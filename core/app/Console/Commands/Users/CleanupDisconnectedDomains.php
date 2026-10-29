@@ -2,20 +2,22 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Models\User;
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\Concerns\SelectsProjects;
+use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
 class CleanupDisconnectedDomains extends Command
 {
+    use ConfirmsChanges;
     use SelectsProjects;
 
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:cleanup-disconnected-domains', 'users:cleanup-disconnected-domains'];
 
-    protected $signature = 'project:domain:cleanup' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:domain:cleanup'.ProjectOptions::SIGNATURE.' {--force : Skip confirmation}';
 
     protected $description = 'Remove a project\'s config files for domains no longer in the database (per project; system:domain:cleanup does the same for webserver-level vhosts)';
 
@@ -28,7 +30,7 @@ class CleanupDisconnectedDomains extends Command
     }
 
     /**
-     * @param array<User>|Collection<int, User> $users
+     * @param  array<User>|Collection<int, User>  $users
      */
     private function cleanupDomains($users): int
     {
@@ -41,22 +43,28 @@ class CleanupDisconnectedDomains extends Command
             $dbDomainsList = $dbDomains->pluck('domain');
             $unusedDomains = [];
             foreach ($webDomains as $webDomain) {
-                if (!($dbDomainsList->contains($webDomain))) {
+                if (! ($dbDomainsList->contains($webDomain))) {
                     $unusedDomains[] = $webDomain;
                 }
             }
 
             if (empty($unusedDomains)) {
                 $this->info('  Did not found any disconnected domains. Nothing to cleanup.');
+
                 continue;
             }
 
-            $this->info('  Found ' . count($unusedDomains) . ' disconnected domains: ');
-            foreach ($unusedDomains as $unusedDomain) {
-                $this->info('    ' . $unusedDomain);
+            if ($this->refusedWithoutConfirmation()) {
+                return 1;
             }
-            if (!$this->confirm('  Continue with cleanup of these domains?')) {
+
+            $this->info('  Found '.count($unusedDomains).' disconnected domains: ');
+            foreach ($unusedDomains as $unusedDomain) {
+                $this->info('    '.$unusedDomain);
+            }
+            if (! $this->option('force') && ! $this->confirm('  Continue with cleanup of these domains?')) {
                 $this->info('  Skipping.');
+
                 continue;
             }
 
@@ -65,6 +73,7 @@ class CleanupDisconnectedDomains extends Command
 
             $this->info('  Domains cleaned up.');
         }
+
         return 0;
     }
 }

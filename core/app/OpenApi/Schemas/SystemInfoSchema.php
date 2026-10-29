@@ -19,10 +19,10 @@ use OpenApi\Attributes as OA;
             example: 'panelalpha',
             nullable: true,
             description: 'What a project created without `tunnel` is published under (setting default_tunnel). '
-                . '`none` skips PanelAlpha Online and keeps the name the domain already resolves on '
-                . '(`<name>.<cert_domain>` or the configured sites_base_domain). `panelalpha` and null both '
-                . 'mean the default ladder: a configured sites_base_domain first, a free panelalpha.online '
-                . 'label otherwise.',
+                .'`none` skips PanelAlpha Online and keeps the name the domain already resolves on '
+                .'(`<name>.<cert_domain>` or the configured sites_base_domain). `panelalpha` and null both '
+                .'mean the default ladder: a configured sites_base_domain first, a free panelalpha.online '
+                .'label otherwise.',
         ),
         new OA\Property(
             property: 'served_certificate',
@@ -62,7 +62,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'unreadable_secrets',
             description: 'Projects holding stored secrets the current APP_KEY cannot decrypt; each project\'s own '
-                . '`unreadable_secrets` names them.',
+                .'`unreadable_secrets` names them. A token scoped to projects sees only the projects in its scope.',
             properties: [
                 new OA\Property(property: 'count', type: 'integer', example: 0),
                 new OA\Property(property: 'projects', type: 'array', items: new OA\Items(type: 'string')),
@@ -78,8 +78,8 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'orphan_account_containers',
             description: 'Host containers started for a project account that no project owns any more, left by a '
-                . 'create or delete that did not finish. The engine never removes them; each names the command '
-                . 'that does.',
+                .'create or delete that did not finish. The engine never removes them; each names the command '
+                .'that does. A token scoped to projects sees only those of the projects in its scope.',
             properties: [
                 new OA\Property(property: 'count', type: 'integer', example: 0),
                 new OA\Property(
@@ -101,9 +101,23 @@ use OpenApi\Attributes as OA;
             ],
             type: 'object'
         ),
+        new OA\Property(
+            property: 'host',
+            description: 'The machine the engine runs on. Each field is null when it cannot be read. Null for a token scoped to projects.',
+            properties: [
+                new OA\Property(property: 'hostname', type: 'string', example: 'srv1', nullable: true),
+                new OA\Property(property: 'os', type: 'string', example: 'Ubuntu 24.04.3 LTS', nullable: true),
+                new OA\Property(property: 'kernel', type: 'string', example: '6.8.0-85-generic', nullable: true),
+                new OA\Property(property: 'uptime_seconds', type: 'integer', example: 864000, nullable: true),
+                new OA\Property(property: 'cpu_cores', type: 'integer', example: 4, nullable: true),
+                new OA\Property(property: 'memory_total_bytes', type: 'integer', example: 8321499136, nullable: true),
+                new OA\Property(property: 'disk_total_bytes', type: 'integer', example: 160982630400, nullable: true, description: 'Size of the disk holding /home, where every project keeps its files and images'),
+                new OA\Property(property: 'ipv4', type: 'string', example: '203.0.113.7', nullable: true, description: 'The main public IPv4 (same as default_ipv4)'),
+            ],
+            type: 'object',
+            nullable: true,
+        ),
     ],
     type: 'object',
 )]
-class SystemInfoSchema
-{
-}
+class SystemInfoSchema {}

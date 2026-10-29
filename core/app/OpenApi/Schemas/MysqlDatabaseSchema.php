@@ -17,6 +17,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class MysqlDatabaseSchema
-{
-}
+class MysqlDatabaseSchema {}

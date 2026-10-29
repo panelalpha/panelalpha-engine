@@ -20,12 +20,12 @@ final class EnvVarKeysNotReserved implements ProblemRule
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return;
         }
 
         foreach (ApiAccess::ENV_KEYS as $reserved) {
-            if (!array_key_exists($reserved, $value)) {
+            if (! array_key_exists($reserved, $value)) {
                 continue;
             }
 
@@ -33,7 +33,7 @@ final class EnvVarKeysNotReserved implements ProblemRule
                 'field' => $attribute,
                 'code' => self::CODE,
                 'message' => "{$reserved} is the engine's own variable, set for a project it allows "
-                    . "to use its API. A project's env_vars may not carry it.",
+                    ."to use its API. A project's env_vars may not carry it.",
                 'expected' => self::EXPECTED,
             ], $fail);
 

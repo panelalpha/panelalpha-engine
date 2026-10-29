@@ -59,8 +59,8 @@ final class ServiceLimits
      * container carries the same limit and is the parent cgroup of the services,
      * so handing the figure to each of them is not additive.
      *
-     * @param array<string, mixed> $service
-     * @param int|null $accountMemoryMb the project's own limit, in MB
+     * @param  array<string, mixed>  $service
+     * @param  int|null  $accountMemoryMb  the project's own limit, in MB
      */
     public static function memoryFor(string $name, array $service = [], ?int $accountMemoryMb = null): string
     {
@@ -71,7 +71,7 @@ final class ServiceLimits
         }
 
         if ($accountMemoryMb !== null && $accountMemoryMb > 0) {
-            return self::underAccountCeiling($accountMemoryMb) . 'm';
+            return self::underAccountCeiling($accountMemoryMb).'m';
         }
 
         return in_array(strtolower($name), self::CAPPED_APPLICATION_ROLES, true)
@@ -99,7 +99,7 @@ final class ServiceLimits
      * The V8 heap for a container of this size. Without a cap Node sizes its
      * heap from the host and is OOM-killed before a collection happens.
      *
-     * @param mixed $memoryLimit
+     * @param  mixed  $memoryLimit
      */
     public static function nodeHeapMbFor($memoryLimit): int
     {
@@ -118,7 +118,7 @@ final class ServiceLimits
      * multi-module reactor died with `[ERROR] Java heap space` while three
      * quarters of the cgroup sat unused.
      *
-     * @param mixed $memoryLimit
+     * @param  mixed  $memoryLimit
      */
     public static function javaHeapMbFor($memoryLimit): int
     {
@@ -130,7 +130,7 @@ final class ServiceLimits
      * job per CPU and a `-sys` crate's C++ gets one compiler per job: liwan's
      * libduckdb-sys was OOM-killed at 8 jobs in 5202 MB (cc1plus ~1.2 GB each).
      *
-     * @param mixed $memoryLimit
+     * @param  mixed  $memoryLimit
      */
     public static function cargoJobsFor($memoryLimit, ?int $cpus = null): int
     {
@@ -157,14 +157,14 @@ final class ServiceLimits
     }
 
     /**
-     * @param mixed $limit a byte count or a Compose size string ("512m")
+     * @param  mixed  $limit  a byte count or a Compose size string ("512m")
      */
     public static function toMegabytes($limit): ?int
     {
         if (is_int($limit) || (is_string($limit) && ctype_digit($limit))) {
             return self::bytesToMegabytes((int) $limit);
         }
-        if (!is_string($limit) || preg_match(self::SIZE_PATTERN, trim($limit), $m) !== 1) {
+        if (! is_string($limit) || preg_match(self::SIZE_PATTERN, trim($limit), $m) !== 1) {
             return null;
         }
 

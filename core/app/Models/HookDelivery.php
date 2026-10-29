@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Lib\DeployHook\Coalescing;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -14,20 +15,20 @@ use Illuminate\Support\Carbon;
  * and the git host is answered from it. `result` is what the queued work then
  * achieved, and stays null for a delivery that queued nothing.
  *
- * @property int     $id
- * @property int     $deploy_hook_id
- * @property string  $provider
+ * @property int $id
+ * @property int $deploy_hook_id
+ * @property string $provider
  * @property ?string $delivery_id
  * @property ?string $event
  * @property ?string $branch
  * @property ?string $commit
- * @property string  $outcome
+ * @property string $outcome
  * @property ?string $reason
  * @property ?string $result
  * @property ?string $detail
  * @property ?string $deploy_id
- * @property Carbon  $created_at
- * @property Carbon  $updated_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  */
 class HookDelivery extends Model
 {
@@ -54,10 +55,13 @@ class HookDelivery extends Model
      * Accepted, but the project already had a deploy running -- from this
      * hook, another one, a manual rebuild, or the account's own creation. It
      * waits as the hook's `pending_delivery_id` rather than racing that
-     * deploy; {@see \App\Lib\DeployHook\Coalescing} runs it once that deploy
+     * deploy; {@see Coalescing} runs it once that deploy
      * finishes.
      */
     public const OUTCOME_COALESCED = 'coalesced';
+
+    /** The outcomes that leave a pull and rebuild to come. */
+    public const OUTCOMES_WITH_WORK = [self::OUTCOME_QUEUED, self::OUTCOME_COALESCED];
 
     /** The pull and rebuild finished and the app is running the pushed code. */
     public const RESULT_DEPLOYED = 'deployed';
@@ -137,7 +141,7 @@ class HookDelivery extends Model
         self::whereIn('id', $staleIds)
             ->when($pendingId !== null, static fn ($query) => $query->whereKeyNot($pendingId))
             ->where(static fn ($query) => $query
-                ->whereNotIn('outcome', [self::OUTCOME_QUEUED, self::OUTCOME_COALESCED])
+                ->whereNotIn('outcome', self::OUTCOMES_WITH_WORK)
                 ->orWhereNotNull('result'))
             ->delete();
     }

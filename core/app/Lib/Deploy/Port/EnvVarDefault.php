@@ -26,11 +26,11 @@ final class EnvVarDefault
      * @var array<string, string> pattern => replacement
      */
     private const RULES = [
-        '/\$\{(' . self::NAME . '):-([^}]*)\}/' => '$2',
-        '/\$\{(' . self::NAME . ')-([^}]*)\}/' => '$2',
-        '/\$\{(' . self::NAME . '):?\?[^}]*\}/' => '',
-        '/\$\{(' . self::NAME . ')\}/' => '',
-        '/\$(' . self::NAME . ')/' => '',
+        '/\$\{('.self::NAME.'):-([^}]*)\}/' => '$2',
+        '/\$\{('.self::NAME.')-([^}]*)\}/' => '$2',
+        '/\$\{('.self::NAME.'):?\?[^}]*\}/' => '',
+        '/\$\{('.self::NAME.')\}/' => '',
+        '/\$('.self::NAME.')/' => '',
     ];
 
     public static function resolve(string $value): string

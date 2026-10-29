@@ -28,6 +28,6 @@ final class DotnetProjectProbe implements PlatformProbe
         // A repository whose only programs are console executables is not
         // served by publishing one; leave it to the strategies after this.
         return DotnetRuntime::hasProject($context->projectDir)
-            && !DotnetRuntime::onlyConsoleExecutables($context->projectDir);
+            && ! DotnetRuntime::onlyConsoleExecutables($context->projectDir);
     }
 }

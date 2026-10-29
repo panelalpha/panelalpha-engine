@@ -35,11 +35,9 @@ final class MailDnsRecords
     public const DMARC_START = 'v=DMARC1; p=none';
 
     /**
-     * @param Closure(string, int): (array<int, array<string, mixed>>|false) $resolve dns_get_record()'s shape
+     * @param  Closure(string, int): (array<int, array<string, mixed>>|false)  $resolve  dns_get_record()'s shape
      */
-    public function __construct(private Closure $resolve)
-    {
-    }
+    public function __construct(private Closure $resolve) {}
 
     public static function usingDns(): self
     {
@@ -58,7 +56,7 @@ final class MailDnsRecords
      * The public addresses mail sent directly leaves from: the default IPv4,
      * through the NAT map when it is a private one, and the default IPv6.
      *
-     * @param array<string, string> $localToPublic
+     * @param  array<string, string>  $localToPublic
      * @return list<string>
      */
     public static function hostAddresses(?string $ipv4, ?string $ipv6, array $localToPublic): array
@@ -91,8 +89,8 @@ final class MailDnsRecords
     }
 
     /**
-     * @param string $relay the mail relay's smarthost_provider: '' sends directly
-     * @param list<string> $hostIps the host's public addresses, for direct sending
+     * @param  string  $relay  the mail relay's smarthost_provider: '' sends directly
+     * @param  list<string>  $hostIps  the host's public addresses, for direct sending
      * @return list<MailDnsRecord>
      */
     public function expected(string $sendingDomain, string $relay, array $hostIps, ?string $dkimSelector = null): array
@@ -102,7 +100,7 @@ final class MailDnsRecords
             $this->dkim($sendingDomain, $relay, $dkimSelector),
             [
                 'type' => 'dmarc',
-                'host' => '_dmarc.' . $sendingDomain,
+                'host' => '_dmarc.'.$sendingDomain,
                 'record_type' => 'TXT',
                 'expected' => self::DMARC_START,
                 'note' => 'p=none only reports; tighten it to quarantine or reject once the reports show every sender passing.',
@@ -113,7 +111,7 @@ final class MailDnsRecords
                 'record_type' => 'MX',
                 'expected' => null,
                 'note' => 'This host receives no mail. Receivers check that a sending domain accepts mail, '
-                    . 'so point its MX at the mailbox provider that should get replies and bounces.',
+                    .'so point its MX at the mailbox provider that should get replies and bounces.',
             ],
         ];
     }
@@ -123,7 +121,7 @@ final class MailDnsRecords
      * or unknown (the lookup failed or the engine cannot tell), what was
      * found, and what is wrong.
      *
-     * @param list<string> $hostIps
+     * @param  list<string>  $hostIps
      * @return list<MailDnsRecord>
      */
     public function check(string $sendingDomain, string $relay, array $hostIps, ?string $dkimSelector = null): array
@@ -142,7 +140,7 @@ final class MailDnsRecords
     }
 
     /**
-     * @param list<string> $hostIps
+     * @param  list<string>  $hostIps
      * @return MailDnsRecord
      */
     private function spf(string $domain, string $relay, array $hostIps): array
@@ -150,26 +148,26 @@ final class MailDnsRecords
         $mechanisms = [];
         if ($relay === '') {
             foreach ($hostIps as $ip) {
-                $mechanisms[] = (str_contains($ip, ':') ? 'ip6:' : 'ip4:') . $ip;
+                $mechanisms[] = (str_contains($ip, ':') ? 'ip6:' : 'ip4:').$ip;
             }
         } elseif (isset(self::RELAY_SPF_INCLUDES[$relay])) {
-            $mechanisms[] = 'include:' . self::RELAY_SPF_INCLUDES[$relay];
+            $mechanisms[] = 'include:'.self::RELAY_SPF_INCLUDES[$relay];
         }
 
         $note = 'One SPF record per domain: if it already has one, add '
-            . ($mechanisms !== [] ? implode(' ', $mechanisms) : "the relay's include")
-            . ' to it instead of publishing a second.';
+            .($mechanisms !== [] ? implode(' ', $mechanisms) : "the relay's include")
+            .' to it instead of publishing a second.';
         if ($relay === '' && $hostIps === []) {
             $note = 'This host has no public address on record, so the engine cannot say which address to authorise.';
         } elseif ($relay !== '' && $mechanisms === []) {
-            $note = "Your SMTP relay's documentation names the include to put in this record. " . $note;
+            $note = "Your SMTP relay's documentation names the include to put in this record. ".$note;
         }
 
         return [
             'type' => 'spf',
             'host' => $domain,
             'record_type' => 'TXT',
-            'expected' => $mechanisms !== [] ? 'v=spf1 ' . implode(' ', $mechanisms) . ' ~all' : null,
+            'expected' => $mechanisms !== [] ? 'v=spf1 '.implode(' ', $mechanisms).' ~all' : null,
             'note' => $note,
         ];
     }
@@ -179,9 +177,9 @@ final class MailDnsRecords
     {
         $note = $relay === ''
             ? 'The engine does not sign mail, so mail sent straight from this host carries no DKIM signature. '
-                . 'Send through a relay that signs for this domain to get one.'
+                .'Send through a relay that signs for this domain to get one.'
             : 'The relay signs. Publish the DKIM record its domain authentication page gives you, '
-                . 'and pass its selector to check it.';
+                .'and pass its selector to check it.';
 
         return [
             'type' => 'dkim',
@@ -193,7 +191,7 @@ final class MailDnsRecords
     }
 
     /**
-     * @param list<string> $hostIps
+     * @param  list<string>  $hostIps
      * @return array{status: string, found: list<string>, problem: ?string}
      */
     private function checkSpf(string $domain, string $relay, array $hostIps): array
@@ -217,7 +215,7 @@ final class MailDnsRecords
             foreach ($hostIps as $ip) {
                 $result = $spf->resultFor($domain, $ip);
                 if ($result === 'temperror') {
-                    return self::outcome('unknown', $found, ucfirst($spf->reason()) . '.');
+                    return self::outcome('unknown', $found, ucfirst($spf->reason()).'.');
                 }
                 if ($result !== 'pass') {
                     return self::outcome('wrong', $found, "Mail from this host ({$ip}) gets SPF {$result}: {$spf->reason()}.");
@@ -274,7 +272,7 @@ final class MailDnsRecords
         $labels = explode('.', $domain);
         for ($i = 0; $i < count($labels) - 1; $i++) {
             $name = implode('.', array_slice($labels, $i));
-            $txt = ($this->resolve)('_dmarc.' . $name, DNS_TXT);
+            $txt = ($this->resolve)('_dmarc.'.$name, DNS_TXT);
             if ($txt === false) {
                 return self::outcome('unknown', [], "The TXT lookup for _dmarc.{$name} failed.");
             }
@@ -307,7 +305,7 @@ final class MailDnsRecords
         }
         $found = [];
         foreach ($mx as $rr) {
-            $found[] = ((int) ($rr['pri'] ?? 0)) . ' ' . rtrim((string) ($rr['target'] ?? ''), '.');
+            $found[] = ((int) ($rr['pri'] ?? 0)).' '.rtrim((string) ($rr['target'] ?? ''), '.');
         }
         if ($found === []) {
             return self::outcome('missing', [], "{$domain} publishes no MX record.");
@@ -320,7 +318,7 @@ final class MailDnsRecords
     }
 
     /**
-     * @param list<string> $found
+     * @param  list<string>  $found
      * @return array{status: string, found: list<string>, problem: ?string}
      */
     private static function outcome(string $status, array $found, ?string $problem): array

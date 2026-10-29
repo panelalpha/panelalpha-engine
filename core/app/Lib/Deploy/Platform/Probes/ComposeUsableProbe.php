@@ -6,6 +6,7 @@ use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\System\Project\Dind\Strategy\AppConfigBootstrap;
 
 /**
  * A compose file worth running as-is: not the engine's generated bootstrap, not
@@ -14,7 +15,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
  *
  * An app config's `replace`-mode compose (ADR-0001: written under its own
  * reserved name, never the repository's) is read ahead of the repository's
- * own — it is what {@see \App\System\Project\Dind\Strategy\AppConfigBootstrap}
+ * own — it is what {@see AppConfigBootstrap}
  * already decided the deploy should run.
  */
 final class ComposeUsableProbe implements PlatformProbe
@@ -28,7 +29,7 @@ final class ComposeUsableProbe implements PlatformProbe
     {
         $candidates = [EngineArtifacts::APP_CONFIG_COMPOSE, ...ComposeFileInspector::COMPOSE_FILE_CANDIDATES];
         foreach ($candidates as $candidate) {
-            if (!$context->hasFile(strtolower($candidate)) || !$context->isFile($candidate)) {
+            if (! $context->hasFile(strtolower($candidate)) || ! $context->isFile($candidate)) {
                 continue;
             }
             $path = $context->path($candidate);

@@ -37,13 +37,14 @@ final class SafeName
     }
 
     /**
-     * @param string $subject what the name is, for the message — "username
-     *        for Docker cleanup", "deploy id"
+     * @param  string  $subject  what the name is, for the message — "username
+     *                           for Docker cleanup", "deploy id"
+     *
      * @throws InvalidArgumentException
      */
     public static function assert(string $name, string $subject): void
     {
-        if (!self::isSafe($name)) {
+        if (! self::isSafe($name)) {
             throw new InvalidArgumentException("Invalid {$subject}: {$name}");
         }
     }

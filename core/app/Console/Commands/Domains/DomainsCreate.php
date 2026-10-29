@@ -2,13 +2,14 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
-use App\System;
 use App\Lib\Domains\NewDomain;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
+use App\System;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
@@ -20,6 +21,7 @@ use Symfony\Component\Console\Helper\Table;
  */
 class DomainsCreate extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:create', 'projects:domains:create'];
@@ -47,10 +49,15 @@ class DomainsCreate extends Command
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $this->summarize($request);
 
-        if (!$this->option('force') && !$this->confirm('Create this domain?')) {
+        if (! $this->option('force') && ! $this->confirm('Create this domain?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -71,8 +78,9 @@ class DomainsCreate extends Command
         [$domainName, $project, $type, $parentDomain, $aliases] = $input;
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return null;
         }
 
@@ -85,6 +93,7 @@ class DomainsCreate extends Command
             ?? $this->nameRefusal($domainName, $aliases);
         if ($refusal !== null) {
             $this->error($refusal);
+
             return null;
         }
 
@@ -117,14 +126,17 @@ class DomainsCreate extends Command
 
         if ($domainName === '') {
             $this->error('Domain name is required (positional argument or --domain).');
+
             return null;
         }
         if ($project === '') {
             $this->error('--project is required.');
+
             return null;
         }
-        if (!in_array($type, ['addon', 'sub'], true)) {
+        if (! in_array($type, ['addon', 'sub'], true)) {
             $this->error("--type must be 'addon' or 'sub'.");
+
             return null;
         }
 
@@ -140,6 +152,7 @@ class DomainsCreate extends Command
         $optionDomain = self::normalised($this->option('domain'));
         if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
             $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+
             return null;
         }
 
@@ -158,7 +171,7 @@ class DomainsCreate extends Command
     private function requestedAliases(): array
     {
         $rawAliases = $this->option('alias');
-        if (!is_array($rawAliases)) {
+        if (! is_array($rawAliases)) {
             return [];
         }
 
@@ -194,12 +207,14 @@ class DomainsCreate extends Command
             [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $user->username);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return null;
         }
 
         $refusal = ProxyRuleUpstream::refusal('user', $user->username, $upstreamHost);
         if ($refusal !== null) {
             $this->error($refusal);
+
             return null;
         }
 
@@ -222,10 +237,10 @@ class DomainsCreate extends Command
         if ($parentDomain === '') {
             return '--parent-domain is required when --type=sub.';
         }
-        if (!$user->domains()->getQuery()->where('domain', $parentDomain)->exists()) {
+        if (! $user->domains()->getQuery()->where('domain', $parentDomain)->exists()) {
             return "Parent domain '{$parentDomain}' not found for project '{$project}'.";
         }
-        if (!Str::endsWith($domainName, $parentDomain)) {
+        if (! Str::endsWith($domainName, $parentDomain)) {
             return "Domain '{$domainName}' must end with parent domain '{$parentDomain}'.";
         }
 
@@ -276,7 +291,7 @@ class DomainsCreate extends Command
     /**
      * Write the row, set the domain up and report it; a failure rolls it all back.
      *
-     * @param CreateRequest $request
+     * @param  CreateRequest  $request
      */
     private function create(array $request): int
     {
@@ -286,7 +301,8 @@ class DomainsCreate extends Command
             $this->provision($request['user'], $domain, $request['upstreamHost'], $request['upstreamPort']);
         } catch (\Throwable $e) {
             $this->rollBack($domain);
-            $this->error('Domain create failed: ' . $e->getMessage());
+            $this->error('Domain create failed: '.$e->getMessage());
+
             return 1;
         }
 
@@ -353,7 +369,7 @@ class DomainsCreate extends Command
             $this->writeProxyRule($user, $domain->domain, $listenPort, $upstreamHost, $upstreamPort);
         }
         $domain->projectDomain()->rebuild();
-        (new System())->webserver()->scheduleWebserverReloadInBackground();
+        (new System)->webserver()->scheduleWebserverReloadInBackground();
     }
 
     private function writeProxyRule(User $user, string $domainName, int $listenPort, string $upstreamHost, int $upstreamPort): void

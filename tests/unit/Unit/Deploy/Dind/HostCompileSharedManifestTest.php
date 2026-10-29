@@ -15,6 +15,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * `runPhpBuild()` and the Composer-image pass (`runComposer()`, private)
@@ -32,8 +34,9 @@ class HostCompileSharedManifestTest extends TestCase
 {
     /**
      * A stubbed System that answers the given files, records every
-     * `runProcess()` argv, and captures what a real `filePutContents()`
-     * write (staged to a temp file, then `sudo cp`'d out) actually sent.
+     * `runProcess()` argv, and captures what a real `writeFileReplacingPath()`
+     * write (staged to a temp file, `sudo cp`'d out, then renamed onto
+     * the target, {@see StagedRename}) actually sent.
      *
      * @param array<string, string> $files absolute account path => contents
      * @param array<string, string> $copiedTo target path => contents, filled in by reference
@@ -80,6 +83,7 @@ class HostCompileSharedManifestTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
@@ -87,10 +91,19 @@ class HostCompileSharedManifestTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = is_array($cmd) ? $cmd : [$cmd];
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
 
-                return $process;
+                $this->renameStaged($cmd);
+
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->copiedTo[$staged])) {
+                    $this->copiedTo[$target] = $this->copiedTo[$staged];
+                    unset($this->copiedTo[$staged]);
+                }
             }
         };
     }

@@ -16,6 +16,7 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
 
     protected $casts = [
         'abilities' => 'json',
+        'hub' => 'boolean',
         'last_used_at' => 'datetime',
         'revoked_at' => 'datetime',
         'expires_at' => 'datetime',

@@ -28,18 +28,18 @@ class DomainPhpVersionCommand extends Command
         $version = $this->argument('version');
         $setting = is_string($version) && $version !== '';
         if ($setting) {
-            Validator::make(['version' => $version], (new DomainSetPhpVersionRequest())->rules())->validate();
+            Validator::make(['version' => $version], (new DomainSetPhpVersionRequest)->rules())->validate();
         }
 
         $domainModel = Domain::findByNameOrFail($domain);
 
-        if (!$setting) {
+        if (! $setting) {
             $this->line($domainModel->getPhpVersion() ?? '');
 
             return 0;
         }
 
-        (new DomainPhpVersion())->set($domainModel, (string) $version);
+        (new DomainPhpVersion)->set($domainModel, (string) $version);
 
         return 0;
     }

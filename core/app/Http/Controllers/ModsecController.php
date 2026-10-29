@@ -4,15 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\ModsecRulesetCollection;
 use App\Lib\Modsec\AuditLogFiles;
+use App\Models\Setting;
 use App\System;
 use App\System\Services\Modsec;
-use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Validation\ValidationException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use OpenApi\Attributes as OA;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ModsecController extends Controller
 {
@@ -62,7 +61,7 @@ class ModsecController extends Controller
 
         $config = Setting::setModsecConfig('mode', $params['mode']);
 
-        $system = new System();
+        $system = new System;
         $system->modsec()->rebuildConfig();
 
         return new JsonResponse([
@@ -83,7 +82,7 @@ class ModsecController extends Controller
     )]
     public function getRulesets(): ModsecRulesetCollection
     {
-        $system = new System();
+        $system = new System;
         $sets = $system->modsec()->getRulesets();
 
         return new ModsecRulesetCollection($sets);
@@ -104,7 +103,7 @@ class ModsecController extends Controller
         $system = $this->systemWithRuleset($name);
 
         $config = Setting::getModsecConfig();
-        if (!in_array($name, $config['enabled_rulesets'])) {
+        if (! in_array($name, $config['enabled_rulesets'])) {
             $config['enabled_rulesets'][] = $name;
             Setting::setModsecConfig('enabled_rulesets', $config['enabled_rulesets']);
             $system->modsec()->rebuildConfig();
@@ -170,8 +169,8 @@ class ModsecController extends Controller
          * } $params
          */
         $params = $request->validate($this->configFileListRules());
-        $enable = !empty($params['enable']) ? $params['enable'] : [];
-        $disable = !empty($params['disable']) ? $params['disable'] : [];
+        $enable = ! empty($params['enable']) ? $params['enable'] : [];
+        $disable = ! empty($params['disable']) ? $params['disable'] : [];
 
         $system->modsec()->toggleConfigFiles($name, $enable, $disable);
 
@@ -187,16 +186,16 @@ class ModsecController extends Controller
     {
         return [
             'enable' => 'array',
-            'enable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
+            'enable.*' => ['string', 'regex:'.Modsec::CONFIG_FILE_NAME],
             'disable' => 'array',
-            'disable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
+            'disable.*' => ['string', 'regex:'.Modsec::CONFIG_FILE_NAME],
         ];
     }
 
     private function systemWithRuleset(string $name): System
     {
-        $system = new System();
-        if (!$system->modsec()->rulesetExists($name)) {
+        $system = new System;
+        if (! $system->modsec()->rulesetExists($name)) {
             abort(new JsonResponse([
                 'message' => 'Ruleset not found',
             ], 404));
@@ -219,7 +218,7 @@ class ModsecController extends Controller
     public function getCustomRules(): JsonResponse
     {
         return new JsonResponse([
-            'data' => $this->customRulesData(new System()),
+            'data' => $this->customRulesData(new System),
         ]);
     }
 
@@ -227,15 +226,15 @@ class ModsecController extends Controller
         path: '/modsec/custom-rules',
         summary: 'Replace the custom ModSecurity rules',
         description: 'The rules go live only after the webserver config test parses them with every enabled ruleset, '
-            . 'and, when they are loaded, passes the live config with them in place; '
-            . 'otherwise the call answers 422 with what the test said and the live rules stay as they were. '
-            . 'On nginx the test also runs them, and refuses rules that would switch ModSecurity off or to detection-only, '
-            . 'stop the rules around them or the reading of request bodies, or deny an ordinary request; '
-            . 'SecRuleEngine and ctl:ruleEngine are refused '
-            . 'anywhere in the rules, skip is refused, and a skipAfter must name a SecMarker after it. '
-            . 'An operator ModSecurity does not know is refused too, since ModSecurity would read it as a regular expression. '
-            . 'Rule ids must be in ' . Modsec::CUSTOM_ID_MIN . '-' . Modsec::CUSTOM_ID_MAX . '. '
-            . 'They apply once the `custom` ruleset is enabled and the mode is not off.',
+            .'and, when they are loaded, passes the live config with them in place; '
+            .'otherwise the call answers 422 with what the test said and the live rules stay as they were. '
+            .'On nginx the test also runs them, and refuses rules that would switch ModSecurity off or to detection-only, '
+            .'stop the rules around them or the reading of request bodies, or deny an ordinary request; '
+            .'SecRuleEngine and ctl:ruleEngine are refused '
+            .'anywhere in the rules, skip is refused, and a skipAfter must name a SecMarker after it. '
+            .'An operator ModSecurity does not know is refused too, since ModSecurity would read it as a regular expression. '
+            .'Rule ids must be in '.Modsec::CUSTOM_ID_MIN.'-'.Modsec::CUSTOM_ID_MAX.'. '
+            .'They apply once the `custom` ruleset is enabled and the mode is not off.',
         security: [['bearerAuth' => []]],
         tags: ['ModSecurity'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -259,10 +258,10 @@ class ModsecController extends Controller
     {
         /** @var array{rules: ?string} $params */
         $params = $request->validate([
-            'rules' => 'present|nullable|string|max:' . Modsec::CUSTOM_RULES_MAX_BYTES,
+            'rules' => 'present|nullable|string|max:'.Modsec::CUSTOM_RULES_MAX_BYTES,
         ]);
 
-        $system = new System();
+        $system = new System;
         try {
             $system->modsec()->saveCustomRules($params['rules'] ?? '');
         } catch (\InvalidArgumentException $e) {
@@ -300,7 +299,7 @@ class ModsecController extends Controller
     public function listAuditLogFiles(): JsonResponse
     {
         return new JsonResponse([
-            'data' => (new AuditLogFiles())->list(),
+            'data' => (new AuditLogFiles)->list(),
         ]);
     }
 
@@ -321,7 +320,7 @@ class ModsecController extends Controller
     )]
     public function downloadAuditLogFile(string $filename): BinaryFileResponse
     {
-        $path = (new AuditLogFiles())->readablePath($filename) ?? abort(new JsonResponse([
+        $path = (new AuditLogFiles)->readablePath($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
 
@@ -342,7 +341,7 @@ class ModsecController extends Controller
     )]
     public function tailAuditLogFile(string $filename): JsonResponse
     {
-        $logs = (new AuditLogFiles())->tail($filename) ?? abort(new JsonResponse([
+        $logs = (new AuditLogFiles)->tail($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
 

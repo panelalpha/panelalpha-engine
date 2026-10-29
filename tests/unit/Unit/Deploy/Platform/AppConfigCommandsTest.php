@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\StageScript;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * An app config's staged commands, in the scripts the deploy actually runs.
@@ -85,13 +86,13 @@ class AppConfigCommandsTest extends TestCase
     public function test_an_app_config_serve_command_replaces_the_platform_entrypoint(): void
     {
         $appConfig = $this->appConfig(
-            "  - {id: serve, stage: start, serve: true, run: \"php -S 0.0.0.0:9000 -t public\"}\n"
+            "  - {id: serve, stage: start, serve: true, run: \"php -S " . TestNetwork::ANY . ":9000 -t public\"}\n"
         );
 
         $script = $this->stageScript($appConfig);
 
         $this->assertSame('serve', $appConfig->serveCommand()?->id);
-        $this->assertStringContainsString('exec php -S 0.0.0.0:9000 -t public', $script);
+        $this->assertStringContainsString('exec php -S ' . TestNetwork::ANY . ':9000 -t public', $script);
         // One process, one port: the platform's own entrypoint is gone.
         $this->assertStringNotContainsString('apache2-foreground', $script);
     }

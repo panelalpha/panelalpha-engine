@@ -48,8 +48,9 @@ final class HostBuildSlot
      * Run `$build` with the host's build slot held, releasing it either way.
      *
      * @template T
-     * @param callable(): T $build
-     * @param ?callable(): void $onWait called once when the slot is busy
+     *
+     * @param  callable(): T  $build
+     * @param  ?callable(): void  $onWait  called once when the slot is busy
      * @return T
      */
     public static function run(callable $build, ?callable $onWait = null): mixed
@@ -67,7 +68,7 @@ final class HostBuildSlot
     }
 
     /**
-     * @param ?callable(): void $onWait
+     * @param  ?callable(): void  $onWait
      * @return resource|null the held lock, or null when the build proceeds unslotted
      */
     private static function acquire(?callable $onWait)
@@ -86,8 +87,8 @@ final class HostBuildSlot
 
         $deadline = microtime(true) + self::WAIT_SECONDS;
         $waited = false;
-        while (!flock($handle, LOCK_EX | LOCK_NB)) {
-            if (!$waited) {
+        while (! flock($handle, LOCK_EX | LOCK_NB)) {
+            if (! $waited) {
                 $waited = true;
                 if ($onWait !== null) {
                     $onWait();
@@ -95,7 +96,7 @@ final class HostBuildSlot
             }
             if (microtime(true) >= $deadline) {
                 fclose($handle);
-                Log::warning('Host build slot still held after ' . self::WAIT_SECONDS . 's; building anyway.');
+                Log::warning('Host build slot still held after '.self::WAIT_SECONDS.'s; building anyway.');
 
                 return null;
             }

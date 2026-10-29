@@ -1,6 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { uniqueId } from '@/helpers/random';
+import { randomUsername, uniqueId } from '@/helpers/random';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { expectStatus } from '@/helpers/expect-status';
 import {
@@ -12,7 +12,7 @@ import {
 
 /**
  * The secret vault: a slot the customer pastes a secret into in their browser,
- * referenced from API calls as `vault:<id>` so the secret never passes through
+ * referenced from API calls as `vault:<key>` so the secret never passes through
  * the caller.
  *
  * The properties under test are the ones the mechanism exists for. The paste
@@ -40,7 +40,7 @@ test.describe('secret vault', () => {
       validateParsedApiResponse(created, createdVaultSecretResponseSchema);
       expect(created.data.type).toBe(type);
       expect(created.data.status).toBe('pending');
-      expect(created.data.ref).toBe(`vault:${created.data.id}`);
+      expect(created.data.ref).toMatch(/^vault:[A-Za-z0-9]{24}$/);
       // Project scope by default, unclaimed until a project is given it.
       expect(created.data.scope).toBe('project');
       expect(created.data.project).toBeNull();
@@ -54,21 +54,19 @@ test.describe('secret vault', () => {
     }
   });
 
-  test('a reference resolves both as `vault:<id>` and bare', async ({ api }) => {
+  test('an entry is found by its reference and never by its id', async ({ api }) => {
     const created = await api.createVaultSecret({ type: vaultType() });
-    const prefixed = created.data.ref;
-    const bare = prefixed.slice('vault:'.length);
 
     try {
-      for (const ref of [prefixed, bare]) {
-        const entry = await api.getVaultSecret(ref);
-        validateParsedApiResponse(entry, vaultSecretResponseSchema);
-        expect(entry.data.status, `lookup by ${ref === bare ? 'bare id' : 'vault: value'}`).toBe(
-          'pending'
-        );
+      const entry = await api.getVaultSecret(created.data.ref);
+      validateParsedApiResponse(entry, vaultSecretResponseSchema);
+      expect(entry.data.status).toBe('pending');
+
+      for (const byId of [String(created.data.id), `vault:${created.data.id}`]) {
+        await expectStatus(await api.getVaultSecretRaw(byId), 404, `lookup by ${byId}`);
       }
     } finally {
-      await api.deleteVaultSecretSafe(prefixed);
+      await api.deleteVaultSecretSafe(created.data.ref);
     }
   });
 
@@ -232,6 +230,33 @@ test.describe('secret vault', () => {
     }
 
     expectOneOf((await api.createVaultSecretRaw({})).status, [400, 422]);
+  });
+
+  test('a reference sent to a project that does not exist is not found before it is read', async ({
+    api,
+  }) => {
+    const created = await api.createVaultSecret({ type: 'password' });
+    const missing = randomUsername();
+
+    try {
+      // Unpasted, the entry would be refused with a 422 had it been read.
+      await expectStatus(
+        await api.setSitePasswordRaw(missing, created.data.ref),
+        404,
+        'site password'
+      );
+      await expectStatus(
+        await api.createMySqlUserRaw(missing, { name: 'vaultuser', password: created.data.ref }),
+        404,
+        'mysql user'
+      );
+
+      const entry = (await api.getVaultSecret(created.data.ref)).data;
+      expect(entry.project, 'the missing name did not claim the entry').toBeNull();
+      expect(entry.used_count, 'the entry was not read').toBe(0);
+    } finally {
+      await api.deleteVaultSecretSafe(created.data.ref);
+    }
   });
 
   test('the vault endpoints require authentication', async ({ playwright, settings }) => {

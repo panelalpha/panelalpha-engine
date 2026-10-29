@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands\Telemetry;
 
-use App\System;
 use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Deploy\Telemetry\NotificationPreferences;
 use App\Lib\Deploy\Telemetry\SourceBundlePolicy;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\System;
 use Illuminate\Console\Command;
 
 class TelemetryStatusCommand extends Command
@@ -42,20 +42,20 @@ class TelemetryStatusCommand extends Command
             ['Spool', Telemetry::spool()->dir()],
             ['Queued', (string) $stats['count']],
             ['Queue size', $this->bytes($stats['bytes'])],
-            ['Source bundles queued', $stats['bundles'] . ' (' . $this->bytes($stats['bundle_bytes']) . ')'],
+            ['Source bundles queued', $stats['bundles'].' ('.$this->bytes($stats['bundle_bytes']).')'],
             ['Oldest queued', $stats['oldest'] === null ? '-' : date('Y-m-d H:i:s', $stats['oldest'])],
         ]);
 
-        if (!Telemetry::enabled()) {
+        if (! Telemetry::enabled()) {
             $this->newLine();
             $this->line('<comment>Reporting is off. Every deploy is still recorded to the local log '
-                . 'above — that file can be shared with support at any time.</comment>');
+                .'above — that file can be shared with support at any time.</comment>');
         }
 
         $this->newLine();
         $this->line('<comment>Platform facts sent with each batch:</comment>');
         $rows = [];
-        foreach (HostFacts::envelope(new System()) as $key => $value) {
+        foreach (HostFacts::envelope(new System) as $key => $value) {
             $rows[] = [$key, is_array($value) ? implode(', ', $value) : (string) ($value ?? '-')];
         }
         $this->table(['Fact', 'Value'], $rows);
@@ -83,7 +83,7 @@ class TelemetryStatusCommand extends Command
             return '(channel not configured)';
         }
 
-        $today = preg_replace('/\.log$/', '-' . date('Y-m-d') . '.log', $path) ?? $path;
+        $today = preg_replace('/\.log$/', '-'.date('Y-m-d').'.log', $path) ?? $path;
         $existing = @glob(preg_replace('/\.log$/', '-*.log', $path) ?? '') ?: [];
 
         $bytes = 0;
@@ -91,7 +91,7 @@ class TelemetryStatusCommand extends Command
             $bytes += (int) @filesize($file);
         }
 
-        return $today . ' (' . count($existing) . ' file(s), ' . $this->bytes($bytes) . ')';
+        return $today.' ('.count($existing).' file(s), '.$this->bytes($bytes).')';
     }
 
     private function tierLabel(int $tier): string
@@ -106,12 +106,12 @@ class TelemetryStatusCommand extends Command
     private function bytes(int $bytes): string
     {
         if ($bytes < 1024) {
-            return $bytes . ' B';
+            return $bytes.' B';
         }
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024, 1) . ' KiB';
+            return round($bytes / 1024, 1).' KiB';
         }
 
-        return round($bytes / 1024 / 1024, 1) . ' MiB';
+        return round($bytes / 1024 / 1024, 1).' MiB';
     }
 }

@@ -870,7 +870,8 @@ Ask which of the two the repository means: *where the application is built* is
 | HTTP 200 that is not the app | Easy!Appointments without `config.php`; Adminer without `compile.php`. Assert on `<title>` and bytes, never status alone. |
 | Repo `Dockerfile` / compose is not a deployment | `dockerfile` is 970, compose is 980. OpenCart's Dockerfile does not build the checkout. Outrank only with the reason in the manifest. |
 | Compose sidecars / `profiles:` / bind mounts | Probe skips profiled services; `./subdir` bind on a build service is a workstation file; `database:` beats a workstation datastore. |
-| `JavaScript heap out of memory` in host compile | container 2 GB, Node heap now ~1.4 GB. If that is not enough, measure **without** the engine and report the number. |
+| `JavaScript heap out of memory` in host compile | the container gets `DEPLOY_BUILD_MEMORY` (8 GB, held to half the RAM; the log's `Host build container memory` line), Node 70% of it. If that is not enough, measure **without** the engine and report the number. |
+| `ResourceExhausted` / exit 137 in an image build | the account's BuildKit steps run under `/sys/fs/cgroup/docker/buildkit`, capped at the same figure held to the project's limit (`Image build memory` line). Prove it from the host: `memory.max` up the step's `/proc/<pid>/cgroup` chain, and `/proc/<pid>/oom_score_adj` is 1000 while the engine builds. |
 | `requires ext-… missing` | `PhpExtensions::BUNDLED` must match `docker run --rm php:8.3-apache-bookworm php -m`. Do not remember. |
 | `file_put_contents` during composer | plugins running before the tree is copied. Host build uses `--no-plugins` then a second install. |
 | Data disappears on redeploy | no persist key. Flag ephemeral, or copy Matomo's `restore-config` on `stage: upgrade`. |

@@ -13,8 +13,7 @@ class Tables
 {
     public function __construct(
         protected PDO $pdo,
-    ) {
-    }
+    ) {}
 
     /**
      * @return list<string>
@@ -24,7 +23,7 @@ class Tables
         $conn = new Connection($this->pdo);
         $rows = $conn->select(
             'SELECT TABLE_NAME AS name FROM information_schema.TABLES '
-            . 'WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = ? ORDER BY TABLE_NAME',
+            .'WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = ? ORDER BY TABLE_NAME',
             [$database, 'BASE TABLE']
         );
 
@@ -44,7 +43,7 @@ class Tables
     public function createStatement(string $database, string $table): ?string
     {
         $rows = (new Connection($this->pdo))->select(
-            'SHOW CREATE TABLE ' . self::quote($database) . '.' . self::quote($table)
+            'SHOW CREATE TABLE '.self::quote($database).'.'.self::quote($table)
         );
         if ($rows === []) {
             return null;
@@ -58,7 +57,7 @@ class Tables
     public function checksum(string $database, string $table): ?string
     {
         $rows = (new Connection($this->pdo))->select(
-            'CHECKSUM TABLE ' . self::quote($database) . '.' . self::quote($table)
+            'CHECKSUM TABLE '.self::quote($database).'.'.self::quote($table)
         );
         if ($rows === []) {
             return null;
@@ -73,6 +72,6 @@ class Tables
     /** A MySQL identifier, quoted for SQL text: any backtick in it is doubled. */
     public static function quote(string $identifier): string
     {
-        return '`' . str_replace('`', '``', $identifier) . '`';
+        return '`'.str_replace('`', '``', $identifier).'`';
     }
 }

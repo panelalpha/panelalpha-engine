@@ -4,6 +4,7 @@ namespace Tests\Unit\DeployHook;
 
 use App\Lib\DeployHook\EngineTlsAdvisory;
 use App\Lib\DeployHook\TlsInstructions;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -16,7 +17,7 @@ class EngineTlsAdvisoryTest extends TestCase
 {
     public function test_with_no_engine_certificate_the_state_is_self_signed_with_every_providers_instructions(): void
     {
-        config(['app.url' => 'https://8.8.8.8']);
+        config(['app.url' => 'https://'.TestNetwork::routable(8)]);
 
         $advisory = EngineTlsAdvisory::forProvider();
 
@@ -26,7 +27,7 @@ class EngineTlsAdvisoryTest extends TestCase
 
     public function test_a_provider_narrows_the_instructions_to_that_one(): void
     {
-        config(['app.url' => 'https://8.8.8.8']);
+        config(['app.url' => 'https://'.TestNetwork::routable(8)]);
 
         $advisory = EngineTlsAdvisory::forProvider('gitlab');
 
@@ -35,14 +36,14 @@ class EngineTlsAdvisoryTest extends TestCase
 
     public function test_a_public_address_carries_no_warning(): void
     {
-        config(['app.url' => 'https://8.8.8.8']);
+        config(['app.url' => 'https://'.TestNetwork::routable(8)]);
 
         $this->assertNull(EngineTlsAdvisory::forProvider()['warning']);
     }
 
     public function test_a_private_address_warns_that_a_git_host_cannot_reach_it(): void
     {
-        config(['app.url' => 'https://192.168.1.50']);
+        config(['app.url' => 'https://'.TestNetwork::private2(50)]);
 
         $warning = EngineTlsAdvisory::forProvider()['warning'];
 

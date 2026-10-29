@@ -14,6 +14,7 @@ import {
   restoreFirewallState,
 } from '@/helpers/firewall-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { firewallRuleResponseSchema } from '@/schemas';
 import type { FirewallRule } from '@/types';
 
@@ -171,6 +172,45 @@ test.describe('Firewall rules', () => {
     expect(denyAt, 'a deny rule below an allow rule never matches').toBeLessThan(firstAllowAt);
   });
 
+  test('an allow edited into a deny without a scope covers published ports too', async ({
+    api,
+  }) => {
+    const allow = await createRule(api, created, {
+      action: 'allow',
+      protocol: 'tcp',
+      port: randomTestPort(),
+      source: randomTestNetAddress(),
+      comment: RULE_COMMENT,
+    });
+    expect(allow.scope).toBe('host');
+
+    const deny = (await api.updateFirewallRule(allow.id, { action: 'deny' })).data;
+    created.add(deny.id);
+    expect(deny).toMatchObject({ action: 'deny', scope: 'both' });
+
+    const back = (await api.updateFirewallRule(deny.id, { action: 'allow' })).data;
+    created.add(back.id);
+    expect(back).toMatchObject({ action: 'allow', scope: 'host' });
+  });
+
+  test('an outbound deny edited inbound without a scope covers published ports too', async ({
+    api,
+  }) => {
+    const out = await createRule(api, created, {
+      action: 'deny',
+      direction: 'out',
+      protocol: 'tcp',
+      port: randomTestPort(),
+      source: randomTestNetAddress(),
+      comment: RULE_COMMENT,
+    });
+    expect(out.scope).toBe('host');
+
+    const inbound = (await api.updateFirewallRule(out.id, { direction: 'in' })).data;
+    created.add(inbound.id);
+    expect(inbound).toMatchObject({ action: 'deny', direction: 'in', scope: 'both' });
+  });
+
   test('rules the API cannot write safely are refused', async ({ api }) => {
     const port = randomTestPort();
     const source = randomTestNetAddress();
@@ -181,7 +221,12 @@ test.describe('Firewall rules', () => {
       ['a port list without a protocol', { action: 'allow', port: '40000,40001', source }],
       [
         'an address that is not one',
-        { action: 'allow', protocol: 'tcp', port, source: '192.0.2.300' },
+        {
+          action: 'allow',
+          protocol: 'tcp',
+          port,
+          source: testNetwork.public3(0).replace(/\d+$/, '300'),
+        },
       ],
       [
         'a hostname as an address',

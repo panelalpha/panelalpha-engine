@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Services\Webserver\NginxProxy;
 use App\System\Services\Webserver\ProxyRulePorts;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -23,7 +24,7 @@ class NginxProxyHttpRulesTest extends TestCase
 
     public function test_ipv4_and_wildcard_listens_are_as_before(): void
     {
-        $this->assertMatchesRegularExpression('/^\s*listen 10\.0\.0\.5:8081;$/m', NginxProxy::renderHttpProxyRule($this->vars('10.0.0.5', 8081)));
+        $this->assertMatchesRegularExpression('/^\s*listen '.preg_quote(TestNetwork::private(5), '/').':8081;$/m', NginxProxy::renderHttpProxyRule($this->vars(TestNetwork::private(5), 8081)));
         $this->assertMatchesRegularExpression('/^\s*listen 8081;$/m', NginxProxy::renderHttpProxyRule($this->vars('*', 8081)));
     }
 
@@ -37,19 +38,19 @@ class NginxProxyHttpRulesTest extends TestCase
         $this->assertMatchesRegularExpression('/^\s*listen \[::\]:8443 ssl;$/m', NginxProxy::renderHttpProxyRule($vars, true));
 
         // An address is still that address alone, and an IPv4-only host never gets [::].
-        $this->assertStringNotContainsString('[::]', NginxProxy::renderHttpProxyRule($this->vars('10.0.0.5', 8081), true));
+        $this->assertStringNotContainsString('[::]', NginxProxy::renderHttpProxyRule($this->vars(TestNetwork::private(5), 8081), true));
         $this->assertStringNotContainsString('[::]', NginxProxy::renderHttpProxyRule($this->vars('2a01:4f8::1', 8081), true));
         $this->assertStringNotContainsString('[::]', NginxProxy::renderHttpProxyRule($this->vars('*', 8081)));
     }
 
     public function test_a_wildcard_on_80_or_443_binds_the_host_addresses_the_main_config_binds(): void
     {
-        $conf = NginxProxy::renderHttpProxyRule($this->vars('*', 80), true, ['10.0.0.5', '2a01:4f8::1']);
+        $conf = NginxProxy::renderHttpProxyRule($this->vars('*', 80), true, [TestNetwork::private(5), '2a01:4f8::1']);
 
-        $this->assertMatchesRegularExpression('/^\s*listen 10\.0\.0\.5:80;\n\s*listen \[2a01:4f8::1\]:80;$/m', $conf);
+        $this->assertMatchesRegularExpression('/^\s*listen '.preg_quote(TestNetwork::private(5), '/').':80;\n\s*listen \[2a01:4f8::1\]:80;$/m', $conf);
         $this->assertDoesNotMatchRegularExpression('/^\s*listen (80|\[::\]:80);$/m', $conf);
         // Any other port keeps the wildcard: nothing else binds it per address.
-        $this->assertMatchesRegularExpression('/^\s*listen 8081;$/m', NginxProxy::renderHttpProxyRule($this->vars('*', 8081), false, ['10.0.0.5']));
+        $this->assertMatchesRegularExpression('/^\s*listen 8081;$/m', NginxProxy::renderHttpProxyRule($this->vars('*', 8081), false, [TestNetwork::private(5)]));
     }
 
     public function test_ssl_follows_the_bracketed_address_and_log_names_keep_the_bare_one(): void

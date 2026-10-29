@@ -60,8 +60,8 @@ final class SystemPackages
     private const DEFAULT_DATABASE_PACKAGE = 'libpq-dev';
 
     /**
-     * @param list<string> $manifests contents of requirements.txt, pyproject.toml,
-     *        Pipfile — whatever the project ships
+     * @param  list<string>  $manifests  contents of requirements.txt, pyproject.toml,
+     *                                   Pipfile — whatever the project ships
      * @return list<string>
      */
     public static function for(array $manifests): array
@@ -71,11 +71,11 @@ final class SystemPackages
         $packages = self::ALWAYS;
         $matched = false;
         foreach (self::PACKAGE_LIBRARIES as $distribution => $libraries) {
-            if (!self::mentions($text, $distribution)) {
+            if (! self::mentions($text, $distribution)) {
                 continue;
             }
             foreach (explode(' ', $libraries) as $library) {
-                if (!in_array($library, $packages, true)) {
+                if (! in_array($library, $packages, true)) {
                     $packages[] = $library;
                 }
             }
@@ -86,7 +86,7 @@ final class SystemPackages
             }
         }
 
-        if (!$matched && !in_array(self::DEFAULT_DATABASE_PACKAGE, $packages, true)) {
+        if (! $matched && ! in_array(self::DEFAULT_DATABASE_PACKAGE, $packages, true)) {
             $packages[] = self::DEFAULT_DATABASE_PACKAGE;
         }
 
@@ -101,7 +101,7 @@ final class SystemPackages
      */
     private static function mentions(string $text, string $distribution): bool
     {
-        $pattern = '/(?<![a-z0-9_.-])' . preg_quote($distribution, '/') . '(?![a-z0-9_.-])/';
+        $pattern = '/(?<![a-z0-9_.-])'.preg_quote($distribution, '/').'(?![a-z0-9_.-])/';
 
         return preg_match($pattern, $text) === 1;
     }

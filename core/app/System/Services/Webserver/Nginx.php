@@ -24,7 +24,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
@@ -35,8 +35,8 @@ class Nginx extends AbstractWebserver implements WebserverInterface
 
     private function rebuildMainConfig(): void
     {
-        $confPath = $this->system->engineDirPath() . '/webserver-config/nginx/nginx.conf';
-        $confTemplatePath = $this->system->engineDirPath() . '/templates/webserver-nginx.blade.php';
+        $confPath = $this->system->engineDirPath().'/webserver-config/nginx/nginx.conf';
+        $confTemplatePath = $this->system->engineDirPath().'/templates/webserver-nginx.blade.php';
         $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
 
         $modseConfig = Setting::getModsecConfig();
@@ -52,19 +52,20 @@ class Nginx extends AbstractWebserver implements WebserverInterface
 
     private function rebuildAppProxyConfig(): void
     {
-        $confPath = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts/app-lite.conf';
-        $appLiteProxyEnabled = (bool)config('env.APP_LITE_PROXY_ENABLED');
-        if (!$appLiteProxyEnabled) {
+        $confPath = $this->system->engineDirPath().'/webserver-config/nginx/vhosts/app-lite.conf';
+        $appLiteProxyEnabled = (bool) config('env.APP_LITE_PROXY_ENABLED');
+        if (! $appLiteProxyEnabled) {
             $this->system->runProcess([
-                "sudo",
-                "rm",
-                "-f",
+                'sudo',
+                'rm',
+                '-f',
                 $confPath,
             ]);
+
             return;
         }
 
-        $confTemplatePath = $this->system->engineDirPath() . '/templates/virtualHost-nginx-app-lite.blade.php';
+        $confTemplatePath = $this->system->engineDirPath().'/templates/virtualHost-nginx-app-lite.blade.php';
         $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
 
         $templateVars = [
@@ -80,7 +81,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             'sudo',
             'mkdir',
             '-p',
-            $this->system->engineDirPath() . '/webserver-logs/nginx/app-lite',
+            $this->system->engineDirPath().'/webserver-logs/nginx/app-lite',
         ]);
     }
 
@@ -89,15 +90,15 @@ class Nginx extends AbstractWebserver implements WebserverInterface
      */
     public function needsIpListenerRebind(): bool
     {
-        $confPath = $this->system->engineDirPath() . '/webserver-config/nginx/nginx.conf';
+        $confPath = $this->system->engineDirPath().'/webserver-config/nginx/nginx.conf';
         try {
             $contents = $this->system->filesystem()->fileGetContents($confPath);
         } catch (\Throwable $e) {
             return true;
         }
 
-        return (bool)preg_match('/^\s*listen\s+80(\s+default_server)?\s*;/m', $contents)
-            || (bool)preg_match('/^\s*listen\s+443\s+ssl(\s+default_server)?\s*;/m', $contents);
+        return (bool) preg_match('/^\s*listen\s+80(\s+default_server)?\s*;/m', $contents)
+            || (bool) preg_match('/^\s*listen\s+443\s+ssl(\s+default_server)?\s*;/m', $contents);
     }
 
     public function reload(bool $rebindIpListeners = false): void
@@ -106,9 +107,10 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             // Never `/etc/init.d/nginx restart` inside the container: that exits
             // PID 1 and loops the webserver (see Modsec::restartWebserver).
             $this->system->webserver()->restartWebserverContainerFromHost();
+
             return;
         }
-        $this->exec("/etc/init.d/nginx reload");
+        $this->exec('/etc/init.d/nginx reload');
     }
 
     public function restart(): void
@@ -118,7 +120,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
 
     public function createDomainConfig(Domain $domain): void
     {
-        $virtualHostTemplate = file_get_contents($this->system->templatesDirPath() . '/virtualHost-nginx.blade.php');
+        $virtualHostTemplate = file_get_contents($this->system->templatesDirPath().'/virtualHost-nginx.blade.php');
 
         $user = $domain->getUser();
         $ips = $user->getBindIpAddresses();
@@ -140,7 +142,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
 
         // The .pem and .key are what nginx loads; a .crt alone passed this before.
         if ($connection->hasServableCertificate()) {
-            $certDir = $project->projectDirPath() . "/ssl-certs";
+            $certDir = $project->projectDirPath().'/ssl-certs';
             $keyFile = "{$certDir}/{$domain->domain}.key";
             $pemFile = "{$certDir}/{$domain->domain}.pem";
             $templateVars['ssl_enabled'] = true;
@@ -148,14 +150,14 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             $templateVars['ssl_cert_key_file'] = $keyFile;
         }
         $virtualHost = Blade::render($virtualHostTemplate, $templateVars);
-        $virtualHostPath = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts/' . $domain->domain . '.conf';
+        $virtualHostPath = $this->system->engineDirPath().'/webserver-config/nginx/vhosts/'.$domain->domain.'.conf';
         $this->system->filesystem()->filePutContents($virtualHostPath, $virtualHost);
 
         $this->system->exec([
             'sudo',
             'mkdir',
             '-p',
-            $this->system->engineDirPath() . '/webserver-logs/nginx/' . $domain->domain,
+            $this->system->engineDirPath().'/webserver-logs/nginx/'.$domain->domain,
         ]);
     }
 
@@ -166,16 +168,16 @@ class Nginx extends AbstractWebserver implements WebserverInterface
 
     public function deleteDomainConfig(string $domainName): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts';
-        $configFile = $dir . '/' . $domainName . '.conf';
+        $dir = $this->system->engineDirPath().'/webserver-config/nginx/vhosts';
+        $configFile = $dir.'/'.$domainName.'.conf';
         $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts';
+        $dir = $this->system->engineDirPath().'/webserver-config/nginx/vhosts';
         foreach ($domainNames as $domainName) {
-            $configFile = $dir . '/' . $domainName . '.conf';
+            $configFile = $dir.'/'.$domainName.'.conf';
             $this->system->exec(['sudo', 'rm', '-f', $configFile]);
         }
     }

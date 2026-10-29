@@ -25,7 +25,7 @@ class Apache extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
@@ -36,14 +36,14 @@ class Apache extends AbstractWebserver implements WebserverInterface
 
     private function rebuildMainConfig(): void
     {
-        $confPath = $this->system->engineDirPath() . '/webserver-config/apache/httpd.conf';
-        $confTemplatePath = $this->system->engineDirPath() . '/templates/webserver-apache.blade.php';
+        $confPath = $this->system->engineDirPath().'/webserver-config/apache/httpd.conf';
+        $confTemplatePath = $this->system->engineDirPath().'/templates/webserver-apache.blade.php';
         $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
 
         $modseConfig = Setting::getModsecConfig();
         $ipsv4 = [];
         $ipsv6 = [];
-        foreach(User::getAll() as $user) {
+        foreach (User::getAll() as $user) {
             $userIps = $user->getIpAddresses();
             $ipsv4 = [...$ipsv4, ...$userIps['ipv4']];
             $ipsv6 = [...$ipsv6, ...$userIps['ipv6']];
@@ -62,19 +62,20 @@ class Apache extends AbstractWebserver implements WebserverInterface
 
     private function rebuildAppProxyConfig(): void
     {
-        $confPath = $this->system->engineDirPath() . '/webserver-config/apache/vhosts/app-lite.conf';
-        $appLiteProxyEnabled = (bool)config('env.APP_LITE_PROXY_ENABLED');
-        if (!$appLiteProxyEnabled) {
+        $confPath = $this->system->engineDirPath().'/webserver-config/apache/vhosts/app-lite.conf';
+        $appLiteProxyEnabled = (bool) config('env.APP_LITE_PROXY_ENABLED');
+        if (! $appLiteProxyEnabled) {
             $this->system->runProcess([
-                "sudo",
-                "rm",
-                "-f",
+                'sudo',
+                'rm',
+                '-f',
                 $confPath,
             ]);
+
             return;
         }
 
-        $confTemplatePath = $this->system->engineDirPath() . '/templates/virtualHost-apache-app-lite.blade.php';
+        $confTemplatePath = $this->system->engineDirPath().'/templates/virtualHost-apache-app-lite.blade.php';
         $confTemplate = $this->system->filesystem()->fileGetContents($confTemplatePath);
 
         $templateVars = [
@@ -90,7 +91,7 @@ class Apache extends AbstractWebserver implements WebserverInterface
             'sudo',
             'mkdir',
             '-p',
-            $this->system->engineDirPath() . '/webserver-logs/apache/app-lite',
+            $this->system->engineDirPath().'/webserver-logs/apache/app-lite',
         ]);
     }
 
@@ -128,7 +129,7 @@ class Apache extends AbstractWebserver implements WebserverInterface
 
     public function createDomainConfig(Domain $domain): void
     {
-        $virtualHostTemplate = file_get_contents($this->system->templatesDirPath() . '/virtualHost-apache.blade.php');
+        $virtualHostTemplate = file_get_contents($this->system->templatesDirPath().'/virtualHost-apache.blade.php');
 
         $user = $domain->getUser();
         $ips = $user->getBindIpAddresses();
@@ -148,7 +149,7 @@ class Apache extends AbstractWebserver implements WebserverInterface
         ];
         $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
         if ($connection->hasSslCertificate()) {
-            $certDir = $project->projectDirPath() . "/ssl-certs";
+            $certDir = $project->projectDirPath().'/ssl-certs';
             $keyFile = "{$certDir}/{$domain->domain}.key";
             $crtFile = "{$certDir}/{$domain->domain}.crt";
             $caFile = "{$certDir}/{$domain->domain}.ca";
@@ -158,14 +159,14 @@ class Apache extends AbstractWebserver implements WebserverInterface
             $templateVars['ssl_cert_ca_file'] = $caFile;
         }
         $virtualHost = Blade::render($virtualHostTemplate, $templateVars);
-        $virtualHostPath = $this->system->engineDirPath() . '/webserver-config/apache/vhosts/' . $domain->domain . '.conf';
+        $virtualHostPath = $this->system->engineDirPath().'/webserver-config/apache/vhosts/'.$domain->domain.'.conf';
         $this->system->filesystem()->filePutContents($virtualHostPath, $virtualHost);
 
         $this->system->exec([
             'sudo',
             'mkdir',
             '-p',
-            $this->system->engineDirPath() . '/webserver-logs/apache/' . $domain->domain,
+            $this->system->engineDirPath().'/webserver-logs/apache/'.$domain->domain,
         ]);
     }
 
@@ -176,16 +177,16 @@ class Apache extends AbstractWebserver implements WebserverInterface
 
     public function deleteDomainConfig(string $domainName): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/apache/vhosts';
-        $configFile = $dir . '/' . $domainName . '.conf';
+        $dir = $this->system->engineDirPath().'/webserver-config/apache/vhosts';
+        $configFile = $dir.'/'.$domainName.'.conf';
         $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/apache/vhosts';
+        $dir = $this->system->engineDirPath().'/webserver-config/apache/vhosts';
         foreach ($domainNames as $domainName) {
-            $configFile = $dir . '/' . $domainName . '.conf';
+            $configFile = $dir.'/'.$domainName.'.conf';
             // The glob stays a glob; the name is a positional argument, never shell.
             $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }

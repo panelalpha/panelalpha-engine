@@ -3,6 +3,7 @@
 namespace App\System\Project\PhpHosting;
 
 use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use Illuminate\Support\Str;
 
 /**
@@ -12,8 +13,7 @@ final class PhpRuntime
 {
     public function __construct(
         private PhpHosting $project,
-    ) {
-    }
+    ) {}
 
     public function customIniFilePath(string $phpVersion): string
     {
@@ -29,7 +29,7 @@ final class PhpRuntime
     }
 
     /**
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      *
      * @throws \ErrorException
      */
@@ -49,8 +49,7 @@ final class PhpRuntime
     }
 
     /**
-     * @param list<string> $args
-     *
+     * @param  list<string>  $args
      * @return array{stdout: string, stderr: string, exit_code: int}
      */
     public function runWpCli(array $args): array
@@ -78,15 +77,16 @@ final class PhpRuntime
             $this->project->defaultServiceName(),
             $this->phpBinaryPath($wpPath),
             '-d',
-            'memory_limit=' . $this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
+            'memory_limit='.$this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
             '/opt/wp-cli.phar',
+            '--exec='.MustUsePlugin::MEND_ON_LOAD,
             ...$args,
         ];
 
         $process = $this->project->system()->runProcess($command);
         $exitCode = $process->getExitCode();
         if ($exitCode === null) {
-            throw new \Exception('Could not get exit code after running WP-CLI command: ' . implode(' ', $args));
+            throw new \Exception('Could not get exit code after running WP-CLI command: '.implode(' ', $args));
         }
 
         return [
@@ -98,16 +98,9 @@ final class PhpRuntime
 
     public function phpBinaryPath(?string $wpPath = null): string
     {
-        $phpVersion = null;
-        if ($wpPath) {
-            $domain = $this->project->userModel()->findDomainByDocumentRoot($wpPath);
-            if ($domain) {
-                $phpVersion = $domain->getPhpVersion();
-            }
-        }
-
+        $phpVersion = $this->phpVersionForPath($wpPath);
         if ($phpVersion === null) {
-            $phpVersion = '8.3';
+            throw new \RuntimeException("No PHP version is available for account '{$this->project->username()}'.");
         }
 
         $webserver = $this->project->system()->webserver()->getCurrentWebserver();
@@ -122,9 +115,30 @@ final class PhpRuntime
         }
     }
 
+    private function phpVersionForPath(?string $wpPath): ?string
+    {
+        return $this->matchedDomainPhpVersion($wpPath) ?? $this->accountPhpVersion();
+    }
+
+    private function matchedDomainPhpVersion(?string $wpPath): ?string
+    {
+        if ($wpPath === null) {
+            return null;
+        }
+
+        return $this->project->userModel()->findDomainByDocumentRoot($wpPath)?->getPhpVersion();
+    }
+
+    /** The account's main-domain version, then the host default; never a hard-coded minor. */
+    private function accountPhpVersion(): ?string
+    {
+        return $this->project->userModel()->getMainDomain()?->getPhpVersion()
+            ?? $this->project->system()->php()->defaultPhpVersion();
+    }
+
     public function getPhpPort(?string $phpVersion): int
     {
-        if (!$phpVersion || !Str::contains($phpVersion, '.')) {
+        if (! $phpVersion || ! Str::contains($phpVersion, '.')) {
             return 9083;
         }
 
@@ -144,6 +158,6 @@ final class PhpRuntime
             $limitMb = min(128, $containerMemoryLimitMb);
         }
 
-        return $limitMb . 'M';
+        return $limitMb.'M';
     }
 }

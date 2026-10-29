@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * Ghost and listmonk both ship an unauthenticated first-run page that makes
@@ -79,9 +80,9 @@ class OwnerSetupSourceRecipesTest extends TestCase
         $init = $this->file($config, 'panelalpha/ghost/init.sh');
         $claim = $this->file($config, 'panelalpha/ghost/claim.js');
 
-        $this->assertStringContainsString('server__host=127.0.0.1', $init);
+        $this->assertStringContainsString('server__host=' . TestNetwork::LOOPBACK, $init);
         $this->assertStringContainsString("'/ghost/api/admin/authentication/setup/'", $claim);
-        $this->assertStringContainsString("host: '127.0.0.1'", $claim);
+        $this->assertStringContainsString("host: '" . TestNetwork::LOOPBACK . "'", $claim);
         // A failed setup must fail the deploy, not start an unclaimed site.
         $this->assertStringContainsString('exit "$rc"', $init);
     }
@@ -123,7 +124,7 @@ class OwnerSetupSourceRecipesTest extends TestCase
 
         $start = $this->file($config, 'panelalpha/listmonk/start.sh');
         $install = strpos($start, 'LISTMONK_ADMIN_USER="${PA_ADMIN_USER}"');
-        $loopback = strpos($start, 'PORT=127.0.0.1:');
+        $loopback = strpos($start, 'PORT=' . TestNetwork::LOOPBACK . ':');
         $serve = strrpos($start, "exec ./listmonk --config ''");
         $this->assertNotFalse($install);
         $this->assertNotFalse($loopback);

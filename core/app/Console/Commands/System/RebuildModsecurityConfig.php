@@ -17,12 +17,14 @@ class RebuildModsecurityConfig extends Command
     public function handle(): int
     {
         try {
-            $system = new System();
+            $system = new System;
             $system->modsec()->rebuildConfig();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
+
             return self::FAILURE;
         }
+
         return self::SUCCESS;
     }
 }

@@ -22,8 +22,7 @@ class Webserver implements WebserverInterface
 
     public function __construct(
         private EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     public function isRunning(): bool
     {
@@ -56,18 +55,20 @@ class Webserver implements WebserverInterface
             return self::$currentWebserver;
         }
 
-        $composeWebserverFile = $this->system->engineDirPath() . '/docker-compose.yml-webserver';
+        $composeWebserverFile = $this->system->engineDirPath().'/docker-compose.yml-webserver';
         if (file_exists($composeWebserverFile)) {
             $contents = @file_get_contents($composeWebserverFile);
             if (is_string($contents)) {
                 if (preg_match('/com\.panelalpha\.webserver\s*=\s*([a-z0-9_\-]+)/i', $contents, $m)) {
                     $webserver = strtolower($m[1]);
                     self::$currentWebserver = $webserver;
+
                     return $webserver;
                 }
                 if (preg_match('/-\s*com\.panelalpha\.webserver\s*=\s*([a-z0-9_\-]+)/i', $contents, $m2)) {
                     $webserver = strtolower($m2[1]);
                     self::$currentWebserver = $webserver;
+
                     return $webserver;
                 }
             }
@@ -92,7 +93,7 @@ class Webserver implements WebserverInterface
             throw new \Exception('Could not parse docker compose response');
         }
 
-        $webserver = "unknown";
+        $webserver = 'unknown';
         $labels = explode(',', $result->Labels);
         foreach ($labels as $label) {
             if (Str::startsWith($label, 'com.panelalpha.webserver=')) {
@@ -102,6 +103,7 @@ class Webserver implements WebserverInterface
         }
 
         self::$currentWebserver = $webserver;
+
         return $webserver;
     }
 
@@ -140,7 +142,7 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
@@ -186,7 +188,7 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * @param array<string> $domainNames
+     * @param  array<string>  $domainNames
      */
     public function deleteDomainsConfigs(array $domainNames): void
     {
@@ -199,7 +201,7 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * @param array<string> $domainNames
+     * @param  array<string>  $domainNames
      */
     public function deleteDomainsLogsDirs(array $domainNames): void
     {
@@ -234,9 +236,9 @@ class Webserver implements WebserverInterface
      */
     public function getLatestChangeWebserverInfo(): ?array
     {
-        $latestLink = "/opt/panelalpha/log/change-webserver/latest";
+        $latestLink = '/opt/panelalpha/log/change-webserver/latest';
         $fs = $this->system->filesystem();
-        if (!$fs->directoryExists($latestLink)) {
+        if (! $fs->directoryExists($latestLink)) {
             return null;
         }
 
@@ -262,8 +264,8 @@ class Webserver implements WebserverInterface
         return [
             'started_at' => $fs->mtime($pidFile),
             'finished_at' => $fs->mtime($exitCodeFile),
-            'pid' => (is_numeric($pid) ? (int)$pid : null),
-            'exit_code' => (is_numeric($exitCode) ? (int)$exitCode : null),
+            'pid' => (is_numeric($pid) ? (int) $pid : null),
+            'exit_code' => (is_numeric($exitCode) ? (int) $exitCode : null),
             'tail_stdout' => $tailStdout,
             'tail_stderr' => $tailStderr,
             'from_version' => $fs->cat($fromVersionFile),
@@ -281,13 +283,13 @@ class Webserver implements WebserverInterface
             '1',
             '--all',
             'bash',
-            $this->system->engineDirPath() . '/webserver.sh',
+            $this->system->engineDirPath().'/webserver.sh',
             '--set',
             $newWebserver,
         ];
 
         if ($serialNumber !== null && $serialNumber !== '') {
-            $command[] = '--serial-no=' . $serialNumber;
+            $command[] = '--serial-no='.$serialNumber;
         }
 
         $command[] = '--background';
@@ -295,28 +297,28 @@ class Webserver implements WebserverInterface
         $process = $this->system->runProcess($command);
 
         if ($process->getExitCode() !== 0) {
-            $message = "Failed to run change webserver script: ";
+            $message = 'Failed to run change webserver script: ';
             $message .= ($process->getErrorOutput() ?: $process->getOutput());
-            $message .= " (exit code " . (string)$process->getExitCode() . ")";
+            $message .= ' (exit code '.(string) $process->getExitCode().')';
             throw new \Exception($message);
         }
     }
 
     public function isChangeWebserverScriptRunning(): bool
     {
-        $latestLink = "/opt/panelalpha/log/change-webserver/latest";
-        if (!$this->system->filesystem()->directoryExists($latestLink)) {
+        $latestLink = '/opt/panelalpha/log/change-webserver/latest';
+        if (! $this->system->filesystem()->directoryExists($latestLink)) {
             return false;
         }
 
         $pidFile = "$latestLink/pid";
-        if (!file_exists($pidFile)) {
+        if (! file_exists($pidFile)) {
             return false;
         }
 
         $pid = trim(file_get_contents($pidFile));
 
-        if (!ctype_digit($pid)) {
+        if (! ctype_digit($pid)) {
             return false;
         }
 
@@ -332,6 +334,21 @@ class Webserver implements WebserverInterface
         ]);
 
         return $process->getExitCode() === 0;
+    }
+
+    /**
+     * A proxy rule on 443 names a certificate on the server, which certbot or an administrator
+     * renews, replaces or removes outside the engine: follow it. True when nginx was reloaded.
+     */
+    public function refreshProxyRuleCertificates(): bool
+    {
+        $driver = $this->driver();
+        if (! $driver instanceof NginxProxy || ! $driver->refreshProxyRuleCertificates()) {
+            return false;
+        }
+        $driver->reloadRouting();
+
+        return true;
     }
 
     public function rebuildDomains(): void
@@ -360,14 +377,14 @@ class Webserver implements WebserverInterface
         if ($this->webserverConfigProblem() !== null) {
             throw new \Exception(
                 'Refusing to restart sites-http: the rendered configuration does not pass `nginx -t`. '
-                . 'The running container is left as it is, so sites keep serving. '
-                . 'What nginx said is in the engine log.'
+                .'The running container is left as it is, so sites keep serving. '
+                .'What nginx said is in the engine log.'
             );
         }
 
         $composeFile = $this->system->composeFilePath();
         $this->system->runProcessOnHost(
-            'sudo docker compose -f ' . escapeshellarg($composeFile) . ' restart sites-http'
+            'sudo docker compose -f '.escapeshellarg($composeFile).' restart sites-http'
         );
     }
 
@@ -391,22 +408,22 @@ class Webserver implements WebserverInterface
         } catch (\Throwable $e) {
             return null;
         }
-        if (!in_array($webserver, ['nginx', 'nginx-proxy'], true)) {
+        if (! in_array($webserver, ['nginx', 'nginx-proxy'], true)) {
             return null;
         }
 
         $composeFile = $this->system->composeFilePath();
         try {
             $process = $this->system->runProcessOnHost(
-                'sudo docker compose -f ' . escapeshellarg($composeFile) . ' exec -T sites-http nginx -t',
+                'sudo docker compose -f '.escapeshellarg($composeFile).' exec -T sites-http nginx -t',
                 [],
                 self::CONFIG_TEST_TIMEOUT
             );
-            $output = trim($process->getErrorOutput() . "\n" . $process->getOutput());
+            $output = trim($process->getErrorOutput()."\n".$process->getOutput());
             $problem = self::configProblemFrom($process->getExitCode(), $output);
         } catch (\Throwable $e) {
             // A test that timed out or never started is not a verdict about the config.
-            Log::warning('Webserver config test could not be run: ' . $e->getMessage());
+            Log::warning('Webserver config test could not be run: '.$e->getMessage());
 
             return null;
         }
@@ -435,7 +452,7 @@ class Webserver implements WebserverInterface
         // reached nginx, a sudo or nsenter error, no output at all -- says
         // nothing about the configuration, and a restart is what fixes most of
         // it.
-        if (!self::isNginxTestVerdict($output)) {
+        if (! self::isNginxTestVerdict($output)) {
             return null;
         }
 
@@ -467,19 +484,19 @@ class Webserver implements WebserverInterface
      */
     public static function restartGuardedByConfigTest(string $testCmd, string $restartCmd): string
     {
-        return 'out=$(' . $testCmd . ' 2>&1); '
-            . 'case "$out" in *"[emerg]"*|*"test failed"*) '
-            . 'echo "sites-http restart refused, nginx -t: $out" >&2; exit 1;; esac; '
-            . $restartCmd;
+        return 'out=$('.$testCmd.' 2>&1); '
+            .'case "$out" in *"[emerg]"*|*"test failed"*) '
+            .'echo "sites-http restart refused, nginx -t: $out" >&2; exit 1;; esac; '
+            .$restartCmd;
     }
 
     /**
      * Schedule a webserver reload on the host in the background (non-blocking).
      * Uses `at now` to enqueue the command inside the host namespace.
      *
-     * @param bool $rebindIpListeners When true (nginx only), schedule a host-level
-     *        container restart after a short delay so the current HTTP response can
-     *        leave through the proxy first. Never uses in-container init.d restart.
+     * @param  bool  $rebindIpListeners  When true (nginx only), schedule a host-level
+     *                                   container restart after a short delay so the current HTTP response can
+     *                                   leave through the proxy first. Never uses in-container init.d restart.
      */
     public function scheduleWebserverReloadInBackground(bool $rebindIpListeners = false): void
     {
@@ -507,7 +524,7 @@ class Webserver implements WebserverInterface
                     // Delay so the in-flight API response can finish through the proxy.
                     // The restart is the one path that turns an unusable config into a
                     // crash loop, so the queued job tests it right before restarting.
-                    $inner = 'sleep 5; ' . self::restartGuardedByConfigTest(
+                    $inner = 'sleep 5; '.self::restartGuardedByConfigTest(
                         "sudo docker compose -f {$composeFileArg} exec -T sites-http nginx -t",
                         "sudo docker compose -f {$composeFileArg} restart sites-http"
                     );
@@ -523,13 +540,13 @@ class Webserver implements WebserverInterface
                 return;
         }
 
-        $pipeline = 'echo ' . escapeshellarg($inner) . ' | at now';
-        $hostCmd = 'bash -lc ' . escapeshellarg($pipeline);
+        $pipeline = 'echo '.escapeshellarg($inner).' | at now';
+        $hostCmd = 'bash -lc '.escapeshellarg($pipeline);
         $process = $this->system->runProcessOnHost($hostCmd);
         // Nothing else would say so: a host without `at` never runs the job.
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             Log::warning('Could not queue the webserver reload on the host: '
-                . Str::limit(trim($process->getErrorOutput() . ' ' . $process->getOutput()), 200));
+                .Str::limit(trim($process->getErrorOutput().' '.$process->getOutput()), 200));
         }
     }
 }

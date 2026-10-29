@@ -9,9 +9,9 @@ use App\System\Firewall\FirewallCommandFailed;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
 use App\System\Firewall\FirewallLogEntry;
+use App\System\Firewall\FirewallNotFound;
 use App\System\Firewall\FirewallRule;
 use App\System\Firewall\TrustedAddress;
-use App\System\Firewall\FirewallNotFound;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -66,7 +66,7 @@ class FirewallController extends Controller
         path: '/firewall/rules',
         summary: 'List firewall rules',
         description: 'In the order the firewall evaluates them. Rules marked managed are the ports the engine itself needs. '
-            . 'Host rules by default; scope=published lists the rules for ports Docker publishes. A deny in both scopes is in both lists, once, with scope both.',
+            .'Host rules by default; scope=published lists the rules for ports Docker publishes. A deny in both scopes is in both lists, once, with scope both.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [
@@ -80,7 +80,7 @@ class FirewallController extends Controller
     )]
     public function rules(Request $request): JsonResponse
     {
-        $scope = $request->validate(['scope' => ['nullable', 'string', 'in:' . FirewallRule::HOST . ',' . FirewallRule::PUBLISHED]])['scope'] ?? FirewallRule::HOST;
+        $scope = $request->validate(['scope' => ['nullable', 'string', 'in:'.FirewallRule::HOST.','.FirewallRule::PUBLISHED]])['scope'] ?? FirewallRule::HOST;
         try {
             $rules = $this->firewall()->rules();
         } catch (FirewallException $e) {
@@ -96,17 +96,17 @@ class FirewallController extends Controller
         path: '/firewall/rules',
         summary: 'Add a firewall rule',
         description: 'A deny rule is placed above every allow rule, so it wins; an allow rule goes last. '
-            . 'An inbound deny covers the host\'s ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. '
-            . 'A rule needs a port, a source or a destination. A rule that matches the same traffic as one already there, '
-            . 'whatever its action or comment, is refused naming that rule, which is left as it is. Do not open a port for an application: '
-            . 'sites are reached through the engine\'s webserver.',
+            .'An inbound deny covers the host\'s ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. '
+            .'A rule needs a port, a source or a destination. A rule that matches the same traffic as one already there, '
+            .'whatever its action or comment, is refused naming that rule, which is left as it is. Do not open a port for an application: '
+            .'sites are reached through the engine\'s webserver.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['action'],
             properties: [
                 new OA\Property(property: 'action', type: 'string', enum: ['allow', 'deny']),
-                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny without scope published is both.'),
+                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept, except both on an outbound rule, which is host.'),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true, description: 'Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination.'),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: 'Omit for both. Required with a port range or list.'),
                 new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
@@ -139,8 +139,9 @@ class FirewallController extends Controller
     #[OA\Put(
         path: '/firewall/rules/{id}',
         summary: 'Edit a firewall rule',
-        description: 'A field not sent keeps its current value; send null to clear it. The rule gets a new id when what it matches changes; '
-            . 'an edit that would make it match the same traffic as another rule is refused.',
+        description: 'A field not sent keeps its current value; send null to clear it. An edit that changes action or direction without sending scope '
+            .'gets the scope a new rule with them would get (an inbound deny is both, an outbound deny and an allow are host); a published rule stays published. '
+            .'The rule gets a new id when what it matches changes; an edit that would make it match the same traffic as another rule is refused.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -241,8 +242,8 @@ class FirewallController extends Controller
         path: '/firewall/logs',
         summary: 'Read what the firewall blocked and banned',
         description: 'Newest first. blocked: a connection refused by the default policy (on a published port too), '
-            . 'as the kernel logged it, rate-limited. ban/unban: fail2ban banning or releasing an address. '
-            . 'A connection dropped by an explicit deny rule is not logged.',
+            .'as the kernel logged it, rate-limited. ban/unban: fail2ban banning or releasing an address. '
+            .'A connection dropped by an explicit deny rule is not logged.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [
@@ -268,7 +269,7 @@ class FirewallController extends Controller
     {
         $query = $request->validate([
             'limit' => ['nullable', 'integer', 'min:1', 'max:1000'],
-            'type' => ['nullable', 'string', 'in:' . implode(',', [FirewallLogEntry::BLOCKED, FirewallLogEntry::BAN, FirewallLogEntry::UNBAN])],
+            'type' => ['nullable', 'string', 'in:'.implode(',', [FirewallLogEntry::BLOCKED, FirewallLogEntry::BAN, FirewallLogEntry::UNBAN])],
             'address' => ['nullable', 'string', 'max:64', 'ip'],
         ]);
         $entries = $this->firewall()->logs((int) ($query['limit'] ?? 100), $query['type'] ?? null, $query['address'] ?? null);
@@ -280,7 +281,7 @@ class FirewallController extends Controller
         path: '/firewall/trusted',
         summary: 'List trusted addresses',
         description: 'Addresses the login protection (fail2ban) never bans: failed SSH, SFTP, FTP and engine API logins from them are not counted. '
-            . 'They are not allow rules; the firewall rules still apply to them.',
+            .'They are not allow rules; the firewall rules still apply to them.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         responses: [
@@ -300,7 +301,7 @@ class FirewallController extends Controller
         path: '/firewall/trusted',
         summary: 'Trust an address',
         description: 'It is never banned again, and a ban it has now is lifted. Trust your own office, monitoring, or the panel that calls this engine, '
-            . 'so a mistyped password or a stale token cannot lock it out.',
+            .'so a mistyped password or a stale token cannot lock it out.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -347,7 +348,7 @@ class FirewallController extends Controller
     }
 
     /**
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      * @return list<array<string, mixed>>
      */
     private function rulesInScope(array $rules, string $scope): array
@@ -365,7 +366,7 @@ class FirewallController extends Controller
 
     private function trustableAddressRule(string $attribute, mixed $value, \Closure $fail): void
     {
-        if (!is_string($value) || !FirewallRule::isAddress($value)) {
+        if (! is_string($value) || ! FirewallRule::isAddress($value)) {
             $fail('The address must be an IPv4 or IPv6 address or a CIDR range.');
         } elseif (($wide = TrustedAddress::widthProblem($value)) !== null) {
             $fail($wide);
@@ -400,7 +401,7 @@ class FirewallController extends Controller
         }
         $warnings = [];
         foreach ($this->attempt(fn () => $this->firewall()->rules()) as $engine) {
-            if (!$this->deniesEngineAllow($rule, $engine)) {
+            if (! $this->deniesEngineAllow($rule, $engine)) {
                 continue;
             }
             $label = trim(substr((string) $engine->comment, strlen(FirewallRule::MANAGED_PREFIX)));
@@ -410,7 +411,7 @@ class FirewallController extends Controller
                 continue;
             }
             $this->refuseSelfLockout($rule, $label, $port, $request);
-            $warnings[] = "This deny also covers the engine's own {$port}" . ($rule->source === null ? ', for every address.' : ", for {$rule->source}.");
+            $warnings[] = "This deny also covers the engine's own {$port}".($rule->source === null ? ', for every address.' : ", for {$rule->source}.");
         }
 
         return array_values(array_unique($warnings));
@@ -444,9 +445,9 @@ class FirewallController extends Controller
     private function refuseSelfLockout(FirewallRule $rule, string $label, string $port, Request $request): void
     {
         $client = (string) $request->ip();
-        if (in_array($label, ['ssh', self::ENGINE_API_LABEL], true) && $rule->hasSource($client) && !$request->boolean('confirm')) {
+        if (in_array($label, ['ssh', self::ENGINE_API_LABEL], true) && $rule->hasSource($client) && ! $request->boolean('confirm')) {
             throw ValidationException::withMessages(['confirm' => "This deny covers your own address {$client} on the engine's {$port}, so it would shut you out of this host."
-                . ' Narrow its source or port, or send confirm: true to add it anyway.']);
+                .' Narrow its source or port, or send confirm: true to add it anyway.']);
         }
     }
 
@@ -457,7 +458,7 @@ class FirewallController extends Controller
         if ($rule->managed()) {
             throw ValidationException::withMessages(['id' => 'The engine opened this rule and needs it; it is not changed through the API.']);
         }
-        if (!$rule->editable) {
+        if (! $rule->editable) {
             throw ValidationException::withMessages(['id' => 'This rule was written on the host with options the API does not carry; change it there.']);
         }
 
@@ -469,7 +470,8 @@ class FirewallController extends Controller
      * broken host 502, and a clash or a rule the provider refused 422.
      *
      * @template T
-     * @param callable(): T $call
+     *
+     * @param  callable(): T  $call
      * @return T
      */
     private function attempt(callable $call): mixed

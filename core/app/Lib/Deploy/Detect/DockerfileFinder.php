@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Port\InternalPorts;
 use Generator;
@@ -43,14 +44,12 @@ final class DockerfileFinder
     private const COPY_LINE_PATTERN = '/^[ \t]*(?:COPY|ADD)[ \t]+(.+)$/mi';
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
-    public function __construct(private readonly string $projectDir, private readonly array $files)
-    {
-    }
+    public function __construct(private readonly string $projectDir, private readonly array $files) {}
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function find(string $projectDir, array $files): ?string
     {
@@ -71,7 +70,7 @@ final class DockerfileFinder
     /** The first port a Dockerfile declares it listens on, best first. */
     public static function exposedPort(string $dockerfilePath): ?int
     {
-        $contents = is_file($dockerfilePath) ? @file_get_contents($dockerfilePath) : null;
+        $contents = is_file($dockerfilePath) ? AccountHomeRead::contents($dockerfilePath) : null;
 
         return is_string($contents) ? self::exposedPortIn($contents) : null;
     }
@@ -182,7 +181,7 @@ final class DockerfileFinder
      * `$PORT` and `${PORT}` replaced by what the file assigned them. A name
      * the file never defines is left unresolved, not emptied.
      *
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      */
     private static function substitute(string $line, array $values): string
     {
@@ -218,7 +217,7 @@ final class DockerfileFinder
             foreach ($tokens ?: [] as $token) {
                 $path = trim((string) $token, " \t\"'");
                 // A build-arg path is not something to guess at.
-                if (str_starts_with($path, '/') && !str_contains($path, '$')) {
+                if (str_starts_with($path, '/') && ! str_contains($path, '$')) {
                     $paths[$path] = true;
                 }
             }
@@ -308,6 +307,7 @@ final class DockerfileFinder
                 if (strcasecmp((string) $name, self::ROOT_NAME) !== 0) {
                     $plain[] = (string) $name;
                 }
+
                 continue;
             }
 
@@ -341,7 +341,7 @@ final class DockerfileFinder
         foreach (scandir($projectDir) ?: [] as $entry) {
             if (preg_match('/^(.+)\.(?:dockerfile|containerfile)$/i', $entry, $m) !== 1
                 || preg_match(self::NAME_PATTERN, $entry) === 1
-                || !$finder->isUsable($entry)
+                || ! $finder->isUsable($entry)
             ) {
                 continue;
             }
@@ -379,7 +379,7 @@ final class DockerfileFinder
                 if ($required === null) {
                     continue;
                 }
-                if (!file_exists(rtrim($contextDir, '/') . '/' . $required)) {
+                if (! file_exists(rtrim($contextDir, '/').'/'.$required)) {
                     return $source;
                 }
             }
@@ -413,7 +413,7 @@ final class DockerfileFinder
                 }
             }
 
-            $paths = array_values(array_filter($argv, static fn (string $a): bool => !str_starts_with($a, '--')));
+            $paths = array_values(array_filter($argv, static fn (string $a): bool => ! str_starts_with($a, '--')));
             // The last argument is the destination; one argument names nothing.
             array_pop($paths);
             if ($paths === []) {
@@ -423,7 +423,7 @@ final class DockerfileFinder
             // `COPY <<EOF /dst` writes inline content, not from the context.
             yield array_values(array_filter(
                 $paths,
-                static fn (string $p): bool => !self::isRemote($p) && !str_starts_with($p, '<<')
+                static fn (string $p): bool => ! self::isRemote($p) && ! str_starts_with($p, '<<')
             ));
         }
     }
@@ -441,6 +441,7 @@ final class DockerfileFinder
                 if (trim($line) === $pending[0]) {
                     array_shift($pending);
                 }
+
                 continue;
             }
             $out[] = $line;
@@ -536,13 +537,13 @@ final class DockerfileFinder
 
     private function isUsable(string $relative): bool
     {
-        $path = $this->projectDir . '/' . $relative;
-        if (!is_file($path) || ComposeFileInspector::isHostUidMappedDockerfile($path)) {
+        $path = $this->projectDir.'/'.$relative;
+        if (! is_file($path) || ComposeFileInspector::isHostUidMappedDockerfile($path)) {
             return false;
         }
 
-        $contents = @file_get_contents($path);
-        if (!is_string($contents)) {
+        $contents = AccountHomeRead::contents($path);
+        if (! is_string($contents)) {
             return false;
         }
 

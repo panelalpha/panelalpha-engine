@@ -9,7 +9,7 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * `project_setting_set` takes a credential, so a secret setting accepts a
- * `vault:<id>`: the controller reads it for this project and stores the
+ * `vault:<key>`: the controller reads it for this project and stores the
  * secret, exactly as if the caller had sent it.
  */
 class ProjectSettingVaultTest extends VaultTestCase

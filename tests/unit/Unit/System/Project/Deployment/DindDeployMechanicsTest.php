@@ -146,7 +146,7 @@ class DindDeployMechanicsTest extends TestCase
         );
 
         $sync = self::methodBody($source, 'syncHostingForSourceRebuild');
-        $this->assertStringContainsString('if (!$this->reclonesOnRebuild($zipPath))', $sync);
+        $this->assertStringContainsString('if (! $this->reclonesOnRebuild($zipPath))', $sync);
 
         $ingest = self::methodBody($source, 'ingestForWipeRebuild');
         $this->assertMatchesRegularExpression(

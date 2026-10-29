@@ -26,7 +26,7 @@ final class FirewallFactory
     /**
      * Register a provider, or replace one; a cached instance is dropped.
      *
-     * @param callable(): Firewall $factory
+     * @param  callable(): Firewall  $factory
      */
     public static function register(string $name, callable $factory): void
     {
@@ -85,8 +85,8 @@ final class FirewallFactory
 
     private static function bootDefaults(): void
     {
-        if (!isset(self::$factories[self::UFW])) {
-            self::$factories[self::UFW] = static fn (): Firewall => new UfwFirewall(new System());
+        if (! isset(self::$factories[self::UFW])) {
+            self::$factories[self::UFW] = static fn (): Firewall => new UfwFirewall(new System);
         }
     }
 

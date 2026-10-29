@@ -6,6 +6,7 @@ use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
+use App\System\Project\Dind\CopyVolumes;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -28,7 +29,7 @@ class PushState implements ShouldQueue
     public int $timeout = JobBudget::SECONDS;
 
     /**
-     * @param list<array{database: string, name: string}>|null $tables
+     * @param  list<array{database: string, name: string}>|null  $tables
      */
     public function __construct(
         public string $fromUsername,
@@ -43,7 +44,7 @@ class PushState implements ShouldQueue
     public function handle(): void
     {
         $this->runTask(function (): void {
-            $result = (new System())->projects()->pushToApp(
+            $result = (new System)->projects()->pushToApp(
                 $this->fromUsername,
                 $this->toUsername,
                 $this->files,
@@ -81,21 +82,21 @@ class PushState implements ShouldQueue
     public function failed(\Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e);
         }
 
         $from = User::findByUsername($this->fromUsername);
         $to = User::findByUsername($this->toUsername);
-        $system = new System();
+        $system = new System;
 
         if ($to !== null) {
             $this->markPushFailed($to, $e->getMessage());
             $this->removeIncoming($system, $to);
         }
 
-        $this->resumeAfterCopy($system, $from);
-        $this->resumeAfterCopy($system, $to);
+        $this->copyVolumesOf($system, $from)?->resumeSourceAfterCopy();
+        $this->copyVolumesOf($system, $to)?->resumeAfterCopy();
     }
 
     private function markPushFailed(User $to, string $error): void
@@ -109,24 +110,25 @@ class PushState implements ShouldQueue
     {
         try {
             $home = rtrim($system->project($to)->homeDirPath(), '/');
-            $system->runProcess(['sudo', 'rm', '-rf', $home . '/.incoming']);
+            $system->runProcess(['sudo', 'rm', '-rf', $home.'/.incoming']);
         } catch (\Throwable $cleanup) {
             Log::warning('PushState failed cleanup could not remove .incoming', [
-                'target'    => $this->toUsername,
+                'target' => $this->toUsername,
                 'exception' => $cleanup->getMessage(),
             ]);
         }
     }
 
-    private function resumeAfterCopy(System $system, ?User $user): void
+    private function copyVolumesOf(System $system, ?User $user): ?CopyVolumes
     {
         if ($user === null) {
-            return;
+            return null;
         }
 
         try {
-            $system->project($user)->copyVolumesForClone()?->resumeAfterCopy();
-        } catch (\Throwable $ignored) {
+            return $system->project($user)->copyVolumesForClone();
+        } catch (\Throwable) {
+            return null;
         }
     }
 }

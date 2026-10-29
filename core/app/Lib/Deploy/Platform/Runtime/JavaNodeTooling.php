@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * Whether a Java build runs a JS tool, and which Node it gets when it does.
  *
@@ -16,7 +18,7 @@ final class JavaNodeTooling
      * `commandLine 'npm', 'ci'`, `commandLine("yarn build")`. Or the node-gradle plugin.
      */
     private const GRADLE_NODE = '/(["\'])(?:npm|npx|pnpm|yarn|node)(?:\.cmd)?(?:\1|\s)'
-        . '|\bcom\.github\.node-gradle\.node\b|\bcom\.moowork\.node\b/';
+        .'|\bcom\.github\.node-gradle\.node\b|\bcom\.moowork\.node\b/';
 
     /**
      * The node-gradle plugin declared in a version catalog, which a script then
@@ -39,15 +41,15 @@ final class JavaNodeTooling
     public static function nodeImageFor(string $projectDir): ?string
     {
         $root = rtrim($projectDir, '/');
-        if ($root === '' || !is_dir($root)) {
+        if ($root === '' || ! is_dir($root)) {
             return null;
         }
 
         foreach (self::buildScripts($root) as $path => $pattern) {
-            if (!is_file($path) || (int) @filesize($path) > self::MAX_BYTES) {
+            if (! is_file($path) || (int) @filesize($path) > self::MAX_BYTES) {
                 continue;
             }
-            $contents = @file_get_contents($path);
+            $contents = AccountHomeRead::contents($path);
             if (is_string($contents) && preg_match($pattern, $contents) === 1) {
                 return NodeRuntime::imageFor($root);
             }
@@ -68,16 +70,16 @@ final class JavaNodeTooling
         $gradle = ['/', '/gradle/', '/buildSrc/', '/*/', '/*/*/'];
         foreach ($gradle as $dir) {
             foreach (['*.gradle', '*.gradle.kts'] as $name) {
-                foreach (glob($root . $dir . $name) ?: [] as $path) {
+                foreach (glob($root.$dir.$name) ?: [] as $path) {
                     $scripts[$path] = self::GRADLE_NODE;
                 }
             }
         }
-        foreach (glob($root . '/gradle/*.versions.toml') ?: [] as $path) {
+        foreach (glob($root.'/gradle/*.versions.toml') ?: [] as $path) {
             $scripts[$path] = self::CATALOG_NODE;
         }
         foreach (['/', '/*/', '/*/*/'] as $dir) {
-            foreach (glob($root . $dir . 'pom.xml') ?: [] as $path) {
+            foreach (glob($root.$dir.'pom.xml') ?: [] as $path) {
                 $scripts[$path] = self::MAVEN_NODE;
             }
         }

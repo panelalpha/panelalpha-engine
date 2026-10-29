@@ -5,7 +5,9 @@ namespace Tests\Unit\System\Services;
 use App\Models\ProxyRule;
 use App\System;
 use App\System\Services\Webserver\ProxyListenPort;
+use App\System\Services\Webserver\ProxyRuleDuplicate;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -16,27 +18,42 @@ class ProxyListenPortTest extends TestCase
 {
     use InMemoryDatabase;
 
-    /** Real `ss -Hln -t` lines from an engine host. */
-    private const TCP = <<<'SS'
-LISTEN 0      4096       127.0.0.54:53         0.0.0.0:*
-LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*
-LISTEN 0      4096          0.0.0.0:2011       0.0.0.0:*
-LISTEN 0      80          127.0.0.1:3306       0.0.0.0:*
-LISTEN 0      511          10.0.0.6:9000       0.0.0.0:*
-LISTEN 0      4096             [::]:8443          [::]:*
-LISTEN 0      4096                *:9100             *:*
-LISTEN 0      511           0.0.0.0:8081       0.0.0.0:*
-SS;
-
-    private const UDP = <<<'SS'
-UNCONN 0      0          127.0.0.54:53         0.0.0.0:*
-UNCONN 0      0     [fe80::1%eth0]:546           [::]:*
-SS;
-
     protected function setUp(): void
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
+    }
+
+    /** Real `ss -Hln -t` lines from an engine host. */
+    private static function tcp(): string
+    {
+        $any = TestNetwork::ANY;
+        $dnsProxy = TestNetwork::ENGINE_DNS_PROXY;
+        $stub = TestNetwork::RESOLVED_STUB;
+        $loopback = TestNetwork::LOOPBACK;
+        $lan = TestNetwork::private(6);
+
+        return <<<SS
+LISTEN 0      4096    {$dnsProxy}:53         {$any}:*
+LISTEN 0      4096     {$stub}%lo:53         {$any}:*
+LISTEN 0      4096           {$any}:2011       {$any}:*
+LISTEN 0      80        {$loopback}:3306       {$any}:*
+LISTEN 0      511            {$lan}:9000       {$any}:*
+LISTEN 0      4096             [::]:8443          [::]:*
+LISTEN 0      4096                *:9100             *:*
+LISTEN 0      511            {$any}:8081       {$any}:*
+SS;
+    }
+
+    private static function udp(): string
+    {
+        $any = TestNetwork::ANY;
+        $dnsProxy = TestNetwork::ENGINE_DNS_PROXY;
+
+        return <<<SS
+UNCONN 0      0       {$dnsProxy}:53         {$any}:*
+UNCONN 0      0     [fe80::1%eth0]:546           [::]:*
+SS;
     }
 
     public function test_the_webservers_ports_are_for_http_rules_only(): void
@@ -45,7 +62,7 @@ SS;
         foreach ([80, 443] as $port) {
             $this->assertNull($ports->refusal('http', '*', $port));
             $this->assertSame("Port {$port} is the webserver's own; only an http rule can listen on it.", $ports->refusal('tcp', '*', $port));
-            $this->assertNotNull($ports->refusal('udp', '10.0.0.5', $port));
+            $this->assertNotNull($ports->refusal('udp', TestNetwork::private(5), $port));
         }
     }
 
@@ -81,16 +98,16 @@ SS;
     {
         $ports = $this->ports();
 
-        // 10.0.0.6:9000 is bound.
-        $this->assertNotNull($ports->refusal('tcp', '10.0.0.6', 9000));
+        // Port 9000 is bound on the LAN address.
+        $this->assertNotNull($ports->refusal('tcp', TestNetwork::private(6), 9000));
         $this->assertNotNull($ports->refusal('tcp', '*', 9000));
-        $this->assertNull($ports->refusal('tcp', '10.0.0.5', 9000));
+        $this->assertNull($ports->refusal('tcp', TestNetwork::private(5), 9000));
         // [::]:8443 and *:9100 take every address.
-        $this->assertNotNull($ports->refusal('tcp', '10.0.0.5', 8443));
+        $this->assertNotNull($ports->refusal('tcp', TestNetwork::private(5), 8443));
         $this->assertNotNull($ports->refusal('tcp', '2a01:4f8::1', 9100));
         // An interface suffix is not part of the address.
         $this->assertNotNull($ports->refusal('udp', 'fe80::1', 546));
-        $this->assertNull($ports->refusal('udp', '10.0.0.5', 53));
+        $this->assertNull($ports->refusal('udp', TestNetwork::private(5), 53));
     }
 
     public function test_a_port_another_http_rule_holds_is_shared_by_http_rules_only(): void
@@ -100,7 +117,7 @@ SS;
         $ports = $this->ports();
 
         $this->assertNull($ports->refusal('http', '*', 8081));
-        $this->assertNull($ports->refusal('http', '10.0.0.5', 8081));
+        $this->assertNull($ports->refusal('http', TestNetwork::private(5), 8081));
         $this->assertSame("Port 8081 is already used by proxy rule {$held->id} (http).", $ports->refusal('tcp', '*', 8081));
         $this->assertNull($ports->refusal('udp', '*', 8081));
     }
@@ -108,9 +125,9 @@ SS;
     public function test_a_port_a_stream_rule_holds_is_shared_by_rules_of_its_kind(): void
     {
         $held = $this->rule('tcp', 25212);
-        $ports = $this->ports(tcp: 'LISTEN 0 511 0.0.0.0:25212 0.0.0.0:*');
+        $ports = $this->ports(tcp: 'LISTEN 0 511 '.TestNetwork::ANY.':25212 '.TestNetwork::ANY.':*');
 
-        $this->assertNull($ports->refusal('tcp', '10.0.0.5', 25212));
+        $this->assertNull($ports->refusal('tcp', TestNetwork::private(5), 25212));
         $this->assertSame("Port 25212 is already used by proxy rule {$held->id} (tcp).", $ports->refusal('http', '*', 25212));
     }
 
@@ -120,6 +137,49 @@ SS;
 
         // Whatever binds 8081 now is not nginx serving that rule.
         $this->assertSame('Port 8081 is already in use on this host.', $this->ports()->refusal('http', '*', 8081));
+    }
+
+    public function test_switching_on_an_http_rule_beside_a_live_one_on_its_name_and_port_is_refused(): void
+    {
+        $this->rule('http', 80);
+        $parked = $this->rule('http', 80, enabled: false);
+
+        $this->assertSame(ProxyRuleDuplicate::MESSAGE, $this->ports()->switchOnRefusal($parked));
+    }
+
+    public function test_switching_on_the_only_http_rule_on_its_name_and_port_is_allowed(): void
+    {
+        $parked = $this->rule('http', 80, enabled: false);
+
+        $this->assertNull($this->ports()->switchOnRefusal($parked));
+    }
+
+    /** stream.conf renders no server name, so nginx would serve only one of the two. */
+    public function test_switching_on_a_stream_rule_beside_its_live_twin_is_refused(): void
+    {
+        foreach (['tcp' => 25212, 'udp' => 25213] as $transport => $port) {
+            $this->rule($transport, $port);
+            $parked = $this->rule($transport, $port, enabled: false);
+
+            $this->assertSame(ProxyRuleDuplicate::MESSAGE, $this->ports()->switchOnRefusal($parked), $transport);
+        }
+    }
+
+    public function test_switching_on_a_stream_rule_on_another_address_or_transport_of_a_live_port_is_allowed(): void
+    {
+        $this->rule('tcp', 25212);
+        $otherAddress = $this->rule('tcp', 25212, enabled: false, listenIp: TestNetwork::private(5));
+        $otherTransport = $this->rule('udp', 25212, enabled: false);
+
+        $this->assertNull($this->ports(tcp: '', udp: '')->switchOnRefusal($otherAddress));
+        $this->assertNull($this->ports(tcp: '', udp: '')->switchOnRefusal($otherTransport));
+    }
+
+    public function test_switching_on_a_rule_takes_its_port_again(): void
+    {
+        $parked = $this->rule('tcp', 2011, enabled: false);
+
+        $this->assertSame('Port 2011 is reserved by the engine.', $this->ports()->switchOnRefusal($parked));
     }
 
     public function test_a_listing_that_cannot_be_read_refuses_nothing(): void
@@ -138,16 +198,16 @@ SS;
     public function test_the_listing_is_parsed_to_address_and_port(): void
     {
         $this->assertSame(
-            [['127.0.0.54', 53], ['127.0.0.53', 53], ['0.0.0.0', 2011], ['127.0.0.1', 3306], ['10.0.0.6', 9000], ['::', 8443], ['*', 9100], ['0.0.0.0', 8081]],
-            ProxyListenPort::listening(self::TCP)
+            [[TestNetwork::ENGINE_DNS_PROXY, 53], [TestNetwork::RESOLVED_STUB, 53], [TestNetwork::ANY, 2011], [TestNetwork::LOOPBACK, 3306], [TestNetwork::private(6), 9000], ['::', 8443], ['*', 9100], [TestNetwork::ANY, 8081]],
+            ProxyListenPort::listening(self::tcp())
         );
-        $this->assertSame([['127.0.0.54', 53], ['fe80::1', 546]], ProxyListenPort::listening(self::UDP));
+        $this->assertSame([[TestNetwork::ENGINE_DNS_PROXY, 53], ['fe80::1', 546]], ProxyListenPort::listening(self::udp()));
         $this->assertSame([], ProxyListenPort::listening(''));
     }
 
-    private function ports(string $tcp = self::TCP, string $udp = self::UDP): ProxyListenPort
+    private function ports(?string $tcp = null, ?string $udp = null): ProxyListenPort
     {
-        $system = new class ($tcp, $udp) extends System {
+        $system = new class ($tcp ?? self::tcp(), $udp ?? self::udp()) extends System {
             public function __construct(private string $tcp, private string $udp)
             {
             }
@@ -164,12 +224,12 @@ SS;
         return new ProxyListenPort($system);
     }
 
-    private function rule(string $transport, int $port, bool $enabled = true): ProxyRule
+    private function rule(string $transport, int $port, bool $enabled = true, string $listenIp = '*'): ProxyRule
     {
         return ProxyRule::query()->create([
             'owner_scope' => 'system',
             'transport' => $transport,
-            'listen_ip' => '*',
+            'listen_ip' => $listenIp,
             'listen_port' => $port,
             'upstream_host' => 'app',
             'upstream_port' => 3000,

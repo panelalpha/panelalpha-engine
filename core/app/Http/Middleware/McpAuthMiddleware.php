@@ -5,8 +5,8 @@ namespace App\Http\Middleware;
 use App\Auth\TokenAbilities;
 use App\Models\PersonalAccessToken;
 use Closure;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class McpAuthMiddleware
 {
@@ -14,13 +14,13 @@ class McpAuthMiddleware
     {
         $token = $request->user()?->currentAccessToken();
 
-        if (!$token instanceof PersonalAccessToken) {
+        if (! $token instanceof PersonalAccessToken) {
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
         // 401, not the 403 this describes: the MCP spec pairs 401 with the
         // WWW-Authenticate header this stack already adds, and clients expect it.
-        if (!TokenAbilities::of($token)->mayUseMcp()) {
+        if (! TokenAbilities::of($token)->mayUseMcp()) {
             return new JsonResponse([
                 'error' => 'This token was not issued for an assistant. Mint one with `pae connect`.',
             ], 401);

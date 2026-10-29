@@ -34,7 +34,7 @@ final class DeployHistory
      */
     public static function find(User $user, string $id): ?array
     {
-        if (!in_array($id, self::ids($user->username), true)) {
+        if (! in_array($id, self::ids($user->username), true)) {
             return null;
         }
 
@@ -42,7 +42,7 @@ final class DeployHistory
     }
 
     /**
-     * @param list<string> $ids
+     * @param  list<string>  $ids
      * @return list<array<string, mixed>>
      */
     private static function entries(User $user, array $ids): array
@@ -78,7 +78,7 @@ final class DeployHistory
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array<string, mixed>
      */
     private static function entry(string $username, string $id, array $latest, ?Task $task, ?HookDelivery $delivery): array
@@ -102,7 +102,7 @@ final class DeployHistory
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      * @return array{status: string, error: ?string, started_at: ?int, finished_at: ?int}
      */
     private static function latestOutcome(array $latest): array
@@ -116,7 +116,7 @@ final class DeployHistory
     }
 
     /**
-     * @param list<array{ts: int, stage: ?string, level: string, msg: string}> $head
+     * @param  list<array{ts: int, stage: ?string, level: string, msg: string}>  $head
      * @return array{status: string, error: ?string, started_at: ?int, finished_at: ?int}
      */
     private static function loggedOutcome(DeployLogReader $reader, array $head): array
@@ -151,7 +151,7 @@ final class DeployHistory
      * The newest task that ran each deploy: an archive upload continues the
      * deploy its create left waiting for files.
      *
-     * @param list<string> $ids
+     * @param  list<string>  $ids
      * @return Collection<string, Task>
      */
     private static function tasksByDeploy(string $username, array $ids): Collection
@@ -166,7 +166,7 @@ final class DeployHistory
     }
 
     /**
-     * @param list<string> $ids
+     * @param  list<string>  $ids
      * @return Collection<string, HookDelivery>
      */
     private static function deliveriesByDeploy(User $user, array $ids): Collection

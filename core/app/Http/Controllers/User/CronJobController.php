@@ -31,7 +31,7 @@ class CronJobController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return CronJobCollection
      */
     public function index($username)
@@ -62,12 +62,12 @@ class CronJobController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Cron job created', content: new OA\JsonContent(ref: '#/components/schemas/CronJob')),
+            new OA\Response(response: 409, description: 'The project has not been deployed yet: problems code `project_not_deployed`', content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
-     * @param string $username
-     * @param CronJobStoreRequest $request
+     * @param  string  $username
      * @return CronJobResource
      */
     public function store($username, CronJobStoreRequest $request)
@@ -120,9 +120,8 @@ class CronJobController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $hash
-     * @param CronJobUpdateRequest $request
+     * @param  string  $username
+     * @param  string  $hash
      * @return CronJobResource
      */
     public function update($username, $hash, CronJobUpdateRequest $request)
@@ -142,7 +141,7 @@ class CronJobController extends Controller
          */
         $params = $request->validated();
         $cron = $user->project()->cron();
-        if (!$cron->exists($hash)) {
+        if (! $cron->exists($hash)) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));
@@ -168,8 +167,8 @@ class CronJobController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $hash
+     * @param  string  $username
+     * @param  string  $hash
      * @return CronJobResource
      */
     public function destroy($username, $hash)
@@ -177,7 +176,7 @@ class CronJobController extends Controller
         $user = $this->projectOr404($username);
 
         $cron = $user->project()->cron();
-        if (!$cron->exists($hash)) {
+        if (! $cron->exists($hash)) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));
@@ -197,7 +196,7 @@ class CronJobController extends Controller
         if ($user->project()->runtime() instanceof Dind) {
             throw ValidationException::withMessages([
                 'command' => 'Cron jobs are not supported for dind projects. '
-                    . 'Schedule the work inside the app, for example as a service in its compose file.',
+                    .'Schedule the work inside the app, for example as a service in its compose file.',
             ]);
         }
     }

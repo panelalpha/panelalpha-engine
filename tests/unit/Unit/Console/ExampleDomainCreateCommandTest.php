@@ -18,6 +18,7 @@ use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -85,8 +86,8 @@ class ExampleDomainCreateCommandTest extends TestCase
     public function test_an_unreadable_repository_is_refused(): void
     {
         $this->assertSame(
-            ['127.0.0.1 is an address this engine does not fetch from.'],
-            $this->refused(['--git-repo' => 'http://127.0.0.1:1/acme/app.git'])
+            [TestNetwork::LOOPBACK.' is an address this engine does not fetch from.'],
+            $this->refused(['--git-repo' => 'http://'.TestNetwork::LOOPBACK.':1/acme/app.git'])
         );
         $this->assertSame(0, User::query()->count());
         $this->assertSame(0, Domain::query()->count());
@@ -104,14 +105,14 @@ class ExampleDomainCreateCommandTest extends TestCase
 
     public function test_the_wildcard_domain_is_derived_from_the_public_address(): void
     {
-        Setting::set('default_ipv4', '203.0.113.7');
+        Setting::set('default_ipv4', TestNetwork::public(7));
         $this->stubCreate(function (): never {
             throw ProblemException::one('git_repo', 'git_repo_unreadable', 'The repository could not be read.');
         });
 
         $this->assertSame(['The repository could not be read.'], $this->refused(['--git-repo' => 'acme/app']));
-        $this->assertSame('203-0-113-7.sslip.io', Setting::get('default_wildcard_domain'));
-        $this->assertSame('app.203-0-113-7.sslip.io', Setting::get('vhost-default-ip-domain'));
+        $this->assertSame(str_replace('.', '-', TestNetwork::public(7)).'.sslip.io', Setting::get('default_wildcard_domain'));
+        $this->assertSame('app.'.str_replace('.', '-', TestNetwork::public(7)).'.sslip.io', Setting::get('vhost-default-ip-domain'));
     }
 
     public function test_several_problems_are_printed_one_per_line(): void
@@ -162,7 +163,7 @@ class ExampleDomainCreateCommandTest extends TestCase
 
     public function test_a_git_example_is_flagged_and_announced(): void
     {
-        Setting::set('default_ipv4', '203.0.113.7');
+        Setting::set('default_ipv4', TestNetwork::public(7));
         $seen = null;
         $this->stubCreate(function (array $params) use (&$seen): User {
             $seen = $params;
@@ -175,18 +176,18 @@ class ExampleDomainCreateCommandTest extends TestCase
         [$code, $out] = $this->example(['--git-repo' => 'acme/app']);
 
         $this->assertSame(0, $code, $out);
-        $this->assertSame("Example domain with Git repository created: https://203.0.113.7\n", $out);
+        $this->assertSame('Example domain with Git repository created: https://'.TestNetwork::public(7)."\n", $out);
         $expected = [
             'git_repo' => 'https://github.com/acme/app',
             'username' => 'app',
-            'domain' => 'app.203-0-113-7.sslip.io',
+            'domain' => 'app.'.str_replace('.', '-', TestNetwork::public(7)).'.sslip.io',
             // Filled in by validation, as the API does.
             'memory_limit' => ProjectMemory::defaultMb(),
         ];
         ksort($expected);
         ksort($seen);
         $this->assertSame($expected, $seen);
-        $this->assertTrue(Domain::findByName('app.203-0-113-7.sslip.io')->isExampleDomain());
+        $this->assertTrue(Domain::findByName('app.'.str_replace('.', '-', TestNetwork::public(7)).'.sslip.io')->isExampleDomain());
         $this->assertSame('1', Setting::get('example-domain-created'));
     }
 

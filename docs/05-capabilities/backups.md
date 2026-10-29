@@ -70,6 +70,8 @@ Restore last backup onto this project.
 
 On a traditional PHP project, a restore replaces the home folder with the backed-up one and puts the old one back if the restore fails. To keep the files that are there and only write the backed-up ones over them, say so. You can also restore only the databases or only the files, if the backup has them. Choosing parts by volume is for container projects only.
 
+The parts are chosen with `only` or `exclude`, never both. Each is an object with up to three keys: `files` (true or false), `volumes` (a list of volume names) and `databases` (a list of database names). For example, `only` with `databases` set to the one database name restores just that database.
+
 ## Download one part
 
 A backup is stored as separate items, for example the home folder and one dump per database. To take one item off the server:

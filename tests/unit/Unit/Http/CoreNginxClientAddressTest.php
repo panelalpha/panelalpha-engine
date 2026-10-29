@@ -3,10 +3,11 @@
 namespace Tests\Unit\Http;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * On a CSF host :2011 reached core through docker-proxy, from the
- * bridge gateway, and that gateway sat inside the trusted 172.16.0.0/12 -- so
+ * bridge gateway, and that gateway sat inside the trusted private 172.16/12 -- so
  * an internet client's X-Forwarded-For was believed. Only the two proxies that
  * really set the header may be trusted, and :2011 must start the chain itself.
  */
@@ -51,8 +52,8 @@ class CoreNginxClientAddressTest extends TestCase
         $php = $this->server($conf, 'listen 80 default_server;');
 
         preg_match_all('/set_real_ip_from\s+([^;]+);/', $conf, $all);
-        $this->assertSame(['127.0.0.1'], $all[1], 'no range may be trusted');
-        $this->assertStringContainsString('set_real_ip_from 127.0.0.1;', $php);
+        $this->assertSame([TestNetwork::LOOPBACK], $all[1], 'no range may be trusted');
+        $this->assertStringContainsString('set_real_ip_from ' . TestNetwork::LOOPBACK . ';', $php);
         $this->assertStringContainsString('include /etc/nginx/pa-trusted-proxy*.conf;', $php);
     }
 

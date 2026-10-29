@@ -85,14 +85,14 @@ final class DetectionFiles
      * then the symbolic links within reach of detection, each as a path
      * relative to the repository root.
      *
-     * @param list<array{path: string, type: string, mode?: string, size?: ?int}> $entries a recursive tree
-     * @param ?string $subdirectory where inspection starts, relative to the repository root
+     * @param  list<array{path: string, type: string, mode?: string, size?: ?int}>  $entries  a recursive tree
+     * @param  ?string  $subdirectory  where inspection starts, relative to the repository root
      * @return array{decisive: list<string>, refining: list<string>, links: list<string>}
      */
     public static function select(array $entries, ?string $subdirectory = null): array
     {
         $prefix = trim((string) $subdirectory, '/');
-        $prefix = $prefix === '' ? '' : $prefix . '/';
+        $prefix = $prefix === '' ? '' : $prefix.'/';
 
         $decisive = [];
         $links = [];
@@ -102,7 +102,7 @@ final class DetectionFiles
                 continue;
             }
             $path = $entry['path'];
-            if ($prefix !== '' && !str_starts_with($path, $prefix)) {
+            if ($prefix !== '' && ! str_starts_with($path, $prefix)) {
                 continue;
             }
             $segments = explode('/', substr($path, strlen($prefix)));
@@ -111,15 +111,17 @@ final class DetectionFiles
 
             if ($depth > 0 && in_array(strtolower($segments[0]), self::READ_WHOLE, true)) {
                 $decisive[$path] = $depth;
+
                 continue;
             }
-            if ($depth > self::MAX_DEPTH || !self::searchable($segments)) {
+            if ($depth > self::MAX_DEPTH || ! self::searchable($segments)) {
                 continue;
             }
             // A link's blob is its target. Written back as a link, it reads as
             // whatever it points at, as in a checkout.
             if (($entry['mode'] ?? '') === self::SYMLINK_MODE) {
                 $links[] = $path;
+
                 continue;
             }
             if (self::matches($name, self::NAMES, self::PATTERNS)
@@ -128,20 +130,20 @@ final class DetectionFiles
                 || ($depth === 0 && str_ends_with($name, '.py'))
             ) {
                 $decisive[$path] = $depth;
+
                 continue;
             }
-            if ($depth <= 2 && str_ends_with($name, '.go') && !str_ends_with($name, '_test.go')) {
+            if ($depth <= 2 && str_ends_with($name, '.go') && ! str_ends_with($name, '_test.go')) {
                 $dir = implode('/', $segments);
                 // One file says which package a directory is; main.go says it best.
-                if (!isset($goByDir[$dir]) || $name === 'main.go') {
+                if (! isset($goByDir[$dir]) || $name === 'main.go') {
                     $goByDir[$dir] = $path;
                 }
             }
         }
 
         // Shallow first: the root decides more than anything below it.
-        $byDepth = static fn (array $depths): \Closure =>
-            static fn (string $a, string $b): int => [$depths[$a], $a] <=> [$depths[$b], $b];
+        $byDepth = static fn (array $depths): \Closure => static fn (string $a, string $b): int => [$depths[$a], $a] <=> [$depths[$b], $b];
         uksort($decisive, $byDepth($decisive));
         $goDepths = array_map(static fn (string $p): int => substr_count($p, '/'), $goByDir);
         $goFiles = array_combine(array_values($goByDir), array_values($goDepths));
@@ -150,14 +152,14 @@ final class DetectionFiles
         return [
             'decisive' => array_keys($decisive),
             // Go sources only say which package to build, and only beside a go.mod.
-            'refining' => isset($decisive[$prefix . 'go.mod']) ? array_keys($goFiles) : [],
+            'refining' => isset($decisive[$prefix.'go.mod']) ? array_keys($goFiles) : [],
             'links' => $links,
         ];
     }
 
     /**
-     * @param list<string> $names
-     * @param list<string> $patterns
+     * @param  list<string>  $names
+     * @param  list<string>  $patterns
      */
     private static function matches(string $name, array $names, array $patterns): bool
     {
@@ -174,7 +176,7 @@ final class DetectionFiles
     }
 
     /**
-     * @param list<string> $segments
+     * @param  list<string>  $segments
      */
     private static function manifestDepth(array $segments): bool
     {
@@ -183,7 +185,7 @@ final class DetectionFiles
     }
 
     /**
-     * @param list<string> $segments the directories above a file
+     * @param  list<string>  $segments  the directories above a file
      */
     private static function searchable(array $segments): bool
     {
@@ -192,7 +194,7 @@ final class DetectionFiles
             if (in_array($lower, self::SKIP_DIRS, true)) {
                 return false;
             }
-            if (str_starts_with($segment, '.') && !in_array($lower, self::DOT_DIRS, true)) {
+            if (str_starts_with($segment, '.') && ! in_array($lower, self::DOT_DIRS, true)) {
                 return false;
             }
         }

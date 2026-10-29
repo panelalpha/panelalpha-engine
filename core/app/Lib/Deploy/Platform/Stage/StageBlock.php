@@ -17,12 +17,12 @@ use App\Lib\Deploy\Template\Template;
 final class StageBlock
 {
     /**
-     * @param list<PlatformCommand> $commands
-     * @param array<string, string> $overrides
-     * @param array<string, string> $prepend id => command, run first
-     * @param array<string, string> $extra id => command, run last and optional
-     * @param bool $overridden the deploy request spoke for this stage, so
-     *        these commands are its commands and not the platform's
+     * @param  list<PlatformCommand>  $commands
+     * @param  array<string, string>  $overrides
+     * @param  array<string, string>  $prepend  id => command, run first
+     * @param  array<string, string>  $extra  id => command, run last and optional
+     * @param  bool  $overridden  the deploy request spoke for this stage, so
+     *                            these commands are its commands and not the platform's
      */
     public function __construct(
         private readonly string $stage,
@@ -31,8 +31,7 @@ final class StageBlock
         private readonly array $prepend = [],
         private readonly array $extra = [],
         private readonly bool $overridden = false
-    ) {
-    }
+    ) {}
 
     /**
      * An overridden stage is never empty, even with nothing in it. "The
@@ -42,7 +41,7 @@ final class StageBlock
      */
     public function isEmpty(): bool
     {
-        return !$this->overridden
+        return ! $this->overridden
             && $this->commands === []
             && $this->prepend === []
             && $this->extra === [];
@@ -63,7 +62,7 @@ final class StageBlock
     {
         $lines = [];
         if ($this->overridden) {
-            $lines[] = 'pa_step ' . $this->stage . ' ' . ShellQuote::of(
+            $lines[] = 'pa_step '.$this->stage.' '.ShellQuote::of(
                 $this->commands === []
                     ? 'replaced by the deploy request (no commands)'
                     : 'replaced by the deploy request'
@@ -90,8 +89,8 @@ final class StageBlock
         $quoted = ShellQuote::of($id);
 
         return [
-            'pa_step ' . $this->stage . ' ' . $quoted,
-            $optional ? $run . ' || pa_skip ' . $this->stage . ' ' . $quoted : $run,
+            'pa_step '.$this->stage.' '.$quoted,
+            $optional ? $run.' || pa_skip '.$this->stage.' '.$quoted : $run,
         ];
     }
 }

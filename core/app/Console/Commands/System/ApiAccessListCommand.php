@@ -17,7 +17,7 @@ class ApiAccessListCommand extends Command
 
     public function handle(): int
     {
-        $entries = (new ApiAccess())->all();
+        $entries = (new ApiAccess)->all();
         if ($entries === []) {
             $this->line('No project is allowed to use the Engine API.');
 

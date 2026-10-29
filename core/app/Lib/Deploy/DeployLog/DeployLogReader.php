@@ -18,9 +18,7 @@ final class DeployLogReader
     /** Bytes from the end of a log that last() reads: room for the finish line's lookback. */
     public const LAST_WINDOW = 262144;
 
-    public function __construct(private readonly string $path)
-    {
-    }
+    public function __construct(private readonly string $path) {}
 
     /**
      * Every line, timestamped, in order.
@@ -123,7 +121,7 @@ final class DeployLogReader
     {
         $size = $limit > 0 && is_file($this->path) ? (int) @filesize($this->path) : 0;
         $chunk = $size > 0 ? @file_get_contents($this->path, false, null, max(0, $size - $window)) : false;
-        if (!is_string($chunk) || $chunk === '') {
+        if (! is_string($chunk) || $chunk === '') {
             return [];
         }
 
@@ -136,7 +134,7 @@ final class DeployLogReader
     }
 
     /**
-     * @param list<string> $raw
+     * @param  list<string>  $raw
      * @return list<array{ts: int, stage: ?string, level: string, msg: string}>
      */
     private function parse(array $raw, ?int $maxBytes = null): array
@@ -163,7 +161,7 @@ final class DeployLogReader
             return $msg;
         }
 
-        return mb_strcut($msg, 0, $maxBytes) . ' [... ' . (strlen($msg) - $maxBytes) . ' more bytes cut]';
+        return mb_strcut($msg, 0, $maxBytes).' [... '.(strlen($msg) - $maxBytes).' more bytes cut]';
     }
 
     /**
@@ -187,7 +185,7 @@ final class DeployLogReader
      */
     private function rawLines(): array
     {
-        if (!is_file($this->path)) {
+        if (! is_file($this->path)) {
             return [];
         }
 

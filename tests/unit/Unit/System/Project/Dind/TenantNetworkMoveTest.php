@@ -9,6 +9,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\TenantNetworkMove;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -45,12 +46,15 @@ class TenantNetworkMoveTest extends TestCase
 
     public int $upExit = 0;
 
+    /** @var list<string> paths the tenant replaced with a symlink */
+    public array $links = [];
+
     protected function setUp(): void
     {
         parent::setUp();
         config(['env.USERS_DB_HOST' => null]);
         $this->files = [
-            self::RUN_FILE => "    extra_hosts:\n      - 'database-users.shared-hosting.palocal:172.25.0.3'\n",
+            self::RUN_FILE => "    extra_hosts:\n      - 'database-users.shared-hosting.palocal:" . TestNetwork::container2(3) . "'\n",
             self::ACCOUNT_FILE => self::ACCOUNT_COMPOSE,
         ];
     }
@@ -71,7 +75,7 @@ class TenantNetworkMoveTest extends TestCase
             'disconnect',
             'reload proxy',
         ], $this->events);
-        $this->assertStringContainsString('palocal:10.200.0.2', $this->files[self::RUN_FILE]);
+        $this->assertStringContainsString('palocal:' . TestNetwork::container(2), $this->files[self::RUN_FILE]);
         $this->assertSame([TenantNetwork::NAME], $this->networks);
     }
 
@@ -101,13 +105,31 @@ class TenantNetworkMoveTest extends TestCase
     {
         $this->networks = [TenantNetwork::LEGACY_NAME];
         $override = '/home/alice/project/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE;
-        $this->files[$override] = "      - 'database-users.shared-hosting.palocal:172.25.0.3'\n";
+        $this->files[$override] = "      - 'database-users.shared-hosting.palocal:" . TestNetwork::container2(3) . "'\n";
         $this->composeFiles = [self::RUN_FILE, $override];
 
         (new TenantNetworkMove($this->dind(true)))->run();
 
         $this->assertSame(EngineArtifacts::RUN_COMPOSE_MODE, $this->modes[self::RUN_FILE]);
         $this->assertSame('644', $this->modes[$override]);
+    }
+
+    /** A tenant's symlink at a compose file is never read or written through by root. */
+    public function test_a_symlinked_compose_file_stops_the_move_before_it_is_read(): void
+    {
+        $this->networks = [TenantNetwork::LEGACY_NAME];
+        $this->links = [self::RUN_FILE];
+        $before = $this->files[self::RUN_FILE];
+
+        try {
+            (new TenantNetworkMove($this->dind(true)))->run();
+            $this->fail('expected the move to stop');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('it is a symlink', $e->getMessage());
+        }
+        $this->assertNotContains('write ' . self::RUN_FILE, $this->events);
+        $this->assertSame($before, $this->files[self::RUN_FILE]);
+        $this->assertContains(TenantNetwork::LEGACY_NAME, $this->networks);
     }
 
     public function test_an_app_that_does_not_come_back_keeps_the_old_network(): void
@@ -128,7 +150,7 @@ class TenantNetworkMoveTest extends TestCase
     public function test_a_moved_account_is_left_as_it_is(): void
     {
         $this->networks = [TenantNetwork::NAME];
-        $this->files[self::RUN_FILE] = "      - 'database-users.shared-hosting.palocal:10.200.0.2'\n";
+        $this->files[self::RUN_FILE] = "      - 'database-users.shared-hosting.palocal:" . TestNetwork::container(2) . "'\n";
         $this->files[self::ACCOUNT_FILE] = TenantNetwork::composeOnTenantNetwork(self::ACCOUNT_COMPOSE);
 
         $this->assertSame(TenantNetworkMove::ALREADY, (new TenantNetworkMove($this->dind(true)))->run());
@@ -163,8 +185,8 @@ class TenantNetworkMoveTest extends TestCase
                     $out = [];
                     foreach ($this->test->networks as $name) {
                         $out[$name] = $name === TenantNetwork::NAME
-                            ? ['IPAddress' => '10.200.128.9', 'IPPrefixLen' => 16]
-                            : ['IPAddress' => '172.25.0.9', 'IPPrefixLen' => 24];
+                            ? ['IPAddress' => TestNetwork::add(TestNetwork::container(9), 128 * 256), 'IPPrefixLen' => 16]
+                            : ['IPAddress' => TestNetwork::container2(9), 'IPPrefixLen' => 24];
                     }
 
                     return (string) json_encode($out);
@@ -214,6 +236,16 @@ class TenantNetworkMoveTest extends TestCase
                         $this->test->events[] = 'write ' . $path;
                         $this->test->files[$path] = $contents;
                         $this->test->modes[$path] = $chmod;
+                    }
+
+                    public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
+                    {
+                        $this->filePutContents($path, $contents, $chown, $chmod);
+                    }
+
+                    public function isSymlink(string $path): bool
+                    {
+                        return in_array($path, $this->test->links, true);
                     }
                 };
             }

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Env;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -101,7 +102,7 @@ final class EnvExampleCopies
     private static function collect(string $projectDir, bool $includeMade): array
     {
         $projectDir = rtrim($projectDir, '/');
-        if ($projectDir === '' || !is_dir($projectDir)) {
+        if ($projectDir === '' || ! is_dir($projectDir)) {
             return [];
         }
 
@@ -121,8 +122,8 @@ final class EnvExampleCopies
     private static function localCopy(string $projectDir, bool $includeMade): array
     {
         $projectDir = rtrim($projectDir, '/');
-        $dest = $projectDir . '/' . self::LOCAL;
-        if ($projectDir === '' || !is_dir($projectDir) || (!$includeMade && is_file($dest))) {
+        $dest = $projectDir.'/'.self::LOCAL;
+        if ($projectDir === '' || ! is_dir($projectDir) || (! $includeMade && is_file($dest))) {
             return [];
         }
 
@@ -139,11 +140,11 @@ final class EnvExampleCopies
             // error handler, so a project with no next.config wrote three
             // ERROR lines into the log on every deploy -- noise that reads
             // like a failure in a file nobody was expected to have.
-            $path = $projectDir . '/' . $name;
-            if (!is_file($path)) {
+            $path = $projectDir.'/'.$name;
+            if (! is_file($path)) {
                 continue;
             }
-            $raw = file_get_contents($path);
+            $raw = AccountHomeRead::contents($path);
             if (is_string($raw) && str_contains($raw, self::LOCAL)) {
                 return true;
             }
@@ -154,16 +155,16 @@ final class EnvExampleCopies
 
     private static function localSource(string $projectDir): ?string
     {
-        $localExample = $projectDir . '/' . self::LOCAL_EXAMPLE;
+        $localExample = $projectDir.'/'.self::LOCAL_EXAMPLE;
         if (is_file($localExample)) {
             return $localExample;
         }
-        if (!self::mentionsEnvLocal($projectDir)) {
+        if (! self::mentionsEnvLocal($projectDir)) {
             return null;
         }
 
-        $example = EnvTemplates::first(static fn (string $name): bool => is_file($projectDir . '/' . $name)) ?? self::EXAMPLE;
-        foreach ([$projectDir . '/' . self::ENV, $projectDir . '/' . $example] as $source) {
+        $example = EnvTemplates::first(static fn (string $name): bool => is_file($projectDir.'/'.$name)) ?? self::EXAMPLE;
+        foreach ([$projectDir.'/'.self::ENV, $projectDir.'/'.$example] as $source) {
             if (is_file($source)) {
                 return $source;
             }
@@ -173,17 +174,17 @@ final class EnvExampleCopies
     }
 
     /**
-     * @param array<string, array{example: string, dest: string, relative: string}> $copies
+     * @param  array<string, array{example: string, dest: string, relative: string}>  $copies
      */
     private static function collectExamples(string $projectDir, string $rel, int $depth, array &$copies, bool $includeMade): void
     {
-        $dir = $rel === '' ? $projectDir : $projectDir . '/' . $rel;
-        $template = EnvTemplates::first(static fn (string $name): bool => is_file($dir . '/' . $name)) ?? self::EXAMPLE;
+        $dir = $rel === '' ? $projectDir : $projectDir.'/'.$rel;
+        $template = EnvTemplates::first(static fn (string $name): bool => is_file($dir.'/'.$name)) ?? self::EXAMPLE;
         foreach ([$template => self::ENV, self::LOCAL_EXAMPLE => self::LOCAL] as $example => $target) {
-            $source = $dir . '/' . $example;
-            $dest = $dir . '/' . $target;
-            if (is_file($source) && ($includeMade || !is_file($dest))) {
-                $copies[$dest] = self::copy($source, $dest, $rel === '' ? $target : $rel . '/' . $target);
+            $source = $dir.'/'.$example;
+            $dest = $dir.'/'.$target;
+            if (is_file($source) && ($includeMade || ! is_file($dest))) {
+                $copies[$dest] = self::copy($source, $dest, $rel === '' ? $target : $rel.'/'.$target);
             }
         }
 
@@ -204,8 +205,8 @@ final class EnvExampleCopies
             if ($entry === '.' || $entry === '..' || isset(self::SKIP_DIRS[strtolower($entry)])) {
                 continue;
             }
-            $childRel = $rel === '' ? $entry : $rel . '/' . $entry;
-            if (is_dir($projectDir . '/' . $childRel)) {
+            $childRel = $rel === '' ? $entry : $rel.'/'.$entry;
+            if (is_dir($projectDir.'/'.$childRel)) {
                 $children[] = $childRel;
             }
         }
@@ -225,8 +226,8 @@ final class EnvExampleCopies
 
         $copies = [];
         foreach (ComposeEnvFiles::declaredIn($raw) as $relative) {
-            $dest = $projectDir . '/' . $relative;
-            if (($includeMade || !is_file($dest)) && is_dir(dirname($dest))) {
+            $dest = $projectDir.'/'.$relative;
+            if (($includeMade || ! is_file($dest)) && is_dir(dirname($dest))) {
                 $copies[$dest] = self::copy(self::sourceFor($projectDir, $dest), $dest, $relative);
             }
         }
@@ -237,7 +238,7 @@ final class EnvExampleCopies
     private static function composeContents(string $projectDir): ?string
     {
         $path = ComposeFileInspector::firstIn($projectDir);
-        $raw = $path !== null && is_readable($path) ? @file_get_contents($path) : null;
+        $raw = $path !== null && is_readable($path) ? AccountHomeRead::contents($path) : null;
 
         return is_string($raw) && $raw !== '' ? $raw : null;
     }
@@ -248,10 +249,10 @@ final class EnvExampleCopies
         $candidates = [
             // The file's own template first: openstatus ships `.env.docker.example`
             // for its `env_file: .env.docker`, and the root `.env` lacks its keys.
-            ...array_map(static fn (string $suffix): string => $dest . $suffix, self::OWN_TEMPLATE_SUFFIXES),
-            dirname($dest) . '/' . self::EXAMPLE,
-            $projectDir . '/' . self::EXAMPLE,
-            $projectDir . '/' . self::ENV,
+            ...array_map(static fn (string $suffix): string => $dest.$suffix, self::OWN_TEMPLATE_SUFFIXES),
+            dirname($dest).'/'.self::EXAMPLE,
+            $projectDir.'/'.self::EXAMPLE,
+            $projectDir.'/'.self::ENV,
         ];
         foreach ($candidates as $candidate) {
             if (is_file($candidate)) {

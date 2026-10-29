@@ -9,6 +9,4 @@ use RuntimeException;
  * format does not allow. The sender is authentic and the request is still
  * useless, so it is rejected rather than ignored.
  */
-final class InvalidPayload extends RuntimeException
-{
-}
+final class InvalidPayload extends RuntimeException {}

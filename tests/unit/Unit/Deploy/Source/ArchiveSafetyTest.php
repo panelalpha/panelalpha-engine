@@ -80,6 +80,8 @@ class ArchiveSafetyTest extends TestCase
             'climbs above the root from a subdirectory' => [['a/x' => '../../etc'], ['a/', 'a/x']],
             'through another link' => [['b' => '.', 'a' => 'b/..'], ['b', 'a']],
             'a member stored below a link' => [['l' => 'sub'], ['sub/', 'l', 'l/f']],
+            'a backslash in the target' => [['l' => 'a\\b/../..'], ['l']],
+            'a backslash in the link name' => [['a\\l' => '../x'], ['a\\l']],
         ];
     }
 
@@ -101,6 +103,127 @@ class ArchiveSafetyTest extends TestCase
         ArchiveSafety::assertLinksStayInside(['docs/r' => '../README.md', 'bin/python' => 'python3'], ['README.md', 'docs/', 'docs/r', 'bin/python', 'bin/python3']);
 
         $this->addToAssertionCount(1);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function nameUnzipRenamesProvider(): array
+    {
+        return [
+            'byte 0xff' => ["\xff/l"],
+            'byte 0xff inside a component' => ["a\xffb/x"],
+            'byte 0x7f' => ["\x7f/l"],
+            'a raw control byte' => ["a\tb"],
+            'a control byte as unzip lists it' => ['^A/l'],
+            'a VMS version' => ['d/a;1'],
+            'a bare trailing semicolon' => ['x;'],
+        ];
+    }
+
+    #[DataProvider('nameUnzipRenamesProvider')]
+    public function test_a_zip_name_unzip_would_rename_is_refused(string $name): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive contains a file name unzip would rename on extraction');
+
+        ArchiveSafety::assertUnzipKeepsNames(['index.php', $name]);
+    }
+
+    public function test_a_zip_name_unzip_writes_as_listed_is_kept(): void
+    {
+        ArchiveSafety::assertUnzipKeepsNames(["za\u{17c}\u{f3}\u{142}\u{107}/", "\x80\xfe/x", 'w;1/', 'w;1/q', 'z;1a', 'a^b', '^.txt', 'sp /x ']);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** GNU tar's `escape` style, as core's C locale prints it. */
+    public function test_tar_names_are_read_back_to_the_bytes_tar_writes(): void
+    {
+        $this->assertSame(
+            ['ä/x', "nl\nx", 'b\\s', "t\tz", "del\x7f", 'sp ace', 'x€/'],
+            ArchiveSafety::unescapeTarNames(['\\303\\244/x', 'nl\\nx', 'b\\\\s', 't\\tz', 'del\\177', 'sp ace', 'x\\342\\202\\254/'])
+        );
+    }
+
+    #[DataProvider('unreadableTarNameProvider')]
+    public function test_a_tar_name_with_an_escape_tar_does_not_write_is_refused(string $name): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive contains an invalid path.');
+
+        ArchiveSafety::unescapeTarNames([$name]);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function unreadableTarNameProvider(): array
+    {
+        return [
+            'unknown letter' => ['a\\qb'],
+            'octal above a byte' => ['a\\477'],
+            'trailing backslash' => ['a\\'],
+        ];
+    }
+
+    public function test_a_tar_member_starting_with_a_non_ascii_character_is_relative(): void
+    {
+        ArchiveSafety::assertSafeNames(ArchiveSafety::unescapeTarNames(['\\303\\244/', '\\303\\244/x', '\\303\\244bout.html']), backslashSeparates: false);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_a_backslash_in_a_tar_name_is_part_of_the_name(): void
+    {
+        ArchiveSafety::assertSafeNames(['\\x', '..\\..\\x'], backslashSeparates: false);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** `x€` is one directory, not the four `x\342\202\254` would make of it. */
+    public function test_a_tar_link_climbing_out_past_a_non_ascii_directory_is_refused(): void
+    {
+        $listing = "drwxr-xr-x root/root 0 2026-10-26 12:00 x\\342\\202\\254/\n"
+            . "lrwxrwxrwx root/root 0 2026-10-26 12:00 l -> x\\342\\202\\254/../../../..\n";
+        $listed = ['x\\342\\202\\254/', 'l'];
+        $links = ArchiveSafety::tarLinks($listing, $listed);
+
+        $this->assertSame(['l' => 'x€/../../../..'], $links);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('symbolic link');
+
+        ArchiveSafety::assertLinksStayInside($links, ArchiveSafety::unescapeTarNames($listed));
+    }
+
+    public function test_a_tar_link_named_and_pointing_in_non_ascii_inside_the_archive_is_allowed(): void
+    {
+        $listing = "-rw-r--r-- root/root 1 2026-10-26 12:00 \\303\\244/index.html\n"
+            . "lrwxrwxrwx root/root 0 2026-10-26 12:00 \\303\\244/l\\303\\266 -> ../\\303\\244/index.html\n";
+        $listed = ['\\303\\244/index.html', '\\303\\244/l\\303\\266'];
+        $links = ArchiveSafety::tarLinks($listing, $listed);
+
+        ArchiveSafety::assertLinksStayInside($links, ArchiveSafety::unescapeTarNames($listed));
+
+        $this->assertSame(['ä/lö' => '../ä/index.html'], $links);
+    }
+
+    public function test_a_non_ascii_tar_link_climbing_above_the_root_is_refused(): void
+    {
+        $listing = "lrwxrwxrwx root/root 0 2026-10-26 12:00 \\303\\244/l -> ../../etc\n";
+        $listed = ['\\303\\244/', '\\303\\244/l'];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('symbolic link');
+
+        ArchiveSafety::assertLinksStayInside(ArchiveSafety::tarLinks($listing, $listed), ArchiveSafety::unescapeTarNames($listed));
+    }
+
+    /** `a\b/../..` climbs one level above the root: the kernel never splits on `\`. */
+    public function test_a_tar_link_target_holding_a_backslash_is_refused(): void
+    {
+        $listing = "lrwxrwxrwx root/root 0 2026-10-26 12:00 l -> a\\\\b/../..\n";
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('symbolic link');
+
+        ArchiveSafety::assertLinksStayInside(ArchiveSafety::tarLinks($listing, ['l']), ['l']);
     }
 
     public function test_zip_link_members_are_found_by_name(): void

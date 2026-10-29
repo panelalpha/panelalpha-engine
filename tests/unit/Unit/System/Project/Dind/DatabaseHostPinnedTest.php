@@ -8,6 +8,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\AppDatabase;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\Strategy\AccountSecrets;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -33,7 +34,7 @@ class DatabaseHostPinnedTest extends TestCase
 
         $system = $this->createStub(System::class);
         $system->method('exec')->willReturn((string) json_encode([
-            \App\Lib\Deploy\Dind\TenantNetwork::NAME => ['IPAddress' => '10.10.0.5', 'IPPrefixLen' => 16],
+            \App\Lib\Deploy\Dind\TenantNetwork::NAME => ['IPAddress' => TestNetwork::container(5), 'IPPrefixLen' => 16],
         ]));
 
         $dind = $this->createStub(Dind::class);
@@ -72,7 +73,7 @@ class DatabaseHostPinnedTest extends TestCase
             'DB_NAME' => 'alice_shop',
         ]]);
 
-        $this->assertSame(['database-users.shared-hosting.palocal:10.10.0.2'], $decision['extra_hosts']);
+        $this->assertSame(['database-users.shared-hosting.palocal:' . TestNetwork::container(2)], $decision['extra_hosts']);
     }
 
     /** Nothing names the database host: no pin is added. */
@@ -88,9 +89,9 @@ class DatabaseHostPinnedTest extends TestCase
     {
         $decision = $this->strategy()->composeDecision([
             'env' => ['DB_HOST' => AppDatabase::hostname()],
-            'extra_hosts' => [AppDatabase::hostname() . ':10.10.0.9'],
+            'extra_hosts' => [AppDatabase::hostname() . ':' . TestNetwork::container(9)],
         ]);
 
-        $this->assertSame([AppDatabase::hostname() . ':10.10.0.9'], $decision['extra_hosts']);
+        $this->assertSame([AppDatabase::hostname() . ':' . TestNetwork::container(9)], $decision['extra_hosts']);
     }
 }

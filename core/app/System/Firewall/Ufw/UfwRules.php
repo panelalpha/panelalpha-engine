@@ -22,7 +22,7 @@ final class UfwRules
     public static function parse(string $v4, string $v6 = ''): array
     {
         $rules = [];
-        foreach (preg_split('/\R/', $v4 . "\n" . $v6) ?: [] as $line) {
+        foreach (preg_split('/\R/', $v4."\n".$v6) ?: [] as $line) {
             $rule = self::parseTuple($line);
             if ($rule !== null) {
                 $rules[$rule->id()] ??= $rule;
@@ -35,7 +35,7 @@ final class UfwRules
     /**
      * ufw's rules, each one direction and one scope, as they are listed.
      *
-     * @param list<FirewallRule> $halves
+     * @param  list<FirewallRule>  $halves
      * @return list<FirewallRule>
      */
     private static function listed(array $halves): array
@@ -48,7 +48,7 @@ final class UfwRules
      * scopes, as the API and fail2ban write it; listed once, where the host
      * half is.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      * @return list<FirewallRule>
      */
     private static function pairScopes(array $rules): array
@@ -65,7 +65,7 @@ final class UfwRules
         $both = [];
         $taken = [];
         foreach ($rules as $i => $rule) {
-            if (!$rule->editable || $rule->scope !== FirewallRule::HOST || $rule->action !== FirewallRule::DENY || $rule->direction === FirewallRule::OUT) {
+            if (! $rule->editable || $rule->scope !== FirewallRule::HOST || $rule->action !== FirewallRule::DENY || $rule->direction === FirewallRule::OUT) {
                 continue;
             }
             // A deny both ways has its route half on the inbound side only.
@@ -95,7 +95,7 @@ final class UfwRules
      * alike, are the two halves of one `both` rule; listed once, where the
      * first half is.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      * @return list<FirewallRule>
      */
     private static function pairBothDirections(array $rules): array
@@ -111,7 +111,7 @@ final class UfwRules
         $partner = [];
         foreach ($rules as $i => $rule) {
             if ($rule->editable && $rule->direction === FirewallRule::IN && $rule->source !== null && $rule->destination === null
-                && isset($outbound[$key = self::halfKey($rule, $rule->source)]) && !isset($partner[$outbound[$key]])) {
+                && isset($outbound[$key = self::halfKey($rule, $rule->source)]) && ! isset($partner[$outbound[$key]])) {
                 $partner[$i] = $outbound[$key];
                 $partner[$outbound[$key]] = $i;
             }
@@ -123,8 +123,9 @@ final class UfwRules
             if (isset($done[$i])) {
                 continue;
             }
-            if (!isset($partner[$i])) {
+            if (! isset($partner[$i])) {
                 $paired[] = $rule;
+
                 continue;
             }
             $in = $rule->direction === FirewallRule::IN ? $rule : $rules[$partner[$i]];
@@ -142,7 +143,7 @@ final class UfwRules
 
     public static function parseTuple(string $line): ?FirewallRule
     {
-        if (!str_starts_with($line, '### tuple ###')) {
+        if (! str_starts_with($line, '### tuple ###')) {
             return null;
         }
         $tuple = trim(substr($line, strlen('### tuple ###')));
@@ -203,8 +204,7 @@ final class UfwRules
     private static function halves(FirewallRule $rule): array
     {
         $host = $rule->scope === FirewallRule::BOTH ? FirewallRule::HOST : $rule->scope;
-        $half = static fn (string $direction, ?string $source, ?string $destination, string $scope): FirewallRule
-            => new FirewallRule($rule->action, $direction, $rule->protocol, $rule->port, $source, $destination, $rule->comment, scope: $scope);
+        $half = static fn (string $direction, ?string $source, ?string $destination, string $scope): FirewallRule => new FirewallRule($rule->action, $direction, $rule->protocol, $rule->port, $source, $destination, $rule->comment, scope: $scope);
 
         $halves = $rule->direction === FirewallRule::BOTH
             ? [$half(FirewallRule::IN, $rule->source, null, $host), $half(FirewallRule::OUT, null, $rule->source, $host)]
@@ -221,7 +221,7 @@ final class UfwRules
      * per match: adding one that differs from a rule already there only in
      * its action or comment writes over that rule, or, inserted, is skipped.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      */
     public static function clash(FirewallRule $rule, array $rules): ?FirewallRule
     {
@@ -241,7 +241,7 @@ final class UfwRules
      * otherwise alike, are how one rule both ways or on both scopes is written;
      * ufw keeps nothing that tells them apart, so they read back as that rule.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      */
     public static function pairsWith(FirewallRule $rule, array $rules): ?FirewallRule
     {
@@ -266,7 +266,7 @@ final class UfwRules
      * The rules in $rules each of whose ufw rules is one of $rule's, action and
      * comment included: adding $rule, ufw skips those and writes the rest.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      * @return list<FirewallRule>
      */
     public static function partsOf(FirewallRule $rule, array $rules): array
@@ -275,7 +275,7 @@ final class UfwRules
 
         return array_values(array_filter($rules, static function (FirewallRule $other) use ($mine): bool {
             foreach ($other->editable ? self::halves($other) : [$other] as $half) {
-                if (!in_array($half->toArray(), $mine, true)) {
+                if (! in_array($half->toArray(), $mine, true)) {
                     return false;
                 }
             }
@@ -288,7 +288,7 @@ final class UfwRules
      * The rule in $rules that $half, one ufw rule as {@see parseTuple()} reads it,
      * is listed as, alone or as part of a rule both ways or in both scopes.
      *
-     * @param list<FirewallRule> $rules
+     * @param  list<FirewallRule>  $rules
      */
     public static function listedAs(FirewallRule $half, array $rules): ?FirewallRule
     {
@@ -312,10 +312,10 @@ final class UfwRules
      */
     private static function slots(FirewallRule $rule): array
     {
-        if (!$rule->editable) {
+        if (! $rule->editable) {
             $f = preg_split('/\s+/', (string) $rule->raw) ?: [];
 
-            return [(str_starts_with($f[0] ?? '', 'route:') ? 'route ' : '') . implode(' ', array_slice($f, 1))];
+            return [(str_starts_with($f[0] ?? '', 'route:') ? 'route ' : '').implode(' ', array_slice($f, 1))];
         }
 
         // ufw stores any address as 0.0.0.0/0 and ::/0, so it takes those for any.

@@ -6,6 +6,7 @@ use App\Exceptions\TaskCancelledException;
 use App\Jobs\Middleware\RecordCoverage;
 use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Lib\Task\TaskPruner;
+use App\Lib\Task\TaskReconciler;
 use App\Models\Task;
 use App\Models\TaskLog;
 use Illuminate\Support\Facades\Log;
@@ -69,7 +70,7 @@ trait AttachTask
     /**
      * The worker process running this task. Its queue row stays reserved for a
      * day after the worker dies, so the reconciler asks whether this process
-     * is still alive instead ({@see \App\Lib\Task\TaskReconciler::workerGone()}).
+     * is still alive instead ({@see TaskReconciler::workerGone()}).
      *
      * @return array<string, mixed>
      */
@@ -130,7 +131,7 @@ trait AttachTask
     public function throwIfCancelled(): void
     {
         if ($this->isCancelled()) {
-            throw new TaskCancelledException();
+            throw new TaskCancelledException;
         }
     }
 
@@ -169,9 +170,7 @@ trait AttachTask
      * Releases what was reserved for this job when it was queued, once its task
      * turns out cancelled before the work began. Nothing by default.
      */
-    protected function cancelledBeforeWork(): void
-    {
-    }
+    protected function cancelledBeforeWork(): void {}
 
     private function trimAttachedTaskLogs(): void
     {
@@ -183,7 +182,7 @@ trait AttachTask
             $task->refresh();
             TaskPruner::trimTask($task);
         } catch (Throwable $e) {
-            Log::warning('Task log trim failed: ' . $e->getMessage());
+            Log::warning('Task log trim failed: '.$e->getMessage());
         }
     }
 }

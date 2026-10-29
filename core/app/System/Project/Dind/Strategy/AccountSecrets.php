@@ -60,14 +60,14 @@ class AccountSecrets
     }
 
     /**
-     * @param string $purpose keeps secrets for different uses independent of
-     *        each other, so one leaking does not expose the rest
+     * @param  string  $purpose  keeps secrets for different uses independent of
+     *                           each other, so one leaking does not expose the rest
      */
     public function for(string $purpose): string
     {
         return hash_hmac(
             'sha256',
-            $purpose . ':' . $this->dind->userModel()->username,
+            $purpose.':'.$this->dind->userModel()->username,
             (string) config('app.key')
         );
     }
@@ -77,12 +77,12 @@ class AccountSecrets
      * now counted as named. The run file and .env fill a compose file's
      * `${VAR:?}` with the same value, and one value deserves one log line.
      *
-     * @param list<string> $names
+     * @param  list<string>  $names
      * @return list<string>
      */
     public function notYetAnnounced(array $names): array
     {
-        $new = array_values(array_filter($names, fn (string $name): bool => !isset($this->announced[$name])));
+        $new = array_values(array_filter($names, fn (string $name): bool => ! isset($this->announced[$name])));
         $this->announced += array_fill_keys($new, true);
 
         return $new;

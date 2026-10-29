@@ -23,7 +23,7 @@ final class AnsweringPort
      * on equal terms, and the others. Null when there is none to make: a
      * recipe names the port, or the scan had a reason for its port.
      *
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return ?array{primary: int, alternatives: list<int>}
      */
     public static function choiceIn(string $composePath, array $env, ?int $recipePort): ?array
@@ -63,8 +63,8 @@ final class AnsweringPort
      * them, whole, as compose resolves it (container ports, image, command,
      * environment). Null when compose names none of them.
      *
-     * @param array<string, mixed> $config `docker compose config --format json`
-     * @param array{primary: int, alternatives: list<int>} $choice
+     * @param  array<string, mixed>  $config  `docker compose config --format json`
+     * @param  array{primary: int, alternatives: list<int>}  $choice
      */
     public static function behind(array $config, array $choice): ?string
     {
@@ -87,8 +87,8 @@ final class AnsweringPort
      * same services behind it; null otherwise. The record is used up either
      * way: only a deploy whose port serves a page again writes it back.
      *
-     * @param ?array{primary: int, alternatives: list<int>} $choice
-     * @param ?array<string, mixed> $config
+     * @param  ?array{primary: int, alternatives: list<int>}  $choice
+     * @param  ?array<string, mixed>  $config
      */
     public static function claim(User $user, ?array $choice, ?array $config): ?int
     {
@@ -112,8 +112,8 @@ final class AnsweringPort
      * Where {@see AppLauncher::betterRoute()} sends a site guessed onto the
      * lowest port, from one probe per port.
      *
-     * @param array{primary: int, alternatives: list<int>} $choice
-     * @param list<array<string, mixed>> $results
+     * @param  array{primary: int, alternatives: list<int>}  $choice
+     * @param  list<array<string, mixed>>  $results
      * @return array{port: int, reason: string}|null
      */
     public static function better(array $choice, array $results): ?array
@@ -133,7 +133,7 @@ final class AnsweringPort
      * what served behind it, for the next rebuild. Forgotten otherwise: an
      * answer without a page proves nothing about which port is the site.
      *
-     * @param array<string, mixed> $report {@see AppHealth::report()}
+     * @param  array<string, mixed>  $report  {@see AppHealth::report()}
      */
     public static function remember(DindProject $project, array $report): void
     {
@@ -184,11 +184,11 @@ final class AnsweringPort
     /** Maps in key order, lists as they are: the same definition always hashes the same. */
     private static function canonical(mixed $value): mixed
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return $value;
         }
         $value = array_map(self::canonical(...), $value);
-        if (!array_is_list($value)) {
+        if (! array_is_list($value)) {
             ksort($value);
         }
 
@@ -196,7 +196,7 @@ final class AnsweringPort
     }
 
     /**
-     * @param array<mixed> $ports
+     * @param  array<mixed>  $ports
      * @return list<int>
      */
     private static function sorted(array $ports): array

@@ -5,6 +5,7 @@ namespace Tests\Unit\Console;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -24,7 +25,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
         parent::setUp();
         $this->bootInMemoryDatabase();
         $this->recordWebserverApply();
-        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
+        $this->makeMainDomain($this->makeUser('alice', ['template' => 'dind']), 'shop.test');
         $this->rule = ProxyRule::query()->create([
             'owner_scope' => 'user',
             'username' => 'alice',
@@ -61,7 +62,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     public function test_a_project_rule_cannot_be_pointed_elsewhere(): void
     {
         $this->makeUser('bob');
-        foreach (['bob', 'sites-db', '172.25.0.2', '10.0.0.9'] as $upstream) {
+        foreach (['bob', 'sites-db', TestNetwork::container2(2), TestNetwork::private(9)] as $upstream) {
             $this->update("--upstream-host={$upstream}")
                 ->expectsOutput("The upstream must be the project's own app, 'alice': "
                     . "a project's rule cannot reach another project, the engine's services or the host.")
@@ -71,14 +72,14 @@ class ProxyRuleUpdateCommandTest extends TestCase
         $this->assertWebserverApplied(0);
 
         $this->rule->update(['owner_scope' => 'system', 'username' => null]);
-        $this->update('--upstream-host=10.0.0.9')->assertExitCode(0);
-        $this->assertSame('10.0.0.9', $this->rule->fresh()->upstream_host);
+        $this->update('--upstream-host='.TestNetwork::private(9))->assertExitCode(0);
+        $this->assertSame(TestNetwork::private(9), $this->rule->fresh()->upstream_host);
     }
 
     /** One stored before the check can be switched off or fixed, and nothing else. */
     public function test_a_rule_stored_before_the_check_is_fixed_or_switched_off(): void
     {
-        $this->rule->update(['upstream_host' => '172.25.0.2']);
+        $this->rule->update(['upstream_host' => TestNetwork::container2(2)]);
 
         $this->update('--upstream-port=3307')->assertExitCode(1);
         $this->update('--enabled=0')->assertExitCode(0);
@@ -91,7 +92,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     /** A rule named after another project's site cannot be renamed here, so it can only be switched off. */
     public function test_a_rule_on_another_projects_site_can_only_be_switched_off(): void
     {
-        $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
+        $this->makeMainDomain($this->makeUser('bob', ['template' => 'dind']), 'bob.test');
         $this->rule->update(['server_name' => 'bob.test']);
 
         $this->update('--upstream-port=8081')
@@ -102,6 +103,72 @@ class ProxyRuleUpdateCommandTest extends TestCase
         $this->update('--enabled=1')->assertExitCode(1);
 
         $this->assertSame([8080, false], [$this->rule->fresh()->upstream_port, $this->rule->fresh()->enabled]);
+    }
+
+    /** The vhost keys one entry per name and port, so a second live HTTP rule must not be switched on. */
+    public function test_re_enabling_a_disabled_http_duplicate_is_refused(): void
+    {
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->create([
+            'owner_scope' => 'system',
+            'username' => null,
+            'transport' => 'http',
+            'listen_ip' => TestNetwork::private(5),
+            'listen_port' => 80,
+            'server_name' => 'shop.test',
+            'upstream_host' => TestNetwork::private(9),
+            'upstream_port' => 8443,
+            'enabled' => false,
+        ]);
+
+        $this->artisan("proxy:rule:update {$duplicate->id} --enabled=1 --no-interaction --force")
+            ->expectsOutput('A rule with the same transport, port, and server_name already exists')
+            ->assertExitCode(1);
+
+        $this->assertFalse($duplicate->fresh()->enabled);
+        $this->assertWebserverApplied(0);
+    }
+
+    /** stream.conf renders no server name, so a second live tcp rule on one address and port must not be switched on. */
+    public function test_re_enabling_a_disabled_stream_duplicate_is_refused(): void
+    {
+        $stream = ['owner_scope' => 'system', 'username' => null, 'transport' => 'tcp', 'listen_ip' => '*',
+            'listen_port' => 3306, 'upstream_host' => TestNetwork::private(9), 'upstream_port' => 3306];
+        ProxyRule::query()->create($stream + ['enabled' => true]);
+        /** @var ProxyRule $duplicate */
+        $duplicate = ProxyRule::query()->create($stream + ['enabled' => false]);
+
+        $this->artisan("proxy:rule:update {$duplicate->id} --enabled=1 --no-interaction --force")
+            ->expectsOutput('A rule with the same transport, port, and server_name already exists')
+            ->assertExitCode(1);
+
+        $this->assertFalse($duplicate->fresh()->enabled);
+        $this->assertWebserverApplied(0);
+    }
+
+    /** Switching on a rule clients will warn about says so, as PUT /proxy-rules/{id} does. */
+    public function test_switching_on_a_wildcard_rule_on_443_warns_about_the_default_certificate(): void
+    {
+        /** @var ProxyRule $wildcard */
+        $wildcard = ProxyRule::query()->create([
+            'owner_scope' => 'system',
+            'username' => null,
+            'transport' => 'http',
+            'listen_ip' => '*',
+            'listen_port' => 443,
+            'server_name' => '*.shop.test',
+            'upstream_host' => TestNetwork::private(9),
+            'upstream_port' => 8443,
+            'enabled' => false,
+        ]);
+
+        $this->artisan("proxy:rule:update {$wildcard->id} --enabled=1 --no-interaction --force")
+            ->expectsOutputToContain('Rule updated successfully')
+            ->expectsOutputToContain("served with the host's default self-signed certificate")
+            ->assertExitCode(0);
+        $this->artisan("proxy:rule:update {$wildcard->id} --enabled=0 --no-interaction --force")
+            ->doesntExpectOutputToContain('self-signed')
+            ->assertExitCode(0);
     }
 
     public function test_disabling_a_rule_is_applied(): void
@@ -128,7 +195,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     public function test_enabling_a_rule_on_a_port_now_in_use_is_refused(): void
     {
         $this->rule->update(['enabled' => false, 'listen_port' => 3306]);
-        $this->hostListens('LISTEN 0 80 127.0.0.1:3306 0.0.0.0:*');
+        $this->hostListens('LISTEN 0 80 '.TestNetwork::LOOPBACK.':3306 '.TestNetwork::ANY.':*');
 
         $this->update('--enabled=1')
             ->expectsOutput('Port 3306 is already in use on this host.')
@@ -142,7 +209,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     public function test_an_enabled_rule_keeps_its_own_port(): void
     {
         $this->rule->update(['listen_port' => 8081]);
-        $this->hostListens('LISTEN 0 511 0.0.0.0:8081 0.0.0.0:*');
+        $this->hostListens('LISTEN 0 511 '.TestNetwork::ANY.':8081 '.TestNetwork::ANY.':*');
 
         $this->update('--upstream-port=8082 --enabled=1')->assertExitCode(0);
 
@@ -154,7 +221,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
     public function test_values_written_into_the_proxy_config_are_validated(): void
     {
         $cases = [
-            ["--upstream-host='10.0.0.9; return 200'", 'The upstream host must be a hostname or an IP address.'],
+            ["--upstream-host='".TestNetwork::private(9)."; return 200'", 'The upstream host must be a hostname or an IP address.'],
             ["--upstream-host='h b'", 'The upstream host must be a hostname or an IP address.'],
             ['--upstream-protocol=grpc', 'The selected upstream protocol is invalid.'],
             ['--upstream-protocol=HTTPS', 'The selected upstream protocol is invalid.'],

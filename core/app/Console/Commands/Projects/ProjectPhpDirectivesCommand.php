@@ -30,7 +30,7 @@ class ProjectPhpDirectivesCommand extends Command
             return 1;
         }
 
-        Validator::make(['php_version' => $version], (new UserPhpListCustomIniSettingsRequest())->rules())->validate();
+        Validator::make(['php_version' => $version], (new UserPhpListCustomIniSettingsRequest)->rules())->validate();
 
         $user = User::findByUsernameOrFail($username);
         $settings = (new CustomIniSettings(app(System::class)))->get($user, $version);

@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -197,7 +198,7 @@ class ZeroDowntimeGateTest extends TestCase
             str_contains($line, "'ps' '--quiet' '--status' 'running'") => "old1\n",
             str_contains($line, 'docker rm -f -v') => '',
             str_contains($line, 'label=com.docker.compose.service=app') => "next1\n",
-            str_contains($line, 'docker port next1 3000/tcp') => '0.0.0.0:' . self::NEXT_PORT . "\n",
+            str_contains($line, 'docker port next1 3000/tcp') => TestNetwork::ANY . ':' . self::NEXT_PORT . "\n",
             str_contains($line, 'docker inspect') => "running 0 0\n",
             str_contains($line, 'docker logs') => "booting v2\nlistening 3000\n",
             default => '',

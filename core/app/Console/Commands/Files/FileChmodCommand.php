@@ -28,7 +28,7 @@ class FileChmodCommand extends Command
             return 1;
         }
 
-        Validator::make(['path' => $path, 'mode' => $mode], (new ChmodRequest())->rules())->validate();
+        Validator::make(['path' => $path, 'mode' => $mode], (new ChmodRequest)->rules())->validate();
         $user = User::findByUsernameOrFail($project);
         $resolved = $user->project()->resolvePath($path);
 
@@ -39,7 +39,7 @@ class FileChmodCommand extends Command
             throw ValidationException::withMessages(['path' => $e->getMessage()]);
         }
 
-        $this->info('Set mode ' . $mode . ' on ' . $path);
+        $this->info('Set mode '.$mode.' on '.$path);
 
         return 0;
     }

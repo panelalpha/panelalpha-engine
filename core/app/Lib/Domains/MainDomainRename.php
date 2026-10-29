@@ -3,6 +3,7 @@
 namespace App\Lib\Domains;
 
 use App\Exceptions\ProblemException;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
@@ -18,6 +19,9 @@ use Illuminate\Support\Facades\Log;
  */
 final class MainDomainRename
 {
+    private const PROXY_ZONE_REFUSAL = 'Names under '.DomainPlan::PANELALPHA_ONLINE.' are registered with PanelAlpha Online '
+        .'and served through its proxy, so a main domain is not renamed to one. Add the name as a tunnel instead.';
+
     /**
      * Point the project's main domain at $newFqdn. The same name in any case
      * is left alone, so its vhost is not torn down and rebuilt for nothing.
@@ -60,6 +64,7 @@ final class MainDomainRename
      */
     private static function moveDomain(User $user, Domain $domain, Domain $newDomain, string $oldFqdn, string $newFqdn): void
     {
+        $oldNameTunnels = self::oldNameTunnels($domain, $oldFqdn);
         $retargeted = $oldFqdn === '' ? 0 : ProxyRule::retargetServerName($user->username, $oldFqdn, $newFqdn);
         if ($retargeted === 0) {
             self::generateDindRouting($user, $newFqdn);
@@ -69,6 +74,7 @@ final class MainDomainRename
         self::deleteVhostIgnoringFailure($domain);
         $domain->delete();
         $newDomain->save();
+        self::releaseTunnels($oldNameTunnels);
     }
 
     private static function generateDindRouting(User $user, string $newFqdn): void
@@ -115,7 +121,7 @@ final class MainDomainRename
         }
 
         return ProxyRule::forUser($user->username)
-            ->whereIn('server_name', [$oldFqdn, 'www.' . $oldFqdn])
+            ->whereIn('server_name', [$oldFqdn, 'www.'.$oldFqdn])
             ->get()
             ->map(static fn (ProxyRule $rule): array => $rule->getAttributes())
             ->all();
@@ -125,14 +131,14 @@ final class MainDomainRename
      * Raw attributes go back raw: create() would re-encode the already-encoded metadata JSON.
      * A failure is logged, never thrown, so it does not replace the error that failed the rename.
      *
-     * @param list<array<string, mixed>> $routing
+     * @param  list<array<string, mixed>>  $routing
      */
     private static function restoreRouting(User $user, array $routing, string $oldFqdn, string $newFqdn): void
     {
         try {
             if ($oldFqdn !== '' && strcasecmp($oldFqdn, $newFqdn) !== 0) {
                 ProxyRule::forUser($user->username)
-                    ->whereIn('server_name', [$newFqdn, 'www.' . $newFqdn])
+                    ->whereIn('server_name', [$newFqdn, 'www.'.$newFqdn])
                     ->delete();
                 foreach ($routing as $attributes) {
                     unset($attributes['id']);
@@ -141,7 +147,7 @@ final class MainDomainRename
             }
         } catch (\Throwable $restore) {
             Log::error(
-                "Restoring proxy rules after a failed rename of {$oldFqdn} to {$newFqdn} failed: " . $restore->getMessage()
+                "Restoring proxy rules after a failed rename of {$oldFqdn} to {$newFqdn} failed: ".$restore->getMessage()
             );
         }
     }
@@ -153,7 +159,7 @@ final class MainDomainRename
             User::query()->whereKey($user->getKey())->update(['domain' => $previous]);
         } catch (\Throwable $writeBack) {
             Log::error(
-                "Writing the domain {$previous} back after a failed rename to {$newFqdn} failed: " . $writeBack->getMessage()
+                "Writing the domain {$previous} back after a failed rename to {$newFqdn} failed: ".$writeBack->getMessage()
             );
         }
     }
@@ -172,6 +178,98 @@ final class MainDomainRename
             publiclyResolvable: null,
             tlsTerminatedAt: 'engine',
         ))->toDetails();
+    }
+
+    /**
+     * Why the main domain cannot be renamed to $newFqdn, or null when it can.
+     *
+     * @return ?array{code: string, message: string}
+     */
+    public static function refusal(User $user, string $newFqdn): ?array
+    {
+        $domain = $user->getMainDomain();
+        $oldFqdn = self::currentName($user, $domain);
+        if (self::isSameName($oldFqdn, trim($newFqdn))) {
+            return null;
+        }
+        if (($taken = self::takenName($user, $newFqdn)) !== null) {
+            return ['code' => 'domain_taken', 'message' => "{$taken} is already on this engine."];
+        }
+        if (DomainPlan::inOnlineZone($newFqdn)) {
+            return ['code' => 'domain_proxy_zone', 'message' => self::PROXY_ZONE_REFUSAL];
+        }
+
+        return self::tunnelRefusal($domain, $oldFqdn);
+    }
+
+    /**
+     * Tunnels other than the one serving the old name forward to the domain under its current name;
+     * the rename would drop them while the provider kept them, so they are deleted first.
+     *
+     * @return ?array{code: string, message: string}
+     */
+    private static function tunnelRefusal(?Domain $domain, string $oldFqdn): ?array
+    {
+        $forwarding = array_map(static fn (Tunnel $tunnel): string => $tunnel->hostname, self::forwardingTunnels($domain, $oldFqdn));
+        if ($forwarding === []) {
+            return null;
+        }
+
+        return [
+            'code' => 'domain_has_tunnels',
+            'message' => "{$oldFqdn} has tunnels that forward to it (".implode(', ', $forwarding).'); delete them before renaming it.',
+        ];
+    }
+
+    /**
+     * The domain's PanelAlpha Online tunnel that is its old name itself.
+     *
+     * @return list<Tunnel>
+     */
+    private static function oldNameTunnels(?Domain $domain, string $oldFqdn): array
+    {
+        return array_values(array_filter(self::tunnelsOf($domain), static fn (Tunnel $tunnel): bool => self::isOldName($tunnel, $oldFqdn)));
+    }
+
+    /** @return list<Tunnel> */
+    private static function forwardingTunnels(?Domain $domain, string $oldFqdn): array
+    {
+        return array_values(array_filter(self::tunnelsOf($domain), static fn (Tunnel $tunnel): bool => ! self::isOldName($tunnel, $oldFqdn)));
+    }
+
+    /** @return list<Tunnel> */
+    private static function tunnelsOf(?Domain $domain): array
+    {
+        return $domain !== null && $domain->exists ? Tunnel::forDomain($domain) : [];
+    }
+
+    private static function isOldName(Tunnel $tunnel, string $oldFqdn): bool
+    {
+        return PanelAlphaConnect::servesItsOwnPublicName($oldFqdn, $tunnel->hostname, $tunnel->provider);
+    }
+
+    /**
+     * The old name is no longer served here, so its PanelAlpha Online site is deleted
+     * rather than left registered for a name this engine forgot.
+     *
+     * @param  list<Tunnel>  $tunnels
+     */
+    private static function releaseTunnels(array $tunnels): void
+    {
+        foreach ($tunnels as $tunnel) {
+            self::deleteSiteIgnoringFailure($tunnel);
+            $tunnel->delete();
+        }
+    }
+
+    /** The rename has gone through by now, so a proxy that cannot be reached is logged rather than undoing it. */
+    private static function deleteSiteIgnoringFailure(Tunnel $tunnel): void
+    {
+        try {
+            PanelAlphaConnect::deleteTunnelRemote($tunnel);
+        } catch (\Throwable $e) {
+            Log::warning("Could not delete the PanelAlpha Online site {$tunnel->hostname} after a rename: ".$e->getMessage());
+        }
     }
 
     /**
@@ -194,10 +292,10 @@ final class MainDomainRename
             return $newFqdn;
         }
 
-        $www = 'www.' . $newFqdn;
+        $www = 'www.'.$newFqdn;
         if (
             $domain !== null
-            && in_array('www.' . $domain->domain, $domain->getAliases())
+            && in_array('www.'.$domain->domain, $domain->getAliases())
             && self::heldElsewhere($user, $domain, $www)
         ) {
             return $www;
@@ -247,7 +345,7 @@ final class MainDomainRename
         $newDomain->domain = $newFqdn;
         $newDomain->removeAliases();
         foreach ($domain->getAliases() as $alias) {
-            self::carryAlias($domain, $newDomain, $alias, 'www.' . $newFqdn);
+            self::carryAlias($domain, $newDomain, $alias, 'www.'.$newFqdn);
         }
         $newDomain->setDetails(['aliases' => array_values(array_unique($newDomain->getAliases()))]);
 
@@ -260,8 +358,8 @@ final class MainDomainRename
      */
     private static function carryAlias(Domain $domain, Domain $newDomain, mixed $alias, string $newWww): void
     {
-        if ($alias == 'www.' . $domain->domain) {
-            if (!self::servedBy($domain, $newWww)) {
+        if ($alias == 'www.'.$domain->domain) {
+            if (! self::servedBy($domain, $newWww)) {
                 $newDomain->addAlias($newWww);
 
                 return;

@@ -16,6 +16,7 @@ class FallbackDomain extends Command
     public function handle(): int
     {
         $this->error('TODO');
+
         return 1;
     }
 }

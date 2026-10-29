@@ -20,7 +20,7 @@ final class SilentPort
      * The running containers that publish one of $hostPorts, from
      * `docker compose ps --format json` (one array, or one object per line).
      *
-     * @param list<int> $hostPorts
+     * @param  list<int>  $hostPorts
      * @return list<array{name: string, service: string, published: int, target: int}>
      */
     public static function publishers(string $psJson, array $hostPorts): array
@@ -34,10 +34,10 @@ final class SilentPort
             foreach ((array) ($row['Publishers'] ?? []) as $publisher) {
                 $published = (int) ($publisher['PublishedPort'] ?? 0);
                 $target = (int) ($publisher['TargetPort'] ?? 0);
-                if ($name === '' || $target <= 0 || !in_array($published, $hostPorts, true)) {
+                if ($name === '' || $target <= 0 || ! in_array($published, $hostPorts, true)) {
                     continue;
                 }
-                $found[$name . ':' . $target] = [
+                $found[$name.':'.$target] = [
                     'name' => $name,
                     'service' => (string) ($row['Service'] ?? $name),
                     'published' => $published,
@@ -52,41 +52,41 @@ final class SilentPort
     /**
      * One sentence for one container, from what it is listening on.
      *
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      */
     public static function diagnose(string $service, int $published, int $target, array $sockets): string
     {
         $sockets = self::relevant($sockets, $target);
         if ($sockets === []) {
             return "{$service} is running but listens on no TCP port yet: it is still starting, "
-                . 'or waiting for something it needs.';
+                .'or waiting for something it needs.';
         }
 
         $onTarget = array_values(array_filter($sockets, static fn (array $s): bool => (int) $s['port'] === $target));
         if ($onTarget !== []) {
             foreach ($onTarget as $socket) {
-                if (!ListeningSockets::isLoopback((string) $socket['addr'])) {
+                if (! ListeningSockets::isLoopback((string) $socket['addr'])) {
                     return "{$service} listens on {$target}, but did not answer HTTP there: it may expect "
-                        . 'HTTPS, or another protocol.';
+                        .'HTTPS, or another protocol.';
                 }
             }
 
             return "{$service} listens on {$target} on 127.0.0.1 only, inside its container, so connections "
-                . 'from outside it are refused. It has to listen on 0.0.0.0.';
+                .'from outside it are refused. It has to listen on 0.0.0.0.';
         }
 
         $ports = array_values(array_unique(array_map(static fn (array $s): int => (int) $s['port'], $sockets)));
         sort($ports);
         $where = $target === $published ? "{$target}" : "{$target} (published as {$published})";
 
-        return "{$service} listens on " . implode(', ', $ports) . ", not on {$where}.";
+        return "{$service} listens on ".implode(', ', $ports).", not on {$where}.";
     }
 
     /**
      * Nothing bound yet that could be the answer: the process is still
      * starting, or waiting for something it needs.
      *
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      */
     public static function listensOnNothing(array $sockets, int $target): bool
     {
@@ -97,7 +97,7 @@ final class SilentPort
      * A loopback listener on another port is the app's own internals or
      * Docker's embedded DNS (127.0.0.11, a random port), never the answer.
      *
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      * @return list<array{addr: string, port: int}>
      */
     private static function relevant(array $sockets, int $target): array
@@ -105,7 +105,7 @@ final class SilentPort
         return array_values(array_filter(
             $sockets,
             static fn (array $s): bool => (int) $s['port'] === $target
-                || !ListeningSockets::isLoopback((string) $s['addr'])
+                || ! ListeningSockets::isLoopback((string) $s['addr'])
         ));
     }
 

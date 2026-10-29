@@ -4,12 +4,13 @@ namespace Tests\Unit\Ssl;
 
 use App\Lib\Ssl\EngineCertificateRequest;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The certificate script writes for a terminal; this output goes into JSON.
  *
  * It matters because the script's own sentence is the answer: "does not
- * resolve. Point an A record at 203.0.113.7 first" is what the caller needs
+ * resolve. Point an A record at <address> first" is what the caller needs
  * to read, and wrapping it in escape codes is how a useful message becomes
  * something a panel renders as mojibake.
  */
@@ -17,12 +18,13 @@ class EngineCertificateRequestTest extends TestCase
 {
     public function test_colour_codes_are_stripped_and_the_sentence_survives(): void
     {
+        $address = TestNetwork::public(7);
         $coloured = "\e[32mCertificate domain: panel.example.com\e[39m\n"
-            . "\e[31mpanel.example.com does not resolve. Point an A record at 203.0.113.7 first\e[39m";
+            . "\e[31mpanel.example.com does not resolve. Point an A record at {$address} first\e[39m";
 
         $this->assertSame(
             "Certificate domain: panel.example.com\n"
-            . 'panel.example.com does not resolve. Point an A record at 203.0.113.7 first',
+            . "panel.example.com does not resolve. Point an A record at {$address} first",
             EngineCertificateRequest::readable($coloured)
         );
     }

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Realip rewrites REMOTE_ADDR to the client before PHP runs, so
@@ -29,7 +30,7 @@ class CoreNginxForwardedSchemeTest extends TestCase
         // The loopback, and the gateway entrypoint-core.sh writes into
         // $pa_gateway -- the same two hops the :80 server's realip trusts.
         $this->assertStringContainsString('map "$realip_remote_addr $pa_gateway" $pa_trusted_hop {', $conf);
-        $this->assertStringContainsString('"~^127\.0\.0\.1 " 1;', $conf);
+        $this->assertStringContainsString('"~^'.preg_quote(TestNetwork::LOOPBACK).' " 1;', $conf);
         $this->assertStringContainsString('"~^(\S+) \1$" 1;', $conf);
         $this->assertStringContainsString('"1:https" on;', $conf);
     }

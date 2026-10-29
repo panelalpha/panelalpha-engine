@@ -2,6 +2,9 @@
 
 namespace App\Lib\Deploy;
 
+use App\Lib\Deploy\Dind\DindHostBuilder;
+use Tests\Unit\Deploy\PruneProjectCachesScriptTest;
+
 /**
  * Everything the host caches on a project's behalf, under one directory per
  * project.
@@ -68,7 +71,7 @@ final class ProjectCache
     {
         SafeName::assert($username, 'username for project cache');
 
-        return self::ROOT . '/' . $username;
+        return self::ROOT.'/'.$username;
     }
 
     /**
@@ -81,11 +84,11 @@ final class ProjectCache
      */
     public static function subdirFor(string $username, string $name): string
     {
-        if (!in_array($name, self::NAMES, true)) {
-            throw new \InvalidArgumentException('Unknown project cache: ' . $name);
+        if (! in_array($name, self::NAMES, true)) {
+            throw new \InvalidArgumentException('Unknown project cache: '.$name);
         }
 
-        return self::dirFor($username) . '/' . $name;
+        return self::dirFor($username).'/'.$name;
     }
 
     /**
@@ -98,8 +101,8 @@ final class ProjectCache
         SafeName::assert($username, 'username for project cache');
 
         return [
-            self::LEGACY_JS_ROOT . '/' . $username,
-            self::LEGACY_COMPOSER_ROOT . '/' . $username,
+            self::LEGACY_JS_ROOT.'/'.$username,
+            self::LEGACY_COMPOSER_ROOT.'/'.$username,
         ];
     }
 
@@ -140,16 +143,16 @@ final class ProjectCache
             $subdirs[] = escapeshellarg(self::subdirFor($username, $name));
         }
 
-        return 'mkdir -p ' . $dir
-            . '; touch ' . $dir
-            . '; if [ -d ' . $legacyJs . ' ]; then '
-            . 'mv ' . $legacyJs . '/* ' . $dir . '/ 2>/dev/null; '
-            . 'rmdir ' . $legacyJs . ' 2>/dev/null; fi'
-            . '; if [ -d ' . $legacyComposer . ' ] && [ ! -d ' . $dir . '/' . self::COMPOSER . ' ]; then '
-            . 'mv ' . $legacyComposer . ' ' . $dir . '/' . self::COMPOSER . ' 2>/dev/null; fi'
-            . '; mkdir -p ' . implode(' ', $subdirs)
-            . ' && chown -R ' . escapeshellarg($identity) . ' ' . $dir
-            . ' && chmod 750 ' . $dir;
+        return 'mkdir -p '.$dir
+            .'; touch '.$dir
+            .'; if [ -d '.$legacyJs.' ]; then '
+            .'mv '.$legacyJs.'/* '.$dir.'/ 2>/dev/null; '
+            .'rmdir '.$legacyJs.' 2>/dev/null; fi'
+            .'; if [ -d '.$legacyComposer.' ] && [ ! -d '.$dir.'/'.self::COMPOSER.' ]; then '
+            .'mv '.$legacyComposer.' '.$dir.'/'.self::COMPOSER.' 2>/dev/null; fi'
+            .'; mkdir -p '.implode(' ', $subdirs)
+            .' && chown -R '.escapeshellarg($identity).' '.$dir
+            .' && chmod 750 '.$dir;
     }
 
     /**
@@ -157,7 +160,7 @@ final class ProjectCache
      *
      * A shell script rather than PHP because the core container cannot see
      * these directories at all -- /var/cache/panelalpha is not a container
-     * volume, which is why {@see \App\Lib\Deploy\Dind\DindHostBuilder::prepareCacheArgv()}
+     * volume, which is why {@see DindHostBuilder::prepareCacheArgv()}
      * enters the host namespace to create them. `scandir` and `unlink` have
      * nothing to work on from in here.
      *
@@ -166,13 +169,13 @@ final class ProjectCache
      * real program, and a real program pasted together from PHP string
      * fragments is unreadable and cannot be run on its own. This one takes
      * arguments, is executable by hand, and is tested by running it against a
-     * temporary tree ({@see \Tests\Unit\Deploy\PruneProjectCachesScriptTest}).
+     * temporary tree ({@see PruneProjectCachesScriptTest}).
      */
     public const PRUNE_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/prune-project-caches.sh';
 
     /**
-     * @param list<string> $skipUsernames accounts with a deploy in flight,
-     *        whose caches are about to be read
+     * @param  list<string>  $skipUsernames  accounts with a deploy in flight,
+     *                                       whose caches are about to be read
      * @return list<string>
      */
     public static function pruneArgv(int $maxAgeSeconds, bool $dryRun = false, array $skipUsernames = []): array
@@ -211,7 +214,7 @@ final class ProjectCache
         $rows = [];
         foreach (preg_split("/\r\n|\n|\r/", trim($output)) ?: [] as $line) {
             $parts = explode("\t", trim($line));
-            if (count($parts) !== 4 || !ctype_digit($parts[1]) || !ctype_digit($parts[2])) {
+            if (count($parts) !== 4 || ! ctype_digit($parts[1]) || ! ctype_digit($parts[2])) {
                 continue;
             }
             $rows[] = [

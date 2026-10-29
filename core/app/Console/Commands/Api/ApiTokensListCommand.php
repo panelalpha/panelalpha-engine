@@ -22,6 +22,7 @@ class ApiTokensListCommand extends Command
             ['ID', 'Name', 'Last Used', 'Created'],
             $tokens
         );
+
         return 0;
     }
 }

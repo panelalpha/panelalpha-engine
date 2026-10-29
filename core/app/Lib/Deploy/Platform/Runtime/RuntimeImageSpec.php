@@ -2,12 +2,14 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\CacheManager\PhpBaseImage;
+
 /**
  * What one runtime at one version resolves to: an image, and how to get it.
  *
  * Not the tag itself — a built image's tag fingerprints the whole recipe, and
  * the recipe lives with whoever assembles it
- * ({@see \App\Lib\Deploy\CacheManager\PhpBaseImage}). This says what to build
+ * ({@see PhpBaseImage}). This says what to build
  * from and where to put it.
  */
 final class RuntimeImageSpec
@@ -28,13 +30,12 @@ final class RuntimeImageSpec
          * Rust is why this exists: `rust:1-slim-bookworm` is the right runtime
          * and the wrong build image, because a host compile runs as the
          * account and cannot install the compiler, pkg-config and headers the
-         * slim tag omits. {@see \App\Lib\Deploy\Platform\Runtime\RustRuntime}
+         * slim tag omits. {@see RustRuntime}
          * names the default; a host that points `from` at an image of its own
          * says so here too, or the compile keeps using ours.
          */
         public readonly ?string $buildFrom = null
-    ) {
-    }
+    ) {}
 
     /** Can the engine produce this image itself, rather than pull it? */
     public function isBuilt(): bool
@@ -45,6 +46,6 @@ final class RuntimeImageSpec
     /** `php-8.3`, spelled as {@see Requirement::token()} spells it. */
     public function token(): string
     {
-        return $this->runtime . '-' . $this->version;
+        return $this->runtime.'-'.$this->version;
     }
 }

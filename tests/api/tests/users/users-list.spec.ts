@@ -1,5 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
-import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { userListSchema } from '@/schemas';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 
@@ -8,6 +8,15 @@ test.describe('user listing', () => {
     // The schema is the field contract: id/username/domain/status and their
     // types, for every row rather than the first one.
     validateParsedApiResponse(await api.listUsers(), userListSchema);
+  });
+
+  test('every project carries a normalized app summary', async ({ api, setupUser }) => {
+    const { data } = await api.listAllUsers();
+    const project = data.find((u) => u.username === setupUser.username);
+
+    expect(project, `${setupUser.username} is missing from the list`).toBeDefined();
+    expect(project!.app.status).not.toBe('suspended');
+    expect(typeof project!.app.admin_sso).toBe('boolean');
   });
 
   test('the unpaged list returns an array', async ({ api }) => {
@@ -44,7 +53,7 @@ test.describe('user listing', () => {
     expect((await api.verifyUsername(candidate)).valid).toBe(true);
   });
 
-  test('a taken username is rejected by verify-new-username', async ({
+  test('a taken username is answered as not free, not as an error', async ({
     userFactory,
     authedRequest,
   }) => {
@@ -54,6 +63,43 @@ test.describe('user listing', () => {
       data: { username: user.username },
     });
 
-    expectOneOf(response.status(), [400, 422]);
+    await expectStatus(response, 200);
+    expect(await response.json()).toEqual({
+      valid: false,
+      reason: 'taken',
+      message: 'Project name already in use.',
+    });
+  });
+
+  test('a name that breaks the naming rules is still refused with 422', async ({
+    authedRequest,
+  }) => {
+    const response = await authedRequest.post('projects/verify-new-username', {
+      data: { username: 'Shop-1' },
+    });
+
+    await expectStatus(response, 422);
+  });
+
+  test('a request without a name is refused with 422, not a server error', async ({
+    authedRequest,
+  }) => {
+    const response = await authedRequest.post('projects/verify-new-username', { data: {} });
+
+    await expectStatus(response, 422);
+  });
+
+  test('name is accepted for username, as on project create', async ({
+    userFactory,
+    authedRequest,
+  }) => {
+    const user = await userFactory.createSimpleUser();
+
+    const response = await authedRequest.post('projects/verify-new-username', {
+      data: { name: user.username },
+    });
+
+    await expectStatus(response, 200);
+    expect(await response.json()).toMatchObject({ valid: false, reason: 'taken' });
   });
 });

@@ -17,7 +17,7 @@ class PushDiffResource extends JsonResource
     {
         return [
             'tables_structure_diff' => $this->resource['tables_structure_diff'],
-            'tables_data_diff'      => $this->resource['tables_data_diff'],
+            'tables_data_diff' => $this->resource['tables_data_diff'],
         ];
     }
 }

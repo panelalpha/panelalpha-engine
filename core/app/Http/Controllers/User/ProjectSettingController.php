@@ -6,7 +6,6 @@ use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Vault\RequestVault;
-use App\Models\User;
 use App\System\Project\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,7 +81,7 @@ class ProjectSettingController extends Controller
         path: '/projects/{username}/settings/{key}',
         summary: 'Set one project setting',
         description: 'A Cloudflare API token is verified against Cloudflare before it is stored, and the '
-            . 'account it belongs to comes back in the response.',
+            .'account it belongs to comes back in the response.',
         security: [['bearerAuth' => []]],
         tags: ['Project Settings'],
         parameters: [
@@ -118,10 +117,10 @@ class ProjectSettingController extends Controller
         $settings = $this->settingsFor($username);
         $validated = $request->validate(['value' => ['required', 'string']]);
 
-        // A secret setting may be given a `vault:<id>` in place of the secret.
+        // A secret setting may be given a `vault:<key>` in place of the secret.
         try {
             $result = $settings->set($key, self::valueFor($username, $key, (string) $validated['value']));
-        } catch (\InvalidArgumentException | CloudflareException $e) {
+        } catch (\InvalidArgumentException|CloudflareException $e) {
             // An unknown key, or a token Cloudflare itself refused: the
             // caller's input either way.
             throw ValidationException::withMessages(['value' => $e->getMessage()]);
@@ -131,7 +130,7 @@ class ProjectSettingController extends Controller
     }
 
     /**
-     * The value to store: as sent, or the secret a `vault:<id>` stands for.
+     * The value to store: as sent, or the secret a `vault:<key>` stands for.
      *
      * Only a *secret* setting may take a reference: a non-secret one can be
      * read back verbatim, so resolving it from the vault would put a secret
@@ -139,7 +138,7 @@ class ProjectSettingController extends Controller
      */
     private static function valueFor(string $username, string $key, string $value): string
     {
-        if (!Settings::isSecret($key)) {
+        if (! Settings::isSecret($key)) {
             return $value;
         }
 
@@ -151,7 +150,7 @@ class ProjectSettingController extends Controller
         path: '/projects/{username}/settings/{key}',
         summary: 'Clear one project setting',
         description: 'Clearing a Cloudflare API token is refused while the project still has Cloudflare '
-            . 'tunnels, unless `force` is true, which tears them down first.',
+            .'tunnels, unless `force` is true, which tears them down first.',
         security: [['bearerAuth' => []]],
         tags: ['Project Settings'],
         parameters: [
@@ -181,7 +180,7 @@ class ProjectSettingController extends Controller
 
         try {
             $this->settingsFor($username)->unset($key, $force);
-        } catch (\InvalidArgumentException | CloudflareException $e) {
+        } catch (\InvalidArgumentException|CloudflareException $e) {
             throw ValidationException::withMessages(['key' => $e->getMessage()]);
         }
 
@@ -207,7 +206,7 @@ class ProjectSettingController extends Controller
 
         return new JsonResponse([
             'message' => "The 'protected' setting is read-only over the API. An operator changes it on the "
-                . "host: pae project:settings:set protected on --project={$username}, or unset it the same way.",
+                ."host: pae project:settings:set protected on --project={$username}, or unset it the same way.",
         ], 403);
     }
 }

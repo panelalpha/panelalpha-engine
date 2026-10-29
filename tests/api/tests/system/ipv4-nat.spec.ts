@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { CleanupSteps } from '@/helpers/cleanup-step';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { randomIpv4 } from '@/helpers/random';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * NAT mode lets the engine serve sites on a public address that the host itself
@@ -13,7 +14,7 @@ import { randomIpv4 } from '@/helpers/random';
  */
 
 /** TEST-NET-3 (RFC 5737) — routable nowhere, so it is genuinely "non-local". */
-const NON_LOCAL_IPV4 = '203.0.113.50';
+const NON_LOCAL_IPV4 = testNetwork.public(50);
 
 test.describe('IPv4 NAT maps', () => {
   test('a map is created, listed and deleted', async ({ api }) => {
@@ -54,7 +55,7 @@ test.describe('IPv4 NAT maps', () => {
    * It inspects the host's addressing, writes what it concludes into the NAT
    * map table, and rebuilds every vhost from it. On 2026-09-17 it ran here
    * against an engine that holds its public address directly, decided the box
-   * was behind NAT, wrote `172.25.0.1 -> 95.217.155.125`, rebound every vhost
+   * was behind NAT, wrote `<Docker gateway> -> <its public address>`, rebound every vhost
    * to the Docker gateway and took the public address off the air — for the
    * live sites too, not just the suite's. It then answered 500.
    *

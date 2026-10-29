@@ -11,12 +11,11 @@ final class ProjectTree
 {
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function appDirPath(): string
     {
-        return $this->project->homeDirPath() . '/project';
+        return $this->project->homeDirPath().'/project';
     }
 
     /**
@@ -25,7 +24,7 @@ final class ProjectTree
      */
     public function stagingDirPath(): string
     {
-        return $this->project->homeDirPath() . '/.project-next-' . bin2hex(random_bytes(6));
+        return $this->project->homeDirPath().'/.project-next-'.bin2hex(random_bytes(6));
     }
 
     /**

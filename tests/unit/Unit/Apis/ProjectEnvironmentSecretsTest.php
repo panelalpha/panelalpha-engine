@@ -6,6 +6,7 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\Lib\Deploy\EnvFile;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Blank secrets in a project's `.env.example`, filled in when the engine
@@ -121,7 +122,7 @@ class ProjectEnvironmentSecretsTest extends TestCase
 
     public function test_a_project_with_no_app_key_is_untouched(): void
     {
-        $contents = "DB_HOST=127.0.0.1\nDB_PORT=3306\n";
+        $contents = 'DB_HOST=' . TestNetwork::LOOPBACK . "\nDB_PORT=3306\n";
 
         $this->assertSame($contents, $this->fill($contents));
     }

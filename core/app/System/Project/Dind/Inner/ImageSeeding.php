@@ -2,16 +2,17 @@
 
 namespace App\System\Project\Dind\Inner;
 
-use App\System\Project\Dind\InnerDocker;
+use App\Lib\Deploy\CacheManager\BuiltImage;
+use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\RailpackCache;
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
+use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Dind\RegistryConfigSync;
-use App\Lib\Deploy\CacheManager\ImageTransfer;
-use App\Lib\Deploy\CacheManager\RegistryImageConfig;
-use App\Lib\Deploy\CacheManager\BuiltImage;
-use App\Lib\Deploy\CacheManager\RailpackCache;
-use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Runtime\Images;
+use App\System\Project\Dind;
+use App\System\Project\Dind\InnerDocker;
 
 /**
  * Getting images into the inner daemon before a build or `compose up` asks.
@@ -44,7 +45,7 @@ class ImageSeeding
             $this->inner->dind()->userAppDirPath()
         );
         foreach ($images as $image) {
-            if (!is_string($image) || $image === '' || !ImageTransfer::isSafeImageRef($image)) {
+            if (! is_string($image) || $image === '' || ! ImageTransfer::isSafeImageRef($image)) {
                 continue;
             }
             $this->ensureCurrent($image);
@@ -65,14 +66,14 @@ class ImageSeeding
      * the cache registry instead of from the internet. A base the project's
      * railpack config names instead goes the way any public image does.
      *
-     * @param list<string> $images
+     * @param  list<string>  $images
      */
     public function preloadRailpack(array $images): void
     {
         foreach ($images as $image) {
-            if (!RailpackCache::isRailpackImage($image)) {
+            if (! RailpackCache::isRailpackImage($image)) {
                 $this->ensure($image);
-            } elseif (!$this->hasImage($image)) {
+            } elseif (! $this->hasImage($image)) {
                 $this->runSeed($image, $this->inner->imageStore()->seedThroughHostCommand(
                     $this->inner->dind()->engineAccount(),
                     $image
@@ -103,7 +104,7 @@ class ImageSeeding
         // A private image is pulled on its own below, with the project's login.
         $login = $this->inner->dind()->registryLogin();
         $this->seedInParallel(
-            array_values(array_filter($images, static fn (string $image): bool => !$login->covers($image))),
+            array_values(array_filter($images, static fn (string $image): bool => ! $login->covers($image))),
             $concurrency
         );
 
@@ -112,10 +113,25 @@ class ImageSeeding
         // everything it holds rather than once per image.
         $present = $this->presentImages();
         foreach ($images as $image) {
-            if (!in_array($image, $present, true)) {
+            if (! in_array($image, $present, true)) {
                 $this->ensure($image);
             }
         }
+    }
+
+    /**
+     * The images the compose file at $composePath runs without building them
+     * that this account still lacks: what `compose create` or `up` would go
+     * to a registry for.
+     *
+     * @return list<string>
+     */
+    public function missingFrom(string $composePath): array
+    {
+        return array_values(array_filter(
+            $this->composeImages($composePath),
+            fn (string $image): bool => ! $this->hasImage($image)
+        ));
     }
 
     /**
@@ -125,16 +141,16 @@ class ImageSeeding
     {
         $system = $this->inner->dind()->system();
         $fs = $system->filesystem();
-        if (!$fs->fileExists($composePath)) {
+        if (! $fs->fileExists($composePath)) {
             return [];
         }
         $contents = $fs->fileGetContents($composePath);
-        if (!is_string($contents) || $contents === '') {
+        if (! is_string($contents) || $contents === '') {
             return [];
         }
 
         $images = [];
-        $profiles = $this->activeProfiles(dirname($composePath) . '/.env');
+        $profiles = $this->activeProfiles(dirname($composePath).'/.env');
         // `wordpress:${WORDPRESS_VERSION:-latest}` names an image only once
         // interpolated; read raw it was skipped and never preloaded.
         try {
@@ -171,7 +187,7 @@ class ImageSeeding
     }
 
     /**
-     * @param list<string> $images
+     * @param  list<string>  $images
      */
     private function seedInParallel(array $images, int $concurrency): void
     {
@@ -199,7 +215,7 @@ class ImageSeeding
             );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo('Parallel image seed failed, falling back: ' . $e->getMessage());
+            $host->logInfo('Parallel image seed failed, falling back: '.$e->getMessage());
         }
     }
 
@@ -256,7 +272,7 @@ class ImageSeeding
      */
     public function declaredImagePorts(string $image): array
     {
-        if ($image === '' || !ImageTransfer::isSafeImageRef($image)) {
+        if ($image === '' || ! ImageTransfer::isSafeImageRef($image)) {
             return [];
         }
 
@@ -267,7 +283,7 @@ class ImageSeeding
                 30
             );
         } catch (\Exception $e) {
-            return (new RegistryImageConfig())->exposedPorts($image);
+            return (new RegistryImageConfig)->exposedPorts($image);
         }
 
         return ImageTransfer::parseExposedPorts(is_string($output) ? $output : '');
@@ -281,7 +297,7 @@ class ImageSeeding
      */
     public function imageEnvironment(string $image): array
     {
-        if ($image === '' || !ImageTransfer::isSafeImageRef($image)) {
+        if ($image === '' || ! ImageTransfer::isSafeImageRef($image)) {
             return [];
         }
 
@@ -292,7 +308,7 @@ class ImageSeeding
                 30
             )), true);
         } catch (\Exception $e) {
-            return (new RegistryImageConfig())->environment($image);
+            return (new RegistryImageConfig)->environment($image);
         }
 
         return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
@@ -300,7 +316,7 @@ class ImageSeeding
 
     public function ensure(string $image): void
     {
-        if (!$this->hasImage($image)) {
+        if (! $this->hasImage($image)) {
             $this->fetch($image);
         }
     }
@@ -314,12 +330,12 @@ class ImageSeeding
      */
     public function ensureCurrent(string $image): void
     {
-        if (!$this->hasImage($image)) {
+        if (! $this->hasImage($image)) {
             $this->fetch($image);
 
             return;
         }
-        if (!DindImageStore::followsUpstream($image) || $this->inner->dind()->registryLogin()->covers($image)) {
+        if (! DindImageStore::followsUpstream($image) || $this->inner->dind()->registryLogin()->covers($image)) {
             return;
         }
 
@@ -332,7 +348,7 @@ class ImageSeeding
             );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logDim("Could not refresh base image {$image}, using the copy this account has: " . trim($e->getMessage()));
+            $host->logDim("Could not refresh base image {$image}, using the copy this account has: ".trim($e->getMessage()));
 
             return;
         }
@@ -350,7 +366,7 @@ class ImageSeeding
         // Ours, and never on a public registry: the cache registry, the host,
         // or a rebuild. Which images those are comes from the catalogue.
         if (BuiltImage::isOurs($image)) {
-            if (!$this->provideBuiltImage($image)) {
+            if (! $this->provideBuiltImage($image)) {
                 $this->inner->host()->logInfo(
                     "Base image {$image} is one of ours and is not on this host; continuing without it"
                 );
@@ -387,7 +403,7 @@ class ImageSeeding
             return true;
         }
 
-        if (!BuiltImage::isRebuildableFromTag($image)) {
+        if (! BuiltImage::isRebuildableFromTag($image)) {
             return false;
         }
 
@@ -415,7 +431,7 @@ class ImageSeeding
     {
         // An image the project logs in for is pulled straight into the account.
         $login = $this->inner->dind()->registryLogin();
-        $private = !$ours && $login->covers($image);
+        $private = ! $ours && $login->covers($image);
 
         return $this->runSeed($image, $this->inner->imageStore()->seedCommand(
             $this->inner->dind()->engineAccount(),
@@ -451,7 +467,7 @@ class ImageSeeding
         $present = $this->hasImage($image);
         if ($ours && $present) {
             $host->logInfo(self::usingShared($image, $line));
-        } elseif (!$ours && $line !== '') {
+        } elseif (! $ours && $line !== '') {
             $host->logInfo($line);
         }
 
@@ -483,21 +499,21 @@ class ImageSeeding
             static fn (string $line): bool => $line !== '' && $line !== $said
         ));
 
-        return $lines === [] ? $said : $said . ': ' . implode(' ', $lines);
+        return $lines === [] ? $said : $said.': '.implode(' ', $lines);
     }
 
     /**
      * Once per deploy, on the first image question.
      *
      * An account created after the mount shipped reads that file directly:
-     * {@see \App\System\Project\Dind::rewriteDaemonJsonInPlace()} keeps the
+     * {@see Dind::rewriteDaemonJsonInPlace()} keeps the
      * same inode the bind mount already serves (refusing a symlink
      * there), so HUPing the account's own dockerd from the host (never a
      * shell inside the account) is enough to pick it up, no restart needed.
      *
      * An account that predates the mount has no mount to tell apart from one
      * that is simply missing, so it only gets the plain, symlink-safe render
-     * {@see \App\System\Project\Dind::setupDaemonJson()} writes anyway -- its
+     * {@see Dind::setupDaemonJson()} writes anyway -- its
      * own init script still writes a correct daemon.json on its own next
      * boot, and it gets the mount itself the next time it is recreated.
      */
@@ -519,7 +535,7 @@ class ImageSeeding
                 return;
             }
 
-            if (!$this->accountHasDaemonJsonMount()) {
+            if (! $this->accountHasDaemonJsonMount()) {
                 // No bind mount to keep live: a plain, symlink-safe render,
                 // which is what this account gets when it is next recreated
                 // either way. Nothing to signal -- its own init script is
@@ -531,7 +547,7 @@ class ImageSeeding
 
             // Mounted: write the existing inode in place so the running
             // container's view changes too, then HUP its dockerd to read it.
-            if (!$dind->rewriteDaemonJsonInPlace()) {
+            if (! $dind->rewriteDaemonJsonInPlace()) {
                 return;
             }
             $pid = $this->dockerdHostPid();
@@ -542,7 +558,7 @@ class ImageSeeding
             $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
         } catch (\Exception $e) {
             // Not fatal: public images still come straight from their registries.
-            $this->inner->host()->logDim('Could not update this account\'s registry settings: ' . trim($e->getMessage()));
+            $this->inner->host()->logDim('Could not update this account\'s registry settings: '.trim($e->getMessage()));
         }
     }
 

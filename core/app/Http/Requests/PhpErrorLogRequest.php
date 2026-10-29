@@ -30,7 +30,7 @@ class PhpErrorLogRequest extends FormRequest
             if (is_string($value) && (LogTime::isDuration($value) || Validator::make(['since' => $value], ['since' => 'date'])->passes())) {
                 return;
             }
-            $fail('The since must be ' . LogTime::EXPECTED . '.');
+            $fail('The since must be '.LogTime::EXPECTED.'.');
         };
     }
 }

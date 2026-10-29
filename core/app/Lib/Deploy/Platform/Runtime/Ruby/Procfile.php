@@ -13,9 +13,7 @@ final class Procfile
 
     private const WEB_LINE = '/^\s*web\s*:\s*(.+)$/mi';
 
-    private function __construct(private readonly ?string $contents)
-    {
-    }
+    private function __construct(private readonly ?string $contents) {}
 
     public static function of(ProjectContext $project): self
     {

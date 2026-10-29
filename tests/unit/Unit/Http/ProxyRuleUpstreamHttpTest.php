@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -43,14 +44,14 @@ class ProxyRuleUpstreamHttpTest extends TestCase
     {
         $foreign = [
             'bob',                          // another project
-            '172.25.0.2',                   // sites-db on pash-default-network
-            '10.200.0.2',                   // sites-db on pash-tenants
+            TestNetwork::container2(2),     // sites-db on pash-default-network
+            TestNetwork::container(2),      // sites-db on pash-tenants
             'sites-db',
             'core',
             'panelalpha-cache-registry',
             'panelalpha-registry-proxy',
-            '127.0.0.1',                    // the host itself
-            '10.10.0.44',
+            TestNetwork::LOOPBACK,          // the host itself
+            TestNetwork::private(44),
             '::1',
             'db.example.com',               // a name that may resolve to any of those
             'alice.example.com',
@@ -81,7 +82,7 @@ class ProxyRuleUpstreamHttpTest extends TestCase
     /** The operator's own rules may point anywhere the host reaches. */
     public function test_a_system_rule_may_name_any_upstream(): void
     {
-        $this->postJson('/api/proxy-rules', $this->rule('172.25.0.2', ['owner_scope' => 'system', 'username' => null]))
+        $this->postJson('/api/proxy-rules', $this->rule(TestNetwork::container2(2), ['owner_scope' => 'system', 'username' => null]))
             ->assertCreated();
 
         $this->assertSame('system', ProxyRule::query()->sole()->owner_scope);
@@ -92,7 +93,7 @@ class ProxyRuleUpstreamHttpTest extends TestCase
         $this->postJson('/api/proxy-rules', $this->rule('alice'))->assertCreated();
         $id = ProxyRule::query()->sole()->id;
 
-        foreach (['bob', 'sites-db', '172.25.0.2', '127.0.0.1'] as $upstream) {
+        foreach (['bob', 'sites-db', TestNetwork::container2(2), TestNetwork::LOOPBACK] as $upstream) {
             $this->putJson("/api/proxy-rules/{$id}", ['upstream_host' => $upstream])
                 ->assertStatus(422)
                 ->assertJsonPath('errors.upstream_host.0', self::REFUSED);
@@ -106,7 +107,7 @@ class ProxyRuleUpstreamHttpTest extends TestCase
     /** One stored before the check can be switched off or fixed, and nothing else. */
     public function test_a_rule_stored_before_the_check_is_fixed_or_switched_off(): void
     {
-        $rule = ProxyRule::query()->create($this->rule('172.25.0.2', ['listen_ip' => '*', 'enabled' => true]));
+        $rule = ProxyRule::query()->create($this->rule(TestNetwork::container2(2), ['listen_ip' => '*', 'enabled' => true]));
 
         $this->putJson("/api/proxy-rules/{$rule->id}", ['upstream_port' => 3307])->assertStatus(422);
         $this->putJson("/api/proxy-rules/{$rule->id}", ['enabled' => false])->assertOk();

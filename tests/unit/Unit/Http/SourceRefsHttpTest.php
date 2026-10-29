@@ -6,13 +6,15 @@ use App\Http\Middleware\Authenticate;
 use App\Lib\Deploy\Source\GitRefs;
 use App\Lib\Deploy\Source\GitRefsUnavailableException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
  * POST /api/source/refs: the branches and tags a remote advertises, and what
- * each refusal reads as. The probe is doubled, so what is asserted is the
- * endpoint's mapping, not a forge's answer.
+ * each refusal reads as. The probe and the address check's DNS are doubled, so
+ * what is asserted is the endpoint's mapping, not a forge's answer.
  */
 class SourceRefsHttpTest extends TestCase
 {
@@ -34,6 +36,13 @@ class SourceRefsHttpTest extends TestCase
         $this->withoutMiddleware(Authenticate::class);
         $this->probe = $this->fakeProbe();
         $this->app->instance(GitRemoteProbe::class, $this->probe);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
+    }
+
+    protected function tearDown(): void
+    {
+        OutboundUrl::setResolverForTests(null);
+        parent::tearDown();
     }
 
     public function test_it_lists_the_branches_and_tags_of_a_remote(): void
@@ -99,7 +108,7 @@ class SourceRefsHttpTest extends TestCase
 
     public function test_a_loopback_host_is_refused_before_git_runs(): void
     {
-        $response = $this->postJson('/api/source/refs', ['repository' => 'http://127.0.0.1/x.git']);
+        $response = $this->postJson('/api/source/refs', ['repository' => 'http://' . TestNetwork::LOOPBACK . '/x.git']);
 
         $response->assertStatus(422);
         $response->assertJsonPath('problems.0.field', 'repository');

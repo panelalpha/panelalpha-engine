@@ -137,6 +137,23 @@ function ${AJAX_ACTION}() {
 }
 `;
 
+/**
+ * The shape of Elementor's editor save in `actions`: its `"$$type"` keys match
+ * CRS 942290, which the shipped Elementor exception skips only for Elementor's
+ * own `elementor_ajax` action with a WordPress sign-in cookie.
+ */
+export const ELEMENTOR_SAVE_ACTIONS = JSON.stringify({
+  save_builder: {
+    action: 'save_builder',
+    data: {
+      elements: [{ settings: { image: { $$type: 'image', url: '/wp-content/uploads/x.png' } } }],
+    },
+  },
+});
+
+/** A cookie with WordPress's sign-in name and no real session behind it. */
+export const MADE_UP_SIGN_IN_COOKIE = 'wordpress_logged_in_x=1';
+
 export function isBlockedStatus(status: number): boolean {
   return [403, 404, 405, 406, 429].includes(status);
 }

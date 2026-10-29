@@ -48,7 +48,7 @@ class DindBuildStorage
             }
             $availableIndex = count($parts) >= 7 ? 4 : 3;
             $availableKb = $parts[$availableIndex] ?? null;
-            if (!is_string($availableKb) || !ctype_digit($availableKb)) {
+            if (! is_string($availableKb) || ! ctype_digit($availableKb)) {
                 continue;
             }
 
@@ -60,7 +60,7 @@ class DindBuildStorage
 
     public static function parseBuildxTotalBytes(string $buildxDuOutput): ?int
     {
-        if (!preg_match('/^Total:\s+([0-9.]+)\s*([KMGTP]?B)$/mi', $buildxDuOutput, $m)) {
+        if (! preg_match('/^Total:\s+([0-9.]+)\s*([KMGTP]?B)$/mi', $buildxDuOutput, $m)) {
             return null;
         }
 
@@ -77,7 +77,7 @@ class DindBuildStorage
 
     private static function script(string $name): string
     {
-        return rtrim(Template::named('script/' . $name)->render([]), "\n");
+        return rtrim(Template::named('script/'.$name)->render([]), "\n");
     }
 
     public static function shouldReclaimBeforeBuild(
@@ -107,7 +107,7 @@ class DindBuildStorage
 
     private static function sizeToBytes(string $value, string $unit): ?int
     {
-        if (!is_numeric($value)) {
+        if (! is_numeric($value)) {
             return null;
         }
 
@@ -121,7 +121,7 @@ class DindBuildStorage
             'PB' => 1024 * 1024 * 1024 * 1024 * 1024,
         ];
         $unit = strtoupper($unit);
-        if (!isset($multipliers[$unit])) {
+        if (! isset($multipliers[$unit])) {
             return null;
         }
 

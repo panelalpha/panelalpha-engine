@@ -3,8 +3,8 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\BuildStalledException;
-use App\Exceptions\DiskLimitException;
 use App\Exceptions\DeployCancelledException;
+use App\Exceptions\DiskLimitException;
 use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\StepWatchdog;
@@ -47,21 +47,20 @@ final class ShellOperations
      * `docker stats` reads only init.scope, while BuildKit steps run in a sibling cgroup.
      */
     private const CGROUP_CPU_SCRIPT = 'u() { echo "$(cut -d" " -f1 /proc/uptime) $(sed -n "s/^usage_usec //p" /sys/fs/cgroup/cpu.stat)"; }; '
-        . 'echo "$(u)"; sleep 2; echo "$(u)"';
+        .'echo "$(u)"; sleep 2; echo "$(u)"';
 
     /** Runs inside dind: TERM, then KILL, every process carrying the tag ($1) in its env. */
     private const KILL_TAGGED_SCRIPT = 'for sig in TERM KILL; do '
-        . 'for d in /proc/[0-9]*; do '
-        . 'tr "\0" "\n" < "$d/environ" 2>/dev/null | grep -qxF "$1" && kill -s $sig "${d#/proc/}" 2>/dev/null; '
-        . 'done; [ $sig = TERM ] && sleep 3; done; true';
+        .'for d in /proc/[0-9]*; do '
+        .'tr "\0" "\n" < "$d/environ" 2>/dev/null | grep -qxF "$1" && kill -s $sig "${d#/proc/}" 2>/dev/null; '
+        .'done; [ $sig = TERM ] && sleep 3; done; true';
 
     /** A hook's shell needs these itself; a project env var of the same name is not exported to it. */
     private const HOOK_RESERVED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'IFS', 'BASH_ENV', 'ENV'];
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function logger(): ?DeployLogger
     {
@@ -83,14 +82,14 @@ final class ShellOperations
     /** A cancelled deploy makes every command throw until it has finished or its process is gone. */
     private function isWindingDownAfterCancel(DeployLogger $logger): bool
     {
-        return $logger->isCancelled() && !$logger->isFinished() && DeployLogger::isLockedFor($this->project->username());
+        return $logger->isCancelled() && ! $logger->isFinished() && DeployLogger::isLockedFor($this->project->username());
     }
 
     /**
      * Root gets DOCKER_CONFIG in the account home, not /root: unmapped root in an account sysbox
      * started cannot enter /root, and the docker CLI then finds no compose plugin.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      * @return list<string>
      */
     public function wrap(array $cmd, bool $asUser = false): array
@@ -108,7 +107,7 @@ final class ShellOperations
             $args[] = $this->project->userModel()->getChownString();
         } elseif (($cmd[0] ?? null) !== 'su') {
             $args[] = '-e';
-            $args[] = 'DOCKER_CONFIG=' . $this->dockerConfigDir();
+            $args[] = 'DOCKER_CONFIG='.$this->dockerConfigDir();
         }
         $args[] = '-T';
         $args[] = 'dind';
@@ -118,11 +117,11 @@ final class ShellOperations
 
     public function dockerConfigDir(): string
     {
-        return rtrim($this->project->homeDirPath(), '/') . '/' . self::DOCKER_CONFIG_DIR;
+        return rtrim($this->project->homeDirPath(), '/').'/'.self::DOCKER_CONFIG_DIR;
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function execQuiet(array $cmd, array $env = [], int $timeout = 600): string
     {
@@ -132,7 +131,8 @@ final class ShellOperations
     /**
      * execQuiet() that the deploy's cancel stops at once instead of when the command ends.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
+     *
      * @throws DeployCancelledException
      */
     public function execQuietUntilCancelled(array $cmd, DeployLogger $logger, int $timeout = 600): string
@@ -145,7 +145,7 @@ final class ShellOperations
             fn (Process $process) => self::stopOnCancel($process, $logger),
         );
         $logger->throwIfCancelled();
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             throw new \Exception($process->getErrorOutput() ?: $process->getOutput());
         }
 
@@ -166,7 +166,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function execAsUserQuiet(array $cmd, array $env = [], int $timeout = 600): string
     {
@@ -174,7 +174,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      * @return list<string>
      */
     private function asAccountUser(array $cmd): array
@@ -186,7 +186,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function exec(array $cmd, array $env = [], int $timeout = 600): string
     {
@@ -201,7 +201,7 @@ final class ShellOperations
         if ($logger->isCancelled()) {
             throw new DeployCancelledException('Deployment cancelled by user');
         }
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $message = $process->getErrorOutput() ?: $process->getOutput();
             if (Str::contains($message, 'Error response from daemon')) {
                 throw new DockerErrorException($message);
@@ -213,7 +213,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function execAsUser(array $cmd, array $env = [], int $timeout = 600): string
     {
@@ -224,9 +224,9 @@ final class ShellOperations
      * Run as the account user and hand each chunk of output to $onOutput as it arrives.
      * $onIdle is called after every $idleSeconds without output; throwing from it stops the run.
      *
-     * @param list<string> $cmd
-     * @param callable(string, string): void $onOutput
-     * @param ?callable(): void $onIdle
+     * @param  list<string>  $cmd
+     * @param  callable(string, string): void  $onOutput
+     * @param  ?callable(): void  $onIdle
      */
     public function followAsUser(array $cmd, int $timeout, callable $onOutput, ?callable $onIdle = null, int $idleSeconds = 2): void
     {
@@ -252,8 +252,8 @@ final class ShellOperations
      * Polls instead of Process::wait(), which returns only when output arrives while a quiet service
      * may print nothing for minutes; so it also reads the output itself and hands it to $output.
      *
-     * @param callable(string, string): void $output
-     * @param callable(): void $onIdle
+     * @param  callable(string, string): void  $output
+     * @param  callable(): void  $onIdle
      * @return \Closure(Process): void
      */
     private static function pollWithIdleCallback(callable $output, callable $onIdle, int $idleSeconds, float &$lastOutput): \Closure
@@ -292,7 +292,7 @@ final class ShellOperations
      * execAsUser() with the project's env vars exported, so a recipe hook can check them. The values
      * go through a 0600 file in the home, never argv or the deploy log.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function execAsUserWithProjectEnv(array $cmd, int $timeout = 600): string
     {
@@ -302,10 +302,10 @@ final class ShellOperations
             return $this->execAsUser($cmd, [], $timeout);
         }
 
-        $path = rtrim($this->project->homeDirPath(), '/') . '/.panelalpha-hook-env-' . bin2hex(random_bytes(8));
-        $this->project->system()->filesystem()->filePutContents(
+        $path = rtrim($this->project->homeDirPath(), '/').'/.panelalpha-hook-env-'.bin2hex(random_bytes(8));
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             $path,
-            implode("\n", $lines) . "\n",
+            implode("\n", $lines)."\n",
             $user->getChownString() ?: $this->project->username(),
             '600',
         );
@@ -323,15 +323,15 @@ final class ShellOperations
     /**
      * Shell assignments for every env var a hook's shell does not reserve for itself.
      *
-     * @param array<string, string> $envVars
+     * @param  array<string, string>  $envVars
      * @return list<string>
      */
     private static function hookEnvLines(array $envVars): array
     {
         $lines = [];
         foreach ($envVars as $key => $value) {
-            if (!in_array($key, self::HOOK_RESERVED_ENV, true)) {
-                $lines[] = $key . '=' . escapeshellarg((string) $value);
+            if (! in_array($key, self::HOOK_RESERVED_ENV, true)) {
+                $lines[] = $key.'='.escapeshellarg((string) $value);
             }
         }
 
@@ -385,7 +385,7 @@ final class ShellOperations
      */
     public static function timedShellCommand(string $command, int $timeout): string
     {
-        return 'exec timeout -k ' . self::SHELL_KILL_GRACE . ' ' . $timeout . ' bash -c ' . escapeshellarg($command);
+        return 'exec timeout -k '.self::SHELL_KILL_GRACE.' '.$timeout.' bash -c '.escapeshellarg($command);
     }
 
     /**
@@ -406,11 +406,11 @@ final class ShellOperations
             return $command;
         }
 
-        return 'cd ' . escapeshellarg($cwd) . ' && ' . $command;
+        return 'cd '.escapeshellarg($cwd).' && '.$command;
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function runProcess(array $cmd, array $env = [], int $timeout = 600): Process
     {
@@ -418,7 +418,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function runProcessAsUser(array $cmd, array $env = [], int $timeout = 600): Process
     {
@@ -429,7 +429,7 @@ final class ShellOperations
      * Run a deploy step into the log under a watchdog. A stalled, disk-limited or cancelled step is
      * also stopped inside the account by its tag, since killing the exec on the host does not reach it.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function streamProcess(array $cmd, array $env, int $timeout, DeployLogger $logger): Process
     {
@@ -465,8 +465,8 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $tagged
-     * @param ?\Closure(): ?string $diskFull
+     * @param  list<string>  $tagged
+     * @param  ?\Closure(): ?string  $diskFull
      */
     private function stepWatchdog(array $tagged, string $tag, int $idle, string $label, ?\Closure $diskFull): StepWatchdog
     {
@@ -474,7 +474,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     private function runLogged(array $cmd, array $env, int $timeout, DeployLogger $logger, ?StepWatchdog $watchdog): Process
     {
@@ -493,7 +493,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     private function failStep(DeployLogger $logger, \Throwable $e, array $cmd, string $tag): void
     {
@@ -508,7 +508,7 @@ final class ShellOperations
         try {
             $this->project->innerDocker()->reclaimStorageAfterDiskLimit();
         } catch (\Throwable $reclaim) {
-            $logger->warn('Could not reclaim the account\'s Docker storage: ' . $reclaim->getMessage());
+            $logger->warn('Could not reclaim the account\'s Docker storage: '.$reclaim->getMessage());
         }
     }
 
@@ -525,29 +525,29 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      * @return list<string>
      */
     public function tagStep(array $cmd, string $tag): array
     {
         if ($this->isDindExec($cmd)) {
-            array_splice($cmd, 6, 0, ['-e', self::STEP_ENV . '=' . $tag]);
+            array_splice($cmd, 6, 0, ['-e', self::STEP_ENV.'='.$tag]);
         } elseif (self::isHostDockerRun($cmd)) {
-            array_splice($cmd, 3, 0, ['--label', self::STEP_LABEL . '=' . $tag]);
+            array_splice($cmd, 3, 0, ['--label', self::STEP_LABEL.'='.$tag]);
         }
 
         return $cmd;
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     private function stopTaggedStep(array $cmd, string $tag): void
     {
         $system = $this->project->system();
         try {
             if ($this->isDindExec($cmd)) {
-                $system->runProcess($this->wrap(['sh', '-c', self::KILL_TAGGED_SCRIPT, 'sh', self::STEP_ENV . '=' . $tag]), [], 30);
+                $system->runProcess($this->wrap(['sh', '-c', self::KILL_TAGGED_SCRIPT, 'sh', self::STEP_ENV.'='.$tag]), [], 30);
             } elseif (self::isHostDockerRun($cmd)) {
                 $ids = self::taggedHostContainerIds($system, $tag);
                 if ($ids !== []) {
@@ -555,7 +555,7 @@ final class ShellOperations
                 }
             }
         } catch (\Throwable $e) {
-            $this->logger()?->warn('Could not stop what the step left running: ' . $e->getMessage());
+            $this->logger()?->warn('Could not stop what the step left running: '.$e->getMessage());
         }
     }
 
@@ -563,7 +563,7 @@ final class ShellOperations
      * Is a silent step still working, by its container's CPU: the DinD cgroup for a build inside the
      * account (BuildKit is not a child of the exec), `docker stats` of the tagged container for a host build.
      *
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public function stepIsBusy(array $cmd, string $tag): bool
     {
@@ -601,7 +601,7 @@ final class ShellOperations
     private static function taggedHostContainerIds(System $system, string $tag): array
     {
         $ids = preg_split('/\s+/', trim($system->exec(
-            ['sudo', 'docker', 'ps', '-q', '--filter', 'label=' . self::STEP_LABEL . '=' . $tag],
+            ['sudo', 'docker', 'ps', '-q', '--filter', 'label='.self::STEP_LABEL.'='.$tag],
             [],
             30
         ))) ?: [];
@@ -648,7 +648,7 @@ final class ShellOperations
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
      */
     public static function stepLabel(array $cmd): string
     {
@@ -660,7 +660,7 @@ final class ShellOperations
             return (string) ($cmd[$c + 1] ?? '');
         }
         if (self::isHostDockerRun($cmd)) {
-            return 'host build: ' . (string) end($cmd);
+            return 'host build: '.(string) end($cmd);
         }
 
         return implode(' ', $cmd);

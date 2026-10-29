@@ -40,7 +40,7 @@ final class LogStorage
         self::fixOwnership(dirname($path));
         if (@file_put_contents($path, $contents, $flags) === false) {
             throw new RuntimeException(
-                'Could not write deploy log file: ' . $path . self::writeFailureHint($path)
+                'Could not write deploy log file: '.$path.self::writeFailureHint($path)
             );
         }
     }
@@ -48,14 +48,14 @@ final class LogStorage
     /** Replace $path atomically, so a reader never sees a half-written file. */
     public static function replace(string $path, string $contents): void
     {
-        $temporary = $path . '.tmp.' . getmypid();
+        $temporary = $path.'.tmp.'.getmypid();
         self::write($temporary, $contents);
         if (@rename($temporary, $path)) {
             return;
         }
 
         self::fixOwnership(dirname($path));
-        if (!@rename($temporary, $path)) {
+        if (! @rename($temporary, $path)) {
             throw new RuntimeException("Could not write deploy latest pointer: {$path}");
         }
     }
@@ -67,9 +67,9 @@ final class LogStorage
         }
 
         self::fixOwnership(dirname($dir));
-        if (!@mkdir($dir, self::DIRECTORY_MODE, true) && !is_dir($dir)) {
+        if (! @mkdir($dir, self::DIRECTORY_MODE, true) && ! is_dir($dir)) {
             throw new RuntimeException(
-                'Could not create deploy log directory: ' . $dir . self::writeFailureHint($dir)
+                'Could not create deploy log directory: '.$dir.self::writeFailureHint($dir)
             );
         }
     }
@@ -77,7 +77,7 @@ final class LogStorage
     private static function makeWritable(string $dir): void
     {
         self::fixOwnership($dir);
-        if (!is_writable($dir)) {
+        if (! is_writable($dir)) {
             throw new RuntimeException("Deploy log directory is not writable: {$dir}");
         }
     }
@@ -106,7 +106,7 @@ final class LogStorage
         }
 
         try {
-            (new System())->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
+            (new System)->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
         } catch (\Throwable $e) {
             Log::warning('DeployLogger: could not fix ownership', [
                 'path' => $path,

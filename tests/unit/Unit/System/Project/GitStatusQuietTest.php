@@ -88,6 +88,11 @@ final class QuietRecordingWorkTree extends WorkTree
             public function __construct()
             {
             }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return '';
+            }
         };
     }
 
@@ -108,6 +113,11 @@ final class QuietRecordingWorkTree extends WorkTree
         $this->quiet[] = $cmd;
 
         return $this->answer();
+    }
+
+    protected function runsOnHost(): bool
+    {
+        return false;
     }
 
     private function answer(): string

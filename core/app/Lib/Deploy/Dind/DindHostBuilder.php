@@ -2,16 +2,16 @@
 
 namespace App\Lib\Deploy\Dind;
 
-use App\Lib\Deploy\Compose\ServiceLimits;
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\PhpBaseImage;
+use App\Lib\Deploy\Compose\ServiceLimits;
 use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\HostBuilder;
-use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
-use App\Lib\Deploy\ProjectCache;
+use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
+use App\Lib\Deploy\ProjectCache;
 
 /**
  * Throwaway build containers on the **host** Docker daemon, working on the
@@ -123,7 +123,7 @@ final class DindHostBuilder implements HostBuilder
             return self::DEFAULT_MEMORY_LIMIT;
         }
 
-        return $configured . 'm';
+        return $configured.'m';
     }
 
     private function memoryLimit(): string
@@ -132,7 +132,7 @@ final class DindHostBuilder implements HostBuilder
     }
 
     /**
-     * @param array<string, string|int> $env
+     * @param  array<string, string|int>  $env
      * @return list<string>
      */
     public function nodeBuildArgv(
@@ -155,12 +155,12 @@ final class DindHostBuilder implements HostBuilder
 
         return [
             ...$this->sandboxPrefix($account->identity),
-            '-v', $projectDir . ':/app',
-            '-v', $cache . ':/var/cache/pa-js',
+            '-v', $projectDir.':/app',
+            '-v', $cache.':/var/cache/pa-js',
             '-w', $workdir,
             ...$this->systemTrustStore(),
             ...$this->flatEnv($this->toolchainEnv()),
-            ...($isolateNodeModules ? ['-v', $cache . '/node_modules:' . $workdir . '/node_modules'] : []),
+            ...($isolateNodeModules ? ['-v', $cache.'/node_modules:'.$workdir.'/node_modules'] : []),
             ...$this->callerEnv($env),
             $image,
             'sh',
@@ -182,10 +182,10 @@ final class DindHostBuilder implements HostBuilder
         bool $isNode = true,
         string $workdir = '/app'
     ): string {
-        if (!HostNodeBuild::isSafeProjectDir($projectDir)) {
+        if (! HostNodeBuild::isSafeProjectDir($projectDir)) {
             throw new \InvalidArgumentException('Refusing host Node build outside ~/project');
         }
-        if (!ImageTransfer::isSafeImageRef($image)) {
+        if (! ImageTransfer::isSafeImageRef($image)) {
             throw new \InvalidArgumentException('Unsafe Node image ref');
         }
 
@@ -216,7 +216,7 @@ final class DindHostBuilder implements HostBuilder
             // ({@see ServiceHardener::withNodeHeapCap()}), so one rule covers
             // building and serving. A recipe's own NODE_OPTIONS still wins:
             // caller environment is appended after this one.
-            'NODE_OPTIONS' => '--max-old-space-size=' . ServiceLimits::nodeHeapMbFor($this->memoryLimit()),
+            'NODE_OPTIONS' => '--max-old-space-size='.ServiceLimits::nodeHeapMbFor($this->memoryLimit()),
             'COREPACK_HOME' => '/tmp/corepack',
             'npm_config_cache' => '/var/cache/pa-js/npm',
             'npm_config_audit' => 'false',
@@ -251,7 +251,7 @@ final class DindHostBuilder implements HostBuilder
             //
             // Prepended to the command line, so a project's own `.mvn/jvm.config`
             // or Gradle `org.gradle.jvmargs` still wins.
-            'JAVA_TOOL_OPTIONS' => '-Xmx' . ServiceLimits::javaHeapMbFor($this->memoryLimit()) . 'm',
+            'JAVA_TOOL_OPTIONS' => '-Xmx'.ServiceLimits::javaHeapMbFor($this->memoryLimit()).'m',
             'ASTRO_TELEMETRY_DISABLED' => '1',
             'NEXT_TELEMETRY_DISABLED' => '1',
             'NUXT_TELEMETRY_DISABLED' => '1',
@@ -283,8 +283,8 @@ final class DindHostBuilder implements HostBuilder
         }
 
         return [
-            '-v', $this->caBundle . ':' . self::CONTAINER_CA_BUNDLE . ':ro',
-            '-e', 'SSL_CERT_FILE=' . self::CONTAINER_CA_BUNDLE,
+            '-v', $this->caBundle.':'.self::CONTAINER_CA_BUNDLE.':ro',
+            '-e', 'SSL_CERT_FILE='.self::CONTAINER_CA_BUNDLE,
         ];
     }
 
@@ -322,14 +322,14 @@ final class DindHostBuilder implements HostBuilder
     {
         $argv = [];
         foreach ($env as $key => $value) {
-            if (!is_string($key) || preg_match('/^[A-Z_][A-Z0-9_]*$/', $key) !== 1) {
+            if (! is_string($key) || preg_match('/^[A-Z_][A-Z0-9_]*$/', $key) !== 1) {
                 continue;
             }
-            if (!is_string($value) && !is_int($value)) {
+            if (! is_string($value) && ! is_int($value)) {
                 continue;
             }
             $argv[] = '-e';
-            $argv[] = $key . '=' . $value;
+            $argv[] = $key.'='.$value;
         }
 
         return $argv;
@@ -349,11 +349,11 @@ final class DindHostBuilder implements HostBuilder
      * `--entrypoint sh` because a build step should not depend on the image's
      * shim indirection to be correct.
      *
-     * @param string $image the shared PHP base this account was assigned
-     * @param string $script the build steps, already ordered
-     *        ({@see PhpHostBuild::script()})
-     * @param string $appRoot application subtree inside the repository, '' when
-     *        they are the same
+     * @param  string  $image  the shared PHP base this account was assigned
+     * @param  string  $script  the build steps, already ordered
+     *                          ({@see PhpHostBuild::script()})
+     * @param  string  $appRoot  application subtree inside the repository, '' when
+     *                           they are the same
      * @return list<string>
      */
     public function phpBuildArgv(
@@ -365,10 +365,10 @@ final class DindHostBuilder implements HostBuilder
         ?string $manifest = null
     ): array {
         $projectDir = $account->projectDir();
-        if (!HostNodeBuild::isSafeProjectDir($projectDir)) {
+        if (! HostNodeBuild::isSafeProjectDir($projectDir)) {
             throw new \InvalidArgumentException('Refusing host PHP build outside ~/project');
         }
-        if (!ImageTransfer::isSafeImageRef($image)) {
+        if (! ImageTransfer::isSafeImageRef($image)) {
             throw new \InvalidArgumentException('Unsafe PHP image ref');
         }
         if (trim($script) === '') {
@@ -381,7 +381,7 @@ final class DindHostBuilder implements HostBuilder
         // would create it as root and composer, running as the account, would
         // stop on a permission error it cannot explain.
         $cache = $withCache
-            ? ['-v', PhpHostBuild::cacheDirFor($account->username) . ':' . PhpBaseImage::COMPOSER_CACHE_DIR]
+            ? ['-v', PhpHostBuild::cacheDirFor($account->username).':'.PhpBaseImage::COMPOSER_CACHE_DIR]
             : [];
 
         return [
@@ -389,7 +389,7 @@ final class DindHostBuilder implements HostBuilder
             '--entrypoint',
             'sh',
             '-v',
-            $projectDir . ':/app',
+            $projectDir.':/app',
             ...$cache,
             '-w',
             PhpHostBuild::workingDir($appRoot),
@@ -397,7 +397,7 @@ final class DindHostBuilder implements HostBuilder
             // The build step shares the mount, so it can resolve from the same
             // runtime manifest the other composer passes use. Null leaves it on
             // composer.json.
-            ...($manifest !== null ? ['-e', PhpHostBuild::MANIFEST_ENV . '=' . $manifest] : []),
+            ...($manifest !== null ? ['-e', PhpHostBuild::MANIFEST_ENV.'='.$manifest] : []),
             $image,
             '-e',
             '-c',
@@ -431,7 +431,7 @@ final class DindHostBuilder implements HostBuilder
         string $appRoot = ''
     ): array {
         $projectDir = $account->projectDir();
-        if (!HostNodeBuild::isSafeProjectDir($projectDir)) {
+        if (! HostNodeBuild::isSafeProjectDir($projectDir)) {
             throw new \InvalidArgumentException('Refusing host Composer install outside ~/project');
         }
 
@@ -440,7 +440,7 @@ final class DindHostBuilder implements HostBuilder
             '--entrypoint',
             'sh',
             '-v',
-            $projectDir . ':/app',
+            $projectDir.':/app',
             '-w',
             PhpHostBuild::workingDir($appRoot),
             ...$this->flatEnv([
@@ -463,12 +463,12 @@ final class DindHostBuilder implements HostBuilder
     private static function reportingOom(string $script): string
     {
         return 'trap \'rc=$?; if [ "$rc" -ne 0 ] && grep -qs "^oom_kill [1-9]" /sys/fs/cgroup/memory.events; '
-            . 'then echo "' . self::OOM_REPORT . '" >&2; fi; exit "$rc"\' EXIT; ' . $script;
+            .'then echo "'.self::OOM_REPORT.'" >&2; fi; exit "$rc"\' EXIT; '.$script;
     }
 
     /**
- * What each command *is* comes from {@see HostNodeBuild}, which is
- * engine-neutral; this class only puts it in a container. Builds argv only.
+     * What each command *is* comes from {@see HostNodeBuild}, which is
+     * engine-neutral; this class only puts it in a container. Builds argv only.
      *
      * Extensions stay ignored *here* only: the Composer image does not carry
      * the app's set, whereas the host build runs in the shared base and can
@@ -479,10 +479,10 @@ final class DindHostBuilder implements HostBuilder
         $install = 'composer install --no-dev --no-interaction --no-scripts --no-plugins';
         $pin = PhpHostBuild::platformPin($phpVersion);
         if ($pin === '') {
-            return $install . ' --ignore-platform-reqs';
+            return $install.' --ignore-platform-reqs';
         }
 
-        return $pin . ' && ' . $install . " --ignore-platform-req='ext-*'";
+        return $pin.' && '.$install." --ignore-platform-req='ext-*'";
     }
 
     /**
@@ -557,7 +557,7 @@ final class DindHostBuilder implements HostBuilder
     }
 
     /**
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return list<string>
      */
     private function flatEnv(array $env): array
@@ -565,7 +565,7 @@ final class DindHostBuilder implements HostBuilder
         $argv = [];
         foreach ($env as $key => $value) {
             $argv[] = '-e';
-            $argv[] = $key . '=' . $value;
+            $argv[] = $key.'='.$value;
         }
 
         return $argv;

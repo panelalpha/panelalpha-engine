@@ -165,6 +165,29 @@ class FileManagerAsksAsTheAccountTest extends TestCase
         $this->assertSame(['confine', 'confine', 'test'], $this->ran());
     }
 
+    /** What an archive deploy reads: where a file lands, links followed, asked as the account. */
+    public function test_resolved_file_follows_links_as_the_account(): void
+    {
+        mkdir($this->homeDir . '/.panelalpha/archives', 0700, true);
+        file_put_contents($this->homeDir . '/.panelalpha/archives/site.zip', 'PK');
+        symlink($this->homeDir . '/.panelalpha/archives/site.zip', $this->homeDir . '/link.zip');
+        symlink($this->homeDir . '/gone.zip', $this->homeDir . '/dangling.zip');
+        $files = $this->files();
+        $archive = $this->homeDir . '/.panelalpha/archives/site.zip';
+
+        $this->assertSame($archive, $files->resolvedFile($archive));
+        $this->assertSame($archive, $files->resolvedFile($this->homeDir . '/link.zip'));
+        $this->assertNull($files->resolvedFile($this->homeDir . '/.panelalpha/archives'));
+        $this->assertNull($files->resolvedFile($this->homeDir . '/dangling.zip'));
+        $this->assertNull($files->resolvedFile($this->homeDir . '/nothing.zip'));
+        foreach ($this->commands as $argv) {
+            $this->assertSame(
+                ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT],
+                array_slice($argv, 0, 10)
+            );
+        }
+    }
+
     public function test_stat_and_exists_inside_the_home_are_unchanged(): void
     {
         $this->requireGnuFind();

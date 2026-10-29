@@ -19,6 +19,7 @@ use App\System\Services\Webserver\ProxyRulePorts;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -41,11 +42,11 @@ class ProxyRulePortsTest extends TestCase
     public function test_a_udp_rule_on_one_address_allows_udp_to_that_address(): void
     {
         $firewall = $this->firewall();
-        (new ProxyRulePorts($firewall))->sync([$this->rule(8, 'udp', '10.0.0.5', 5353)]);
+        (new ProxyRulePorts($firewall))->sync([$this->rule(8, 'udp', TestNetwork::private(5), 5353)]);
 
         $allow = array_values($firewall->rules)[0];
         $this->assertSame('udp', $allow->protocol);
-        $this->assertSame('10.0.0.5', $allow->destination);
+        $this->assertSame(TestNetwork::private(5), $allow->destination);
         $this->assertSame('5353', $allow->port);
     }
 
@@ -104,7 +105,7 @@ class ProxyRulePortsTest extends TestCase
 
     public function test_http_rules_on_80_and_443_open_nothing(): void
     {
-        $this->assertSame([], ProxyRulePorts::allows([$this->rule(9, 'http', '*', 80), $this->rule(10, 'http', '10.0.0.5', 443)]));
+        $this->assertSame([], ProxyRulePorts::allows([$this->rule(9, 'http', '*', 80), $this->rule(10, 'http', TestNetwork::private(5), 443)]));
     }
 
     public function test_http_rules_sharing_a_port_share_one_allow(): void
@@ -129,7 +130,8 @@ class ProxyRulePortsTest extends TestCase
     {
         // ufw would turn the deny into the engine's allow; ufw's provider refuses instead.
         $closed = 'comment=' . bin2hex('closed');
-        $denied = "### tuple ### deny tcp 25212 0.0.0.0/0 any 0.0.0.0/0 in {$closed}\n### tuple ### route:deny tcp 25212 0.0.0.0/0 any 0.0.0.0/0 in {$closed}\n";
+        $any = TestNetwork::ANY_CIDR;
+        $denied = "### tuple ### deny tcp 25212 {$any} any {$any} in {$closed}\n### tuple ### route:deny tcp 25212 {$any} any {$any} in {$closed}\n";
         $deny = FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '25212']);
         $host = $this->ufwHost($denied);
         $rules = [$this->rule(7, 'tcp', '*', 25212), $this->rule(8, 'tcp', '*', 25300)];
@@ -160,7 +162,8 @@ class ProxyRulePortsTest extends TestCase
     public function test_rules_removed_in_one_rebuild_close_the_ports_opened_beside_a_refused_one(): void
     {
         $closed = 'comment=' . bin2hex('closed');
-        $denied = "### tuple ### deny tcp 25212 0.0.0.0/0 any 0.0.0.0/0 in {$closed}\n### tuple ### route:deny tcp 25212 0.0.0.0/0 any 0.0.0.0/0 in {$closed}\n";
+        $any = TestNetwork::ANY_CIDR;
+        $denied = "### tuple ### deny tcp 25212 {$any} any {$any} in {$closed}\n### tuple ### route:deny tcp 25212 {$any} any {$any} in {$closed}\n";
         $host = $this->ufwHost($denied);
         $lock = (string) tempnam(sys_get_temp_dir(), 'ufw-lock');
         Log::spy();
@@ -224,7 +227,7 @@ class ProxyRulePortsTest extends TestCase
 
                     return FakeProcess::ok('Rule deleted');
                 }
-                $this->tuples .= sprintf("### tuple ### allow %s %s 0.0.0.0/0 any 0.0.0.0/0 in comment=%s\n", $after('proto'), $after('port'), bin2hex($after('comment')));
+                $this->tuples .= sprintf("### tuple ### allow %s %s %s any %s in comment=%s\n", $after('proto'), $after('port'), TestNetwork::ANY_CIDR, TestNetwork::ANY_CIDR, bin2hex($after('comment')));
 
                 return FakeProcess::ok('Rule added');
             }

@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -441,7 +442,7 @@ class CopyAnsweringPortTest extends TestCase
             return "next1\n";
         }
         if (preg_match('/docker port next1 (\d+)\/tcp/', $line, $m) === 1) {
-            return '0.0.0.0:' . self::COPY_PORTS[(int) $m[1]] . "\n";
+            return TestNetwork::ANY . ':' . self::COPY_PORTS[(int) $m[1]] . "\n";
         }
         if (str_contains($line, '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')) {
             $copyProbes = count(array_filter($this->probed, static fn (int $p): bool => $p >= 32768));

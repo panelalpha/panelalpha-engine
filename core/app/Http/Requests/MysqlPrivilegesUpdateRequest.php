@@ -25,36 +25,36 @@ class MysqlPrivilegesUpdateRequest extends FormRequest
     public function rules()
     {
         $availablePrivileges = [
-            "ALL PRIVILEGES",
-            "ALTER",
-            "ALTER ROUTINE",
-            "CREATE",
-            "CREATE ROUTINE",
-            "CREATE TEMPORARY TABLES",
-            "CREATE VIEW",
-            "DELETE",
-            "DROP",
-            "EVENT",
-            "EXECUTE",
-            "INDEX",
-            "INSERT",
-            "LOCK TABLES",
-            "REFERENCES",
-            "SELECT",
-            "SHOW VIEW",
-            "TRIGGER",
-            "UPDATE",
+            'ALL PRIVILEGES',
+            'ALTER',
+            'ALTER ROUTINE',
+            'CREATE',
+            'CREATE ROUTINE',
+            'CREATE TEMPORARY TABLES',
+            'CREATE VIEW',
+            'DELETE',
+            'DROP',
+            'EVENT',
+            'EXECUTE',
+            'INDEX',
+            'INSERT',
+            'LOCK TABLES',
+            'REFERENCES',
+            'SELECT',
+            'SHOW VIEW',
+            'TRIGGER',
+            'UPDATE',
         ];
 
         /** @var mixed */
         $privileges = $this->input('privileges');
-        if (!is_string($privileges)) {
+        if (! is_string($privileges)) {
             throw ValidationException::withMessages([
                 'privileges' => 'Invalid value.',
             ]);
         }
         foreach (explode(',', $privileges) as $priv) {
-            if (!in_array($priv, $availablePrivileges)) {
+            if (! in_array($priv, $availablePrivileges)) {
                 throw ValidationException::withMessages([
                     'privileges' => 'Invalid value.',
                 ]);
@@ -62,7 +62,7 @@ class MysqlPrivilegesUpdateRequest extends FormRequest
         }
 
         return [
-            'privileges' => 'string|required'
+            'privileges' => 'string|required',
         ];
     }
 }

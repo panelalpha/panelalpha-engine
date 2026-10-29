@@ -2,6 +2,7 @@
 
 namespace App\Rules;
 
+use App\Http\Requests\Concerns\ReportsProblems;
 use Illuminate\Contracts\Validation\ValidationRule;
 
 /**
@@ -9,7 +10,7 @@ use Illuminate\Contracts\Validation\ValidationRule;
  *
  * validate() is handed $fail(string) and nothing else, so a rule that worked
  * out the value the caller meant has nowhere to put it. It keeps it here, and
- * {@see \App\Http\Requests\Concerns\ReportsProblems} reads it back.
+ * {@see ReportsProblems} reads it back.
  *
  * Instances are stateful: construct one per field.
  */

@@ -4,13 +4,14 @@ namespace App\System\Project\Deployment;
 
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
+use App\Http\Controllers\UserController;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Domains\PublicUrl;
-use App\System\Project\Dind as DindRuntime;
 use App\System\Project\Dind\AppLauncher;
+use App\System\Project\Dind as DindRuntime;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use Illuminate\Support\Facades\Log;
 
@@ -25,8 +26,7 @@ final class DeploymentWorkflow
         private ?DeployMechanics $mechanics = null,
         private ?FailureDisposition $disposition = null,
         private bool $explainNoiseOnlyOutput = true,
-    ) {
-    }
+    ) {}
 
     /**
      * A workflow over mechanics that are not the DinD default.
@@ -46,7 +46,16 @@ final class DeploymentWorkflow
     /** DinD keeps a failed project; the template path rolls it back. */
     private function disposition(): FailureDisposition
     {
-        return $this->disposition ??= new RetainProject();
+        return $this->disposition ??= new RetainProject;
+    }
+
+    /**
+     * A project whose account a failed prepare removed again has nothing left to keep:
+     * it is rolled back as on the template path, so no project is left without an account.
+     */
+    private function dispositionFor(DeployMechanics $mechanics): FailureDisposition
+    {
+        return $mechanics->removedTheAccount() ? new RollBackProject : $this->disposition();
     }
 
     public function run(?DeployLogger $deployLogger = null, ?callable $beforeRetention = null): void
@@ -61,6 +70,7 @@ final class DeploymentWorkflow
 
             if ($mechanics->isDindWithoutGit()) {
                 $mechanics->publishDomain($domain);
+                $deployLogger?->throwIfCancelled();
                 $deployLogger?->info(DeployLogger::WAITING_FOR_FILES);
 
                 return;
@@ -74,7 +84,7 @@ final class DeploymentWorkflow
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
-            $this->disposition()->afterCancelled($user, $e->getMessage());
+            $this->dispositionFor($mechanics)->afterCancelled($user, $e->getMessage());
             throw ProblemException::deploy('deploy_cancelled', $e->getMessage(), $stage);
         } catch (\Exception $e) {
             $deployLogger?->recordFailureOutput($e->getMessage());
@@ -82,12 +92,12 @@ final class DeploymentWorkflow
             $message = $match['message'] ?? $e->getMessage();
             $hint = $mechanics->customEnvFailureHint();
             if ($hint !== null) {
-                $message .= ' | ' . $hint;
+                $message .= ' | '.$hint;
             }
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-            $this->disposition()->afterFailure($user, $message);
+            $this->dispositionFor($mechanics)->afterFailure($user, $message);
             throw ProblemException::deploy($match['rule'] ?? 'deploy_failed', $message, $stage);
         }
 
@@ -165,10 +175,10 @@ final class DeploymentWorkflow
     /**
      * Redeploy from files already in ~/project (git pull/revert/change-branch on deploy-managed accounts).
      *
-     * @param string  $source what the deploy log says started this: `git` for a manual porcelain call,
-     *                        `push` for a Deploy Hook delivery
-     * @param ?string $commit the commit the checkout is at, named in the log when the caller knows it
-     * @param ?string $branch the branch the checkout is on, named in the log when the caller knows it
+     * @param  string  $source  what the deploy log says started this: `git` for a manual porcelain call,
+     *                          `push` for a Deploy Hook delivery
+     * @param  ?string  $commit  the commit the checkout is at, named in the log when the caller knows it
+     * @param  ?string  $branch  the branch the checkout is on, named in the log when the caller knows it
      */
     public function rebuildFromCheckout(?DeployLogger $deployLogger = null, string $source = 'git', ?string $commit = null, ?string $branch = null): void
     {
@@ -184,7 +194,7 @@ final class DeploymentWorkflow
         try {
             $mechanics->recordRunningVersion();
             $reuseRunning = $user->getTemplate() === 'dind' && $mechanics->isApplicationEnvironmentRunning();
-            if (!$reuseRunning) {
+            if (! $reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
                 $deployLogger->dim('Recreating home and project directories');
             }
@@ -196,7 +206,7 @@ final class DeploymentWorkflow
             $result = $mechanics->startApplication();
             $deployLogger->throwIfCancelled();
             if ($result['exit_code'] !== 0) {
-                if (!empty($result[AppLauncher::RELEASE_FAILED])) {
+                if (! empty($result[AppLauncher::RELEASE_FAILED])) {
                     // Nothing new was started: tearing down now would only stop the version still serving.
                     $deployLogger->info(self::releaseFailedLine($result));
                 } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
@@ -285,14 +295,14 @@ final class DeploymentWorkflow
         try {
             $mechanics->recordRunningVersion();
             $reuseRunning = $mechanics->isApplicationEnvironmentRunning();
-            if (!$reuseRunning) {
+            if (! $reuseRunning) {
                 $deployLogger->stage(DeployLogger::STAGE_PREPARING);
                 $deployLogger->dim('Recreating home and project directories');
             }
             if ($zipPath !== null && $zipPath !== '') {
                 $deployLogger->info('Importing project archive before rebuild');
             }
-            if (!$reuseRunning) {
+            if (! $reuseRunning) {
                 $deployLogger->dim('Preparing container environment');
                 $deployLogger->dim('Restarting container environment');
             }
@@ -325,6 +335,7 @@ final class DeploymentWorkflow
      * archive normally sits inside it. Same contract otherwise: the deploy log
      * is finished here, a failure is recorded on the project, and a start failure
      * is a ProblemException; anything else is a plain exception for the caller to map.
+     * A failure or a cancel closes the log before the settle, which needs the deploy lock the log holds.
      */
     public function deployFromArchive(?DeployLogger $deployLogger, string $zipPath): void
     {
@@ -340,12 +351,16 @@ final class DeploymentWorkflow
             $succeeded = true;
         } catch (\InvalidArgumentException $e) {
             // A refused archive (the caller answers 422 on zip_path): nothing was replaced.
+            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
             throw $e;
         } catch (DeployCancelledException $e) {
+            $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             FailureRetention::retainAfterDeployCancelled($mechanics->user(), $e->getMessage());
             throw $e;
         } catch (\Exception $e) {
+            $deployLogger?->recordFailureOutput($e->getMessage());
             $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             FailureRetention::retainAfterDeployFailure($mechanics->user(), $message);
             throw $e;
         } finally {
@@ -363,7 +378,7 @@ final class DeploymentWorkflow
         $result = $mechanics->startApplication();
         $deployLogger?->throwIfCancelled();
         if ($result['exit_code'] !== 0) {
-            if (!empty($result[AppLauncher::RELEASE_FAILED])) {
+            if (! empty($result[AppLauncher::RELEASE_FAILED])) {
                 $deployLogger?->info(self::releaseFailedLine($result));
             } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
                 // Said as a checkout redeploy says it.
@@ -376,7 +391,7 @@ final class DeploymentWorkflow
             if ($hint !== null) {
                 $deployLogger?->info($hint);
             }
-            $full = self::startFailure($message) . ($hint !== null ? " | {$hint}" : '');
+            $full = self::startFailure($message).($hint !== null ? " | {$hint}" : '');
             // The rule is matched here, on the output, as telemetry does: the
             // sentence thrown on no longer carries anything a rule can match.
             $region = trim(FailureOutput::select($raw));
@@ -426,7 +441,7 @@ final class DeploymentWorkflow
         if ($this->mechanics !== null) {
             return $this->mechanics;
         }
-        if (!$this->project instanceof DindRuntime) {
+        if (! $this->project instanceof DindRuntime) {
             throw new \LogicException('Default deploy mechanics require a DinD runtime project.');
         }
 
@@ -453,13 +468,13 @@ final class DeploymentWorkflow
 
     /**
      * The explainer's sentence, else the failing region, as the first deploy
-     * reports it ({@see \App\Http\Controllers\UserController}). The whole
+     * reports it ({@see UserController}). The whole
      * output of a compose up is mostly pull progress.
      */
     private function failureSentence(string $output): string
     {
         $region = trim(FailureOutput::select($output));
-        if ($region === '' && !$this->explainNoiseOnlyOutput) {
+        if ($region === '' && ! $this->explainNoiseOnlyOutput) {
             return trim($output);
         }
         $explanation = DeployFailureExplainer::explain($region !== '' ? $region : $output);
@@ -479,13 +494,13 @@ final class DeploymentWorkflow
         if ($beforeRetention === null || $logger === null) {
             return;
         }
-        if ($cancelled && !$this->disposition()->hookRunsOnCancel()) {
+        if ($cancelled && ! $this->disposition()->hookRunsOnCancel()) {
             return;
         }
         try {
             $beforeRetention($logger);
         } catch (\Throwable $e) {
-            Log::warning('Before-' . $this->disposition()->hookName() . " hook failed for {$username}: {$e->getMessage()}");
+            Log::warning('Before-'.$this->disposition()->hookName()." hook failed for {$username}: {$e->getMessage()}");
         }
     }
 }

@@ -11,13 +11,14 @@ namespace App\Lib\Deploy\Health;
 final class CheckResult
 {
     public const STATUS_PASS = 'pass';
+
     public const STATUS_FAIL = 'fail';
 
     /** The guard on the check said it does not apply to this project. */
     public const STATUS_SKIPPED = 'skipped';
 
     /**
-     * @param array<string, mixed>|null $evidence
+     * @param  array<string, mixed>|null  $evidence
      */
     private function __construct(
         public readonly HealthCheck $check,
@@ -26,8 +27,7 @@ final class CheckResult
         public readonly ?string $detail,
         public readonly ?string $fix,
         public readonly ?array $evidence
-    ) {
-    }
+    ) {}
 
     /**
      * A check that held has nothing to say.
@@ -63,7 +63,7 @@ final class CheckResult
     }
 
     /**
-     * @param array<string, mixed> $evidence
+     * @param  array<string, mixed>  $evidence
      */
     public static function fail(
         HealthCheck $check,
@@ -100,8 +100,8 @@ final class CheckResult
     /** One line for a deploy log. Only a failure has one. */
     public function describe(): string
     {
-        $line = 'Check ' . $this->check->reference() . ': ' . ($this->title ?? 'passed');
+        $line = 'Check '.$this->check->reference().': '.($this->title ?? 'passed');
 
-        return $this->detail === null ? $line : $line . ' ' . $this->detail;
+        return $this->detail === null ? $line : $line.' '.$this->detail;
     }
 }

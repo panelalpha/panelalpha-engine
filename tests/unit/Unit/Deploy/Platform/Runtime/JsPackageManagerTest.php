@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Unit tests for JsPackageManager.
@@ -434,7 +435,7 @@ class JsPackageManagerTest extends TestCase
         // `npx next build` at a pnpm workspace root finds no next.
         $partial = [
             'default_build' => 'npx next build',
-            'default_start' => 'npx next start -H 0.0.0.0 -p 3000',
+            'default_start' => 'npx next start -H ' . TestNetwork::ANY . ' -p 3000',
             'workspace_relative' => 'apps/nextjs-app',
             'workspace_slug' => 'nextjs-app',
         ];
@@ -444,7 +445,7 @@ class JsPackageManagerTest extends TestCase
             JsPackageManager::resolveLifecycleCommand('pnpm', [], 'build', $partial)
         );
         $this->assertSame(
-            "cd 'apps/nextjs-app' && npx next start -H 0.0.0.0 -p 3000",
+            "cd 'apps/nextjs-app' && npx next start -H " . TestNetwork::ANY . " -p 3000",
             JsPackageManager::resolveLifecycleCommand('pnpm', [], 'start', $partial)
         );
         // The root's own script still runs at the root.

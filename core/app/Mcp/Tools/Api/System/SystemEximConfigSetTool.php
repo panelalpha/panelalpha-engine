@@ -51,6 +51,7 @@ class SystemEximConfigSetTool extends ApiTool
             'smtp_password',
             'smtp_implicit_tls',
             'sender_domain',
+            'clear_secrets',
         ];
     }
 
@@ -62,18 +63,19 @@ class SystemEximConfigSetTool extends ApiTool
         return [
             'smarthost_provider' => $schema->string(),
             'sendgrid_api_token' => $schema->string(),
-            'mailchannels_username' => $schema->string(),
+            'mailchannels_username' => $schema->string()->description('The username itself; a `vault:` reference is refused, since a username is not a secret.'),
             'mailchannels_password' => $schema->string(),
             'amazon_ses_smtp_endpoint' => $schema->string(),
             'amazon_ses_starttls_port' => $schema->string(),
-            'amazon_ses_smtp_username' => $schema->string(),
+            'amazon_ses_smtp_username' => $schema->string()->description('The username itself; a `vault:` reference is refused, since a username is not a secret.'),
             'amazon_ses_smtp_password' => $schema->string(),
             'smtp_host' => $schema->string(),
             'smtp_port' => $schema->string(),
-            'smtp_username' => $schema->string(),
+            'smtp_username' => $schema->string()->description('The username itself; a `vault:` reference is refused, since a username is not a secret.'),
             'smtp_password' => $schema->string(),
             'smtp_implicit_tls' => $schema->boolean(),
             'sender_domain' => $schema->string(),
+            'clear_secrets' => $schema->array()->description('Stored passwords or API tokens to clear.'),
         ];
     }
 }

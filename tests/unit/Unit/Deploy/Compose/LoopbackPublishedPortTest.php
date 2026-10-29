@@ -7,12 +7,13 @@ use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\Port\ComposePortScan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
- * `127.0.0.1:8080:8080` is a security default on a shared machine. Inside an
- * account container it only means the app cannot be reached, so hardening
- * publishes it properly -- which is also what makes the port visible to
- * detection at all.
+ * Publishing `8080:8080` on loopback only is a security default on a shared
+ * machine. Inside an account container it only means the app cannot be
+ * reached, so hardening publishes it properly -- which is also what makes the
+ * port visible to detection at all.
  */
 final class LoopbackPublishedPortTest extends TestCase
 {
@@ -28,10 +29,10 @@ final class LoopbackPublishedPortTest extends TestCase
     public static function loopbackBindings(): array
     {
         return [
-            'ipv4' => ['127.0.0.1:53842:53842', '53842:53842'],
+            'ipv4' => [TestNetwork::LOOPBACK . ':53842:53842', '53842:53842'],
             'ipv6' => ['[::1]:8080:80', '8080:80'],
             'by name' => ['localhost:3000:3000', '3000:3000'],
-            'with a protocol' => ['127.0.0.1:8080:80/tcp', '8080:80/tcp'],
+            'with a protocol' => [TestNetwork::LOOPBACK . ':8080:80/tcp', '8080:80/tcp'],
         ];
     }
 
@@ -65,9 +66,9 @@ final class LoopbackPublishedPortTest extends TestCase
     /** IPv4 already has the port: publishing `[::]` everywhere too would clash with it. */
     public function testAnIpv6WildcardBesideAnIpv4PublishOfThePortStays(): void
     {
-        $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => ['0.0.0.0:8080:80', '[::]:8080:80']]);
+        $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => [TestNetwork::ANY . ':8080:80', '[::]:8080:80']]);
 
-        $this->assertSame(['0.0.0.0:8080:80', '[::]:8080:80'], $hardened['ports']);
+        $this->assertSame([TestNetwork::ANY . ':8080:80', '[::]:8080:80'], $hardened['ports']);
     }
 
     #[DataProvider('bindingsToLeaveAlone')]
@@ -85,8 +86,8 @@ final class LoopbackPublishedPortTest extends TestCase
             'container port only' => ['8080'],
             'host and container' => ['8080:80'],
             // An address the operator chose deliberately is theirs to keep.
-            'a real address' => ['10.0.0.5:8080:80'],
-            'all interfaces' => ['0.0.0.0:8080:80'],
+            'a real address' => [TestNetwork::private(5) . ':8080:80'],
+            'all interfaces' => [TestNetwork::ANY . ':8080:80'],
         ];
     }
 
@@ -94,7 +95,7 @@ final class LoopbackPublishedPortTest extends TestCase
     {
         $hardened = ServiceHardener::harden('app', [
             'image' => 'app',
-            'ports' => [['target' => 80, 'published' => '8080', 'host_ip' => '127.0.0.1']],
+            'ports' => [['target' => 80, 'published' => '8080', 'host_ip' => TestNetwork::LOOPBACK]],
         ]);
 
         $this->assertSame([['target' => 80, 'published' => '8080']], $hardened['ports']);
@@ -102,7 +103,7 @@ final class LoopbackPublishedPortTest extends TestCase
 
     public function testALongFormHostIpThatIsNotLoopbackStays(): void
     {
-        $port = ['target' => 80, 'published' => '8080', 'host_ip' => '10.0.0.5'];
+        $port = ['target' => 80, 'published' => '8080', 'host_ip' => TestNetwork::private(5)];
         $hardened = ServiceHardener::harden('app', ['image' => 'app', 'ports' => [$port]]);
 
         $this->assertSame([$port], $hardened['ports']);
@@ -128,7 +129,7 @@ final class LoopbackPublishedPortTest extends TestCase
 
         try {
             file_put_contents($compose, "services:\n  gokapi:\n    image: f0rc3/gokapi:latest\n"
-                . "    ports:\n      - '127.0.0.1:53842:53842'\n");
+                . "    ports:\n      - '" . TestNetwork::LOOPBACK . ":53842:53842'\n");
             // 8080 is the platform fallback: the scan found no published port
             // at all, which is exactly how Gokapi ended up proxied to a port
             // nothing was listening on.
@@ -136,7 +137,7 @@ final class LoopbackPublishedPortTest extends TestCase
 
             $hardened = ServiceHardener::harden('gokapi', [
                 'image' => 'f0rc3/gokapi:latest',
-                'ports' => ['127.0.0.1:53842:53842'],
+                'ports' => [TestNetwork::LOOPBACK . ':53842:53842'],
             ]);
             file_put_contents(
                 $compose,
@@ -168,11 +169,11 @@ final class LoopbackPublishedPortTest extends TestCase
     {
         return [
             'rss monster' => [
-                '${RSSMONSTER_BIND_ADDRESS:-127.0.0.1}:${RSSMONSTER_PORT:-3000}:3000',
+                '${RSSMONSTER_BIND_ADDRESS:-' . TestNetwork::LOOPBACK . '}:${RSSMONSTER_PORT:-3000}:3000',
                 // The ports stay as written, so an operator still picks the port.
                 '${RSSMONSTER_PORT:-3000}:3000',
             ],
-            'host only' => ['${BIND:-127.0.0.1}:8080:80', '8080:80'],
+            'host only' => ['${BIND:-' . TestNetwork::LOOPBACK . '}:8080:80', '8080:80'],
             'the dash form' => ['${BIND-localhost}:8080:80', '8080:80'],
         ];
     }
@@ -190,8 +191,8 @@ final class LoopbackPublishedPortTest extends TestCase
     {
         return [
             // An address the operator chose is theirs, resolved or not.
-            'a real address' => ['${BIND:-10.0.0.5}:8080:80'],
-            'all interfaces' => ['${BIND:-0.0.0.0}:8080:80'],
+            'a real address' => ['${BIND:-' . TestNetwork::private(5) . '}:8080:80'],
+            'all interfaces' => ['${BIND:-' . TestNetwork::ANY . '}:8080:80'],
             // Mailcow's shape: an empty default is already every interface.
             'empty default' => ['${HTTPS_BIND:-}:${HTTPS_PORT:-443}:443'],
             'templated ports only' => ['${PORT:-3000}:3000'],
@@ -206,11 +207,11 @@ final class LoopbackPublishedPortTest extends TestCase
     {
         $hardened = ComposeHarden::apply(['services' => [
             'webserver' => ['image' => 'ghcr.io/timothepoznanski/poznote', 'ports' => ['${HTTP_WEB_PORT}:80']],
-            'mcp-server' => ['image' => 'ghcr.io/timothepoznanski/poznote-mcp', 'ports' => ['127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045']],
+            'mcp-server' => ['image' => 'ghcr.io/timothepoznanski/poznote-mcp', 'ports' => [TestNetwork::LOOPBACK . ':${POZNOTE_MCP_PORT:-8045}:8045']],
         ]]);
 
         $this->assertSame(['${HTTP_WEB_PORT:-80}:80'], $hardened['services']['webserver']['ports']);
-        $this->assertSame(['127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045'], $hardened['services']['mcp-server']['ports']);
+        $this->assertSame([TestNetwork::LOOPBACK . ':${POZNOTE_MCP_PORT:-8045}:8045'], $hardened['services']['mcp-server']['ports']);
         $this->assertSame(['all' => [80], 'primary' => 80, 'refused' => []], ComposePortScan::ofParsed($hardened));
     }
 
@@ -218,7 +219,7 @@ final class LoopbackPublishedPortTest extends TestCase
     public function testALoopbackAppBesideAPublishedDatabaseIsStillOpened(): void
     {
         $hardened = ComposeHarden::apply(['services' => [
-            'app' => ['image' => 'acme/app', 'ports' => ['127.0.0.1:3000:3000']],
+            'app' => ['image' => 'acme/app', 'ports' => [TestNetwork::LOOPBACK . ':3000:3000']],
             'db' => ['image' => 'postgres:16', 'ports' => ['5432:5432']],
         ]]);
 

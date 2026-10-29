@@ -8,6 +8,11 @@
                 <li><span class="dash">–</span><span><strong>Account</strong> → Cloudflare Tunnel → <strong>Edit</strong></span></li>
                 <li><span class="dash">–</span><span><strong>Zone</strong> → DNS → <strong>Edit</strong></span></li>
             </ul>
+            To purge the cache or change the security level from the engine, add two more:
+            <ul>
+                <li><span class="dash">–</span><span><strong>Zone</strong> → Cache Purge → <strong>Purge</strong></span></li>
+                <li><span class="dash">–</span><span><strong>Zone</strong> → Zone Settings → <strong>Edit</strong></span></li>
+            </ul>
         </span></li>
         <li><span class="n">4.</span><span>Set the resources:
             <ul>

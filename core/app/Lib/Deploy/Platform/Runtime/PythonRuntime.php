@@ -2,8 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Detect\PlaceholderPage;
-
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -35,7 +35,7 @@ final class PythonRuntime implements Runtime
      * A const expression, so it cannot read the catalogue: for callers needing
      * a compile-time constant. {@see defaultImage()} honours a configured one.
      */
-    public const IMAGE = 'python:3.' . self::DEFAULT_MINOR . '-' . self::IMAGE_VARIANT;
+    public const IMAGE = 'python:3.'.self::DEFAULT_MINOR.'-'.self::IMAGE_VARIANT;
 
     /**
      * The versions a project may resolve to, oldest first, as `3.12`.
@@ -49,13 +49,13 @@ final class PythonRuntime implements Runtime
             return $configured;
         }
 
-        return array_map(static fn (int $minor): string => '3.' . $minor, self::MINORS);
+        return array_map(static fn (int $minor): string => '3.'.$minor, self::MINORS);
     }
 
     /** What a project that states no version gets, as `3.12`. */
     public static function defaultVersion(): string
     {
-        return RuntimeImageCatalog::defaultVersion('python') ?? '3.' . self::DEFAULT_MINOR;
+        return RuntimeImageCatalog::defaultVersion('python') ?? '3.'.self::DEFAULT_MINOR;
     }
 
     public static function defaultImage(): string
@@ -67,7 +67,7 @@ final class PythonRuntime implements Runtime
     {
         $spec = RuntimeImageCatalog::spec('python', $version);
 
-        return $spec?->from ?? 'python:' . $version . '-' . self::IMAGE_VARIANT;
+        return $spec?->from ?? 'python:'.$version.'-'.self::IMAGE_VARIANT;
     }
 
     /** @var list<string> */
@@ -82,7 +82,7 @@ final class PythonRuntime implements Runtime
     {
         $present = false;
         foreach (self::MANIFESTS as $manifest) {
-            if (!$context->hasFile($manifest)) {
+            if (! $context->hasFile($manifest)) {
                 continue;
             }
             // A pyproject.toml is evidence only when it is a Python project's
@@ -92,13 +92,13 @@ final class PythonRuntime implements Runtime
             // Dolibarr, a PHP application whose root pyproject.toml runs
             // codespell, was detected as Python and served the placeholder.
             // {@see declaresProject()}
-            if ($manifest === 'pyproject.toml' && !self::declaresProject($context->contents($manifest))) {
+            if ($manifest === 'pyproject.toml' && ! self::declaresProject($context->contents($manifest))) {
                 continue;
             }
             $present = true;
             break;
         }
-        if (!$present && !$context->isFile('manage.py')) {
+        if (! $present && ! $context->isFile('manage.py')) {
             return null;
         }
 
@@ -106,7 +106,7 @@ final class PythonRuntime implements Runtime
         // names, and a venv built on another minor is not the one the image runs.
         $pinned = self::pinnedMinor($context->contents('.python-version'));
         if ($pinned !== null) {
-            return new Requirement('python', '3.' . $pinned, '', '.python-version');
+            return new Requirement('python', '3.'.$pinned, '', '.python-version');
         }
 
         $toml = $context->contents('pyproject.toml');
@@ -122,7 +122,7 @@ final class PythonRuntime implements Runtime
             return new Requirement('python', self::defaultVersion(), $constraint, 'engine default');
         }
 
-        $wanted = '3.' . $minor;
+        $wanted = '3.'.$minor;
         foreach (self::versions() as $known) {
             if (version_compare($known, $wanted, '>=')) {
                 return new Requirement('python', $known, $constraint, 'pyproject.toml requires-python');
@@ -182,20 +182,20 @@ final class PythonRuntime implements Runtime
     public const VENV = '.venv';
 
     /**
-     * @param array<string, true> $files
+     * @param  array<string, true>  $files
      */
     public static function installCommand(array $files, ?string $pyproject = null): string
     {
         // Re-running `venv` over an existing one is a no-op, so a rebuild
         // keeps the packages it already has and pip only reconciles the diff.
         // No --upgrade-deps: it reinstalls pip and setuptools every deploy.
-        $venv = 'python -m venv ' . self::VENV . ' && ';
+        $venv = 'python -m venv '.self::VENV.' && ';
         // Cached, not --no-cache-dir: the host build mounts a per-project
         // pip cache, and there is no image layer here for the cache to bloat.
-        $pip = self::VENV . '/bin/pip install ';
+        $pip = self::VENV.'/bin/pip install ';
 
         if (isset($files['requirements.txt'])) {
-            return $venv . $pip . '-r requirements.txt';
+            return $venv.$pip.'-r requirements.txt';
         }
         // A committed Pipfile.lock is installed as-is, like `uv sync --frozen`:
         // `install --deploy` aborts when the lock's hash lags the Pipfile
@@ -203,7 +203,7 @@ final class PythonRuntime implements Runtime
         if (isset($files['pipfile'])) {
             $pipenv = isset($files['pipfile.lock']) ? 'sync' : 'install --deploy';
 
-            return $venv . $pip . 'pipenv && ' . self::VENV . '/bin/pipenv ' . $pipenv;
+            return $venv.$pip.'pipenv && '.self::VENV.'/bin/pipenv '.$pipenv;
         }
         // A Poetry application declaring `package-mode = false` is a
         // deployable program, not a distributable package: `pip install .`
@@ -214,9 +214,9 @@ final class PythonRuntime implements Runtime
         // installs write into; without it poetry makes its own under a cache
         // directory the runtime never looks at.
         if (self::isNonPackagePoetry($pyproject)) {
-            return $venv . $pip . 'poetry'
-                . ' && VIRTUAL_ENV="$PWD/' . self::VENV . '" ' . self::VENV
-                . '/bin/poetry install --no-root --no-interaction';
+            return $venv.$pip.'poetry'
+                .' && VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
+                .'/bin/poetry install --no-root --no-interaction';
         }
 
         // A uv project states its resolution in `uv.lock`, and
@@ -240,10 +240,10 @@ final class PythonRuntime implements Runtime
         // .python-version, uv downloads its own CPython outside /app and links
         // .venv to it, which the run container does not have.
         if (isset($files['uv.lock'])) {
-            return $venv . $pip . 'uv'
-                . ' && UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)"'
-                . ' VIRTUAL_ENV="$PWD/' . self::VENV . '" ' . self::VENV
-                . '/bin/uv sync --frozen' . (self::isUvPackage($pyproject) ? '' : ' --no-install-project');
+            return $venv.$pip.'uv'
+                .' && UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)"'
+                .' VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
+                .'/bin/uv sync --frozen'.(self::isUvPackage($pyproject) ? '' : ' --no-install-project');
         }
 
         // A pyproject declaring neither `[project]` (PEP 621) nor a Poetry
@@ -253,7 +253,7 @@ final class PythonRuntime implements Runtime
         // `configuration error: 'project' must contain ['version'] properties`.
         // The venv is still created: every start command runs through it.
         if (self::declaresNothingToInstall($files, $pyproject)) {
-            return 'python -m venv ' . self::VENV;
+            return 'python -m venv '.self::VENV;
         }
 
         // Everything left states a package and has no lockfile: Poetry in
@@ -261,7 +261,7 @@ final class PythonRuntime implements Runtime
         // way to install their dependencies, and also where a console entry
         // point and an importable root package come from (mopidy's `mopidy`
         // script) — so building the project is kept here.
-        return $venv . $pip . '.';
+        return $venv.$pip.'.';
     }
 
     /** uv builds and installs a project only when it names a build backend. */
@@ -276,7 +276,7 @@ final class PythonRuntime implements Runtime
      * Whether {@see installCommand()} installs the project itself, which is
      * where its console scripts come from.
      *
-     * @param array<string, true> $files
+     * @param  array<string, true>  $files
      */
     private static function installsProject(array $files, ?string $pyproject): bool
     {
@@ -288,7 +288,7 @@ final class PythonRuntime implements Runtime
             return self::isUvPackage($pyproject);
         }
 
-        return !self::declaresNothingToInstall($files, $pyproject);
+        return ! self::declaresNothingToInstall($files, $pyproject);
     }
 
     /**
@@ -301,7 +301,7 @@ final class PythonRuntime implements Runtime
      * A `setup.py` or `setup.cfg` beside the pyproject is metadata this reader
      * cannot see, so the project is never judged from the pyproject alone.
      *
-     * @param array<string, true> $files
+     * @param  array<string, true>  $files
      */
     public static function declaresNothingToInstall(array $files, ?string $pyproject): bool
     {
@@ -314,7 +314,7 @@ final class PythonRuntime implements Runtime
 
         // The same question {@see declaresProject()} answers: "declares
         // nothing" is exactly "declares no project".
-        return !self::declaresProject($pyproject);
+        return ! self::declaresProject($pyproject);
     }
 
     /**
@@ -347,7 +347,7 @@ final class PythonRuntime implements Runtime
         // TOML allows a comment after a table header, and a project that
         // writes `[project]  # the app` must not be read as declaring nothing.
         return preg_match(
-            '/^[ \t]*\[' . preg_quote($table, '/') . '\][ \t]*(?:#.*)?\r?$/m',
+            '/^[ \t]*\['.preg_quote($table, '/').'\][ \t]*(?:#.*)?\r?$/m',
             $toml
         ) === 1;
     }
@@ -377,9 +377,8 @@ final class PythonRuntime implements Runtime
     /** The venv's interpreter, which is what every Python command must run under. */
     public static function python(): string
     {
-        return self::VENV . '/bin/python';
+        return self::VENV.'/bin/python';
     }
-
 
     /** The port the recipe publishes and a server has to bind; python.yaml declares the same. */
     public const PORT = 8000;
@@ -408,7 +407,7 @@ final class PythonRuntime implements Runtime
      * 127.0.0.1:5000, so the container comes up, stays up, and answers nothing
      * on the port the recipe published.
      *
-     * @param list<string> $manifests contents of requirements.txt and friends
+     * @param  list<string>  $manifests  contents of requirements.txt and friends
      */
     public static function startCommand(string $projectDir, array $manifests = []): string
     {
@@ -425,18 +424,18 @@ final class PythonRuntime implements Runtime
 
         // 2. A root entry point runnable as a script.
         foreach (self::ENTRYPOINTS as $file) {
-            if (!is_file($projectDir . '/' . $file)) {
+            if (! is_file($projectDir.'/'.$file)) {
                 continue;
             }
             // A file called wsgi.py or asgi.py is a hand-off to a server, not
             // a program. Running it imports the module and exits, and the
             // account crash-loops with nothing bound. Only run one when it
             // says it is also a script.
-            if (self::isServerHandoff($file) && !self::hasMainGuard($projectDir . '/' . $file)) {
+            if (self::isServerHandoff($file) && ! self::hasMainGuard($projectDir.'/'.$file)) {
                 continue;
             }
 
-            return self::python() . ' ' . $file;
+            return self::python().' '.$file;
         }
 
         // 3. A Django project laid out in a subdirectory -- NetBox --
@@ -452,14 +451,14 @@ final class PythonRuntime implements Runtime
         // 4. The console script the project declares (Music Assistant's `mass`).
         $script = self::consoleScript($projectDir);
         if ($script !== null) {
-            return self::VENV . '/bin/' . $script;
+            return self::VENV.'/bin/'.$script;
         }
 
         // 5. The one root script with a `__main__` guard (SABnzbd.py).
         $main = self::soleMainScript($projectDir);
         if ($main !== null) {
-            return self::python() . ' '
-                . (preg_match('#^[A-Za-z0-9._-]+$#', $main) === 1 ? $main : escapeshellarg($main));
+            return self::python().' '
+                .(preg_match('#^[A-Za-z0-9._-]+$#', $main) === 1 ? $main : escapeshellarg($main));
         }
 
         return self::lastResortServer();
@@ -472,9 +471,9 @@ final class PythonRuntime implements Runtime
      */
     private static function consoleScript(string $projectDir): ?string
     {
-        $pyproject = @file_get_contents($projectDir . '/pyproject.toml');
-        if (!is_string($pyproject)
-            || !self::installsProject(ProjectContext::listRootFiles($projectDir), $pyproject)
+        $pyproject = AccountHomeRead::contents($projectDir.'/pyproject.toml');
+        if (! is_string($pyproject)
+            || ! self::installsProject(ProjectContext::listRootFiles($projectDir), $pyproject)
         ) {
             return null;
         }
@@ -502,7 +501,7 @@ final class PythonRuntime implements Runtime
     /** The lines of one TOML table, up to the next table header. */
     private static function tableBody(string $toml, string $table): ?string
     {
-        $header = '/^[ \t]*\[' . preg_quote($table, '/') . '\][ \t]*(?:#.*)?\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
+        $header = '/^[ \t]*\['.preg_quote($table, '/').'\][ \t]*(?:#.*)?\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
 
         return preg_match($header, $toml, $matches) === 1 ? $matches[1] : null;
     }
@@ -515,10 +514,10 @@ final class PythonRuntime implements Runtime
     {
         $found = null;
         foreach (scandir($projectDir) ?: [] as $entry) {
-            if (!str_ends_with($entry, '.py') || !is_file($projectDir . '/' . $entry)
+            if (! str_ends_with($entry, '.py') || ! is_file($projectDir.'/'.$entry)
                 || in_array(strtolower($entry), ['setup.py', 'conftest.py', 'manage.py', 'noxfile.py'], true)
                 || preg_match('/^test_|_test\.py$/i', $entry) === 1
-                || !self::hasMainGuard($projectDir . '/' . $entry)
+                || ! self::hasMainGuard($projectDir.'/'.$entry)
             ) {
                 continue;
             }
@@ -541,17 +540,17 @@ final class PythonRuntime implements Runtime
     private static function serverCommand(string $server, string $module, string $callable, string $searchPath): string
     {
         if ($server === 'uvicorn') {
-            return self::VENV . '/bin/uvicorn'
-                . self::searchPathOption('uvicorn', $searchPath)
-                . ' ' . $module . ':' . $callable
-                . ' --host 0.0.0.0 --port ' . self::PORT;
+            return self::VENV.'/bin/uvicorn'
+                .self::searchPathOption('uvicorn', $searchPath)
+                .' '.$module.':'.$callable
+                .' --host 0.0.0.0 --port '.self::PORT;
         }
 
         // --bind, not the default 127.0.0.1:8000: the listener has to be
         // reachable from outside the container.
-        return self::VENV . '/bin/gunicorn --bind 0.0.0.0:' . self::PORT
-            . ' --timeout 120' . self::searchPathOption('gunicorn', $searchPath)
-            . ' ' . $module . ':' . $callable;
+        return self::VENV.'/bin/gunicorn --bind 0.0.0.0:'.self::PORT
+            .' --timeout 120'.self::searchPathOption('gunicorn', $searchPath)
+            .' '.$module.':'.$callable;
     }
 
     /** `wsgi.py` and `asgi.py` name a callable for a server to import. */
@@ -562,7 +561,7 @@ final class PythonRuntime implements Runtime
 
     private static function hasMainGuard(string $path): bool
     {
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
 
         return is_string($contents)
             && preg_match('/^if\s+__name__\s*==/m', $contents) === 1;
@@ -586,15 +585,15 @@ final class PythonRuntime implements Runtime
         $dir = self::PLACEHOLDER_DIR;
         // The title is the detection contract not-placeholder matches on: a
         // page with a title of its own answered 200 and was reported healthy.
-        $page = '<!doctype html><title>' . PlaceholderPage::NOT_CONFIGURED_TITLE . '</title>'
-            . '<h1>This application did not start</h1>'
-            . '<p>PanelAlpha found no Python entry point in this repository, so nothing is running. '
-            . 'Name the entry point in a panelalpha.yaml, declare one [project.scripts] entry, or add one of: '
-            . implode(', ', self::ENTRYPOINTS) . '.</p>';
+        $page = '<!doctype html><title>'.PlaceholderPage::NOT_CONFIGURED_TITLE.'</title>'
+            .'<h1>This application did not start</h1>'
+            .'<p>PanelAlpha found no Python entry point in this repository, so nothing is running. '
+            .'Name the entry point in a panelalpha.yaml, declare one [project.scripts] entry, or add one of: '
+            .implode(', ', self::ENTRYPOINTS).'.</p>';
 
-        return 'mkdir -p ' . $dir
-            . " && printf '%s' " . escapeshellarg($page) . ' > ' . $dir . '/index.html'
-            . ' && ' . self::python() . ' -m http.server ' . self::PORT . ' --directory ' . $dir;
+        return 'mkdir -p '.$dir
+            ." && printf '%s' ".escapeshellarg($page).' > '.$dir.'/index.html'
+            .' && '.self::python().' -m http.server '.self::PORT.' --directory '.$dir;
     }
 
     /**
@@ -602,13 +601,13 @@ final class PythonRuntime implements Runtime
      * through gunicorn with a uvicorn worker class, and gunicorn takes the bind
      * address.
      *
-     * @param list<string> $manifests
+     * @param  list<string>  $manifests
      */
     private static function declaredServer(array $manifests): ?string
     {
         $text = strtolower(implode("\n", array_filter($manifests, 'is_string')));
         foreach (['gunicorn', 'uvicorn'] as $server) {
-            if (preg_match('/(?<![a-z0-9_.-])' . $server . '(?![a-z0-9_.-])/', $text) === 1) {
+            if (preg_match('/(?<![a-z0-9_.-])'.$server.'(?![a-z0-9_.-])/', $text) === 1) {
                 return $server;
             }
         }
@@ -633,12 +632,12 @@ final class PythonRuntime implements Runtime
     private static function nestedServableModule(string $projectDir): ?array
     {
         foreach (self::djangoProjectLayout($projectDir) as $module) {
-            $contents = @file_get_contents($projectDir . '/' . $module[2]);
-            if (!is_string($contents)) {
+            $contents = AccountHomeRead::contents($projectDir.'/'.$module[2]);
+            if (! is_string($contents)) {
                 continue;
             }
             foreach (['application', 'app'] as $callable) {
-                if (preg_match('/^' . $callable . '\s*=/m', $contents) === 1) {
+                if (preg_match('/^'.$callable.'\s*=/m', $contents) === 1) {
                     return [$module[0], $callable, $module[1]];
                 }
             }
@@ -669,22 +668,22 @@ final class PythonRuntime implements Runtime
     {
         $candidates = [];
         foreach (self::managePyDirs($projectDir) as $relative) {
-            $projectDirOf = $relative === '' ? $projectDir : $projectDir . '/' . $relative;
+            $projectDirOf = $relative === '' ? $projectDir : $projectDir.'/'.$relative;
             foreach (self::WSGI_MODULES as $module) {
                 foreach (ProjectContext::entries($projectDirOf) as $entry) {
                     if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                         continue;
                     }
                     // `NAME/wsgi.py`, a package beside the manage.py.
-                    if (!is_file($projectDirOf . '/' . $entry . '/' . $module)
-                        || !is_file($projectDirOf . '/' . $entry . '/__init__.py')) {
+                    if (! is_file($projectDirOf.'/'.$entry.'/'.$module)
+                        || ! is_file($projectDirOf.'/'.$entry.'/__init__.py')) {
                         continue;
                     }
-                    $package = $relative === '' ? $entry : $relative . '/' . $entry;
+                    $package = $relative === '' ? $entry : $relative.'/'.$entry;
                     $candidates[] = [
-                        basename($entry) . '.' . basename($module, '.py'),
+                        basename($entry).'.'.basename($module, '.py'),
                         $relative,
-                        $package . '/' . $module,
+                        $package.'/'.$module,
                     ];
                 }
             }
@@ -718,14 +717,14 @@ final class PythonRuntime implements Runtime
     public static function manageCommand(string $projectDir, string $arguments): string
     {
         $dir = self::djangoManageDir($projectDir);
-        $script = $dir === null || $dir === '' ? 'manage.py' : $dir . '/manage.py';
+        $script = $dir === null || $dir === '' ? 'manage.py' : $dir.'/manage.py';
 
         // Quoted only when needed: the directory name comes off the filesystem
         // and can hold a space or a metacharacter, but quoting the ordinary
         // case would put `'manage.py'` in every Django deploy log.
-        return self::python() . ' '
-            . (preg_match('#^[A-Za-z0-9._/-]+$#', $script) === 1 ? $script : escapeshellarg($script))
-            . ' ' . $arguments;
+        return self::python().' '
+            .(preg_match('#^[A-Za-z0-9._/-]+$#', $script) === 1 ? $script : escapeshellarg($script))
+            .' '.$arguments;
     }
 
     /**
@@ -735,7 +734,7 @@ final class PythonRuntime implements Runtime
      *
      * `runserver` is Django's development server and says so on every boot.
      *
-     * @param list<string> $manifests contents of requirements.txt and friends
+     * @param  list<string>  $manifests  contents of requirements.txt and friends
      */
     public static function djangoStartCommand(string $projectDir, array $manifests = []): string
     {
@@ -748,7 +747,7 @@ final class PythonRuntime implements Runtime
             }
         }
 
-        return self::manageCommand($projectDir, 'runserver 0.0.0.0:' . self::PORT);
+        return self::manageCommand($projectDir, 'runserver 0.0.0.0:'.self::PORT);
     }
 
     /**
@@ -770,7 +769,7 @@ final class PythonRuntime implements Runtime
      */
     private static function isDjangoManagePy(string $dir): bool
     {
-        $contents = @file_get_contents($dir . '/manage.py');
+        $contents = AccountHomeRead::contents($dir.'/manage.py');
         if (is_string($contents) && $contents !== ''
             && preg_match(
                 '/DJANGO_SETTINGS_MODULE|execute_from_command_line|from\s+django\b|import\s+django\b/',
@@ -784,12 +783,12 @@ final class PythonRuntime implements Runtime
             if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                 continue;
             }
-            $package = $dir . '/' . $entry;
-            if (!is_file($package . '/__init__.py')) {
+            $package = $dir.'/'.$entry;
+            if (! is_file($package.'/__init__.py')) {
                 continue;
             }
             foreach (self::WSGI_MODULES as $module) {
-                if (is_file($package . '/' . $module)) {
+                if (is_file($package.'/'.$module)) {
                     return true;
                 }
             }
@@ -808,8 +807,8 @@ final class PythonRuntime implements Runtime
     private static function managePyDirs(string $projectDir, string $relative = '', int $depth = 0): array
     {
         $dirs = [];
-        $dir = $relative === '' ? $projectDir : $projectDir . '/' . $relative;
-        if (is_file($dir . '/manage.py') && self::isDjangoManagePy($dir)) {
+        $dir = $relative === '' ? $projectDir : $projectDir.'/'.$relative;
+        if (is_file($dir.'/manage.py') && self::isDjangoManagePy($dir)) {
             $dirs[] = $relative;
         }
         if ($depth >= 3) {
@@ -819,10 +818,10 @@ final class PythonRuntime implements Runtime
             if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                 continue;
             }
-            if (!is_dir($dir . '/' . $entry)) {
+            if (! is_dir($dir.'/'.$entry)) {
                 continue;
             }
-            $child = $relative === '' ? $entry : $relative . '/' . $entry;
+            $child = $relative === '' ? $entry : $relative.'/'.$entry;
             $dirs = array_merge($dirs, self::managePyDirs($projectDir, $child, $depth + 1));
         }
 
@@ -841,22 +840,22 @@ final class PythonRuntime implements Runtime
     /**
      * The module holding the application object, and the name it is bound to.
      *
-     * @param list<string> $files basenames to look for, in order
+     * @param  list<string>  $files  basenames to look for, in order
      * @return array{0: string, 1: string}|null module and callable name
      */
     private static function applicationModule(string $dir, array $files): ?array
     {
         foreach ($files as $file) {
-            $path = $dir . '/' . $file;
-            if (!is_file($path)) {
+            $path = $dir.'/'.$file;
+            if (! is_file($path)) {
                 continue;
             }
-            $contents = @file_get_contents($path);
-            if (!is_string($contents)) {
+            $contents = AccountHomeRead::contents($path);
+            if (! is_string($contents)) {
                 continue;
             }
             foreach (['app', 'application'] as $name) {
-                if (preg_match('/^' . $name . '\s*=/m', $contents) === 1) {
+                if (preg_match('/^'.$name.'\s*=/m', $contents) === 1) {
                     return [substr($file, 0, -3), $name];
                 }
             }
@@ -881,7 +880,7 @@ final class PythonRuntime implements Runtime
 
         $flag = $server === 'uvicorn' ? '--app-dir' : '--pythonpath';
 
-        return " {$flag} '" . $searchPath . "'";
+        return " {$flag} '".$searchPath."'";
     }
 
     public function defaultRequirement(): Requirement

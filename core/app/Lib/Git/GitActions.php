@@ -5,18 +5,20 @@ namespace App\Lib\Git;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
+use App\Jobs\DeployProject;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Lib\DeployHook\DeployHooks;
 use App\Lib\Net\EgressGuard;
-use App\Jobs\DeployProject;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
+use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Git;
 use App\System\Project\Git\CheckoutRedeploy;
 use App\System\Project\Git\Exception as GitException;
@@ -37,12 +39,10 @@ class GitActions
      */
     public const MAX_COMMITS = 1000;
 
-    public function __construct(private readonly DeployHooks $hooks)
-    {
-    }
+    public function __construct(private readonly DeployHooks $hooks) {}
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function status(User $user, array $params, bool $fetch): array
     {
@@ -50,7 +50,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function branches(User $user, array $params): array
     {
@@ -58,7 +58,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function commits(User $user, array $params): array
     {
@@ -71,7 +71,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function connectRemote(User $user, array $params): array
     {
@@ -89,7 +89,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function disconnect(User $user, array $params): array
     {
@@ -99,7 +99,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function changeBranch(User $user, array $params): array
     {
@@ -111,7 +111,7 @@ class GitActions
     /**
      * Omitting `token` leaves the stored one alone; sending it, even empty, replaces it.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function updateCredentials(User $user, array $params): array
     {
@@ -127,7 +127,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function pull(User $user, array $params): array
     {
@@ -137,7 +137,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function push(User $user, array $params): array
     {
@@ -147,7 +147,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function revert(User $user, array $params): array
     {
@@ -160,7 +160,7 @@ class GitActions
      * Create the project's SSH deploy key, or return the one it has, pinning
      * `host` when given.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
     public function deployKey(User $user, array $params): array
@@ -171,21 +171,37 @@ class GitActions
     /**
      * The connect runs `git ls-remote` and `git fetch` on the host, whose
      * network reaches the metadata service and internal services. A host the
-     * egress guard refuses is a 422 before anything is connected.
+     * egress guard refuses, or cannot resolve to check, is a 422 before
+     * anything is connected.
      *
      * @throws ProblemException
      */
     private function assertRemoteAllowed(string $repoUrl): void
     {
-        if ($repoUrl === '' || GitRepoInput::isSsh($repoUrl)) {
+        if ($repoUrl === '') {
+            return;
+        }
+        if (GitRepoInput::isSsh($repoUrl)) {
+            $this->assertSshRemoteAddressAllowed($repoUrl);
+
             return;
         }
 
-        try {
-            $problem = EgressGuard::problem('repo_url', $repoUrl);
-        } catch (\InvalidArgumentException) {
-            return;
+        $problem = EgressGuard::problem('repo_url', $repoUrl);
+        if ($problem !== null) {
+            throw ProblemException::of([$problem]);
         }
+    }
+
+    /**
+     * A pinned host key proves who answers, not where: the SSH host is checked
+     * like the deploy key's scan, refused when internal or unresolvable.
+     *
+     * @throws ProblemException
+     */
+    private function assertSshRemoteAddressAllowed(string $repoUrl): void
+    {
+        $problem = RepositoryAddress::problem($repoUrl, 'repo_url');
         if ($problem !== null) {
             throw ProblemException::of([$problem]);
         }
@@ -197,7 +213,7 @@ class GitActions
      */
     private function assertSshRemoteUsable(User $user, string $repoUrl): void
     {
-        if (!GitRepoInput::isSsh($repoUrl)) {
+        if (! GitRepoInput::isSsh($repoUrl)) {
             return;
         }
 
@@ -205,8 +221,8 @@ class GitActions
             $https = GitRepoInput::httpsEquivalent($repoUrl);
             throw ProblemException::one('repo_url', 'repo_url_ssh_needs_deploy_key',
                 'This project has no deploy key, so an SSH remote cannot authenticate. Create one with '
-                . 'POST /projects/{name}/git/deploy-key, add its public key to the repository as a deploy key, '
-                . 'and connect again' . ($https !== null ? ", or connect {$https} with a token." : '.'),
+                .'POST /projects/{name}/git/deploy-key, add its public key to the repository as a deploy key, '
+                .'and connect again'.($https !== null ? ", or connect {$https} with a token." : '.'),
                 array_filter(['suggestion' => $https]));
         }
 
@@ -222,8 +238,10 @@ class GitActions
      * credentials in its message, still carrying its status for the endpoints.
      *
      * @template T
-     * @param callable(Git, ProjectAggregate): T $work
+     *
+     * @param  callable(Git, ProjectAggregate): T  $work
      * @return T
+     *
      * @throws GitException
      * @throws ValidationException
      */
@@ -278,7 +296,7 @@ class GitActions
      */
     private function refuseWhileTheLockIsHeld(ProjectAggregate $project, ?DeployLogger $logger): void
     {
-        if ($logger !== null || !DeployLogger::isLockedFor($project->username())) {
+        if ($logger !== null || ! DeployLogger::isLockedFor($project->username())) {
             return;
         }
 
@@ -310,8 +328,8 @@ class GitActions
         $task = ProjectRebuild::pendingTask($username);
 
         return new GitException(
-            "A deploy of project '{$username}' is running" . ($task !== null ? " (task {$task->id})" : '')
-                . '; try again when it has finished.',
+            "A deploy of project '{$username}' is running".($task !== null ? " (task {$task->id})" : '')
+                .'; try again when it has finished.',
             409,
             taskId: $task?->id,
         );
@@ -325,7 +343,8 @@ class GitActions
      * deployed from is kept aside, and put back after a failed rebuild, only
      * by the process that changes it.
      *
-     * @param array<string, mixed> $params the endpoint's validated input
+     * @param  array<string, mixed>  $params  the endpoint's validated input
+     *
      * @throws DeployBusyException while a deploy of the project is queued or running
      */
     public function queueRedeploy(User $user, string $action, array $params): ?Task
@@ -341,11 +360,11 @@ class GitActions
      * The project is checked idle before the change is, since those checks must not read a
      * checkout a deploy is moving aside.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function queueIfRebuildable(User $user, Git $git, ProjectAggregate $project, string $action, array $params): ?Task
     {
-        if (!$git->isDeployManaged() || !$project->runtime() instanceof Dind) {
+        if (! $git->isDeployManaged() || ! $project->runtime() instanceof Dind) {
             return null;
         }
         $rebuild = app(ProjectRebuild::class);
@@ -357,7 +376,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function assertChangeAllowed(Git $git, string $action, array $params): void
     {
@@ -369,7 +388,7 @@ class GitActions
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return array<string, string> what the queued job hands back to redeploy()
      */
     private function queuedInput(Git $git, string $action, array $params): array
@@ -387,7 +406,7 @@ class GitActions
      * rebuild, under the deploy `$logger` the job opened -- and whose lock it
      * holds -- before the checkout is touched.
      *
-     * @param array<string, string> $input what queueRedeploy() recorded
+     * @param  array<string, string>  $input  what queueRedeploy() recorded
      * @return array{commit: ?string, checkout: array<string, mixed>}
      */
     public function redeploy(User $user, string $action, array $input, ?DeployLogger $logger): array
@@ -403,19 +422,19 @@ class GitActions
     }
 
     /**
-     * @param array<string, string> $input
+     * @param  array<string, string>  $input
      */
     private function redeployAnnouncement(string $action, array $input): string
     {
         return match ($action) {
-            ProjectRebuild::GIT_PULL => 'Pulling the connected branch (' . ($input['strategy'] ?? Git::STRATEGY_FF) . ') before the rebuild',
+            ProjectRebuild::GIT_PULL => 'Pulling the connected branch ('.($input['strategy'] ?? Git::STRATEGY_FF).') before the rebuild',
             ProjectRebuild::CHANGE_BRANCH => "Changing the branch to {$input['branch']} before the rebuild",
-            ProjectRebuild::REVERT => 'Reverting the checkout to ' . ($input['ref'] ?? 'HEAD') . ' before the rebuild',
+            ProjectRebuild::REVERT => 'Reverting the checkout to '.($input['ref'] ?? 'HEAD').' before the rebuild',
         };
     }
 
     /**
-     * @param array<string, string> $input
+     * @param  array<string, string>  $input
      * @return callable(Git): array<mixed>
      */
     private function checkoutChange(string $action, array $input): callable
@@ -428,13 +447,13 @@ class GitActions
     }
 
     /**
-     * @param callable(Git): array<mixed> $action
+     * @param  callable(Git): array<mixed>  $action
      * @return array<mixed>
      */
     private function run(User $user, ?string $path, callable $action, bool $redeployIfManaged = false): array
     {
         return $this->onCheckout($user, $path, function (Git $git, ProjectAggregate $project) use ($action, $redeployIfManaged): array {
-            if (!$redeployIfManaged) {
+            if (! $redeployIfManaged) {
                 return $action($git);
             }
 
@@ -447,9 +466,9 @@ class GitActions
      * Given a `$logger`, a change git refuses, or one cancelled while git
      * runs, closes that deploy before the tree is settled; the rebuild
      * finishes it otherwise. A tree put back brings its branch records back
-     * ({@see \App\System\Project\Dind\Generation\CheckoutAside}).
+     * ({@see CheckoutAside}).
      *
-     * @param callable(Git): array<mixed> $action
+     * @param  callable(Git): array<mixed>  $action
      * @return array{commit: ?string, checkout: array<mixed>}
      */
     private function changeAndRebuild(Git $git, ProjectAggregate $project, callable $action, ?DeployLogger $logger): array
@@ -472,7 +491,7 @@ class GitActions
      * without finishing, and the lock it keeps would stop the served tree coming back. A runtime
      * with nothing to rebuild returns with the deploy still running, so it is finished here.
      *
-     * @param callable(Git): array<mixed> $action
+     * @param  callable(Git): array<mixed>  $action
      * @return array{commit: ?string, checkout: array<mixed>}
      */
     private function changeThenRebuild(Git $git, ProjectAggregate $project, CheckoutRedeploy $redeploy, callable $action, ?DeployLogger $logger): array
@@ -480,8 +499,8 @@ class GitActions
         try {
             $data = $action($git);
         } catch (\Throwable $e) {
-            if ($logger !== null && !$logger->isFinished()) {
-                $logger->finish(DeployLogger::STATUS_FAILED, 'Could not change the checkout: ' . GitUrl::sanitize($e->getMessage()));
+            if ($logger !== null && ! $logger->isFinished()) {
+                $logger->finish(DeployLogger::STATUS_FAILED, 'Could not change the checkout: '.GitUrl::sanitize($e->getMessage()));
             }
             throw $e;
         }

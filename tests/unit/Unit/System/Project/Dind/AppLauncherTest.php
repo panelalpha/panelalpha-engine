@@ -30,6 +30,23 @@ class AppLauncherTest extends TestCase
         );
     }
 
+    // A failed push puts the target's files and volumes back and starts it asking for new containers:
+    // one only started again would keep a mount of the pushed data the rollback removed.
+    public function test_a_start_asked_to_recreate_recreates_whatever_the_strategy(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 6) . '/core/app/System/Project/Dind/AppLauncher.php');
+
+        $this->assertStringContainsString('$this->startWithLogins($forceRecreate)', $this->methodBody($source, 'start'));
+        $this->assertStringContainsString(
+            '$this->releaseThenBringUp($skipBuild, $forceRecreate,',
+            $this->methodBody($source, 'startWithLogins')
+        );
+        $this->assertStringContainsString(
+            '$forceRecreate || $this->mustForceRecreate($strategy, $runtime)',
+            $this->methodBody($source, 'releaseThenBringUp')
+        );
+    }
+
     public function test_compose_up_reads_the_deploys_registry_logins_when_there_are_any(): void
     {
         $command = ['env', 'PWD=/home/a/project', 'docker', 'compose', 'up', '-d'];

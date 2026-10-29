@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * Build tools a Rust project's build scripts call that `rust:1-bookworm` lacks.
  *
@@ -42,7 +44,7 @@ final class RustBuildTools
         $dir = rtrim($projectDir, '/');
         $packages = [];
 
-        $lock = @file_get_contents($dir . '/Cargo.lock');
+        $lock = AccountHomeRead::contents($dir.'/Cargo.lock');
         if (is_string($lock) && preg_match_all('/^name\s*=\s*"([A-Za-z0-9_-]+)"/m', $lock, $m) > 0) {
             foreach (array_unique($m[1]) as $crate) {
                 foreach (self::CRATES[$crate] ?? [] as $package) {
@@ -52,8 +54,8 @@ final class RustBuildTools
         }
 
         foreach (['/.cargo/config.toml', '/.cargo/config'] as $file) {
-            $config = @file_get_contents($dir . $file);
-            if (!is_string($config)) {
+            $config = AccountHomeRead::contents($dir.$file);
+            if (! is_string($config)) {
                 continue;
             }
             if (preg_match_all('/-fuse-ld=([a-z]+)/', $config, $m) > 0) {

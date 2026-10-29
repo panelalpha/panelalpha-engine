@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A PHP manifest declares where its document root is, not how to serve it.
@@ -135,11 +136,11 @@ class PhpDocrootTest extends TestCase
                 'id' => 'serve',
                 'stage' => 'start',
                 'serve' => true,
-                'run' => 'exec php -S 0.0.0.0:8000',
+                'run' => 'exec php -S ' . TestNetwork::ANY . ':8000',
             ]],
         ]);
 
-        $this->assertSame('exec php -S 0.0.0.0:8000', $manifest->serveCommand()->run);
+        $this->assertSame('exec php -S ' . TestNetwork::ANY . ':8000', $manifest->serveCommand()->run);
     }
 
     /** @param list<string> $files */

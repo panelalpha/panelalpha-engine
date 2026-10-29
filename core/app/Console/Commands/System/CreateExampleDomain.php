@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands\System;
 
-use App\System;
 use App\Lib\Helper;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
@@ -11,6 +10,7 @@ use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\Setting;
 use App\Models\User;
+use App\System;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -34,12 +34,12 @@ class CreateExampleDomain extends Command
 
         // If it starts with github.com/, add https://
         if (str_starts_with($repo, 'github.com/')) {
-            return 'https://' . $repo;
+            return 'https://'.$repo;
         }
 
         // If it's in owner/repo format, assume GitHub
         if (preg_match('/^[^\/]+\/[^\/]+$/', $repo)) {
-            return 'https://github.com/' . $repo;
+            return 'https://github.com/'.$repo;
         }
 
         // Otherwise return as-is (will fail validation)
@@ -48,16 +48,16 @@ class CreateExampleDomain extends Command
 
     public function handle(ProjectCreator $creator): int
     {
-        $alreadyCreated = !empty(Setting::get('example-domain-created'));
+        $alreadyCreated = ! empty(Setting::get('example-domain-created'));
         if ($alreadyCreated) {
             $this->info('Example domain has been created before.');
+
             return 0;
         }
 
         // $username = $this->getUsername();
         // $domainName = $this->getDomainName();
-        
-        
+
         // $domainRedirectUrl = null;
 
         // /** @var mixed */
@@ -102,10 +102,10 @@ class CreateExampleDomain extends Command
             $params['git_repo'] = $this->normalizeGitRepo($gitRepo);
             $params['username'] = Helper::generateUsername($gitRepo);
         }
-        if (!Setting::get('default_wildcard_domain')) {
-            $defaultIpv4 = (string)Setting::get('default_ipv4');
+        if (! Setting::get('default_wildcard_domain')) {
+            $defaultIpv4 = (string) Setting::get('default_ipv4');
             if (filter_var($defaultIpv4, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                Setting::set('default_wildcard_domain', Str::replace('.', '-', $defaultIpv4) . '.sslip.io');
+                Setting::set('default_wildcard_domain', Str::replace('.', '-', $defaultIpv4).'.sslip.io');
             }
         }
         if (empty($params['username'])) {
@@ -114,7 +114,7 @@ class CreateExampleDomain extends Command
         $params['domain'] = Helper::generateDomainName($params['username']);
         Setting::set('vhost-default-ip-domain', $params['domain']);
 
-        Log::debug("create-example-domain: creating user with params", [
+        Log::debug('create-example-domain: creating user with params', [
             'params' => $params,
         ]);
         $creator->queue(NewProjectInput::fromArray($params));
@@ -128,8 +128,9 @@ class CreateExampleDomain extends Command
         $domain->save();
 
         if ($user->getGitRepo()) {
-            $url = 'https://' . (string)Setting::get('default_ipv4');
+            $url = 'https://'.(string) Setting::get('default_ipv4');
             $this->info("Example domain with Git repository created: {$url}");
+
             return 0;
         }
 
@@ -139,25 +140,26 @@ class CreateExampleDomain extends Command
     private function handleWordpressInstallation(User $user, Domain $domain): int
     {
         // Only install WordPress if no git repo is specified
-        $path = $user->getHomeDir() . $domain->getDocumentRoot();
+        $path = $user->getHomeDir().$domain->getDocumentRoot();
         $result = $user->project()->runWpCli([
             'core',
             'download',
-            '--path=' . $path,
+            '--path='.$path,
         ]);
         if ($result['exit_code'] !== 0) {
-            $this->error('Error during wp-cli core download: ' . ($result['stderr'] ?: $result['stdout']) . " (exit code {$result['exit_code']})");
+            $this->error('Error during wp-cli core download: '.($result['stderr'] ?: $result['stdout'])." (exit code {$result['exit_code']})");
+
             return 1;
         }
 
-        $mysql = (new System())->mysql();
-        $dbname = $user->getMysqlPrefix() . 'example';
+        $mysql = (new System)->mysql();
+        $dbname = $user->getMysqlPrefix().'example';
         $mysql->databases()->createDatabase($dbname);
         MysqlDatabase::create([
             'user_id' => $user->id,
             'database' => $dbname,
         ]);
-        $dbuser = $user->getMysqlPrefix() . 'example';
+        $dbuser = $user->getMysqlPrefix().'example';
         $dbpass = Str::random(16);
         $mysql->users()->createUser($dbuser, $dbpass);
         MysqlUser::create([
@@ -168,37 +170,39 @@ class CreateExampleDomain extends Command
 
         /** @var mixed */
         $dbhost = config('env.USERS_DB_HOST');
-        if (!is_string($dbhost)) {
+        if (! is_string($dbhost)) {
             $dbhost = 'database-users.shared-hosting.palocal';
         }
         $result = $user->project()->runWpCli([
             'config',
             'create',
-            '--path=' . $path,
-            '--dbname=' . $dbname,
-            '--dbuser=' . $dbuser,
-            '--dbpass=' . $dbpass,
-            '--dbhost=' . $dbhost,
+            '--path='.$path,
+            '--dbname='.$dbname,
+            '--dbuser='.$dbuser,
+            '--dbpass='.$dbpass,
+            '--dbhost='.$dbhost,
         ]);
         if ($result['exit_code'] !== 0) {
-            $this->error('Error during wp-cli config create: ' . ($result['stderr'] ?: $result['stdout']) . " (exit code {$result['exit_code']})");
+            $this->error('Error during wp-cli config create: '.($result['stderr'] ?: $result['stdout'])." (exit code {$result['exit_code']})");
+
             return 1;
         }
 
-        $url = 'https://' . (string)Setting::get('default_ipv4');
+        $url = 'https://'.(string) Setting::get('default_ipv4');
         $result = $user->project()->runWpCli([
             'core',
             'install',
-            '--path=' . $path,
-            '--url=' . $url,
+            '--path='.$path,
+            '--url='.$url,
             '--title=Example Website',
             '--admin_user=admin',
-            '--admin_password=' . Str::random(16),
-            '--admin_email=' . $this->getEmail(),
+            '--admin_password='.Str::random(16),
+            '--admin_email='.$this->getEmail(),
             '--skip-email',
         ]);
         if ($result['exit_code'] !== 0) {
-            $this->error('Error during wp-cli core install: ' . ($result['stderr'] ?: $result['stdout']) . " (exit code {$result['exit_code']})");
+            $this->error('Error during wp-cli core install: '.($result['stderr'] ?: $result['stdout'])." (exit code {$result['exit_code']})");
+
             return 1;
         }
 
@@ -208,13 +212,14 @@ class CreateExampleDomain extends Command
             'install',
             $themeName,
             '--activate',
-            '--path=' . $path,
+            '--path='.$path,
         ]);
         if ($result['exit_code'] !== 0) {
             Log::warning("Could not install theme '{$themeName}' on example domain", $result);
         }
 
         $this->info("Example domain with WordPress created: {$url}");
+
         return 0;
     }
 
@@ -233,10 +238,11 @@ class CreateExampleDomain extends Command
 
     private function getEmail(): string
     {
-        $email = (string)Setting::get('email');
+        $email = (string) Setting::get('email');
         if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return $email;
         }
+
         return 'user@localhost.localdomain';
     }
 
@@ -248,7 +254,7 @@ class CreateExampleDomain extends Command
             if ($this->usernameAvailable($username)) {
                 return $username;
             }
-            $username = $base . rand(1000, 9999);
+            $username = $base.rand(1000, 9999);
         } while ($limit--);
         throw new \Exception('Cannot get available username');
     }
@@ -258,9 +264,10 @@ class CreateExampleDomain extends Command
         if (User::existsByUsername($username)) {
             return false;
         }
-        if ((new System())->isUsernameAvailable($username)) {
+        if ((new System)->isUsernameAvailable($username)) {
             return true;
         }
+
         return false;
     }
 }

@@ -32,15 +32,15 @@ final class HookEvent
     public readonly array $changes;
 
     /**
-     * @param string           $kind       PING, PUSH or OTHER
-     * @param string           $event      the provider's own name for it (`push`, `ping`, `issues`)
-     * @param ?string          $deliveryId the provider's id for this delivery, the same on a redelivery
-     * @param ?string          $ref        the full ref (`refs/heads/main`), pushes only
-     * @param ?string          $branch     the branch name, when the ref is one -- also for a deletion
-     * @param bool             $tag        the ref is a tag
-     * @param bool             $deleted    the push removed the ref
-     * @param ?string          $commit     the commit the ref points at now
-     * @param list<RefChange>  $changes    the refs a multi-ref push moved; leave empty for a single ref
+     * @param  string  $kind  PING, PUSH or OTHER
+     * @param  string  $event  the provider's own name for it (`push`, `ping`, `issues`)
+     * @param  ?string  $deliveryId  the provider's id for this delivery, the same on a redelivery
+     * @param  ?string  $ref  the full ref (`refs/heads/main`), pushes only
+     * @param  ?string  $branch  the branch name, when the ref is one -- also for a deletion
+     * @param  bool  $tag  the ref is a tag
+     * @param  bool  $deleted  the push removed the ref
+     * @param  ?string  $commit  the commit the ref points at now
+     * @param  list<RefChange>  $changes  the refs a multi-ref push moved; leave empty for a single ref
      */
     public function __construct(
         public readonly string $provider,
@@ -62,7 +62,7 @@ final class HookEvent
     /**
      * A push that carries a list of ref changes, possibly none.
      *
-     * @param list<RefChange> $changes
+     * @param  list<RefChange>  $changes
      */
     public static function push(string $provider, string $event, ?string $deliveryId, array $changes): self
     {

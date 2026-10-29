@@ -25,7 +25,7 @@ class ToolsListCommand extends Command
 
     public function handle(): int
     {
-        $policy = new ToolPolicy();
+        $policy = new ToolPolicy;
 
         $all = ToolRegistry::all();
         $exposed = $policy->filter($all);

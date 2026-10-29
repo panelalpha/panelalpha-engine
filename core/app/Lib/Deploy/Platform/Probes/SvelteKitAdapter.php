@@ -50,7 +50,7 @@ final class SvelteKitAdapter
     /** Why a project configured for $adapter cannot be served here, or null when it can. */
     public static function refusal(string $adapter): ?string
     {
-        if (!array_key_exists($adapter, self::PLATFORM_ONLY)) {
+        if (! array_key_exists($adapter, self::PLATFORM_ONLY)) {
             return null;
         }
         $platform = self::PLATFORM_ONLY[$adapter];
@@ -58,7 +58,7 @@ final class SvelteKitAdapter
             ? 'svelte.config uses @sveltejs/adapter-auto, which writes no output outside Vercel, Netlify or Cloudflare.'
             : "svelte.config uses @sveltejs/adapter-{$adapter}, which builds for {$platform} only.";
 
-        return $head . ' Switch it to @sveltejs/adapter-node (a Node server) or @sveltejs/adapter-static '
-            . '(a static site) to deploy it here.';
+        return $head.' Switch it to @sveltejs/adapter-node (a Node server) or @sveltejs/adapter-static '
+            .'(a static site) to deploy it here.';
     }
 }

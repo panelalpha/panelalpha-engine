@@ -203,7 +203,7 @@ class DindInnerRuntimeTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $argv = $this->withoutSudo($cmd);
-                if (($argv[0] ?? null) !== 'test') {
+                if (!in_array($argv[0] ?? null, ['test', 'stat', 'realpath', 'python3'], true)) {
                     throw new \LogicException('Unexpected process in test: ' . implode(' ', $argv));
                 }
                 $process = new Process($argv);
@@ -216,7 +216,7 @@ class DindInnerRuntimeTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $argv = $this->withoutSudo($cmd);
-                if (in_array($argv[0] ?? null, ['mkdir', 'cp', 'chmod'], true)) {
+                if (in_array($argv[0] ?? null, ['mkdir', 'cp', 'chmod', 'mv'], true)) {
                     return (new Process($argv))->mustRun()->getOutput();
                 }
                 // The account's answer to which lxcfs files it has.

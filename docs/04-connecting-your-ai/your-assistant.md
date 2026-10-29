@@ -62,7 +62,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`system_exim_config_get`, `app_credentials_get`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
 | `modify` | Create and change things, and blocks only DELETE routes. It is **not** a "no destructive actions" setting: the write tools that are not plain creations (`ssh_run`, `wp_cli_run`, `backup_restore`, `file_write`, `system_update`, `firewall_disable`, `project_rebuild`) still run. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 225 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 287 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -176,7 +176,7 @@ List the users on this WordPress site.
 Update all plugins on this site.
 ```
 
-Backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. WP-CLI and changing PHP need traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
+WP-CLI, its named operations (plugins, themes, users, core, cache), backups and domains work on WordPress that is already on this engine, in its own container or on traditional PHP hosting. The App users actions and the install wizard need a WordPress site in its own container. Changing PHP needs traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
 
 **Change the PHP version on traditional WordPress**
 
@@ -188,7 +188,7 @@ Set shop.example.com to PHP 8.2.
 **Raise PHP memory on this project**
 
 ```text
-Set PHP memory_limit to 256M on this project.
+Set PHP 8.2 memory_limit to 256M on this project.
 ```
 
 **Deploy a public repository**
@@ -344,7 +344,7 @@ pae mcp:tool:list
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
-| [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 3 |
+| [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 4 |
 | [MySQL databases](#mysql-databases) | `mysqldatabases` | On | 5 |
 | [MySQL users](#mysql-users) | `mysqlusers` | On | 6 |
 | [MySQL privileges](#mysql-privileges) | `mysqlprivileges` | On | 3 |
@@ -356,12 +356,13 @@ pae mcp:tool:list
 | [PHP](#php) | `php` | On | 4 |
 | [Containers](#containers) | `containers` | On | 5 |
 | [App users](#app-users) | `appusers` | On | 8 |
-| [Usage](#usage) | `usage` | On | 5 |
-| [WP-CLI](#wp-cli) | `wpcli` | On | 1 |
+| [Usage](#usage) | `usage` | On | 7 |
+| [WP-CLI](#wp-cli) | `wpcli` | On | 49 |
+| [WordPress import](#wordpress-import) | `wordpressmigrations` | On | 7 |
 | [Deploy](#deploy) | `deploy` | On | 7 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
 | [System](#system) | `system` | On | 15 |
-| [Server metrics](#server-metrics) | `servermetrics` | On | 5 |
+| [Server metrics](#server-metrics) | `servermetrics` | On | 6 |
 | [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
 | [ModSecurity](#modsecurity) | `modsecurity` | On | 11 |
@@ -370,6 +371,7 @@ pae mcp:tool:list
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
 | [Backups](#backups) | `backups` | On | 9 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
+| [CDN](#cdn) | `cdn` | On | 3 |
 | [Git](#git) | `git` | On | 16 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
@@ -456,6 +458,7 @@ pae mcp:tool:list
 | `ssl_cert_get` | Get installed SSL cert for a domain |
 | `ssl_cert_install` | Install a custom SSL certificate on a domain |
 | `ssl_cert_list` | List installed SSL certificates for the domains of a project |
+| `ssl_check` | Check the certificate a domain really serves |
 
 ## MySQL databases
 
@@ -583,12 +586,78 @@ pae mcp:tool:list
 | `domain_bandwidth` | Transfer over a date range for one domain |
 | `domain_visitors` | Visitor overview for a domain. `start`/`end` clip daily hits and visits; unique visitors, session length, and breakdowns are overlapping calendar months. Period aliases such as last-week stay in the client. |
 | `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain), or requests and bytes per HTTP status (`status_codes`, exact range) |
+| `project_metrics_history` | A project's CPU and memory over 1 hour, 24 hours, 7 days or 30 days |
+| `container_metrics` | CPU and memory of each container inside a project, now or over a `range` |
 
 ## WP-CLI
 
+Named WordPress operations and the raw WP-CLI command. They work on traditional PHP hosting and on WordPress in a project's own containers: [Run WP-CLI](../05-capabilities/wordpress-and-apps.md#run-wp-cli).
+
 | Tool | What it does |
 |---|---|
+| `wp_app_password_create` | Create an application password for a WordPress user |
+| `wp_app_password_delete` | Delete an application password for a WordPress user |
+| `wp_app_password_list` | List application passwords for a WordPress user |
+| `wp_auto_update_get` | Read WordPress auto-update settings |
+| `wp_auto_update_set` | Set WordPress auto-update settings |
+| `wp_cache_flush` | Flush the WordPress object and page caches |
 | `wp_cli_run` | Run a WP-CLI command |
+| `wp_config_create` | Create wp-config.php |
+| `wp_config_delete` | Delete a WordPress wp-config constant |
+| `wp_config_get` | Read a WordPress wp-config constant |
+| `wp_config_list` | List WordPress wp-config constants |
+| `wp_config_set` | Set a WordPress wp-config constant |
+| `wp_core_check_update` | List available WordPress core updates |
+| `wp_core_download` | Download WordPress core files |
+| `wp_core_install` | Install WordPress core |
+| `wp_core_status` | Read WordPress core status |
+| `wp_core_update` | Update WordPress core to a target version |
+| `wp_database_export` | Export the WordPress install database to a file |
+| `wp_database_import` | Import a SQL file into the WordPress install database |
+| `wp_language_set` | Set the WordPress site language |
+| `wp_maintenance_get` | Read WordPress maintenance mode |
+| `wp_maintenance_set` | Set WordPress maintenance mode |
+| `wp_option_get` | Read a WordPress option |
+| `wp_option_list` | List WordPress options |
+| `wp_option_set` | Update a WordPress option |
+| `wp_plugin_activate` | Activate a WordPress plugin |
+| `wp_plugin_deactivate` | Deactivate a WordPress plugin |
+| `wp_plugin_delete` | Delete a WordPress plugin |
+| `wp_plugin_get` | Read one installed WordPress plugin |
+| `wp_plugin_install` | Install a WordPress plugin |
+| `wp_plugin_is_installed` | Check whether a WordPress plugin is installed |
+| `wp_plugin_list` | List installed WordPress plugins |
+| `wp_plugin_search` | Search wordpress.org for plugins |
+| `wp_plugin_update` | Update a WordPress plugin |
+| `wp_search_replace` | Search-replace a string in the WordPress install |
+| `wp_theme_activate` | Activate a WordPress theme |
+| `wp_theme_delete` | Delete a WordPress theme |
+| `wp_theme_get` | Read one installed WordPress theme |
+| `wp_theme_install` | Install a WordPress theme |
+| `wp_theme_is_installed` | Check whether a WordPress theme is installed |
+| `wp_theme_list` | List installed WordPress themes |
+| `wp_theme_search` | Search wordpress.org for themes |
+| `wp_theme_update` | Update a WordPress theme |
+| `wp_user_create` | Create a WordPress user |
+| `wp_user_delete` | Delete a WordPress user |
+| `wp_user_list` | List WordPress users |
+| `wp_user_password_set` | Set a WordPress user password |
+| `wp_user_sso_create` | Create a one-time SSO URL for a WordPress user |
+| `wp_user_update` | Update a WordPress user |
+
+## WordPress import
+
+Moves a WordPress site from another host onto this engine: [Move a WordPress site here](../05-capabilities/wordpress-and-apps.md#move-a-wordpress-site-here).
+
+| Tool | What it does |
+|---|---|
+| `wordpress_migration_cancel` | Cancel a WordPress migration and remove what it made |
+| `wordpress_migration_create` | Start a WordPress site migration |
+| `wordpress_migration_delete` | Delete a finished WordPress migration record |
+| `wordpress_migration_get` | Get WordPress migration status |
+| `wordpress_migration_package_create` | Get the migrator plugin for a manual_plugin migration |
+| `wordpress_migration_resume` | Resume a failed or stalled WordPress migration |
+| `wordpress_migration_test` | Test the connection to a WordPress site before migrating it |
 
 ## Deploy
 
@@ -637,6 +706,7 @@ pae mcp:tool:list
 | Tool | What it does |
 |---|---|
 | `metrics_current` | Get current server metrics |
+| `metrics_history` | Averaged server metrics over 1 hour, 24 hours, 7 days or 30 days |
 | `metrics_last_12_hours` | Get metrics for the last 12 hours |
 | `metrics_last_5_minutes` | Get metrics for the last 5 minutes |
 | `metrics_last_hour` | Get metrics for the last hour |
@@ -731,6 +801,16 @@ pae mcp:tool:list
 | `tunnel_delete` | Remove a public tunnel hostname |
 | `tunnel_list` | List a domain's public tunnel hostnames |
 
+## CDN
+
+Cloudflare cache and security level for a domain, with the project's own Cloudflare token: [Cloudflare](../05-capabilities/cloudflare.md#purge-the-cache-and-change-the-security-level).
+
+| Tool | What it does |
+|---|---|
+| `cdn_get` | Read a domain's Cloudflare CDN status |
+| `cdn_purge` | Purge a domain's Cloudflare cache |
+| `cdn_security_level_set` | Set a domain's Cloudflare security level |
+
 ## Git
 
 | Tool | What it does |
@@ -790,7 +870,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 
 ### What you can see, and what you cannot
 
-A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's reference (`vault:<id>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
+A secret is never readable again. Not by your assistant, not by you, not by any command. An environment variable set from a `vault:<key>` stays masked in the project's variable list, even when the list is asked to show the values. What you can always see is the **inventory**: each entry's reference (`vault:<key>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
 
 Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
 
@@ -815,7 +895,7 @@ Create a project from https://github.com/acme/shop with the global
 acme Git token.
 ```
 
-The assistant passes the secret's reference, such as `vault:7`, in place of the token. A project created without a token gets none, even when the engine holds global secrets. Inspecting a repository can use a global secret, or a project secret that no project owns yet. Inspecting does not make the secret belong to anything; the first project given it does.
+The assistant passes the secret's reference, such as `vault:Kq3xT9bL...`, in place of the token. The reference is random, so a token that may not list the vault cannot use a secret by guessing it. A project created without a token gets none, even when the engine holds global secrets. Inspecting a repository can use a global secret, or a project secret that no project owns yet. Inspecting does not make the secret belong to anything; the first project given it does.
 
 The paste page closes after an hour. A secret is kept until it is deleted, unless you give it an expiry when you ask for the link ("keep it for 7 days"); after that it is refused and the engine deletes it by itself. A project stores the secret it was given, so deleting the vault entry does not take it away from projects that already used it. The engine never looks a secret up in the vault on a project's behalf.
 

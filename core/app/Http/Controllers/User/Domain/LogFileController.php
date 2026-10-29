@@ -7,9 +7,9 @@ use App\Lib\Domains\DomainLogFiles;
 use App\System as EngineSystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
-use OpenApi\Attributes as OA;
 
 class LogFileController extends Controller
 {
@@ -30,9 +30,8 @@ class LogFileController extends Controller
         ],
     )]
     /**
-     * @param Request $request
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return JsonResponse
      */
     public function index(Request $request, $username, $domain, EngineSystem $system)
@@ -44,7 +43,7 @@ class LogFileController extends Controller
         $user = $this->projectOr404($username);
         $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
 
-        return new JsonResponse(['data' => $logFiles->list(!empty($params['all_webservers']))]);
+        return new JsonResponse(['data' => $logFiles->list(! empty($params['all_webservers']))]);
     }
 
     #[OA\Get(
@@ -63,10 +62,9 @@ class LogFileController extends Controller
         ],
     )]
     /**
-     * @param Request $request
-     * @param string $username
-     * @param string $domain
-     * @param string $filename
+     * @param  string  $username
+     * @param  string  $domain
+     * @param  string  $filename
      * @return BinaryFileResponse
      */
     public function download(Request $request, $username, $domain, $filename, EngineSystem $system)
@@ -77,7 +75,7 @@ class LogFileController extends Controller
 
         $user = $this->projectOr404($username);
         $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
-        $path = $logFiles->readablePath($filename, !empty($params['all_webservers'])) ?? abort(404, 'Not found');
+        $path = $logFiles->readablePath($filename, ! empty($params['all_webservers'])) ?? abort(404, 'Not found');
 
         try {
             /** @var BinaryFileResponse */

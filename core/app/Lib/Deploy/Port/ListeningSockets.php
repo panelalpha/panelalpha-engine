@@ -71,7 +71,7 @@ final class ListeningSockets
                 return true;
             }
             // A JVM binds 127.0.0.1 as ::ffff:127.0.0.1 in tcp6.
-            if (!str_starts_with($hex, self::V4_MAPPED_PREFIX)) {
+            if (! str_starts_with($hex, self::V4_MAPPED_PREFIX)) {
                 return false;
             }
             $hex = substr($hex, 24);
@@ -92,8 +92,8 @@ final class ListeningSockets
      * outranks the generic preference: rapidbay listens on 80 (a stock nginx
      * page) and on its declared 5000.
      *
-     * @param list<array{addr: string, port: int}> $sockets
-     * @param list<int> $declared
+     * @param  list<array{addr: string, port: int}>  $sockets
+     * @param  list<int>  $declared
      */
     public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
@@ -105,8 +105,8 @@ final class ListeningSockets
      * that finds the first one does not speak HTTP can try the next: php-fpm
      * on 9000 ranks above a real server on 8081.
      *
-     * @param list<array{addr: string, port: int}> $sockets
-     * @param list<int> $declared
+     * @param  list<array{addr: string, port: int}>  $sockets
+     * @param  list<int>  $declared
      * @return list<int>
      */
     public static function rankedAppPorts(array $sockets, int $expected, array $declared = []): array
@@ -126,7 +126,7 @@ final class ListeningSockets
 
         $ranked = [];
         foreach ([...$declared, ...self::WEB_PORT_PREFERENCE] as $preferred) {
-            if (in_array($preferred, $reachable, true) && !in_array($preferred, $ranked, true)) {
+            if (in_array($preferred, $reachable, true) && ! in_array($preferred, $ranked, true)) {
                 $ranked[] = $preferred;
             }
         }
@@ -142,12 +142,12 @@ final class ListeningSockets
      * pointing at yet"; the caller must tell those apart before it stops
      * waiting.
      *
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      */
     public static function serves(array $sockets, int $port): bool
     {
         foreach ($sockets as $socket) {
-            if ((int) $socket['port'] === $port && !self::isLoopback((string) $socket['addr'])) {
+            if ((int) $socket['port'] === $port && ! self::isLoopback((string) $socket['addr'])) {
                 return true;
             }
         }
@@ -156,7 +156,7 @@ final class ListeningSockets
     }
 
     /**
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      * @return list<int>
      */
     private static function reachablePorts(array $sockets): array
@@ -174,8 +174,8 @@ final class ListeningSockets
 
     private static function isReachable(string $addr, int $port): bool
     {
-        return !self::isLoopback($addr)
-            && !in_array($port, self::INFRA_PORTS, true)
+        return ! self::isLoopback($addr)
+            && ! in_array($port, self::INFRA_PORTS, true)
             && $port < self::EPHEMERAL_PORT_MIN;
     }
 }

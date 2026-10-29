@@ -19,11 +19,9 @@ final class CancelledGeneration
 
     /** Removes the containers named before `--`, then each image after it that no container uses. */
     private const REMOVE_SCRIPT = 'ids=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do ids+=("$1"); shift; done; shift; '
-        . 'docker rm -f "${ids[@]}" >/dev/null || exit 1; for image in "$@"; do docker rmi "$image" >/dev/null 2>&1; done; true';
+        .'docker rm -f "${ids[@]}" >/dev/null || exit 1; for image in "$@"; do docker rmi "$image" >/dev/null 2>&1; done; true';
 
-    public function __construct(private readonly DindProject $project)
-    {
-    }
+    public function __construct(private readonly DindProject $project) {}
 
     /**
      * Nothing goes while a version it was replacing may be what serves: the sweep settles that.
@@ -33,7 +31,7 @@ final class CancelledGeneration
     public function remove(): array
     {
         $since = $this->deployStartedAt();
-        if ($since === null || !$this->replacedNothingRunning()) {
+        if ($since === null || $this->runFileNotWrittenYet() || ! $this->replacedNothingRunning()) {
             return [];
         }
         $containers = self::createdSince((string) $this->inspectProject(), $since);
@@ -79,22 +77,52 @@ final class CancelledGeneration
         return is_int($started) ? $started : null;
     }
 
-    /** No running version was noted, or every container of the one noted still runs. */
+    /**
+     * The checkout is aside and ~/project holds no run file yet: compose cannot read the app's
+     * project, and the redeploy has started nothing from a run file it has not written.
+     */
+    private function runFileNotWrittenYet(): bool
+    {
+        if ((new GenerationState($this->project->username()))->get(GenerationState::CHECKOUT) === null
+            || $this->project->system()->filesystem()->fileExists($this->project->userAppComposeFilePath())) {
+            return false;
+        }
+        Log::info("Nothing to remove for the cancelled redeploy of {$this->project->username()}: "
+            .'its checkout is aside and the new run file is not written yet');
+
+        return true;
+    }
+
+    /** Nothing ran when the redeploy started, or every container of the version noted still runs. */
     private function replacedNothingRunning(): bool
     {
         $entry = (new RoutingSnapshot($this->project))->entry();
         if ($entry === null) {
-            return true;
+            return $this->notedNothingRunning();
         }
 
         return CheckoutAside::allRunning($this->project, array_values(array_filter((array) ($entry['containers'] ?? []), 'is_string'))) === true;
     }
 
+    /** Only a snapshot that read the app's containers and found none says so: what it could not read may be live. */
+    private function notedNothingRunning(): bool
+    {
+        $state = new GenerationState($this->project->username());
+        if ($state->get(GenerationState::UNREAD) !== null) {
+            Log::info("Left what the cancelled redeploy of {$this->project->username()} created: "
+                .'its containers could not be read when it started, so it may be what serves');
+
+            return false;
+        }
+
+        return $state->get(GenerationState::STOPPED) !== null;
+    }
+
     private function inspectProject(): ?string
     {
         $ps = implode(' ', array_map('escapeshellarg', $this->project->userAppComposeCommand(['ps', '--all', '--quiet'])));
-        $script = 'ids=$(' . $ps . ') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            . escapeshellarg(self::CONTAINER_FORMAT) . ' $ids';
+        $script = 'ids=$('.$ps.') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
+            .escapeshellarg(self::CONTAINER_FORMAT).' $ids';
 
         return $this->quietly(fn (): string => $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS));
     }
@@ -115,8 +143,8 @@ final class CancelledGeneration
     }
 
     /**
-     * @param list<string> $containers
-     * @param list<string> $images
+     * @param  list<string>  $containers
+     * @param  list<string>  $images
      * @return list<string>
      */
     private function removeAll(array $containers, array $images): array
@@ -130,7 +158,7 @@ final class CancelledGeneration
             return [];
         }
         Log::info("Removed what the cancelled redeploy of {$this->project->username()} created: "
-            . count($containers) . ' container(s), and their new images where nothing else uses them');
+            .count($containers).' container(s), and their new images where nothing else uses them');
 
         return $containers;
     }
@@ -141,7 +169,7 @@ final class CancelledGeneration
         try {
             return $exec();
         } catch (\Throwable $e) {
-            Log::warning("Could not remove what the cancelled redeploy of {$this->project->username()} created: " . $e->getMessage());
+            Log::warning("Could not remove what the cancelled redeploy of {$this->project->username()} created: ".$e->getMessage());
 
             return null;
         }

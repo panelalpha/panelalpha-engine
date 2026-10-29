@@ -5,6 +5,7 @@ import { assertDeploymentWarnings, requireServing } from '@/helpers/app-health';
 import { DEFAULT_DEPLOY_GIT_REPO, waitForDeploy } from '@/helpers/deploy-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 import { taskIdFromBody } from '@/helpers/task-helpers';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * The code the shared create/attach repository check reports for a refused
@@ -142,7 +143,7 @@ test.describe('attach a git source to an existing project', () => {
       expect(JSON.stringify(missing.body), 'git_repo is required').toContain('git_repo_required');
 
       const privateAddress = await api.attachSourceRaw(user.username, {
-        git_repo: 'http://10.10.0.25:18660/r7.git',
+        git_repo: `http://${testNetwork.PRIVATE_10}:18660/r7.git`,
       });
       await expectStatus(privateAddress, 422);
       expect(JSON.stringify(privateAddress.body), 'the refused address is named').toContain(

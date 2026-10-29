@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy;
 
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * An app a recipe declares HTTPS-only (`port_scheme: https`): nginx with
@@ -62,7 +63,7 @@ class HealthProbeDeclaredSchemeTest extends TestCase
         [$scheme, $code, $urls] = $this->probe([8443]);
 
         $this->assertSame(['https', '200'], [$scheme, $code]);
-        $this->assertSame(['https://127.0.0.1:8443/'], $urls);
+        $this->assertSame(['https://' . TestNetwork::LOOPBACK . ':8443/'], $urls);
     }
 
     /** Undeclared, http still comes first: its answer is kept as before. */
@@ -71,6 +72,6 @@ class HealthProbeDeclaredSchemeTest extends TestCase
         [$scheme, $code, $urls] = $this->probe([]);
 
         $this->assertSame(['http', '400'], [$scheme, $code]);
-        $this->assertSame(['http://127.0.0.1:8443/'], $urls);
+        $this->assertSame(['http://' . TestNetwork::LOOPBACK . ':8443/'], $urls);
     }
 }

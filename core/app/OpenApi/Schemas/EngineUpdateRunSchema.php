@@ -17,7 +17,7 @@ use OpenApi\Attributes as OA;
             type: 'boolean',
             example: false,
             description: 'True when the run exited non-zero, or ended without writing an exit code: its process is gone, '
-                . 'or it never started within the grace period. The tails then say why.',
+                .'or it never started within the grace period. The tails then say why.',
         ),
         new OA\Property(
             property: 'reason',
@@ -25,7 +25,7 @@ use OpenApi\Attributes as OA;
             nullable: true,
             example: 'the update job never started',
             description: 'Why a failed run failed when neither output tail says it: the job never started, or its '
-                . 'process ended without writing an exit code.',
+                .'process ended without writing an exit code.',
         ),
         new OA\Property(property: 'tail_stdout', type: 'string', nullable: true, description: 'The last lines of its output'),
         new OA\Property(property: 'tail_stderr', type: 'string', nullable: true, description: 'The last lines of its error output'),
@@ -35,6 +35,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class EngineUpdateRunSchema
-{
-}
+class EngineUpdateRunSchema {}

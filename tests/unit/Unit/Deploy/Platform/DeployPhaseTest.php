@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Platform;
 
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Models\User as ModelsUser;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -40,6 +41,25 @@ class DeployPhaseTest extends TestCase
     public function test_a_failed_redeploy_of_a_deployed_account_is_still_upgrading(): void
     {
         $this->assertSame(PlatformStage::UPGRADE, PlatformStage::phaseFor('failed', true));
+    }
+
+    /** The project answers from its own deploy history, the way phaseFor() does. */
+    public function test_a_project_upgrades_once_it_has_deployed(): void
+    {
+        $this->assertFalse(self::project([])->deploysAsUpgrade());
+        $this->assertFalse(self::project(['deployment_status' => 'failed'])->deploysAsUpgrade());
+        $this->assertTrue(self::project(['deployment_status' => 'success'])->deploysAsUpgrade());
+        $this->assertTrue(self::project(['deployment_status' => 'partial'])->deploysAsUpgrade());
+        $this->assertTrue(self::project(['deployment_status' => 'failed', 'deployed_before' => true])->deploysAsUpgrade());
+    }
+
+    /** @param array<string, mixed> $details */
+    private static function project(array $details): ModelsUser
+    {
+        $user = new ModelsUser();
+        $user->setDetails($details);
+
+        return $user;
     }
 
     public function test_the_env_var_name_is_the_one_the_entrypoint_reads(): void

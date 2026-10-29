@@ -37,23 +37,23 @@ class ProjectPhpDirectivesSetCommand extends Command
 
             return 1;
         }
-        if (!$clear && !$hasSettings) {
+        if (! $clear && ! $hasSettings) {
             $this->error('Pass --settings or --clear.');
 
             return 1;
         }
 
         $settings = [];
-        if (!$clear) {
+        if (! $clear) {
             /** @var mixed $decoded */
             $decoded = json_decode((string) $raw, true);
-            if (!is_array($decoded) || (array_is_list($decoded) && $decoded !== [])) {
+            if (! is_array($decoded) || (array_is_list($decoded) && $decoded !== [])) {
                 $this->error('--settings must be a JSON object.');
 
                 return 1;
             }
             foreach ($decoded as $key => $value) {
-                if (!is_string($key) || !is_string($value)) {
+                if (! is_string($key) || ! is_string($value)) {
                     $this->error('--settings values must be strings.');
 
                     return 1;
@@ -64,7 +64,7 @@ class ProjectPhpDirectivesSetCommand extends Command
 
         Validator::make(
             ['php_version' => $version, 'settings' => $settings],
-            (new UserPhpUpdateCustomIniSettingsRequest())->rules(),
+            (new UserPhpUpdateCustomIniSettingsRequest)->rules(),
         )->validate();
 
         $user = User::findByUsernameOrFail($username);

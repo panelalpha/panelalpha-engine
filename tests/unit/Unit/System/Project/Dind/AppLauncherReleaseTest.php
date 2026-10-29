@@ -13,6 +13,7 @@ use App\System\Filesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppLauncher;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
+use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
@@ -46,6 +47,11 @@ class AppLauncherReleaseTest extends TestCase
 
     /** Runs when the launcher asks what is running, the last step before the release. */
     private ?\Closure $onPs = null;
+
+    /** @var list<string> each build-guard script run, with how many compose commands had run by then */
+    private array $guards = [];
+
+    private string $strategy = 'dockerfile';
 
     public function test_a_failed_release_stops_before_up_and_is_flagged(): void
     {
@@ -163,6 +169,25 @@ class AppLauncherReleaseTest extends TestCase
         $this->assertSame(['run --rm -T release'], $this->ran);
     }
 
+    /** The release's build, the build and `up` run inside one guard, applied first and released last. */
+    public function test_the_builds_run_inside_one_build_guard(): void
+    {
+        $this->launcher('exit 0')->start();
+
+        $this->assertSame(['build release', 'run --rm -T release'], array_slice($this->ran, 0, 2));
+        $this->assertSame(['build-guard@0', 'build-guard-release@' . count($this->ran)], $this->guards);
+    }
+
+    /** A strategy whose image is already built starts without a guard. */
+    public function test_a_start_that_builds_nothing_sets_no_guard(): void
+    {
+        $this->strategy = 'railpack';
+        $this->compose = DeployCompose::railpack('project-app', 3000);
+        $this->launcher('exit 0')->start();
+
+        $this->assertSame([], $this->guards);
+    }
+
     public function test_a_deploy_cancelled_before_the_release_does_not_start_it(): void
     {
         $this->compose = DeployCompose::railpack('project-app', 3000);
@@ -185,6 +210,7 @@ class AppLauncherReleaseTest extends TestCase
     private function launcher(string $release, ?string $username = null): AppLauncher
     {
         $ran = &$this->ran;
+        $guards = &$this->guards;
         $reclaimed = &$this->reclaimed;
         $ps = $this->ps;
         // The ENOSPC scripts fail on their first build and succeed on the retry,
@@ -196,12 +222,16 @@ class AppLauncherReleaseTest extends TestCase
             $this->compose ?? DeployCompose::dockerfile('Dockerfile', 3000),
             ['release' => 'node migrate.js']
         ));
-        $system = new class ($ran, $release, $build, $filesystem, $ps, $enospc, $this->onPs) extends System {
+        $system = new class ($ran, $guards, $release, $build, $filesystem, $ps, $enospc, $this->onPs) extends System {
             private int $builds = 0;
 
-            /** @param list<string> $ran */
+            /**
+             * @param list<string> $ran
+             * @param list<string> $guards
+             */
             public function __construct(
                 private array &$ran,
+                private array &$guards,
                 private string $release,
                 private string $build,
                 private Filesystem $files,
@@ -213,6 +243,12 @@ class AppLauncherReleaseTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $guard = preg_grep('/^build-guard/', (array) $cmd);
+                if ($guard !== [] && $guard !== false) {
+                    $this->guards[] = reset($guard) . '@' . count($this->ran);
+
+                    return '';
+                }
                 if (!str_contains(implode(' ', (array) $cmd), "'ps' '--quiet' '--status' 'running'")) {
                     throw new \RuntimeException('unexpected command');
                 }
@@ -269,7 +305,7 @@ class AppLauncherReleaseTest extends TestCase
 
         $user = new User();
         $user->username = $username ?? 'release-' . bin2hex(random_bytes(4));
-        $user->setDetails(['deploy_strategy' => 'dockerfile']);
+        $user->setDetails(['deploy_strategy' => $this->strategy]);
 
         $project = $this->createStub(Dind::class);
         $project->method('innerDocker')->willReturn($inner);
@@ -283,6 +319,7 @@ class AppLauncherReleaseTest extends TestCase
             static fn (array $rest): array => ['docker', 'compose', '--', ...$rest]
         );
         $project->method('registryLogin')->willReturn(new RegistryLogin($project));
+        $project->method('innerBuildGuard')->willReturn(new InnerBuildGuard($project));
         $project->method('shell')->willReturn(new ShellOperations($project));
 
         return new AppLauncher($project);

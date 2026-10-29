@@ -6,6 +6,7 @@ use App\Models\ProxyRule;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Support\Facades\Log;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -21,8 +22,8 @@ class ProxyRuleOrphanAdoptionTest extends TestCase
         $this->bootInMemoryDatabase();
         $this->makeUser('alice');
         $adopted = $this->orphan('alice', 17002);
-        $foreign = $this->orphan('172.25.0.2', 17003);
-        $system = ProxyRule::query()->create($this->row('10.0.0.5', 17004) + ['owner_scope' => 'system']);
+        $foreign = $this->orphan(TestNetwork::container2(2), 17003);
+        $system = ProxyRule::query()->create($this->row(TestNetwork::private(5), 17004) + ['owner_scope' => 'system']);
         Log::spy();
 
         (require base_path('database/migrations/2026_10_05_000000_adopt_orphan_project_proxy_rules.php'))->up();

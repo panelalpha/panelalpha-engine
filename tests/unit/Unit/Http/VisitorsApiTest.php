@@ -114,6 +114,7 @@ class VisitorsApiTest extends TestCase
             'total' => 0,
             'visits' => ['records' => [], 'total' => 0],
             'visits_length' => [],
+            'session_length' => ['records' => [], 'average' => null, 'estimated' => true],
         ]);
 
         $this->getJson(

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -53,7 +54,7 @@ final class AngularOutputProbe implements PlatformProbe
         }
         $name = preg_match('/^[A-Za-z0-9._-]+$/', $project[0]) === 1 ? $project[0] : escapeshellarg($project[0]);
 
-        return self::DEFAULT_BUILD . ' ' . $name;
+        return self::DEFAULT_BUILD.' '.$name;
     }
 
     /**
@@ -61,12 +62,12 @@ final class AngularOutputProbe implements PlatformProbe
      */
     private static function projects(string $projectDir): array
     {
-        $path = rtrim($projectDir, '/') . '/angular.json';
-        if (!is_file($path)) {
+        $path = rtrim($projectDir, '/').'/angular.json';
+        if (! is_file($path)) {
             return [];
         }
-        $json = json_decode((string) @file_get_contents($path), true);
-        if (!is_array($json) || empty($json['projects']) || !is_array($json['projects'])) {
+        $json = json_decode((string) AccountHomeRead::contents($path), true);
+        if (! is_array($json) || empty($json['projects']) || ! is_array($json['projects'])) {
             return [];
         }
 
@@ -84,7 +85,7 @@ final class AngularOutputProbe implements PlatformProbe
      * The project whose build is served: `defaultProject`, else the first
      * application, else the first project at all that states an output path.
      *
-     * @param array<string, array<string, mixed>> $projects
+     * @param  array<string, array<string, mixed>>  $projects
      * @return ?array{0: string, 1: array<string, mixed>}
      */
     private static function buildProject(array $projects): ?array
@@ -114,7 +115,7 @@ final class AngularOutputProbe implements PlatformProbe
             // legacy `browser` builder writes straight into it.
             $builder = is_string($build['builder'] ?? null) ? $build['builder'] : '';
 
-            return str_ends_with($builder, ':application') ? rtrim($output, '/') . '/browser' : $output;
+            return str_ends_with($builder, ':application') ? rtrim($output, '/').'/browser' : $output;
         }
         if (is_array($output)) {
             $base = is_string($output['base'] ?? null) ? $output['base'] : 'dist';
@@ -123,7 +124,7 @@ final class AngularOutputProbe implements PlatformProbe
             // `browser: ''` flattens the client bundle into `base`.
             return trim($browser, '/') === ''
                 ? rtrim($base, '/')
-                : rtrim($base, '/') . '/' . ltrim($browser, '/');
+                : rtrim($base, '/').'/'.ltrim($browser, '/');
         }
 
         return null;

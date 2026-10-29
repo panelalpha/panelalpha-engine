@@ -7,6 +7,7 @@ use App\System as EngineSystem;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\NginxProxy;
 use Illuminate\Support\Facades\Log;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -28,10 +29,11 @@ class NginxProxyReloadAppliedTest extends TestCase
         parent::setUp();
         $this->dir = sys_get_temp_dir() . '/nginx-proxy-reload-' . bin2hex(random_bytes(4));
         mkdir($this->dir . '/webserver-config/nginx-proxy', 0777, true);
+        $address = TestNetwork::private(44);
         file_put_contents(
             $this->dir . '/webserver-config/nginx-proxy/nginx.conf',
-            "http {\n    server {\n        listen 10.10.0.44:80 default_server;\n    }\n"
-            . "    server {\n        listen 10.10.0.44:443 ssl default_server;\n    }\n}\n"
+            "http {\n    server {\n        listen {$address}:80 default_server;\n    }\n"
+            . "    server {\n        listen {$address}:443 ssl default_server;\n    }\n}\n"
         );
     }
 
@@ -218,8 +220,8 @@ class NginxProxyReloadAppliedTest extends TestCase
 
             private static function procNetTcp(string $state, array $extra = []): string
             {
-                // 10.10.0.44 little-endian is 2C000A0A; ports 80 and 443 are 0050 and 01BB.
-                $addr = $state === 'bound' ? '2C000A0A' : '00000000';
+                // Addresses are little-endian hex; ports 80 and 443 are 0050 and 01BB.
+                $addr = $state === 'bound' ? strtoupper(bin2hex(strrev((string) inet_pton(TestNetwork::private(44))))) : '00000000';
                 $line = '%4d: %s:%s 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1 0 100 0 0 10 0';
 
                 $out = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"

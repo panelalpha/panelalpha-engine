@@ -26,7 +26,7 @@ class SitesDbSection implements Section
 
     public function __construct(?SitesDbCaches $caches = null)
     {
-        $this->caches = $caches ?? new SitesDbCaches(new System());
+        $this->caches = $caches ?? new SitesDbCaches(new System);
     }
 
     public static function key(): string
@@ -72,14 +72,14 @@ class SitesDbSection implements Section
     }
 
     /**
-     * @param array<string, string> $configured
-     * @param ?array<string, int> $running
+     * @param  array<string, string>  $configured
+     * @param  ?array<string, int>  $running
      */
     private function header(array $configured, ?array $running): void
     {
         $lines = [$running === null ? 'sites-db is not running; changes apply when it starts.' : 'Configured    Running'];
         foreach (SitesDbCaches::CACHES as $key => $cache) {
-            $lines[] = sprintf('%-20s %-8s%s', $cache['label'], $configured[$key], $running === null ? '' : $running[$key] . 'M');
+            $lines[] = sprintf('%-20s %-8s%s', $cache['label'], $configured[$key], $running === null ? '' : $running[$key].'M');
         }
 
         Screen::draw(self::label(), implode("\n", $lines));
@@ -88,7 +88,7 @@ class SitesDbSection implements Section
     private function setSize(string $key, string $current, bool $dryRun): void
     {
         $cache = SitesDbCaches::CACHES[$key];
-        Screen::draw(self::label() . '  ·  ' . $cache['label']);
+        Screen::draw(self::label().'  ·  '.$cache['label']);
         note("A size like 32M or 1G. The engine's default is {$cache['default']}; MariaDB's own is 128M.");
 
         $hostMb = HostMemoryProbe::current()->totalMb;
@@ -109,21 +109,21 @@ class SitesDbSection implements Section
         }
 
         if ($this->caches->running() !== null
-            && !confirm('sites-db restarts to apply it: hosted sites lose their database for a few seconds. Go ahead?', default: true)) {
+            && ! confirm('sites-db restarts to apply it: hosted sites lose their database for a few seconds. Go ahead?', default: true)) {
             return;
         }
 
         try {
             $result = $this->caches->apply([$key => $size]);
         } catch (Throwable $e) {
-            warning('Could not apply it: ' . trim($e->getMessage()));
+            warning('Could not apply it: '.trim($e->getMessage()));
             pause('Press enter to carry on...');
 
             return;
         }
 
         $this->receipt[] = "{$cache['label']} set to {$size}.";
-        note(end($this->receipt) . ($result['recreated'] ? ' sites-db was recreated with it.' : ' It applies when sites-db next starts.'), 'info');
+        note(end($this->receipt).($result['recreated'] ? ' sites-db was recreated with it.' : ' It applies when sites-db next starts.'), 'info');
         pause('Press enter to carry on...');
     }
 }

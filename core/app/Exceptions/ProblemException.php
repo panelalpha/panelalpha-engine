@@ -37,7 +37,7 @@ class ProblemException extends ValidationException
     public array $problems = [];
 
     /**
-     * @param list<array{field: string, code: string, message: string, ...}> $problems
+     * @param  list<array{field: string, code: string, message: string, ...}>  $problems
      */
     public static function of(array $problems): self
     {
@@ -55,7 +55,7 @@ class ProblemException extends ValidationException
     /**
      * One problem, for the many callers that only ever have one.
      *
-     * @param array<string, mixed> $extra
+     * @param  array<string, mixed>  $extra
      */
     public static function one(string $field, string $code, string $message, array $extra = []): self
     {

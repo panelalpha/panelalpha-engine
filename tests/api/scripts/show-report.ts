@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { testNetwork } from '@/helpers/test-network';
+
 import { preparePlaywright } from './lib/playwright-cli';
 import {
   reportListenUrl,
@@ -15,15 +17,15 @@ import {
 /**
  * Serve the last HTML report in a way that works on a remote VPS.
  *
- * Playwright binds to `--host localhost` by default, and even with `--host
- * 0.0.0.0` it prints `http://localhost:…` because that is how it turns a
+ * Playwright binds to `--host localhost` by default, and even bound to all
+ * interfaces it prints `http://localhost:…` because that is how it turns a
  * bind-all address into a URL. This binds to all interfaces and rewrites that
  * line to the engine's public hostname.
  *
  * Safer alternative if you do not want port 9323 open on the public IP:
- *   ssh -L 9323:127.0.0.1:9323 root@<vps>
- *   bun run report -- --host 127.0.0.1
- * then open http://127.0.0.1:9323 locally.
+ *   ssh -L 9323:localhost:9323 root@<vps>
+ *   bun run report -- --host localhost
+ * then open http://localhost:9323 locally.
  */
 
 const suiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,7 +62,7 @@ if (!fs.existsSync(reportDir)) {
   process.exit(1);
 }
 
-const host = hasFlag('--host') ? (flagValue('--host') ?? '0.0.0.0') : '0.0.0.0';
+const host = hasFlag('--host') ? (flagValue('--host') ?? testNetwork.ANY) : testNetwork.ANY;
 const envPort = process.env.REPORT_PORT?.trim();
 const port = hasFlag('--port')
   ? (flagValue('--port') ?? '9323')
@@ -69,7 +71,7 @@ const port = hasFlag('--port')
     : '9323';
 const publicHost = resolvePublicReportHost(suiteRoot, testEnv);
 const publicUrl = reportListenUrl(publicHost, port);
-const rewritePlaywrightUrl = host === '0.0.0.0' || host === '::';
+const rewritePlaywrightUrl = host === testNetwork.ANY || host === '::';
 
 const args = ['show-report', reportDir];
 if (!hasFlag('--host')) {
@@ -84,7 +86,9 @@ console.log(`Report directory: ${path.relative(suiteRoot, reportDir)}`);
 console.log(`Listening on ${host}:${port}`);
 if (rewritePlaywrightUrl) {
   console.log(`Open from your machine:  ${publicUrl}`);
-  console.log(`Or tunnel instead:         ssh -L ${port}:127.0.0.1:${port} <user>@${publicHost}`);
+  console.log(
+    `Or tunnel instead:         ssh -L ${port}:${testNetwork.LOOPBACK}:${port} <user>@${publicHost}`
+  );
 } else {
   console.log(`Open: ${reportListenUrl(host, port)}`);
 }

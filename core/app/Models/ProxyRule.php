@@ -31,6 +31,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @property ?User $user
+ *
  * @method static ?ProxyRule find(int $id)
  */
 class ProxyRule extends Model
@@ -137,8 +138,8 @@ class ProxyRule extends Model
             ->where('server_name', $from)
             ->update(['server_name' => $to]);
 
-        $wwwFrom = 'www.' . $from;
-        $wwwTo = 'www.' . $to;
+        $wwwFrom = 'www.'.$from;
+        $wwwTo = 'www.'.$to;
         $updated += self::forUser($username)
             ->where('server_name', $wwwFrom)
             ->update(['server_name' => $wwwTo]);
@@ -223,7 +224,7 @@ class ProxyRule extends Model
     ): array {
         return [
             'description' => ($isPrimary ? 'Primary' : 'Additional')
-                . " {$listenPort}→{$upstreamPort} for {$username}",
+                ." {$listenPort}→{$upstreamPort} for {$username}",
             'source' => 'auto-detected-from-compose',
             'detected_port' => $upstreamPort,
         ] + ($upstreamProtocol === 'https' ? ['port_scheme' => 'https'] : []);
@@ -268,7 +269,7 @@ class ProxyRule extends Model
     {
         if ($upstreamProtocol === 'https') {
             $rule->upstream_protocol = 'https';
-        } elseif (!$rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
+        } elseif (! $rule->exists || $rule->upstream_protocol === null || $setByRecipe) {
             $rule->upstream_protocol = 'http';
         }
     }
@@ -292,6 +293,26 @@ class ProxyRule extends Model
         } else {
             $query->where('server_name', $name);
         }
+        if ($ignoreId !== null) {
+            $query->whereKeyNot($ignoreId);
+        }
+
+        /** @var ?self */
+        return $query->first();
+    }
+
+    /**
+     * The enabled tcp or udp rule that already listens on this address and port.
+     * stream.conf renders a server block per rule and no server name, so nginx
+     * serves only one of two such rules.
+     */
+    public static function conflictingStreamRule(string $transport, string $listenIp, int $listenPort, ?int $ignoreId = null): ?self
+    {
+        $query = self::query()
+            ->where('enabled', true)
+            ->where('transport', $transport)
+            ->where('listen_ip', $listenIp)
+            ->where('listen_port', $listenPort);
         if ($ignoreId !== null) {
             $query->whereKeyNot($ignoreId);
         }

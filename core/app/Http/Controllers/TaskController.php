@@ -5,15 +5,18 @@ namespace App\Http\Controllers;
 use App\Auth\TokenAbilities;
 use App\Http\Controllers\Concerns\StreamsNdjson;
 use App\Http\Requests\TaskListRequest;
+use App\Http\Requests\TaskLogPageRequest;
 use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
 use App\Http\Resources\TaskSummaryCollection;
-use App\System;
 use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
+use App\Lib\Task\TaskLogPage;
 use App\Models\Task;
+use App\Models\TaskLog;
+use App\System;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,12 +30,18 @@ class TaskController extends Controller
     /** Silence after which the log stream checks that its reader is still there. */
     public const STREAM_HEARTBEAT_SECONDS = 2;
 
+    private const AFTER_ID_DESCRIPTION = 'The offset cursor: only log rows with an id above it are returned. '
+        .'Start at 0, then send the `next_after_id` of the previous page.';
+
+    private const LIMIT_DESCRIPTION = 'Log rows in one page, 1 to '.TaskLogPage::MAX_LIMIT.'. '
+        .TaskLogPage::DEFAULT_LIMIT.' rows of typical deploy output are about 100 KB.';
+
     private float $lastFrameAt = 0.0;
 
     private function taskOr404(int $id): Task
     {
         $task = Task::find($id);
-        if (!$task) {
+        if (! $task) {
             abort(new JsonResponse(['message' => 'Not found'], 404));
         }
 
@@ -47,7 +56,7 @@ class TaskController extends Controller
             return null;
         }
 
-        if (!Task::isSince($since)) {
+        if (! Task::isSince($since)) {
             abort(new JsonResponse(['message' => Task::SINCE_EXPECTED], 422));
         }
 
@@ -58,11 +67,11 @@ class TaskController extends Controller
         path: '/tasks',
         summary: 'List tasks newest first, filtered by project, status, action or time',
         description: 'Covers every queued job on the engine, not only deploys. `scope=mine` (the default) shows the '
-            . 'tasks the calling token started plus engine-originated work (deploy hooks, schedules, CLI) on projects '
-            . 'it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the '
-            . 'API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is '
-            . 'shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, '
-            . 'push, backup, restore or attach_source.',
+            .'tasks the calling token started plus engine-originated work (deploy hooks, schedules, CLI) on projects '
+            .'it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the '
+            .'API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is '
+            .'shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, '
+            .'push, backup, restore or attach_source.',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
@@ -110,7 +119,7 @@ class TaskController extends Controller
     }
 
     /**
-     * @param Builder<Task> $query
+     * @param  Builder<Task>  $query
      */
     private function applyFilters(Builder $query, TaskListRequest $request): void
     {
@@ -131,7 +140,7 @@ class TaskController extends Controller
     }
 
     /**
-     * @param Builder<Task> $query
+     * @param  Builder<Task>  $query
      */
     private function applyScope(Builder $query, TaskListRequest $request, TokenAbilities $abilities): void
     {
@@ -149,7 +158,7 @@ class TaskController extends Controller
     }
 
     /**
-     * @param Builder<Task> $query
+     * @param  Builder<Task>  $query
      */
     private function applyProjectReach(Builder $query, TokenAbilities $abilities): void
     {
@@ -162,11 +171,27 @@ class TaskController extends Controller
     #[OA\Get(
         path: '/tasks/{id}',
         summary: 'Poll a task status and new log lines after a cursor',
+        description: 'Returns the task and a page of at most `limit` log rows after `after_id`. While `more` '
+            .'is true there are rows after this page: ask again with `after_id` set to `next_after_id`.',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
             new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
-            new OA\Parameter(name: 'after_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 0)),
+            new OA\Parameter(
+                name: 'after_id',
+                in: 'query',
+                required: false,
+                description: self::AFTER_ID_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: 0, minimum: 0),
+            ),
+            new OA\Parameter(
+                name: 'limit',
+                in: 'query',
+                required: false,
+                description: self::LIMIT_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: TaskLogPage::DEFAULT_LIMIT, maximum: TaskLogPage::MAX_LIMIT, minimum: 1),
+                x: ['mcp-default' => TaskLogPage::DEFAULT_LIMIT],
+            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Task status and log page', content: new OA\JsonContent(
@@ -175,22 +200,24 @@ class TaskController extends Controller
             new OA\Response(response: 404, description: 'Task not found', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function show(int $id): TaskResource|JsonResponse
+    public function show(int $id, TaskLogPageRequest $request): TaskResource|JsonResponse
     {
         $task = $this->taskOr404($id);
 
-        return new TaskResource($task);
+        return new TaskResource($task, $request->afterId(), $request->limit());
     }
 
     #[OA\Get(
         path: '/tasks/{id}/logs',
         description: 'Pass `since` as unix seconds or an ISO datetime to keep only rows '
-            . 'with created_at greater than that instant. Pass `after_id` to skip rows at '
-            . 'or below that id (needed when many lines share the same second). Both filters '
-            . 'AND together. Prefer this over the logs embedded in GET /tasks/{id} when '
-            . 'polling by time.',
+            .'with created_at greater than that instant. Pass `after_id` to skip rows at '
+            .'or below that id (needed when many lines share the same second). Both filters '
+            .'AND together. A page holds at most `limit` rows; while `meta.more` is true there are '
+            .'rows after it: ask again with `after_id` set to `meta.next_after_id`. Prefer this over '
+            .'the logs embedded in GET /tasks/{id} when polling by time.',
         summary: 'Page of task log lines after a timestamp and/or id cursor',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
@@ -205,7 +232,21 @@ class TaskController extends Controller
                     new OA\Schema(type: 'string', description: 'ISO datetime'),
                 ]),
             ),
-            new OA\Parameter(name: 'after_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 0)),
+            new OA\Parameter(
+                name: 'after_id',
+                in: 'query',
+                required: false,
+                description: self::AFTER_ID_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: 0, minimum: 0),
+            ),
+            new OA\Parameter(
+                name: 'limit',
+                in: 'query',
+                required: false,
+                description: self::LIMIT_DESCRIPTION,
+                schema: new OA\Schema(type: 'integer', default: TaskLogPage::DEFAULT_LIMIT, maximum: TaskLogPage::MAX_LIMIT, minimum: 1),
+                x: ['mcp-default' => TaskLogPage::DEFAULT_LIMIT],
+            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Log page', content: new OA\JsonContent(
@@ -217,27 +258,25 @@ class TaskController extends Controller
             new OA\Response(response: 404, description: 'Task not found', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function logs(int $id, Request $request): TaskLogCollection|JsonResponse
+    public function logs(int $id, TaskLogPageRequest $request): TaskLogCollection|JsonResponse
     {
         $task = $this->taskOr404($id);
 
-        $afterId = max(0, (int) $request->query('after_id', 0));
-        $since = $this->since($request);
-        $page = $task->logsPage($afterId, $since);
-        $nextAfterId = $page->isEmpty() ? $afterId : (int) $page->last()->id;
+        $page = TaskLogPage::read($task, $request->afterId(), $this->since($request), $request->limit());
 
-        return new TaskLogCollection($page, $task->status, $nextAfterId);
+        return new TaskLogCollection($page, $task->status);
     }
 
     #[OA\Get(
         path: '/tasks/{id}/logs/stream',
         description: 'Chunked NDJSON without Content-Length. Each log line is one JSON object; '
-            . 'a final `{"type":"finish","status":"..."}` frame closes the stream when the task '
-            . 'is terminal and no further lines remain. While the task logs nothing, a `{"type":"heartbeat"}` '
-            . 'frame follows every 2 seconds without a line; skip it. Optional `since` / `after_id` skip the '
-            . 'backlog. Long-lived: MCP clients should poll GET /tasks/{id}/logs instead.',
+            .'a final `{"type":"finish","status":"..."}` frame closes the stream when the task '
+            .'is terminal and no further lines remain. While the task logs nothing, a `{"type":"heartbeat"}` '
+            .'frame follows every 2 seconds without a line; skip it. Optional `since` / `after_id` skip the '
+            .'backlog. Long-lived: MCP clients should poll GET /tasks/{id}/logs instead.',
         summary: 'Stream task log lines as NDJSON until the task finishes',
         // A tool answers once; this never does. task_log_list is the MCP way.
         x: ['mcp-hide' => true],
@@ -291,7 +330,7 @@ class TaskController extends Controller
      * The streamed response, which frees its limiter slot when it ends. Anything that can refuse the
      * request must run before this: a throw inside the callback comes after the 200 headers.
      *
-     * @param resource $slot
+     * @param  resource  $slot
      */
     private function ndjsonStream(Task $task, int $afterId, int|string|null $since, $slot): StreamedResponse
     {
@@ -316,7 +355,7 @@ class TaskController extends Controller
         $cursor = $afterId;
         $sinceCursor = $since;
 
-        while (!connection_aborted()) {
+        while (! connection_aborted()) {
             $task->refresh();
             $page = $task->logsPage($cursor, $sinceCursor);
 
@@ -341,7 +380,7 @@ class TaskController extends Controller
     }
 
     /**
-     * @param iterable<\App\Models\TaskLog> $page
+     * @param  iterable<TaskLog>  $page
      * @return ?int the id of the last line emitted, null when there was none
      */
     private function emitLogLines(iterable $page): ?int
@@ -377,8 +416,8 @@ class TaskController extends Controller
     /** @param array<string, mixed> $frame */
     private function emitFrame(array $frame): void
     {
-        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
-        if (!app()->runningUnitTests()) {
+        echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
+        if (! app()->runningUnitTests()) {
             flush();
         }
         $this->lastFrameAt = microtime(true);
@@ -408,9 +447,9 @@ class TaskController extends Controller
     {
         $task = $this->taskOr404($id);
 
-        $canceller = new TaskCanceller(new ProcessTreeKiller(new System()));
+        $canceller = new TaskCanceller(new ProcessTreeKiller(new System));
         $result = $canceller->cancel($task);
-        if (!$result['cancelled']) {
+        if (! $result['cancelled']) {
             return new JsonResponse(['message' => $result['message']], 409);
         }
 

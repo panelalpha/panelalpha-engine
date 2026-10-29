@@ -21,8 +21,19 @@ class ProjectFields
     private const MAP = [
         'POST /projects/{username}/push' => ['target'],
         'GET /projects/{username}/push/diff' => ['target'],
+        'POST /projects/{username}/clone' => ['new_username'],
+        'POST /projects/{username}/staging' => ['new_username'],
         'GET /tasks' => ['username'],
         self::SOURCE_INSPECT => ['source'],
+    ];
+
+    /**
+     * Operations that bring the project they name into existence. Leaving that
+     * name out asks the engine for one, which is a project no scope can list.
+     */
+    private const CREATING = [
+        'POST /projects/{username}/clone',
+        'POST /projects/{username}/staging',
     ];
 
     /**
@@ -43,19 +54,46 @@ class ProjectFields
      */
     public static function namedIn(Request $request, ?string $operation): array
     {
-        if ($operation === self::SOURCE_INSPECT && !self::inspectsProject($request)) {
+        if ($operation === self::SOURCE_INSPECT && ! self::inspectsProject($request)) {
             return [];
         }
 
         $names = [];
         foreach (self::named($operation) as $field) {
-            $value = $request->input($field);
-            if (is_string($value) && $value !== '') {
+            $value = self::givenName($request, $field);
+            if ($value !== null) {
                 $names[] = $value;
             }
         }
 
         return $names;
+    }
+
+    /**
+     * The field that should name the project this operation creates but does
+     * not, or null when it creates nothing or the request names one.
+     */
+    public static function missingCreationName(Request $request, ?string $operation): ?string
+    {
+        if (! in_array($operation, self::CREATING, true)) {
+            return null;
+        }
+
+        $field = self::named($operation)[0] ?? null;
+
+        if ($field === null || self::givenName($request, $field) !== null) {
+            return null;
+        }
+
+        return $field;
+    }
+
+    /** The name a request gives this field, or null when it leaves it out. */
+    private static function givenName(Request $request, string $field): ?string
+    {
+        $value = $request->input($field);
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /** The inspection's own reading: a declared `type` first, else the shape of `source`. */

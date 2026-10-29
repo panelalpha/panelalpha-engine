@@ -31,10 +31,11 @@ class FilesDownloadCommand extends Command
 
         if ($path === '') {
             $this->error('--path is required');
+
             return 1;
         }
 
-        Validator::make(['path' => $path], (new DownloadRequest())->rules())->validate();
+        Validator::make(['path' => $path], (new DownloadRequest)->rules())->validate();
         $user = User::findByUsernameOrFail($project);
         $source = ProjectFiles::readablePathOrFail($user, $path);
 

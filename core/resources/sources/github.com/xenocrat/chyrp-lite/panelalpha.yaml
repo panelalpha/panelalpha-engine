@@ -120,7 +120,8 @@ commands:
     description: >-
       Runs Chyrp Lite's own installer -- or its upgrader, on a redeploy -- from
       the deploy rather than leaving install.php on a public URL for whoever
-      arrives first, points the site at the account's current domain, and
+      arrives first, points the site at the account's current domain and
+      database (a staging or clone carries the source's in its config), and
       removes install.php and upgrade.php from the document root afterwards.
       Idempotent: the upgrade stage replays it on every redeploy over a
       database that survived. On the build stage it would not run at all.

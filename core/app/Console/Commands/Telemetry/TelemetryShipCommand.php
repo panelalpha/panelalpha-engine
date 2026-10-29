@@ -17,7 +17,7 @@ class TelemetryShipCommand extends Command
 
     public function handle(): int
     {
-        if (!Telemetry::enabled()) {
+        if (! Telemetry::enabled()) {
             $this->info('Telemetry is disabled (TELEMETRY_ENABLED=false).');
 
             return 0;
@@ -29,7 +29,7 @@ class TelemetryShipCommand extends Command
             return $this->dryRun($batch);
         }
 
-        $result = (new TelemetryShipper())->ship($batch);
+        $result = (new TelemetryShipper)->ship($batch);
 
         $line = sprintf(
             '%s — sent %d, rejected %d, kept %d, dropped %d (queue: %d)',
@@ -50,7 +50,7 @@ class TelemetryShipCommand extends Command
         }
 
         if ($result['message'] !== null) {
-            $line .= ' | ' . $result['message'];
+            $line .= ' | '.$result['message'];
         }
 
         // A failed send is a normal condition for an offline box, so it is not
@@ -80,7 +80,7 @@ class TelemetryShipCommand extends Command
             return 0;
         }
 
-        $this->info('Would POST ' . count($items) . ' report(s) to ' . Telemetry::endpoint());
+        $this->info('Would POST '.count($items).' report(s) to '.Telemetry::endpoint());
         $this->table(
             ['ID', 'Outcome', 'Strategy', 'Rule', 'Source bundle', 'Attempts'],
             array_map(static function (array $item): array {
@@ -93,7 +93,7 @@ class TelemetryShipCommand extends Command
                     $report['deploy']['strategy'] ?? '-',
                     $report['failure']['rule'] ?? '(unexplained)',
                     $item['bundle'] !== null
-                        ? round((int) ($bundle['bytes'] ?? filesize($item['bundle'])) / 1024) . ' KiB, held'
+                        ? round((int) ($bundle['bytes'] ?? filesize($item['bundle'])) / 1024).' KiB, held'
                         : '-',
                     $item['attempts'],
                 ];

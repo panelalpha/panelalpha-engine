@@ -2,10 +2,10 @@
 
 namespace App\Lib\Deploy\Sidecar;
 
-use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
-use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\ComposeHarden;
+use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\EnvFile;
+use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -79,7 +79,7 @@ class EnvSidecars
     ];
 
     /**
-     * @param (callable(string): ?string)|null $read
+     * @param  (callable(string): ?string)|null  $read
      * @return array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
@@ -92,9 +92,9 @@ class EnvSidecars
     }
 
     /**
-     * @param array<string, string> $variables
-     * @param ?SidecarPasswords $passwords fills a password the URL left out;
-     *        null keeps the legacy `app`
+     * @param  array<string, string>  $variables
+     * @param  ?SidecarPasswords  $passwords  fills a password the URL left out;
+     *                                        null keeps the legacy `app`
      * @return array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
@@ -170,7 +170,7 @@ class EnvSidecars
      * `.env.example` first, then `.env` so live values win. `$read` as in
      * {@see EnvFile::databaseSettings()}.
      *
-     * @param (callable(string): ?string)|null $read
+     * @param  (callable(string): ?string)|null  $read
      * @return array<string, string>
      */
     public static function variableMap(string $projectDir, ?callable $read = null): array
@@ -179,8 +179,8 @@ class EnvSidecars
         $projectDir = rtrim($projectDir, '/');
         $read ??= EnvFile::readHostFile(...);
         foreach (['.env.example', '.env'] as $name) {
-            $contents = $read($projectDir . '/' . $name);
-            if (!is_string($contents) || $contents === '') {
+            $contents = $read($projectDir.'/'.$name);
+            if (! is_string($contents) || $contents === '') {
                 continue;
             }
             foreach (EnvFile::parse($contents) as $row) {
@@ -204,7 +204,7 @@ class EnvSidecars
     private static function specFromUrl(string $url): ?array
     {
         $parts = parse_url($url);
-        if (!is_array($parts)) {
+        if (! is_array($parts)) {
             return null;
         }
         $scheme = strtolower((string) ($parts['scheme'] ?? ''));
@@ -213,7 +213,7 @@ class EnvSidecars
             return null;
         }
         $host = strtolower((string) ($parts['host'] ?? ''));
-        if (!self::isLocalHost($host)) {
+        if (! self::isLocalHost($host)) {
             return null;
         }
 
@@ -236,7 +236,7 @@ class EnvSidecars
     /**
      * Laravel-style DB_* without a URL (same signal PhpStrategy uses).
      *
-     * @param array<string, string> $variables
+     * @param  array<string, string>  $variables
      * @return array{engine: string, username: string, password: string, database: string}|null
      */
     private static function specFromDbConnection(array $variables): ?array
@@ -251,7 +251,7 @@ class EnvSidecars
             return null;
         }
         $host = strtolower(trim((string) ($variables['DB_HOST'] ?? '127.0.0.1')));
-        if ($host !== '' && !self::isLocalHost($host)) {
+        if ($host !== '' && ! self::isLocalHost($host)) {
             return null;
         }
 
@@ -280,7 +280,7 @@ class EnvSidecars
     }
 
     /**
-     * @param array{engine: string, username: string, password: string, database: string} $spec
+     * @param  array{engine: string, username: string, password: string, database: string}  $spec
      * @return array{service: array<string, mixed>, volumes: array<string, mixed>}
      */
     private static function serviceDefinition(string $engine, array $spec, SidecarPasswords $passwords): array
@@ -308,7 +308,7 @@ class EnvSidecars
         $volumes = [];
         $dataPath = self::DATA_PATHS[$engine] ?? null;
         if ($dataPath !== null) {
-            $service['volumes'] = ['dbdata:' . $dataPath];
+            $service['volumes'] = ['dbdata:'.$dataPath];
             $volumes['dbdata'] = null;
         }
 
@@ -356,7 +356,7 @@ class EnvSidecars
      * `app` everyone could guess. Redis numbers its databases
      * rather than naming them, which is why its default is `0` and not `app`.
      *
-     * @param array{username: string, password: string, database: string} $spec
+     * @param  array{username: string, password: string, database: string}  $spec
      * @return array{0: string, 1: string, 2: string} user, password, database
      */
     private static function credentials(string $engine, array $spec, SidecarPasswords $passwords): array

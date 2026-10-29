@@ -25,7 +25,7 @@ trait MintsTokens
             return null;
         }
 
-        if (!is_string($given) || preg_match('/^(\d+)\s*([smhdw])$/i', trim($given), $m) !== 1) {
+        if (! is_string($given) || preg_match('/^(\d+)\s*([smhdw])$/i', trim($given), $m) !== 1) {
             $this->error(sprintf(
                 'Could not read --expires=%s. Give a number and a unit: 30m, 12h, 90d, 2w.',
                 is_string($given) ? $given : gettype($given)
@@ -56,6 +56,6 @@ trait MintsTokens
     {
         return $expiry === null
             ? 'never expires'
-            : 'expires ' . $expiry->format('Y-m-d H:i');
+            : 'expires '.$expiry->format('Y-m-d H:i');
     }
 }

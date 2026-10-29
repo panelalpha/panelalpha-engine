@@ -45,7 +45,7 @@ final class InterruptedDeliveries
 
             $latest = DeployLogger::readLatestFor($username) ?? [];
             foreach ($candidates as $delivery) {
-                if (!self::isOver($delivery->deploy_id, $latest)) {
+                if (! self::isOver($delivery->deploy_id, $latest)) {
                     continue;
                 }
 
@@ -62,7 +62,7 @@ final class InterruptedDeliveries
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      */
     private static function isOver(string $deployId, array $latest): bool
     {

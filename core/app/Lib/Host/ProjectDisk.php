@@ -23,14 +23,14 @@ class ProjectDisk
     /** @param (callable(string): string)|null $runOnHost runs a bash script on the host, returns stdout */
     public function __construct(?callable $runOnHost = null)
     {
-        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System())->execOnHost(['bash', '-c', $script]);
+        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System)->execOnHost(['bash', '-c', $script]);
     }
 
     /** @return int rows written */
     public function sample(?Carbon $now = null): int
     {
         $now = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC');
-        $system = new System();
+        $system = new System;
         $homes = [];
         foreach (User::query()->pluck('username') as $username) {
             if (is_string($username) && $username !== '') {
@@ -44,7 +44,7 @@ class ProjectDisk
         try {
             $read = self::parse(($this->runOnHost)(self::script($homes)));
         } catch (\Throwable $e) {
-            Log::warning('Could not measure project disk use: ' . $e->getMessage());
+            Log::warning('Could not measure project disk use: '.$e->getMessage());
 
             return 0;
         }
@@ -105,13 +105,13 @@ class ProjectDisk
      * and of ~/docker (empty when there is none). Idle I/O priority, one
      * filesystem, so a busy host barely notices.
      *
-     * @param array<string, string> $homes username => home directory
+     * @param  array<string, string>  $homes  username => home directory
      */
     public static function script(array $homes): string
     {
         $pairs = '';
         foreach ($homes as $username => $home) {
-            $pairs .= escapeshellarg($username) . ' ' . escapeshellarg(rtrim($home, '/')) . ' ';
+            $pairs .= escapeshellarg($username).' '.escapeshellarg(rtrim($home, '/')).' ';
         }
 
         return str_replace('__PAIRS__', $pairs, <<<'SH'

@@ -14,21 +14,24 @@ namespace App\Lib\DeployHook;
 final class TlsInstructions
 {
     public const GITHUB = 'github';
+
     public const GITLAB = 'gitlab';
+
     public const BITBUCKET_CLOUD = 'bitbucket-cloud';
+
     public const BITBUCKET_DATA_CENTER = 'bitbucket-data-center';
 
     /** @var array<string, string> */
     private const TEXT = [
         self::GITHUB => 'On the webhook\'s settings page (repository or organization Settings > Webhooks > this webhook), '
-            . 'set "SSL verification" to Disable, then save. This applies to this one webhook only.',
+            .'set "SSL verification" to Disable, then save. This applies to this one webhook only.',
         self::GITLAB => 'When adding or editing the webhook (Settings > Webhooks), clear the "Enable SSL verification" checkbox before saving.',
         self::BITBUCKET_CLOUD => 'Bitbucket Cloud always verifies the certificate a webhook URL presents and has no setting to skip that. '
-            . 'A self-signed engine certificate will make every delivery fail here: give the engine a trusted certificate for a '
-            . 'domain first (see the getting-started TLS guide), then register the webhook against that domain.',
+            .'A self-signed engine certificate will make every delivery fail here: give the engine a trusted certificate for a '
+            .'domain first (see the getting-started TLS guide), then register the webhook against that domain.',
         self::BITBUCKET_DATA_CENTER => 'When adding the webhook, open its advanced settings and disable certificate verification for '
-            . 'this webhook (older Bitbucket Data Center releases do not offer this option and need a trusted certificate instead, '
-            . 'the same as Bitbucket Cloud).',
+            .'this webhook (older Bitbucket Data Center releases do not offer this option and need a trusted certificate instead, '
+            .'the same as Bitbucket Cloud).',
     ];
 
     /**

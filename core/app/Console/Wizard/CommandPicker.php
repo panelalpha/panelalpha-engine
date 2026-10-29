@@ -16,11 +16,11 @@ use function Laravel\Prompts\multiselect;
 class CommandPicker
 {
     /**
-     * @param array<string, array<int, string>> $groups  toolset => command names, the whole universe
-     * @param Closure(): void                   $header  redraws the screen this picker draws on
-     * @param Closure(string): string           $note    a command's short suffix, e.g. `read`
-     * @param Closure(string): string|null      $groupNote a group's short suffix, or null for none
-     * @param int                               $width     what a key's label is padded to
+     * @param  array<string, array<int, string>>  $groups  toolset => command names, the whole universe
+     * @param  Closure(): void  $header  redraws the screen this picker draws on
+     * @param  Closure(string): string  $note  a command's short suffix, e.g. `read`
+     * @param  Closure(string): string|null  $groupNote  a group's short suffix, or null for none
+     * @param  int  $width  what a key's label is padded to
      */
     public function __construct(
         private readonly array $groups,
@@ -28,14 +28,13 @@ class CommandPicker
         private readonly Closure $note,
         private readonly ?Closure $groupNote = null,
         private readonly int $width = 34,
-    ) {
-    }
+    ) {}
 
     /**
      * Whole groups, on or off. A group that was ticked and stays ticked is
      * left alone, or a visit here would undo every command unticked by hand.
      *
-     * @param array<int, string> $selected
+     * @param  array<int, string>  $selected
      * @return array<int, string>
      */
     public function groups(array $selected, string $label): array
@@ -86,7 +85,7 @@ class CommandPicker
      * The answer is the whole selection rather than one group's share of it,
      * because everything was on screen to be ticked.
      *
-     * @param array<int, string> $selected
+     * @param  array<int, string>  $selected
      * @return array<int, string>
      */
     public function commands(array $selected, string $label): array
@@ -98,7 +97,7 @@ class CommandPicker
 
         foreach ($this->groups as $keys) {
             foreach ($keys as $key) {
-                $options[$key] = sprintf('%-' . $this->width . 's %s', $key, ($this->note)($key));
+                $options[$key] = sprintf('%-'.$this->width.'s %s', $key, ($this->note)($key));
             }
         }
 
@@ -120,7 +119,7 @@ class CommandPicker
      * The groups that have at least one command ticked — what "the group is
      * on" means when a group can be partly ticked.
      *
-     * @param array<string, mixed> $selected keyed by command name
+     * @param  array<string, mixed>  $selected  keyed by command name
      * @return array<int, string>
      */
     private function groupsFullyOff(array $selected): array
@@ -141,7 +140,7 @@ class CommandPicker
     }
 
     /**
-     * @param array<string, mixed> $selected keyed by command name
+     * @param  array<string, mixed>  $selected  keyed by command name
      * @return array<string, string>
      */
     private function groupOptions(array $selected): array
@@ -157,7 +156,7 @@ class CommandPicker
                 $toolset,
                 count($on),
                 count($names),
-                $note === null || $note === '' ? '' : '  ' . $note,
+                $note === null || $note === '' ? '' : '  '.$note,
             );
         }
 

@@ -86,7 +86,7 @@ class Create extends Command
         // create prints only its reason, not a progress line and a log hint.
         $user = $creator->provisionForDeploy(NewProjectInput::fromArray($params));
 
-        if (!$this->option('json')) {
+        if (! $this->option('json')) {
             $this->info(isset($params['git_repo'])
                 ? "Creating a project for {$params['git_repo']} — this takes a few minutes."
                 : 'Creating a project — this takes a few minutes.');
@@ -100,7 +100,7 @@ class Create extends Command
 
         try {
             $creator->deploy($user, $creator->startDeployLog($user));
-        } catch (ValidationException | DeployAlreadyRunningException | DockerErrorException $e) {
+        } catch (ValidationException|DeployAlreadyRunningException|DockerErrorException $e) {
             $this->warnAboutRepository($creator);
             // The hint first: the console renderer prints the reason after it.
             $this->pointAtDeployLog($params);
@@ -144,7 +144,7 @@ class Create extends Command
     /**
      * A failed deploy is rolled back but its log is kept.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     private function pointAtDeployLog(array $params): void
     {
@@ -170,6 +170,7 @@ class Create extends Command
     {
         if ($this->option('json')) {
             $this->output->writeln($body);
+
             return 0;
         }
 
@@ -181,12 +182,13 @@ class Create extends Command
 
         if ($username === '') {
             $this->error('The project was created but the response carried no username.');
+
             return 1;
         }
 
         $this->info("Project {$username} created.");
         if ($domain !== '') {
-            $this->info('Live at ' . $this->url($domain));
+            $this->info('Live at '.$this->url($domain));
         }
         $this->warnAboutRepository($creator);
 
@@ -210,6 +212,6 @@ class Create extends Command
         $model = Domain::findByName($domain);
         $details = $model !== null && is_array($model->details) ? $model->details : [];
 
-        return (empty($details['ssl_disabled']) ? 'https://' : 'http://') . $domain;
+        return (empty($details['ssl_disabled']) ? 'https://' : 'http://').$domain;
     }
 }

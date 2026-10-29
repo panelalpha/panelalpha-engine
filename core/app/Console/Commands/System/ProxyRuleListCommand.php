@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands\System;
 
-use App\Models\ProxyRule;
 use App\Console\Commands\Concerns\ResolvesProject;
+use App\Models\ProxyRule;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -43,6 +43,7 @@ class ProxyRuleListCommand extends Command
 
         if ($rules->isEmpty()) {
             $this->info('No proxy rules found.');
+
             return 0;
         }
 
@@ -53,9 +54,9 @@ class ProxyRuleListCommand extends Command
                 'scope' => $rule->owner_scope,
                 'user' => $rule->username ?? '-',
                 'transport' => $rule->transport,
-                'listen' => ($rule->listen_ip ?? '*') . ':' . $rule->listen_port,
+                'listen' => ($rule->listen_ip ?? '*').':'.$rule->listen_port,
                 'server_name' => $rule->server_name ?? '-',
-                'upstream' => $rule->upstream_host . ':' . $rule->upstream_port,
+                'upstream' => $rule->upstream_host.':'.$rule->upstream_port,
                 'enabled' => $rule->enabled ? 'Y' : 'N',
                 'generated' => $rule->is_generated ? 'Y' : 'N',
             ];

@@ -16,7 +16,7 @@ trait HasDetails
     }
 
     /**
-     * @param array $details
+     * @param  array  $details
      * @return array
      */
     public function setDetails($details)

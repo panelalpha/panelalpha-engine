@@ -22,7 +22,7 @@ final class DetectionSignal
     /**
      * The signal a detection decision deserves, or null when a recipe did its job.
      *
-     * @param array<string, mixed> $decision as DetectProjectStrategy::detect() returns it
+     * @param  array<string, mixed>  $decision  as DetectProjectStrategy::detect() returns it
      * @return array{signal: string, detail: string}|null
      */
     public static function forDecision(array $decision, string $projectDir): ?array
@@ -34,14 +34,14 @@ final class DetectionSignal
             return [
                 'signal' => self::RAILPACK,
                 'detail' => 'No recipe matched; built by Railpack'
-                    . self::recognisedSuffix(self::recognisedRuntimes($projectDir)),
+                    .self::recognisedSuffix(self::recognisedRuntimes($projectDir)),
             ];
         }
 
         if ($strategy === Strategies::FALLBACK) {
             return [
                 'signal' => self::FALLBACK,
-                'detail' => 'No recipe matched; label: ' . $label,
+                'detail' => 'No recipe matched; label: '.$label,
             ];
         }
 
@@ -49,13 +49,13 @@ final class DetectionSignal
     }
 
     /**
-     * @param list<string> $runtimes
+     * @param  list<string>  $runtimes
      */
     private static function recognisedSuffix(array $runtimes): string
     {
         return $runtimes === []
             ? ''
-            : '; recognised by ' . implode(', ', $runtimes);
+            : '; recognised by '.implode(', ', $runtimes);
     }
 
     /**

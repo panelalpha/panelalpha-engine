@@ -2,8 +2,10 @@
 
 namespace Tests\Unit\Mcp;
 
-use App\Mcp\Tools\Api\ApiTool;
+use App\Mcp\ToolRegistry;
 use App\Models\McpActivityLog;
+use Laravel\Mcp\Server\Tool;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -12,6 +14,13 @@ use Tests\TestCase;
  */
 class ActivityLogRedactionTest extends TestCase
 {
+    private const CREDENTIAL_WORDS = '/pass|pwd|token|secret|private|credential|api_?key|access_?key|license_?key/i';
+
+    /** Names with a credential word in them that hold none. */
+    private const NOT_CREDENTIALS = [
+        'clear_secrets' => 'a flag that removes the stored ones',
+    ];
+
     public function test_it_redacts_credentials_at_the_top_level(): void
     {
         $redacted = McpActivityLog::redact([
@@ -23,6 +32,15 @@ class ActivityLogRedactionTest extends TestCase
         $this->assertSame('johndoe', $redacted['username']);
         $this->assertSame(McpActivityLog::REDACTED, $redacted['password']);
         $this->assertSame(McpActivityLog::REDACTED, $redacted['git_token']);
+    }
+
+    /** wp_config_create's `dbpass`, and the short forms WP-CLI and connection strings use. */
+    public function test_short_password_names_are_redacted(): void
+    {
+        $input = ['dbpass' => 'a', 'user_pass' => 'b', 'db_pwd' => 'c', 'secret_key' => 'd', 'aws_access_key' => 'e'];
+
+        $this->assertSame(array_fill_keys(array_keys($input), McpActivityLog::REDACTED), McpActivityLog::redact($input));
+        $this->assertSame('wp', McpActivityLog::redact(['dbname' => 'wp'])['dbname']);
     }
 
     public function test_it_redacts_at_every_depth(): void
@@ -129,6 +147,37 @@ class ActivityLogRedactionTest extends TestCase
         $this->assertStringNotContainsString('token@', (string) $log->error_message);
     }
 
+    /**
+     * A refused tool call's error text is the API's JSON answer, and a refused deploy-hook
+     * registration carries the hook's one-time secret in it. Only secret-named members go.
+     */
+    public function test_secret_members_of_a_json_error_message_are_masked(): void
+    {
+        $answer = json_encode(['status' => 422, 'data' => ['problems' => [[
+            'code' => 'provider_token_missing',
+            'hook' => ['url' => 'https://'.TestNetwork::public(10).'/hooks/abc', 'secret' => 'one-time-"secret\\', 'created' => true],
+        ]], 'git_token' => 'ghp_x']], JSON_UNESCAPED_SLASHES);
+        $log = new McpActivityLog(['error_message' => $answer]);
+
+        $stored = json_decode((string) $log->error_message, true);
+        $this->assertSame(McpActivityLog::REDACTED, $stored['data']['problems'][0]['hook']['secret']);
+        $this->assertSame(McpActivityLog::REDACTED, $stored['data']['git_token']);
+        $this->assertSame('https://'.TestNetwork::public(10).'/hooks/abc', $stored['data']['problems'][0]['hook']['url']);
+        $this->assertSame('provider_token_missing', $stored['data']['problems'][0]['code']);
+        $this->assertTrue($stored['data']['problems'][0]['hook']['created']);
+    }
+
+    /** The same answer, escaped inside another tool's JSON (execute_tools reports its calls this way). */
+    public function test_secret_members_of_json_escaped_in_a_json_string_are_masked(): void
+    {
+        $inner = json_encode(['hook' => ['secret' => 'one-time-"secret\\', 'url' => 'https://h/x']], JSON_UNESCAPED_SLASHES);
+        $log = new McpActivityLog(['error_message' => json_encode(['results' => [['text' => $inner]]], JSON_UNESCAPED_SLASHES)]);
+
+        $stored = json_decode((string) json_decode((string) $log->error_message, true)['results'][0]['text'], true);
+        $this->assertSame(McpActivityLog::REDACTED, $stored['hook']['secret']);
+        $this->assertSame('https://h/x', $stored['hook']['url']);
+    }
+
     /** A token in a query string survived both the URL and the suffix guards. */
     public function test_secret_query_parameters_are_masked_in_both_fields(): void
     {
@@ -180,6 +229,29 @@ class ActivityLogRedactionTest extends TestCase
         $this->assertSame(McpActivityLog::REDACTED, $redacted['Admin_Password']);
     }
 
+    /** A row stored before `dbpass` was a credential name: only such names change, sizes stay. */
+    public function test_a_stored_row_loses_only_its_credential_values(): void
+    {
+        $stored = [
+            'dbname' => 'wp',
+            'dbpass' => 'hunter2',
+            'password' => McpActivityLog::REDACTED,
+            'args' => '[redacted] (4 items)',
+            'nested' => [['user_pass' => 'hunter2', 'role' => 'editor']],
+        ];
+
+        $this->assertSame(
+            [
+                'dbname' => 'wp',
+                'dbpass' => McpActivityLog::REDACTED,
+                'password' => McpActivityLog::REDACTED,
+                'args' => '[redacted] (4 items)',
+                'nested' => [['user_pass' => McpActivityLog::REDACTED, 'role' => 'editor']],
+            ],
+            McpActivityLog::redactSecretKeys($stored)
+        );
+    }
+
     public function test_it_leaves_ordinary_arguments_and_shape_alone(): void
     {
         $input = ['username' => 'johndoe', 'per_page' => 15, 'enabled' => true, 'list' => ['a', 'b']];
@@ -189,32 +261,26 @@ class ActivityLogRedactionTest extends TestCase
 
     /**
      * The guard is only worth anything if it covers the arguments the tools
-     * actually declare, so take the names from the generated tools themselves
-     * rather than from a list written alongside the guard.
+     * actually declare, so take the names from the tools themselves, nested
+     * ones included, and look for credential words anywhere in a name rather
+     * than reuse the suffixes the guard matches: `dbpass` ended in none.
      */
-    public function test_every_credential_argument_a_generated_tool_declares_is_covered(): void
+    public function test_every_credential_argument_a_tool_declares_is_covered(): void
     {
-        /** @var array<int, class-string<ApiTool>> $classes */
-        $classes = require base_path('app/Mcp/Tools/Api/generated-tools.php');
-
         $uncovered = [];
 
-        foreach ($classes as $class) {
-            $tool = new $class();
-
-            if (!$tool instanceof ApiTool) {
+        foreach (ToolRegistry::all() as $class) {
+            $tool = app($class);
+            if (! $tool instanceof Tool) {
                 continue;
             }
 
-            $properties = (array)($tool->toArray()['inputSchema']['properties'] ?? []);
-
-            foreach (array_keys($properties) as $name) {
-                if (!preg_match('/(password|passwd|passphrase|token|secret|private_key|api_key|license_key)$/i', (string)$name)) {
+            foreach ($this->argumentNames((array) ($tool->toArray()['inputSchema']['properties'] ?? [])) as $name) {
+                if (preg_match(self::CREDENTIAL_WORDS, $name) !== 1 || array_key_exists($name, self::NOT_CREDENTIALS)) {
                     continue;
                 }
-
                 if (McpActivityLog::redact([$name => 'x'])[$name] !== McpActivityLog::REDACTED) {
-                    $uncovered[] = $tool->name() . ' -> ' . $name;
+                    $uncovered[] = $tool->name().' -> '.$name;
                 }
             }
         }
@@ -222,8 +288,24 @@ class ActivityLogRedactionTest extends TestCase
         $this->assertSame(
             [],
             $uncovered,
-            "Tool arguments that look like credentials but are not in McpActivityLog::REDACT_SUFFIXES:\n"
-                . implode("\n", $uncovered)
+            "Tool arguments that look like credentials but are not redacted by McpActivityLog:\n"
+                .implode("\n", $uncovered)
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $properties
+     * @return list<string>
+     */
+    private function argumentNames(array $properties): array
+    {
+        $names = [];
+        foreach ($properties as $name => $schema) {
+            $names[] = (string) $name;
+            $nested = is_array($schema) ? ($schema['properties'] ?? $schema['items']['properties'] ?? []) : [];
+            array_push($names, ...$this->argumentNames((array) $nested));
+        }
+
+        return $names;
     }
 }

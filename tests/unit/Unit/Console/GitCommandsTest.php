@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Exceptions\NotFoundException;
 use App\Jobs\DeployProject;
+use App\Lib\Http\OutboundUrl;
 use App\Models\Admin;
 use App\Models\DeployHook;
 use App\Models\SecretVaultEntry;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 use Tests\Unit\Git\FakesGitHost;
@@ -54,6 +56,7 @@ class GitCommandsTest extends DeployHookTestCase
         config(['app.debug' => false]);
 
         $this->fakeGitHost();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
 
         $this->redeploy = new SpyCheckoutRedeploy();
         $this->app->instance(CheckoutRedeploy::class, $this->redeploy);
@@ -62,6 +65,7 @@ class GitCommandsTest extends DeployHookTestCase
     protected function tearDown(): void
     {
         $this->restoreHost();
+        OutboundUrl::setResolverForTests(null);
         Schema::dropIfExists('secret_vault_entries');
         Schema::dropIfExists('admins');
 
@@ -505,6 +509,21 @@ class GitCommandsTest extends DeployHookTestCase
         $this->assertSame('alice', $entry->refresh()->project);
     }
 
+    /** The entry is not read for a project that does not exist, so it is neither claimed nor counted as used. */
+    public function test_a_vault_reference_for_an_unknown_project_is_not_read(): void
+    {
+        $entry = $this->vaultEntry('ghp_from_vault');
+
+        foreach (['git:update-credentials' => [], 'git:connect' => ['--repo-url' => self::REPO, '--branch' => 'main']] as $command => $options) {
+            $failure = $this->failureOf($command, ['username' => 'nobody', '--token' => $entry->reference()] + $options);
+
+            $this->assertSame("Project 'nobody' not found.\n", $failure, $command);
+        }
+        $entry->refresh();
+        $this->assertNull($entry->project);
+        $this->assertSame(0, $entry->use_count);
+    }
+
     public function test_an_unknown_vault_reference_is_refused_not_stored(): void
     {
         $user = $this->siteGitPublicHtml('old');
@@ -526,6 +545,7 @@ class GitCommandsTest extends DeployHookTestCase
             Schema::create('secret_vault_entries', function ($table) {
                 $table->id();
                 $table->char('ref_hash', 64)->unique();
+                $table->string('ref_key', 64)->nullable()->unique();
                 $table->string('type');
                 $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_PROJECT);
                 $table->string('project', 64)->nullable();
@@ -702,7 +722,7 @@ class GitCommandsTest extends DeployHookTestCase
         [$exit, $output] = $this->runCommand('git:deploy-hook', ['username' => 'alice', '--raw' => true]);
 
         $this->assertSame(0, $exit);
-        $this->assertStringStartsWith('{"data":{"url":"https:\/\/203.0.113.10\/hooks\/', $output);
+        $this->assertStringStartsWith('{"data":{"url":"https:\/\/'.TestNetwork::public(10).'\/hooks\/', $output);
         $hook = DeployHook::firstOrFail();
         $this->assertSame(json_encode(['data' => [
             'url' => $hook->url(),
@@ -712,6 +732,7 @@ class GitCommandsTest extends DeployHookTestCase
             'warning' => \App\Lib\DeployHook\DeployHooks::FORCE_PULL_WARNING,
             'created' => true,
             'tls' => \App\Lib\DeployHook\EngineTlsAdvisory::forProvider(null),
+            'registration' => null,
             'secret' => $hook->secret(),
         ]]) . "\n", $output);
     }

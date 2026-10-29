@@ -201,6 +201,10 @@ class DindDeployStrategyTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                if (array_slice((array) $cmd, 0, 2) === ['sudo', 'realpath']) {
+                    return SuccessfulProcess::for($cmd);
+                }
+
                 return new class extends Process {
                     public function __construct()
                     {
@@ -260,6 +264,15 @@ class DindDeployStrategyTest extends TestCase
                     ): void {
                         $this->makeDirWithParents(dirname($path), $chown);
                         file_put_contents($path, $contents);
+                    }
+
+                    public function writeFileReplacingPath(
+                        string $path,
+                        string $contents,
+                        ?string $chown = null,
+                        ?string $chmod = null,
+                    ): void {
+                        $this->filePutContents($path, $contents, $chown, $chmod);
                     }
                 };
             }

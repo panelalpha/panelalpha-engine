@@ -53,7 +53,7 @@ final class UsernamePolicy
     /** Whether the name is one a project could have, on any host. */
     public static function isAcceptable(string $username): bool
     {
-        return self::isWellFormed($username) && !self::isReserved($username);
+        return self::isWellFormed($username) && ! self::isReserved($username);
     }
 
     public static function isWellFormed(string $username): bool

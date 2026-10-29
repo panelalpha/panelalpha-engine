@@ -51,6 +51,15 @@ export interface UserConfig extends UserLimits {
   };
 }
 
+export interface ProjectApp {
+  type: string | null;
+  framework: string | null;
+  label: string | null;
+  status: 'live' | 'building' | 'failed' | 'down' | 'suspended' | 'none';
+  public_url: string | null;
+  admin_sso: boolean;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -67,6 +76,7 @@ export interface User {
   updated_at: string;
   details: UserDetails;
   config: UserConfig;
+  app: ProjectApp;
 }
 
 export interface UserCredentials {

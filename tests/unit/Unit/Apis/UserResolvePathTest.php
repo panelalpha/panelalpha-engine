@@ -39,6 +39,29 @@ class UserResolvePathTest extends TestCase
         );
     }
 
+    public function test_resolve_keeps_a_sibling_home_with_the_same_prefix_as_a_whole_segment(): void
+    {
+        $project = $this->projectWithHome('/home/alice');
+
+        $this->assertSame('/home/alice/home/alice2/x', $project->resolvePath('/home/alice2/x'));
+        $this->assertSame('/home/alice/home/alicex', $project->resolvePath('/home/alicex'));
+    }
+
+    public function test_resolve_reads_the_home_itself_as_the_home(): void
+    {
+        $project = $this->projectWithHome('/home/alice');
+
+        $this->assertSame('/home/alice/', $project->resolvePath('/home/alice'));
+    }
+
+    public function test_resolve_replaces_legacy_var_www_only_as_a_whole_segment(): void
+    {
+        $project = $this->projectWithHome('/home/alice');
+
+        $this->assertSame('/home/alice/', $project->resolvePath('/var/www'));
+        $this->assertSame('/home/alice/var/www2/x', $project->resolvePath('/var/www2/x'));
+    }
+
     public function test_resolve_rejects_path_traversal(): void
     {
         $project = $this->projectWithHome('/home/alice');
@@ -61,7 +84,7 @@ class UserResolvePathTest extends TestCase
         $system->method('projectHomeDirPath')->willReturn($home);
         $system->method('projectDirPath')->willReturn($home);
 
-        $model = new User();
+        $model = new User;
         $model->username = 'alice';
         $model->details = ['template' => 'dind'];
 

@@ -46,13 +46,18 @@ pae mcp:token:revoke <id>
 
 Stops a token working immediately. Use this the moment a token might have leaked. `pae mcp:token:delete <id>` removes it from the list altogether.
 
+Software that holds a token can also replace or end it itself, over the engine's API. These are not assistant tools:
+
+- `POST /api/tokens/current/rotate` returns a new token with the same name, permissions and lifetime. The old one keeps working for 10 minutes, so requests already on their way still succeed; a retry in that time returns the same new token.
+- `DELETE /api/tokens/current` revokes the token that makes the call.
+
 ## A token limited to some projects
 
 A token made with `pae connect` or `pae mcp:token:create` reaches every project on the engine. Software such as a control panel can instead ask the engine for a token limited to chosen projects. `pae` has no option for this, and `pae mcp:token:list` does not show it.
 
-An assistant on a limited token sees and changes only those projects. A request that names another project is refused, project lists show only its own, and the tools that are about the whole server are not available to it, except reading general engine information and inspecting a repository. It also cannot change a project's limits or suspend and unsuspend it, because those belong to you. A project it creates by cloning or by making a staging copy is outside its projects until the limit is updated.
+An assistant on a limited token sees and changes only those projects. A request that names another project is refused, project lists show only its own, and the tools that are about the whole server are not available to it, except reading general engine information (without the server's own name, system, kernel and uptime, and naming no other project) and inspecting a repository. It also cannot change a project's limits or suspend and unsuspend it, because those belong to you. It can clone a project or make a staging copy only under a new name that is already on its list, and it must give that name (`new_username`); the engine does not pick one for it. Without the name, or with a name outside the list, the request is refused with 403.
 
-The assistant activity log records which project each request named, and software can filter it by project.
+The assistant activity log records which project each request named and which token made it. Software can filter it by project, by a list of token ids, and by part of a token name. A request keeps its token id after that token is deleted, so the calls of tokens a user has since removed still show up under their ids.
 
 ## Next
 

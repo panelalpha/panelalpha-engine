@@ -144,16 +144,16 @@ final class FailureOutput
         // whole reported "reason" for rero-ils. A line saying `Error`
         // matches neither and is kept.
         '/^\s*(?:Image|Network|Volume|Container)\s+\S+\s+(?:Pulling|Pulled|Building|Built|Creating|Created'
-            . '|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
-            . '|Skipped)(?:\s+[\d.]+s)?\s*$/',
+            .'|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
+            .'|Skipped)(?:\s+[\d.]+s)?\s*$/',
         '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
-            . '|Extracting|Pull complete|Already exists)\b/',
+            .'|Extracting|Pull complete|Already exists)\b/',
         // `docker run`'s own pull of an image it does not have yet, which a
         // host build prints on stderr ahead of anything the build says.
         '/^Unable to find image \'[^\']+\' locally$/',
         '/^[\w.-]+: Pulling from [\w.\/:-]+$/',
         '/^[0-9a-f]{12}: (?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
-            . '|Extracting|Pull complete|Already exists)\b/',
+            .'|Extracting|Pull complete|Already exists)\b/',
         '/^Digest: sha256:[0-9a-f]{64}$/',
         '/^Status: (?:Downloaded newer image|Image is up to date) for \S+$/',
         // The same for `apt-get update`, best effort in the Rust host compile
@@ -171,7 +171,7 @@ final class FailureOutput
         $built = self::builtTags($lines);
         $lines = array_values(array_filter(
             $lines,
-            static fn (string $l): bool => !self::isNoise($l) && !self::isPullOfBuiltTag($l, $built)
+            static fn (string $l): bool => ! self::isNoise($l) && ! self::isPullOfBuiltTag($l, $built)
         ));
         if ($lines === []) {
             return '';
@@ -214,7 +214,7 @@ final class FailureOutput
     public static function withoutNoise(string $output): string
     {
         $lines = preg_split('/\r?\n/', trim($output)) ?: [];
-        $kept = array_filter($lines, static fn (string $l): bool => !self::isNoise($l));
+        $kept = array_filter($lines, static fn (string $l): bool => ! self::isNoise($l));
 
         return $kept === [] ? trim($output) : trim(implode("\n", $kept));
     }
@@ -244,7 +244,7 @@ final class FailureOutput
 
         $own = array_values(array_filter(
             $lines,
-            static fn (string $l): bool => str_starts_with($l, '#' . $step . ' ')
+            static fn (string $l): bool => str_starts_with($l, '#'.$step.' ')
         ));
 
         return trim(implode("\n", array_slice($own, -self::STEP_LINES)));
@@ -278,7 +278,7 @@ final class FailureOutput
      * the step's own line an explainer rule recognises instead. Null when
      * none does: the old region stands.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      */
     private static function stepCause(array $lines, int $at): ?string
     {
@@ -287,7 +287,7 @@ final class FailureOutput
         }
         $own = array_values(array_filter(
             array_slice($lines, 0, $at),
-            static fn (string $l): bool => str_starts_with($l, '#' . $m[1] . ' ')
+            static fn (string $l): bool => str_starts_with($l, '#'.$m[1].' ')
         ));
         $rule = DeployFailureExplainer::match(implode("\n", $own))['rule'] ?? null;
         if ($rule === null) {
@@ -313,13 +313,12 @@ final class FailureOutput
      * command's whole usage after EUSAGE, longer than WINDOW, so the window
      * opened mid-block and `npm error code` and its reason were cut off.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      */
     private static function npmBlockStart(array $lines, int $at): int
     {
-        $isNpmError = static fn (string $l): bool =>
-            preg_match('/^npm error(?:\s|$)/', (string) preg_replace(self::STEP_PREFIX, '', $l)) === 1;
-        if (!$isNpmError($lines[$at])) {
+        $isNpmError = static fn (string $l): bool => preg_match('/^npm error(?:\s|$)/', (string) preg_replace(self::STEP_PREFIX, '', $l)) === 1;
+        if (! $isNpmError($lines[$at])) {
             return $at;
         }
         while ($at > 0 && $isNpmError($lines[$at - 1])) {
@@ -344,7 +343,7 @@ final class FailureOutput
      * Tags compose says it builds (`Image <tag> Building`). That line is noise
      * and is dropped, so the explainer cannot see it.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      * @return array<string, true>
      */
     private static function builtTags(array $lines): array
@@ -362,7 +361,7 @@ final class FailureOutput
     /**
      * Compose's pull of a tag it then builds itself: benign, not a missing base image.
      *
-     * @param array<string, true> $built
+     * @param  array<string, true>  $built
      */
     private static function isPullOfBuiltTag(string $line, array $built): bool
     {

@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\PlatformCommand;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Matomo's restore-config, run as a rebuild's entrypoint runs it.
@@ -78,7 +79,7 @@ class MatomoRestoreConfigTest extends TestCase
         $run = str_replace('/app/', $this->dir . '/app/', $this->command()->run);
         $env = 'PATH=' . escapeshellarg($path)
             . ' FAKE_DIR=' . escapeshellarg($this->dir)
-            . ' DB_HOST=127.0.0.1 DB_PORT=' . escapeshellarg($port)
+            . ' DB_HOST=' . TestNetwork::LOOPBACK . ' DB_PORT=' . escapeshellarg($port)
             . ' DB_USERNAME=acct DB_PASSWORD=secret DB_DATABASE=acct_app APP_URL=https://stats.example.com';
         // set -e as in the generated entrypoint, so a failed step ends the boot.
         exec($env . ' sh -c ' . escapeshellarg("set -e\n{$run}\necho booted") . ' 2>&1', $output, $status);
@@ -104,7 +105,7 @@ class MatomoRestoreConfigTest extends TestCase
 
         $this->assertSame(0, $boot['status'], $boot['output']);
         $this->assertStringContainsString('booted', $boot['output']);
-        $this->assertStringContainsString("[database]\nhost = \"127.0.0.1\"", (string) $this->config());
+        $this->assertStringContainsString("[database]\nhost = \"" . TestNetwork::LOOPBACK . "\"", (string) $this->config());
         $this->assertStringContainsString('dbname = "acct_app"', (string) $this->config());
         $this->assertStringContainsString('trusted_hosts[] = "stats.example.com"', (string) $this->config());
     }

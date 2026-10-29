@@ -207,6 +207,32 @@ test.describe('engine API access', () => {
   );
 
   /**
+   * A project created later under a deleted project's name is someone else's, so the
+   * name leaves every allowance that listed it, and a rotation does not grant it again.
+   */
+  test(
+    "a deleted project leaves every other project's scope",
+    { tag: ['@slow'] },
+    async ({ api, userFactory }) => {
+      const keeper = await userFactory.createDindUser({ tunnel: 'none' });
+      skipUnless(keeper, 'DinD is not available on this engine.');
+      const gone = await userFactory.createDindUser({ tunnel: 'none' });
+      skipUnless(gone, 'DinD is not available on this engine.');
+
+      await api.allowApiAccess(keeper.username, { scope: [keeper.username, gone.username] });
+      await userFactory.deleteUser(gone.username);
+
+      const listed = (await api.listApiAccess()).data.find(
+        (entry) => entry.project === keeper.username
+      );
+      expect(listed?.scope, 'the deleted project left the scope').toEqual([keeper.username]);
+
+      const rotated = await api.rotateApiAccess(keeper.username);
+      expect(rotated.data.scope, 'a rotation does not grant it again').toEqual([keeper.username]);
+    }
+  );
+
+  /**
    * A classic project has no container to receive the address, the certificate or the
    * token, and no address on the tenant network to admit, so allowing it would read as
    * done and change nothing.

@@ -20,16 +20,18 @@ class Attach extends Command
         assert(is_string($username));
 
         $user = User::findByUsername($username);
-        if (!$user) {
+        if (! $user) {
             $this->error("User `{$username}` not found in database.");
+
             return 1;
         }
 
         $projectDir = $user->project()->projectDirPath();
         $composeFile = "{$projectDir}/docker-compose.yml";
 
-        if (!file_exists($composeFile)) {
+        if (! file_exists($composeFile)) {
             $this->error("Compose file not found: {$composeFile}");
+
             return 1;
         }
 
@@ -42,11 +44,12 @@ class Attach extends Command
             $workDir = "{$homeDir}/project";
         } else {
             $mainDomain = $user->getMainDomain();
-            if (!$mainDomain) {
+            if (! $mainDomain) {
                 $this->error("User `{$username}` has no main domain.");
+
                 return 1;
             }
-            $workDir = $homeDir . $mainDomain->getDocumentRoot();
+            $workDir = $homeDir.$mainDomain->getDocumentRoot();
         }
 
         $runAs = $this->option('u');
@@ -77,8 +80,9 @@ class Attach extends Command
 
         $process = proc_open($cmd, [STDIN, STDOUT, STDERR], $pipes);
 
-        if (!is_resource($process)) {
-            $this->error("Failed to start process.");
+        if (! is_resource($process)) {
+            $this->error('Failed to start process.');
+
             return 1;
         }
 

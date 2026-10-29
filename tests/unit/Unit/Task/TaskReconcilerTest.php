@@ -9,6 +9,7 @@ use App\Lib\Deploy\DeployLog\DeployStatus;
 use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Lib\Task\TaskReconciler;
 use App\Models\Task;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
 class TaskReconcilerTest extends SqliteTaskTestCase
@@ -89,6 +90,73 @@ class TaskReconcilerTest extends SqliteTaskTestCase
             Task::STATUS_FAILED,
             TaskReconciler::decide($task, $this->log(DeployLogger::STATUS_FAILED, 'boom'), $this->gone())
         );
+    }
+
+    public function test_a_cancelled_deploy_log_cancels_the_row(): void
+    {
+        $task = $this->runningTask();
+
+        $this->assertSame(
+            Task::STATUS_CANCELLED,
+            TaskReconciler::decide($task, $this->log(DeployLogger::STATUS_CANCELLED), $this->queued())
+        );
+    }
+
+    /**
+     * deploy-cancel closes the log at once; the job stops seconds later. A sweep in
+     * between must not blame a dead engine process for a cancel the user asked for.
+     */
+    public function test_a_deploy_cancelled_while_its_job_is_still_stopping_is_cancelled_not_failed(): void
+    {
+        $username = 'stopping-' . bin2hex(random_bytes(4));
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default', username: $username);
+        $task->markRunning('h-' . ++self::$jobSeq);
+        $task->started_at = now()->subMinutes(10);
+        $task->save();
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+
+        try {
+            $this->assertTrue(DeployLogger::requestCancel($username)['cancelled']);
+            $this->assertSame(self::retired(cancelled: [(int) $task->id]), TaskReconciler::reconcile(isPending: $this->queued()));
+
+            $task->refresh();
+            $this->assertSame(Task::STATUS_CANCELLED, $task->status);
+            $this->assertNotNull($task->cancelled_at);
+            $this->assertNull($task->details['error'] ?? null);
+            $this->assertArrayNotHasKey('reconciled', $task->details ?? []);
+        } finally {
+            unset($logger);
+            gc_collect_cycles();
+            DeployLogger::deleteUserLogs($username);
+        }
+    }
+
+    /** A deploy the user cancelled is not reported as one whose engine process died. */
+    public function test_the_sweep_reports_a_cancelled_deploy_apart_from_orphaned_tasks(): void
+    {
+        $username = 'reported-' . bin2hex(random_bytes(4));
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default', username: $username);
+        $task->markRunning('h-' . ++self::$jobSeq);
+        $task->started_at = now()->subMinutes(10);
+        $task->save();
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+
+        try {
+            DeployLogger::requestCancel($username);
+
+            $this->assertSame(0, Artisan::call('task:reconcile', ['--older-than' => 120]));
+            $output = Artisan::output();
+
+            $this->assertStringContainsString('Retired 0 orphaned task(s).', $output);
+            $this->assertStringContainsString('Cancelled 1 task(s) whose deploy was cancelled. ids: ' . $task->id, $output);
+            $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
+        } finally {
+            unset($logger);
+            gc_collect_cycles();
+            DeployLogger::deleteUserLogs($username);
+        }
     }
 
     public function test_a_terminal_log_wins_even_while_the_job_is_still_reserved(): void
@@ -173,10 +241,10 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         gc_collect_cycles();
 
         try {
-            $this->assertSame([], TaskReconciler::reconcile(isPending: $this->queued()), 'running log, reserved job: left alone');
+            $this->assertSame(self::retired(), TaskReconciler::reconcile(isPending: $this->queued()), 'running log, reserved job: left alone');
 
             $this->assertContains($username, DeployLogger::settleOrphanedDeploys());
-            $this->assertSame([(int) $task->id], TaskReconciler::reconcile(isPending: $this->queued()));
+            $this->assertSame(self::retired([(int) $task->id]), TaskReconciler::reconcile(isPending: $this->queued()));
 
             $task->refresh();
             $this->assertSame(Task::STATUS_FAILED, $task->status);
@@ -218,7 +286,7 @@ class TaskReconcilerTest extends SqliteTaskTestCase
             $id = $this->finishedLogStartedAnHourAgo($username, DeployLogger::STATUS_FAILED, 'Failed to start app: boom');
             $task = $this->runningRebuild($username, ['deploy_id' => $id]);
 
-            $this->assertSame([(int) $task->id], TaskReconciler::reconcile(isPending: $this->queued()));
+            $this->assertSame(self::retired([(int) $task->id]), TaskReconciler::reconcile(isPending: $this->queued()));
             $this->assertSame(Task::STATUS_FAILED, $task->refresh()->status);
             $this->assertSame('Failed to start app: boom', $task->details['error']);
         } finally {
@@ -233,7 +301,7 @@ class TaskReconcilerTest extends SqliteTaskTestCase
             $this->finishedLogStartedAnHourAgo($username, DeployLogger::STATUS_FAILED, 'someone else');
             $task = $this->runningRebuild($username, ['deploy_id' => 'another-deploy']);
 
-            $this->assertSame([], TaskReconciler::reconcile(isPending: $this->queued()));
+            $this->assertSame(self::retired(), TaskReconciler::reconcile(isPending: $this->queued()));
             $this->assertSame(Task::STATUS_RUNNING, $task->refresh()->status);
         } finally {
             DeployLogger::deleteUserLogs($username);
@@ -274,11 +342,11 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         $orphan = $this->runningTask();
 
         $dry = TaskReconciler::reconcile(true, 0, $this->gone());
-        $this->assertSame([$orphan->id], $dry);
+        $this->assertSame(self::retired([$orphan->id]), $dry);
         $this->assertSame(Task::STATUS_RUNNING, $orphan->refresh()->status);
 
         $retired = TaskReconciler::reconcile(false, 0, $this->gone());
-        $this->assertSame([$orphan->id], $retired);
+        $this->assertSame(self::retired([$orphan->id]), $retired);
         $this->assertSame(Task::STATUS_CANCELLED, $orphan->refresh()->status);
         $this->assertNotNull($orphan->cancelled_at);
         $this->assertStringContainsString('stopped without finishing', $orphan->details['reconciled']);
@@ -288,7 +356,7 @@ class TaskReconcilerTest extends SqliteTaskTestCase
     {
         $live = $this->runningTask();
 
-        $this->assertSame([], TaskReconciler::reconcile(false, 0, $this->queued()));
+        $this->assertSame(self::retired(), TaskReconciler::reconcile(false, 0, $this->queued()));
         $this->assertSame(Task::STATUS_RUNNING, $live->refresh()->status);
     }
 
@@ -298,7 +366,7 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         // marked itself running but whose job has not been pushed yet.
         $orphan = $this->runningTask();
 
-        $this->assertSame([], TaskReconciler::reconcile(false, 3600, $this->gone()));
+        $this->assertSame(self::retired(), TaskReconciler::reconcile(false, 3600, $this->gone()));
         $this->assertSame(Task::STATUS_RUNNING, $orphan->refresh()->status);
     }
 
@@ -307,7 +375,7 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         $done = $this->runningTask();
         $done->markCompleted();
 
-        $this->assertSame([], TaskReconciler::reconcile(false, 0, $this->gone()));
+        $this->assertSame(self::retired(), TaskReconciler::reconcile(false, 0, $this->gone()));
         $this->assertSame(Task::STATUS_COMPLETED, $done->refresh()->status);
     }
 
@@ -423,5 +491,15 @@ class TaskReconcilerTest extends SqliteTaskTestCase
 
         $this->assertNull($check($task));
         $this->assertNull(TaskReconciler::decide($task, null, $check));
+    }
+
+    /**
+     * @param list<int> $orphaned
+     * @param list<int> $cancelled
+     * @return array{orphaned: list<int>, cancelled: list<int>}
+     */
+    private static function retired(array $orphaned = [], array $cancelled = []): array
+    {
+        return [TaskReconciler::RETIRED_ORPHANED => $orphaned, TaskReconciler::RETIRED_CANCELLED => $cancelled];
     }
 }

@@ -10,6 +10,7 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * `_baseline/not-an-open-installer` against real pages.
@@ -31,7 +32,7 @@ class OpenInstallerCheckTest extends TestCase
     /** @return array{serving: string, result: CheckResult} */
     private function ask(string $fixture, string $path, int $status = 200, string $check = self::CHECK): array
     {
-        $response = new ProbedResponse($status, $this->fixture($fixture), 'http://127.0.0.1:8000' . $path, 0.05, $path);
+        $response = new ProbedResponse($status, $this->fixture($fixture), 'http://' . TestNetwork::LOOPBACK . ':8000' . $path, 0.05, $path);
         $runner = CheckRunner::for(null);
         foreach ($runner->results($response, null) as $result) {
             if ($result->check->id === $check) {
@@ -63,7 +64,7 @@ class OpenInstallerCheckTest extends TestCase
         $this->assertTrue($asked['result']->failed(), "{$fixture} at {$path} must be reported");
         $this->assertSame('unclaimed_install', $asked['serving']);
         $this->assertSame(HealthCheck::SEVERITY_WARNING, $asked['result']->check->severity);
-        $this->assertSame('http://127.0.0.1:8000' . $path, $asked['result']->toArray()['evidence']['url']);
+        $this->assertSame('http://' . TestNetwork::LOOPBACK . ':8000' . $path, $asked['result']->toArray()['evidence']['url']);
     }
 
     /**

@@ -21,13 +21,12 @@ final class AccountUserFiles
     private const CACHE_PREFIX = 'php-base-account-files:';
 
     /**
-     * @param \Closure(list<string>): string $runOnHost
+     * @param  \Closure(list<string>): string  $runOnHost
      */
     public function __construct(
         private readonly \Closure $runOnHost,
         private readonly Repository $cache
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{passwd: string, group: string}|null null when nothing has to be mounted
@@ -55,7 +54,7 @@ final class AccountUserFiles
             return null;
         }
 
-        return self::withLine($passwd, self::USER_NAME . ":x:{$uid}:{$gid}:" . self::USER_NAME . ':/app:/usr/sbin/nologin');
+        return self::withLine($passwd, self::USER_NAME.":x:{$uid}:{$gid}:".self::USER_NAME.':/app:/usr/sbin/nologin');
     }
 
     public static function groupWith(string $group, int $gid): ?string
@@ -64,7 +63,7 @@ final class AccountUserFiles
             return null;
         }
 
-        return self::withLine($group, self::USER_NAME . ":x:{$gid}:");
+        return self::withLine($group, self::USER_NAME.":x:{$gid}:");
     }
 
     /**
@@ -75,8 +74,8 @@ final class AccountUserFiles
     public static function volumes(): array
     {
         return [
-            './' . EngineArtifacts::RUN_PASSWD . ':/etc/passwd:ro',
-            './' . EngineArtifacts::RUN_GROUP . ':/etc/group:ro',
+            './'.EngineArtifacts::RUN_PASSWD.':/etc/passwd:ro',
+            './'.EngineArtifacts::RUN_GROUP.':/etc/group:ro',
         ];
     }
 
@@ -85,10 +84,10 @@ final class AccountUserFiles
      */
     private function imageFiles(string $image): ?array
     {
-        if (!ImageTransfer::isSafeImageRef($image)) {
+        if (! ImageTransfer::isSafeImageRef($image)) {
             return null;
         }
-        $key = self::CACHE_PREFIX . $image;
+        $key = self::CACHE_PREFIX.$image;
         $cached = $this->cache->get($key);
         if (is_array($cached) && is_string($cached['passwd'] ?? null) && is_string($cached['group'] ?? null)) {
             return ['passwd' => $cached['passwd'], 'group' => $cached['group']];
@@ -100,7 +99,7 @@ final class AccountUserFiles
             return null;
         }
         // An image with no root line is not one we can extend safely.
-        if (!self::hasId($files['passwd'], 0) || !self::hasId($files['group'], 0)) {
+        if (! self::hasId($files['passwd'], 0) || ! self::hasId($files['group'], 0)) {
             return null;
         }
         $this->cache->forever($key, $files);
@@ -133,6 +132,6 @@ final class AccountUserFiles
     {
         $file = rtrim($file, "\n");
 
-        return ($file === '' ? '' : $file . "\n") . $line . "\n";
+        return ($file === '' ? '' : $file."\n").$line."\n";
     }
 }

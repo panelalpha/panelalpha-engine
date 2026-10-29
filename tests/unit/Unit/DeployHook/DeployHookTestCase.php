@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Support\TaskSchema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -22,7 +23,7 @@ abstract class DeployHookTestCase extends TestCase
 
         config([
             'app.key' => 'base64:' . base64_encode(str_repeat('k', 32)),
-            'app.url' => 'https://203.0.113.10',
+            'app.url' => 'https://' . TestNetwork::public(10),
             'database.default' => 'sqlite',
             'database.connections.sqlite.database' => ':memory:',
             'database.connections.sqlite.foreign_key_constraints' => true,
@@ -39,6 +40,8 @@ abstract class DeployHookTestCase extends TestCase
             '2026_09_22_000000_add_pending_delivery_to_deploy_hooks_table.php',
             '2026_09_23_000000_add_diagnostics_to_deploy_hooks_tables.php',
             '2026_10_08_000000_create_hook_payload_digests_table.php',
+            '2026_10_09_000000_add_provider_registration_to_deploy_hooks_table.php',
+            '2026_10_16_000000_add_signature_seen_to_deploy_hooks_table.php',
         ] as $migration) {
             (require base_path('database/migrations/' . $migration))->up();
         }

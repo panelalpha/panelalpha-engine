@@ -62,7 +62,7 @@ final class PhpEntryExplainer implements Explainer
     public function explain(ProjectContext $context, ProbedResponse $response): array
     {
         foreach (self::ENTRY_POINTS as $entry) {
-            if (!$context->isFile($entry)) {
+            if (! $context->isFile($entry)) {
                 continue;
             }
 
@@ -70,26 +70,26 @@ final class PhpEntryExplainer implements Explainer
                 $dir = dirname($entry);
 
                 return [
-                    'detail' => 'The entry point is ' . $entry . ', so the document root should be '
-                        . $dir . ' rather than the project root, which has no index to serve.',
+                    'detail' => 'The entry point is '.$entry.', so the document root should be '
+                        .$dir.' rather than the project root, which has no index to serve.',
                     'fix' => self::docrootFix($context, $dir),
                 ];
             }
 
             // An index-less public/ is what the image serves when nothing is
             // declared, so the root index is not the one being looked for.
-            if (is_dir($context->path('public')) && !$context->isFile('public/index.html')) {
+            if (is_dir($context->path('public')) && ! $context->isFile('public/index.html')) {
                 return [
                     'detail' => 'The document root has no index file: public/ exists without one, '
-                        . 'while index.php is at the project root.',
+                        .'while index.php is at the project root.',
                     'fix' => 'Redeploy, which serves the project root when public/ has no index, '
-                        . 'or set `docroot` in panelalpha.yaml to the directory holding the entry point.',
+                        .'or set `docroot` in panelalpha.yaml to the directory holding the entry point.',
                 ];
             }
 
             return [
                 'detail' => 'index.php is at the project root, where the server is looking, '
-                    . 'so the file is not missing -- it cannot be read.',
+                    .'so the file is not missing -- it cannot be read.',
                 'fix' => 'Check the permissions on ~/project and index.php, then redeploy.',
             ];
         }
@@ -98,19 +98,19 @@ final class PhpEntryExplainer implements Explainer
         $dir = self::shallowestIndexDir($context->projectDir);
         if ($dir !== null) {
             return [
-                'detail' => 'index.php is not in any of the usual places, but ' . $dir . '/index.php exists, '
-                    . 'so the document root should most likely be ' . $dir . ' rather than the project root.',
+                'detail' => 'index.php is not in any of the usual places, but '.$dir.'/index.php exists, '
+                    .'so the document root should most likely be '.$dir.' rather than the project root.',
                 'fix' => self::docrootFix($context, $dir),
             ];
         }
 
         return [
             'detail' => 'There is no index.php anywhere in ~/project, so nothing in this project '
-                . 'is a front page.',
+                .'is a front page.',
             'fix' => 'Add an index.php, or set `docroot` in panelalpha.yaml to the directory that '
-                . 'holds the application, with `extends: ' . self::platformOf($context) . '` when the file has no `id` '
-                . 'or `extends` of its own. A repository that is a library rather than a site has no '
-                . 'front page to serve.',
+                .'holds the application, with `extends: '.self::platformOf($context).'` when the file has no `id` '
+                .'or `extends` of its own. A repository that is a library rather than a site has no '
+                .'front page to serve.',
         ];
     }
 
@@ -120,8 +120,8 @@ final class PhpEntryExplainer implements Explainer
      */
     public static function docrootFix(ProjectContext $context, string $dir): string
     {
-        return 'Set `docroot: ' . $dir . '` in panelalpha.yaml and redeploy. A file with no `id` or `extends` '
-            . 'of its own also needs `extends: ' . self::platformOf($context) . '`, the platform to start from.';
+        return 'Set `docroot: '.$dir.'` in panelalpha.yaml and redeploy. A file with no `id` or `extends` '
+            .'of its own also needs `extends: '.self::platformOf($context).'`, the platform to start from.';
     }
 
     /** The shipped PHP platform this project deploys as: Composer or not. */
@@ -141,7 +141,7 @@ final class PhpEntryExplainer implements Explainer
         for ($depth = 0; $depth < self::SEARCH_DEPTH && $level !== []; $depth++) {
             $next = [];
             foreach ($level as $relative) {
-                $entries = @scandir($relative === '' ? $root : $root . '/' . $relative);
+                $entries = @scandir($relative === '' ? $root : $root.'/'.$relative);
                 if ($entries === false) {
                     continue;
                 }
@@ -149,12 +149,12 @@ final class PhpEntryExplainer implements Explainer
                     if ($entry[0] === '.' || in_array($entry, self::NOT_SEARCHED, true)) {
                         continue;
                     }
-                    $child = $relative === '' ? $entry : $relative . '/' . $entry;
-                    $path = $root . '/' . $child;
-                    if (is_link($path) || !is_dir($path)) {
+                    $child = $relative === '' ? $entry : $relative.'/'.$entry;
+                    $path = $root.'/'.$child;
+                    if (is_link($path) || ! is_dir($path)) {
                         continue;
                     }
-                    if (is_file($path . '/index.php')) {
+                    if (is_file($path.'/index.php')) {
                         return $child;
                     }
                     $next[] = $child;

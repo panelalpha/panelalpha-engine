@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\InstallFingerprint;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class InstallFingerprintTest extends TestCase
 {
@@ -42,7 +43,7 @@ class InstallFingerprintTest extends TestCase
             'cpu_model' => 'AMD EPYC 7443P 24-Core Processor',
             'cpu_cores' => 24,
             'mem_total_kb' => 65811628,
-            'public_ip' => '203.0.113.7',
+            'public_ip' => TestNetwork::public(7),
         ], $overrides);
     }
 
@@ -66,7 +67,7 @@ class InstallFingerprintTest extends TestCase
     {
         $id = InstallFingerprint::derive($this->facts());
 
-        foreach (['203.0.113.7', 'engine-host', 'EPYC', 'a1b2c3d4'] as $fact) {
+        foreach ([TestNetwork::public(7), 'engine-host', 'EPYC', 'a1b2c3d4'] as $fact) {
             $this->assertStringNotContainsString($fact, $id);
         }
     }

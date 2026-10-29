@@ -144,7 +144,7 @@ class ChangeWebserverWebserverTest extends TestCase
             $this->markTestSkipped('bash integration script is not run on Windows CI hosts');
         }
 
-        $scriptPath = dirname(__DIR__, 4) . '/scripts/webserver-parse-args.test.sh';
+        $scriptPath = dirname(__DIR__, 4) . '/tests/scripts/webserver-parse-args.test.sh';
         $this->assertFileExists($scriptPath);
 
         $process = Process::fromShellCommandline('bash ' . escapeshellarg($scriptPath));

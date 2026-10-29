@@ -18,8 +18,7 @@ class DatabaseRenamer
     public function __construct(
         private readonly Mysql $mysql,
         private readonly DatabaseCopier $copier,
-    ) {
-    }
+    ) {}
 
     public function rename(User $user, MysqlDatabase $row, string $newName): void
     {
@@ -88,7 +87,7 @@ class DatabaseRenamer
     }
 
     /**
-     * @param array<string, string> $grants
+     * @param  array<string, string>  $grants
      */
     private function moveGrants(array $grants, string $from, string $to): void
     {
@@ -103,8 +102,8 @@ class DatabaseRenamer
      * copy, or tables already moved back. Tables that cannot be moved back stay
      * in it, and the failure says where they are.
      *
-     * @param array<string, string> $grants
-     * @param list<string>          $moved
+     * @param  array<string, string>  $grants
+     * @param  list<string>  $moved
      */
     private function undo(array $grants, string $from, string $to, array $moved, \Throwable $cause): \Throwable
     {
@@ -123,14 +122,14 @@ class DatabaseRenamer
         }
 
         return new \RuntimeException(
-            $cause->getMessage() . " The tables could not be moved back to '{$from}' and are kept in '{$to}'.",
+            $cause->getMessage()." The tables could not be moved back to '{$from}' and are kept in '{$to}'.",
             0,
             $cause,
         );
     }
 
     /**
-     * @param list<string> $tables
+     * @param  list<string>  $tables
      */
     private function moveBack(string $from, string $to, array $tables): bool
     {
@@ -141,7 +140,7 @@ class DatabaseRenamer
         try {
             $this->mysql->databases()->renameTables($from, $to, $tables);
         } catch (\Throwable $e) {
-            Log::warning("Database rename could not move the tables of '{$from}' back to '{$to}': " . $e->getMessage());
+            Log::warning("Database rename could not move the tables of '{$from}' back to '{$to}': ".$e->getMessage());
 
             return false;
         }

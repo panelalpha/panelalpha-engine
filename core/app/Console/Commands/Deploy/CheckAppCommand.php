@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Models\User;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
-use App\Models\User;
 use Illuminate\Console\Command;
 
 /**
@@ -33,18 +33,21 @@ class CheckAppCommand extends Command
         $username = (string) $this->argument('project');
 
         $user = User::findByUsername($username);
-        if (!$user) {
+        if (! $user) {
             $this->error("No such user: '{$username}'");
+
             return 1;
         }
         if ($user->getTemplate() !== 'dind') {
             $this->error("'{$username}' is not a dind account; there is no deployed application to check");
+
             return 1;
         }
 
         $project = self::dindOf($user);
         if ($project === null) {
             $this->error("'{$username}' does not run on the dind project driver");
+
             return 1;
         }
 
@@ -56,6 +59,7 @@ class CheckAppCommand extends Command
 
         if ($this->option('json')) {
             $this->line((string) json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
             return $report['healthy'] === false ? 1 : 0;
         }
 
@@ -63,11 +67,13 @@ class CheckAppCommand extends Command
         // the application is down when we never managed to ask it.
         if (isset($report['error'])) {
             $this->error("Could not check '{$username}': {$report['error']}");
+
             return 1;
         }
 
         if ($report['healthy'] === null) {
             $this->warn("'{$username}' publishes no application port to probe");
+
             return 0;
         }
 
@@ -78,16 +84,18 @@ class CheckAppCommand extends Command
                 $result['scheme'] ?? '-',
                 $result['status'] === AppHealth::STATUS_OK ? '<info>ok</info>' : '<error>fail</error>',
                 $result['detail'],
-                $result['time'] !== null ? $result['time'] . 's' : '-',
+                $result['time'] !== null ? $result['time'].'s' : '-',
             ], $report['ports'])
         );
 
         if ($report['healthy']) {
             $this->info("'{$username}' answered on every published port");
+
             return 0;
         }
 
         $this->error("'{$username}' did not answer on every published port");
+
         return 1;
     }
 

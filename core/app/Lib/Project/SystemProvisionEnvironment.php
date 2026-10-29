@@ -49,6 +49,6 @@ final class SystemProvisionEnvironment implements ProvisionEnvironment
 
     private function system(): System
     {
-        return $this->system ??= new System();
+        return $this->system ??= new System;
     }
 }

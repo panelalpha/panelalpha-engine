@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Lib\Deploy\Platform\PlatformSelector;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -15,7 +16,7 @@ use Illuminate\Validation\ValidationException;
  * and with the same words for a rejection.
  *
  * Only the shape is checked here. Whether the engine has a recipe by that name
- * is settled by {@see \App\Lib\Deploy\Platform\PlatformSelector}, from the same
+ * is settled by {@see PlatformSelector}, from the same
  * registry that would answer the question during a deploy — a validation rule
  * listing the ids would be a second copy of that list, to fall behind the first
  * the next time somebody adds a manifest.
@@ -35,9 +36,9 @@ final class RecipeChoiceInput
         if ($raw === null) {
             return null;
         }
-        if (!is_string($raw)) {
+        if (! is_string($raw)) {
             throw ValidationException::withMessages([
-                self::FIELD => self::FIELD . ' must be a recipe id, as reported by inspect.',
+                self::FIELD => self::FIELD.' must be a recipe id, as reported by inspect.',
             ]);
         }
 
@@ -48,7 +49,7 @@ final class RecipeChoiceInput
         if (preg_match(self::PATTERN, $recipe) !== 1) {
             throw ValidationException::withMessages([
                 self::FIELD => "'{$recipe}' is not a recipe id. Inspect the source and pick one of "
-                    . 'the ids under application.candidates.',
+                    .'the ids under application.candidates.',
             ]);
         }
 

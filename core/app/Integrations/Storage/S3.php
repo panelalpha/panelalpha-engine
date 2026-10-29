@@ -18,8 +18,7 @@ final class S3 extends AbstractStorage
 {
     public function __construct(
         private readonly FilesystemOperator $filesystem,
-    ) {
-    }
+    ) {}
 
     public static function fromContainer(BackupContainer $container): self
     {
@@ -115,7 +114,7 @@ final class S3 extends AbstractStorage
             ],
         ];
 
-        if (!empty($credentials['endpoint'])) {
+        if (! empty($credentials['endpoint'])) {
             $config['endpoint'] = $credentials['endpoint'];
             $config['use_path_style_endpoint'] = (bool) ($credentials['use_path_style_endpoint'] ?? false);
         }
@@ -129,7 +128,7 @@ final class S3 extends AbstractStorage
     private static function requireCredentials(BackupContainer $container, string $driver): array
     {
         $credentials = $container->credentials;
-        if (!is_array($credentials) || $credentials === []) {
+        if (! is_array($credentials) || $credentials === []) {
             throw new InvalidArgumentException("Credentials are required for {$driver} backup storage.");
         }
 
@@ -139,7 +138,7 @@ final class S3 extends AbstractStorage
     private static function requireCredential(array $credentials, string $key, string $driver): string
     {
         $value = $credentials[$key] ?? null;
-        if (!is_string($value) || $value === '') {
+        if (! is_string($value) || $value === '') {
             throw new InvalidArgumentException("Missing backup storage credential: {$key} ({$driver}).");
         }
 

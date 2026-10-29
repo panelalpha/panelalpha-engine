@@ -2,8 +2,8 @@
 
 namespace App\Lib\Deploy\Platform;
 
-use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
 use App\Lib\Deploy\Platform\Probes\DockerfileProbe;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
@@ -19,7 +19,7 @@ final class PlatformSelector
      * The platform for this project, or null when no manifest claims it —
      * the signal for the caller to fall through to Railpack.
      *
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
      */
     public static function detect(
@@ -37,6 +37,7 @@ final class PlatformSelector
      * id this engine does not ship is an error, not a fall-through.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
+     *
      * @throws ManifestException when `$recipe` names no recipe this engine has
      */
     public static function forContext(
@@ -56,6 +57,7 @@ final class PlatformSelector
      * skipped — only the existence of the recipe is still checked.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}
+     *
      * @throws ManifestException
      */
     private static function pinned(ProjectContext $context, ?string $directory, string $id): array
@@ -95,7 +97,7 @@ final class PlatformSelector
     private static function fromSource(ProjectContext $context): ?array
     {
         $hit = AppConfigLocator::findCandidate(
-            new LocalAppConfigSource(),
+            new LocalAppConfigSource,
             $context->projectDir,
             $context->sourceUrl
         );
@@ -126,17 +128,17 @@ final class PlatformSelector
      * `compose_path` or `dockerfile`/`port_hint`. Other
      * strategies' probes would change what existing recipes build.
      *
-     * @param array<string, mixed> $declared the keys the recipe itself states
+     * @param  array<string, mixed>  $declared  the keys the recipe itself states
      * @return array<string, mixed>
      */
     private static function probeData(PlatformManifest $manifest, ProjectContext $context, array $declared): array
     {
         $found = match ($manifest->strategy) {
-            Strategies::COMPOSE => (new ComposeUsableProbe())->evaluate($context),
-            Strategies::DOCKERFILE => (new DockerfileProbe())->evaluate($context),
+            Strategies::COMPOSE => (new ComposeUsableProbe)->evaluate($context),
+            Strategies::DOCKERFILE => (new DockerfileProbe)->evaluate($context),
             default => false,
         };
-        if (!is_array($found)) {
+        if (! is_array($found)) {
             return [];
         }
         // A recipe's own `port:` outranks the Dockerfile's EXPOSE; an inherited one does not.
@@ -158,7 +160,7 @@ final class PlatformSelector
         $matcher = new PlatformMatcher(ProbeRegistry::all());
 
         foreach (PlatformRegistry::all($directory) as $manifest) {
-            if (!$matcher->matches($manifest->detect, $context)) {
+            if (! $matcher->matches($manifest->detect, $context)) {
                 continue;
             }
 

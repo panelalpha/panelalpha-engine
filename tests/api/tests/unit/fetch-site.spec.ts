@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@/fixtures/test-options';
+import { testNetwork } from '@/helpers/test-network';
 import { fetchSite } from '@/helpers/webserver-helpers';
 
 // Answers like a Rails HTML route: 406 unless the client accepts HTML.
@@ -14,9 +15,9 @@ function startHtmlOnlyApp(): Promise<{ server: Server; url: string; seen: string
     response.end(html ? '<title>Login</title>' : '');
   });
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, testNetwork.LOOPBACK, () => {
       const { port } = server.address() as AddressInfo;
-      resolve({ server, url: `http://127.0.0.1:${port}/`, seen });
+      resolve({ server, url: `http://${testNetwork.LOOPBACK}:${port}/`, seen });
     });
   });
 }

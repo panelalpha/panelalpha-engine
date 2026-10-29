@@ -66,6 +66,7 @@ class DindPrepareFromSourceTest extends TestCase
             'deploy_platform',
             'deploy_checks_dir',
             'deploy_image',
+            'deploy_admin_sso',
             'git_commit',
         ] as $key) {
             $this->assertArrayHasKey($key, $details, "missing freeze key {$key}");
@@ -75,6 +76,7 @@ class DindPrepareFromSourceTest extends TestCase
         $this->assertSame('static', $details['deploy_strategy']);
         $this->assertNotSame('', (string) $details['deploy_label']);
         $this->assertNull($details['git_commit']);
+        $this->assertFalse($details['deploy_admin_sso']);
         $this->assertFileExists($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
     }
 

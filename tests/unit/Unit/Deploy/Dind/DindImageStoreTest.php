@@ -32,12 +32,12 @@ class DindImageStoreTest extends TestCase
             mkdir($this->dir . '/state/' . $store, 0700, true);
         }
         file_put_contents($this->dir . '/bin/sudo', "#!/bin/sh\nexec \"\$@\"\n");
-        file_put_contents($this->dir . '/bin/docker', <<<'SH'
+        file_put_contents($this->dir . '/bin/docker', sprintf(<<<'SH'
 #!/bin/bash
 # State lives in $STATE: registry-running, remote-ok, host-remote-ok, push-fails (a count) and
 # host/, account/, cache/ holding one file per image. Every call is logged.
 echo "$*" >> "$STATE/calls"
-key() { printf '%s' "$1" | tr '/:' '__'; }
+key() { printf '%%s' "$1" | tr '/:' '__'; }
 if [ "$1" = inspect ]; then
   # inspect -f FORMAT NAME; down-NAME stops just that container.
   [ -e "$STATE/registry-running" ] && [ ! -e "$STATE/down-$4" ] && echo true || echo false; exit 0
@@ -68,7 +68,7 @@ if [ "$1" = compose ]; then
   exit 0
 fi
 case "$1 $2" in
-  "image inspect") [ -e "$STATE/host/$(key "$4")" ]; exit ;;
+  "image inspect") for ref; do :; done; [ -e "$STATE/host/$(key "$ref")" ]; exit ;;
 esac
 if [ "$1" = tag ]; then exit 0; fi
 if [ "$1" = pull ]; then
@@ -76,13 +76,17 @@ if [ "$1" = pull ]; then
   [ -e "$STATE/host-remote-ok" ] || { echo "pull access denied for $3" >&2; exit 1; }
   touch "$STATE/host/$(key "$3")"; exit 0
 fi
+if [ "$1" = build ]; then
+  while [ $# -gt 0 ]; do [ "$1" = -t ] && t="$2"; shift; done
+  cat >/dev/null; touch "$STATE/host/$(key "$t")"; exit 0
+fi
 if [ "$1" = push ]; then
   n=$(cat "$STATE/push-fails" 2>/dev/null || echo 0)
   if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$STATE/push-fails"; echo "push refused" >&2; exit 1; fi
-  ref="$3"; touch "$STATE/cache/$(key "${ref#127.0.0.1:5000/}")"; exit 0
+  ref="$3"; touch "$STATE/cache/$(key "${ref#%s/}")"; exit 0
 fi
 echo "unexpected docker call: $*" >&2; exit 99
-SH);
+SH, DindImageStore::HOST_CACHE_REGISTRY));
         chmod($this->dir . '/bin/sudo', 0755);
         chmod($this->dir . '/bin/docker', 0755);
     }
@@ -115,6 +119,54 @@ SH);
     private function calls(): string
     {
         return (string) @file_get_contents($this->dir . '/state/calls');
+    }
+
+    private function hostHas(string $image): bool
+    {
+        return file_exists($this->dir . '/state/host/' . str_replace(['/', ':'], '_', $image));
+    }
+
+    /** @return resource $script running in the background, for proc_close() to wait on */
+    private function start(string $script)
+    {
+        $proc = proc_open(
+            ['sh', '-c', $script],
+            [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+            $pipes,
+            null,
+            ['PATH' => $this->dir . '/bin:/usr/local/bin:/usr/bin:/bin', 'STATE' => $this->dir . '/state']
+        );
+        $this->assertIsResource($proc);
+
+        return $proc;
+    }
+
+    /** @param  callable(): bool  $condition */
+    private function waitFor(callable $condition): bool
+    {
+        for ($i = 0; $i < 50 && ! $condition(); $i++) {
+            usleep(100000);
+        }
+
+        return $condition();
+    }
+
+    /** @return resource */
+    private function lockExclusively(string $path)
+    {
+        @touch($path);
+        $lock = fopen($path, 'r');
+        $this->assertIsResource($lock);
+        $this->assertTrue(flock($lock, LOCK_EX));
+
+        return $lock;
+    }
+
+    /** @param  resource  $lock */
+    private function unlock($lock): void
+    {
+        flock($lock, LOCK_UN);
+        fclose($lock);
     }
 
     /**
@@ -260,7 +312,7 @@ SH);
 
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::IMAGE . ' from the host through the cache registry', $out);
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/' . self::IMAGE, $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
         $this->assertStringContainsString('pull -q panelalpha-cache-registry:5000/' . self::IMAGE, $this->calls());
         $this->assertTrue($this->accountHas(self::IMAGE));
     }
@@ -385,7 +437,7 @@ SH);
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::RAILPACK_BUILDER . ' from the host through the cache registry', $out);
         $this->assertMatchesRegularExpression('/^pull -q ' . preg_quote(self::RAILPACK_BUILDER, '/') . '$/m', $this->calls(), 'the host pulls it');
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/' . self::RAILPACK_BUILDER, $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::RAILPACK_BUILDER, $this->calls());
         $this->assertStringNotContainsString('docker pull -q ' . self::RAILPACK_BUILDER, $this->calls(), 'the account never asks ghcr.io');
         $this->assertTrue($this->accountHas(self::RAILPACK_BUILDER));
     }
@@ -580,7 +632,7 @@ SH);
         [$code] = $this->sh((new DindImageStore())->hostPublishCommand('node:22-bookworm-slim'));
 
         $this->assertSame(0, $code);
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/node:22-bookworm-slim', $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/node:22-bookworm-slim', $this->calls());
         $this->assertFileExists($this->dir . '/state/cache/node_22-bookworm-slim');
     }
 
@@ -605,6 +657,49 @@ SH);
         [$code] = $this->sh($push);
         $this->assertSame(0, $code);
         $this->assertStringContainsString('push -q', $this->calls());
+    }
+
+    /** A garbage-collect holding the push lock holds up a rebuild's push, never its build. */
+    public function test_a_rebuild_builds_while_the_push_lock_is_held_and_only_its_push_waits(): void
+    {
+        $rebuild = (new DindImageStore())->hostRebuildCommand(self::IMAGE, 'FROM php:8.3');
+
+        $gc = $this->lockExclusively(DindImageStore::PUSH_LOCK);
+        try {
+            $proc = $this->start($rebuild);
+            $this->assertTrue($this->waitFor(fn (): bool => $this->hostHas(self::IMAGE)), 'the build must not wait for the push lock');
+            usleep(300000);
+            $this->assertStringNotContainsString('push -q', $this->calls(), 'the push must wait for the garbage-collect');
+        } finally {
+            $this->unlock($gc);
+        }
+
+        $this->assertSame(0, proc_close($proc));
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
+    }
+
+    /** Two deploys missing one base: the second waits, finds the first one's image and builds nothing; other images go on. */
+    public function test_a_second_rebuild_of_one_image_waits_for_the_first_and_builds_nothing(): void
+    {
+        $other = 'panelalpha/ruby:3.3-pa2';
+        $store = new DindImageStore();
+
+        $first = $this->lockExclusively(DindImageStore::buildLockPath(self::IMAGE));
+        try {
+            $proc = $this->start($store->hostRebuildCommand(self::IMAGE, 'FROM php:8.3'));
+            [$code] = $this->sh($store->hostRebuildCommand($other, 'FROM ruby:3.3'));
+            $this->assertSame(0, $code);
+            $this->assertTrue($this->hostHas($other), 'another image is not held up');
+            usleep(300000);
+            $this->assertStringNotContainsString(self::IMAGE, $this->calls(), 'the second rebuild must wait for the first');
+            $this->has('host', self::IMAGE);
+        } finally {
+            $this->unlock($first);
+        }
+
+        $this->assertSame(0, proc_close($proc));
+        $this->assertStringNotContainsString('-t ' . self::IMAGE, $this->calls());
+        $this->assertStringNotContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
     }
 
     public function test_a_refresh_rebuilds_even_when_the_tag_exists(): void

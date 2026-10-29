@@ -76,7 +76,7 @@ final class SharedZones
         }
 
         foreach (self::ZONES as $zone) {
-            if ($domain === $zone || str_ends_with($domain, '.' . $zone)) {
+            if ($domain === $zone || str_ends_with($domain, '.'.$zone)) {
                 return true;
             }
         }
@@ -92,7 +92,7 @@ final class SharedZones
     {
         $domain = strtolower(trim($domain));
 
-        if ($domain === '' || !str_contains($domain, '.')) {
+        if ($domain === '' || ! str_contains($domain, '.')) {
             return false;
         }
         if (filter_var($domain, FILTER_VALIDATE_IP) !== false) {
@@ -101,7 +101,7 @@ final class SharedZones
 
         $domain = trim($domain, '.');
         foreach (self::RESERVED_TLDS as $reserved) {
-            if ($domain === $reserved || str_ends_with($domain, '.' . $reserved)) {
+            if ($domain === $reserved || str_ends_with($domain, '.'.$reserved)) {
                 return false;
             }
         }
@@ -119,20 +119,20 @@ final class SharedZones
      * elsewhere, and the operator's to weigh.
      */
     /**
-     * @param bool $sharedZoneAllowed whether the operator has said this engine
-     *        may spend the fleet's shared allowance. Passed in rather than
-     *        read, so this class stays a statement about names.
+     * @param  bool  $sharedZoneAllowed  whether the operator has said this engine
+     *                                   may spend the fleet's shared allowance. Passed in rather than
+     *                                   read, so this class stays a statement about names.
      */
     public static function ineligibleReason(string $domain, bool $sharedZoneAllowed = true): ?string
     {
-        if (!self::isPubliclyIssuable($domain)) {
+        if (! self::isPubliclyIssuable($domain)) {
             return "{$domain} is not a public hostname a certificate authority will issue for";
         }
 
-        if (!$sharedZoneAllowed && self::covers($domain)) {
-            return "{$domain} is under " . self::zoneOf($domain) . ', a zone every engine in the '
-                . 'fleet issues under and shares one 50-certificate weekly limit on. Set '
-                . 'shared_zone_issuance to obtain one anyway, or give the project a domain you own';
+        if (! $sharedZoneAllowed && self::covers($domain)) {
+            return "{$domain} is under ".self::zoneOf($domain).', a zone every engine in the '
+                .'fleet issues under and shares one 50-certificate weekly limit on. Set '
+                .'shared_zone_issuance to obtain one anyway, or give the project a domain you own';
         }
 
         return null;
@@ -146,7 +146,7 @@ final class SharedZones
         $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
 
         foreach (self::ZONES as $zone) {
-            if ($domain === $zone || str_ends_with($domain, '.' . $zone)) {
+            if ($domain === $zone || str_ends_with($domain, '.'.$zone)) {
                 return $zone;
             }
         }

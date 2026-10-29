@@ -9,8 +9,8 @@ use App\System\Services\Mysql\Databases;
 use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
-use Symfony\Component\Process\Process;
 use PDO;
+use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -194,6 +194,33 @@ class DatabaseCopierTest extends TestCase
         $this->assertSame(['/tmp/rq-rollback/bob_wp.sql.gz'], $record->restores);
     }
 
+    public function test_a_database_a_push_creates_gets_the_source_users_grants_for_the_target_user(): void
+    {
+        $record = $this->recorder(sourcePrivileges: ['alice_wp' => 'SELECT, INSERT, TRIGGER', 'alice_other' => 'SELECT']);
+
+        $warnings = (new DatabaseCopier($this->mysqlDouble($record)))->grantCreatedDatabase('alice_wp', 'bob_wp', $this->definers());
+
+        $this->assertSame([['bob_wp', 'bob_wp', 'SELECT, INSERT, TRIGGER']], $record->grants);
+        $this->assertSame([], $warnings);
+    }
+
+    public function test_a_database_a_push_creates_without_a_target_user_to_grant_says_so(): void
+    {
+        $record = $this->recorder(sourcePrivileges: ['alice_wp' => 'ALL PRIVILEGES']);
+
+        $warnings = (new DatabaseCopier($this->mysqlDouble($record)))->grantCreatedDatabase(
+            'alice_wp',
+            'bob_wp',
+            DefinerMap::map('alice_', 'bob_', ['alice_wp'], []),
+        );
+
+        $this->assertSame([], $record->grants);
+        $this->assertSame(
+            ["Created database 'bob_wp' with no grants: no user of the target maps to a source user with grants on 'alice_wp'."],
+            $warnings
+        );
+    }
+
     private function definers(): DefinerMap
     {
         return DefinerMap::map('alice_', 'bob_', ['alice_wp'], ['bob_wp']);
@@ -212,16 +239,16 @@ class DatabaseCopierTest extends TestCase
 
     private function sourceWithDatabaseAndUser(string $name): User
     {
-        $user = $this->makeUser($name, ['mysql_prefix' => $name . '_']);
-        $user->mysqlDatabases()->create(['database' => $name . '_wp']);
-        $user->mysqlUsers()->create(['user' => $name . '_wp']);
+        $user = $this->makeUser($name, ['mysql_prefix' => $name.'_']);
+        $user->mysqlDatabases()->create(['database' => $name.'_wp']);
+        $user->mysqlUsers()->create(['user' => $name.'_wp']);
 
         return $user->refresh();
     }
 
     private function targetWithDatabaseAndUser(string $name, string $database): User
     {
-        $user = $this->makeUser($name, ['mysql_prefix' => $name . '_']);
+        $user = $this->makeUser($name, ['mysql_prefix' => $name.'_']);
         $user->mysqlDatabases()->create(['database' => $database]);
         $user->mysqlUsers()->create(['user' => $database]);
 
@@ -229,19 +256,19 @@ class DatabaseCopierTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $sourcePrivileges
-     * @param array<string, string> $targetPrivileges
+     * @param  array<string, string>  $sourcePrivileges
+     * @param  array<string, string>  $targetPrivileges
      */
     private function recorder(array $sourcePrivileges = [], array $targetPrivileges = []): object
     {
         return (object) [
-            'created'          => [],
-            'deleted'          => [],
-            'users'            => [],
-            'dumps'            => [],
-            'restores'         => [],
-            'grants'           => [],
-            'scripts'          => [],
+            'created' => [],
+            'deleted' => [],
+            'users' => [],
+            'dumps' => [],
+            'restores' => [],
+            'grants' => [],
+            'scripts' => [],
             'sourcePrivileges' => $sourcePrivileges,
             'targetPrivileges' => $targetPrivileges,
         ];
@@ -251,7 +278,8 @@ class DatabaseCopierTest extends TestCase
     {
         $record ??= $this->recorder();
 
-        return new class ($record, $failStream) extends Mysql {
+        return new class($record, $failStream) extends Mysql
+        {
             public function __construct(private object $record, private bool $failStream)
             {
                 parent::__construct(null);
@@ -261,7 +289,8 @@ class DatabaseCopierTest extends TestCase
             {
                 $record = $this->record;
 
-                return new class ($record) extends Databases {
+                return new class($record) extends Databases
+                {
                     public function __construct(private object $record)
                     {
                         parent::__construct(new PDO('sqlite::memory:'));
@@ -283,7 +312,8 @@ class DatabaseCopierTest extends TestCase
             {
                 $record = $this->record;
 
-                return new class ($record) extends Users {
+                return new class($record) extends Users
+                {
                     public function __construct(private object $record)
                     {
                         parent::__construct(new PDO('sqlite::memory:'), '%');
@@ -300,7 +330,8 @@ class DatabaseCopierTest extends TestCase
             {
                 $record = $this->record;
 
-                return new class ($record) extends Privileges {
+                return new class($record) extends Privileges
+                {
                     public function __construct(private object $record)
                     {
                         parent::__construct(new PDO('sqlite::memory:'), '%');

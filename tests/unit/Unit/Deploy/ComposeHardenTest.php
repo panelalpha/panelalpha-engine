@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\Compose\ComposeHarden;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class ComposeHardenTest extends TestCase
 {
@@ -15,7 +16,7 @@ class ComposeHardenTest extends TestCase
                     'image' => 'n8nio/n8n',
                     'environment' => [
                         'HUSKY' => '1',
-                        'N8N_HOST' => '0.0.0.0',
+                        'N8N_HOST' => TestNetwork::ANY,
                     ],
                     'restart' => 'always',
                 ],
@@ -26,7 +27,7 @@ class ComposeHardenTest extends TestCase
 
         $this->assertSame('always', $result['services']['app']['restart']);
         $this->assertSame('1', $result['services']['app']['environment']['HUSKY']);
-        $this->assertSame('0.0.0.0', $result['services']['app']['environment']['N8N_HOST']);
+        $this->assertSame(TestNetwork::ANY, $result['services']['app']['environment']['N8N_HOST']);
         $this->assertSame('384m', $result['services']['app']['mem_limit']);
         // A heap cap matched to mem_limit is a neutral limit, not a framework
         // opinion: without it Node sizes its heap from the host and is killed.
@@ -96,6 +97,19 @@ class ComposeHardenTest extends TestCase
         $this->assertSame(['pw'], $result['compose']['services']['app']['secrets']);
     }
 
+    /** `- /anon` names no host path: it is the container path of an anonymous volume, and stays in the run file. */
+    public function test_an_anonymous_volume_is_kept_and_not_reported(): void
+    {
+        $result = ComposeHarden::applyReporting(
+            ['services' => ['db' => ['image' => 'busybox', 'volumes' => ['data:/data', '/anon', '/var/lib/mysql']]]],
+            accountUser: 'acct',
+            projectDir: '/nonexistent-core-view/acct/project'
+        );
+
+        $this->assertSame([], $result['removed']);
+        $this->assertSame(['data:/data', '/anon', '/var/lib/mysql'], $result['compose']['services']['db']['volumes']);
+    }
+
     public function test_apply_reporting_reports_nothing_for_a_clean_file(): void
     {
         $result = ComposeHarden::applyReporting(['services' => ['app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']]]]);
@@ -141,7 +155,7 @@ class ComposeHardenTest extends TestCase
         $compose = [
             'services' => [
                 'app' => [
-                    'command' => 'bash -c "rm -f tmp/pids/server.pid && bundle exec rails db:prepare && bundle exec falcon serve --bind http://0.0.0.0:3000"',
+                    'command' => 'bash -c "rm -f tmp/pids/server.pid && bundle exec rails db:prepare && bundle exec falcon serve --bind http://' . TestNetwork::ANY . ':3000"',
                 ],
                 'worker' => [
                     'command' => ['bundle', 'exec', 'rake', 'db:setup'],
@@ -171,7 +185,7 @@ class ComposeHardenTest extends TestCase
                 ],
                 'vite' => [
                     'build' => '.',
-                    'command' => 'pnpm vite dev --host 0.0.0.0 --port 3036',
+                    'command' => 'pnpm vite dev --host ' . TestNetwork::ANY . ' --port 3036',
                 ],
                 'mailhog' => [
                     'image' => 'mailhog/mailhog',
@@ -638,7 +652,7 @@ YAML
                 'image' => 'chatwoot/chatwoot:latest',
                 'ports' => ['3000:3000'],
                 'entrypoint' => 'docker/entrypoints/rails.sh',
-                'command' => ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0'],
+                'command' => ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', TestNetwork::ANY],
                 'depends_on' => ['postgres', 'redis'],
             ],
             'sidekiq' => [

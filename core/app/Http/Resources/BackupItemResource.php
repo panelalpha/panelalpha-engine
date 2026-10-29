@@ -2,7 +2,6 @@
 
 namespace App\Http\Resources;
 
-use App\Models\Backup as BackupRecord;
 use App\Models\BackupItem;
 use Illuminate\Http\Resources\Json\JsonResource;
 

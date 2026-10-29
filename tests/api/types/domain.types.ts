@@ -36,6 +36,70 @@ export interface SslCertificate {
   domains?: string[];
 }
 
+export type SslCheckStatus =
+  | 'trusted'
+  | 'self_signed'
+  | 'untrusted_issuer'
+  | 'expired'
+  | 'not_yet_valid'
+  | 'domain_mismatch'
+  | 'unreadable'
+  | 'not_resolving'
+  | 'refused_address'
+  | 'unreachable';
+
+export interface SslCheckName {
+  common_name: string | null;
+  organization: string | null;
+  country: string | null;
+}
+
+export interface SslCheckCertificate {
+  status: SslCheckStatus;
+  issuer?: string;
+  common_name?: string;
+  names?: string[];
+  self_signed?: boolean;
+  chain_trusted?: boolean | null;
+  covers_domain?: boolean;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  days_remaining?: number | null;
+  signer?: SslCheckName | null;
+  serial_number?: string | null;
+  signature_algorithm?: string | null;
+  key?: { type: string | null; bits: number | null; curve: string | null } | null;
+  fingerprint_sha256: string | null;
+  chain?: {
+    subject: SslCheckName | null;
+    signer: SslCheckName | null;
+    expires_at: string | null;
+  }[];
+}
+
+export interface SslCheckProbe {
+  address: string;
+  answered: boolean;
+  refused: boolean;
+  error: string | null;
+  certificate: SslCheckCertificate | null;
+  serves_installed?: boolean | null;
+}
+
+export interface SslCheck {
+  domain: string;
+  status: SslCheckStatus;
+  checked_at: string;
+  issuer: string | null;
+  signer: SslCheckName | null;
+  valid_from: string | null;
+  expires_at: string | null;
+  days_remaining: number | null;
+  dns: { addresses: string[]; expected: string[]; points_here: boolean };
+  public: SslCheckProbe | null;
+  engine: SslCheckProbe | null;
+}
+
 export interface LogFile {
   file: string;
   path?: string;

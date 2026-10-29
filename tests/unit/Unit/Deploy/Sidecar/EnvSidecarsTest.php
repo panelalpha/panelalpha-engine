@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Sidecar;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class EnvSidecarsTest extends TestCase
 {
@@ -32,7 +33,7 @@ class EnvSidecarsTest extends TestCase
     public function test_credentials_in_the_url_are_kept(): void
     {
         $result = EnvSidecars::fromVariables([
-            'DATABASE_URL' => 'postgresql://alice:s3cret@127.0.0.1:5432/shop',
+            'DATABASE_URL' => 'postgresql://alice:s3cret@' . TestNetwork::LOOPBACK . ':5432/shop',
         ]);
 
         $this->assertSame('alice', $result['services']['db']['environment']['POSTGRES_USER']);
@@ -69,7 +70,7 @@ class EnvSidecarsTest extends TestCase
     {
         $result = EnvSidecars::fromVariables([
             'DB_CONNECTION' => 'mysql',
-            'DB_HOST' => '127.0.0.1',
+            'DB_HOST' => TestNetwork::LOOPBACK,
             'DB_DATABASE' => 'shop',
             'DB_USERNAME' => 'shop',
             'DB_PASSWORD' => 'secret',

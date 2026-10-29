@@ -15,11 +15,9 @@ final class ProjectBindMounts
 
     /** One line per container: its service, then each bind source, tab-separated. */
     private const INSPECT_FORMAT = '{{index .Config.Labels "com.docker.compose.service"}}'
-        . '{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{end}}{{end}}';
+        .'{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{end}}{{end}}';
 
-    public function __construct(private DindProject $project)
-    {
-    }
+    public function __construct(private DindProject $project) {}
 
     /**
      * "<service> mounts ./<path>" per bind under ~/project; null when it
@@ -44,8 +42,8 @@ final class ProjectBindMounts
             'escapeshellarg',
             $this->project->userAppComposeCommand(['ps', '--quiet'])
         ));
-        $script = 'ids=$(' . $ps . ') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            . escapeshellarg('{{.Id}}{{"\t"}}' . self::INSPECT_FORMAT) . ' $ids';
+        $script = 'ids=$('.$ps.') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
+            .escapeshellarg('{{.Id}}{{"\t"}}'.self::INSPECT_FORMAT).' $ids';
 
         try {
             $raw = $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS);
@@ -93,11 +91,11 @@ final class ProjectBindMounts
             $service = trim((string) array_shift($fields));
             foreach ($fields as $source) {
                 $source = rtrim(trim($source), '/');
-                if ($source !== $root && !str_starts_with($source, $root . '/')) {
+                if ($source !== $root && ! str_starts_with($source, $root.'/')) {
                     continue;
                 }
-                $relative = $source === $root ? '.' : './' . substr($source, strlen($root) + 1);
-                $found[] = ($service !== '' ? $service : 'a container') . " mounts {$relative}";
+                $relative = $source === $root ? '.' : './'.substr($source, strlen($root) + 1);
+                $found[] = ($service !== '' ? $service : 'a container')." mounts {$relative}";
             }
         }
 

@@ -13,6 +13,7 @@ use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 class DeployComposeTest extends TestCase
 {
@@ -73,13 +74,13 @@ class DeployComposeTest extends TestCase
         $parsed = Yaml::parse(DeployCompose::framework(
             [
                 'runtime' => PlatformManifest::RUNTIME_PHP,
-                'extra_hosts' => ['database-users.shared-hosting.palocal:172.18.0.2'],
+                'extra_hosts' => ['database-users.shared-hosting.palocal:' . TestNetwork::container(2)],
             ],
             8000
         ));
 
         $this->assertSame(
-            ['database-users.shared-hosting.palocal:172.18.0.2'],
+            ['database-users.shared-hosting.palocal:' . TestNetwork::container(2)],
             $parsed['services']['app']['extra_hosts']
         );
     }
@@ -242,6 +243,7 @@ class DeployComposeTest extends TestCase
         $this->assertArrayNotHasKey('build', $parsed['services']['app']);
         $this->assertArrayNotHasKey('volumes', $parsed['services']['app']);
         $this->assertSame('railpack', $parsed['services']['app']['labels']['panelalpha.generated']);
+        $this->assertSame('never', $parsed['services']['app']['pull_policy'], 'built in the account, on no registry');
     }
 
     public function test_skip_build_only_for_image_only_strategies(): void

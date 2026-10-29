@@ -6,6 +6,7 @@ use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\TenantEgressGuard;
 
 /**
  * The tenant firewall's list of projects allowed to call the Engine API.
@@ -17,7 +18,7 @@ use App\System\Project\Dind;
  * so it is root-owned and replaced atomically.
  *
  * An account that has been allowed also carries an egress guard of its own
- * ({@see \App\System\Project\Dind\TenantEgressGuard}), which knows nothing of that
+ * ({@see TenantEgressGuard}), which knows nothing of that
  * host port until it is rewritten here: the account's service re-applies it
  * within seconds, and nobody has to enter the account.
  */
@@ -25,19 +26,17 @@ class ApiAccessFirewall
 {
     public const FILE = '/opt/panelalpha/shared-hosting/config/tenant-api-access';
 
-    public function __construct(private ?System $system = null)
-    {
-    }
+    public function __construct(private ?System $system = null) {}
 
     /**
-     * @param list<string> $projects the accounts that may reach the API
-     * @param list<string> $touched the accounts whose allowance just changed, whose
-     *        own egress guard has to follow it -- an account that lost its
-     *        allowance is not in $projects any more
+     * @param  list<string>  $projects  the accounts that may reach the API
+     * @param  list<string>  $touched  the accounts whose allowance just changed, whose
+     *                                 own egress guard has to follow it -- an account that lost its
+     *                                 allowance is not in $projects any more
      */
     public function apply(array $projects, array $touched = []): void
     {
-        $system = $this->system ?? new System();
+        $system = $this->system ?? new System;
         $system->filesystem()->writeFileReplacingPath(
             self::FILE,
             self::contents($projects),
@@ -79,6 +78,6 @@ class ApiAccessFirewall
             }
         }
 
-        return $names === [] ? '' : implode("\n", $names) . "\n";
+        return $names === [] ? '' : implode("\n", $names)."\n";
     }
 }

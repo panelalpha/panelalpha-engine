@@ -2,13 +2,15 @@
 
 namespace App\Lib\Task;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Task;
 use App\Models\TaskLog;
+use Illuminate\Support\Carbon;
 
 /**
  * Batched tee from DeployLogger frames into task_logs.
  *
- * Invokable so it plugs into {@see \App\Lib\Deploy\DeployLog\DeployLogger::streamTo()}.
+ * Invokable so it plugs into {@see DeployLogger::streamTo()}.
  * Only `type === line` frames are persisted — stage changes already produce a
  * separate "Starting stage: …" line frame.
  */
@@ -16,15 +18,13 @@ final class TaskLogSink
 {
     public const BATCH_SIZE = 50;
 
-    /** @var list<array{task_id: int, log: string, created_at: \Illuminate\Support\Carbon}> */
+    /** @var list<array{task_id: int, log: string, created_at: Carbon}> */
     private array $buffer = [];
 
-    public function __construct(private readonly ?Task $task)
-    {
-    }
+    public function __construct(private readonly ?Task $task) {}
 
     /**
-     * @param array<string, mixed> $frame
+     * @param  array<string, mixed>  $frame
      */
     public function __invoke(array $frame): void
     {

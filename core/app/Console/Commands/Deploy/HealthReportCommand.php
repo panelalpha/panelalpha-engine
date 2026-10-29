@@ -2,11 +2,12 @@
 
 namespace App\Console\Commands\Deploy;
 
-use App\System\Project\Dind;
-use App\System\Project\Dind\AppHealth;
+use App\Console\Kernel;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Telemetry\Telemetry;
 use App\Models\User;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AppHealth;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
  * what notices a site that stopped working afterwards (a lost database, a lapsed
  * certificate, a deleted index page).
  *
- * Runs every six hours from {@see \App\Console\Kernel}: the probe is a
+ * Runs every six hours from {@see Kernel}: the probe is a
  * `docker exec` per account and none of these failures is minute-sensitive.
  *
  * Sends nothing when telemetry is off, because such an install has said it does
@@ -31,7 +32,9 @@ class HealthReportCommand extends Command
      * deploy's boot budget, a port that does not answer twice is down.
      */
     private const SWEEP_TIMEOUT = 5;
+
     private const SWEEP_ATTEMPTS = 2;
+
     private const SWEEP_DELAY = 2;
 
     protected $signature = 'project:health:report
@@ -48,7 +51,7 @@ class HealthReportCommand extends Command
     {
         $local = (bool) $this->option('local');
 
-        if (!$local && !Telemetry::enabled()) {
+        if (! $local && ! Telemetry::enabled()) {
             $this->line('Telemetry is disabled, so there is nowhere to report. Use --local to record verdicts anyway.');
 
             return self::SUCCESS;
@@ -68,7 +71,7 @@ class HealthReportCommand extends Command
      * A failed check, or ports that gave no answer at all: silence nothing
      * could explain is not "fine" either.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     public static function notServing(array $details): bool
     {
@@ -78,7 +81,7 @@ class HealthReportCommand extends Command
     /**
      * Probe every project up to --limit and report the ones not serving themselves.
      *
-     * @param iterable<User> $projects
+     * @param  iterable<User>  $projects
      * @return array{swept: int, degraded: int, reported: int, projects: list<array<string, string>>}
      */
     private function sweep(iterable $projects, bool $local): array
@@ -106,7 +109,7 @@ class HealthReportCommand extends Command
             $sweep['degraded']++;
             $sweep['projects'][] = $row;
 
-            if (!$local) {
+            if (! $local) {
                 Telemetry::captureHealth($user->username, $this->currentDetails($user));
                 $sweep['reported']++;
             }
@@ -129,7 +132,7 @@ class HealthReportCommand extends Command
         }
 
         $details = $this->currentDetails($user);
-        if (!self::notServing($details)) {
+        if (! self::notServing($details)) {
             return null;
         }
 
@@ -154,7 +157,7 @@ class HealthReportCommand extends Command
         try {
             return $project->appHealth()->observe($timeout, $attempts, self::SWEEP_DELAY);
         } catch (\Throwable $e) {
-            Log::debug("Health sweep skipped {$user->username}: " . $e->getMessage());
+            Log::debug("Health sweep skipped {$user->username}: ".$e->getMessage());
 
             return null;
         }
@@ -171,7 +174,7 @@ class HealthReportCommand extends Command
     }
 
     /**
-     * @param list<array{id: string, severity: string}> $failures
+     * @param  list<array{id: string, severity: string}>  $failures
      */
     private static function describeFailures(array $failures): string
     {
@@ -180,13 +183,13 @@ class HealthReportCommand extends Command
         }
 
         return implode(', ', array_map(
-            static fn (array $f): string => $f['id'] . ' (' . $f['severity'] . ')',
+            static fn (array $f): string => $f['id'].' ('.$f['severity'].')',
             $failures
         ));
     }
 
     /**
-     * @param array{swept: int, degraded: int, reported: int, projects: list<array<string, string>>} $sweep
+     * @param  array{swept: int, degraded: int, reported: int, projects: list<array<string, string>>}  $sweep
      */
     private function present(array $sweep, bool $local): void
     {
@@ -213,12 +216,12 @@ class HealthReportCommand extends Command
     private function projects(): ?iterable
     {
         $one = $this->argument('project');
-        if (!is_string($one) || $one === '') {
+        if (! is_string($one) || $one === '') {
             return $this->allProjects();
         }
 
         $user = User::findByUsername($one);
-        if (!$user) {
+        if (! $user) {
             $this->getOutput()->getErrorStyle()->error("No such project: '{$one}'");
 
             return null;

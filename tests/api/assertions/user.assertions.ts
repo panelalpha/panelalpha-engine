@@ -165,10 +165,8 @@ export class UserAssertions {
    * @param username - Username to verify
    */
   async verifyUsernameTaken(username: string): Promise<void> {
-    try {
-      await this.api.verifyUsername(username);
-    } catch {
-      // Expected - username is taken
-    }
+    const response = await this.api.verifyUsername(username);
+    expect(response.valid).toBe(false);
+    expect(response.reason).toBe('taken');
   }
 }

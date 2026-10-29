@@ -3,8 +3,10 @@
 namespace App\Lib\Apis;
 
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Apis\Cloudflare\ZoneNotFoundException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -13,6 +15,9 @@ use Illuminate\Support\Facades\Http;
 class Cloudflare
 {
     private const API_BASE = 'https://api.cloudflare.com/client/v4';
+
+    /** The values Cloudflare accepts for the zone's `security_level` setting. */
+    public const array SECURITY_LEVELS = ['off', 'essentially_off', 'low', 'medium', 'high', 'under_attack'];
 
     private string $apiToken;
 
@@ -48,6 +53,7 @@ class Cloudflare
      * zones yet.
      *
      * @return array{id: string, name: string}
+     *
      * @throws CloudflareException
      */
     public function resolveAccount(): array
@@ -73,7 +79,7 @@ class Cloudflare
         // better, so it goes first and the scoping advice follows it.
         if ($refused !== null) {
             throw new CloudflareException(
-                'Cloudflare rejected this API token: ' . $refused->getMessage(),
+                'Cloudflare rejected this API token: '.$refused->getMessage(),
                 previous: $refused
             );
         }
@@ -84,8 +90,8 @@ class Cloudflare
         // permissions") is not the answer.
         throw new CloudflareException(
             'Cloudflare API token has no accessible accounts. Check that it selects an '
-            . 'account under Account Resources, and that Zone Resources includes at least '
-            . 'one zone in that account -- the engine can take the account id from either.'
+            .'account under Account Resources, and that Zone Resources includes at least '
+            .'one zone in that account -- the engine can take the account id from either.'
         );
     }
 
@@ -111,7 +117,7 @@ class Cloudflare
         }
 
         $accounts = $json['result'] ?? [];
-        if (!is_array($accounts) || $accounts === []) {
+        if (! is_array($accounts) || $accounts === []) {
             return null;
         }
 
@@ -144,17 +150,17 @@ class Cloudflare
         }
 
         $zones = $json['result'] ?? [];
-        if (!is_array($zones)) {
+        if (! is_array($zones)) {
             return null;
         }
 
         $accounts = [];
         foreach ($zones as $zone) {
-            if (!is_array($zone)) {
+            if (! is_array($zone)) {
                 continue;
             }
             $account = $zone['account'] ?? null;
-            if (!is_array($account)) {
+            if (! is_array($account)) {
                 continue;
             }
             $id = (string) ($account['id'] ?? '');
@@ -178,14 +184,14 @@ class Cloudflare
         if (count($accounts) > 1) {
             throw new CloudflareException(
                 'This API token can see zones in more than one Cloudflare account ('
-                . implode(', ', array_map(
+                .implode(', ', array_map(
                     static fn (string $id, string $name): string => $name !== '' ? "{$name} [{$id}]" : $id,
                     array_keys($accounts),
                     $accounts
                 ))
-                . '), so the engine cannot tell which one the tunnel belongs in. Give the token '
-                . 'Account Resources for the account you want, so /accounts answers directly, or '
-                . 'scope Zone Resources to zones in that one account.'
+                .'), so the engine cannot tell which one the tunnel belongs in. Give the token '
+                .'Account Resources for the account you want, so /accounts answers directly, or '
+                .'scope Zone Resources to zones in that one account.'
             );
         }
 
@@ -204,21 +210,21 @@ class Cloudflare
         $hostname = strtolower(trim($hostname));
         $json = $this->get('/zones', ['per_page' => 50]);
         $zones = $json['result'] ?? [];
-        if (!is_array($zones) || $zones === []) {
+        if (! is_array($zones) || $zones === []) {
             // Three causes, and the operator can only tell them apart if all
             // three are named: the permission, the account resource, and
             // whether the zone is in this Cloudflare account at all.
-            throw new CloudflareException(
-                "No Cloudflare zones are visible to this API token. Check that it has "
-                . 'Zone:DNS Edit, that Zone Resources includes the zone this hostname is '
-                . 'under, and that the zone belongs to the account the token selects.'
+            throw new ZoneNotFoundException(
+                'No Cloudflare zones are visible to this API token. Check that it has '
+                .'Zone:DNS Edit, that Zone Resources includes the zone this hostname is '
+                .'under, and that the zone belongs to the account the token selects.'
             );
         }
 
         $best = null;
         $bestLen = -1;
         foreach ($zones as $zone) {
-            if (!is_array($zone)) {
+            if (! is_array($zone)) {
                 continue;
             }
             $name = strtolower(trim((string) ($zone['name'] ?? '')));
@@ -226,7 +232,7 @@ class Cloudflare
             if ($name === '' || $id === '') {
                 continue;
             }
-            if ($hostname === $name || str_ends_with($hostname, '.' . $name)) {
+            if ($hostname === $name || str_ends_with($hostname, '.'.$name)) {
                 $len = strlen($name);
                 if ($len > $bestLen) {
                     $bestLen = $len;
@@ -236,7 +242,7 @@ class Cloudflare
         }
 
         if ($best === null) {
-            throw new CloudflareException(
+            throw new ZoneNotFoundException(
                 "Hostname '{$hostname}' is not under any Cloudflare zone accessible with this API token."
             );
         }
@@ -255,12 +261,12 @@ class Cloudflare
             'per_page' => 50,
         ]);
         $tunnels = $json['result'] ?? [];
-        if (!is_array($tunnels)) {
+        if (! is_array($tunnels)) {
             return null;
         }
 
         foreach ($tunnels as $tunnel) {
-            if (!is_array($tunnel)) {
+            if (! is_array($tunnel)) {
                 continue;
             }
             if (($tunnel['name'] ?? null) !== $name) {
@@ -288,7 +294,7 @@ class Cloudflare
             'config_src' => 'cloudflare',
         ]);
         $result = $json['result'] ?? [];
-        if (!is_array($result)) {
+        if (! is_array($result)) {
             throw new CloudflareException('Unexpected response creating Cloudflare tunnel.');
         }
         $id = (string) ($result['id'] ?? '');
@@ -307,7 +313,7 @@ class Cloudflare
     {
         $json = $this->get("/accounts/{$accountId}/cfd_tunnel/{$tunnelId}/token");
         $token = $json['result'] ?? null;
-        if (!is_string($token) || trim($token) === '') {
+        if (! is_string($token) || trim($token) === '') {
             throw new CloudflareException("Could not fetch token for Cloudflare tunnel '{$tunnelId}'.");
         }
 
@@ -321,11 +327,11 @@ class Cloudflare
     {
         $json = $this->get("/accounts/{$accountId}/cfd_tunnel/{$tunnelId}/configurations");
         $result = $json['result'] ?? [];
-        if (!is_array($result)) {
+        if (! is_array($result)) {
             return [];
         }
         $config = $result['config'] ?? [];
-        if (!is_array($config)) {
+        if (! is_array($config)) {
             return [];
         }
         $ingress = $config['ingress'] ?? [];
@@ -334,7 +340,7 @@ class Cloudflare
     }
 
     /**
-     * @param list<array<string, mixed>> $ingress
+     * @param  list<array<string, mixed>>  $ingress
      */
     public function putIngress(string $accountId, string $tunnelId, array $ingress): void
     {
@@ -359,7 +365,7 @@ class Cloudflare
             if (
                 strtoupper((string) ($existing['type'] ?? '')) === 'CNAME'
                 && strtolower((string) ($existing['content'] ?? '')) === strtolower($target)
-                && !empty($existing['proxied'])
+                && ! empty($existing['proxied'])
             ) {
                 return [
                     'id' => (string) $existing['id'],
@@ -385,7 +391,7 @@ class Cloudflare
         }
 
         $result = $json['result'] ?? [];
-        if (!is_array($result) || empty($result['id'])) {
+        if (! is_array($result) || empty($result['id'])) {
             throw new CloudflareException("Failed to upsert DNS CNAME for '{$hostname}'.");
         }
 
@@ -402,8 +408,8 @@ class Cloudflare
             $this->delete("/zones/{$zoneId}/dns_records/{$recordId}");
         } catch (CloudflareException $e) {
             // Already gone is fine.
-            if (!str_contains(strtolower($e->getMessage()), 'could not find')
-                && !str_contains(strtolower($e->getMessage()), 'not found')
+            if (! str_contains(strtolower($e->getMessage()), 'could not find')
+                && ! str_contains(strtolower($e->getMessage()), 'not found')
             ) {
                 throw $e;
             }
@@ -415,7 +421,7 @@ class Cloudflare
         try {
             $this->delete("/accounts/{$accountId}/cfd_tunnel/{$tunnelId}");
         } catch (CloudflareException $e) {
-            if (!str_contains(strtolower($e->getMessage()), 'not found')) {
+            if (! str_contains(strtolower($e->getMessage()), 'not found')) {
                 throw $e;
             }
         }
@@ -431,11 +437,11 @@ class Cloudflare
             'per_page' => 50,
         ]);
         $records = $json['result'] ?? [];
-        if (!is_array($records)) {
+        if (! is_array($records)) {
             return null;
         }
         foreach ($records as $record) {
-            if (!is_array($record) || empty($record['id'])) {
+            if (! is_array($record) || empty($record['id'])) {
                 continue;
             }
 
@@ -452,26 +458,74 @@ class Cloudflare
     }
 
     /**
+     * Purge a zone's cached assets: everything, or the listed URLs.
+     *
+     * @param  list<string>  $files
+     */
+    public function purgeCache(string $zoneId, bool $everything, array $files = []): void
+    {
+        $this->post(
+            "/zones/{$zoneId}/purge_cache",
+            $everything ? ['purge_everything' => true] : ['files' => array_values($files)]
+        );
+    }
+
+    /** One zone setting, e.g. `security_level` or `development_mode`. */
+    public function getSetting(string $zoneId, string $name): string
+    {
+        return $this->settingValue(
+            $this->get("/zones/{$zoneId}/settings/{$name}"),
+            $zoneId,
+            $name
+        );
+    }
+
+    /** Set one zone setting and answer its new value. */
+    public function setSetting(string $zoneId, string $name, string $value): string
+    {
+        return $this->settingValue(
+            $this->patch("/zones/{$zoneId}/settings/{$name}", ['value' => $value]),
+            $zoneId,
+            $name
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    private function settingValue(array $json, string $zoneId, string $name): string
+    {
+        $result = $json['result'] ?? [];
+        if (! is_array($result) || ! array_key_exists('value', $result)) {
+            throw new CloudflareException(
+                "Cloudflare did not answer with the '{$name}' setting for zone '{$zoneId}'."
+            );
+        }
+
+        return (string) $result['value'];
+    }
+
+    /**
      * Build ingress list with catch-all, replacing any existing rule for hostname.
      *
-     * @param list<array<string, mixed>> $existing
-     * @param array<string, mixed>|\stdClass $originRequest
+     * @param  list<array<string, mixed>>  $existing
+     * @param  array<string, mixed>|\stdClass  $originRequest
      * @return list<array<string, mixed>>
      */
     public static function upsertHostnameIngress(
         array $existing,
         string $hostname,
         string $service,
-        array|\stdClass $originRequest = new \stdClass(),
+        array|\stdClass $originRequest = new \stdClass,
     ): array {
         $hostname = strtolower(trim($hostname));
         $rules = [];
         foreach ($existing as $rule) {
-            if (!is_array($rule)) {
+            if (! is_array($rule)) {
                 continue;
             }
             // Drop catch-all; re-append at end.
-            if (!isset($rule['hostname']) || $rule['hostname'] === '' || $rule['hostname'] === null) {
+            if (! isset($rule['hostname']) || $rule['hostname'] === '' || $rule['hostname'] === null) {
                 continue;
             }
             if (strtolower((string) $rule['hostname']) === $hostname) {
@@ -490,7 +544,7 @@ class Cloudflare
     }
 
     /**
-     * @param list<array<string, mixed>> $existing
+     * @param  list<array<string, mixed>>  $existing
      * @return list<array<string, mixed>>
      */
     public static function removeHostnameIngress(array $existing, string $hostname): array
@@ -498,10 +552,10 @@ class Cloudflare
         $hostname = strtolower(trim($hostname));
         $rules = [];
         foreach ($existing as $rule) {
-            if (!is_array($rule)) {
+            if (! is_array($rule)) {
                 continue;
             }
-            if (!isset($rule['hostname']) || $rule['hostname'] === '' || $rule['hostname'] === null) {
+            if (! isset($rule['hostname']) || $rule['hostname'] === '' || $rule['hostname'] === null) {
                 continue;
             }
             if (strtolower((string) $rule['hostname']) === $hostname) {
@@ -523,30 +577,30 @@ class Cloudflare
     }
 
     /**
-     * @param array<string, mixed> $query
+     * @param  array<string, mixed>  $query
      * @return array<string, mixed>
      */
     private function get(string $path, array $query = []): array
     {
-        return $this->send($this->http()->get(self::API_BASE . $path, $query));
+        return $this->send($this->http()->get(self::API_BASE.$path, $query));
     }
 
     /**
-     * @param array<string, mixed> $body
+     * @param  array<string, mixed>  $body
      * @return array<string, mixed>
      */
     private function post(string $path, array $body): array
     {
-        return $this->send($this->http()->post(self::API_BASE . $path, $body));
+        return $this->send($this->http()->post(self::API_BASE.$path, $body));
     }
 
     /**
-     * @param array<string, mixed> $body
+     * @param  array<string, mixed>  $body
      * @return array<string, mixed>
      */
     private function put(string $path, array $body): array
     {
-        return $this->send($this->http()->put(self::API_BASE . $path, $body));
+        return $this->send($this->http()->put(self::API_BASE.$path, $body));
     }
 
     /**
@@ -554,7 +608,16 @@ class Cloudflare
      */
     private function delete(string $path): array
     {
-        return $this->send($this->http()->delete(self::API_BASE . $path));
+        return $this->send($this->http()->delete(self::API_BASE.$path));
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     */
+    private function patch(string $path, array $body): array
+    {
+        return $this->send($this->http()->patch(self::API_BASE.$path, $body));
     }
 
     private function http(): PendingRequest
@@ -569,7 +632,7 @@ class Cloudflare
     /**
      * @return array<string, mixed>
      */
-    private function send(\Illuminate\Http\Client\Response $response): array
+    private function send(Response $response): array
     {
         try {
             $response->throw();
@@ -585,16 +648,16 @@ class Cloudflare
                     }
                 }
                 if ($parts !== []) {
-                    $message .= ': ' . implode('; ', $parts);
+                    $message .= ': '.implode('; ', $parts);
                 }
             } else {
-                $message .= ' (HTTP ' . $response->status() . ')';
+                $message .= ' (HTTP '.$response->status().')';
             }
-            throw new CloudflareException($message, previous: $e);
+            throw new CloudflareException($message, $response->status(), $e, self::errorsOf($errors));
         }
 
         $json = $response->json();
-        if (!is_array($json)) {
+        if (! is_array($json)) {
             throw new CloudflareException('Cloudflare API returned a non-JSON response.');
         }
         if (($json['success'] ?? true) === false) {
@@ -608,10 +671,38 @@ class Cloudflare
                 }
             }
             throw new CloudflareException(
-                'Cloudflare API error' . ($parts !== [] ? ': ' . implode('; ', $parts) : '')
+                'Cloudflare API error'.($parts !== [] ? ': '.implode('; ', $parts) : ''),
+                $response->status(),
+                errors: self::errorsOf($errors)
             );
         }
 
         return $json;
+    }
+
+    /**
+     * Cloudflare's errors as code and message, with the ones their error chains add.
+     *
+     * @return list<array{code: int, message: string}>
+     */
+    private static function errorsOf(mixed $errors): array
+    {
+        if (! is_array($errors)) {
+            return [];
+        }
+
+        $found = [];
+        foreach ($errors as $error) {
+            if (! is_array($error)) {
+                continue;
+            }
+            $found[] = [
+                'code' => is_numeric($error['code'] ?? null) ? (int) $error['code'] : 0,
+                'message' => is_scalar($error['message'] ?? null) ? (string) $error['message'] : '',
+            ];
+            array_push($found, ...self::errorsOf($error['error_chain'] ?? null));
+        }
+
+        return $found;
     }
 }

@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { SystemApi } from '@/clients/resources/system.api';
 import type { ApiTransport } from '@/clients/api-transport';
 import type { APIResponse } from '@/fixtures/test-options';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * Pure unit coverage of the change-webserver payload — runs against a stub
@@ -82,7 +83,7 @@ test.describe('SystemApi.updateSystemNetworkConfig', () => {
       put: () => Promise.resolve(answers.shift()!),
     });
 
-    await api.updateSystemNetworkConfig({ default_ipv4: '10.0.0.1' });
+    await api.updateSystemNetworkConfig({ default_ipv4: testNetwork.private(1) });
     const notes = test
       .info()
       .annotations.filter((a) => a.type === 'retry')

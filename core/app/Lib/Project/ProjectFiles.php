@@ -27,8 +27,8 @@ final class ProjectFiles
      */
     public static function readablePath(User $user, string $path, ?System $system = null): ?string
     {
-        $files = $user->project($system ?? new System())->fileManager();
-        if (!$files->isFile($path)) {
+        $files = $user->project($system ?? new System)->fileManager();
+        if (! $files->isFile($path)) {
             return null;
         }
 
@@ -37,7 +37,7 @@ final class ProjectFiles
         // the helper re-checks the resolved file, as the account.
         FileStreamWrapper::confineTo($files->homeDirPath(), $files->asAccount([]));
 
-        return 'sudophp://' . $path;
+        return 'sudophp://'.$path;
     }
 
     /** Like readablePath(), but $path is as the caller gave it, inside the project. */
@@ -51,7 +51,7 @@ final class ProjectFiles
     public static function htaccessChanged(string $path): void
     {
         try {
-            $system = new System();
+            $system = new System;
             if ($system->webserver()->getCurrentWebserver() === 'openlitespeed') {
                 $system->webserver()->scheduleWebserverReloadInBackground();
             }

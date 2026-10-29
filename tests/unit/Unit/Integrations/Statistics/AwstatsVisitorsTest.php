@@ -4,6 +4,7 @@ namespace Tests\Unit\Integrations\Statistics;
 
 use App\Integrations\GeoLocation\DbIp;
 use App\Integrations\Statistics\Awstats;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Integrations\GeoLocation\FakeGeoLocation;
 
@@ -23,8 +24,14 @@ class AwstatsVisitorsTest extends TestCase
             if (!str_starts_with($file, 'awstats')) {
                 continue;
             }
-            copy($fixtures . '/' . $file, $this->dataDir . '/' . $file);
+            file_put_contents($this->dataDir . '/' . $file, strtr((string) file_get_contents($fixtures . '/' . $file), self::visitors()));
         }
+    }
+
+    /** The visitors the fixture names by placeholder. */
+    private static function visitors(): array
+    {
+        return ['{visitor-us}' => TestNetwork::routable(8), '{visitor-au}' => TestNetwork::routable(1)];
     }
 
     protected function tearDown(): void
@@ -58,7 +65,7 @@ class AwstatsVisitorsTest extends TestCase
                 '30s-2mn' => 6,
                 '2mn-5mn' => 4,
             ],
-        ], $stats->domainVisitors('example.com', '2026-09-01', '2026-09-30'));
+        ], $this->withoutSessionLength($stats->domainVisitors('example.com', '2026-09-01', '2026-09-30')));
     }
 
     public function test_overview_clips_daily_visits_to_the_requested_range(): void
@@ -94,13 +101,61 @@ class AwstatsVisitorsTest extends TestCase
             'total' => 0,
             'visits' => ['records' => [], 'total' => 0],
             'visits_length' => [],
-        ], $stats->domainVisitors('missing.com', '2026-09-01', '2026-09-30'));
+            'session_length' => [
+                'records' => ['2026-09-01' => null, '2026-09-02' => null],
+                'average' => null,
+                'estimated' => true,
+            ],
+        ], $stats->domainVisitors('missing.com', '2026-09-01', '2026-09-02'));
         $this->assertSame([
             'unique' => 0,
             'total' => 0,
             'visits' => ['records' => [], 'total' => 0],
             'visits_length' => [],
-        ], $stats->domainVisitors('empty.com', '2026-09-01', '2026-09-30'));
+        ], $this->withoutSessionLength($stats->domainVisitors('empty.com', '2026-09-01', '2026-09-30')));
+    }
+
+    public function test_session_length_is_each_days_average_at_the_bucket_midpoints(): void
+    {
+        file_put_contents($this->dataDir . '/awstats09202601.example.com.txt', "BEGIN_SESSION 2\n0s-30s 2\n30s-2mn 2\nEND_SESSION\n");
+        file_put_contents($this->dataDir . '/awstats09202602.example.com.txt', "BEGIN_SESSION 0\nEND_SESSION\n");
+        file_put_contents($this->dataDir . '/awstats09202604.example.com.txt', "BEGIN_SESSION 2\n2mn-5mn 1\nunknown 9\nEND_SESSION\n");
+        $stats = new Awstats($this->dataDir);
+
+        $this->assertSame([
+            'records' => [
+                '2026-09-01' => 45,
+                '2026-09-02' => null,
+                '2026-09-03' => null,
+                '2026-09-04' => 210,
+            ],
+            'average' => 78,
+            'estimated' => true,
+        ], $stats->domainVisitors('example.com', '2026-09-01', '2026-09-04')['session_length']);
+    }
+
+    public function test_session_length_counts_only_the_requested_days(): void
+    {
+        file_put_contents($this->dataDir . '/awstats09202601.example.com.txt', "BEGIN_SESSION 1\n1h+ 5\nEND_SESSION\n");
+        file_put_contents($this->dataDir . '/awstats09202602.example.com.txt', "BEGIN_SESSION 1\n0s-30s 1\nEND_SESSION\n");
+        $stats = new Awstats($this->dataDir);
+
+        $this->assertSame(
+            ['records' => ['2026-09-02' => 15], 'average' => 15, 'estimated' => true],
+            $stats->domainVisitors('example.com', '2026-09-02', '2026-09-02')['session_length'],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $overview
+     * @return array<string, mixed>
+     */
+    private function withoutSessionLength(array $overview): array
+    {
+        $this->assertArrayHasKey('session_length', $overview);
+        unset($overview['session_length']);
+
+        return $overview;
     }
 
     public function test_pages_breakdown_uses_sider_hits_not_visit_ratios(): void
@@ -161,13 +216,13 @@ class AwstatsVisitorsTest extends TestCase
     public function test_geo_breakdowns_lookup_visitor_ips_offline(): void
     {
         $geo = new FakeGeoLocation([
-            '8.8.8.8' => [
+            self::visitors()['{visitor-us}'] => [
                 'country' => 'United States',
                 'country_code' => 'US',
                 'region' => 'California',
                 'region_code' => 'CA',
             ],
-            '1.1.1.1' => [
+            self::visitors()['{visitor-au}'] => [
                 'country' => 'Australia',
                 'country_code' => 'AU',
                 'region' => 'New South Wales',

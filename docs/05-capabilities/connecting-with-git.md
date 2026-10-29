@@ -29,7 +29,7 @@ That token belongs to the project it was pasted for. The first project given it 
 
 <img src="../assets/connect-repository.jpg" alt="Connect your repository page: paste a git token and select Save secret" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 
-If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat.
+If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat. The secret's type has to match the field it is passed in: `git_token` for a new project, `token` when you replace the token of a project that exists.
 
 ## A token shared by several projects
 
@@ -48,7 +48,7 @@ Create a project from https://github.com/acme/shop with the global
 acme Git token.
 ```
 
-The assistant passes the token's reference, such as `vault:7`, in place of the token. A project created without a token clones without one, even when the engine holds global tokens.
+The assistant passes the token's reference, such as `vault:Kq3xT9bL...`, in place of the token. A project created without a token clones without one, even when the engine holds global tokens.
 
 A project stores the token it was given. Deleting a vault entry does not take it away from projects that already used it; to change a project's token, give it the new one. Pasting again on the old link does not change a stored secret.
 
@@ -62,7 +62,7 @@ Create a deploy key for the project shop and connect git@github.com:acme/shop.gi
 
 The assistant creates the project's key and shows you its public half, a line that starts with `ssh-ed25519`. Add that line to the repository as a read-only deploy key (on GitHub: **Settings > Deploy keys**), then tell the assistant you are done. The engine connects the repository over SSH and deploys it. Later pulls and rebuilds use the same key. The private half is stored encrypted and never leaves the engine.
 
-The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. If the server's key changes later, the connection is refused; delete the deploy key and create it again to trust the new one.
+The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. The server must be on a public address, like any repository the engine fetches from: see `host_refused` under Troubleshooting below. If the server's key changes later, the connection is refused; delete the deploy key and create it again to trust the new one.
 
 ## A zip of files, not a repository
 
@@ -76,7 +76,7 @@ Use this when the code is not in git. After the first deploy, updating that proj
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
-A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. A submodule that cannot be fetched fails the deploy: see Troubleshooting below.
+A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. Once the project has deployed, a submodule the last deployed commit already had keeps whatever copy it had when it cannot be fetched, and the deploy log warns. A submodule that cannot be fetched fails the first deploy, a deploy whose commit adds it, and a rebuild that would lose a copy the previous deploy had: see Troubleshooting below. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key.
 
 The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. A pull, branch change or revert asked for while a deploy, backup or restore is running on the project is refused too, and the answer says which one. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
 
@@ -126,10 +126,12 @@ Instead of asking for a pull each time, you can have your git host redeploy the 
 The URL is wrong, or the repository is private and no token was saved. Check the URL is `https://` with no username in it. For a private repository, ask the assistant to send the paste page again.
 
 **The deploy failed with "The repository's submodules could not be fetched".**
-The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
+The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. A submodule addressed over SSH is fetched over HTTPS when the project has no deploy key, with the git token when it is on the repository's own host; a private one elsewhere needs a deploy key that can read it. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
 
 **The repository is refused with `host_refused`.**
-The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks. This covers a repository, a submodule, and a file fetched by URL. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback and link-local addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting).
+The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks, nor from the reserved ranges that no real server uses, such as the documentation networks (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32). This covers a repository, a submodule, an SSH remote, the git server named for a deploy key, a file fetched by URL, and the webhook a push-to-deploy hook registers at your git host, where a redirect to another host is not followed either. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback, link-local and other reserved addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting). On traditional PHP hosting, a server whose git is older than 2.37 (Ubuntu 22.04) also refuses a pull from any host name not in `EGRESS_ALLOW_HOSTS`, and the message says git 2.37 or newer is required: [Troubleshooting](../02-getting-started/install.md#troubleshooting).
+
+A host name the engine cannot resolve is refused too, since the engine cannot check where it leads. Check the spelling, and write an address in its usual dotted form.
 
 **A pull or branch change is refused because the project is busy.**
 A deploy, backup or restore holds the project. The answer names which. Wait for it to end, or cancel the deploy, then ask again.
@@ -150,7 +152,7 @@ Revoke that token at your git host and create a new one. Ask the assistant to se
 Is the project name tshop free on this engine?
 ```
 
-Mode: read. Tools: `project_verify_name`. Check: the answer says free or taken, and a name that breaks the rules (for example `Shop-1`) is refused with the reason.
+Mode: read. Tools: `project_verify_name`. Check: the answer says free, taken or unavailable on this host (200 with `valid`, and a `reason` when it is not free), and only a name that breaks the rules (for example `Shop-1`) is refused, with 422 and the reason.
 
 **Look before deploying**
 
@@ -285,10 +287,10 @@ Mode: modify. Tools: `project_rebuild` twice. Check: the second answer is a conf
 **Project inspection against the last deploy**
 
 ```text
-Inspect tmemos. Have its files changed since the last deploy?
+Inspect tmemos. Is it still set up the way the last deploy left it?
 ```
 
-Mode: read. Tools: `project_inspect`, `file_write`, `project_inspect`. Check: after a file is written by hand, the second inspection reports the difference.
+Mode: read. Tools: `project_inspect`. Check: `drift` is empty when the strategy, platform, runtime, port and commit match the last deploy, and lists each one that differs. It does not compare file contents.
 
 **Pull, branch, history**
 
@@ -305,7 +307,7 @@ Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_br
 Roll tmemos back to the previous commit.
 ```
 
-Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for.
+Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for. A deploy from git clones only the newest commit, so there is no earlier one to go back to unless the repository's `.panelalpha/panelalpha.yaml` sets `git: {history: full}`.
 
 **Push local edits, force a pull**
 
@@ -331,7 +333,7 @@ Mode: full. Tools: `git_connect`, `git_status` (poll while `connecting` is true)
 The git token of tmemos no longer works. Send me the page to replace it.
 ```
 
-Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat, and `git_pull` works afterwards.
+Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat and the secret is created with the type `token`. `git_pull` works afterwards.
 
 **Deploy key for an SSH remote**
 

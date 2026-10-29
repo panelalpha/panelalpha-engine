@@ -10,7 +10,9 @@ namespace App\Lib\Deploy\Health;
 final class HealthCheck
 {
     public const SEVERITY_ERROR = 'error';
+
     public const SEVERITY_WARNING = 'warning';
+
     public const SEVERITY_INFO = 'info';
 
     /** @var list<string> */
@@ -26,9 +28,9 @@ final class HealthCheck
     private const KNOWN_KEYS = ['$schema', 'id', 'severity', 'expect', 'when', 'landing', 'message', 'fix', 'serving', 'explain'];
 
     /**
-     * @param array<string, mixed> $expect
-     * @param array<string, mixed>|null $when
-     * @param list<string> $landing
+     * @param  array<string, mixed>  $expect
+     * @param  array<string, mixed>|null  $when
+     * @param  list<string>  $landing
      */
     private function __construct(
         public readonly string $group,
@@ -44,13 +46,12 @@ final class HealthCheck
         // Asked only when the probe's redirects from `/` ended under one of
         // these paths; any other landing passes. Empty: always asked.
         public readonly array $landing = []
-    ) {
-    }
+    ) {}
 
     /** How a manifest and a report name this check: `<group>/<id>`. */
     public function reference(): string
     {
-        return $this->group . '/' . $this->id;
+        return $this->group.'/'.$this->id;
     }
 
     /**
@@ -78,18 +79,19 @@ final class HealthCheck
     }
 
     /**
-     * @param array<string, mixed> $raw decoded check file
+     * @param  array<string, mixed>  $raw  decoded check file
+     *
      * @throws CheckException
      */
     public static function fromArray(array $raw, string $group, string $source): self
     {
         $unknown = array_diff(array_keys($raw), self::KNOWN_KEYS);
         if ($unknown !== []) {
-            throw new CheckException("{$source}: unknown key(s) " . implode(', ', $unknown));
+            throw new CheckException("{$source}: unknown key(s) ".implode(', ', $unknown));
         }
 
         $id = $raw['id'] ?? null;
-        if (!is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]*$/', $id) !== 1) {
+        if (! is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]*$/', $id) !== 1) {
             throw new CheckException("{$source}: 'id' must be a lowercase slug");
         }
 
@@ -98,31 +100,31 @@ final class HealthCheck
         $where = $source !== '' ? $source : "{$group}/{$id}";
 
         $message = $raw['message'] ?? null;
-        if (!is_string($message) || trim($message) === '') {
+        if (! is_string($message) || trim($message) === '') {
             throw new CheckException("{$where}: 'message' must be a non-empty string");
         }
 
         $severity = $raw['severity'] ?? self::SEVERITY_ERROR;
-        if (!is_string($severity) || !in_array($severity, self::SEVERITIES, true)) {
+        if (! is_string($severity) || ! in_array($severity, self::SEVERITIES, true)) {
             throw new CheckException(
-                "{$group}/{$id}: 'severity' must be one of " . implode(', ', self::SEVERITIES)
+                "{$group}/{$id}: 'severity' must be one of ".implode(', ', self::SEVERITIES)
             );
         }
 
         $expect = $raw['expect'] ?? [];
-        if (!is_array($expect)) {
+        if (! is_array($expect)) {
             throw new CheckException("{$group}/{$id}: 'expect' must be an object");
         }
         $unknownExpect = array_diff(array_keys($expect), self::EXPECT_KEYS);
         if ($unknownExpect !== []) {
             throw new CheckException(
-                "{$group}/{$id}: unknown expect key(s) " . implode(', ', $unknownExpect)
-                . '; a question needing more than ' . implode(', ', self::EXPECT_KEYS) . ' belongs in an explain class'
+                "{$group}/{$id}: unknown expect key(s) ".implode(', ', $unknownExpect)
+                .'; a question needing more than '.implode(', ', self::EXPECT_KEYS).' belongs in an explain class'
             );
         }
 
         $when = $raw['when'] ?? null;
-        if ($when !== null && !is_array($when)) {
+        if ($when !== null && ! is_array($when)) {
             throw new CheckException("{$group}/{$id}: 'when' must be an object");
         }
 
@@ -157,16 +159,16 @@ final class HealthCheck
      * absolute URL would make the engine request a host the check author chose.
      * A query string is allowed (`/health?deep=1`).
      *
-     * @param array<string, mixed> $expect
+     * @param  array<string, mixed>  $expect
      */
     private static function assertPath(array $expect, string $group, string $id): void
     {
-        if (!array_key_exists('path', $expect)) {
+        if (! array_key_exists('path', $expect)) {
             return;
         }
 
         $path = $expect['path'];
-        if (!is_string($path) || $path === '' || $path[0] !== '/') {
+        if (! is_string($path) || $path === '' || $path[0] !== '/') {
             throw new CheckException(
                 "{$group}/{$id}: 'path' must be a local path beginning with '/', not a URL"
             );
@@ -186,21 +188,21 @@ final class HealthCheck
      * `landing` is a non-empty list of local paths, the same shape `path`
      * must have.
      *
-     * @param array<string, mixed> $raw
+     * @param  array<string, mixed>  $raw
      * @return list<string>
      */
     private static function landing(array $raw, string $group, string $id): array
     {
-        if (!array_key_exists('landing', $raw)) {
+        if (! array_key_exists('landing', $raw)) {
             return [];
         }
 
         $landing = $raw['landing'];
-        if (!is_array($landing) || $landing === [] || !array_is_list($landing)) {
+        if (! is_array($landing) || $landing === [] || ! array_is_list($landing)) {
             throw new CheckException("{$group}/{$id}: 'landing' must be a non-empty list of paths");
         }
         foreach ($landing as $path) {
-            if (!is_string($path) || !str_starts_with($path, '/') || preg_match('/[\s\x00-\x1f]/', $path) === 1) {
+            if (! is_string($path) || ! str_starts_with($path, '/') || preg_match('/[\s\x00-\x1f]/', $path) === 1) {
                 throw new CheckException("{$group}/{$id}: 'landing' paths must begin with '/' and hold no whitespace");
             }
         }
@@ -214,16 +216,16 @@ final class HealthCheck
      * member compared as an object is a claim about shape and belongs in an
      * explain class.
      *
-     * @param array<string, mixed> $expect
+     * @param  array<string, mixed>  $expect
      */
     private static function assertJson(array $expect, string $group, string $id): void
     {
-        if (!array_key_exists('json', $expect)) {
+        if (! array_key_exists('json', $expect)) {
             return;
         }
 
         $json = $expect['json'];
-        if (!is_array($json) || $json === []) {
+        if (! is_array($json) || $json === []) {
             throw new CheckException("{$group}/{$id}: 'json' must be a non-empty object");
         }
         if (array_is_list($json)) {
@@ -231,16 +233,16 @@ final class HealthCheck
         }
 
         foreach ($json as $key => $wanted) {
-            if (!is_string($key) || $key === '') {
+            if (! is_string($key) || $key === '') {
                 throw new CheckException("{$group}/{$id}: 'json' member names must be non-empty strings");
             }
             if (is_array($wanted)) {
                 // PHP has one type for both: a list is "any of these", a
                 // mapping is a shape claim and is refused.
-                if (!array_is_list($wanted)) {
+                if (! array_is_list($wanted)) {
                     throw new CheckException(
                         "{$group}/{$id}: 'json.{$key}' must not be nested — a member compared as an object "
-                        . 'belongs in an explain class'
+                        .'belongs in an explain class'
                     );
                 }
                 if ($wanted === []) {
@@ -249,6 +251,7 @@ final class HealthCheck
                 foreach ($wanted as $one) {
                     self::assertJsonScalar($one, "{$key}", $group, $id);
                 }
+
                 continue;
             }
             self::assertJsonScalar($wanted, $key, $group, $id);
@@ -263,12 +266,12 @@ final class HealthCheck
 
         throw new CheckException(
             "{$group}/{$id}: 'json.{$key}' must be a string, number or boolean — "
-            . 'a member compared as an object or array belongs in an explain class'
+            .'a member compared as an object or array belongs in an explain class'
         );
     }
 
     /**
-     * @param array<string, mixed> $raw
+     * @param  array<string, mixed>  $raw
      */
     private static function optionalString(array $raw, string $key, string $group, string $id): ?string
     {
@@ -276,7 +279,7 @@ final class HealthCheck
         if ($value === null) {
             return null;
         }
-        if (!is_string($value) || trim($value) === '') {
+        if (! is_string($value) || trim($value) === '') {
             throw new CheckException("{$group}/{$id}: '{$key}' must be a non-empty string when present");
         }
 

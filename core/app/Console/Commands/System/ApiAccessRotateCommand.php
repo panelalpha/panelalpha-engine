@@ -29,7 +29,7 @@ class ApiAccessRotateCommand extends Command
         }
 
         try {
-            $entry = (new ApiAccess())->rotate($user, $taskId);
+            $entry = (new ApiAccess)->rotate($user, $taskId);
         } catch (ProblemException $e) {
             $this->error($e->getMessage());
 
@@ -38,8 +38,8 @@ class ApiAccessRotateCommand extends Command
 
         $this->info(sprintf(
             'Minted a new Engine API token (id %s) for %s, scope %s, and queued apply task %s to hand it over. The '
-            . 'previous token is revoked once the application is running on the new one; if that apply fails, both '
-            . 'stay valid and the task says why.',
+            .'previous token is revoked once the application is running on the new one; if that apply fails, both '
+            .'stay valid and the task says why.',
             (string) ($entry['token_id'] ?? '-'),
             $username,
             ApiAccess::scopeLabel($entry['scope'] ?? ApiAccess::SCOPE_SELF),

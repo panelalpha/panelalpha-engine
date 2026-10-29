@@ -26,7 +26,7 @@ final class DindAccountStorage implements AccountStorage
      */
     public function freeSpaceProbeArgv(): array
     {
-        return ['sh', '-lc', 'df -Pk "' . $this->dataRoot() . '" 2>/dev/null || true'];
+        return ['sh', '-lc', 'df -Pk "'.$this->dataRoot().'" 2>/dev/null || true'];
     }
 
     public function parseFreeBytes(string $output): ?int
@@ -108,7 +108,7 @@ final class DindAccountStorage implements AccountStorage
     }
 
     /**
-     * @param list<string> $sidecarRefs
+     * @param  list<string>  $sidecarRefs
      * @return list<string>
      */
     public function hostCleanupArgv(EngineAccount $account, array $sidecarRefs = []): array

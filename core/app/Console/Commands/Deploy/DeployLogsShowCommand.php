@@ -30,55 +30,58 @@ class DeployLogsShowCommand extends Command
 
     public function handle(): int
     {
-        $username = (string)$this->argument('project');
+        $username = (string) $this->argument('project');
         $deployId = $this->option('id');
-        $tail = max(1, (int)$this->option('tail'));
-        $raw = (bool)$this->option('raw');
-        $follow = (bool)$this->option('follow');
-        $timeout = max(1, (int)$this->option('timeout'));
+        $tail = max(1, (int) $this->option('tail'));
+        $raw = (bool) $this->option('raw');
+        $follow = (bool) $this->option('follow');
+        $timeout = max(1, (int) $this->option('timeout'));
 
         try {
             if ($deployId !== null && $deployId !== '') {
-                $logger = DeployLogger::forDeploy($username, (string)$deployId);
+                $logger = DeployLogger::forDeploy($username, (string) $deployId);
             } else {
                 $logger = $follow
                     ? $this->awaitCurrent($username, $timeout)
                     : DeployLogger::current($username);
                 if ($logger === null) {
                     $this->error("No deploy log found for '{$username}' (missing latest.json)");
+
                     return 1;
                 }
             }
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 
         $path = $logger->getLogPath();
         // Following a deploy that has only just been queued: the status file
         // names it before the first line is written.
-        if (!is_file($path) && $follow) {
+        if (! is_file($path) && $follow) {
             $this->awaitFile($path, $timeout);
         }
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             $this->error("Log file not found: {$path}");
+
             return 1;
         }
 
         $latestMeta = DeployLogger::readLatestFor($username);
 
         $this->line("User:    {$username}");
-        $this->line('Deploy:  ' . $logger->getDeployId());
-        $this->line('Path:    ' . $path);
+        $this->line('Deploy:  '.$logger->getDeployId());
+        $this->line('Path:    '.$path);
         if ($latestMeta !== null && ($latestMeta['id'] ?? null) === $logger->getDeployId()) {
-            $this->line('Status:  ' . ($latestMeta['status'] ?? '-'));
-            $this->line('Stage:   ' . ($latestMeta['stage'] ?? '-'));
-            $this->line('PID:     ' . (($latestMeta['pid'] ?? null) !== null ? (string)$latestMeta['pid'] : '-'));
-            if (!empty($latestMeta['error'])) {
-                $this->line('Error:   ' . $latestMeta['error']);
+            $this->line('Status:  '.($latestMeta['status'] ?? '-'));
+            $this->line('Stage:   '.($latestMeta['stage'] ?? '-'));
+            $this->line('PID:     '.(($latestMeta['pid'] ?? null) !== null ? (string) $latestMeta['pid'] : '-'));
+            if (! empty($latestMeta['error'])) {
+                $this->line('Error:   '.$latestMeta['error']);
             }
         } elseif ($latestMeta !== null) {
-            $this->line('Note:    latest.json points to ' . ($latestMeta['id'] ?? '?'));
+            $this->line('Note:    latest.json points to '.($latestMeta['id'] ?? '?'));
         }
         $this->line('');
 
@@ -89,6 +92,7 @@ class DeployLogsShowCommand extends Command
         $all = file($path, FILE_IGNORE_NEW_LINES);
         if ($all === false) {
             $this->error("Could not read {$path}");
+
             return 1;
         }
         $slice = array_slice($all, -$tail);
@@ -97,19 +101,21 @@ class DeployLogsShowCommand extends Command
             foreach ($slice as $line) {
                 $this->line($line);
             }
+
             return 0;
         }
 
         foreach ($slice as $line) {
             /** @var mixed $decoded */
             $decoded = json_decode($line, true);
-            if (!is_array($decoded)) {
+            if (! is_array($decoded)) {
                 $this->line($line);
+
                 continue;
             }
-            $ts = isset($decoded['ts']) ? date('Y-m-d H:i:s', (int)$decoded['ts']) : '-';
-            $level = (string)($decoded['level'] ?? 'dim');
-            $msg = (string)($decoded['msg'] ?? '');
+            $ts = isset($decoded['ts']) ? date('Y-m-d H:i:s', (int) $decoded['ts']) : '-';
+            $level = (string) ($decoded['level'] ?? 'dim');
+            $msg = (string) ($decoded['msg'] ?? '');
             $this->line(sprintf('[%s] %-5s %s', $ts, $level, $msg));
         }
 
@@ -131,7 +137,7 @@ class DeployLogsShowCommand extends Command
 
         $page = $logger->read(0);
         $lines = $page['lines'];
-        $startedAt = $lines === [] ? time() : (int)($lines[0]['ts'] ?? time());
+        $startedAt = $lines === [] ? time() : (int) ($lines[0]['ts'] ?? time());
         // The backlog, so a deploy already halfway through does not start
         // mid-sentence, then everything new from where that ended.
         foreach (array_slice($lines, -$tail) as $line) {
@@ -177,6 +183,7 @@ class DeployLogsShowCommand extends Command
             if (time() >= $deadline) {
                 $this->line('');
                 $this->error("Still running after {$timeout}s; giving up on watching it.");
+
                 return 1;
             }
 
@@ -233,7 +240,7 @@ class DeployLogsShowCommand extends Command
     private function awaitFile(string $path, int $timeout): void
     {
         $deadline = time() + min(self::APPEAR_GRACE, $timeout);
-        while (!is_file($path) && time() < $deadline) {
+        while (! is_file($path) && time() < $deadline) {
             usleep(500_000);
         }
     }

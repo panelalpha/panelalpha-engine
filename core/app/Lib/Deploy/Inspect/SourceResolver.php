@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Inspect;
 
 use App\Lib\Deploy\Source\GitRepoInput;
+use App\Lib\Deploy\Source\GitTransport;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Lib\Http\OutboundUrl;
@@ -68,15 +69,16 @@ final class SourceResolver
     ];
 
     /**
-     * @param ?GitHubTree $tree reads a public GitHub repository from its file
-     *        list before falling back to a clone; null always clones
+     * @param  ?GitHubTree  $tree  reads a public GitHub repository from its file
+     *                             list before falling back to a clone; null always clones
+     * @param  list<string>  $allowedProtocols  the transports the clone and its submodules may use
      */
     public function __construct(
         private readonly string $tempRoot,
         private readonly int $timeout = 180,
-        private readonly ?GitHubTree $tree = null
-    ) {
-    }
+        private readonly ?GitHubTree $tree = null,
+        private readonly array $allowedProtocols = GitRepoInput::SCHEMES
+    ) {}
 
     /**
      * Which of the three kinds of source this string names, or null when it is
@@ -184,13 +186,13 @@ final class SourceResolver
     private function cloneRepository(string $repoUrl, ?string $branch, ?string $token): ResolvedSource
     {
         $root = $this->makeTempDir();
-        $target = $root . '/repo';
+        $target = $root.'/repo';
 
         $askPass = null;
         try {
             $command = self::cloneCommand($repoUrl, $branch, $target);
             if ($token !== null) {
-                $askPass = $root . '/askpass.sh';
+                $askPass = $root.'/askpass.sh';
                 self::writeAskPass($askPass, $token, $repoUrl);
                 $command = GitUrl::withAskPass($command, $askPass);
             }
@@ -200,7 +202,7 @@ final class SourceResolver
         } catch (\Throwable $e) {
             (new ResolvedSource(self::TYPE_GIT, $repoUrl, $root, [], $root))->release();
             throw $e instanceof \InvalidArgumentException
-                ? new InspectException('Could not clone the repository: ' . $e->getMessage(), 0, $e)
+                ? new InspectException('Could not clone the repository: '.$e->getMessage(), 0, $e)
                 : $e;
         } finally {
             if ($askPass !== null) {
@@ -234,7 +236,7 @@ final class SourceResolver
     private static function writeAskPass(string $askPass, string $token, string $repoUrl): void
     {
         if (file_put_contents($askPass, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX) === false
-            || !chmod($askPass, 0700)
+            || ! chmod($askPass, 0700)
         ) {
             throw new InspectException('Could not prepare the Git credential helper.');
         }
@@ -304,7 +306,7 @@ final class SourceResolver
     ): ResolvedSource {
         $root = $this->makeTempDir();
         try {
-            $meta = $tree->writeTo($root . '/repo', $repoUrl, $branch, $subdirectory);
+            $meta = $tree->writeTo($root.'/repo', $repoUrl, $branch, $subdirectory);
         } catch (TreeUnavailable $e) {
             ResolvedSource::removeTree($root);
 
@@ -314,7 +316,7 @@ final class SourceResolver
         return new ResolvedSource(
             self::TYPE_GIT,
             $repoUrl,
-            $root . '/repo',
+            $root.'/repo',
             $meta + ['method' => self::METHOD_TREE],
             $root
         );
@@ -329,10 +331,10 @@ final class SourceResolver
     public function fromDirectory(string $type, string $reference, string $dir): ResolvedSource
     {
         $real = realpath($dir);
-        if ($real === false || !is_dir($real)) {
+        if ($real === false || ! is_dir($real)) {
             throw new InspectException("No such directory: {$dir}");
         }
-        if (!is_readable($real)) {
+        if (! is_readable($real)) {
             throw new InspectException("Directory is not readable: {$dir}");
         }
 
@@ -360,7 +362,7 @@ final class SourceResolver
             return self::descend($home, self::underRoot($home, $relative));
         }
 
-        $appDir = $home . '/project';
+        $appDir = $home.'/project';
         if (file_exists($appDir) || is_link($appDir)) {
             return self::descend($home, 'project');
         }
@@ -410,6 +412,7 @@ final class SourceResolver
 
     /**
      * @return list<string>
+     *
      * @throws InspectException when a part climbs out with `..`
      */
     private static function pathParts(string $subdirectory): array
@@ -432,18 +435,19 @@ final class SourceResolver
      * The resolved directory $parts names under $base. The stat cache is cleared first:
      * it outlives the request, and a link swapped in since would pass for the directory it replaced.
      *
-     * @param list<string> $parts
+     * @param  list<string>  $parts
+     *
      * @throws InspectException
      */
     private static function existingDirectoryInside(string $base, array $parts): string
     {
         clearstatcache(true);
-        $candidate = realpath($base . '/' . implode('/', $parts));
+        $candidate = realpath($base.'/'.implode('/', $parts));
         $root = realpath($base);
-        if ($candidate === false || $root === false || !is_dir($candidate)) {
+        if ($candidate === false || $root === false || ! is_dir($candidate)) {
             throw new InspectException('The requested directory does not exist in the source.');
         }
-        if ($candidate !== $root && !str_starts_with($candidate, rtrim($root, '/') . '/')) {
+        if ($candidate !== $root && ! str_starts_with($candidate, rtrim($root, '/').'/')) {
             throw new InspectException('The requested directory must stay inside the source.');
         }
 
@@ -463,7 +467,7 @@ final class SourceResolver
     {
         $root = rtrim($root, '/');
         $path = trim($path);
-        if (!str_starts_with($path, '/')) {
+        if (! str_starts_with($path, '/')) {
             return $path;
         }
 
@@ -471,7 +475,7 @@ final class SourceResolver
         if ($path === $root) {
             return '';
         }
-        if (!str_starts_with($path, $root . '/')) {
+        if (! str_starts_with($path, $root.'/')) {
             throw new InspectException("Path must be inside {$root}.");
         }
 
@@ -481,8 +485,8 @@ final class SourceResolver
     /** $path as seen from $root, or null when it is not under it. */
     public static function relativeTo(string $root, string $path): ?string
     {
-        $prefix = rtrim($root, '/') . '/';
-        if (!str_starts_with($path, $prefix)) {
+        $prefix = rtrim($root, '/').'/';
+        if (! str_starts_with($path, $prefix)) {
             return null;
         }
         $relative = trim(substr($path, strlen($prefix)), '/');
@@ -514,11 +518,11 @@ final class SourceResolver
      * an error. `safe.directory=*` is needed because most checkouts here belong to
      * another uid, which git otherwise refuses to read.
      *
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     private function readGit(string $dir, array $args): ?string
     {
-        if (!is_dir($dir . '/.git') && !is_file($dir . '/.git')) {
+        if (! is_dir($dir.'/.git') && ! is_file($dir.'/.git')) {
             return null;
         }
 
@@ -534,7 +538,7 @@ final class SourceResolver
         } catch (\Throwable $e) {
             return null;
         }
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             return null;
         }
         $out = trim($process->getOutput());
@@ -548,17 +552,18 @@ final class SourceResolver
      */
     private function initSubmodules(string $target, ?string $askPass, int $level = 0): void
     {
-        if ($level > self::SUBMODULE_LEVELS || !is_file($target . '/.gitmodules')) {
+        if ($level > self::SUBMODULE_LEVELS || ! is_file($target.'/.gitmodules')) {
             return;
         }
 
         $git = ['git', ...self::UNATTENDED_GIT_CONFIG, '-C', $target];
 
         try {
-            if (!$this->submoduleUrlsAllowed($git, $target)) {
+            $pins = $this->submodulePins($git, $target);
+            if ($pins === null) {
                 return;
             }
-            $this->fetchSubmodules($git, $target, $askPass);
+            $this->fetchSubmodules($git, $target, $askPass, $pins);
             $this->initNestedSubmodules($target, $askPass, $level);
         } catch (InspectException) {
             return;
@@ -567,32 +572,57 @@ final class SourceResolver
 
     /**
      * `submodule init` fetches nothing: it writes each URL into .git/config as the fetch
-     * will use it, a relative `../` resolved, so those are what gets checked.
+     * will use it, a relative `../` resolved, so those are what gets checked. Each http(s)
+     * one is pinned to the address checked; null when any of them is refused.
      *
-     * @param list<string> $git
+     * @param  list<string>  $git
+     * @return ?list<string>
+     *
      * @throws InspectException
      */
-    private function submoduleUrlsAllowed(array $git, string $target): bool
+    private function submodulePins(array $git, string $target): ?array
     {
         $this->run([...$git, 'submodule', 'init'], 'Could not read submodules', $target);
-        foreach ($this->gitConfigValues($target, '^submodule\..*\.url$') as $url) {
-            if (RepositoryAddress::refused($url)) {
-                return false;
+        $pins = [];
+        try {
+            foreach ($this->gitConfigValues($target, '^submodule\..*\.url$') as $url) {
+                if (RepositoryAddress::refused($url)) {
+                    return null;
+                }
+                $pins[] = self::pinOf($url);
             }
+        } catch (\InvalidArgumentException) {
+            return null;
         }
 
-        return true;
+        return array_values(array_unique(array_filter($pins, static fn (?string $pin): bool => $pin !== null)));
+    }
+
+    /**
+     * @throws \InvalidArgumentException when the host no longer resolves, or resolves to an address core must not contact
+     */
+    private static function pinOf(string $url): ?string
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+        return in_array($scheme, GitRepoInput::SCHEMES, true) ? OutboundUrl::pin($url, GitRepoInput::SCHEMES) : null;
     }
 
     /**
      * Shallow, to match the --depth=1 clone; not --recursive, so each nested level is checked first.
+     * The pins reach the child git each submodule is cloned by through GIT_CONFIG_PARAMETERS.
      *
-     * @param list<string> $git
+     * @param  list<string>  $git
+     * @param  list<string>  $pins
+     *
      * @throws InspectException
      */
-    private function fetchSubmodules(array $git, string $target, ?string $askPass): void
+    private function fetchSubmodules(array $git, string $target, ?string $askPass, array $pins): void
     {
         $command = [...$git, 'submodule', 'update', '--depth=1'];
+        foreach ($pins as $pin) {
+            $command = GitUrl::withResolve($command, $pin);
+        }
         if ($askPass !== null) {
             $command = GitUrl::withAskPass($command, $askPass);
         }
@@ -603,8 +633,8 @@ final class SourceResolver
     {
         $root = realpath($target);
         foreach ($this->gitConfigValues($target, '^submodule\..*\.path$', '.gitmodules') as $path) {
-            $dir = realpath($target . '/' . $path);
-            if ($root !== false && $dir !== false && str_starts_with($dir, $root . '/')) {
+            $dir = realpath($target.'/'.$path);
+            if ($root !== false && $dir !== false && str_starts_with($dir, $root.'/')) {
                 $this->initSubmodules($dir, $askPass, $level + 1);
             }
         }
@@ -615,6 +645,7 @@ final class SourceResolver
      * the checkout's own config or from $file.
      *
      * @return list<string>
+     *
      * @throws InspectException when git does not answer in time
      */
     private function gitConfigValues(string $target, string $pattern, ?string $file = null): array
@@ -635,7 +666,8 @@ final class SourceResolver
     }
 
     /**
-     * @param list<string> $command
+     * @param  list<string>  $command
+     *
      * @throws InspectException
      */
     private function configOutput(array $command): string
@@ -652,21 +684,22 @@ final class SourceResolver
     }
 
     /**
-     * @param list<string> $command
-     * @param ?string $redact a path that must not appear in the error message
+     * @param  list<string>  $command
+     * @param  ?string  $redact  a path that must not appear in the error message
+     *
      * @throws InspectException
      */
     private function run(array $command, string $failure, ?string $redact = null): void
     {
-        $process = new Process($command, null, self::UNATTENDED_GIT_ENV, null, $this->timeout);
+        $process = new Process($command, null, $this->gitEnv(), null, $this->timeout);
 
         try {
             $process->run();
         } catch (\Throwable $e) {
-            throw new InspectException($failure . ': ' . $e->getMessage(), 0, $e);
+            throw new InspectException($failure.': '.$e->getMessage(), 0, $e);
         }
 
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $output = $process->getErrorOutput() ?: $process->getOutput();
             $redirect = GitUrl::redirectedTo($output);
             if ($redirect !== null) {
@@ -674,12 +707,24 @@ final class SourceResolver
                     'field' => 'source',
                     'code' => 'redirect_not_followed',
                     'message' => "The repository redirects to {$redirect}. This engine does not follow Git "
-                        . "redirects; use {$redirect} instead.",
+                        ."redirects; use {$redirect} instead.",
                 ]);
             }
             $message = self::reason($output, $redact);
-            throw new InspectException($failure . ($message === '' ? '.' : ': ' . $message));
+            throw new InspectException($failure.($message === '' ? '.' : ': '.$message));
         }
+    }
+
+    /**
+     * `protocol.allow` reaches only the process git runs it in; a submodule's clone is a
+     * child with its own config. GIT_ALLOW_PROTOCOL is git's own form of it and is inherited,
+     * so it limits the clone and every submodule fetch alike.
+     *
+     * @return array<string, string>
+     */
+    private function gitEnv(): array
+    {
+        return self::UNATTENDED_GIT_ENV + GitTransport::env($this->allowedProtocols);
     }
 
     /**
@@ -696,7 +741,7 @@ final class SourceResolver
 
         if (self::mentionsAuthentication($lines)) {
             return 'the repository is private or does not exist. '
-                . 'Pass git_token to read a private HTTPS repository.';
+                .'Pass git_token to read a private HTTPS repository.';
         }
 
         $chosen = self::fatalOrLastLine($lines);
@@ -727,7 +772,7 @@ final class SourceResolver
      * Authentication is rewritten rather than quoted: git's "unable to read askpass response"
      * describes this class's plumbing, and on GitHub it is also the answer for a missing repository.
      *
-     * @param list<string> $lines
+     * @param  list<string>  $lines
      */
     private static function mentionsAuthentication(array $lines): bool
     {
@@ -741,7 +786,7 @@ final class SourceResolver
     }
 
     /**
-     * @param non-empty-list<string> $lines
+     * @param  non-empty-list<string>  $lines
      */
     private static function fatalOrLastLine(array $lines): string
     {
@@ -760,14 +805,14 @@ final class SourceResolver
     private function makeTempDir(): string
     {
         $root = rtrim($this->tempRoot, '/');
-        if (!is_dir($root) && !@mkdir($root, 0700, true) && !is_dir($root)) {
+        if (! is_dir($root) && ! @mkdir($root, 0700, true) && ! is_dir($root)) {
             throw new InspectException('Could not create the inspection workspace.');
         }
 
         $this->sweepStaleWorkspaces($root);
 
-        $dir = $root . '/inspect-' . bin2hex(random_bytes(8));
-        if (!@mkdir($dir, 0700)) {
+        $dir = $root.'/inspect-'.bin2hex(random_bytes(8));
+        if (! @mkdir($dir, 0700)) {
             throw new InspectException('Could not create the inspection workspace.');
         }
 
@@ -784,11 +829,11 @@ final class SourceResolver
         $cutoff = time() - self::STALE_WORKSPACE_SECONDS;
 
         foreach (scandir($root) ?: [] as $entry) {
-            if (!str_starts_with($entry, 'inspect-')) {
+            if (! str_starts_with($entry, 'inspect-')) {
                 continue;
             }
-            $path = $root . '/' . $entry;
-            if (!is_dir($path) || is_link($path)) {
+            $path = $root.'/'.$entry;
+            if (! is_dir($path) || is_link($path)) {
                 continue;
             }
             $modified = @filemtime($path);

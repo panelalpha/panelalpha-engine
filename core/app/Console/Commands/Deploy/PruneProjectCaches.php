@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands\Deploy;
 
-use App\System;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\ProjectCache;
 use App\Models\User;
+use App\System;
 use Illuminate\Console\Command;
 
 /**
@@ -57,19 +57,19 @@ class PruneProjectCaches extends Command
 
         $skip = $this->deployingNow();
         if ($skip !== []) {
-            $this->line('Skipping ' . implode(', ', $skip) . ' — deploy in flight');
+            $this->line('Skipping '.implode(', ', $skip).' — deploy in flight');
         }
 
         $dryRun = (bool) $this->option('dry-run');
 
         try {
-            $output = (new System())->exec(
+            $output = (new System)->exec(
                 ProjectCache::pruneArgv((int) $maxAge, $dryRun, $skip),
                 [],
                 900
             );
         } catch (\Exception $e) {
-            $this->error('Could not prune project caches: ' . $e->getMessage());
+            $this->error('Could not prune project caches: '.$e->getMessage());
 
             return 1;
         }
@@ -96,7 +96,7 @@ class PruneProjectCaches extends Command
             count($rows) - count($failed)
         ));
         if ($failed !== []) {
-            $this->warn(count($failed) . ' could not be removed');
+            $this->warn(count($failed).' could not be removed');
         }
 
         return 0;
@@ -116,7 +116,7 @@ class PruneProjectCaches extends Command
     {
         $running = [];
         foreach (User::query()->pluck('username') as $username) {
-            if (!is_string($username) || $username === '') {
+            if (! is_string($username) || $username === '') {
                 continue;
             }
             try {
@@ -133,7 +133,7 @@ class PruneProjectCaches extends Command
     }
 
     /**
-     * @param list<array{path: string, bytes: int, age: int, action: string}> $rows
+     * @param  list<array{path: string, bytes: int, age: int, action: string}>  $rows
      */
     private function renderReport(array $rows): void
     {
@@ -153,25 +153,25 @@ class PruneProjectCaches extends Command
     private function formatAge(int $seconds): string
     {
         if ($seconds >= 86400) {
-            return round($seconds / 86400, 1) . 'd ago';
+            return round($seconds / 86400, 1).'d ago';
         }
         if ($seconds >= 3600) {
-            return round($seconds / 3600, 1) . 'h ago';
+            return round($seconds / 3600, 1).'h ago';
         }
 
-        return max(0, (int) round($seconds / 60)) . 'm ago';
+        return max(0, (int) round($seconds / 60)).'m ago';
     }
 
     private function formatBytes(int $bytes): string
     {
         if ($bytes >= 1073741824) {
-            return round($bytes / 1073741824, 1) . 'G';
+            return round($bytes / 1073741824, 1).'G';
         }
         if ($bytes >= 1048576) {
-            return round($bytes / 1048576) . 'M';
+            return round($bytes / 1048576).'M';
         }
 
-        return $bytes . 'B';
+        return $bytes.'B';
     }
 
     private function stringOption(string $name): ?string

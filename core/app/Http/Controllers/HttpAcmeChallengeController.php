@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\HttpAcmeChallengeStoreRequest;
-use App\System;
 use App\Lib\HttpAcmeChallengeStore;
 use App\Models\Domain;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use InvalidArgumentException;
@@ -27,11 +27,11 @@ class HttpAcmeChallengeController extends Controller
     public function index(string $domain): JsonResponse
     {
         $domainModel = $this->resolveDomain($domain);
-        if (!$domainModel) {
+        if (! $domainModel) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
-        $store = new HttpAcmeChallengeStore();
+        $store = new HttpAcmeChallengeStore;
         $primary = $domainModel->domain;
 
         return new JsonResponse([
@@ -59,11 +59,11 @@ class HttpAcmeChallengeController extends Controller
     public function show(string $domain, string $token): JsonResponse
     {
         $domainModel = $this->resolveDomain($domain);
-        if (!$domainModel) {
+        if (! $domainModel) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
-        $store = new HttpAcmeChallengeStore();
+        $store = new HttpAcmeChallengeStore;
         try {
             $content = $store->get($domainModel->domain, $token);
         } catch (InvalidArgumentException $e) {
@@ -105,13 +105,13 @@ class HttpAcmeChallengeController extends Controller
     public function store(string $domain, HttpAcmeChallengeStoreRequest $request): JsonResponse
     {
         $domainModel = $this->resolveDomain($domain);
-        if (!$domainModel) {
+        if (! $domainModel) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
         /** @var array{token: string, content: string} $params */
         $params = $request->validated();
-        $store = new HttpAcmeChallengeStore();
+        $store = new HttpAcmeChallengeStore;
         $primary = $domainModel->domain;
 
         try {
@@ -151,11 +151,11 @@ class HttpAcmeChallengeController extends Controller
     public function destroyAll(string $domain): Response|JsonResponse
     {
         $domainModel = $this->resolveDomain($domain);
-        if (!$domainModel) {
+        if (! $domainModel) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
-        $store = new HttpAcmeChallengeStore();
+        $store = new HttpAcmeChallengeStore;
         $result = $store->deleteAll($domainModel->domain);
         if ($result['became_disabled']) {
             $this->rebuildAndReload($domainModel);
@@ -181,18 +181,18 @@ class HttpAcmeChallengeController extends Controller
     public function destroy(string $domain, string $token): Response|JsonResponse
     {
         $domainModel = $this->resolveDomain($domain);
-        if (!$domainModel) {
+        if (! $domainModel) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
-        $store = new HttpAcmeChallengeStore();
+        $store = new HttpAcmeChallengeStore;
         try {
             $result = $store->delete($domainModel->domain, $token);
         } catch (InvalidArgumentException $e) {
             return new JsonResponse(['message' => $e->getMessage()], 422);
         }
 
-        if (!$result['deleted']) {
+        if (! $result['deleted']) {
             return new JsonResponse(['message' => 'Not Found'], 404);
         }
 
@@ -211,6 +211,6 @@ class HttpAcmeChallengeController extends Controller
     private function rebuildAndReload(Domain $domain): void
     {
         $domain->projectDomain()->rebuild();
-        (new System())->webserver()->reload();
+        (new System)->webserver()->reload();
     }
 }

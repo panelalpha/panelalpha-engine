@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Nginx-proxy routing compiler.
- * 
+ *
  * Merges persisted custom rules with auto-generated domain defaults,
  * implements conflict suppression, and maintains separate HTTP and stream rule sets.
- * 
+ *
  * @psalm-type HttpRule = array{
  *   id: int,
  *   transport: string,
@@ -45,9 +45,12 @@ class RoutingCompiler
 {
     /** @var array<ProxyRule> */
     private array $persistedRules = [];
+
     private array $generatedRules = [];
+
     /** @psalm-var list<HttpRule> */
     private array $finalHttpRules = [];
+
     /** @psalm-var list<StreamRule> */
     private array $finalStreamRules = [];
 
@@ -62,14 +65,16 @@ class RoutingCompiler
         $owners = ProxyRuleServerName::owners();
         $this->persistedRules = array_values(array_filter(ProxyRule::getEnabled(), static function (ProxyRule $rule) use ($owners): bool {
             // Stored before these were checked: neither served nor given a port.
-            if (!ProxyRuleUpstream::serves($rule)) {
+            if (! ProxyRuleUpstream::serves($rule)) {
                 Log::warning("Proxy rule {$rule->id} of {$rule->username} is not served: "
-                    . "its upstream {$rule->upstream_host} is not the project's own app.");
+                    ."its upstream {$rule->upstream_host} is not the project's own app.");
+
                 return false;
             }
-            if (!ProxyRuleServerName::serves($rule, $owners)) {
+            if (! ProxyRuleServerName::serves($rule, $owners)) {
                 Log::warning("Proxy rule {$rule->id} of {$rule->username} is not served: "
-                    . "its server name {$rule->server_name} is not one of the project's own domains.");
+                    ."its server name {$rule->server_name} is not one of the project's own domains.");
+
                 return false;
             }
 
@@ -79,9 +84,10 @@ class RoutingCompiler
 
     /**
      * Compile routing rules from domains and persisted rules.
-     * 
-     * @param array<Domain> $domains
+     *
+     * @param  array<Domain>  $domains
      * @return array{http: array<array>, stream: array<array>}
+     *
      * @psalm-return array{http: list<HttpRule>, stream: list<StreamRule>}
      */
     public function compile(array $domains): array
@@ -112,7 +118,7 @@ class RoutingCompiler
         $aliases = $domain->getVhostAltNames();
         $allHostnames = [
             $primaryHostname,
-            ...$aliases
+            ...$aliases,
         ];
 
         // Create rules for the primary domain and all aliases
@@ -183,13 +189,15 @@ class RoutingCompiler
                         $rule['listen_ip'] !== $persistedRule->listen_ip
                     ) {
                         $filteredHttpRules[] = $rule;
+
                         continue;
                     }
                     // If persisted rule has specific server_name, only suppress matching server_names
-                    if (!empty($persistedRule->server_name)) {
+                    if (! empty($persistedRule->server_name)) {
                         // Only suppress if generated rule's server_names include this server_name
-                        if (!in_array($persistedRule->server_name, $rule['server_names'] ?? [])) {
+                        if (! in_array($persistedRule->server_name, $rule['server_names'] ?? [])) {
                             $filteredHttpRules[] = $rule;
+
                             continue;
                         }
                     }

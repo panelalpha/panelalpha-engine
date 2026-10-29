@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The text a failure sentence is built from.
@@ -574,10 +575,10 @@ OUT;
             . "#8 3.264 Get:10 http://deb.debian.org/debian bullseye/main amd64 pandoc-data all 2.9.2.1-1+deb11u1 [377 kB]\n"
             . "#8 3.278 Get:11 http://deb.debian.org/debian bullseye/main amd64 pandoc amd64 2.9.2.1-1+deb11u1 [18.5 MB]\n"
             . "#8 3.445 Fetched 19.5 MB in 0s (81.8 MB/s)\n"
-            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/o/openssl/openssl_1.1.1w-0%2bdeb11u8_amd64.deb  404  Not Found [IP: 151.101.2.132 80]\n"
-            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/ca-certificates/ca-certificates_20250419%7edeb12u1%7edeb11u1_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
-            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/libc-l10n_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
-            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/locales_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/o/openssl/openssl_1.1.1w-0%2bdeb11u8_amd64.deb  404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/ca-certificates/ca-certificates_20250419%7edeb12u1%7edeb11u1_all.deb  404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/libc-l10n_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/locales_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
             . "#8 3.445 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?\n"
             . "#8 ERROR: process \"/bin/sh -c apt-get update -y &&     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc     && apt-get clean && rm -f /var/lib/apt/lists/*_*\" did not complete successfully: exit code: 100\n";
         $stderr = " Image project-app Building \n"

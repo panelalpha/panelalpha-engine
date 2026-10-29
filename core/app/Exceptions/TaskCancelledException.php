@@ -2,6 +2,4 @@
 
 namespace App\Exceptions;
 
-class TaskCancelledException extends \Exception
-{
-}
+class TaskCancelledException extends \Exception {}

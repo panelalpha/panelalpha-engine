@@ -18,8 +18,8 @@ final class ServiceDependencies
     private const REFERENCE_KEYS = ['depends_on', 'links'];
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, true> $dropped lowercase service names
+     * @param  array<string, mixed>  $service
+     * @param  array<string, true>  $dropped  lowercase service names
      * @return array<string, mixed>
      */
     public static function withoutDropped(array $service, array $dropped): array
@@ -39,9 +39,9 @@ final class ServiceDependencies
         if (is_array($service['volumes_from'] ?? null)) {
             $service['volumes_from'] = array_values(array_filter(
                 $service['volumes_from'],
-                static fn ($ref): bool => !is_string($ref)
+                static fn ($ref): bool => ! is_string($ref)
                     || str_starts_with($ref, 'container:')
-                    || !isset($dropped[strtolower(self::serviceIn($ref))])
+                    || ! isset($dropped[strtolower(self::serviceIn($ref))])
             ));
             if ($service['volumes_from'] === []) {
                 unset($service['volumes_from']);
@@ -55,7 +55,7 @@ final class ServiceDependencies
      * The services $service names through `depends_on`, `links`,
      * `network_mode: service:x` or `volumes_from`.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return list<string>
      */
     public static function namesIn(array $service): array
@@ -63,7 +63,7 @@ final class ServiceDependencies
         $names = [];
         foreach (self::REFERENCE_KEYS as $key) {
             $refs = $service[$key] ?? null;
-            if (!is_array($refs)) {
+            if (! is_array($refs)) {
                 continue;
             }
             foreach (self::isStringList($refs) ? $refs : array_keys($refs) as $ref) {
@@ -77,7 +77,7 @@ final class ServiceDependencies
             $names[] = $network;
         }
         foreach (is_array($service['volumes_from'] ?? null) ? $service['volumes_from'] : [] as $ref) {
-            if (is_string($ref) && !str_starts_with($ref, 'container:')) {
+            if (is_string($ref) && ! str_starts_with($ref, 'container:')) {
                 $names[] = self::serviceIn($ref);
             }
         }
@@ -88,7 +88,7 @@ final class ServiceDependencies
     /**
      * Points every reference to $from at $to, keeping a `links` alias.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     public static function renamed(array $service, string $from, string $to): array
@@ -96,14 +96,15 @@ final class ServiceDependencies
         $matches = static fn ($ref): bool => is_string($ref) && strcasecmp(self::serviceIn($ref), $from) === 0;
         foreach (self::REFERENCE_KEYS as $key) {
             $refs = $service[$key] ?? null;
-            if (!is_array($refs)) {
+            if (! is_array($refs)) {
                 continue;
             }
             if (self::isStringList($refs)) {
                 $service[$key] = array_map(
-                    static fn ($ref) => $matches($ref) ? $to . substr($ref, strlen(self::serviceIn($ref))) : $ref,
+                    static fn ($ref) => $matches($ref) ? $to.substr($ref, strlen(self::serviceIn($ref))) : $ref,
                     $refs
                 );
+
                 continue;
             }
             $renamed = [];
@@ -114,12 +115,12 @@ final class ServiceDependencies
         }
         $network = self::networkServiceOf($service);
         if ($network !== null && strcasecmp($network, $from) === 0) {
-            $service['network_mode'] = 'service:' . $to;
+            $service['network_mode'] = 'service:'.$to;
         }
         if (is_array($service['volumes_from'] ?? null)) {
             $service['volumes_from'] = array_map(
-                static fn ($ref) => is_string($ref) && !str_starts_with($ref, 'container:') && $matches($ref)
-                    ? $to . substr($ref, strlen(self::serviceIn($ref)))
+                static fn ($ref) => is_string($ref) && ! str_starts_with($ref, 'container:') && $matches($ref)
+                    ? $to.substr($ref, strlen(self::serviceIn($ref)))
                     : $ref,
                 $service['volumes_from']
             );
@@ -129,12 +130,12 @@ final class ServiceDependencies
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function networkServiceOf(array $service): ?string
     {
         $mode = $service['network_mode'] ?? null;
-        if (!is_string($mode) || !str_starts_with(trim($mode), 'service:')) {
+        if (! is_string($mode) || ! str_starts_with(trim($mode), 'service:')) {
             return null;
         }
 
@@ -145,13 +146,13 @@ final class ServiceDependencies
      * `links` entries may be `name` or `name:alias`; the alias goes with the
      * dropped service, since nothing can reach it any more.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, true> $dropped
+     * @param  array<string, mixed>  $service
+     * @param  array<string, true>  $dropped
      * @return array<string, mixed>
      */
     private static function withoutDroppedIn(array $service, string $key, array $dropped): array
     {
-        if (!isset($service[$key]) || !is_array($service[$key])) {
+        if (! isset($service[$key]) || ! is_array($service[$key])) {
             return $service;
         }
 
@@ -170,8 +171,8 @@ final class ServiceDependencies
     }
 
     /**
-     * @param list<mixed> $dependencies
-     * @param array<string, true> $dropped
+     * @param  list<mixed>  $dependencies
+     * @param  array<string, true>  $dropped
      * @return list<string>
      */
     private static function keepListed(array $dependencies, array $dropped): array
@@ -179,13 +180,13 @@ final class ServiceDependencies
         return array_values(array_filter(
             $dependencies,
             static fn ($name): bool => is_string($name)
-                && !isset($dropped[strtolower(self::serviceIn($name))])
+                && ! isset($dropped[strtolower(self::serviceIn($name))])
         ));
     }
 
     /**
-     * @param array<string, mixed> $dependencies
-     * @param array<string, true> $dropped
+     * @param  array<string, mixed>  $dependencies
+     * @param  array<string, true>  $dropped
      * @return array<string, mixed>
      */
     private static function keepKeyed(array $dependencies, array $dropped): array
@@ -208,7 +209,7 @@ final class ServiceDependencies
     }
 
     /**
-     * @param array<mixed> $items
+     * @param  array<mixed>  $items
      */
     private static function isStringList(array $items): bool
     {

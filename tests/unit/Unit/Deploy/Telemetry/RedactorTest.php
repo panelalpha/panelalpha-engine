@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\Redactor;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The redactor is the only thing standing between a customer's build log and
@@ -92,11 +93,11 @@ class RedactorTest extends TestCase
      */
     public function test_masks_public_ips_but_keeps_bind_addresses(): void
     {
-        $this->assertStringNotContainsString('203.0.113.7', Redactor::line('connect to 203.0.113.7 failed'));
+        $this->assertStringNotContainsString(TestNetwork::public(7), Redactor::line('connect to ' . TestNetwork::public(7) . ' failed'));
 
-        $this->assertStringContainsString('0.0.0.0:3000', Redactor::line('listening on 0.0.0.0:3000'));
-        $this->assertStringContainsString('127.0.0.1', Redactor::line('proxy to 127.0.0.1:8080'));
-        $this->assertStringContainsString('172.17.0.2', Redactor::line('container ip 172.17.0.2'));
+        $this->assertStringContainsString(TestNetwork::ANY . ':3000', Redactor::line('listening on ' . TestNetwork::ANY . ':3000'));
+        $this->assertStringContainsString(TestNetwork::LOOPBACK, Redactor::line('proxy to ' . TestNetwork::LOOPBACK . ':8080'));
+        $this->assertStringContainsString(TestNetwork::container(2), Redactor::line('container ip ' . TestNetwork::container(2)));
     }
 
     public function test_does_not_mistake_a_version_string_for_an_ip(): void

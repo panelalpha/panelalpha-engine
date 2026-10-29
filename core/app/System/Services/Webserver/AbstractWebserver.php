@@ -25,7 +25,7 @@ abstract class AbstractWebserver implements WebserverInterface
 
     protected function phpPortForVersion(?string $phpVersion): int
     {
-        if (!$phpVersion || !Str::contains($phpVersion, '.')) {
+        if (! $phpVersion || ! Str::contains($phpVersion, '.')) {
             return 9083;
         }
 
@@ -60,7 +60,7 @@ abstract class AbstractWebserver implements WebserverInterface
             'fallback_proxy_port' => 8080,
         ];
 
-        if (!config('env.APP_LITE_PROXY_ENABLED')) {
+        if (! config('env.APP_LITE_PROXY_ENABLED')) {
             return $default;
         }
 
@@ -79,18 +79,18 @@ abstract class AbstractWebserver implements WebserverInterface
     {
         $projectDir = $this->system->engineDirPath();
         $default = [
-            'ssl_cert_file' => $projectDir . '/crt/server.cert',
-            'ssl_cert_key_file' => $projectDir . '/crt/server.key',
+            'ssl_cert_file' => $projectDir.'/crt/server.cert',
+            'ssl_cert_key_file' => $projectDir.'/crt/server.key',
         ];
 
-        $leIpCertDir = "/etc/letsencrypt/live/panelalpha-engine-ip-cert";
-        if (!file_exists($leIpCertDir . '/fullchain.pem') || !file_exists($leIpCertDir . '/privkey.pem')) {
+        $leIpCertDir = '/etc/letsencrypt/live/panelalpha-engine-ip-cert';
+        if (! file_exists($leIpCertDir.'/fullchain.pem') || ! file_exists($leIpCertDir.'/privkey.pem')) {
             return $default;
         }
 
         return [
-            'ssl_cert_file' => $leIpCertDir . '/fullchain.pem',
-            'ssl_cert_key_file' => $leIpCertDir . '/privkey.pem',
+            'ssl_cert_file' => $leIpCertDir.'/fullchain.pem',
+            'ssl_cert_key_file' => $leIpCertDir.'/privkey.pem',
         ];
     }
 
@@ -99,7 +99,7 @@ abstract class AbstractWebserver implements WebserverInterface
      */
     protected function httpAcmeChallengeTemplateVars(Domain $domain): array
     {
-        $dir = $this->system->engineDirPath() . '/data/webserver/acme-challenges/' . $domain->domain;
+        $dir = $this->system->engineDirPath().'/data/webserver/acme-challenges/'.$domain->domain;
 
         return [
             'http_acme_challenges_enabled' => $this->httpAcmeChallengesEnabled($dir),
@@ -110,7 +110,7 @@ abstract class AbstractWebserver implements WebserverInterface
     private function httpAcmeChallengesEnabled(string $dir): bool
     {
         $fs = $this->system->filesystem();
-        if (!$fs->directoryExists($dir)) {
+        if (! $fs->directoryExists($dir)) {
             return false;
         }
 
@@ -134,37 +134,37 @@ abstract class AbstractWebserver implements WebserverInterface
     protected function getAppProxyVars(): array
     {
         $caPort = Config::getIntValue('env.APP_LITE_CA_PORT');
-        $caServerName = "_";
+        $caServerName = '_';
         $caDomain = Config::getStringValue('env.APP_LITE_CA_DOMAIN');
-        if (!empty($caDomain)) {
+        if (! empty($caDomain)) {
             $caServerName = $caDomain;
         }
         $caEnabled = $caPort || $caDomain;
         $caProxyHost = Config::getStringValue('env.APP_LITE_PROXY_CA_HOST');
         $caProxyPort = Config::getIntValue('env.APP_LITE_PROXY_CA_PORT');
         $aaPort = Config::getIntValue('env.APP_LITE_AA_PORT');
-        $aaServerName = "_";
+        $aaServerName = '_';
         $aaDomain = Config::getStringValue('env.APP_LITE_AA_DOMAIN');
-        if (!empty($aaDomain)) {
+        if (! empty($aaDomain)) {
             $aaServerName = $aaDomain;
         }
         $aaEnabled = $aaPort || $aaDomain;
 
         return [
-            'client_area' => (string)$caEnabled,
-            'ca_port' => (string)$caPort,
+            'client_area' => (string) $caEnabled,
+            'ca_port' => (string) $caPort,
             'ca_server_name' => $caServerName,
-            'ca_proxy_host' => (string)$caProxyHost,
-            'ca_proxy_port' => (string)$caProxyPort,
-            'admin_area' => (string)$aaEnabled,
-            'aa_port' => (string)$aaPort,
+            'ca_proxy_host' => (string) $caProxyHost,
+            'ca_proxy_port' => (string) $caProxyPort,
+            'admin_area' => (string) $aaEnabled,
+            'aa_port' => (string) $aaPort,
             'aa_server_name' => $aaServerName,
-            'aa_proxy_host' => (string)Config::getStringValue('env.APP_LITE_PROXY_AA_HOST'),
-            'aa_proxy_port' => (string)Config::getIntValue('env.APP_LITE_PROXY_AA_PORT'),
-            'ws_proxy_host' => (string)Config::getStringValue('env.APP_LITE_PROXY_WS_HOST'),
-            'ws_proxy_port' => (string)Config::getIntValue('env.APP_LITE_PROXY_WS_PORT'),
-            'ws_rewrite_proxy_host' => (string)Config::getStringValue('env.APP_LITE_PROXY_WS_REWRITE_HOST'),
-            'ws_rewrite_proxy_port' => (string)Config::getIntValue('env.APP_LITE_PROXY_WS_REWRITE_PORT'),
+            'aa_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_AA_HOST'),
+            'aa_proxy_port' => (string) Config::getIntValue('env.APP_LITE_PROXY_AA_PORT'),
+            'ws_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_WS_HOST'),
+            'ws_proxy_port' => (string) Config::getIntValue('env.APP_LITE_PROXY_WS_PORT'),
+            'ws_rewrite_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_WS_REWRITE_HOST'),
+            'ws_rewrite_proxy_port' => (string) Config::getIntValue('env.APP_LITE_PROXY_WS_REWRITE_PORT'),
         ];
     }
 
@@ -197,6 +197,7 @@ abstract class AbstractWebserver implements WebserverInterface
             'ips_v4' => $ipsv4,
             'ips_v6' => $ipsv6,
         ];
+
         return $vars;
     }
 
@@ -225,26 +226,28 @@ abstract class AbstractWebserver implements WebserverInterface
     public function logsDirPath(): string
     {
         $webserver = $this->system->webserver()->getCurrentWebserver();
-        return $this->system->engineDirPath() . '/webserver-logs/' . $webserver;
+
+        return $this->system->engineDirPath().'/webserver-logs/'.$webserver;
     }
 
     public function domainsConfigsDirPath(): string
     {
         $webserver = $this->system->webserver()->getCurrentWebserver();
-        return $this->system->engineDirPath() . '/webserver-config/' . $webserver . '/vhosts';
+
+        return $this->system->engineDirPath().'/webserver-config/'.$webserver.'/vhosts';
     }
 
     public function rebuildDomainConfig(Domain $domain): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     /**
@@ -259,7 +262,7 @@ abstract class AbstractWebserver implements WebserverInterface
 
     public function reload(bool $rebindIpListeners = false): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     /**
@@ -272,12 +275,12 @@ abstract class AbstractWebserver implements WebserverInterface
 
     public function restart(): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     public function addDomain(Domain $domain): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     /**
@@ -289,7 +292,7 @@ abstract class AbstractWebserver implements WebserverInterface
      */
     public function createDomainConfig(Domain $domain): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     /**
@@ -298,7 +301,7 @@ abstract class AbstractWebserver implements WebserverInterface
      * The tail every rebuildConfig() shares. The LiteSpeed pair do not use it:
      * they regenerate one whole config file rather than a file per domain.
      *
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     protected function rebuildDomainConfigs(?array $domains = null): void
     {
@@ -316,13 +319,13 @@ abstract class AbstractWebserver implements WebserverInterface
      * tested without one -- production passes `Domain::getAll()`, which is
      * exactly what the loop below does with the default.
      *
-     * @param ?list<string> $liveDomains the domains still in the database
+     * @param  ?list<string>  $liveDomains  the domains still in the database
      * @return list<string> the domain names pruned
      */
     public function pruneDomainConfigs(?array $liveDomains = null): array
     {
         $dir = $this->domainsConfigsDirPath();
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return [];
         }
 
@@ -335,14 +338,14 @@ abstract class AbstractWebserver implements WebserverInterface
         }
 
         $pruned = [];
-        foreach (glob($dir . '/*.conf') ?: [] as $file) {
+        foreach (glob($dir.'/*.conf') ?: [] as $file) {
             $name = basename($file, '.conf');
             if ($name === '' || $name === 'app-lite' || str_starts_with($name, 'proxy-rule-')
                 || $name === 'stream' || $name === 'nginx'
             ) {
                 continue;
             }
-            if (!isset($known[$name])) {
+            if (! isset($known[$name])) {
                 $this->deleteDomainConfig($name);
                 $pruned[] = $name;
             }
@@ -356,24 +359,24 @@ abstract class AbstractWebserver implements WebserverInterface
      */
     public function listDomains(): array
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     public function deleteDomainConfig(string $domainName): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
-        throw new \Exception('Method ' . __METHOD__ . ' not implemented for class ' . get_called_class());
+        throw new \Exception('Method '.__METHOD__.' not implemented for class '.get_called_class());
     }
 
     public function deleteDomainLogsDir(string $domainName): void
     {
         $slug = $this->getDetails()['slug'];
-        $dir = $this->system->engineDirPath() . "/webserver-logs/{$slug}";
-        $this->system->runProcess(["sudo", "rm", "-rf", "{$dir}/{$domainName}"]);
+        $dir = $this->system->engineDirPath()."/webserver-logs/{$slug}";
+        $this->system->runProcess(['sudo', 'rm', '-rf', "{$dir}/{$domainName}"]);
     }
 
     public function deleteDomainsLogsDirs(array $domainNames): void

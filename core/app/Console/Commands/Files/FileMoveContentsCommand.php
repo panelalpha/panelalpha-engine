@@ -32,7 +32,7 @@ class FileMoveContentsCommand extends Command
         $override = filter_var($this->option('override'), FILTER_VALIDATE_BOOLEAN);
         Validator::make(
             ['source_path' => $source, 'dest_path' => $dest, 'override' => $override],
-            (new MoveContentsRequest())->rules()
+            (new MoveContentsRequest)->rules()
         )->validate();
         $user = User::findByUsernameOrFail($project);
         $from = $user->project()->resolvePath($source);
@@ -45,7 +45,7 @@ class FileMoveContentsCommand extends Command
             throw ValidationException::withMessages(['dest_path' => $e->getMessage()]);
         }
 
-        $this->info('Moved children of ' . $source . ' into ' . $dest);
+        $this->info('Moved children of '.$source.' into '.$dest);
 
         return 0;
     }

@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform;
 
 use App\Lib\Deploy\DetectProjectStrategy;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A repository carrying both build files must resolve to one build tool for
@@ -91,19 +92,19 @@ class JavaBuildToolTest extends TestCase
 
     /**
      * A Spring Boot app that sets `server.address=localhost` binds
-     * 127.0.0.1 and nothing outside the container reaches it. Both Java
+     * loopback and nothing outside the container reaches it. Both Java
      * platforms put the env var that outranks it into the container.
      */
     public function test_both_java_platforms_bind_spring_to_every_interface(): void
     {
         file_put_contents($this->dir . '/pom.xml', '<project></project>');
-        $this->assertSame('0.0.0.0', DetectProjectStrategy::detect($this->dir)['env']['SERVER_ADDRESS'] ?? null);
+        $this->assertSame(TestNetwork::ANY, DetectProjectStrategy::detect($this->dir)['env']['SERVER_ADDRESS'] ?? null);
 
         unlink($this->dir . '/pom.xml');
         file_put_contents($this->dir . '/build.gradle', 'plugins {}');
         $gradle = DetectProjectStrategy::detect($this->dir);
         $this->assertSame('java-gradle', $gradle['platform']);
-        $this->assertSame('0.0.0.0', $gradle['env']['SERVER_ADDRESS'] ?? null);
+        $this->assertSame(TestNetwork::ANY, $gradle['env']['SERVER_ADDRESS'] ?? null);
     }
 
     /** OpenTripPlanner binds `spotless:apply` with Prettier, which needs npm, to its build. */

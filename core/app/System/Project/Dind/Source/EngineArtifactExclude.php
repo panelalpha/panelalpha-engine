@@ -5,8 +5,8 @@ namespace App\System\Project\Dind\Source;
 use App\Lib\Deploy\Checkout\CheckoutExclude;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Detect\PlaceholderPage;
-use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\Lib\Deploy\Env\EnvExampleCopies;
+use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Strategy\EntrypointWriter;
 use Closure;
@@ -23,13 +23,12 @@ use Illuminate\Support\Facades\Log;
 final class EngineArtifactExclude
 {
     /**
-     * @param Closure(string $path, string $contents): void $writeFile
+     * @param  Closure(string $path, string $contents): void  $writeFile
      */
     public function __construct(
         private GitRepository $git,
         private Closure $writeFile,
-    ) {
-    }
+    ) {}
 
     public static function forProject(DindProject $dind): self
     {
@@ -38,7 +37,7 @@ final class EngineArtifactExclude
         return new self(
             new GitRepository($dind),
             static function (string $path, string $contents) use ($dind, $chown): void {
-                $dind->system()->filesystem()->filePutContents($path, $contents, $chown, '644');
+                $dind->system()->filesystem()->writeFileReplacingPath($path, $contents, $chown, '644');
             },
         );
     }
@@ -105,11 +104,11 @@ final class EngineArtifactExclude
 
         $files = [];
         foreach ($candidates as $relative) {
-            if (is_file($checkout . '/' . $relative)) {
+            if (is_file($checkout.'/'.$relative)) {
                 $files[] = $relative;
             }
         }
-        if (PlaceholderPage::isOneOf($checkout . '/index.html')) {
+        if (PlaceholderPage::isOneOf($checkout.'/index.html')) {
             $files[] = 'index.html';
         }
 
@@ -129,7 +128,7 @@ final class EngineArtifactExclude
     {
         $files = [];
         foreach (['*', '*/*', '*/*/*'] as $depth) {
-            foreach (glob($checkout . '/' . $depth . '.dockerignore') ?: [] as $path) {
+            foreach (glob($checkout.'/'.$depth.'.dockerignore') ?: [] as $path) {
                 $head = is_file($path) ? (string) file_get_contents($path, false, null, 0, 256) : null;
                 if (BuildContextIgnore::isEngineWritten($head)) {
                     $files[] = substr($path, strlen($checkout) + 1);

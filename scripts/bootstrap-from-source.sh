@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.2.0-20261028'
 
 # The composer image, built from dockerfiles/Dockerfile-composer when no tag is
 # published or the published one's PHP is older than core's composer.json asks
@@ -131,6 +131,16 @@ resolve_public_ip() {
     step "Using host address ${PUBLIC_IP}"
 }
 
+# As installer.sh: git before 2.37 ignores the http.curloptResolve pin that
+# traditional PHP hosting's host-side git runs with.
+warn_old_host_git() {
+    local version
+    version=$(git --version 2>/dev/null | sed -n 's/^git version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p') || version=''
+    if [ -n "$version" ] && [ "$(printf '%s\n' 2.37 "$version" | sort -V | head -1)" != 2.37 ]; then
+        warn "git ${version} is older than 2.37: on traditional PHP hosting the engine refuses a git pull from any host name not in EGRESS_ALLOW_HOSTS until git on this server is upgraded."
+    fi
+}
+
 check_prerequisites() {
     step "Checking prerequisites"
     . /etc/os-release
@@ -139,6 +149,7 @@ check_prerequisites() {
     *) warn "Untested distribution '${ID:-unknown}' — the stack expects Debian 12/13 or Ubuntu 22.04/24.04" ;;
     esac
     install_missing_tools
+    warn_old_host_git
     install_docker
     docker compose version >/dev/null 2>&1 || { echo "The docker compose plugin is missing." >&2; exit 1; }
     resolve_public_ip
@@ -241,8 +252,8 @@ seed_config_dirs() {
     mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
         webserver-config/{litespeed,openlitespeed}-admin \
         webserver-logs/{apache,nginx,nginx-proxy,litespeed,openlitespeed} \
-        logs/{litespeed,exim,modsecurity} \
-        config/{pure-ftpd,sftp,logrotate,exim,modsecurity}
+        logs/{litespeed,exim} \
+        config/{pure-ftpd,sftp,logrotate,exim}
     cp -Rn templates/webserver-config/. webserver-config/
     cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
     chmod +x config/pure-ftpd/entrypoint.sh
@@ -253,7 +264,7 @@ seed_config_dirs() {
     cp -Rn templates/config/logrotate/. config/logrotate/
     cp templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf config/logrotate/
     cp -Rn templates/config/exim/. config/exim/
-    cp -Rn templates/config/modsecurity/. config/modsecurity/
+    bash scripts/seed-modsecurity.sh "$PWD"
 }
 
 generate_sftp_host_keys() {

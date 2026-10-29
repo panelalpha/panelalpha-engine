@@ -2,18 +2,21 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ProjectOptions;
-use App\Lib\Host\ProjectMemory;
 use App\Console\Commands\Concerns\SelectsProjects;
+use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\LimitSelection;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
 use App\System\Project\Dind;
+use App\System\Projects;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
 class SetLimits extends Command
 {
+    use ConfirmsChanges;
     use SelectsProjects;
 
     /** Older spellings still answer, so nothing scripted against them breaks. */
@@ -27,11 +30,12 @@ class SetLimits extends Command
     {
         // Built from the same table the values are parsed against, so an added
         // limit cannot be accepted by one and ignored by the other.
-        $this->signature = 'project:limit:set' . ProjectOptions::SIGNATURE
-            . implode('', array_map(
+        $this->signature = 'project:limit:set'.ProjectOptions::SIGNATURE
+            .implode('', array_map(
                 static fn (ResourceLimit $l): string => " {--{$l->option}=}",
                 ResourceLimit::all()
-            ));
+            ))
+            .' {--force : Skip confirmation}';
 
         parent::__construct();
     }
@@ -40,14 +44,14 @@ class SetLimits extends Command
     {
         // Options are validated before the project is looked up, so a bad
         // value is reported first whatever the name.
-        if (!$this->namesProjects()) {
+        if (! $this->namesProjects()) {
             return 1;
         }
 
         $selection = LimitSelection::fromOptions($this->options());
 
         if ($selection->isEmpty()) {
-            $this->error('At least one of following options is required: ' . LimitSelection::optionListHint());
+            $this->error('At least one of following options is required: '.LimitSelection::optionListHint());
 
             return 1;
         }
@@ -73,22 +77,55 @@ class SetLimits extends Command
             return 1;
         }
 
+        $containerProblem = $this->containerMemoryProblem($projects, $selection);
+        if ($containerProblem !== null) {
+            $this->error($containerProblem);
+
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $one = $this->option('username') ? $projects[0] : null;
         $this->warn($one !== null
             ? "Following limits will be set for user `{$one->username}`:"
-            : 'Following limits will be set for all (' . count($projects) . ') users:');
+            : 'Following limits will be set for all ('.count($projects).') users:');
         // The two headings have always padded their rows differently.
         $this->announce($selection, $one !== null ? 20 : 16);
 
-        return $this->confirm('Do you wish to continue?')
+        return $this->option('force') || $this->confirm('Do you wish to continue?')
             ? $this->apply($projects, $selection)
             : 0;
+    }
+
+    /**
+     * A container project's account runs its own Docker daemon, so its floor is higher than Docker's.
+     *
+     * @param  array<User>|Collection<int, User>  $projects
+     */
+    private function containerMemoryProblem($projects, LimitSelection $selection): ?string
+    {
+        if (! $selection->has('memory_limit')) {
+            return null;
+        }
+        foreach ($projects as $user) {
+            $problem = Projects::isDind($user)
+                ? ProjectMemory::problem((int) $selection->all()['memory_limit'], container: true)
+                : null;
+            if ($problem !== null) {
+                return "{$user->username}: {$problem['message']}";
+            }
+        }
+
+        return null;
     }
 
     private function announce(LimitSelection $selection, int $width): void
     {
         foreach ($selection->all() as $key => $value) {
-            $this->info(str_pad('  ' . $key . ': ', $width) . ResourceLimit::byKey($key)->format($value));
+            $this->info(str_pad('  '.$key.': ', $width).ResourceLimit::byKey($key)->format($value));
         }
     }
 

@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Web\HookController;
 use App\Http\Requests\Git\DeployHookCreateRequest;
 use App\Http\Requests\Git\GitPathRequest;
 use App\Lib\DeployHook\DeployHookActions;
 use App\Lib\DeployHook\DeployHookNotFound;
+use App\Lib\DeployHook\ProviderRegistrationRefused;
 use App\Models\HookDelivery;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
@@ -16,7 +19,7 @@ use OpenApi\Attributes as OA;
  * The authenticated side of Deploy Hooks: what a client calls to get the URL
  * and secret it then registers in its git host, and to look at, replace or
  * remove them. The public side, which the git host calls, is
- * {@see \App\Http\Controllers\Web\HookController}.
+ * {@see HookController}.
  *
  * One hook per checkout, selected by the optional `path` exactly as the git
  * tools select a checkout: absent means the Deploy-managed one.
@@ -33,29 +36,41 @@ class DeployHookController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Create the Deploy Hook for a git-connected checkout, so a push to its tracked branch '
-            . 'redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the '
-            . 'main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
-            . 'The secret is shown ONCE, in this response, and can never be read again: store it now, or '
-            . 'rotate later. Asking again returns the same hook (200) without the secret and never rotates it. '
-            . 'On the Deploy-managed checkout every push to the tracked branch force-updates it to match the '
-            . 'repository (local changes to tracked files and untracked files that are not engine-managed are '
-            . 'discarded before the rebuild) and the response carries a `warning` saying so. On a Site Git '
-            . 'checkout (e.g. `public_html`) a push only fast-forwards, with no build: untracked files such as '
-            . 'uploads are left alone, and when git refuses because of a local change, an untracked file at an '
-            . 'incoming path or rewritten history, nothing changes and the delivery\'s result is `pull_refused`. '
-            . 'The response\'s `tls` block says whether the engine\'s certificate is one a git host trusts outright '
-            . '(`state: valid`) or self-signed (`state: self_signed`); when self-signed it carries `instructions`, '
-            . 'one paragraph per supported provider (github, gitlab, bitbucket-cloud, bitbucket-data-center) on '
-            . 'making that provider call the hook anyway. Optional `provider` on the request narrows `instructions` '
-            . 'to that one provider. `tls.warning` is set when the engine has no public address, so a git host on '
-            . 'the internet could not reach the hook at all. '
-            . '422 when the checkout is not connected to git.',
+            .'redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the '
+            .'main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
+            .'The secret is shown ONCE, in this response, and can never be read again: store it now, or '
+            .'rotate later. Asking again returns the same hook (200) without the secret and never rotates it. '
+            .'On the Deploy-managed checkout every push to the tracked branch force-updates it to match the '
+            .'repository (local changes to tracked files and untracked files that are not engine-managed are '
+            .'discarded before the rebuild) and the response carries a `warning` saying so. On a Site Git '
+            .'checkout (e.g. `public_html`) a push only fast-forwards, with no build: untracked files such as '
+            .'uploads are left alone, and when git refuses because of a local change, an untracked file at an '
+            .'incoming path or rewritten history, nothing changes and the delivery\'s result is `pull_refused`. '
+            .'The response\'s `tls` block says whether the engine\'s certificate is one a git host trusts outright '
+            .'(`state: valid`) or self-signed (`state: self_signed`); when self-signed it carries `instructions`, '
+            .'one paragraph per supported provider (github, gitlab, bitbucket-cloud, bitbucket-data-center) on '
+            .'making that provider call the hook anyway. Optional `provider` on the request narrows `instructions` '
+            .'to that one provider. `tls.warning` is set when the engine has no public address, so a git host on '
+            .'the internet could not reach the hook at all. '
+            .'422 when the checkout is not connected to git. With `register: true` the engine also creates the '
+            .'webhook at the git provider the checkout came from, using the token the checkout itself clones with, '
+            .'and the response carries `registration` (`provider_hook_id` and `registered_at`; a GitLab hook made '
+            .'before 2.2 cannot be signed, and `registration_warning` then says to rotate it); the token needs '
+            .'permission to manage repository webhooks (GitHub admin:repo_hook, GitLab maintainer, Bitbucket admin), '
+            .'else 422 `provider_token_missing` or `provider_permission_denied`; a provider that cannot be reached is '
+            .'502. The provider API is called only at a public address of the repository\'s host, pinned to the '
+            .'address checked, and a redirect is followed only on that same host; any other host is never called '
+            .'and the answer is 422 `host_refused`. The Engine hook is created either way, and `registration: null` with `registration_warning` says '
+            .'when the engine has no provider API for that host. When this call created the hook and the registration '
+            .'is then refused, the refusal carries the hook as a 201 would have answered it, `secret` included, in '
+            .'`problems[0].hook` (422) or `hook` (502): it is the only time that secret is shown.',
         summary: 'Create a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
                 new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
-                new OA\Property(property: 'provider', description: 'Optional. Narrows `tls.instructions` to this git host: github, gitlab, bitbucket-cloud, bitbucket-data-center.', type: 'string'),
+                new OA\Property(property: 'provider', description: 'Optional. Narrows `tls.instructions` to this git host, and names the provider to register at when the repository URL does not: github, gitlab, bitbucket-cloud, bitbucket-data-center.', type: 'string'),
+                new OA\Property(property: 'register', description: 'Optional, default false. Also create the webhook at the git provider with the checkout\'s own token.', type: 'boolean'),
             ],
         )),
         tags: ['Git'],
@@ -70,6 +85,11 @@ class DeployHookController extends Controller
                     new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
                     new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
                     new OA\Property(property: 'warning', type: 'string'),
+                    new OA\Property(property: 'registration', nullable: true, properties: [
+                        new OA\Property(property: 'provider_hook_id', type: 'string'),
+                        new OA\Property(property: 'registered_at', type: 'string', format: 'date-time', nullable: true),
+                    ], type: 'object'),
+                    new OA\Property(property: 'registration_warning', type: 'string'),
                     new OA\Property(property: 'tls', type: 'object', properties: [
                         new OA\Property(property: 'state', type: 'string', enum: ['valid', 'self_signed']),
                         new OA\Property(property: 'warning', type: 'string', nullable: true),
@@ -81,7 +101,8 @@ class DeployHookController extends Controller
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'The checkout is not connected to git', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'The checkout is not connected to git, the token cannot manage webhooks, or it is absent', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 502, description: 'The git provider could not be reached to register the webhook', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function create(string $username, DeployHookCreateRequest $request, DeployHookActions $hooks): JsonResponse
@@ -89,7 +110,7 @@ class DeployHookController extends Controller
         $user = $this->projectOr404($username);
 
         return $this->respond(function () use ($hooks, $user, $request): JsonResponse {
-            $data = $hooks->create($user, $request->validated());
+            $data = $hooks->create($user, $request->hookParams());
 
             return new JsonResponse(['data' => $data], $data['created'] ? 201 : 200);
         });
@@ -102,19 +123,21 @@ class DeployHookController extends Controller
     #[OA\Get(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Show the Deploy Hook of a checkout: its `url` and when it was created or last rotated. '
-            . 'Never includes the secret, which is shown only when the hook is created or rotated. '
-            . '`registered_url` is the address this hook was last created or rotated under; '
-            . '`url_changed_since_registration` is true once the engine\'s own address has moved on from it (an IP a '
-            . 'domain certificate replaced), meaning the git host still calls `registered_url` and the hook has to '
-            . 'be re-registered at `url`. `tls` reports the same certificate state POST .../deploy-hook does. '
-            . '`deliveries` lists the ' . HookDelivery::KEEP_HISTORY . ' most recent accepted Hook Deliveries '
-            . 'and the ' . HookDelivery::KEEP_REJECTED . ' most recent rejected ones, newest first:`outcome` is what the request was answered with (queued, ignored, rejected, coalesced) '
-            . 'and `result` is what the queued work then reached (deployed, partial, deploy_failed, pull_refused, superseded), '
-            . 'null while still queued or for a delivery that queued nothing. `detail` carries the reason for a '
-            . 'refused pull or a failure; `deploy_id` points at the full build log '
-            . '(`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. '
-            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
-            . '404 when the checkout has no hook.',
+            .'Never includes the secret, which is shown only when the hook is created or rotated. '
+            .'`registered_url` is the address this hook was last created or rotated under; '
+            .'`url_changed_since_registration` is true once the engine\'s own address has moved on from it (an IP a '
+            .'domain certificate replaced), meaning the git host still calls `registered_url` and the hook has to '
+            .'be re-registered at `url`. `tls` reports the same certificate state POST .../deploy-hook does. '
+            .'`registration` is the provider webhook this hook is registered as (`provider_hook_id`, '
+            .'`registered_at`), or null when it was not registered there. '
+            .'`deliveries` lists the '.HookDelivery::KEEP_HISTORY.' most recent accepted Hook Deliveries '
+            .'and the '.HookDelivery::KEEP_REJECTED.' most recent rejected ones, newest first:`outcome` is what the request was answered with (queued, ignored, rejected, coalesced) '
+            .'and `result` is what the queued work then reached (deployed, partial, deploy_failed, pull_refused, superseded), '
+            .'null while still queued or for a delivery that queued nothing. `detail` carries the reason for a '
+            .'refused pull or a failure; `deploy_id` points at the full build log '
+            .'(`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. '
+            .'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
+            .'404 when the checkout has no hook.',
         summary: 'Show a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -132,6 +155,10 @@ class DeployHookController extends Controller
                     new OA\Property(property: 'warning', type: 'string'),
                     new OA\Property(property: 'registered_url', type: 'string', nullable: true),
                     new OA\Property(property: 'url_changed_since_registration', type: 'boolean'),
+                    new OA\Property(property: 'registration', nullable: true, properties: [
+                        new OA\Property(property: 'provider_hook_id', type: 'string'),
+                        new OA\Property(property: 'registered_at', type: 'string', format: 'date-time', nullable: true),
+                    ], type: 'object'),
                     new OA\Property(property: 'tls', type: 'object', properties: [
                         new OA\Property(property: 'state', type: 'string', enum: ['valid', 'self_signed']),
                         new OA\Property(property: 'warning', type: 'string', nullable: true),
@@ -165,13 +192,17 @@ class DeployHookController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/deploy-hook/rotate',
         description: 'Replace the Deploy Hook\'s URL and secret with new ones, for when either leaked. '
-            . 'The old URL answers 404 from this moment, so the new `url` and `secret` must be registered '
-            . 'in the git host again. The secret is shown ONCE, in this response, and can never be read again. '
-            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
-            . '404 when the checkout has no hook; rotating '
-            . 'never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates '
-            . 'it to match the repository (local changes to tracked files and untracked files that are not '
-            . 'engine-managed are discarded before the rebuild); a Site Git checkout is only fast-forwarded.',
+            .'The old URL answers 404 from this moment, so the new `url` and `secret` must be registered '
+            .'in the git host again. The secret is shown ONCE, in this response, and can never be read again. '
+            .'When the hook is registered at the provider, the provider webhook is updated with the new URL and '
+            .'secret in the same request. When the provider refuses or cannot be reached, the hook is rotated '
+            .'anyway and `registration_warning` says why the webhook was not updated; one the provider answers 404 '
+            .'for is forgotten (`registration: null`), so a create with `register: true` can make a new one. '
+            .'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
+            .'404 when the checkout has no hook; rotating '
+            .'never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates '
+            .'it to match the repository (local changes to tracked files and untracked files that are not '
+            .'engine-managed are discarded before the rebuild); a Site Git checkout is only fast-forwarded.',
         summary: 'Rotate a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -189,6 +220,11 @@ class DeployHookController extends Controller
                     new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
                     new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
                     new OA\Property(property: 'warning', type: 'string'),
+                    new OA\Property(property: 'registration', nullable: true, properties: [
+                        new OA\Property(property: 'provider_hook_id', type: 'string'),
+                        new OA\Property(property: 'registered_at', type: 'string', format: 'date-time', nullable: true),
+                    ], type: 'object'),
+                    new OA\Property(property: 'registration_warning', type: 'string'),
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project or hook not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -205,8 +241,8 @@ class DeployHookController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 '
-            . 'from then on; remove the webhook in the git host too. Optional `path` defaults to `project` '
-            . 'on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.',
+            .'from then on; remove the webhook in the git host too. Optional `path` defaults to `project` '
+            .'on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.',
         summary: 'Delete a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -238,6 +274,13 @@ class DeployHookController extends Controller
             return $respond();
         } catch (DeployHookNotFound $e) {
             return new JsonResponse(['message' => $e->getMessage()], 404);
+        } catch (ProviderRegistrationRefused $e) {
+            $hook = $e->createdHook === null ? [] : ['hook' => $e->createdHook];
+            if ($e->problemCode !== null) {
+                throw ProblemException::one('registration', $e->problemCode, $e->getMessage(), $hook);
+            }
+
+            return new JsonResponse(['message' => $e->getMessage()] + $hook, $e->httpStatus);
         } catch (GitException $e) {
             return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
         }

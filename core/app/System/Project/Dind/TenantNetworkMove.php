@@ -28,15 +28,14 @@ final class TenantNetworkMove
 
     public function __construct(
         private DindProject $dind,
-    ) {
-    }
+    ) {}
 
     /** @return self::MOVED|self::ALREADY|self::NOT_RUNNING */
     public function run(): string
     {
         // A stopped account would start on the new network with the old pin;
         // left alone, it starts where it was and still works.
-        if (!$this->dind->isRunning()) {
+        if (! $this->dind->isRunning()) {
             return self::NOT_RUNNING;
         }
 
@@ -46,7 +45,7 @@ final class TenantNetworkMove
         $onLegacy = array_key_exists(TenantNetwork::LEGACY_NAME, $networks);
 
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
-        if (!array_key_exists(TenantNetwork::NAME, $networks)) {
+        if (! array_key_exists(TenantNetwork::NAME, $networks)) {
             $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
             // The new port carries nothing until it is bound.
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
@@ -56,21 +55,21 @@ final class TenantNetworkMove
             $system->exec(TenantNetwork::accountNetworksArgv($account), [], 30)
         );
         if ($address === null) {
-            throw new RuntimeException("{$account} joined " . TenantNetwork::NAME . ' but has no address on it');
+            throw new RuntimeException("{$account} joined ".TenantNetwork::NAME.' but has no address on it');
         }
 
         if ($this->repin($address)) {
             $up = $this->dind->projectAction('up');
             if ($up['exit_code'] !== 0) {
                 throw new RuntimeException(
-                    "{$account}: the app did not come back up on its new database address: " . trim($up['stderr'])
+                    "{$account}: the app did not come back up on its new database address: ".trim($up['stderr'])
                 );
             }
         }
 
         $this->pointComposeAtTenantNetwork();
 
-        if (!$onLegacy) {
+        if (! $onLegacy) {
             return self::ALREADY;
         }
         $system->exec(['sudo', 'docker', 'network', 'disconnect', TenantNetwork::LEGACY_NAME, $account], [], 60);
@@ -106,7 +105,7 @@ final class TenantNetworkMove
     {
         $filesystem = $this->dind->system()->filesystem();
         $path = $this->dind->composeFilePath();
-        if (!$filesystem->fileExists($path)) {
+        if (! $filesystem->fileExists($path)) {
             return;
         }
         $compose = $filesystem->fileGetContents($path);
@@ -125,15 +124,16 @@ final class TenantNetworkMove
 
         $files = explode(':', $this->dind->userAppComposeEnv()['COMPOSE_FILE']);
         foreach (array_filter($files, static fn (string $f): bool => $f !== '') as $file) {
-            if (!$filesystem->fileExists($file)) {
+            if (! $filesystem->fileExists($file)) {
                 continue;
             }
+            $filesystem->assertNotSymlink($file);
             $yaml = $filesystem->fileGetContents($file);
             $repinned = AppDatabase::repinned($yaml, $address);
             if ($repinned !== $yaml) {
                 // The run file inlines env_vars and passwords; the overrides are 0644 wherever written.
                 $mode = basename($file) === EngineArtifacts::RUN_COMPOSE ? EngineArtifacts::RUN_COMPOSE_MODE : '644';
-                $filesystem->filePutContents($file, $repinned, $chown, $mode);
+                $filesystem->writeFileReplacingPath($file, $repinned, $chown, $mode);
                 $changed = true;
             }
         }

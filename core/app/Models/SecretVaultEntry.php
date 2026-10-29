@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Http\Controllers\User\ProjectSettingController;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
@@ -11,13 +12,14 @@ use Illuminate\Support\Str;
  * One paste-slot for a secret the API caller does not want to send.
  *
  * An agent creates an entry (`vault_secret_create`), gets back a paste URL
- * and the reference `vault:<id>`, the customer pastes the secret into the
- * form, and an API call that sends `vault:<id>` in the matching request field
+ * and the reference `vault:<key>`, the customer pastes the secret into the
+ * form, and an API call that sends `vault:<key>` in the matching request field
  * uses the secret in its place.
  *
  * The paste URL carries a random token of which only `ref_hash` (sha-256) is
  * stored, so a database dump contains no live form links. The reference is
- * the plain id: knowing it is not enough to read anything.
+ * `vault:<ref_key>`, a random key given to every entry when it is created, so
+ * a token that may not list the vault cannot spend an entry by counting ids.
  *
  * `scope` says where the secret may be used. A `project` entry belongs to the
  * first project it is given to (`project`) and is refused everywhere else; a
@@ -26,26 +28,28 @@ use Illuminate\Support\Str;
  * closes after an hour; the secret expires only if it was created with an
  * expiry (`expires_at`), and is then refused and purged.
  *
- * @property int       $id
- * @property string    $ref_hash
- * @property string    $type
- * @property string    $scope
- * @property ?string   $purpose
- * @property ?array<string, string> $verify_with  what a paste is checked against
+ * @property int $id
+ * @property string $ref_hash
+ * @property string $ref_key the random part of `vault:<ref_key>`
+ * @property string $type
+ * @property string $scope
+ * @property ?string $purpose
+ * @property ?array<string, string> $verify_with what a paste is checked against
  * @property ?array<string, string> $verification the outcome of that check
- * @property ?string   $secret_encrypted
- * @property ?Carbon   $filled_at
- * @property ?string   $project         the project a `project` entry is bound to
- * @property ?Carbon   $link_expires_at
- * @property ?Carbon   $expires_at      null: the secret never expires
- * @property int       $use_count
- * @property ?Carbon   $last_used_at
- * @property Carbon    $created_at
- * @property Carbon    $updated_at
+ * @property ?string $secret_encrypted
+ * @property ?Carbon $filled_at
+ * @property ?string $project the project a `project` entry is bound to
+ * @property ?Carbon $link_expires_at
+ * @property ?Carbon $expires_at null: the secret never expires
+ * @property int $use_count
+ * @property ?Carbon $last_used_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  */
 class SecretVaultEntry extends Model
 {
     public const TYPE_GIT_TOKEN = 'git_token';
+
     public const TYPE_ENV_VARS = 'env_vars';
 
     /**
@@ -54,7 +58,7 @@ class SecretVaultEntry extends Model
      * The setting is `cloudflare-api-token` and the vault type is
      * `cloudflare_api_token`: names are hyphenated in one and snake_case in
      * the other, and the conversion is the caller's
-     * ({@see \App\Http\Controllers\User\ProjectSettingController}).
+     * ({@see ProjectSettingController}).
      */
     public const TYPE_CLOUDFLARE_API_TOKEN = 'cloudflare_api_token';
 
@@ -84,14 +88,18 @@ class SecretVaultEntry extends Model
     /** @var list<string> */
     public const SCOPES = [self::SCOPE_PROJECT, self::SCOPE_GLOBAL];
 
-    /** What marks a request or stored value as a reference: `vault:<id>`. */
+    /** What marks a request or stored value as a reference: `vault:<key>`. */
     public const PREFIX = 'vault:';
 
     /** Seconds from the mint that the paste form stays open. */
     public const TTL_SECONDS = 3600;
 
+    /** Characters of the random `ref_key`. */
+    private const REF_KEY_LENGTH = 24;
+
     protected $fillable = [
         'ref_hash',
+        'ref_key',
         'type',
         'scope',
         'purpose',
@@ -104,12 +112,12 @@ class SecretVaultEntry extends Model
     ];
 
     protected $casts = [
-        'filled_at'       => 'datetime',
+        'filled_at' => 'datetime',
         'link_expires_at' => 'datetime',
-        'expires_at'      => 'datetime',
-        'last_used_at'    => 'datetime',
-        'verify_with'     => 'array',
-        'verification'    => 'array',
+        'expires_at' => 'datetime',
+        'last_used_at' => 'datetime',
+        'verify_with' => 'array',
+        'verification' => 'array',
     ];
 
     /** `use_count` mirrors the column default, so a freshly created entry does not serialise null. */
@@ -117,6 +125,11 @@ class SecretVaultEntry extends Model
         'scope' => self::SCOPE_PROJECT,
         'use_count' => 0,
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(fn (self $entry) => $entry->ref_key ??= Str::random(self::REF_KEY_LENGTH));
+    }
 
     /**
      * sha-256 of the raw ref, hex -- the only spelling ever written to the
@@ -135,13 +148,13 @@ class SecretVaultEntry extends Model
      */
     public static function help(string $type): string
     {
-        $file = resource_path('vault/' . self::helpFileName($type));
+        $file = resource_path('vault/'.self::helpFileName($type));
 
-        if (!is_file($file) || !is_readable($file)) {
+        if (! is_file($file) || ! is_readable($file)) {
             $file = resource_path('vault/default.md');
         }
 
-        if (!is_file($file) || !is_readable($file)) {
+        if (! is_file($file) || ! is_readable($file)) {
             return '';
         }
 
@@ -159,7 +172,7 @@ class SecretVaultEntry extends Model
      */
     private static function helpFileName(string $type): string
     {
-        return preg_match('/^[a-z][a-z0-9_]*$/', $type) === 1 ? $type . '.md' : 'default.md';
+        return preg_match('/^[a-z][a-z0-9_]*$/', $type) === 1 ? $type.'.md' : 'default.md';
     }
 
     public function isGlobal(): bool
@@ -167,18 +180,18 @@ class SecretVaultEntry extends Model
         return $this->scope === self::SCOPE_GLOBAL;
     }
 
-    /** `vault:<id>`, what a request or a project stores in place of the secret. */
+    /** `vault:<ref_key>`, what a request sends in place of the secret. */
     public function reference(): string
     {
-        return self::PREFIX . $this->id;
+        return self::PREFIX.$this->ref_key;
     }
 
-    /** The id in `vault:<id>` (or a bare `<id>`), or null when it is not one. */
-    public static function idFromReference(string $value): ?int
+    /** The entry `vault:<ref_key>` names, or null for anything else -- an id never names one. */
+    public static function findByReference(string $value): ?self
     {
-        $id = str_starts_with($value, self::PREFIX) ? substr($value, strlen(self::PREFIX)) : $value;
+        $key = str_starts_with($value, self::PREFIX) ? substr($value, strlen(self::PREFIX)) : '';
 
-        return ctype_digit($id) && $id !== '' ? (int) $id : null;
+        return $key === '' ? null : self::query()->where('ref_key', $key)->first();
     }
 
     /**
@@ -231,7 +244,7 @@ class SecretVaultEntry extends Model
      * The form's write: false when the row was sealed meanwhile. Two posts of
      * one link can both pass isSealed(), so only the first update may land.
      *
-     * @param ?array<string, string> $verification
+     * @param  ?array<string, string>  $verification
      */
     public function seal(string $secret, ?array $verification): bool
     {
@@ -241,10 +254,12 @@ class SecretVaultEntry extends Model
         $claimed = self::query()->whereKey($this->getKey())->whereNull('filled_at')->update($this->getDirty());
         if ($claimed !== 1) {
             $this->discardChanges();
+
             return false;
         }
 
         $this->syncOriginal();
+
         return true;
     }
 

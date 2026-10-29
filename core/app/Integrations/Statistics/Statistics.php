@@ -23,7 +23,7 @@ interface Statistics
     /**
      * Transfer for a project: the sum of the given domains.
      *
-     * @param list<string> $domains
+     * @param  list<string>  $domains
      * @return array<string, int>
      */
     public function projectBandwidth(array $domains, string $start, string $end, string $groupBy): array;
@@ -31,7 +31,7 @@ interface Statistics
     /**
      * Calendar-month transfer for a project in the host timezone, in bytes.
      *
-     * @param list<string> $domains
+     * @param  list<string>  $domains
      */
     public function projectCalendarMonthBytes(array $domains): int;
 
@@ -42,7 +42,8 @@ interface Statistics
      *   unique: int,
      *   total: int,
      *   visits: array{records: array<string, int>, total: int},
-     *   visits_length: array<string, int>
+     *   visits_length: array<string, int>,
+     *   session_length: array{records: array<string, ?int>, average: ?int, estimated: bool}
      * }
      */
     public function domainVisitors(string $domain, string $start, string $end): array;
@@ -58,7 +59,7 @@ interface Statistics
     /**
      * Ensure provider config for a domain (idempotent).
      *
-     * @param list<string> $aliases
+     * @param  list<string>  $aliases
      */
     public function configureDomain(string $domain, array $aliases, string $logDirectory): void;
 
@@ -71,7 +72,7 @@ interface Statistics
      * Ingest host access logs for the domain into the provider store.
      * Writes config if it is missing. Does not run when there are no logs.
      *
-     * @param list<string> $aliases
+     * @param  list<string>  $aliases
      */
     public function ingestDomain(string $domain, string $logDirectory, array $aliases = []): void;
 }

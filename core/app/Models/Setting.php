@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * @property string $name
  * @property string $value
+ *
  * @psalm-type ModsecConfig = array{
  *   mode: string,
  *   enabled_rulesets: array<string>,
@@ -56,11 +57,12 @@ class Setting extends Model
         if (self::$allSettings === null) {
             self::$allSettings = self::all();
         }
+
         return self::$allSettings;
     }
 
     /**
-     * @param array<string, string> $settings
+     * @param  array<string, string>  $settings
      */
     public static function setRuntimeSettings(array $settings): void
     {
@@ -75,16 +77,16 @@ class Setting extends Model
     }
 
     /**
-     * @param string $name
+     * @param  string  $name
      * @return bool
      */
     public static function exists($name)
     {
-        return (bool)(self::getAllSettings()->where('name', $name)->count());
+        return (bool) (self::getAllSettings()->where('name', $name)->count());
     }
 
     /**
-     * @param string $name
+     * @param  string  $name
      * @return ?string
      */
     public static function get($name)
@@ -92,12 +94,13 @@ class Setting extends Model
         if (array_key_exists($name, self::$runtimeSettings)) {
             return self::$runtimeSettings[$name];
         }
+
         return self::getAllSettings()->where('name', $name)->first()?->value;
     }
 
     /**
-     * @param string $name
-     * @param string $value
+     * @param  string  $name
+     * @param  string  $value
      * @return void
      */
     public static function set($name, $value)
@@ -105,6 +108,7 @@ class Setting extends Model
         if (array_key_exists($name, self::$runtimeSettings)) {
             self::$runtimeSettings[$name] = $value;
             self::$allSettings = null;
+
             return;
         }
 
@@ -129,7 +133,7 @@ class Setting extends Model
     }
 
     /**
-     *  @return array<string>
+     * @return array<string>
      */
     public static function getEximConfig(): array
     {
@@ -140,7 +144,7 @@ class Setting extends Model
 
         $config = [];
         foreach (self::EXIM_DEFAULTS as $name => $value) {
-            $config[$name] = empty($saved[$name]) || !is_scalar($saved[$name]) ? $value : (string) $saved[$name];
+            $config[$name] = empty($saved[$name]) || ! is_scalar($saved[$name]) ? $value : (string) $saved[$name];
         }
 
         return $config;
@@ -186,9 +190,10 @@ class Setting extends Model
 
         $config = [];
         foreach (self::MODSEC_DEFAULTS as $name => $value) {
-            if (!empty($saved[$name]) && gettype($value) === gettype($saved[$name])) {
+            if (! empty($saved[$name]) && gettype($value) === gettype($saved[$name])) {
                 /** @var mixed */
                 $config[$name] = $saved[$name];
+
                 continue;
             }
             $config[$name] = $value;

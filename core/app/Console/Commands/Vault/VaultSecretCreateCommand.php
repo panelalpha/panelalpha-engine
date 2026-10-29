@@ -40,8 +40,8 @@ class VaultSecretCreateCommand extends Command
             return self::FAILURE;
         }
 
-        if (!in_array($scope, SecretVaultEntry::SCOPES, true)) {
-            $this->error('Scope must be one of: ' . implode(', ', SecretVaultEntry::SCOPES) . '.');
+        if (! in_array($scope, SecretVaultEntry::SCOPES, true)) {
+            $this->error('Scope must be one of: '.implode(', ', SecretVaultEntry::SCOPES).'.');
 
             return self::FAILURE;
         }
@@ -61,7 +61,7 @@ class VaultSecretCreateCommand extends Command
         try {
             $project = $this->option('project');
             $expiresIn = $this->option('expires-in');
-            if (is_string($expiresIn) && !ctype_digit($expiresIn)) {
+            if (is_string($expiresIn) && ! ctype_digit($expiresIn)) {
                 $this->error('--expires-in takes a number of seconds.');
 
                 return self::FAILURE;
@@ -81,29 +81,29 @@ class VaultSecretCreateCommand extends Command
             return self::FAILURE;
         }
 
-        $url = rtrim((string) config('app.url'), '/') . '/vault/' . $ref;
+        $url = rtrim((string) config('app.url'), '/').'/vault/'.$ref;
 
         $this->info('Vault link created. Give this URL to whoever holds the secret:');
         $this->newLine();
-        $this->line('  ' . $url);
+        $this->line('  '.$url);
         $this->newLine();
-        $this->line('  id:        ' . $entry->id);
-        $this->line('  type:      ' . $entry->type);
-        $this->line('  scope:     ' . $entry->scope);
-        $this->line('  purpose:   ' . ($entry->purpose ?? '(none given)'));
+        $this->line('  id:        '.$entry->id);
+        $this->line('  type:      '.$entry->type);
+        $this->line('  scope:     '.$entry->scope);
+        $this->line('  purpose:   '.($entry->purpose ?? '(none given)'));
         if (($target = PasteCheck::describe($entry)) !== null) {
-            $this->line('  checked:   against ' . $target . ' before saving');
+            $this->line('  checked:   against '.$target.' before saving');
         }
-        $this->line('  reference: ' . $entry->reference());
+        $this->line('  reference: '.$entry->reference());
         $this->newLine();
-        $this->line('The link stops accepting in ' . (SecretVaultEntry::TTL_SECONDS / 60) . ' minutes; '
-            . ($entry->expires_at === null
+        $this->line('The link stops accepting in '.(SecretVaultEntry::TTL_SECONDS / 60).' minutes; '
+            .($entry->expires_at === null
                 ? 'the secret itself does not expire.'
-                : 'the secret expires at ' . $entry->expires_at->format('Y-m-d H:i') . ' and is then deleted.'));
+                : 'the secret expires at '.$entry->expires_at->format('Y-m-d H:i').' and is then deleted.'));
         $this->line(match (true) {
-            $entry->isGlobal() => 'Any project may use it by passing ' . $entry->reference() . '.',
-            $entry->project !== null => "Only project '{$entry->project}' can use " . $entry->reference() . '.',
-            default => 'The first project given ' . $entry->reference() . ' claims it; any other project is refused.',
+            $entry->isGlobal() => 'Any project may use it by passing '.$entry->reference().'.',
+            $entry->project !== null => "Only project '{$entry->project}' can use ".$entry->reference().'.',
+            default => 'The first project given '.$entry->reference().' claims it; any other project is refused.',
         });
         // Said at create time, because it is the thing that most surprises
         // somebody later: there is no edit, only delete and re-create.

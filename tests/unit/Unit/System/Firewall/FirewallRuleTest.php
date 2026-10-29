@@ -4,28 +4,29 @@ namespace Tests\Unit\System\Firewall;
 
 use App\System\Firewall\FirewallRule;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class FirewallRuleTest extends TestCase
 {
     public function test_addresses_are_spelled_the_way_firewalls_store_them(): void
     {
-        $this->assertSame('1.2.3.4', FirewallRule::normalizeAddress('1.2.3.4/32'));
-        $this->assertSame('10.0.0.0/8', FirewallRule::normalizeAddress('10.1.2.3/8'));
-        $this->assertSame('192.168.1.0/24', FirewallRule::normalizeAddress('192.168.1.77/24'));
+        $this->assertSame(TestNetwork::public3(4), FirewallRule::normalizeAddress(TestNetwork::public3(4) . '/32'));
+        $this->assertSame(TestNetwork::prefix(TestNetwork::private(3), 8), FirewallRule::normalizeAddress(TestNetwork::private(3) . '/8'));
+        $this->assertSame(TestNetwork::prefix(TestNetwork::private2(77), 24), FirewallRule::normalizeAddress(TestNetwork::private2(77) . '/24'));
         $this->assertSame('2001:db8::1', FirewallRule::normalizeAddress('2001:0db8:0:0::1/128'));
         $this->assertSame('2001:db8::/32', FirewallRule::normalizeAddress('2001:db8:1::/32'));
-        $this->assertSame('0.0.0.0/0', FirewallRule::normalizeAddress('9.9.9.9/0'));
+        $this->assertSame(TestNetwork::ANY_CIDR, FirewallRule::normalizeAddress(TestNetwork::public3(9) . '/0'));
         $this->assertSame('example.com', FirewallRule::normalizeAddress('example.com'));
     }
 
     public function test_only_addresses_and_ranges_are_addresses(): void
     {
-        $this->assertTrue(FirewallRule::isAddress('203.0.113.7'));
-        $this->assertTrue(FirewallRule::isAddress('203.0.113.0/24'));
+        $this->assertTrue(FirewallRule::isAddress(TestNetwork::public(7)));
+        $this->assertTrue(FirewallRule::isAddress(TestNetwork::net('PUBLIC')));
         $this->assertTrue(FirewallRule::isAddress('::1'));
         $this->assertFalse(FirewallRule::isAddress('example.com'));
-        $this->assertFalse(FirewallRule::isAddress('1.2.3.4/33'));
-        $this->assertFalse(FirewallRule::isAddress('1.2.3.4/x'));
+        $this->assertFalse(FirewallRule::isAddress(TestNetwork::public3(4) . '/33'));
+        $this->assertFalse(FirewallRule::isAddress(TestNetwork::public3(4) . '/x'));
     }
 
     public function test_a_rule_on_nothing_and_a_range_without_a_protocol_are_refused(): void
@@ -33,11 +34,11 @@ class FirewallRuleTest extends TestCase
         $this->assertArrayHasKey('port', FirewallRule::fromArray(['action' => 'allow'])->problems());
         $this->assertArrayHasKey('protocol', FirewallRule::fromArray(['action' => 'allow', 'port' => '30000:30009'])->problems());
         $this->assertArrayHasKey('protocol', FirewallRule::fromArray(['action' => 'allow', 'port' => '80,443'])->problems());
-        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)])->problems());
         $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'port' => '22'])->problems());
-        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7)])->problems());
         $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'port' => '25'])->problems());
-        $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'destination' => '198.51.100.1'])->problems());
+        $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7), 'destination' => TestNetwork::public2(1)])->problems());
     }
 
     public function test_a_port_outside_1_to_65535_or_a_high_to_low_range_is_refused(): void
@@ -66,17 +67,17 @@ class FirewallRuleTest extends TestCase
     public function test_an_address_that_is_every_address_is_refused(): void
     {
         // ufw would take it for the rule on any address, the engine's own included.
-        foreach (['0.0.0.0/0', '::/0', '203.0.113.7/0', '2001:db8::1/0'] as $every) {
+        foreach ([TestNetwork::ANY_CIDR, '::/0', TestNetwork::public(7) . '/0', '2001:db8::1/0'] as $every) {
             $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => $every])->problems(), $every);
             $this->assertArrayHasKey('destination', FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'destination' => $every])->problems(), $every);
         }
         // Not a deny of every connection either.
         $this->assertSame(
-            ['source' => 'The source 0.0.0.0/0 is every address; leave it out to match any address.'],
-            FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0/0'])->problems()
+            ['source' => 'The source ' . TestNetwork::ANY_CIDR . ' is every address; leave it out to match any address.'],
+            FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::ANY_CIDR])->problems()
         );
-        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0'])->problems());
-        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0/1'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::ANY])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::ANY . '/1'])->problems());
     }
 
     public function test_a_port_list_is_in_the_order_ufw_stores_it(): void
@@ -87,15 +88,15 @@ class FirewallRuleTest extends TestCase
         $this->assertSame('80,80:85,80:90', FirewallRule::normalizePort('80:90,80,80:85'));
         $this->assertSame('30000:30009', FirewallRule::normalizePort('30000:30009'));
         $this->assertSame(
-            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => '192.0.2.1'])->id(),
-            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '443,80', 'source' => '192.0.2.1'])->id()
+            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => TestNetwork::public3(1)])->id(),
+            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '443,80', 'source' => TestNetwork::public3(1)])->id()
         );
     }
 
     public function test_the_id_follows_what_the_rule_matches_not_its_comment(): void
     {
-        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7/32', 'comment' => 'office']);
-        $same = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7) . '/32', 'comment' => 'office']);
+        $same = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         $this->assertSame($rule->id(), $same->id());
         $this->assertTrue($rule->sameMatch($rule->with(['comment' => 'home'])));
@@ -105,13 +106,13 @@ class FirewallRuleTest extends TestCase
 
     public function test_with_keeps_what_is_not_sent_and_clears_what_is_sent_as_null(): void
     {
-        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
+        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
 
-        $changed = $rule->with(['comment' => null, 'source' => '198.51.100.0/24']);
+        $changed = $rule->with(['comment' => null, 'source' => TestNetwork::net('PUBLIC_2')]);
 
         $this->assertSame('tcp', $changed->protocol);
         $this->assertSame('22', $changed->port);
-        $this->assertSame('198.51.100.0/24', $changed->source);
+        $this->assertSame(TestNetwork::net('PUBLIC_2'), $changed->source);
         $this->assertNull($changed->comment);
     }
 
@@ -138,36 +139,66 @@ class FirewallRuleTest extends TestCase
 
         $this->assertSame([], $published->problems());
         $this->assertArrayHasKey('direction', $published->with(['direction' => 'out'])->problems());
-        $this->assertArrayHasKey('direction', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'published'])->problems());
+        $this->assertArrayHasKey('direction', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7), 'scope' => 'published'])->problems());
     }
 
     public function test_a_deny_covers_both_scopes_unless_it_names_published(): void
     {
-        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
 
         // Only a missing scope derives both; an explicit host is kept.
         $this->assertSame('both', $deny->scope);
-        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
-        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
-        $this->assertSame('published', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'published'])->scope);
-        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '203.0.113.7'])->scope, 'nothing published goes out');
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7), 'scope' => 'host'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7), 'scope' => 'host'])->scope);
+        $this->assertSame('published', FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7), 'scope' => 'published'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => TestNetwork::public(7)])->scope, 'nothing published goes out');
         $this->assertSame('host', FirewallRule::fromArray(['action' => 'allow', 'port' => '22'])->scope);
         // The same id as the host deny it was before it covered published ports.
-        $this->assertSame(substr(sha1((string) json_encode(['deny', 'in', null, null, '203.0.113.7', null])), 0, 12), $deny->id());
+        $this->assertSame(substr(sha1((string) json_encode(['deny', 'in', null, null, TestNetwork::public(7), null])), 0, 12), $deny->id());
         $this->assertSame([], $deny->problems());
-        $this->assertArrayHasKey('scope', $deny->with(['action' => 'allow', 'port' => '22'])->problems());
         $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22', 'scope' => 'host'])->scope);
+    }
+
+    public function test_an_edit_that_changes_the_action_without_a_scope_gets_the_scope_a_new_rule_would(): void
+    {
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'source' => TestNetwork::public(7)]);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
+        $publishedAllow = FirewallRule::fromArray(['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080']);
+
+        $this->assertSame('both', $allow->with(['action' => 'deny'])->scope);
+        $this->assertSame('host', $allow->with(['action' => 'deny', 'direction' => 'out'])->scope);
+        $this->assertSame('host', $allow->with(['action' => 'deny', 'scope' => 'host'])->scope);
+        $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22'])->scope);
+        $this->assertSame([], $deny->with(['action' => 'allow', 'port' => '22'])->problems());
+        $this->assertSame('published', $publishedAllow->with(['action' => 'deny'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7), 'scope' => 'host'])->with(['action' => 'deny'])->scope);
+    }
+
+    public function test_an_edit_that_changes_the_direction_without_a_scope_gets_the_scope_a_new_rule_would(): void
+    {
+        $denyOut = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'source' => TestNetwork::public(7)]);
+        $denyIn = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
+
+        $this->assertSame('host', $denyOut->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => 'in'])->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => null])->scope);
+        $this->assertSame('both', $denyOut->with(['direction' => 'both'])->scope);
+        $this->assertSame('host', $denyOut->with(['direction' => 'in', 'scope' => 'host'])->scope);
+        $this->assertSame('both', $denyIn->with(['direction' => 'out'])->with(['direction' => 'in'])->scope);
+        $this->assertSame('host', $denyIn->with(['direction' => 'out'])->scope);
+        $this->assertSame('host', $denyOut->with(['direction' => 'out'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'allow', 'direction' => 'out', 'port' => '22'])->with(['direction' => 'in'])->scope);
     }
 
     /** An edit that does not name the scope keeps the rule's own (engine#766). */
     public function test_an_edit_without_a_scope_keeps_the_rules_current_scope(): void
     {
-        $hostDeny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'host']);
+        $hostDeny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7), 'scope' => 'host']);
 
         $this->assertSame('host', $hostDeny->with(['comment' => 'office'])->scope);
         $this->assertSame('host', $hostDeny->with(['port' => '22'])->scope);
         // A rule that was both stays both when only its comment changes.
-        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
         $this->assertSame('both', $both->with(['comment' => 'office'])->scope);
         // An edit that does name it changes it.
         $this->assertSame('published', $hostDeny->with(['scope' => 'published'])->scope);
@@ -176,10 +207,10 @@ class FirewallRuleTest extends TestCase
     public function test_a_comment_ufw_would_read_as_part_of_the_rule_is_refused(): void
     {
         // Per `ufw --dry-run` (ufw 0.36.2), for a host rule and a route rule as the engine writes them.
-        $host = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'source' => '192.0.2.150']);
+        $host = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'source' => TestNetwork::public3(150)]);
         $published = $host->with(['scope' => 'published']);
-        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.150']);
-        $denyOut = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '192.0.2.150']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public3(150)]);
+        $denyOut = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => TestNetwork::public3(150)]);
 
         foreach (['in', 'out', 'log', 'log-all'] as $comment) {
             foreach ([$host, $published, $deny, $denyOut] as $rule) {
@@ -228,7 +259,7 @@ class FirewallRuleTest extends TestCase
     public function test_a_comment_that_marks_a_fail2ban_ban_is_refused_unless_it_cannot_make_a_new_ban(): void
     {
         $message = 'The comment prefix "by Fail2Ban" marks the bans fail2ban makes.';
-        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.160']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public3(160)]);
         $allow = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392']);
         // fromArray trims, so leading blanks are the same comment.
         foreach (['by Fail2Ban', 'by Fail2Ban test', 'by Fail2Ban after 5 attempts against sshd', '  by Fail2Ban test', "\tby Fail2Ban test"] as $comment) {
@@ -241,11 +272,11 @@ class FirewallRuleTest extends TestCase
         $ban = $deny->with(['comment' => 'by Fail2Ban after 5 attempts against sshd']);
         $this->assertTrue($ban->isBan());
         $this->assertSame([], $ban->with(['protocol' => 'tcp', 'port' => '22'])->problems($ban), 'a ban keeps its comment on an edit');
-        $this->assertSame([], $ban->with(['source' => '192.0.2.160/32'])->problems($ban), 'the same address, spelled otherwise');
+        $this->assertSame([], $ban->with(['source' => TestNetwork::public3(160) . '/32'])->problems($ban), 'the same address, spelled otherwise');
         $this->assertSame([], $ban->with(['action' => 'allow', 'scope' => 'host'])->problems($ban));
         $this->assertSame($message, $ban->with(['comment' => 'by Fail2Ban after 6 attempts against sshd'])->problems($ban)['comment'] ?? null);
         // A stored comment with trailing blanks is the comment the edit sends back trimmed.
-        $stored = new FirewallRule('deny', 'in', null, null, '192.0.2.160', null, 'by Fail2Ban after 5 attempts against sshd  ', scope: FirewallRule::BOTH);
+        $stored = new FirewallRule('deny', 'in', null, null, TestNetwork::public3(160), null, 'by Fail2Ban after 5 attempts against sshd  ', scope: FirewallRule::BOTH);
         $this->assertSame([], $stored->with(['protocol' => 'tcp', 'port' => '22'])->problems($stored));
 
         // An edit that keeps the comment but makes a ban of another rule, or of another address, is refused.
@@ -254,11 +285,11 @@ class FirewallRuleTest extends TestCase
         $this->assertFalse($fromBan->isBan());
         $this->assertSame([], $fromBan->with(['port' => '8080'])->problems($fromBan), 'an allow made from a ban keeps its comment');
         $this->assertSame($kept, $fromBan->with(['action' => 'deny'])->problems($fromBan)['comment'] ?? null);
-        $this->assertSame($kept, $fromBan->with(['action' => 'deny', 'source' => '192.0.2.163'])->problems($fromBan)['comment'] ?? null);
-        $this->assertSame($kept, $ban->with(['source' => '192.0.2.164'])->problems($ban)['comment'] ?? null);
+        $this->assertSame($kept, $fromBan->with(['action' => 'deny', 'source' => TestNetwork::public3(163)])->problems($fromBan)['comment'] ?? null);
+        $this->assertSame($kept, $ban->with(['source' => TestNetwork::public3(164)])->problems($ban)['comment'] ?? null);
         $operator = new FirewallRule('allow', 'in', 'tcp', '80', null, null, 'by Fail2Ban test');
         $this->assertSame([], $operator->with(['port' => '8080'])->problems($operator));
-        $this->assertSame($kept, $operator->with(['action' => 'deny', 'source' => '192.0.2.165'])->problems($operator)['comment'] ?? null);
+        $this->assertSame($kept, $operator->with(['action' => 'deny', 'source' => TestNetwork::public3(165)])->problems($operator)['comment'] ?? null);
         $this->assertSame([], $operator->with(['action' => 'deny'])->problems($operator), 'a deny from any address is not taken for a ban');
 
         // Only this prefix, as written, is taken for a ban.
@@ -272,15 +303,15 @@ class FirewallRuleTest extends TestCase
     public function test_a_source_takes_in_an_address_inside_its_range_only(): void
     {
         $from = fn (?string $source): FirewallRule => FirewallRule::fromArray(['action' => 'deny', 'source' => $source]);
-        $this->assertTrue($from(null)->hasSource('203.0.113.50'));
-        $this->assertTrue($from('203.0.113.0/24')->hasSource('203.0.113.50'));
-        $this->assertTrue($from('203.0.112.0/23')->hasSource('203.0.113.50'));
-        $this->assertFalse($from('203.0.112.0/24')->hasSource('203.0.113.50'));
-        $this->assertTrue($from('203.0.113.50')->hasSource('203.0.113.50'));
-        $this->assertFalse($from('203.0.113.51')->hasSource('203.0.113.50'));
+        $this->assertTrue($from(null)->hasSource(TestNetwork::public(50)));
+        $this->assertTrue($from(TestNetwork::net('PUBLIC'))->hasSource(TestNetwork::public(50)));
+        $this->assertTrue($from(TestNetwork::prefix(TestNetwork::public(50), 23))->hasSource(TestNetwork::public(50)));
+        $this->assertFalse($from(TestNetwork::prefix(TestNetwork::add(TestNetwork::public(50), -256), 24))->hasSource(TestNetwork::public(50)));
+        $this->assertTrue($from(TestNetwork::public(50))->hasSource(TestNetwork::public(50)));
+        $this->assertFalse($from(TestNetwork::public(51))->hasSource(TestNetwork::public(50)));
         $this->assertTrue($from('2001:db8::/33')->hasSource('2001:db8:7fff::1'));
         $this->assertFalse($from('2001:db8::/33')->hasSource('2001:db8:8000::1'));
-        $this->assertFalse($from('2001:db8::/32')->hasSource('203.0.113.50'), 'another IP version');
+        $this->assertFalse($from('2001:db8::/32')->hasSource(TestNetwork::public(50)), 'another IP version');
     }
 
     public function test_a_deny_overlaps_an_allow_on_a_shared_port_protocol_and_scope(): void
@@ -289,7 +320,7 @@ class FirewallRuleTest extends TestCase
         $deny = fn (array $d): FirewallRule => FirewallRule::fromArray(['action' => 'deny'] + $d);
         $this->assertTrue($deny(['protocol' => 'tcp', 'port' => '20:2100'])->overlaps($ssh));
         $this->assertTrue($deny(['port' => '22'])->overlaps($ssh), 'either protocol');
-        $this->assertTrue($deny(['source' => '198.51.100.7'])->overlaps($ssh), 'every port');
+        $this->assertTrue($deny(['source' => TestNetwork::public2(7)])->overlaps($ssh), 'every port');
         $this->assertTrue($deny(['protocol' => 'tcp', 'port' => '80,10:30'])->overlaps($ssh));
         $this->assertFalse($deny(['protocol' => 'udp', 'port' => '22'])->overlaps($ssh));
         $this->assertFalse($deny(['protocol' => 'tcp', 'port' => '23:2100'])->overlaps($ssh));

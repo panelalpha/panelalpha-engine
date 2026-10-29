@@ -12,7 +12,7 @@ class AppPortDetectionTest extends TestCase
 
     public function test_reads_listening_sockets_and_ignores_established_ones(): void
     {
-        // 1F9A = 8090 listening on 0.0.0.0; 1F90 = 8080 but ESTABLISHED (01).
+        // 1F9A = 8090 listening on all interfaces; 1F90 = 8080 but ESTABLISHED (01).
         $proc = self::PROC_HEADER
             . "   0: 00000000:1F9A 00000000:0000 0A 00000000:00000000 00:00000000  00000000  1000  0 123 1\n"
             . "   1: 0100007F:1F90 0100007F:C001 01 00000000:00000000 00:00000000  00000000  1000  0 124 1\n";
@@ -43,7 +43,7 @@ class AppPortDetectionTest extends TestCase
 
     public function test_ignores_loopback_only_listeners(): void
     {
-        // Bound to 127.0.0.1 — unreachable from outside the container, so
+        // Bound to loopback — unreachable from outside the container, so
         // remapping the published port would not fix anything.
         $sockets = [['addr' => '0100007F', 'port' => 8090]];
 

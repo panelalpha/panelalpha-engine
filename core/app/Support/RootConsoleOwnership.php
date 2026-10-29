@@ -18,7 +18,7 @@ final class RootConsoleOwnership
 
     public static function applies(bool $console, int $euid, bool $unitTests): bool
     {
-        return $console && $euid === 0 && !$unitTests;
+        return $console && $euid === 0 && ! $unitTests;
     }
 
     /**
@@ -50,8 +50,8 @@ final class RootConsoleOwnership
         return [
             storage_path(),
             base_path('bootstrap/cache'),
-            EnginePaths::ENGINE_DIR . '/awstats-config',
-            EnginePaths::ENGINE_DIR . '/awstats-data',
+            EnginePaths::ENGINE_DIR.'/awstats-config',
+            EnginePaths::ENGINE_DIR.'/awstats-data',
         ];
     }
 
@@ -59,8 +59,8 @@ final class RootConsoleOwnership
      * -H descends into a path given as a symlink; -h changes a link itself,
      * never what it points at.
      *
-     * @param list<string> $paths
-     * @param array{uid: int, gid: int}|null $owner
+     * @param  list<string>  $paths
+     * @param  array{uid: int, gid: int}|null  $owner
      * @return list<string>|null
      */
     public static function repairArgv(array $paths, ?array $owner): ?array

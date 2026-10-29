@@ -12,7 +12,6 @@ use App\Lib\Deploy\SafeName;
  */
 class HostNodeBuild
 {
-
     public const BUN_IMAGE = 'oven/bun:1';
 
     public static function usesJsPackageManager(string $install): bool
@@ -49,7 +48,7 @@ class HostNodeBuild
      */
     public static function compilerImage(string $install, string $nodeImage, string $packageManager = ''): string
     {
-        if (!self::usesJsPackageManager($install)) {
+        if (! self::usesJsPackageManager($install)) {
             return $nodeImage;
         }
 
@@ -88,7 +87,7 @@ class HostNodeBuild
      */
     public static function nodeInstallCommand(string $original): string
     {
-        if (!self::usesBun($original)) {
+        if (! self::usesBun($original)) {
             return $original;
         }
 
@@ -133,7 +132,7 @@ class HostNodeBuild
             $count = 0;
             $rewritten = preg_replace($pattern, $replacement, $body, 1, $count);
             if ($count > 0 && is_string($rewritten)) {
-                return $prefix . $rewritten;
+                return $prefix.$rewritten;
             }
         }
 
@@ -185,7 +184,7 @@ class HostNodeBuild
 
         $rest = implode(' && ', $segments);
 
-        return [implode(' && ', $prepare), $rest === '' ? '' : $env . $rest];
+        return [implode(' && ', $prepare), $rest === '' ? '' : $env.$rest];
     }
 
     /** Where provisioning() puts corepack's shims and a missing corepack. */
@@ -223,8 +222,8 @@ class HostNodeBuild
     }
 
     /**
-     * @param string $dir where the application sits in the build container:
-     *        /app, or /app/<app_root> for an application in a subtree
+     * @param  string  $dir  where the application sits in the build container:
+     *                       /app, or /app/<app_root> for an application in a subtree
      */
     public static function innerScript(string $install, string $build, string $dir = '/app'): string
     {
@@ -235,7 +234,7 @@ class HostNodeBuild
         $build = trim($build);
         $prepare = self::provisioning($install);
         [, $install] = self::splitToolingPrefix($install);
-        $parts[] = 'export PATH=' . self::PROVISIONED_PATH . ':$PATH';
+        $parts[] = 'export PATH='.self::PROVISIONED_PATH.':$PATH';
         if ($prepare !== '') {
             $parts[] = $prepare;
         }
@@ -245,21 +244,21 @@ class HostNodeBuild
             $strip = str_contains($install, 'bun ')
                 ? JsPackageManager::dockerfileStripGitHookScriptsCommand('bun', sourcePresent: true)
                 : JsPackageManager::dockerfileStripGitHookScriptsCommand('npm', sourcePresent: true);
-            $parts[] = 'if [ -f ' . $dir . '/package.json ]; then ' . $strip . '; fi';
-            $parts[] = 'if [ -f ' . $dir . '/node_modules/.pa-lock ] && { '
-                . 'cmp -s ' . $dir . '/package-lock.json ' . $dir . '/node_modules/.pa-lock '
-                . '|| cmp -s ' . $dir . '/pnpm-lock.yaml ' . $dir . '/node_modules/.pa-lock '
-                . '|| cmp -s ' . $dir . '/yarn.lock ' . $dir . '/node_modules/.pa-lock '
-                . '|| cmp -s ' . $dir . '/bun.lock ' . $dir . '/node_modules/.pa-lock; '
-                . '}; then echo "node_modules cache hit"; '
+            $parts[] = 'if [ -f '.$dir.'/package.json ]; then '.$strip.'; fi';
+            $parts[] = 'if [ -f '.$dir.'/node_modules/.pa-lock ] && { '
+                .'cmp -s '.$dir.'/package-lock.json '.$dir.'/node_modules/.pa-lock '
+                .'|| cmp -s '.$dir.'/pnpm-lock.yaml '.$dir.'/node_modules/.pa-lock '
+                .'|| cmp -s '.$dir.'/yarn.lock '.$dir.'/node_modules/.pa-lock '
+                .'|| cmp -s '.$dir.'/bun.lock '.$dir.'/node_modules/.pa-lock; '
+                .'}; then echo "node_modules cache hit"; '
                 // Only a lockfile that exists is copied: a `cp` chain printed
                 // `cp: cannot stat '/app/package-lock.json'` on every pnpm
                 // build, and a failed build's last lines are what gets
                 // reported as its cause (dub, Teable).
-                . 'else ' . $install . ' && { '
-                . 'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
-                . 'if [ -f "' . $dir . '/$f" ]; then cp "' . $dir . '/$f" ' . $dir . '/node_modules/.pa-lock; break; fi; '
-                . 'done; true; }; fi';
+                .'else '.$install.' && { '
+                .'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
+                .'if [ -f "'.$dir.'/$f" ]; then cp "'.$dir.'/$f" '.$dir.'/node_modules/.pa-lock; break; fi; '
+                .'done; true; }; fi';
         }
         if ($build !== '') {
             $parts[] = $build;
@@ -277,7 +276,7 @@ class HostNodeBuild
     {
         SafeName::assert($username, 'username for node_modules volume');
 
-        return 'pa-nm-' . $username;
+        return 'pa-nm-'.$username;
     }
 
     /**

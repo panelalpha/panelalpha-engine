@@ -2,8 +2,8 @@
 
 namespace App\System\Project\Dind;
 
-use App\System;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigSource;
+use App\System;
 
 /**
  * Reads app config descriptors through {@see System}, which is what can reach an
@@ -11,9 +11,7 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfigSource;
  */
 final class SystemAppConfigSource implements AppConfigSource
 {
-    public function __construct(private readonly System $system)
-    {
-    }
+    public function __construct(private readonly System $system) {}
 
     public function exists(string $path): bool
     {
@@ -22,7 +20,7 @@ final class SystemAppConfigSource implements AppConfigSource
 
     public function read(string $path): ?string
     {
-        if (!$this->system->filesystem()->fileExists($path)) {
+        if (! $this->system->filesystem()->fileExists($path)) {
             return null;
         }
         $contents = $this->system->filesystem()->fileGetContents($path);
@@ -38,7 +36,7 @@ final class SystemAppConfigSource implements AppConfigSource
     /** @return list<string> */
     public function listFiles(string $dir): array
     {
-        if (!$this->isDirectory($dir)) {
+        if (! $this->isDirectory($dir)) {
             return [];
         }
 

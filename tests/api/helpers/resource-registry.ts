@@ -1,4 +1,13 @@
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '@playwright/test';
@@ -20,6 +29,36 @@ const suiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 
 /** Where each run writes its resource events. */
 export const RESOURCE_REGISTRY_DIR = path.join(suiteRoot, '.playwright', 'resources');
+
+/** The Playwright project whose specs drive the factories against stub engines. */
+const UNIT_PROJECT = 'unit';
+
+let unitRegistryDir: string | undefined;
+
+function runningProject(): string | undefined {
+  try {
+    return test.info().project.name;
+  } catch {
+    return undefined;
+  }
+}
+
+function unitRegistry(): string {
+  if (unitRegistryDir === undefined) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'api-unit-resources-'));
+    process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
+    unitRegistryDir = dir;
+  }
+  return unitRegistryDir;
+}
+
+/**
+ * The registry this process records into. Unit specs get a throwaway one of their worker:
+ * the projects they record never existed, and a live run's recovery would keep them as leftovers.
+ */
+function resourceRegistryDir(): string {
+  return runningProject() === UNIT_PROJECT ? unitRegistry() : RESOURCE_REGISTRY_DIR;
+}
 
 export type ResourceEventName =
   | 'creating'
@@ -57,7 +96,7 @@ const DETAIL_CHARS = 300;
 /** The JSONL file of `runId` inside `dir`. */
 export function resourceFile(
   runId: string = currentRunId(),
-  dir: string = RESOURCE_REGISTRY_DIR
+  dir: string = resourceRegistryDir()
 ): string {
   return path.join(dir, `${runId.replace(/[^A-Za-z0-9._-]/g, '_')}.jsonl`);
 }
@@ -96,7 +135,7 @@ export function recordResource(
         ? { detail: shorten(record.detail) }
         : {}),
     };
-    const dir = options.dir ?? RESOURCE_REGISTRY_DIR;
+    const dir = options.dir ?? resourceRegistryDir();
     mkdirSync(dir, { recursive: true });
     appendFileSync(resourceFile(runId, dir), `${JSON.stringify(event)}\n`, { mode: 0o600 });
   } catch {
@@ -218,7 +257,7 @@ export async function recoverOrphanedResources(
   engine: RecoveryEngine,
   options: RecoverOrphanedResourcesOptions = {}
 ): Promise<RecoverOrphanedResourcesResult> {
-  const dir = options.dir ?? RESOURCE_REGISTRY_DIR;
+  const dir = options.dir ?? resourceRegistryDir();
   const now = options.now ?? Date.now();
   const self = options.currentRunId ?? currentRunId();
   const idleMs = options.idleMs ?? UNREFRESHED_LEASE_TTL_MS;

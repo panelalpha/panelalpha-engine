@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
@@ -9,7 +11,9 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
 use Tests\TestCase;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * The rewrite path: php-fpm on 9000 outranks the real server on
@@ -31,6 +35,20 @@ class AppPortAlignmentRealignTest extends TestCase
 
     /** @var list<string> */
     private array $ran = [];
+
+    private string $username = '';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->username = 'align' . bin2hex(random_bytes(3));
+    }
+
+    protected function tearDown(): void
+    {
+        DeployLogger::deleteUserLogs($this->username);
+        parent::tearDown();
+    }
 
     public function test_the_run_file_is_pointed_at_the_candidate_that_answers_http(): void
     {
@@ -76,6 +94,44 @@ class AppPortAlignmentRealignTest extends TestCase
         $this->assertSame([], $this->copiedTo);
     }
 
+    /** A cancel ends the wait for the copy's port at the next poll, not after the whole window, and stops the deploy. */
+    public function test_a_cancel_ends_the_wait_for_a_second_copys_port(): void
+    {
+        $deploy = DeployLogger::start($this->username);
+        $cancelOnFirstPoll = function (): bool {
+            DeployLogger::requestCancel($this->username);
+
+            return false;
+        };
+
+        try {
+            $this->alignWith([9000 => '000', 8081 => '200'], 'next1', $cancelOnFirstPoll);
+            $this->fail('the wait went on past the cancel');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertCount(2, $this->ranMatching('net/tcp'));
+        $this->assertSame([], $this->probed);
+        $this->assertSame([], $this->copiedTo);
+        $deploy->finish(DeployLogger::STATUS_CANCELLED);
+    }
+
+    public function test_a_cancel_ends_the_wait_for_the_apps_own_port(): void
+    {
+        $deploy = DeployLogger::start($this->username);
+        DeployLogger::requestCancel($this->username);
+
+        try {
+            $this->alignWith([9000 => '000', 8081 => '200']);
+            $this->fail('the wait went on past the cancel');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertCount(1, $this->ranMatching('net/tcp'));
+        $this->assertSame([], $this->ranMatching('up -d'));
+        $deploy->finish(DeployLogger::STATUS_CANCELLED);
+    }
+
     public function test_a_second_copy_on_the_port_the_run_file_names_changes_nothing(): void
     {
         $this->assertFalse($this->alignWith([8080 => '200'], 'next1'));
@@ -90,6 +146,16 @@ class AppPortAlignmentRealignTest extends TestCase
         $this->assertSame([], $this->copiedTo);
     }
 
+    /** The tenant can put a symlink at the run file; the realignment must not read or write through it. */
+    public function test_a_symlinked_run_file_is_neither_read_nor_rewritten(): void
+    {
+        $realigned = $this->alignWith([9000 => '000', 8081 => '200'], 'next1', null, true);
+
+        $this->assertFalse($realigned);
+        $this->assertSame([], $this->probed);
+        $this->assertSame([], $this->copiedTo);
+    }
+
     /** @return list<string> */
     private function ranMatching(string $needle): array
     {
@@ -100,7 +166,7 @@ class AppPortAlignmentRealignTest extends TestCase
      * @param array<int, string> $statuses port => what the probe prints
      * @param (\Closure(): bool)|null $stopped
      */
-    private function alignWith(array $statuses, ?string $container = null, ?\Closure $stopped = null): ?bool
+    private function alignWith(array $statuses, ?string $container = null, ?\Closure $stopped = null, bool $runFileIsLink = false): ?bool
     {
         $rows = [self::HEADER];
         foreach (array_keys($statuses) as $i => $port) {
@@ -111,7 +177,7 @@ class AppPortAlignmentRealignTest extends TestCase
         $probed = &$this->probed;
         $ran = &$this->ran;
 
-        $system = new class ($files, $copiedTo, $probed, $ran, implode("\n", $rows) . "\n", $statuses) extends System {
+        $system = new class ($files, $copiedTo, $probed, $ran, implode("\n", $rows) . "\n", $statuses, $runFileIsLink) extends System {
             /**
              * @param array<string, string> $files
              * @param array<string, string> $copiedTo
@@ -126,6 +192,7 @@ class AppPortAlignmentRealignTest extends TestCase
                 private array &$ran,
                 private string $procNetTcp,
                 private array $statuses,
+                private bool $runFileIsLink,
             ) {
             }
 
@@ -133,11 +200,16 @@ class AppPortAlignmentRealignTest extends TestCase
             {
                 $files = $this->files;
 
-                return new class ($this, $files) extends SystemFilesystem {
+                return new class ($this, $files, $this->runFileIsLink) extends SystemFilesystem {
                     /** @param array<string, string> $files */
-                    public function __construct(System $engine, private array $files)
+                    public function __construct(System $engine, private array $files, private bool $runFileIsLink)
                     {
                         parent::__construct($engine);
+                    }
+
+                    public function isSymlink(string $path): bool
+                    {
+                        return $this->runFileIsLink && isset($this->files[$path]);
                     }
 
                     public function fileExists(string $path): bool
@@ -167,16 +239,25 @@ class AppPortAlignmentRealignTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                $this->renameStaged($cmd);
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->copiedTo[$staged])) {
+                    $this->copiedTo[$target] = $this->copiedTo[$staged];
+                    unset($this->copiedTo[$staged]);
+                }
             }
         };
 
@@ -185,6 +266,7 @@ class AppPortAlignmentRealignTest extends TestCase
         $user->details = ['UID' => 1001, 'GID' => 1001];
         $dind = $this->createStub(Dind::class);
         $dind->method('system')->willReturn($system);
+        $dind->method('username')->willReturn($this->username);
         $dind->method('userModel')->willReturn($user);
         $dind->method('userAppDirPath')->willReturn('/home/acme/project');
         $dind->method('composeFilePath')->willReturn('/home/acme/docker-compose.yml');

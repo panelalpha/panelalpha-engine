@@ -7,10 +7,10 @@ use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\GeneratedCompose;
-use App\Lib\Project\ApiAccess;
+use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
-use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Project\ApiAccess;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -31,26 +31,21 @@ class ComposeWriter
         $paths = $this->project->userModel()->getPersistPaths();
         if ($paths !== []) {
             $yaml = GeneratedCompose::withPersistedPaths($yaml, $paths);
-            $this->project->shell()->logger()?->info('Keeping across deploys: ' . implode(', ', $paths));
+            $this->project->shell()->logger()?->info('Keeping across deploys: '.implode(', ', $paths));
         }
         $procfile = $this->project->projectTree()->readIn($projectDir, 'Procfile');
         $processes = $procfile === null ? [] : ProcfileWebProbe::otherProcesses($procfile);
         $withProcesses = GeneratedCompose::withProcesses($yaml, $processes);
         if ($withProcesses !== $yaml) {
             $yaml = $withProcesses;
-            $this->project->shell()->logger()?->info('Running the Procfile processes too: ' . implode(', ', array_keys($processes)));
+            $this->project->shell()->logger()?->info('Running the Procfile processes too: '.implode(', ', array_keys($processes)));
         }
         $procFiles = LxcfsProc::inAccount($this->project);
         $parsed = $procFiles === [] ? null : ComposeYaml::parse($yaml);
         if ($parsed !== null) {
             $yaml = ComposeYaml::dump(ComposeHarden::withProcMounts($parsed, $procFiles), $yaml, 6, 2);
         }
-        $this->project->system()->filesystem()->filePutContents(
-            $this->project->userAppComposeFilePath(),
-            $yaml,
-            $chown,
-            EngineArtifacts::RUN_COMPOSE_MODE
-        );
+        $this->writeRunFile($this->project->userAppComposeFilePath(), $yaml, $chown);
         $this->freezeRuntimeImage($yaml);
     }
 
@@ -59,28 +54,29 @@ class ComposeWriter
      * now carries. A generated file bakes them in, and `environment:` outranks
      * `env_file:`; a file the repository owns reads `.env` and is left alone.
      *
-     * @param array<string, string> $vars the account's current env_vars
-     * @param list<string> $replaced the keys the file was generated with
+     * @param  array<string, string>  $vars  the account's current env_vars
+     * @param  list<string>  $replaced  the keys the file was generated with
      * @return bool whether the run file changed
      */
     public function mergeAccountEnv(array $vars, array $replaced): bool
     {
         $path = $this->project->userAppComposeFilePath();
         $fs = $this->project->system()->filesystem();
-        if (!$fs->fileExists($path)) {
+        if (! $fs->fileExists($path)) {
             return false;
         }
+        $fs->assertNotSymlink($path);
         $raw = (string) $fs->fileGetContents($path);
         $compose = ComposeYaml::parse($raw);
-        if ($compose === null || !self::isEngineGenerated($compose)) {
+        if ($compose === null || ! self::isEngineGenerated($compose)) {
             return false;
         }
         $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
-        if (!is_array($service)) {
+        if (! is_array($service)) {
             return false;
         }
         $environment = $service['environment'] ?? [];
-        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
+        if (! is_array($environment) || self::isListStyleEnvironment($environment)) {
             return false;
         }
         $merged = self::withAccountEnv($environment, $vars, $replaced);
@@ -88,18 +84,19 @@ class ComposeWriter
             return false;
         }
         $compose['services'][GeneratedCompose::APP_SERVICE]['environment'] = $merged;
-        $fs->filePutContents(
-            $path,
-            ComposeYaml::dump($compose, $raw, 6, 2),
-            $this->project->userModel()->getChownString(),
-            EngineArtifacts::RUN_COMPOSE_MODE
-        );
+        $this->writeRunFile($path, ComposeYaml::dump($compose, $raw, 6, 2), $this->project->userModel()->getChownString());
 
         return true;
     }
 
+    /** Replaces whatever sits at $path, so a symlink a tenant planted there is never written through. */
+    private function writeRunFile(string $path, string $yaml, ?string $chown): void
+    {
+        $this->project->system()->filesystem()->writeFileReplacingPath($path, $yaml, $chown, EngineArtifacts::RUN_COMPOSE_MODE);
+    }
+
     /**
-     * @param array<mixed> $compose
+     * @param  array<mixed>  $compose
      */
     private static function isEngineGenerated(array $compose): bool
     {
@@ -117,7 +114,7 @@ class ComposeWriter
      * the `- KEY=value` form and is not ours to write into; an empty list is
      * indistinguishable from an absent map after parsing, and is read as one.
      *
-     * @param array<mixed> $environment
+     * @param  array<mixed>  $environment
      */
     private static function isListStyleEnvironment(array $environment): bool
     {
@@ -128,21 +125,21 @@ class ComposeWriter
      * The engine's own variables and the ones that name where the app is
      * published are never the account's to replace.
      *
-     * @param array<mixed> $environment
-     * @param array<string, string> $vars
-     * @param list<string> $replaced
+     * @param  array<mixed>  $environment
+     * @param  array<string, string>  $vars
+     * @param  list<string>  $replaced
      * @return ?array<mixed> null when nothing changed
      */
     private static function withAccountEnv(array $environment, array $vars, array $replaced): ?array
     {
         $before = $environment;
         foreach ($replaced as $key) {
-            if (!ComposeEnvironment::isReserved($key)) {
+            if (! ComposeEnvironment::isReserved($key)) {
                 unset($environment[$key]);
             }
         }
         foreach ($vars as $key => $value) {
-            if (!ComposeEnvironment::isReserved($key)) {
+            if (! ComposeEnvironment::isReserved($key)) {
                 $environment[$key] = self::escapedForCompose((string) $value);
             }
         }
@@ -156,27 +153,29 @@ class ComposeWriter
      * allowed. A file the repository owns reads them from `.env.panelalpha`
      * instead, which the environment rewrite already refreshed.
      *
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
+     * @param  ?string  $path  a run file other than the project's own
      * @return bool whether the run file changed
      */
-    public function mergeApiAccessEnv(array $values): bool
+    public function mergeApiAccessEnv(array $values, ?string $path = null): bool
     {
-        $path = $this->project->userAppComposeFilePath();
+        $path ??= $this->project->userAppComposeFilePath();
         $fs = $this->project->system()->filesystem();
-        if (!$fs->fileExists($path)) {
+        if (! $fs->fileExists($path)) {
             return false;
         }
+        $fs->assertNotSymlink($path);
         $raw = (string) $fs->fileGetContents($path);
         $compose = ComposeYaml::parse($raw);
-        if ($compose === null || !self::isEngineGenerated($compose)) {
+        if ($compose === null || ! self::isEngineGenerated($compose)) {
             return false;
         }
         $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
-        if (!is_array($service)) {
+        if (! is_array($service)) {
             return false;
         }
         $environment = $service['environment'] ?? [];
-        if (!is_array($environment) || self::isListStyleEnvironment($environment)) {
+        if (! is_array($environment) || self::isListStyleEnvironment($environment)) {
             return false;
         }
         $merged = self::withApiAccessEnv($environment, $values);
@@ -184,19 +183,14 @@ class ComposeWriter
             return false;
         }
         $compose['services'][GeneratedCompose::APP_SERVICE]['environment'] = $merged;
-        $fs->filePutContents(
-            $path,
-            ComposeYaml::dump($compose, $raw, 6, 2),
-            $this->project->userModel()->getChownString(),
-            EngineArtifacts::RUN_COMPOSE_MODE
-        );
+        $this->writeRunFile($path, ComposeYaml::dump($compose, $raw, 6, 2), $this->project->userModel()->getChownString());
 
         return true;
     }
 
     /**
-     * @param array<mixed> $environment
-     * @param array<string, string> $values
+     * @param  array<mixed>  $environment
+     * @param  array<string, string>  $values
      * @return ?array<mixed> null when nothing changed
      */
     private static function withApiAccessEnv(array $environment, array $values): ?array
@@ -204,7 +198,7 @@ class ComposeWriter
         $before = $environment;
         $escaped = ComposeEnvironment::escapedForCompose($values);
         foreach (ApiAccess::ENV_KEYS as $key) {
-            if (!array_key_exists($key, $escaped)) {
+            if (! array_key_exists($key, $escaped)) {
                 unset($environment[$key]);
             }
         }
@@ -237,11 +231,11 @@ class ComposeWriter
             return false;
         }
         $replaced = preg_replace(
-            '/^(\s*image:\s*)([\'"]?)' . preg_quote($from, '/') . '\2\s*$/m',
-            '${1}' . "'" . $to . "'",
+            '/^(\s*image:\s*)([\'"]?)'.preg_quote($from, '/').'\2\s*$/m',
+            '${1}'."'".$to."'",
             $yaml
         );
-        if (!is_string($replaced) || GeneratedCompose::appImage($replaced) !== $to) {
+        if (! is_string($replaced) || GeneratedCompose::appImage($replaced) !== $to) {
             return false;
         }
         $this->writeGeneratedCompose(dirname($path), $replaced, $chown);
@@ -263,8 +257,8 @@ class ComposeWriter
      */
     public function writeStaticNginxConf(string $projectDir, ?string $entry, ?string $chown): void
     {
-        $this->project->system()->filesystem()->filePutContents(
-            $projectDir . '/' . NginxConfig::FILENAME,
+        $this->project->system()->filesystem()->writeFileReplacingPath(
+            $projectDir.'/'.NginxConfig::FILENAME,
             NginxConfig::site($entry),
             $chown,
             '644'
@@ -299,7 +293,7 @@ class ComposeWriter
      */
     public function writeWelcomeIndexHtml(string $appDir): void
     {
-        $body = <<<HTML
+        $body = <<<'HTML'
             <p>
                 PanelAlpha has set up your container environment. You can now log in and place your
                 application files in the <code>~/project</code> directory.
@@ -310,7 +304,7 @@ class ComposeWriter
             </p>
         HTML;
 
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             "{$appDir}/index.html",
             self::infoPage(PlaceholderPage::WELCOME_TITLE, 'Your environment is ready', $body),
             null,
@@ -324,8 +318,8 @@ class ComposeWriter
      */
     public function writeFallbackIndexHtml(string $projectDir, string $sourceDescription, ?string $chown): void
     {
-        $index = $projectDir . '/index.html';
-        if (is_file($index) && !PlaceholderPage::isOneOf($index)) {
+        $index = $projectDir.'/index.html';
+        if (is_file($index) && ! PlaceholderPage::isOneOf($index)) {
             return;
         }
 
@@ -346,7 +340,7 @@ class ComposeWriter
             </p>
         HTML;
 
-        $this->project->system()->filesystem()->filePutContents(
+        $this->project->system()->filesystem()->writeFileReplacingPath(
             $index,
             self::infoPage(PlaceholderPage::NOT_CONFIGURED_TITLE, 'Project not ready yet', $body),
             $chown,

@@ -10,6 +10,7 @@ use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class DindProjectEnvironmentTest extends TestCase
@@ -299,7 +300,7 @@ class DindProjectEnvironmentTest extends TestCase
         mkdir($this->projectDir . '/server');
         file_put_contents(
             $this->projectDir . '/server/.env.example',
-            "APP_NAME=Plainpad\nAPP_KEY={KEY}\nSECRET_KEY=changeme\nDB_HOST=127.0.0.1\n"
+            "APP_NAME=Plainpad\nAPP_KEY={KEY}\nSECRET_KEY=changeme\nDB_HOST=" . TestNetwork::LOOPBACK . "\n"
         );
 
         $dind = $this->dind($this->dindModel());
@@ -316,7 +317,7 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertNotSame('changeme', $env['SECRET_KEY']);
         $this->assertNotSame('', $env['SECRET_KEY']);
         $this->assertSame('Plainpad', $env['APP_NAME']);
-        $this->assertSame('127.0.0.1', $env['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $env['DB_HOST']);
     }
 
     /** A nested file copied from a real .env (not a template) is left exactly as it is. */
@@ -660,6 +661,23 @@ class DindProjectEnvironmentTest extends TestCase
         $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: false)->apply($compose);
 
         $this->assertSame('1', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['ONLY_NESTED']);
+        $this->assertSame('0600', $this->mode('.env'));
+    }
+
+    public function test_an_empty_root_env_a_compose_file_needs_is_owner_only_and_a_nested_one_is_not(): void
+    {
+        file_put_contents(
+            $this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE,
+            "services:\n  app:\n    image: php:8-cli\n    env_file:\n      - .env\n      - worker/.env\n"
+        );
+        mkdir($this->projectDir . '/worker');
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertSame('0644', $this->mode('worker/.env'));
+
+        $this->dind($this->dindModel(['env_vars' => ['API_SECRET' => 's3cret']]))->applyProjectEnvVars();
+        $this->assertSame('s3cret', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['API_SECRET']);
         $this->assertSame('0600', $this->mode('.env'));
     }
 

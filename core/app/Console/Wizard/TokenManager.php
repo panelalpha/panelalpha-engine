@@ -36,10 +36,10 @@ class TokenManager
     private array $receipt = [];
 
     /**
-     * @param string $ability  {@see TokenAbilities::API} or {@see TokenAbilities::MCP}
-     * @param string $noun     what a token of this kind is for, e.g. 'assistant'
-     * @param string $narrow   the menu row that opens the scope editor
-     * @param string $mintHint what to say once a token has been minted
+     * @param  string  $ability  {@see TokenAbilities::API} or {@see TokenAbilities::MCP}
+     * @param  string  $noun  what a token of this kind is for, e.g. 'assistant'
+     * @param  string  $narrow  the menu row that opens the scope editor
+     * @param  string  $mintHint  what to say once a token has been minted
      */
     public function __construct(
         private readonly string $title,
@@ -49,8 +49,7 @@ class TokenManager
         private readonly string $noun,
         private readonly string $narrow,
         private readonly string $mintHint = '',
-    ) {
-    }
+    ) {}
 
     /** @return array<int, string> */
     public function receipt(): array
@@ -68,7 +67,7 @@ class TokenManager
                 // wizard touches. Stack-tracing here would look broken rather
                 // than unable to reach the one thing it needs.
                 Screen::draw($this->title);
-                error('Could not read the tokens: ' . $e->getMessage());
+                error('Could not read the tokens: '.$e->getMessage());
                 note('This needs the engine database.');
                 pause('Press enter to carry on...');
 
@@ -170,7 +169,7 @@ class TokenManager
         $this->tokenHeader($token);
         note(
             "Revoking stops this token working, at once and for good.\n"
-            . 'The row stays, so the audit trail keeps its name. Deleting removes it entirely.'
+            .'The row stays, so the audit trail keeps its name. Deleting removes it entirely.'
         );
 
         if ($this->dryRun) {
@@ -180,7 +179,7 @@ class TokenManager
             return false;
         }
 
-        if (!confirm(label: sprintf('Revoke token %d, "%s"?', $token->id, $token->name), default: false)) {
+        if (! confirm(label: sprintf('Revoke token %d, "%s"?', $token->id, $token->name), default: false)) {
             return false;
         }
 
@@ -214,7 +213,7 @@ class TokenManager
             return false;
         }
 
-        if (!confirm(label: sprintf('Delete token %d, "%s"?', $token->id, $token->name), default: false)) {
+        if (! confirm(label: sprintf('Delete token %d, "%s"?', $token->id, $token->name), default: false)) {
             return false;
         }
 
@@ -246,7 +245,7 @@ class TokenManager
      */
     private function mint(): void
     {
-        Screen::draw($this->title . '  ·  New token');
+        Screen::draw($this->title.'  ·  New token');
 
         $name = trim(text(
             label: sprintf('What is this token for?'),
@@ -258,7 +257,7 @@ class TokenManager
             return;
         }
 
-        Screen::draw($this->title . '  ·  New token');
+        Screen::draw($this->title.'  ·  New token');
 
         $expires = trim(text(
             label: 'How long should it last?',
@@ -298,13 +297,13 @@ class TokenManager
                 $token->accessToken->id,
                 $name,
                 $this->noun,
-                $expires === '' ? 'never expires' : 'expires in ' . $expires,
+                $expires === '' ? 'never expires' : 'expires in '.$expires,
             ),
             'It is shown once and cannot be retrieved again:',
-            '  ' . $token->plainTextToken,
+            '  '.$token->plainTextToken,
         ]);
 
-        Screen::draw($this->title . '  ·  New token');
+        Screen::draw($this->title.'  ·  New token');
         note(implode("\n", array_slice($this->receipt, -3)), 'info');
         warning('Copy it now. This is the only time it is shown.');
 
@@ -374,7 +373,7 @@ class TokenManager
             $keys === null ? 'unlimited' : sprintf('%d %s', count($keys), $many),
             $token->isRevoked()
                 ? 'revoked'
-                : ($token->expires_at === null ? '' : 'expires ' . $token->expires_at->format('Y-m-d')),
+                : ($token->expires_at === null ? '' : 'expires '.$token->expires_at->format('Y-m-d')),
         );
     }
 

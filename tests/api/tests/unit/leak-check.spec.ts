@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import type { EngineApi } from '@/clients/engine-api';
+import { testNetwork } from '@/helpers/test-network';
 import { buildAllowList } from '@/scripts/lib/leak-check/allow';
 import { compareSnapshots } from '@/scripts/lib/leak-check/compare';
 import { leakCheckEnabled } from '@/scripts/lib/leak-check/run';
@@ -57,7 +58,7 @@ function fakeApi(world: World): EngineApi {
             username: rule.username ?? null,
             owner_scope: rule.username ? 'user' : 'system',
             transport: 'tcp',
-            listen_ip: '0.0.0.0',
+            listen_ip: testNetwork.ANY,
             listen_port: 9000 + rule.id,
             server_name: null,
             upstream_host: 'x',
@@ -198,7 +199,7 @@ test.describe('compareSnapshots', () => {
     const ban = {
       id: 7,
       action: 'deny',
-      source: '203.0.113.50',
+      source: testNetwork.public(50),
       comment: 'by Fail2Ban after 5 attempts against sshd',
     };
     const result = compareSnapshots(await snap(), await snap({ firewallRules: [ban] }), {
@@ -210,9 +211,9 @@ test.describe('compareSnapshots', () => {
 
   test('a firewall rule that is not a ban is still a leak', async () => {
     const rules = [
-      { id: 8, action: 'allow', source: '203.0.113.51', comment: 'by Fail2Ban lookalike' },
+      { id: 8, action: 'allow', source: testNetwork.public(51), comment: 'by Fail2Ban lookalike' },
       { id: 9, action: 'deny', source: null, comment: 'by Fail2Ban lookalike' },
-      { id: 10, action: 'deny', source: '203.0.113.52', comment: 'left by a test' },
+      { id: 10, action: 'deny', source: testNetwork.public(52), comment: 'left by a test' },
     ];
     const result = compareSnapshots(await snap(), await snap({ firewallRules: rules }), {
       allow: allowNone,

@@ -6,7 +6,6 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * Backing services the application needs: the datastores a compose file
@@ -21,8 +20,8 @@ final class ServicesReport
     private readonly string $projectDir;
 
     /**
-     * @param ?string $composePath the compose file detection chose, which may
-     *        be a recipe's app-config compose rather than one the repository ships
+     * @param  ?string  $composePath  the compose file detection chose, which may
+     *                                be a recipe's app-config compose rather than one the repository ships
      */
     public function __construct(string $projectDir, private readonly ?string $composePath = null)
     {
@@ -110,7 +109,7 @@ final class ServicesReport
         // `deployable: true, issue: null, services: []` for a file declaring
         // seven services, while the deploy path could read it perfectly well.
         $parsed = ComposeYaml::parseFile($path);
-        if ($parsed === null || !is_array($parsed['services'] ?? null)) {
+        if ($parsed === null || ! is_array($parsed['services'] ?? null)) {
             return [];
         }
 

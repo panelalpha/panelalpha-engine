@@ -10,17 +10,16 @@ use App\Http\Resources\PushDiffResource;
 use App\Http\Resources\UserResource;
 use App\Jobs\CreateStaging;
 use App\Jobs\PushState;
-use App\Lib\Host\ProjectMemory;
-use App\System;
-use App\System\Projects;
-use App\System\Services\Mysql\TableDiff;
+use App\Lib\Domains\CopyDomain;
 use App\Lib\Helper;
-use App\Models\Domain;
+use App\Lib\Host\ProjectMemory;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
+use App\System;
+use App\System\Projects;
+use App\System\Services\Mysql\TableDiff;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -29,10 +28,12 @@ class StagingController extends Controller
     #[OA\Post(
         path: '/projects/{username}/staging',
         description: 'Creates a pending staging project linked to the live source via `staging`, '
-            . 'then copies files and volume data asynchronously. Source and destination must use the same '
-            . 'project template (e.g. dind). Returns HTTP 202 with the destination project; poll '
-            . '`GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. '
-            . 'CLI equivalent: `php artisan project:staging`.',
+            .'then copies files and volume data asynchronously. Source and destination must use the same '
+            .'project template (e.g. dind). Returns HTTP 202 with the destination project; poll '
+            .'`GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. '
+            .'An anonymous volume (an image\'s own VOLUME the compose file does not name) is not copied: '
+            .'the Task\'s `details.warnings` names each one that held data. '
+            .'CLI equivalent: `php artisan project:staging`.',
         summary: 'Create a linked staging mirror of a live project',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -41,7 +42,9 @@ class StagingController extends Controller
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'copy_databases',
-                    description: 'Copy the source project\'s MySQL databases under the destination prefix. Defaults to true.',
+                    description: 'Copy the source project\'s MySQL databases under the destination prefix. Defaults to true. '
+                        .'A classic WordPress site cannot be copied without them: false is refused with 422 '
+                        .'`wordpress_copy_needs_databases` before anything is copied.',
                     type: 'boolean',
                     nullable: true,
                 ),
@@ -51,6 +54,7 @@ class StagingController extends Controller
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
             new OA\Response(response: 202, description: 'Staging creation accepted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: 'Project busy (staging or push in progress)', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
@@ -71,10 +75,10 @@ class StagingController extends Controller
 
         /** @var array{new_username?: ?string, domain?: ?string, copy_databases?: ?bool} $params */
         $params = $request->validated();
-        $system = new System();
+        $system = new System;
         $copyDatabases = $params['copy_databases'] ?? true;
 
-        $newUsername = !empty($params['new_username']) ? $params['new_username'] : null;
+        $newUsername = ! empty($params['new_username']) ? $params['new_username'] : null;
         if ($newUsername === null) {
             $newUsername = Helper::generateCloneUsername($source->username);
             if ($newUsername === null) {
@@ -89,25 +93,20 @@ class StagingController extends Controller
                 'new_username' => 'User already exists.',
             ]);
         }
-        if (!$system->isUsernameAvailable($newUsername)) {
+        if (! $system->isUsernameAvailable($newUsername)) {
             throw ValidationException::withMessages([
                 'new_username' => 'Username not available.',
             ]);
         }
 
-        $destDomain = !empty($params['domain']) ? $params['domain'] : null;
+        $destDomain = CopyDomain::forCopy($source->domain, $params['domain'] ?? null);
         if ($destDomain === null) {
-            $destDomain = Helper::generateCloneDomain($source->domain);
-            if ($destDomain === null) {
-                throw ValidationException::withMessages([
-                    'domain' => 'Could not generate an available staging domain for the clone.',
-                ]);
-            }
-        } elseif (Str::startsWith($destDomain, 'www.')) {
-            $destDomain = Str::after($destDomain, 'www.');
+            throw ValidationException::withMessages([
+                'domain' => 'Could not generate an available staging domain for the clone.',
+            ]);
         }
 
-        if (Domain::domainOrAliasExists($destDomain)) {
+        if ($destDomain->isTaken()) {
             throw ValidationException::withMessages([
                 'domain' => 'Domain already exists.',
             ]);
@@ -115,8 +114,7 @@ class StagingController extends Controller
 
         $probe = User::make([
             'username' => $newUsername,
-            'domain'   => $destDomain,
-            'email'    => $source->email,
+            'email' => $source->email,
         ]);
         if ($probe->project()->hostingExists()) {
             throw ValidationException::withMessages([
@@ -125,9 +123,9 @@ class StagingController extends Controller
         }
 
         // A staging copy keeps the source's memory limit, which must still fit this host.
-        ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()));
+        ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()), Projects::isDind($source));
 
-        Projects::assertDatabaseNamesFit($source, $newUsername . '_');
+        Projects::assertDatabaseNamesFit($source, $newUsername.'_');
 
         $dest = $source->makePendingStaging($newUsername, $destDomain);
 
@@ -142,7 +140,7 @@ class StagingController extends Controller
             details: [
                 'source' => $source->username,
                 'dest' => $dest->username,
-                'domain' => $destDomain,
+                'domain' => $dest->domain,
                 'action' => 'staging',
                 'copy_databases' => $copyDatabases,
             ],
@@ -158,13 +156,15 @@ class StagingController extends Controller
     #[OA\Post(
         path: '/projects/{username}/push',
         description: 'Copies application state from the source to a paired live or staging project '
-            . '(the pair is linked by `staging`), then swaps it in asynchronously. Source and destination '
-            . 'must use the same project template. `tables` is only accepted for a classic project with '
-            . '`databases` true: it copies just the named source tables and leaves the target\'s other '
-            . 'tables alone. Returns HTTP 202 with the target project and a `task_id`; '
-            . 'poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until '
-            . '`async_status.push` is `completed` or `failed`. '
-            . 'CLI equivalent: `php artisan project:push`.',
+            .'(the pair is linked by `staging`), then swaps it in asynchronously. Source and destination '
+            .'must use the same project template. `tables` is only accepted for a classic project with '
+            .'`databases` true: it copies just the named source tables and leaves the target\'s other '
+            .'tables alone. Returns HTTP 202 with the target project and a `task_id`; '
+            .'poll `GET /tasks/{task_id}` for the push Task, or `GET /projects/{target}` until '
+            .'`async_status.push` is `completed` or `failed`. '
+            .'An anonymous volume (an image\'s own VOLUME the compose file does not name) is not pushed: '
+            .'the Task\'s `details.warnings` names each one that held data. '
+            .'CLI equivalent: `php artisan project:push`.',
         summary: 'Push project state to a paired staging or live project',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -173,13 +173,16 @@ class StagingController extends Controller
                 new OA\Property(property: 'target', type: 'string'),
                 new OA\Property(
                     property: 'files',
-                    description: 'Replace the target home directory with the source files. Defaults to true.',
+                    description: 'Replace the target home directory with the source files, and the target\'s deploy settings '
+                        .'(strategy, image, commit) with the source\'s. Defaults to true.',
                     type: 'boolean',
                     nullable: true,
                 ),
                 new OA\Property(
                     property: 'databases',
-                    description: 'Replace the target MySQL databases with the source data. Defaults to true.',
+                    description: 'Replace the target MySQL databases with the source data. Defaults to true. On a container '
+                        .'project that is the application database the engine made, plus the data volumes when `files` is '
+                        .'true too: with `files` false and no such database on the source, the push is refused (nothing_to_push).',
                     type: 'boolean',
                     nullable: true,
                 ),
@@ -204,7 +207,7 @@ class StagingController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Push accepted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy (staging or push in progress). ' . ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: 'Project busy (staging or push in progress). '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -230,7 +233,7 @@ class StagingController extends Controller
         }
 
         $to->mergeAsyncStatus([
-            'push'   => 'running',
+            'push' => 'running',
             'source' => 'api',
         ]);
         $to->setDetails(['error' => null]);
@@ -260,10 +263,10 @@ class StagingController extends Controller
     #[OA\Get(
         path: '/projects/{username}/push/diff',
         description: 'Compares the source project\'s database tables with the paired target\'s, mapping each '
-            . 'source database onto the target prefix. Structure is `SHOW CREATE TABLE`; data is '
-            . '`CHECKSUM TABLE`. Only classic projects have copied databases, so a DinD or git project is '
-            . 'refused. Read-only: nothing is copied. The names are the source project\'s, ready to send '
-            . 'back as the `tables` of a push.',
+            .'source database onto the target prefix. Structure is `SHOW CREATE TABLE`; data is '
+            .'`CHECKSUM TABLE`. Only classic projects have copied databases, so a DinD or git project is '
+            .'refused. Read-only: nothing is copied. The names are the source project\'s, ready to send '
+            .'back as the `tables` of a push.',
         summary: 'List the database tables that differ between a project and its push target',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],

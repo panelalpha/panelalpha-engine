@@ -16,9 +16,7 @@ final class GitRepositoryUrl implements ProblemRule
     use RaisesProblem;
 
     /** @param bool $forToken a `git_token` came with it, so HTTP is out too */
-    public function __construct(private readonly bool $forToken = false)
-    {
-    }
+    public function __construct(private readonly bool $forToken = false) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
@@ -26,10 +24,10 @@ final class GitRepositoryUrl implements ProblemRule
             return;
         }
 
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             $this->reject([
                 'field' => $attribute,
-                'code' => $attribute . '_malformed',
+                'code' => $attribute.'_malformed',
                 'message' => 'A repository URL must be a string.',
             ], $fail);
 

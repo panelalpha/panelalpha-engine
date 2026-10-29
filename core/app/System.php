@@ -10,10 +10,9 @@ use App\System\EngineUpdate;
 use App\System\Filesystem;
 use App\System\HostProcess;
 use App\System\Network;
-use App\System\Project as SystemProject;
 use App\System\ProcessRunner;
+use App\System\Project as SystemProject;
 use App\System\Projects;
-use App\System\UsernamePolicy;
 use App\System\Services\Exim;
 use App\System\Services\Modsec;
 use App\System\Services\Mysql;
@@ -21,6 +20,7 @@ use App\System\Services\Php;
 use App\System\Services\PureFtpd;
 use App\System\Services\Sftp;
 use App\System\Services\Webserver;
+use App\System\UsernamePolicy;
 use Exception;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
@@ -212,9 +212,10 @@ class System implements ProcessRunner
     {
         try {
             $this->webserver()->reload();
+
             return true;
         } catch (DockerErrorException $e) {
-            if (!$e->isContainerUnavailable()) {
+            if (! $e->isContainerUnavailable()) {
                 throw $e;
             }
             Log::warning('Webserver container is not running; reload scheduled in the background', [
@@ -233,7 +234,7 @@ class System implements ProcessRunner
         try {
             $this->webserver()->scheduleWebserverReloadInBackground();
         } catch (\Throwable $scheduleError) {
-            Log::warning('Could not schedule a background webserver reload: ' . $scheduleError->getMessage());
+            Log::warning('Could not schedule a background webserver reload: '.$scheduleError->getMessage());
         }
     }
 
@@ -255,10 +256,10 @@ class System implements ProcessRunner
     public function isUsernameAvailable(string $username): bool
     {
         return UsernamePolicy::isAcceptable($username)
-            && !$this->isUidExists($username)
-            && !is_dir($this->projectHomeDirPath($username))
-            && !is_dir($this->projectDirPath($username))
-            && !$this->isContainerNameTaken($username);
+            && ! $this->isUidExists($username)
+            && ! is_dir($this->projectHomeDirPath($username))
+            && ! is_dir($this->projectDirPath($username))
+            && ! $this->isContainerNameTaken($username);
     }
 
     /**
@@ -268,7 +269,7 @@ class System implements ProcessRunner
     public function isContainerNameTaken(string $name): bool
     {
         $result = $this->runProcess([
-            'sudo', 'docker', 'ps', '-a', '--filter', 'name=^/' . preg_quote($name, null) . '$', '--format', '{{.Names}}',
+            'sudo', 'docker', 'ps', '-a', '--filter', 'name=^/'.preg_quote($name, null).'$', '--format', '{{.Names}}',
         ]);
 
         return $result->isSuccessful() && trim($result->getOutput()) !== '';
@@ -303,7 +304,8 @@ class System implements ProcessRunner
      * stay here calling each other through $this, so a test overriding any
      * one of them stops every real command. {@see HostProcess}
      *
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
+     *
      * @throws DockerErrorException
      * @throws Exception
      */
@@ -313,7 +315,8 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
+     *
      * @throws DockerErrorException
      */
     public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
@@ -322,7 +325,7 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
@@ -330,7 +333,7 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcessWithCallbacks(
         string|array $cmd,
@@ -344,7 +347,7 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param string|list<string> $cmd
+     * @param  string|list<string>  $cmd
      */
     public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
     {

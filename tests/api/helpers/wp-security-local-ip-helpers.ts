@@ -1,5 +1,6 @@
 import type { EngineApi } from '@/clients/engine-api';
 import { redactAndTruncate } from './redact';
+import { testNetwork } from './test-network';
 
 /**
  * Response header the block mu-plugin adds to every request it sees, carrying the
@@ -14,6 +15,12 @@ export const LOCAL_IP_BLOCK_MU_PLUGIN = 'panelalpha-test-block-local-ips.php';
 /** One-off probe script run via `wp eval-file` (removed after tests). */
 export const WP_HTTP_PROBE_SCRIPT = 'panelalpha-wp-http-probe.php';
 
+/** `cidr` as the stub's PHP pair of its first and last address. */
+function phpRange(cidr: string): string {
+  const [first, bits] = cidr.split('/');
+  return `['${first}', '${testNetwork.add(first, 2 ** (32 - Number(bits)) - 1)}']`;
+}
+
 /**
  * Simulates WP firewall plugins that deny RFC1918 / loopback REMOTE_ADDR values.
  * Engine reverse-proxy and in-container HTTP often appear in these ranges.
@@ -27,7 +34,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// WP-CLI reports REMOTE_ADDR 127.0.0.1; like the plugins this stands in for,
+// WP-CLI reports REMOTE_ADDR ${testNetwork.LOOPBACK}; like the plugins this stands in for,
 // only web requests are judged, or the probe run through wp eval-file is blocked.
 if (defined('WP_CLI') && WP_CLI) {
     return;
@@ -54,10 +61,10 @@ function panelalpha_test_is_private_or_local_ip(string $ip): bool
             return false;
         }
         $ranges = [
-            ['10.0.0.0', '10.255.255.255'],
-            ['172.16.0.0', '172.31.255.255'],
-            ['192.168.0.0', '192.168.255.255'],
-            ['127.0.0.0', '127.255.255.255'],
+            ${phpRange(testNetwork.PRIVATE_10_CIDR)},
+            ${phpRange(testNetwork.PRIVATE_172_CIDR)},
+            ${phpRange(testNetwork.PRIVATE_192_CIDR)},
+            ${phpRange(testNetwork.LOOPBACK_CIDR)},
         ];
         foreach ($ranges as [$start, $end]) {
             $startLong = ip2long($start);

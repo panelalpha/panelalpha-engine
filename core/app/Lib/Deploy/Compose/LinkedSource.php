@@ -32,8 +32,8 @@ final class LinkedSource
         $projectDir = rtrim($projectDir, '/');
         $home = dirname($projectDir);
         $project = basename($projectDir);
-        $accountHome = '/home/' . basename($home);
-        if (!is_dir($home)) {
+        $accountHome = '/home/'.basename($home);
+        if (! is_dir($home)) {
             // No checkout to look into, so no link to follow.
             return false;
         }
@@ -68,23 +68,26 @@ final class LinkedSource
                 array_pop($segments);
                 // Back out of what compose would create, and onto the real tree.
                 $missing = max(0, $missing - 1);
+
                 continue;
             }
             $parent = self::join($home, $segments);
             $segments[] = $name;
             if ($missing > 0) {
                 $missing++;
+
                 continue;
             }
-            $path = $parent . '/' . $name;
-            if (!is_link($path)) {
+            $path = $parent.'/'.$name;
+            if (! is_link($path)) {
                 if (@lstat($path) === false) {
                     // Absent is fine; a directory we may not search could hide a link.
-                    if (!is_executable($parent)) {
+                    if (! is_executable($parent)) {
                         return true;
                     }
                     $missing = 1;
                 }
+
                 continue;
             }
 
@@ -110,7 +113,7 @@ final class LinkedSource
             return false;
         }
 
-        return !in_array($segments[0] ?? null, [$project, self::PANELALPHA_DIR], true);
+        return ! in_array($segments[0] ?? null, [$project, self::PANELALPHA_DIR], true);
     }
 
     /**
@@ -134,6 +137,6 @@ final class LinkedSource
     /** @param list<string> $segments */
     private static function join(string $home, array $segments): string
     {
-        return $segments === [] ? $home : $home . '/' . implode('/', $segments);
+        return $segments === [] ? $home : $home.'/'.implode('/', $segments);
     }
 }

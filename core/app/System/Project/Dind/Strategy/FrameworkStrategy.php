@@ -3,12 +3,10 @@
 namespace App\System\Project\Dind\Strategy;
 
 use App\Lib\Deploy\Compose\AppRoot;
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
-use App\Lib\Deploy\Platform\AppConfig\AppConfig;
-use App\Lib\Deploy\Platform\StageScript;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
@@ -16,6 +14,9 @@ use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
+use App\Lib\Deploy\Platform\StageScript;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\HostCompile;
 
 /**
  * A framework a manifest recognised: write the Dockerfile for it, plus a
@@ -23,7 +24,7 @@ use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
  *
  * Two shapes, and the split is about where the build happens. A recipe that
  * compiles to static files or to a standalone Node server is built on the
- * *host* (see {@see \App\System\Project\Dind\HostCompile}) and
+ * *host* (see {@see HostCompile}) and
  * then served from a stock image, so there is no build here at all. Everything
  * else gets a generated Dockerfile.
  *
@@ -45,7 +46,7 @@ class FrameworkStrategy
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function apply(
         array $decision,
@@ -74,7 +75,7 @@ class FrameworkStrategy
      * nginx-static and standalone-Node recipes are compiled on the host and
      * served from a stock image — no build here.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function applyHostCompiled(
         array $decision,
@@ -86,8 +87,8 @@ class FrameworkStrategy
         $system = $this->dind->system();
 
         if ($isNginx) {
-            $system->filesystem()->filePutContents(
-                $projectDir . '/' . NginxConfig::FILENAME,
+            $system->filesystem()->writeFileReplacingPath(
+                $projectDir.'/'.NginxConfig::FILENAME,
                 NginxConfig::contents(),
                 $chown,
                 '644'
@@ -124,8 +125,8 @@ class FrameworkStrategy
         if (DeployCompose::isStandaloneNodeOutput($decision)) {
             // Only a bundled server needs the probe script; a mounted project
             // is started by its own `package.json` script.
-            $system->filesystem()->filePutContents(
-                $projectDir . '/' . StandaloneNodeServe::FILENAME,
+            $system->filesystem()->writeFileReplacingPath(
+                $projectDir.'/'.StandaloneNodeServe::FILENAME,
                 StandaloneNodeServe::script(),
                 $chown,
                 '644'
@@ -156,7 +157,7 @@ class FrameworkStrategy
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function applyGeneratedBuild(
         array $decision,
@@ -168,8 +169,8 @@ class FrameworkStrategy
         $files = ProjectContext::listRootFiles($projectDir);
 
         $this->dind->strategy()->entrypoint()->write($decision, $projectDir, $chown, [], $appConfig);
-        $system->filesystem()->filePutContents(
-            $projectDir . '/' . DockerfileBuilder::FILENAME,
+        $system->filesystem()->writeFileReplacingPath(
+            $projectDir.'/'.DockerfileBuilder::FILENAME,
             DockerfileBuilder::generate($decision, $files, $projectDir),
             $chown,
             '644'
@@ -181,7 +182,7 @@ class FrameworkStrategy
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function writeCompose(array $decision, string $projectDir, ?string $chown, int $port): void
     {

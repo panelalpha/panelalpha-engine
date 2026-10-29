@@ -24,21 +24,29 @@ final class AppConfigDirectory
     public const DIRNAME = '.panelalpha';
 
     public const CONFIG = 'panelalpha.yaml';
+
     public const PRECHECK = 'hooks/precheck.sh';
+
     public const PREPARE = 'hooks/prepare.sh';
+
     public const ENTRYPOINT = 'overrides/entrypoint.sh';
+
     public const APP_SCRIPT = 'overrides/app.sh';
+
     public const COMPOSE = 'overrides/docker-compose.yml';
+
     public const COMPOSE_OVERRIDE = 'overrides/docker-compose.override.yml';
+
     public const FILES = 'files';
 
     /**
      * The app config this directory holds, or null when it holds nothing the engine
      * reads.
      *
-     * @param bool $requireConfig for the engine's own tree, where a directory without a
-     *        `panelalpha.yaml` is a half-written recipe. A repository's own directory is
-     *        taken as it comes.
+     * @param  bool  $requireConfig  for the engine's own tree, where a directory without a
+     *                               `panelalpha.yaml` is a half-written recipe. A repository's own directory is
+     *                               taken as it comes.
+     *
      * @throws ManifestException
      */
     public static function read(
@@ -47,19 +55,19 @@ final class AppConfigDirectory
         bool $requireConfig = false
     ): ?AppConfig {
         $dir = rtrim($dir, '/');
-        if (!$source->isDirectory($dir)) {
+        if (! $source->isDirectory($dir)) {
             return null;
         }
         if ($requireConfig && self::config($source, $dir) === null) {
-            throw new ManifestException("{$dir}: " . self::CONFIG . ' is required');
+            throw new ManifestException("{$dir}: ".self::CONFIG.' is required');
         }
 
         $replace = self::contents($source, $dir, self::COMPOSE);
         $override = self::contents($source, $dir, self::COMPOSE_OVERRIDE);
         if ($replace !== null && $override !== null) {
             throw new ManifestException(
-                "{$dir}: ships both " . self::COMPOSE . ' and ' . self::COMPOSE_OVERRIDE
-                . ' — one replaces the project\'s compose file, the other layers over it'
+                "{$dir}: ships both ".self::COMPOSE.' and '.self::COMPOSE_OVERRIDE
+                .' — one replaces the project\'s compose file, the other layers over it'
             );
         }
 
@@ -86,10 +94,10 @@ final class AppConfigDirectory
     /** @return list<array{path: string, contents: string}> */
     private static function snippets(AppConfigSource $source, string $dir): array
     {
-        $root = $dir . '/' . self::FILES;
+        $root = $dir.'/'.self::FILES;
         $snippets = [];
         foreach ($source->listFiles($root) as $relative) {
-            $contents = $source->read($root . '/' . $relative);
+            $contents = $source->read($root.'/'.$relative);
             if (is_string($contents)) {
                 $snippets[] = ['path' => $relative, 'contents' => $contents];
             }
@@ -100,7 +108,7 @@ final class AppConfigDirectory
 
     private static function contents(AppConfigSource $source, string $dir, string $name): ?string
     {
-        $contents = $source->read($dir . '/' . $name);
+        $contents = $source->read($dir.'/'.$name);
 
         return is_string($contents) && trim($contents) !== '' ? $contents : null;
     }

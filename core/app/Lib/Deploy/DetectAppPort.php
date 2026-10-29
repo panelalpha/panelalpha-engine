@@ -40,8 +40,8 @@ class DetectAppPort
      * The port a running deploy should forward to, or null when $expected is
      * already being served.
      *
-     * @param list<array{addr: string, port: int}> $sockets
-     * @param list<int> $declared ports the image declares, preferred
+     * @param  list<array{addr: string, port: int}>  $sockets
+     * @param  list<int>  $declared  ports the image declares, preferred
      */
     public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
@@ -49,8 +49,8 @@ class DetectAppPort
     }
 
     /**
-     * @param list<array{addr: string, port: int}> $sockets
-     * @param list<int> $declared
+     * @param  list<array{addr: string, port: int}>  $sockets
+     * @param  list<int>  $declared
      * @return list<int>
      */
     public static function rankedAppPorts(array $sockets, int $expected, array $declared = []): array
@@ -59,7 +59,7 @@ class DetectAppPort
     }
 
     /**
-     * @param list<array{addr: string, port: int}> $sockets
+     * @param  list<array{addr: string, port: int}>  $sockets
      */
     public static function servesPort(array $sockets, int $port): bool
     {
@@ -70,7 +70,7 @@ class DetectAppPort
      * Public ports, best first, plus the bindings detection refused and why
      * ({@see ComposePortScan}).
      *
-     * @param array<string, string> $env the project's `.env`, for host ports taken from it
+     * @param  array<string, string>  $env  the project's `.env`, for host ports taken from it
      * @return array{all: list<int>, primary?: int, refused: list<array{port: int, reason: string, service: string}>}
      */
     public static function detectAllPorts(string $composePath, array $env = []): array

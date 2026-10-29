@@ -5,7 +5,7 @@ namespace App\Console\Commands\Concerns;
 trait PrintsPhpSettings
 {
     /**
-     * @param array<array-key, mixed> $settings
+     * @param  array<array-key, mixed>  $settings
      */
     protected function printDirectiveMap(array $settings): void
     {

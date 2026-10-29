@@ -21,11 +21,9 @@ final class SpfCheck
     private string $reason = '';
 
     /**
-     * @param Closure(string, int): (array<int, array<string, mixed>>|false) $resolve dns_get_record()'s shape
+     * @param  Closure(string, int): (array<int, array<string, mixed>>|false)  $resolve  dns_get_record()'s shape
      */
-    public function __construct(private Closure $resolve)
-    {
-    }
+    public function __construct(private Closure $resolve) {}
 
     /**
      * The SPF records published at $domain, or false when the lookup failed.
@@ -132,6 +130,7 @@ final class SpfCheck
         foreach (self::terms($records[0]) as $term) {
             if (preg_match('/^redirect=(.+)$/i', $term, $m) === 1) {
                 $redirect = strtolower(rtrim($m[1], '.'));
+
                 continue;
             }
             if (preg_match('/^[a-z][a-z0-9_.-]*=/i', $term) === 1) {
@@ -240,7 +239,7 @@ final class SpfCheck
 
     private function tooManyLookups(string $domain): string
     {
-        $this->reason = "{$domain}'s SPF record needs more than " . self::MAX_LOOKUPS . ' DNS lookups, which receivers treat as an error';
+        $this->reason = "{$domain}'s SPF record needs more than ".self::MAX_LOOKUPS.' DNS lookups, which receivers treat as an error';
 
         return 'permerror';
     }
@@ -267,7 +266,7 @@ final class SpfCheck
         if ($rest === 0) {
             return true;
         }
-        $mask = (0xff << (8 - $rest)) & 0xff;
+        $mask = (0xFF << (8 - $rest)) & 0xFF;
 
         return (ord($a[$bytes]) & $mask) === (ord($b[$bytes]) & $mask);
     }

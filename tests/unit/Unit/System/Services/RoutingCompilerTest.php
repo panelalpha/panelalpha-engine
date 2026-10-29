@@ -9,6 +9,7 @@ use App\System;
 use App\System\Services\Webserver\ProxyRulePorts;
 use App\System\Services\Webserver\RoutingCompiler;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -67,7 +68,7 @@ class RoutingCompilerTest extends TestCase
             'transport' => 'http',
             'listen_ip' => '*',
             'listen_port' => 80,
-            'upstream_host' => '10.0.0.5',
+            'upstream_host' => TestNetwork::private(5),
             'upstream_port' => 8080,
             'is_generated' => false,
         ], $attributes));
@@ -193,7 +194,7 @@ class RoutingCompilerTest extends TestCase
     public function test_a_rule_on_another_listen_ip_leaves_the_default_alone(): void
     {
         $domain = $this->domainFor('alice', 'alice.test');
-        $this->rule(['listen_ip' => '10.1.2.3', 'listen_port' => 80, 'server_name' => null]);
+        $this->rule(['listen_ip' => TestNetwork::private(3), 'listen_port' => 80, 'server_name' => null]);
 
         $generated = $this->generated($this->compile([$domain])['http']);
 
@@ -215,12 +216,12 @@ class RoutingCompilerTest extends TestCase
 
     public function test_an_http_rule_is_carried_through_with_its_upstream(): void
     {
-        $this->rule(['listen_port' => 8080, 'upstream_host' => '10.0.0.9', 'upstream_port' => 9000]);
+        $this->rule(['listen_port' => 8080, 'upstream_host' => TestNetwork::private(9), 'upstream_port' => 9000]);
 
         $http = $this->compile()['http'];
 
         $this->assertCount(1, $http);
-        $this->assertSame('10.0.0.9', $http[0]['upstream_host']);
+        $this->assertSame(TestNetwork::private(9), $http[0]['upstream_host']);
         $this->assertSame(9000, $http[0]['upstream_port']);
         $this->assertFalse($http[0]['is_generated']);
     }
@@ -255,7 +256,7 @@ class RoutingCompilerTest extends TestCase
         $domain = $this->domainFor('alice', 'alice.test');
         $this->makeUser('bob');
         $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17002, 'upstream_host' => 'bob']);
-        $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => '172.25.0.2']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => TestNetwork::container2(2)]);
         $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'listen_port' => 80, 'server_name' => null, 'upstream_host' => 'core']);
         $own = $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'transport' => 'tcp', 'listen_port' => 17004, 'upstream_host' => 'alice']);
 
@@ -282,7 +283,7 @@ class RoutingCompilerTest extends TestCase
         $bob = $this->domainFor('bob', 'bob.test');
         $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8089, 'server_name' => 'alice.test', 'upstream_host' => 'bob']);
         $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8090, 'server_name' => 'www.alice.test', 'upstream_host' => 'bob']);
-        $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_ip' => '10.1.2.3', 'listen_port' => 80, 'server_name' => 'alice.test', 'upstream_host' => 'bob']);
+        $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_ip' => TestNetwork::private(3), 'listen_port' => 80, 'server_name' => 'alice.test', 'upstream_host' => 'bob']);
         $own = $this->rule(['owner_scope' => 'user', 'username' => 'bob', 'listen_port' => 8091, 'server_name' => 'BOB.test', 'upstream_host' => 'bob']);
         $alias = $this->rule(['owner_scope' => 'user', 'username' => 'alice', 'listen_port' => 8092, 'server_name' => 'www.alice.test', 'upstream_host' => 'alice']);
         $system = $this->rule(['listen_port' => 8093, 'server_name' => 'alice.test']);
@@ -300,9 +301,9 @@ class RoutingCompilerTest extends TestCase
     /** The operator's own rules are not limited. */
     public function test_a_system_rule_to_any_upstream_is_compiled(): void
     {
-        $this->rule(['transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => '172.25.0.2']);
+        $this->rule(['transport' => 'tcp', 'listen_port' => 17003, 'upstream_host' => TestNetwork::container2(2)]);
 
-        $this->assertSame('172.25.0.2', $this->compile()['stream'][0]['upstream_host']);
+        $this->assertSame(TestNetwork::container2(2), $this->compile()['stream'][0]['upstream_host']);
     }
 
     /**

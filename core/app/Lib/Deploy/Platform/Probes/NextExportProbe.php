@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
@@ -23,19 +24,19 @@ final class NextExportProbe implements PlatformProbe
 
     public function evaluate(ProjectContext $context): bool|array
     {
-        $data = (new NextWorkspaceProbe())->evaluate($context);
+        $data = (new NextWorkspaceProbe)->evaluate($context);
         if ($data === false || $data === true) {
             return $data;
         }
 
         $relative = trim((string) ($data['workspace_relative'] ?? ''), '/');
-        $dir = $relative === '' ? $context->projectDir : rtrim($context->projectDir, '/') . '/' . $relative;
+        $dir = $relative === '' ? $context->projectDir : rtrim($context->projectDir, '/').'/'.$relative;
 
         $config = ProjectContext::firstConfigContents($dir, 'next.config');
         if (is_string($config) && preg_match(self::EXPORT_CONFIG, $config) === 1) {
             return $data;
         }
-        $package = @file_get_contents($dir . '/package.json');
+        $package = AccountHomeRead::contents($dir.'/package.json');
 
         return is_string($package) && str_contains($package, 'next export') ? $data : false;
     }

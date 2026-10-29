@@ -18,6 +18,6 @@ final class ComposeProject
     /** The name Compose gives a service's first container. */
     public static function container(string $service): string
     {
-        return self::NAME . '-' . $service . '-1';
+        return self::NAME.'-'.$service.'-1';
     }
 }

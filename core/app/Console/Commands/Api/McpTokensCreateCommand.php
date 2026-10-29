@@ -30,14 +30,16 @@ class McpTokensCreateCommand extends Command
     {
         $root = Admin::rootAccount();
         $name = $this->argument('name');
-        if (!is_string($name)) {
+        if (! is_string($name)) {
             $this->error("Invalid 'name' argument");
+
             return 1;
         }
 
         $client = $this->option('client');
-        if ($client !== null && !is_string($client)) {
+        if ($client !== null && ! is_string($client)) {
             $this->error("Invalid 'client' option");
+
             return 1;
         }
 
@@ -59,6 +61,7 @@ class McpTokensCreateCommand extends Command
 
         if ($this->option('short')) {
             $this->line($token->plainTextToken);
+
             return 0;
         }
 
@@ -68,11 +71,12 @@ class McpTokensCreateCommand extends Command
         $this->line($token->plainTextToken);
         $this->comment('=============================');
 
-        if (!$this->option('no-register')) {
+        if (! $this->option('no-register')) {
             try {
                 $this->registrationHint($token->plainTextToken, $client);
             } catch (InvalidArgumentException $e) {
                 $this->error($e->getMessage());
+
                 return 1;
             }
         }
@@ -88,7 +92,7 @@ class McpTokensCreateCommand extends Command
      */
     private function registrationHint(string $token, ?string $client): void
     {
-        $url = rtrim((string) config('app.url'), '/') . '/mcp';
+        $url = rtrim((string) config('app.url'), '/').'/mcp';
 
         $entries = $client === null || $client === ''
             ? ClientRegistration::all($url, $token)
@@ -96,20 +100,20 @@ class McpTokensCreateCommand extends Command
 
         $single = $client !== null && $client !== '';
 
-        if (!$single) {
+        if (! $single) {
             $this->newLine();
             $this->info('Register the MCP server with your client:');
         }
 
         foreach ($entries as $entry) {
             $this->newLine();
-            $this->line('<options=bold>' . $entry['label'] . '</>');
+            $this->line('<options=bold>'.$entry['label'].'</>');
             foreach ($entry['lines'] as $line) {
                 $this->line($line);
             }
         }
 
-        if (!is_file('/etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem')) {
+        if (! is_file('/etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem')) {
             $this->newLine();
             $this->warn('The engine is using a self-signed certificate. Copy');
             $this->warn('/opt/panelalpha/shared-hosting/crt/server.cert to the client machine and trust it -');

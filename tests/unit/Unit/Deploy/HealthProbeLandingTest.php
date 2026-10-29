@@ -6,6 +6,7 @@ use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The probe reports the path that answered, and follows a path-relative
@@ -40,7 +41,7 @@ class HealthProbeLandingTest extends TestCase
 
         $port = random_int(22000, 22999);
         $process = proc_open(
-            sprintf('exec php -S 127.0.0.1:%d %s/router.php', $port, $dir),
+            sprintf('exec php -S ' . TestNetwork::LOOPBACK . ':%d %s/router.php', $port, $dir),
             [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
             $pipes
         );
@@ -50,7 +51,7 @@ class HealthProbeLandingTest extends TestCase
         $this->servers[] = [$process, $dir];
 
         for ($i = 0; $i < 50; $i++) {
-            $socket = @fsockopen('127.0.0.1', $port, $errno, $error, 0.1);
+            $socket = @fsockopen(TestNetwork::LOOPBACK, $port, $errno, $error, 0.1);
             if (is_resource($socket)) {
                 fclose($socket);
 

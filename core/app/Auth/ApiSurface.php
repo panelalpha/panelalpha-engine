@@ -36,7 +36,7 @@ class ApiSurface
 
         $uri = $route->uri();
 
-        if (!str_starts_with($uri, 'api/')) {
+        if (! str_starts_with($uri, 'api/')) {
             return null;
         }
 
@@ -48,7 +48,7 @@ class ApiSurface
             return null;
         }
 
-        return strtoupper($method) . ' /' . self::canonical($path);
+        return strtoupper($method).' /'.self::canonical($path);
     }
 
     /**
@@ -67,7 +67,7 @@ class ApiSurface
         foreach (Router::getRoutes() as $route) {
             $uri = $route->uri();
 
-            if (!str_starts_with($uri, 'api/')) {
+            if (! str_starts_with($uri, 'api/')) {
                 continue;
             }
 
@@ -82,7 +82,7 @@ class ApiSurface
                     continue;
                 }
 
-                $operations[strtoupper($method) . ' /' . $path] = self::segments($path);
+                $operations[strtoupper($method).' /'.$path] = self::segments($path);
             }
         }
 
@@ -157,7 +157,7 @@ class ApiSurface
     {
         return array_values(array_filter(
             explode('/', $path),
-            fn (string $s): bool => $s !== '' && !str_starts_with($s, '{')
+            fn (string $s): bool => $s !== '' && ! str_starts_with($s, '{')
         ));
     }
 
@@ -180,7 +180,7 @@ class ApiSurface
      * you do to a project. A group of one that came from under `projects/` is
      * always one of those.
      *
-     * @param array<string, array<int, string>> $groups
+     * @param  array<string, array<int, string>>  $groups
      * @return array<string, array<int, string>>
      */
     private static function fold(array $groups): array

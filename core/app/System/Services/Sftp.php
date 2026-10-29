@@ -13,12 +13,11 @@ class Sftp
 {
     public function __construct(
         private EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     public function loginsConfPath(): string
     {
-        return $this->system->engineDirPath() . '/config/sftp/logins.conf';
+        return $this->system->engineDirPath().'/config/sftp/logins.conf';
     }
 
     public function writeLogins(string $config): void
@@ -51,7 +50,7 @@ class Sftp
      * End every SSH session of these logins and answer how many were open. A login is an
      * `sftp_accounts.username`; the account-name grammar is the last check before it reaches a shell pattern.
      *
-     * @param list<string> $logins
+     * @param  list<string>  $logins
      */
     public function killSessions(array $logins): int
     {
@@ -77,7 +76,21 @@ class Sftp
     }
 
     /**
-     * @param list<string> $logins
+     * {@see killSessions()} for a delete: a host whose sftp container is down must still delete the logins.
+     *
+     * @param  list<string>  $logins
+     */
+    public function endSessions(array $logins): void
+    {
+        try {
+            $this->killSessions($logins);
+        } catch (\Throwable $e) {
+            Log::warning('SFTP session kill failed for '.implode(', ', $logins).': '.$e->getMessage());
+        }
+    }
+
+    /**
+     * @param  list<string>  $logins
      * @return list<string>
      */
     private function sessionLogins(array $logins): array
@@ -94,15 +107,15 @@ class Sftp
      * One sshd monitor process watches each session, so the monitors count the sessions; TERM ends them, KILL only
      * what outlives the two-second grace. Never by uid: every account of a project shares one.
      *
-     * @param list<string> $logins
+     * @param  list<string>  $logins
      */
     private function killSessionsScript(array $logins): string
     {
         $patterns = [];
         $monitors = [];
         foreach ($logins as $login) {
-            $patterns[] = escapeshellarg('^sshd: ' . $login . '(@|\s|$)');
-            $monitors[] = escapeshellarg('^sshd: ' . $login . ' \\[priv\\]');
+            $patterns[] = escapeshellarg('^sshd: '.$login.'(@|\s|$)');
+            $monitors[] = escapeshellarg('^sshd: '.$login.' \\[priv\\]');
         }
 
         $all = implode(' ', $patterns);
@@ -148,7 +161,7 @@ class Sftp
                     $config .= "{$username}:{$password}:{$osUser['UID']}:{$osUser['GID']}:{$home}:{$pubKey}\n";
                 }
             } catch (\Exception $e) {
-                Log::warning('Could not rebuild SFTP accounts for user ' . $user->username, [
+                Log::warning('Could not rebuild SFTP accounts for user '.$user->username, [
                     'exception' => $e,
                 ]);
             }

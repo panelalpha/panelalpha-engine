@@ -1,8 +1,9 @@
 <?php
 
 namespace App\Console\Commands\Settings;
-use Illuminate\Console\Command;
+
 use App\Models\Setting;
+use Illuminate\Console\Command;
 
 class Exists extends Command
 {

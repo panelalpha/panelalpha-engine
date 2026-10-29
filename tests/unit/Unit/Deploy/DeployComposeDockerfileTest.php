@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy;
 use App\Lib\Deploy\Compose\DeployCompose;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 class DeployComposeDockerfileTest extends TestCase
 {
@@ -101,10 +102,10 @@ class DeployComposeDockerfileTest extends TestCase
     public function test_extra_hosts_are_carried_into_the_app_service(): void
     {
         $yaml = DeployCompose::dockerfile('Dockerfile', 8001, [
-            'extra_hosts' => ['database-users.shared-hosting.palocal:172.25.0.14'],
+            'extra_hosts' => ['database-users.shared-hosting.palocal:' . TestNetwork::container2(14)],
         ]);
         $service = Yaml::parse($yaml)['services']['app'];
 
-        $this->assertSame(['database-users.shared-hosting.palocal:172.25.0.14'], $service['extra_hosts']);
+        $this->assertSame(['database-users.shared-hosting.palocal:' . TestNetwork::container2(14)], $service['extra_hosts']);
     }
 }

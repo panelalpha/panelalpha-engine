@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a vault entry
 
-    Removes the entry and its secret. References to it stop resolving. This is also how a secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new one. `ref` is its `vault:<id>`, or the bare id. A project that already used it keeps the copy it stored.
+    Removes the entry and its secret. References to it stop resolving. This is also how a secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new one. `ref` is its `vault:<key>`. A project that already used it keeps the copy it stored.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

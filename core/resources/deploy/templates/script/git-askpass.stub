@@ -3,5 +3,5 @@ case "$1" in
   *sername*) printf '%s\n' git; exit 0 ;;
 esac
 host=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -n "s/.*'\([^']*\)'.*/\1/p" | sed -e 's#^[a-z][a-z0-9+.-]*://##' -e 's#^[^@/]*@##' -e 's#[/:].*##')
-[ -n "{{ host }}" ] && [ "$host" != "{{ host }}" ] && exit 1
+[ -n "$host" ] && [ "$host" = "{{ host }}" ] || exit 1
 printf '%s' '{{ encoded_token }}' | base64 -d

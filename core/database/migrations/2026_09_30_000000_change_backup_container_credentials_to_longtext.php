@@ -14,7 +14,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (! in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
             return;
         }
 

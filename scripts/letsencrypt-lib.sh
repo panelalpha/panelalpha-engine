@@ -258,6 +258,10 @@ le_install_lineage() {
     # workers now, and restarting it would kill every deploy in flight.
     # Restart nginx through s6 only when the process itself is down.
     if [ "$target" = "server" ]; then
+        # PanelAlpha Connect pins this key. Tell it before nginx serves the new
+        # one; the command exits 0 whatever happens, so renewal never waits on it.
+        docker compose -f "$LE_COMPOSE_FILE" exec -T core php artisan hub:tls-announce /root/crt/server.cert >/dev/null 2>&1 \
+            || le_warn "Could not announce the new certificate to PanelAlpha Connect"
         docker compose -f "$LE_COMPOSE_FILE" exec -T core nginx -s reload >/dev/null 2>&1 \
             || docker compose -f "$LE_COMPOSE_FILE" exec -T core s6-svc -r /run/service/nginx >/dev/null 2>&1 \
             || le_warn "Could not reload core's nginx; the new certificate is served after the next reload"

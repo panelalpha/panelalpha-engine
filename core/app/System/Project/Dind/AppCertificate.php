@@ -15,8 +15,7 @@ final class AppCertificate
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function remember(): void
     {
@@ -36,12 +35,12 @@ final class AppCertificate
             $user->setDetails([self::DETAIL => $snapshot]);
             $user->save();
         } catch (\Throwable $e) {
-            Log::debug('Could not record the certificate status: ' . $e->getMessage());
+            Log::debug('Could not record the certificate status: '.$e->getMessage());
         }
     }
 
     /**
-     * @param array<string, mixed> $cert
+     * @param  array<string, mixed>  $cert
      * @return array<string, mixed>
      */
     private static function snapshot(array $cert, string $domain): array

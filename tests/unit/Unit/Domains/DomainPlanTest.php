@@ -5,6 +5,7 @@ namespace Tests\Unit\Domains;
 use App\Lib\Domains\DomainPlan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The ladder, without a database or a network.
@@ -16,12 +17,15 @@ use PHPUnit\Framework\TestCase;
  */
 class DomainPlanTest extends TestCase
 {
-    /** @var array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string} */
-    private const FRESH_ENGINE = [
-        'sites_base_domain' => null,
-        'cert_domain' => null,
-        'default_ipv4' => '203.0.113.7',
-    ];
+    /** @return array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string} */
+    private static function freshEngine(): array
+    {
+        return [
+            'sites_base_domain' => null,
+            'cert_domain' => null,
+            'default_ipv4' => TestNetwork::public(7),
+        ];
+    }
 
     private function sources(array $candidates): array
     {
@@ -30,7 +34,7 @@ class DomainPlanTest extends TestCase
 
     public function test_a_fresh_engine_prefers_panelalpha_online_then_the_dashed_address(): void
     {
-        $candidates = DomainPlan::candidates('shop', null, null, self::FRESH_ENGINE);
+        $candidates = DomainPlan::candidates('shop', null, null, self::freshEngine());
 
         $this->assertSame(
             [DomainPlan::SOURCE_PANELALPHA_ONLINE, DomainPlan::SOURCE_PANELALPHA_DIRECT, DomainPlan::SOURCE_LOCAL],
@@ -46,7 +50,7 @@ class DomainPlanTest extends TestCase
             $candidates[0]['label'],
             'the online rung is the one that has to be bought'
         );
-        $this->assertSame('shop.203-0-113-7.panelalpha.direct', $candidates[1]['domain']);
+        $this->assertSame('shop.'.str_replace('.', '-', TestNetwork::public(7)).'.panelalpha.direct', $candidates[1]['domain']);
         $this->assertNull($candidates[1]['label']);
     }
 
@@ -54,7 +58,7 @@ class DomainPlanTest extends TestCase
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
             'cert_domain' => 'engine.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame('shop.engine.example.com', $candidates[1]['domain']);
@@ -64,7 +68,7 @@ class DomainPlanTest extends TestCase
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
             'sites_base_domain' => 'sites.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_SITES_BASE_DOMAIN, $candidates[0]['source']);
@@ -75,7 +79,7 @@ class DomainPlanTest extends TestCase
     {
         $candidates = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_PANELALPHA, [
             'sites_base_domain' => 'sites.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $candidates[0]['source']);
@@ -88,7 +92,7 @@ class DomainPlanTest extends TestCase
 
     public function test_tunnel_none_never_offers_a_name_that_has_to_be_bought(): void
     {
-        $candidates = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_NONE, self::FRESH_ENGINE);
+        $candidates = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_NONE, self::freshEngine());
 
         $this->assertNotContains(DomainPlan::SOURCE_PANELALPHA_ONLINE, $this->sources($candidates));
         $this->assertSame([null, null], array_column($candidates, 'label'));
@@ -102,7 +106,7 @@ class DomainPlanTest extends TestCase
     public function test_an_unlicensed_engine_is_still_offered_the_zone(): void
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $this->sources($candidates)[0]);
@@ -119,14 +123,14 @@ class DomainPlanTest extends TestCase
     public function test_a_private_address_still_gets_a_direct_name(): void
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
-            'default_ipv4' => '10.0.0.4',
+            'default_ipv4' => TestNetwork::private(4),
         ]);
 
         $this->assertSame(
             [DomainPlan::SOURCE_PANELALPHA_DIRECT, DomainPlan::SOURCE_LOCAL],
             $this->sources($candidates)
         );
-        $this->assertSame('shop.10-0-0-4.panelalpha.direct', $candidates[0]['domain']);
+        $this->assertSame('shop.'.str_replace('.', '-', TestNetwork::private(4)).'.panelalpha.direct', $candidates[0]['domain']);
         $this->assertSame('shop.local', $candidates[1]['domain']);
     }
 
@@ -142,7 +146,7 @@ class DomainPlanTest extends TestCase
 
     public function test_a_requested_domain_is_the_only_candidate(): void
     {
-        $candidates = DomainPlan::candidates('shop', 'Shop.Example.COM.', null, self::FRESH_ENGINE);
+        $candidates = DomainPlan::candidates('shop', 'Shop.Example.COM.', null, self::freshEngine());
 
         $this->assertSame([DomainPlan::SOURCE_REQUESTED], $this->sources($candidates));
         $this->assertSame('shop.example.com', $candidates[0]['domain'], 'normalised, never substituted');
@@ -151,7 +155,7 @@ class DomainPlanTest extends TestCase
 
     public function test_a_requested_panelalpha_online_name_still_has_to_be_bought(): void
     {
-        $candidates = DomainPlan::candidates('shop', 'acme-store.panelalpha.online', null, self::FRESH_ENGINE);
+        $candidates = DomainPlan::candidates('shop', 'acme-store.panelalpha.online', null, self::freshEngine());
 
         $this->assertSame([DomainPlan::SOURCE_REQUESTED], $this->sources($candidates));
         $this->assertSame('acme-store', $candidates[0]['label']);
@@ -176,6 +180,16 @@ class DomainPlanTest extends TestCase
         ];
     }
 
+    public function test_the_online_zone_holds_a_name_at_any_depth_below_it(): void
+    {
+        foreach (['shop.panelalpha.online', 'SHOP.PanelAlpha.Online.', 'a.b.panelalpha.online'] as $inside) {
+            $this->assertTrue(DomainPlan::inOnlineZone($inside), $inside);
+        }
+        foreach (['panelalpha.online', 'shop.example.com', 'shoppanelalpha.online'] as $outside) {
+            $this->assertFalse(DomainPlan::inOnlineZone($outside), $outside);
+        }
+    }
+
     /**
      * The proxy serves the exact label it registered, so the alias resolves,
      * reaches something that never heard of it, and fails TLS on the way.
@@ -183,18 +197,18 @@ class DomainPlanTest extends TestCase
     public function test_a_www_alias_is_pointless_under_the_tunnel_zone(): void
     {
         $this->assertFalse(DomainPlan::wwwAliasWouldAnswer('shop-4f2a.panelalpha.online'));
-        $this->assertTrue(DomainPlan::wwwAliasWouldAnswer('shop.203-0-113-7.panelalpha.direct'));
+        $this->assertTrue(DomainPlan::wwwAliasWouldAnswer('shop.'.str_replace('.', '-', TestNetwork::public(7)).'.panelalpha.direct'));
         $this->assertTrue(DomainPlan::wwwAliasWouldAnswer('shop.acme.com'));
     }
 
     public function test_a_host_with_no_public_address_says_so(): void
     {
         $this->assertNull(
-            DomainPlan::noPublicNameReason(['default_ipv4' => '203.0.113.7']),
+            DomainPlan::noPublicNameReason(['default_ipv4' => TestNetwork::public(7)]),
             'nothing to explain while a public rung was on offer'
         );
 
-        foreach ([['default_ipv4' => '10.0.0.4'], ['default_ipv4' => null], []] as $settings) {
+        foreach ([['default_ipv4' => TestNetwork::private(4)], ['default_ipv4' => null], []] as $settings) {
             $this->assertStringContainsString(
                 'no public IPv4',
                 (string) DomainPlan::noPublicNameReason($settings)
@@ -205,7 +219,7 @@ class DomainPlanTest extends TestCase
         // differently: one needs a port forwarded, the other needs an address.
         $this->assertStringContainsString(
             "address is private",
-            (string) DomainPlan::noPublicNameReason(['default_ipv4' => '10.0.0.4'])
+            (string) DomainPlan::noPublicNameReason(['default_ipv4' => TestNetwork::private(4)])
         );
         $this->assertStringContainsString(
             'no IPv4 address on record',
@@ -215,9 +229,9 @@ class DomainPlanTest extends TestCase
 
     public function test_only_a_public_address_counts_as_publicly_reachable(): void
     {
-        $this->assertTrue(DomainPlan::hasPublicIpv4(['default_ipv4' => '203.0.113.7']));
-        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => '10.0.0.4']));
-        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => '127.0.0.1']));
+        $this->assertTrue(DomainPlan::hasPublicIpv4(['default_ipv4' => TestNetwork::public(7)]));
+        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => TestNetwork::private(4)]));
+        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => TestNetwork::LOOPBACK]));
         $this->assertFalse(DomainPlan::hasPublicIpv4([]));
     }
 
@@ -235,7 +249,7 @@ class DomainPlanTest extends TestCase
         $candidates = DomainPlan::candidates('shop', null, null, [
             'default_tunnel' => DomainPlan::TUNNEL_NONE,
             'cert_domain' => 'engine.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(
@@ -251,7 +265,7 @@ class DomainPlanTest extends TestCase
         $candidates = DomainPlan::candidates('shop', null, null, [
             'default_tunnel' => DomainPlan::TUNNEL_NONE,
             'sites_base_domain' => 'sites.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_SITES_BASE_DOMAIN, $candidates[0]['source']);
@@ -267,7 +281,7 @@ class DomainPlanTest extends TestCase
         $settings = [
             'default_tunnel' => DomainPlan::TUNNEL_NONE,
             'sites_base_domain' => 'sites.example.com',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ];
 
         $explicit = DomainPlan::candidates('shop', null, DomainPlan::TUNNEL_PANELALPHA, $settings);
@@ -282,7 +296,7 @@ class DomainPlanTest extends TestCase
      */
     public function test_default_tunnel_panelalpha_keeps_the_same_ladder_as_unset(): void
     {
-        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => '203.0.113.7'];
+        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => TestNetwork::public(7)];
 
         $unset = DomainPlan::candidates('shop', null, null, $configured);
         $setting = DomainPlan::candidates('shop', null, null, $configured + ['default_tunnel' => DomainPlan::TUNNEL_PANELALPHA]);
@@ -304,7 +318,7 @@ class DomainPlanTest extends TestCase
      */
     public function test_an_unset_setting_keeps_the_ladder_as_it_was(): void
     {
-        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => '203.0.113.7'];
+        $configured = ['sites_base_domain' => 'sites.example.com', 'default_ipv4' => TestNetwork::public(7)];
 
         $before = DomainPlan::candidates('shop', null, null, $configured);
         $withNullKey = DomainPlan::candidates('shop', null, null, $configured + ['default_tunnel' => null]);
@@ -317,7 +331,7 @@ class DomainPlanTest extends TestCase
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
             'default_tunnel' => 'cloudflare',
-            'default_ipv4' => '203.0.113.7',
+            'default_ipv4' => TestNetwork::public(7),
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $candidates[0]['source']);

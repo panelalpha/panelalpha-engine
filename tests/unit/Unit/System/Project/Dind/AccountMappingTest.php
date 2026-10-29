@@ -9,6 +9,7 @@ use App\System\Project\Dind\AccountMapping;
 use App\System\Project\Dind\OuterLifecycle;
 use App\System\Project\Dind\ShellOperations;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,14 @@ class AccountMappingTest extends TestCase
 
     /** what a plain `compose up` of the account throws, if anything */
     private ?\Throwable $upError = null;
+
+    /** @var array{container: string, sysbox: string} when the account container and sysbox-mgr last started */
+    private array $started = ['container' => '2026-10-10T15:00:00.123456789Z', 'sysbox' => 'Sat 2026-10-10 15:02:45 UTC'];
+
+    /** when a recreated account container started, if the test moves it */
+    private ?string $startedWhenReady = null;
+
+    private const EXEC_REFUSED = 'OCI runtime exec failed: exec failed: unable to start container process: unsafe procfs detected: openat2 fsmount:fscontext:proc/thread-self/fd/: operation not permitted';
 
     /** What starting a stopped container sysbox forgot answers. */
     private const START_REFUSED = "Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: container_linux.go:439: starting container process caused: process_linux.go:608: container init caused: rootfs_linux.go:76: setting up rootfs mounts caused: open etc/docker/daemon.json: permission denied\n";
@@ -81,10 +90,43 @@ class AccountMappingTest extends TestCase
 
     public function test_an_account_refusing_exec_after_a_sysbox_restart_is_unmapped(): void
     {
-        $this->owners = [new \RuntimeException('OCI runtime exec failed: exec failed: unable to start container process: unsafe procfs detected: openat2 fsmount:fscontext:proc/thread-self/fd/: operation not permitted')];
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED)];
         $mapping = new AccountMapping($this->project());
 
         $this->assertTrue($mapping->isUnmapped());
+    }
+
+    public function test_an_account_started_since_sysbox_last_started_refusing_exec_is_not_called_unmapped(): void
+    {
+        $this->started['container'] = '2026-10-10T15:10:00.5Z';
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED)];
+
+        $this->assertNull((new AccountMapping($this->project()))->isUnmapped());
+        $this->assertFalse((new AccountMapping($this->project()))->ensureMapped());
+        $this->assertSame([], $this->recreates());
+    }
+
+    public function test_unknown_start_times_keep_an_exec_refusal_unmapped(): void
+    {
+        $this->started = ['container' => '', 'sysbox' => ''];
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED)];
+
+        $this->assertTrue((new AccountMapping($this->project()))->isUnmapped());
+    }
+
+    public function test_a_recreated_account_that_still_refuses_exec_is_a_failed_repair(): void
+    {
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED), new \RuntimeException(self::EXEC_REFUSED)];
+        $this->startedWhenReady = '2026-10-10T15:20:00Z';
+        $project = $this->project();
+
+        try {
+            (new AccountMapping($project))->recreate();
+            $this->fail('a recreate after which the account cannot be entered must not read as a repair');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('after it was recreated', $e->getMessage());
+        }
+        $this->assertNull((new AccountMapping($project))->isUnmapped(), 'and the next sweep leaves it alone');
     }
 
     public function test_a_mapped_account_is_left_as_it_is(): void
@@ -110,7 +152,51 @@ class AccountMappingTest extends TestCase
         $this->assertSame(1, $this->awaited);
         $this->assertCount(3, $this->probes());
         Log::shouldHaveReceived('warning')->withArgs(
-            static fn (string $message): bool => $message === 'alice: ' . AccountMapping::RECREATED
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . '/root inside it was owned by uid 65534 instead of root; sysbox was restarted while it ran'
+        );
+    }
+
+    public function test_an_unmapped_account_started_since_sysbox_does_not_blame_a_sysbox_restart(): void
+    {
+        Log::spy();
+        $this->started['container'] = '2026-10-10T15:10:00.5Z';
+        $this->owners = ['1000', '1000', '0'];
+
+        $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . '/root inside it was owned by uid 1000 instead of root'
+        );
+    }
+
+    public function test_unknown_start_times_do_not_blame_a_sysbox_restart(): void
+    {
+        Log::spy();
+        $this->started = ['container' => '', 'sysbox' => ''];
+        $this->owners = [new \RuntimeException(self::EXEC_REFUSED), new \RuntimeException(self::EXEC_REFUSED), '0'];
+
+        $this->assertTrue((new AccountMapping($this->project()))->ensureMapped());
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . 'exec into it was refused (unsafe procfs detected)'
+        );
+    }
+
+    public function test_a_refused_start_says_so(): void
+    {
+        Log::spy();
+        $this->started['container'] = '2026-10-10T15:10:00.5Z';
+        $this->upError = new \RuntimeException(self::START_REFUSED);
+        $this->owners = ['0'];
+
+        (new OuterLifecycle($this->project()))->up();
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message): bool => $message === 'alice: Recreated the account container: '
+                . 'its start was refused with permission denied on its own image'
         );
     }
 
@@ -260,13 +346,38 @@ class AccountMappingTest extends TestCase
 
     private function project(): Dind
     {
-        $system = new class ($this->commands, $this->owners, $this->upError) extends System {
+        $system = new class ($this->commands, $this->owners, $this->upError, $this->started) extends System {
             /**
              * @param list<list<string>> $commands
              * @param list<string|\Throwable> $owners
+             * @param array{container: string, sysbox: string} $started
              */
-            public function __construct(private array &$commands, private array &$owners, private ?\Throwable &$upError)
+            public function __construct(private array &$commands, private array &$owners, private ?\Throwable &$upError, private array &$started)
             {
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $argv = array_values((array) $cmd);
+                $this->commands[] = $argv;
+                $out = in_array('systemctl', $argv, true) ? $this->started['sysbox'] : $this->started['container'];
+
+                return new class ($out) extends Process {
+                    public function __construct(private string $out)
+                    {
+                        parent::__construct(['true']);
+                    }
+
+                    public function isSuccessful(): bool
+                    {
+                        return $this->out !== '';
+                    }
+
+                    public function getOutput(): string
+                    {
+                        return $this->out . "\n";
+                    }
+                };
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
@@ -297,6 +408,7 @@ class AccountMappingTest extends TestCase
         $project->method('shell')->willReturn(new ShellOperations($project));
         $project->method('awaitReady')->willReturnCallback(function (): void {
             $this->awaited++;
+            $this->started['container'] = $this->startedWhenReady ?? $this->started['container'];
         });
 
         return $project;

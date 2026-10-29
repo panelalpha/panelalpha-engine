@@ -2,9 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 
-use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
@@ -95,6 +94,6 @@ final class FrontendStage
             $this->app->project->projectDir
         );
 
-        return str_contains($install, self::PNPM_INSTALL) ? $install . self::IGNORE_SCRIPTS : $install;
+        return str_contains($install, self::PNPM_INSTALL) ? $install.self::IGNORE_SCRIPTS : $install;
     }
 }

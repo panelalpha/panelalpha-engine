@@ -4,8 +4,10 @@ namespace Tests\Unit\Task;
 
 use App\Http\Controllers\TaskController;
 use App\Http\Middleware\Authenticate;
+use App\Lib\Task\TaskLogPage;
 use App\Models\Task;
 use App\Models\TaskLog;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class TaskApiKernelTest extends SqliteTaskTestCase
 {
@@ -71,6 +73,75 @@ class TaskApiKernelTest extends SqliteTaskTestCase
         $this->assertSame('two', $logs[0]['log']);
         $this->assertSame('three', $logs[1]['log']);
         $this->assertSame($logs[1]['id'], $response->json('data.next_after_id'));
+    }
+
+    public function test_get_pages_by_limit_and_says_whether_more_follow(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $this->lines($task, 3);
+
+        $first = $this->getJson('/api/tasks/' . $task->id . '?limit=2');
+
+        $first->assertStatus(200);
+        $this->assertSame(['line-0', 'line-1'], array_column($first->json('data.logs'), 'log'));
+        $first->assertJsonPath('data.more', true);
+
+        $last = $this->getJson('/api/tasks/' . $task->id . '?limit=2&after_id=' . $first->json('data.next_after_id'));
+
+        $this->assertSame(['line-2'], array_column($last->json('data.logs'), 'log'));
+        $last->assertJsonPath('data.more', false);
+        $last->assertJsonPath('data.next_after_id', $last->json('data.logs.0.id'));
+    }
+
+    public function test_get_without_limit_gives_the_default_page(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $this->lines($task, TaskLogPage::DEFAULT_LIMIT + 1);
+
+        $response = $this->getJson('/api/tasks/' . $task->id);
+
+        $this->assertCount(TaskLogPage::DEFAULT_LIMIT, $response->json('data.logs'));
+        $response->assertJsonPath('data.more', true);
+    }
+
+    public function test_get_logs_pages_by_limit_and_says_whether_more_follow(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $this->lines($task, 3);
+
+        $first = $this->getJson('/api/tasks/' . $task->id . '/logs?limit=2');
+
+        $this->assertSame(['line-0', 'line-1'], array_column($first->json('data'), 'log'));
+        $first->assertJsonPath('meta.more', true);
+        $first->assertJsonPath('meta.next_after_id', $first->json('data.1.id'));
+
+        $last = $this->getJson('/api/tasks/' . $task->id . '/logs?limit=2&after_id=' . $first->json('meta.next_after_id'));
+
+        $this->assertSame(['line-2'], array_column($last->json('data'), 'log'));
+        $last->assertJsonPath('meta.more', false);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function badPages(): array
+    {
+        return [
+            'limit 0' => ['limit=0'],
+            'limit over the maximum' => ['limit=' . (TaskLogPage::MAX_LIMIT + 1)],
+            'limit not a number' => ['limit=all'],
+            'negative after_id' => ['after_id=-1'],
+        ];
+    }
+
+    #[DataProvider('badPages')]
+    public function test_a_bad_page_is_422_on_both_page_endpoints(string $query): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $field = explode('=', $query)[0];
+
+        $this->getJson('/api/tasks/' . $task->id . '?' . $query)->assertStatus(422)->assertJsonValidationErrors($field);
+        $this->getJson('/api/tasks/' . $task->id . '/logs?' . $query)->assertStatus(422)->assertJsonValidationErrors($field);
     }
 
     public function test_get_unknown_id_returns_404(): void
@@ -246,5 +317,14 @@ class TaskApiKernelTest extends SqliteTaskTestCase
         $this->assertSame('late', $frames[1]['log']);
         $this->assertSame(['type' => 'finish', 'status' => 'completed'], $frames[2]);
         $this->assertCount(3, $frames);
+    }
+
+    private function lines(Task $task, int $count): void
+    {
+        $rows = [];
+        for ($i = 0; $i < $count; $i++) {
+            $rows[] = ['task_id' => $task->id, 'log' => 'line-' . $i, 'created_at' => now()];
+        }
+        TaskLog::insert($rows);
     }
 }

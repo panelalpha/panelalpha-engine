@@ -13,6 +13,9 @@ class EnvVarsUpdateRequest extends FormRequest
     use ReportsProblems;
     use ResolvesVaultFields;
 
+    /** `env_vars` as the caller sent it, before its vault references were read. */
+    private mixed $sentEnvVars = null;
+
     public function authorize(): bool
     {
         return true;
@@ -20,7 +23,14 @@ class EnvVarsUpdateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $this->sentEnvVars = $this->input('env_vars');
         $this->resolveVaultFields(['env_vars']);
+    }
+
+    /** `env_vars` as sent, so the keys a vault reference set can be told apart. */
+    public function sentEnvVars(): mixed
+    {
+        return $this->sentEnvVars;
     }
 
     /**
@@ -29,7 +39,7 @@ class EnvVarsUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys(), new EnvVarKeysNotReserved()],
+            'env_vars' => ['present', 'array', 'max:200', new EnvVarKeys, new EnvVarKeysNotReserved],
             'env_vars.*' => ['string', 'nullable', 'max:8192'],
             'replace' => ['sometimes', 'boolean'],
             'apply' => ['sometimes', 'in:none,recreate'],

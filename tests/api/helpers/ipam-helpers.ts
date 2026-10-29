@@ -1,14 +1,15 @@
 import type { EngineApi } from '@/clients/engine-api';
 import { expectStatus } from './expect-status';
 import { skipTest } from './test-helpers';
+import { testNetwork } from './test-network';
 
 /**
  * Documentation ranges, so nothing here can collide with a real address the
  * engine actually routes: RFC 1918 for IPv4, RFC 3849 for IPv6.
  */
-export const IPV4_SUBNET = { ip: '192.168.100.0', mask: 24 } as const;
+export const IPV4_SUBNET = { ip: testNetwork.private2(0), mask: 24 } as const;
 export const IPV6_SUBNET = { ip: '2001:db8::', mask: 64 } as const;
-export const SHARED_IPV4_SUBNET = { ip: '192.168.150.0', mask: 24 } as const;
+export const SHARED_IPV4_SUBNET = { ip: testNetwork.private(0), mask: 24 } as const;
 
 export interface SubnetSpec {
   ip: string;

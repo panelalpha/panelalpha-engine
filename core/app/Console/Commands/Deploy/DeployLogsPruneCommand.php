@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Deploy\DeployLog\DeployLogArchive;
 use App\Lib\Deploy\DeployLog\DeployLogger;
-use App\Console\Commands\Concerns\ResolvesProject;
 use Illuminate\Console\Command;
 
 class DeployLogsPruneCommand extends Command
@@ -25,25 +25,27 @@ class DeployLogsPruneCommand extends Command
     {
         $this->foldProjectOption('user');
 
-        $keep = $this->option('keep') === null ? DeployLogArchive::keep() : (int)$this->option('keep');
+        $keep = $this->option('keep') === null ? DeployLogArchive::keep() : (int) $this->option('keep');
         if ($keep < 1) {
             $this->error('--keep must be >= 1');
+
             return 1;
         }
 
-        $dryRun = (bool)$this->option('dry-run');
+        $dryRun = (bool) $this->option('dry-run');
         $user = $this->option('user');
 
         try {
             if ($user !== null && $user !== '') {
                 $deletedByUser = [
-                    (string)$user => DeployLogger::pruneUser((string)$user, $keep, $dryRun),
+                    (string) $user => DeployLogger::pruneUser((string) $user, $keep, $dryRun),
                 ];
             } else {
                 $deletedByUser = DeployLogger::pruneAll($keep, $dryRun);
             }
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 
@@ -52,17 +54,17 @@ class DeployLogsPruneCommand extends Command
             if ($paths === []) {
                 continue;
             }
-            $this->info(($dryRun ? '[dry-run] ' : '') . "{$username}: " . count($paths) . ' file(s)');
+            $this->info(($dryRun ? '[dry-run] ' : '')."{$username}: ".count($paths).' file(s)');
             foreach ($paths as $path) {
-                $this->line('  ' . $path);
+                $this->line('  '.$path);
             }
             $total += count($paths);
         }
 
         if ($total === 0) {
-            $this->info('Nothing to prune (keep=' . $keep . ').');
+            $this->info('Nothing to prune (keep='.$keep.').');
         } else {
-            $this->info(($dryRun ? 'Would delete' : 'Deleted') . " {$total} file(s).");
+            $this->info(($dryRun ? 'Would delete' : 'Deleted')." {$total} file(s).");
         }
 
         return 0;

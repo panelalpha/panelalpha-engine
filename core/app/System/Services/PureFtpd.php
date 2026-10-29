@@ -12,32 +12,31 @@ class PureFtpd
 
     public function __construct(
         private EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     /**
      * @throws DockerErrorException
      */
     public function reload(): void
     {
-        $this->exec(["touch", "/etc/pureftpd/pureftpd.passwd"]);
-        $this->exec(["pure-pw", "mkdb"]);
+        $this->exec(['touch', '/etc/pureftpd/pureftpd.passwd']);
+        $this->exec(['pure-pw', 'mkdb']);
     }
 
     public function userExists(string $username): bool
     {
         $composeFile = $this->system->composeFilePath();
         $process = $this->system->runProcess([
-            "sudo",
-            "docker",
-            "compose",
-            "-f",
+            'sudo',
+            'docker',
+            'compose',
+            '-f',
             $composeFile,
-            "exec",
-            "-T",
-            "ftp",
-            "pure-pw",
-            "show",
+            'exec',
+            '-T',
+            'ftp',
+            'pure-pw',
+            'show',
             $username,
         ]);
 
@@ -64,25 +63,26 @@ class PureFtpd
         ?int $quota = null,
     ): void {
         $pureftpdCmd = [
-            "pure-pw",
-            "useradd",
+            'pure-pw',
+            'useradd',
             escapeshellarg($ftpUser),
-            "-m",
-            "-u",
-            escapeshellarg((string)$uid),
-            "-g",
-            escapeshellarg((string)$gid),
-            "-d",
+            '-m',
+            '-u',
+            escapeshellarg((string) $uid),
+            '-g',
+            escapeshellarg((string) $gid),
+            '-d',
             escapeshellarg($containerPath),
         ];
 
-        if ($quota) {
-            $pureftpdCmd[] = "-N";
-            $pureftpdCmd[] = escapeshellarg((string)$quota);
+        $enforcedQuota = $this->enforcedQuota($quota);
+        if ($enforcedQuota !== null) {
+            $pureftpdCmd[] = '-N';
+            $pureftpdCmd[] = escapeshellarg((string) $enforcedQuota);
         }
 
-        $this->execPasswordPipe($password, implode(" ", $pureftpdCmd));
-        $this->exec(["pure-pw", "mkdb"]);
+        $this->execPasswordPipe($password, implode(' ', $pureftpdCmd));
+        $this->exec(['pure-pw', 'mkdb']);
     }
 
     /**
@@ -91,29 +91,28 @@ class PureFtpd
     public function passwd(string $ftpUser, string $password): void
     {
         $pureftpdCmd = [
-            "pure-pw",
-            "passwd",
+            'pure-pw',
+            'passwd',
             escapeshellarg($ftpUser),
-            "-m",
+            '-m',
         ];
-        $this->execPasswordPipe($password, implode(" ", $pureftpdCmd));
+        $this->execPasswordPipe($password, implode(' ', $pureftpdCmd));
     }
 
     /**
+     * An empty value clears the quota; omitting the option keeps the old one.
+     *
      * @throws DockerErrorException
      */
     public function usermodQuota(string $ftpUser, ?int $quota): void
     {
-        /**
-         * need to pass empty string as parameter to set unlimited quota
-         */
-        $quotaValue = is_null($quota) ? '' : (string)$quota;
+        $enforcedQuota = $this->enforcedQuota($quota);
         $this->exec([
-            "pure-pw",
-            "usermod",
+            'pure-pw',
+            'usermod',
             $ftpUser,
-            "-N",
-            $quotaValue,
+            '-N',
+            $enforcedQuota === null ? '' : (string) $enforcedQuota,
         ]);
     }
 
@@ -123,29 +122,37 @@ class PureFtpd
     public function deleteUser(string $username): void
     {
         $this->exec([
-            "pure-pw",
-            "userdel",
+            'pure-pw',
+            'userdel',
             $username,
-            "-m",
+            '-m',
         ]);
     }
 
+    /** Only a positive quota is set: 0 and unlimited (any negative) set none. */
+    private function enforcedQuota(?int $quota): ?int
+    {
+        return $quota !== null && $quota > 0 ? $quota : null;
+    }
+
     /**
-     * @param list<string> $command
+     * @param  list<string>  $command
+     *
      * @throws DockerErrorException
      */
     public function exec(array $command): string
     {
         $composeFile = $this->system->composeFilePath();
+
         return $this->system->exec([
-            "sudo",
-            "docker",
-            "compose",
-            "-f",
+            'sudo',
+            'docker',
+            'compose',
+            '-f',
             $composeFile,
-            "exec",
-            "-T",
-            "ftp",
+            'exec',
+            '-T',
+            'ftp',
             ...$command,
         ]);
     }
@@ -164,7 +171,7 @@ class PureFtpd
         $composeFile = $this->system->composeFilePath();
         $this->system->exec([
             'sudo',
-            '--preserve-env=' . self::PASSWORD_ENV,
+            '--preserve-env='.self::PASSWORD_ENV,
             'docker',
             'compose',
             '-f',
@@ -176,7 +183,7 @@ class PureFtpd
             'ftp',
             '/bin/sh',
             '-c',
-            'printf \'%s\\n%s\\n\' "$' . self::PASSWORD_ENV . '" "$' . self::PASSWORD_ENV . '" | ' . $pureftpdCmd,
+            'printf \'%s\\n%s\\n\' "$'.self::PASSWORD_ENV.'" "$'.self::PASSWORD_ENV.'" | '.$pureftpdCmd,
         ], [self::PASSWORD_ENV => $password]);
     }
 }

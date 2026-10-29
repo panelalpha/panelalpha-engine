@@ -12,6 +12,8 @@ use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Strategy\DockerfileStrategy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\StagedRename;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * Apache Guacamole's shape: its own Dockerfile runs `COPY .`
@@ -71,16 +73,25 @@ class DockerfileBuildContextTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->written[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                $this->renameStaged($cmd);
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->written[$staged])) {
+                    $this->written[$target] = $this->written[$staged];
+                    unset($this->written[$staged]);
+                }
             }
         };
 

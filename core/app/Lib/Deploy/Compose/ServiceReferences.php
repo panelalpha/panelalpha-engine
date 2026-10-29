@@ -22,7 +22,7 @@ final class ServiceReferences
     private const HOST_KEY_WORDS = ['HOST', 'HOSTS', 'HOSTNAME', 'SERVER', 'SERVERS', 'ADDR', 'ADDRESS', 'ENDPOINT', 'URL', 'URI'];
 
     /**
-     * @param array<array-key, mixed> $services
+     * @param  array<array-key, mixed>  $services
      * @return list<string> the needed services' names as the file writes them
      */
     public static function needed(array $services): array
@@ -39,7 +39,7 @@ final class ServiceReferences
 
         $needed = [];
         foreach ($services as $name => $service) {
-            if (!is_array($service)) {
+            if (! is_array($service)) {
                 continue;
             }
             $names = array_flip(self::namesOf((string) $name, $service));
@@ -81,7 +81,7 @@ final class ServiceReferences
      * The names other containers reach a service by: its own, its
      * `container_name` and its network aliases.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return list<string>
      */
     private static function namesOf(string $name, array $service): array

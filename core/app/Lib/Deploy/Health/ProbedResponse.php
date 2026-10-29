@@ -24,8 +24,7 @@ final class ProbedResponse
         public readonly float $time = 0.0,
         // The path that answered, after the probe followed redirects from `/`.
         public readonly string $path = '/'
-    ) {
-    }
+    ) {}
 
     public static function none(string $url = ''): self
     {
@@ -52,7 +51,7 @@ final class ProbedResponse
      * Did the answer come from under one of these paths? Compared without
      * the query, by prefix: `/install` covers `/install/index.php`.
      *
-     * @param list<string> $prefixes
+     * @param  list<string>  $prefixes
      */
     public function landedUnder(array $prefixes): bool
     {
@@ -94,7 +93,7 @@ final class ProbedResponse
             return $this->json = null;
         }
 
-        return $this->json = is_array($decoded) && !array_is_list($decoded) ? $decoded : null;
+        return $this->json = is_array($decoded) && ! array_is_list($decoded) ? $decoded : null;
     }
 
     /** Could this body be read as a JSON object at all? */
@@ -106,7 +105,7 @@ final class ProbedResponse
     /**
      * Does the status match one of `200`, `404`, `2xx`, `5xx`?
      *
-     * @param list<int|string> $wanted
+     * @param  list<int|string>  $wanted
      */
     public function statusMatches(array $wanted): bool
     {

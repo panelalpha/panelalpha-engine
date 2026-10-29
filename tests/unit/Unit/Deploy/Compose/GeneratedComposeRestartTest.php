@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * Every compose file the engine generates must survive a restart.
@@ -44,7 +45,7 @@ class GeneratedComposeRestartTest extends TestCase
     /** The engine's own sidecars publish no port, and the app needs them up all the same. */
     public function test_the_engines_own_sidecars_get_the_default(): void
     {
-        $decision = MysqlSidecar::withSidecar(['runtime' => 'nginx'], ['connection' => 'mysql', 'host' => '127.0.0.1', 'database' => 'app', 'username' => 'app']);
+        $decision = MysqlSidecar::withSidecar(['runtime' => 'nginx'], ['connection' => 'mysql', 'host' => TestNetwork::LOOPBACK, 'database' => 'app', 'username' => 'app']);
         $compose = Yaml::parse(DeployCompose::framework($decision, 8080));
 
         $this->assertSame('unless-stopped', $compose['services']['app']['restart']);

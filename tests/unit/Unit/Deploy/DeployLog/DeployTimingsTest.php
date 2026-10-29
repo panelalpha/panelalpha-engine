@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployTimings;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Where a deploy spent its time, and whether the cache did anything.
@@ -136,7 +137,7 @@ class DeployTimingsTest extends TestCase
             ['ts' => 1128, 'msg' => '#8 DONE 77.5s'],
             ['ts' => 1128, 'msg' => '#14 [app 7/11] RUN composer install --no-dev --no-interaction'],
             ['ts' => 1137, 'msg' => '#14 DONE 8.4s'],
-            ['ts' => 1168, 'msg' => 'Health check: http://127.0.0.1:8000/ answered HTTP 200 (0.65s)'],
+            ['ts' => 1168, 'msg' => 'Health check: http://' . TestNetwork::LOOPBACK . ':8000/ answered HTTP 200 (0.65s)'],
             ['ts' => 1168, 'msg' => 'Deploy finished successfully'],
         ];
     }

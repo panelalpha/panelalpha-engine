@@ -2,7 +2,8 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
-use App\Lib\Deploy\Detect\DockerfileFinder;
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DockerfileFinder;
 
 /**
  * What may go into a source bundle, and when one may be made at all.
@@ -32,7 +33,7 @@ class SourceBundlePolicy
     /** Never capture. The default. */
     public const MODE_OFF = 'off';
 
-    /** Only failures {@see \App\Lib\Deploy\DeployLog\DeployFailureExplainer} could not name. */
+    /** Only failures {@see DeployFailureExplainer} could not name. */
     public const MODE_UNEXPLAINED = 'unexplained';
 
     /** Every failed deploy. */
@@ -47,7 +48,7 @@ class SourceBundlePolicy
      * whatever credentials ended up in `.git/config`.
      *
      * `docker` is deliberately absent — `docker/Dockerfile` is one of
-     * {@see \App\Lib\Deploy\DockerfileFinder::NESTED_CANDIDATES}
+     * {@see DockerfileFinder::NESTED_CANDIDATES}
      * and is exactly the file a failed Dockerfile build needs.
      *
      * @var list<string>
@@ -133,7 +134,7 @@ class SourceBundlePolicy
     /**
      * May this file travel?
      *
-     * @param string $relativePath forward-slashed, relative to the project root
+     * @param  string  $relativePath  forward-slashed, relative to the project root
      */
     public static function shouldInclude(string $relativePath, int $sizeBytes, int $maxFileBytes): bool
     {
@@ -155,7 +156,7 @@ class SourceBundlePolicy
             }
         }
 
-        return !self::isSensitiveBasename($basename);
+        return ! self::isSensitiveBasename($basename);
     }
 
     public static function isExcludedDirectory(string $segment): bool

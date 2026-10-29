@@ -37,12 +37,18 @@ final class TaskReconciler
 {
     public const ORPHAN_MESSAGE = DeployLogger::INTERRUPTED_MESSAGE;
 
+    public const RETIRED_ORPHANED = 'orphaned';
+
+    public const RETIRED_CANCELLED = 'cancelled';
+
     /**
      * `$olderThanSeconds` spares a task that started moments ago: it may be between
-     * `markRunning()` and its job being pushed.
+     * `markRunning()` and its job being pushed. The ids it retired come back
+     * under `cancelled` when the task's deploy log says the deploy was cancelled,
+     * and under `orphaned` otherwise.
      *
-     * @param null|callable(Task): ?bool $isPending overrides the queue check
-     * @return list<int> the ids it retired
+     * @param  null|callable(Task): ?bool  $isPending  overrides the queue check
+     * @return array{orphaned: list<int>, cancelled: list<int>}
      */
     public static function reconcile(
         bool $dryRun = false,
@@ -55,14 +61,15 @@ final class TaskReconciler
             $query->where('started_at', '<', now()->subSeconds($olderThanSeconds));
         }
 
-        $retired = [];
+        $retired = [self::RETIRED_ORPHANED => [], self::RETIRED_CANCELLED => []];
         foreach ($query->get() as $task) {
-            if (self::retire($task, $dryRun, $isPending)) {
-                $retired[] = (int) $task->id;
+            $kind = self::retire($task, $dryRun, $isPending);
+            if ($kind !== null) {
+                $retired[$kind][] = (int) $task->id;
             }
         }
 
-        if (!$dryRun) {
+        if (! $dryRun) {
             self::dropRowsOfCancelledDeadWorkers();
         }
 
@@ -70,20 +77,22 @@ final class TaskReconciler
     }
 
     /**
-     * Whether the task is to be retired; outside a dry run it is, along with a dead worker's queue row.
+     * How the task is to be retired, or null to leave it; outside a dry run it is, along with
+     * a dead worker's queue row.
      *
-     * @param null|callable(Task): ?bool $isPending
+     * @param  null|callable(Task): ?bool  $isPending
      */
-    private static function retire(Task $task, bool $dryRun, ?callable $isPending): bool
+    private static function retire(Task $task, bool $dryRun, ?callable $isPending): ?string
     {
         $latest = self::deployLogOf($task);
         $decision = self::decide($task, $latest, $isPending);
 
         if ($decision === null) {
-            return false;
+            return null;
         }
+        $kind = self::logWasCancelled($latest) ? self::RETIRED_CANCELLED : self::RETIRED_ORPHANED;
         if ($dryRun) {
-            return true;
+            return $kind;
         }
 
         self::apply($task, $decision, $latest);
@@ -91,7 +100,7 @@ final class TaskReconciler
             self::dropReservedJob($task);
         }
 
-        return true;
+        return $kind;
     }
 
     /**
@@ -123,7 +132,7 @@ final class TaskReconciler
     private static function dropReservedJob(Task $task): void
     {
         $jobId = $task->job_id;
-        if (!is_string($jobId) || $jobId === '') {
+        if (! is_string($jobId) || $jobId === '') {
             return;
         }
         $table = self::jobsTable();
@@ -138,24 +147,26 @@ final class TaskReconciler
                 app('queue.failer')->log('database', $queue, (string) $row->payload, new \RuntimeException(self::ORPHAN_MESSAGE));
             }
         } catch (\Throwable $e) {
-            Log::warning('Could not drop the queue row of retired task ' . $task->id . ': ' . $e->getMessage());
+            Log::warning('Could not drop the queue row of retired task '.$task->id.': '.$e->getMessage());
         }
     }
 
     /**
      * The status this task should have, or null to leave it running. A deploy log's
-     * terminal status is the work's own verdict and is adopted whatever the queue says.
+     * terminal status is the work's own verdict and is adopted whatever the queue says;
+     * a cancelled log cancels the task, as the job would once it stopped.
      * Otherwise a dead worker's task is cancelled, and so is one whose job left the queue
      * with nothing finishing it; a pending job, or a queue that cannot tell (null), is left alone.
      *
-     * @param array<string, mixed>|null $latest the deploy log, when one is readable
-     * @param null|callable(Task): ?bool $isPending
+     * @param  array<string, mixed>|null  $latest  the deploy log, when one is readable
+     * @param  null|callable(Task): ?bool  $isPending
      */
     public static function decide(Task $task, ?array $latest, ?callable $isPending = null): ?string
     {
         if ($latest !== null && ($latest['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
             return match ($latest['status']) {
                 DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL => Task::STATUS_COMPLETED,
+                DeployLogger::STATUS_CANCELLED => Task::STATUS_CANCELLED,
                 default => Task::STATUS_FAILED,
             };
         }
@@ -173,7 +184,7 @@ final class TaskReconciler
      * A child the dead worker started may still hold its deploy's lock; the log is closed
      * with a verdict once that ends.
      *
-     * @param array<string, mixed>|null $latest
+     * @param  array<string, mixed>|null  $latest
      */
     private static function childHoldsTheDeployLock(Task $task, ?array $latest): bool
     {
@@ -181,14 +192,14 @@ final class TaskReconciler
     }
 
     /**
-     * @param array<string, mixed>|null $latest
+     * @param  array<string, mixed>|null  $latest
      */
     private static function apply(Task $task, string $status, ?array $latest): void
     {
         if ($status === Task::STATUS_COMPLETED) {
             $task->markCompleted();
-            Log::warning('Task ' . $task->id . ' for ' . $task->username
-                . ' was reconciled to completed from its deploy log.');
+            Log::warning('Task '.$task->id.' for '.$task->username
+                .' was reconciled to completed from its deploy log.');
 
             return;
         }
@@ -199,11 +210,32 @@ final class TaskReconciler
             return;
         }
 
+        if (self::logWasCancelled($latest)) {
+            self::cancelAsTheLogWas($task);
+
+            return;
+        }
+
         self::retireWithoutVerdict($task);
     }
 
     /**
-     * @param array<string, mixed>|null $latest
+     * @param  array<string, mixed>|null  $latest
+     */
+    private static function logWasCancelled(?array $latest): bool
+    {
+        return ($latest['status'] ?? null) === DeployLogger::STATUS_CANCELLED;
+    }
+
+    private static function cancelAsTheLogWas(Task $task): void
+    {
+        $task->markCancelled();
+        Log::warning('Task '.$task->id.' for '.$task->username
+            .' was reconciled to cancelled from its deploy log.');
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $latest
      */
     private static function failWithTheLogsReason(Task $task, ?array $latest): void
     {
@@ -219,8 +251,8 @@ final class TaskReconciler
     {
         $task->details = array_merge($task->details ?? [], ['reconciled' => self::ORPHAN_MESSAGE]);
         $task->markCancelled();
-        Log::warning('Task ' . $task->id . ' for ' . $task->username
-            . ' was retired: its job is no longer in the queue and nothing finished it.');
+        Log::warning('Task '.$task->id.' for '.$task->username
+            .' was retired: its job is no longer in the queue and nothing finished it.');
     }
 
     /**
@@ -232,11 +264,11 @@ final class TaskReconciler
     public static function workerGone(Task $task): bool
     {
         $worker = $task->details[Task::WORKER] ?? null;
-        if (!is_array($worker) || !is_int($worker['pid'] ?? null) || !is_string($worker['start'] ?? null)) {
+        if (! is_array($worker) || ! is_int($worker['pid'] ?? null) || ! is_string($worker['start'] ?? null)) {
             return false;
         }
 
-        return !ProcessIdentity::isStillRunning($worker['pid'], $worker['start']);
+        return ! ProcessIdentity::isStillRunning($worker['pid'], $worker['start']);
     }
 
     /**
@@ -249,8 +281,8 @@ final class TaskReconciler
      * deletes it when the job finishes or fails. The uuid is a field inside
      * the payload, so it is matched by decoding. {@see membersCarryJob()}
      *
-     * @param null|callable(string): iterable<mixed> $payloads
-     *        overrides the table read, so the check itself is testable
+     * @param  null|callable(string): iterable<mixed>  $payloads
+     *                                                            overrides the table read, so the check itself is testable
      * @return callable(Task): ?bool
      */
     public static function queueCheck(?callable $payloads = null): callable
@@ -262,12 +294,12 @@ final class TaskReconciler
      * Null when the task never recorded a job uuid (a job that died before a worker took it)
      * or the queue cannot be read. The queue is read whole, which its depth bounds.
      *
-     * @param null|callable(string): iterable<mixed> $payloads
+     * @param  null|callable(string): iterable<mixed>  $payloads
      */
     private static function isQueued(Task $task, ?callable $payloads): ?bool
     {
         $jobId = $task->job_id;
-        if (!is_string($jobId) || $jobId === '') {
+        if (! is_string($jobId) || $jobId === '') {
             return null;
         }
 
@@ -285,7 +317,7 @@ final class TaskReconciler
 
             return self::membersCarryJob($members, $jobId);
         } catch (\Throwable $e) {
-            Log::warning('Could not read the queue to reconcile task ' . $task->id . ': ' . $e->getMessage());
+            Log::warning('Could not read the queue to reconcile task '.$task->id.': '.$e->getMessage());
 
             return null;
         }
@@ -304,7 +336,7 @@ final class TaskReconciler
     /**
      * Whether any serialised queue member is the given job.
      *
-     * @param array<int, mixed> $members raw ZSET or list members
+     * @param  array<int, mixed>  $members  raw ZSET or list members
      */
     public static function membersCarryJob(array $members, string $jobId): bool
     {
@@ -327,7 +359,7 @@ final class TaskReconciler
     private static function memberUuid(string $member): ?string
     {
         $decoded = json_decode($member, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return null;
         }
 
@@ -353,17 +385,17 @@ final class TaskReconciler
      */
     public static function deployLogOf(Task $task): ?array
     {
-        if (!$task->isDeploy()) {
+        if (! $task->isDeploy()) {
             return null;
         }
 
         $username = $task->username;
-        if (!is_string($username) || $username === '') {
+        if (! is_string($username) || $username === '') {
             return null;
         }
 
         $latest = self::readLatestLog($username);
-        if (!is_array($latest)) {
+        if (! is_array($latest)) {
             return null;
         }
 
@@ -383,7 +415,7 @@ final class TaskReconciler
         try {
             return DeployLogger::readLatestFor($username);
         } catch (\Throwable $e) {
-            Log::warning('Could not read the deploy log for ' . $username . ': ' . $e->getMessage());
+            Log::warning('Could not read the deploy log for '.$username.': '.$e->getMessage());
 
             return null;
         }
@@ -393,7 +425,7 @@ final class TaskReconciler
      * A log started well before the task did belongs to an earlier deploy. The minute
      * of slack absorbs clock and ordering jitter.
      *
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      */
     private static function startedBeforeTheTask(Task $task, array $latest): bool
     {

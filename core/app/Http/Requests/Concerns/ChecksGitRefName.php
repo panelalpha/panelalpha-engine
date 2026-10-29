@@ -12,7 +12,7 @@ trait ChecksGitRefName
     {
         $validator->after(function (Validator $validator) use ($field): void {
             $name = $validator->getData()[$field] ?? null;
-            if (is_string($name) && $name !== '' && !GitRef::isValidName($name)) {
+            if (is_string($name) && $name !== '' && ! GitRef::isValidName($name)) {
                 $validator->errors()->add($field, 'Invalid git ref name.');
             }
         });

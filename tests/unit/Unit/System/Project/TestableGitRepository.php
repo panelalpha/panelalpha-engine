@@ -19,8 +19,12 @@ final class TestableGitRepository extends GitRepository
         Dind $project,
         $execute,
         ?string $relativePath = null,
+        ?string $absolutePathOverride = null,
     ) {
         parent::__construct($project, $relativePath);
         $this->execute = $execute;
+        if ($absolutePathOverride !== null) {
+            $this->absolutePath = $absolutePathOverride;
+        }
     }
 }

@@ -114,31 +114,30 @@ class PrewarmSection implements Section
         $rank = array_flip(array_values(array_unique(array_column($items, 'runtime'))));
         $position = array_flip(array_column($items, 'id'));
 
-        usort($items, static fn (array $a, array $b): int
-            => [$rank[$a['runtime']], $position[$a['id']]] <=> [$rank[$b['runtime']], $position[$b['id']]]);
+        usort($items, static fn (array $a, array $b): int => [$rank[$a['runtime']], $position[$a['id']]] <=> [$rank[$b['runtime']], $position[$b['id']]]);
 
         return $items;
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $current
-     * @param array{images: list<string>, budget: string, reserve: string} $next
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $current
+     * @param  array{images: list<string>, budget: string, reserve: string}  $next
      */
     private function header(array $catalog, array $current, array $next): void
     {
-        $lines = ['Now:         ' . $this->summary($catalog, $current)];
+        $lines = ['Now:         '.$this->summary($catalog, $current)];
 
-        if (!$this->same($current, $next)) {
-            $lines[] = 'Your change: ' . $this->summary($catalog, $next) . '  (unsaved)';
+        if (! $this->same($current, $next)) {
+            $lines[] = 'Your change: '.$this->summary($catalog, $next).'  (unsaved)';
         }
 
         Screen::draw(self::label(), implode("\n", $lines));
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $state
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $state
      */
     private function summary(array $catalog, array $state): string
     {
@@ -152,15 +151,15 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $current
-     * @param array{images: list<string>, budget: string, reserve: string} $next
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $current
+     * @param  array{images: list<string>, budget: string, reserve: string}  $next
      */
     private function menu(array $catalog, array $current, array $next, bool $dryRun): string
     {
         $this->header($catalog, $current, $next);
 
-        $changed = !$this->same($current, $next);
+        $changed = ! $this->same($current, $next);
         $options = [
             'images' => sprintf('%-10s %d of %d selected', 'Images', $this->selectedCount($catalog, $next['images']), count($catalog)),
         ];
@@ -171,7 +170,7 @@ class PrewarmSection implements Section
         $options['reserve'] = sprintf('%-10s %s', 'Reserve', $this->describe('reserve', $next['reserve']));
         $options['save'] = match (true) {
             $dryRun => 'Review it — this is a dry run, so nothing will be written',
-            !$changed => 'Review and save — nothing has changed yet',
+            ! $changed => 'Review and save — nothing has changed yet',
             default => 'Review and save',
         };
         $options['back'] = $changed ? 'Back, throwing these changes away' : 'Back';
@@ -189,9 +188,9 @@ class PrewarmSection implements Section
      * One checkbox per image. Selected ids the catalogue no longer has are
      * kept, so an image someone chose comes back if a release restores it.
      *
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $current
-     * @param array{images: list<string>, budget: string, reserve: string} $next
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $current
+     * @param  array{images: list<string>, budget: string, reserve: string}  $next
      * @return list<string>
      */
     private function pickImages(array $catalog, array $current, array $next): array
@@ -208,7 +207,7 @@ class PrewarmSection implements Section
         $width = max(array_map('strlen', array_column($catalog, 'id')));
         $options = [];
         foreach ($catalog as $item) {
-            $options[$item['id']] = sprintf('%-' . $width . 's  %-5s  %s', $item['id'], $item['kind'], $item['why']);
+            $options[$item['id']] = sprintf('%-'.$width.'s  %-5s  %s', $item['id'], $item['kind'], $item['why']);
         }
 
         $known = array_keys($options);
@@ -224,9 +223,9 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $current
-     * @param array{images: list<string>, budget: string, reserve: string} $next
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $current
+     * @param  array{images: list<string>, budget: string, reserve: string}  $next
      */
     private function askSize(array $catalog, array $current, array $next, string $which): string
     {
@@ -239,7 +238,7 @@ class PrewarmSection implements Section
         return trim(text(
             label: ucfirst($which),
             default: $next[$which],
-            placeholder: 'empty = ' . $this->shipped($which) . ' from images.yaml',
+            placeholder: 'empty = '.$this->shipped($which).' from images.yaml',
             validate: fn (string $v): ?string => $this->badSize($which, $v),
         ));
     }
@@ -270,7 +269,7 @@ class PrewarmSection implements Section
 
     private function describe(string $which, string $value): string
     {
-        return $value !== '' ? $value : $this->shipped($which) . ' (images.yaml default)';
+        return $value !== '' ? $value : $this->shipped($which).' (images.yaml default)';
     }
 
     private function shipped(string $which): string
@@ -286,9 +285,9 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param array{images: list<string>, budget: string, reserve: string} $current
-     * @param array{images: list<string>, budget: string, reserve: string} $next
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  array{images: list<string>, budget: string, reserve: string}  $current
+     * @param  array{images: list<string>, budget: string, reserve: string}  $next
      * @return int|null an exit code when done, or null to go back to the menu
      */
     private function save(array $catalog, array $current, array $next, bool $dryRun): ?int
@@ -297,16 +296,16 @@ class PrewarmSection implements Section
 
         $lines = $this->envLines($next);
         note(implode("\n", array_map(
-            static fn (string $key, string $value): string => $key . '=' . $value,
+            static fn (string $key, string $value): string => $key.'='.$value,
             array_keys($lines),
             $lines
         )));
 
         if ($dryRun) {
             note('Nothing was written: this was a dry run. Drop --dry-run to apply it.', 'warning');
-            $this->receipt = ['A dry run of ' . self::key() . ' would have written:'];
+            $this->receipt = ['A dry run of '.self::key().' would have written:'];
             foreach ($lines as $key => $value) {
-                $this->receipt[] = $key . '=' . $value;
+                $this->receipt[] = $key.'='.$value;
             }
             pause('Press enter to carry on...');
 
@@ -321,7 +320,7 @@ class PrewarmSection implements Section
         }
 
         $env = EnvFile::current();
-        if (!confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
+        if (! confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
             note('Nothing was written. Your changes are still here.', 'warning');
             pause('Press enter to carry on...');
 
@@ -343,7 +342,7 @@ class PrewarmSection implements Section
             'deploy.prewarm_reserve' => $next['reserve'],
         ]);
 
-        $this->receipt = ['Prewarm: ' . $this->summary($catalog, $next) . '.'];
+        $this->receipt = ['Prewarm: '.$this->summary($catalog, $next).'.'];
         note($this->receipt[0], 'info');
 
         if (app()->configurationIsCached()) {
@@ -352,8 +351,8 @@ class PrewarmSection implements Section
 
         note(
             "Takes effect on the next prewarm: weekly, Sunday 03:30, or now with `pae system:image:prewarm`.\n"
-            . "An image you deselected is not deleted now. The daily `system:image:prune` removes it from the host\n"
-            . 'once no deploy has used it for DEPLOY_HOST_IMAGE_RETENTION, and the weekly prewarm drops it from the cache registry.',
+            ."An image you deselected is not deleted now. The daily `system:image:prune` removes it from the host\n"
+            .'once no deploy has used it for DEPLOY_HOST_IMAGE_RETENTION, and the weekly prewarm drops it from the cache registry.',
             'warning'
         );
         pause('Press enter to carry on...');
@@ -362,7 +361,7 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param array{images: list<string>, budget: string, reserve: string} $state
+     * @param  array{images: list<string>, budget: string, reserve: string}  $state
      * @return array<string, string>
      */
     private function envLines(array $state): array
@@ -375,8 +374,8 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param list<array<string, mixed>> $catalog
-     * @param list<string> $selected
+     * @param  list<array<string, mixed>>  $catalog
+     * @param  list<string>  $selected
      */
     private function selectedCount(array $catalog, array $selected): int
     {
@@ -386,8 +385,8 @@ class PrewarmSection implements Section
     }
 
     /**
-     * @param array{images: list<string>, budget: string, reserve: string} $a
-     * @param array{images: list<string>, budget: string, reserve: string} $b
+     * @param  array{images: list<string>, budget: string, reserve: string}  $a
+     * @param  array{images: list<string>, budget: string, reserve: string}  $b
      */
     private function same(array $a, array $b): bool
     {

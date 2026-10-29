@@ -2,13 +2,12 @@
 
 namespace App\Console\Commands\Stats;
 
-use Illuminate\Console\Command;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
-
 use App\Integrations\Statistics\Statistics;
 use App\Models\Domain;
 use App\System;
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 
 class StatsUpdateCommand extends Command
 {
@@ -21,7 +20,7 @@ class StatsUpdateCommand extends Command
     public function handle(System $system, Statistics $stats): int
     {
         $lock = fopen($this->lockPath(), 'c');
-        if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+        if ($lock === false || ! flock($lock, LOCK_EX | LOCK_NB)) {
             $this->warn('stats:update is already running.');
             if (is_resource($lock)) {
                 fclose($lock);
@@ -33,13 +32,13 @@ class StatsUpdateCommand extends Command
         $failed = 0;
         try {
             $webserver = $system->webserver()->getCurrentWebserver();
-            $logsRoot = $system->engineDirPath() . '/webserver-logs/' . $webserver;
+            $logsRoot = $system->engineDirPath().'/webserver-logs/'.$webserver;
             foreach ($this->candidateDomains() as $domain) {
                 // One domain that cannot be written must not cost every domain after it its day.
                 try {
                     $stats->ingestDomain(
                         $domain->domain,
-                        $logsRoot . '/' . $domain->domain,
+                        $logsRoot.'/'.$domain->domain,
                         $domain->getAliases(),
                     );
                 } catch (\Throwable $e) {
@@ -78,10 +77,10 @@ class StatsUpdateCommand extends Command
     private function lockPath(): string
     {
         $dir = storage_path('app');
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             mkdir($dir, 0775, true);
         }
 
-        return $dir . '/stats-update.lock';
+        return $dir.'/stats-update.lock';
     }
 }

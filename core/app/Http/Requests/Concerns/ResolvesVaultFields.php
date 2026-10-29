@@ -4,9 +4,10 @@ namespace App\Http\Requests\Concerns;
 
 use App\Lib\Vault\RequestVault;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 
 /**
- * Read a `vault:<id>` in place of a secret field, typed by the field's own name
+ * Read a `vault:<key>` in place of a secret field, typed by the field's own name
  * as `git_token` and `env_vars` are. An unusable reference is a 422 naming the field.
  */
 trait ResolvesVaultFields
@@ -15,7 +16,7 @@ trait ResolvesVaultFields
      * Call from prepareForValidation(), so the rules (a min:8, say) see the
      * secret rather than the reference.
      *
-     * @param list<string> $fields
+     * @param  list<string>  $fields
      */
     protected function resolveVaultFields(array $fields): void
     {
@@ -24,13 +25,13 @@ trait ResolvesVaultFields
             return;
         }
 
-        $project = $this->existingProject();
+        $project = $this->routeProjectOr404();
         foreach ($references as $field) {
             $this->merge([$field => RequestVault::resolve($field, $this->input($field), $project)]);
         }
     }
 
-    /** Whether a field's value, or any item of an array field, is a `vault:<id>`. */
+    /** Whether a field's value, or any item of an array field, is a `vault:<key>`. */
     private static function holdsReference(mixed $value): bool
     {
         $values = is_array($value) ? $value : [$value];
@@ -39,16 +40,19 @@ trait ResolvesVaultFields
     }
 
     /**
-     * The route's project when it exists. A name that does not is read as no
-     * project, so a typo cannot claim an unassigned entry before the 404.
+     * The route's project. A name that does not exist is the route's 404 before any
+     * reference is read, so a typo neither claims an entry nor counts as a use of it.
      */
-    private function existingProject(): ?string
+    private function routeProjectOr404(): ?string
     {
         $project = $this->route('username');
-        if (!is_string($project) || $project === '') {
+        if (! is_string($project) || $project === '') {
             return null;
         }
+        if (! User::existsByUsername($project)) {
+            abort(new JsonResponse(['message' => 'Project not found'], 404));
+        }
 
-        return User::existsByUsername($project) ? $project : null;
+        return $project;
     }
 }

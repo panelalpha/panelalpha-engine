@@ -10,19 +10,20 @@ use App\Http\Resources\DomainCollection;
 use App\Http\Resources\DomainResource;
 use App\Http\Resources\SslCertificateCollection;
 use App\Http\Resources\SslCertificateResource;
-use App\System;
 use App\Lib\Domains\NewDomain;
 use App\Lib\Mail\MailDnsRecords;
 use App\Lib\Ssl\ProjectCertificate;
+use App\Lib\Ssl\SslCheck;
 use App\Models\Domain;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class DomainController extends Controller
@@ -41,7 +42,7 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return DomainCollection
      */
     public function index($username, Request $request)
@@ -67,7 +68,7 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return SslCertificateCollection
      */
     public function indexInstalledSslCerts($username)
@@ -100,8 +101,8 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return SslCertificateResource
      */
     public function installedSslCert($username, $domain)
@@ -109,7 +110,7 @@ class DomainController extends Controller
         $user = $this->projectOr404($username);
 
         $domain = $this->domainOr404($user, $domain);
-        if (!$domain->projectDomain()->hasSslCertificate()) {
+        if (! $domain->projectDomain()->hasSslCertificate()) {
             abort(new JsonResponse([
                 'message' => 'SSL certificate not found',
             ], 404));
@@ -117,6 +118,32 @@ class DomainController extends Controller
         $cert = $domain->projectDomain()->getSslCertificateInfo();
 
         return new SslCertificateResource($cert);
+    }
+
+    #[OA\Get(
+        path: '/projects/{username}/domains/{domain}/ssl-check',
+        summary: 'Check the certificate a domain really serves',
+        description: 'Connects to the domain over TLS, with the domain as SNI, and reads the certificate it presents: once at the address its DNS gives (public, what a visitor gets) and once at the address this project\'s webserver listens on (engine, what this host serves). status is the public verdict: trusted, self_signed, untrusted_issuer, expired, not_yet_valid, domain_mismatch or unreadable, else not_resolving, refused_address or unreachable. engine.serves_installed is false when the webserver serves something other than the installed certificate, for example after a renewal it has not reloaded.',
+        security: [['bearerAuth' => []]],
+        tags: ['SSL Certificates'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'What the domain serves', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/SslCheck')],
+            )),
+            new OA\Response(response: 404, description: 'Project or domain not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function sslCheck(string $username, string $domain): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        $model = $this->domainOr404($user, $domain);
+
+        return new JsonResponse(['data' => (new SslCheck)->forDomain($model)]);
     }
 
     #[OA\Get(
@@ -134,8 +161,8 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return DomainResource
      */
     public function show($username, $domain)
@@ -151,9 +178,9 @@ class DomainController extends Controller
         path: '/projects/{username}/domains/{domain}/mail-dns',
         summary: 'List and check the mail DNS records of a domain',
         description: 'The SPF, DKIM, DMARC and MX records mail sent from this domain through this host needs. '
-            . 'With a relay sender domain set, mail is sent as that domain, and the records are its. '
-            . 'With check=1 each record is looked up and gets a status: ok, missing, wrong or unknown. '
-            . 'The engine does not sign mail; DKIM comes from a relay, whose selector dkim_selector checks.',
+            .'With a relay sender domain set, mail is sent as that domain, and the records are its. '
+            .'With check=1 each record is looked up and gets a status: ok, missing, wrong or unknown. '
+            .'The engine does not sign mail; DKIM comes from a relay, whose selector dkim_selector checks.',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -244,7 +271,7 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return DomainResource
      */
     public function store($username, DomainStoreRequest $request)
@@ -272,7 +299,7 @@ class DomainController extends Controller
             'user_id' => $user->id,
             'domain' => $params['domain'],
             'type' => $params['type'],
-            'details' => NewDomain::details($params['domain'], !empty($params['no_ssl']), $params['aliases'], self::parentOf($params)),
+            'details' => NewDomain::details($params['domain'], ! empty($params['no_ssl']), $params['aliases'], self::parentOf($params)),
         ]);
 
         try {
@@ -313,8 +340,8 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return DomainResource
      */
     public function update($username, $domain, DomainUpdateRequest $request)
@@ -350,7 +377,7 @@ class DomainController extends Controller
         $domain->projectDomain()->rebuild();
         $reloaded = (new System)->reloadWebserver();
 
-        return (new DomainResource($domain))->additional(['reload_pending' => !$reloaded]);
+        return (new DomainResource($domain))->additional(['reload_pending' => ! $reloaded]);
     }
 
     #[OA\Delete(
@@ -370,8 +397,8 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return DomainResource
      */
     public function destroy($username, $domain)
@@ -403,12 +430,12 @@ class DomainController extends Controller
     #[OA\Post(
         path: '/projects/{username}/domains/{domain}/request-ssl-cert',
         summary: "Request a Let's Encrypt certificate for a domain",
-        description: "Obtains a certificate for the domain from an ACME authority over HTTP-01 and "
-            . "installs it, then re-renders the vhost so the site serves it. The challenge is served "
-            . "by the running webserver, so nothing goes offline. The name must already resolve to "
-            . "this host. Use install-ssl-cert instead when you already hold a certificate.",
+        description: 'Obtains a certificate for the domain from an ACME authority over HTTP-01 and '
+            .'installs it, then re-renders the vhost so the site serves it. The challenge is served '
+            .'by the running webserver, so nothing goes offline. The name must already resolve to '
+            .'this host. Use install-ssl-cert instead when you already hold a certificate.',
         x: ['mcp-description' => "Gets and installs a Let's Encrypt certificate over HTTP-01, without downtime. "
-            . 'The domain must already resolve to this host.'],
+            .'The domain must already resolve to this host.'],
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -421,18 +448,18 @@ class DomainController extends Controller
                     property: 'staging',
                     type: 'boolean',
                     description: "Use Let's Encrypt's staging authority: the certificate is untrusted "
-                        . 'by browsers but spends no production rate limit. For rehearsing a request.',
+                        .'by browsers but spends no production rate limit. For rehearsing a request.',
                     x: ['mcp-description' => 'Untrusted test certificate; spends no rate limit.']
                 ),
                 new OA\Property(
                     property: 'dry_run',
                     type: 'boolean',
                     description: 'Report what would be requested and whether the name is eligible, '
-                        . 'without contacting the authority. This checks only that the name is '
-                        . 'publicly issuable and the shared-zone rule; it does not resolve DNS, so a '
-                        . 'name with no A/AAAA record, or one pointing elsewhere, still reports '
-                        . 'ineligible_reason: null and then fails HTTP-01. Confirm the name resolves '
-                        . 'to this host before requesting.',
+                        .'without contacting the authority. This checks only that the name is '
+                        .'publicly issuable and the shared-zone rule; it does not resolve DNS, so a '
+                        .'name with no A/AAAA record, or one pointing elsewhere, still reports '
+                        .'ineligible_reason: null and then fails HTTP-01. Confirm the name resolves '
+                        .'to this host before requesting.',
                     x: ['mcp-description' => 'Check eligibility only (issuable name, shared zone); does NOT verify DNS. A name that does not resolve to this host still reports no reason here.']
                 ),
             ],
@@ -451,7 +478,7 @@ class DomainController extends Controller
 
         /** @var ?Domain $model */
         $model = $user->domains()->getQuery()->where('domain', $domain)->first();
-        if (!$model) {
+        if (! $model) {
             return new JsonResponse(['message' => 'Domain not found'], 404);
         }
 
@@ -462,7 +489,7 @@ class DomainController extends Controller
         ]);
         $staging = (bool) ($params['staging'] ?? false);
 
-        if (!empty($params['dry_run'])) {
+        if (! empty($params['dry_run'])) {
             return new JsonResponse(['data' => ProjectCertificate::plan($model, $staging)]);
         }
 
@@ -482,7 +509,7 @@ class DomainController extends Controller
     private function certificateRefused(Domain $model, \Throwable $e): JsonResponse
     {
         return new JsonResponse([
-            'message' => "Could not obtain a certificate for {$model->domain}: " . $e->getMessage(),
+            'message' => "Could not obtain a certificate for {$model->domain}: ".$e->getMessage(),
         ], 422);
     }
 
@@ -499,7 +526,7 @@ class DomainController extends Controller
             required: ['cert', 'key'],
             properties: [
                 new OA\Property(property: 'cert', type: 'string', description: 'PEM-encoded certificate'),
-                new OA\Property(property: 'key', type: 'string', description: 'PEM-encoded private key'),
+                new OA\Property(property: 'key', type: 'string', description: 'PEM-encoded private key, or a `vault:<key>` from vault_secret_create (type `key`) holding it'),
                 new OA\Property(property: 'ca', type: 'string', description: 'PEM-encoded CA bundle', nullable: true),
             ],
         )),
@@ -510,8 +537,8 @@ class DomainController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $domain
+     * @param  string  $username
+     * @param  string  $domain
      * @return DomainResource
      */
     public function installSslCert($username, $domain, DomainInstallSslCertRequest $request)
@@ -539,7 +566,7 @@ class DomainController extends Controller
         $hosted->putCertificate($params['cert'], $params['key'], $params['ca'] ?? '');
 
         $user->project()->reloadWebserver();
-        (new System())->webserver()->reload();
+        (new System)->webserver()->reload();
 
         return new DomainResource($domain);
     }
@@ -548,7 +575,7 @@ class DomainController extends Controller
     {
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $name)->first();
-        if (!$domain) {
+        if (! $domain) {
             abort(new JsonResponse([
                 'message' => 'Domain not found',
             ], 404));
@@ -568,7 +595,8 @@ class DomainController extends Controller
     }
 
     /**
-     * @param array<string> $aliases
+     * @param  array<string>  $aliases
+     *
      * @throws ValidationException
      */
     private function refuseNameProblem(string $name, array $aliases): void
@@ -593,7 +621,8 @@ class DomainController extends Controller
     /**
      * Creates an addon domain, or a subdomain of one of the project's own domains, on the host.
      *
-     * @param array{domain: string, type: string, parent_domain?: ?string} $params
+     * @param  array{domain: string, type: string, parent_domain?: ?string}  $params
+     *
      * @throws ValidationException
      */
     private function createOnHost(Domain $domain, User $user, array $params): void
@@ -614,7 +643,8 @@ class DomainController extends Controller
     }
 
     /**
-     * @param array{domain: string, parent_domain?: ?string} $params
+     * @param  array{domain: string, parent_domain?: ?string}  $params
+     *
      * @throws ValidationException
      */
     private function assertParentDomain(User $user, array $params): void
@@ -624,12 +654,12 @@ class DomainController extends Controller
                 'parent_domain' => 'Invalid value.',
             ]);
         }
-        if (!$user->domains()->getQuery()->where('domain', $params['parent_domain'])->exists()) {
+        if (! $user->domains()->getQuery()->where('domain', $params['parent_domain'])->exists()) {
             throw ValidationException::withMessages([
                 'parent_domain' => 'Invalid value.',
             ]);
         }
-        if (!Str::endsWith($params['domain'], $params['parent_domain'])) {
+        if (! Str::endsWith($params['domain'], $params['parent_domain'])) {
             throw ValidationException::withMessages([
                 'domain' => 'Invalid value.',
             ]);
@@ -637,12 +667,13 @@ class DomainController extends Controller
     }
 
     /**
-     * @param array{redirect_enabled?: bool, redirect_url?: ?string} $params
+     * @param  array{redirect_enabled?: bool, redirect_url?: ?string}  $params
+     *
      * @throws ValidationException when enabling a redirect with no URL sent or stored
      */
     private function applyRedirect(Domain $domain, array $params): void
     {
-        if (array_key_exists('redirect_enabled', $params) && !$params['redirect_enabled'] && $domain->redirectEnabled()) {
+        if (array_key_exists('redirect_enabled', $params) && ! $params['redirect_enabled'] && $domain->redirectEnabled()) {
             $domain->disableRedirect();
         }
 
@@ -662,7 +693,8 @@ class DomainController extends Controller
     /**
      * A present `aliases` key is the new list, so `[]` removes them all; an absent key leaves them alone.
      *
-     * @param array{aliases?: ?array<mixed>} $params
+     * @param  array{aliases?: ?array<mixed>}  $params
+     *
      * @throws ValidationException
      */
     private function replaceAliases(Domain $domain, array $params): void
@@ -683,12 +715,12 @@ class DomainController extends Controller
      */
     private function assertAliasAvailable(Domain $domain, mixed $alias): void
     {
-        if (!is_string($alias) || !filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        if (! is_string($alias) || ! filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
             throw ValidationException::withMessages([
-                'aliases' => 'Invalid alias domain name.'
+                'aliases' => 'Invalid alias domain name.',
             ]);
         }
-        if (!$domain->isAliasAvailable($alias)) {
+        if (! $domain->isAliasAvailable($alias)) {
             throw ValidationException::withMessages([
                 'aliases' => "Domain alias {$alias} is not available",
             ]);

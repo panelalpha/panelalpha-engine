@@ -20,7 +20,7 @@ class TunnelResource extends JsonResource
             'provider' => $tunnel->provider,
             'purpose' => $tunnel->purpose(),
             'domain' => $tunnel->domain?->domain,
-            'url' => 'https://' . $tunnel->hostname . '/',
+            'url' => 'https://'.$tunnel->hostname.'/',
             'valid_until' => $tunnel->expiresAt()?->toIso8601String(),
             'details' => $tunnel->getDetails(),
             'created_at' => $tunnel->created_at?->toIso8601String(),

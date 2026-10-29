@@ -2,10 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-
-use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
 
 class BackupContainerStoreRequest extends FormRequest
 {

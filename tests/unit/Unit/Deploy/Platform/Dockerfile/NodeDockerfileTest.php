@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\Dockerfile\BuildRecipe;
 use App\Lib\Deploy\Platform\Dockerfile\NodeDockerfile;
 use App\Lib\Deploy\Platform\Dockerfile\NodeBaseImage;
 use App\Lib\Deploy\Platform\Dockerfile\StaticSiteDockerfile;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -56,8 +57,8 @@ class NodeDockerfileTest extends TestCase
         $dockerfile = $this->node([]);
 
         $this->assertStringContainsString('ENV NODE_ENV=production', $dockerfile);
-        $this->assertStringContainsString('ENV HOST=0.0.0.0', $dockerfile);
-        $this->assertStringContainsString('ENV HOSTNAME=0.0.0.0', $dockerfile);
+        $this->assertStringContainsString('ENV HOST=' . TestNetwork::ANY, $dockerfile);
+        $this->assertStringContainsString('ENV HOSTNAME=' . TestNetwork::ANY, $dockerfile);
         $this->assertStringContainsString('ENV PORT=3000', $dockerfile);
         $this->assertStringContainsString('EXPOSE 3000', $dockerfile);
     }

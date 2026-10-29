@@ -10,6 +10,7 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * PHP Server Monitor without config.php: a suppressed fatal ends every request
@@ -27,7 +28,7 @@ class BlankPageCheckTest extends TestCase
     /** @return array{serving: string, checks: list<array<string, mixed>>} */
     private static function probe(string $runtime, int $status, string $body): array
     {
-        $front = new ProbedResponse($status, $body, 'http://127.0.0.1:8000/');
+        $front = new ProbedResponse($status, $body, 'http://'.TestNetwork::LOOPBACK.':8000/');
         $verdict = AppHealth::checkRunnerFor([AppHealth::DETAIL_RUNTIME => $runtime])
             ->runByPath(['/' => $front], sys_get_temp_dir());
 
@@ -140,7 +141,7 @@ class BlankPageCheckTest extends TestCase
         $this->assertNull(self::blank(AppHealth::withBlankPageCheck(
             ['serving' => CheckRunner::SERVING_UNKNOWN, 'checks' => []],
             PlatformManifest::RUNTIME_NODE,
-            ProbedResponse::none('http://127.0.0.1:8000/')
+            ProbedResponse::none('http://'.TestNetwork::LOOPBACK.':8000/')
         )));
     }
 
@@ -152,7 +153,7 @@ class BlankPageCheckTest extends TestCase
             'severity' => HealthCheck::SEVERITY_ERROR,
         ]]];
 
-        $report = AppHealth::withBlankPageCheck($verdict, PlatformManifest::RUNTIME_PHP, new ProbedResponse(200, '', 'http://127.0.0.1:8000/'));
+        $report = AppHealth::withBlankPageCheck($verdict, PlatformManifest::RUNTIME_PHP, new ProbedResponse(200, '', 'http://'.TestNetwork::LOOPBACK.':8000/'));
 
         $this->assertSame('php_error', $report['serving']);
         $this->assertNotNull(self::blank($report));

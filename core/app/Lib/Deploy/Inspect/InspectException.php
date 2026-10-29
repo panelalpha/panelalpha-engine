@@ -31,7 +31,7 @@ class InspectException extends \RuntimeException
     {
         return $this->problem ?? [
             'field' => $field,
-            'code' => $field . '_' . $code,
+            'code' => $field.'_'.$code,
             'message' => $this->getMessage(),
         ];
     }

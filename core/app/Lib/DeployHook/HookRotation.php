@@ -13,6 +13,5 @@ final class HookRotation
     public function __construct(
         public readonly DeployHook $hook,
         public readonly string $secret,
-    ) {
-    }
+    ) {}
 }

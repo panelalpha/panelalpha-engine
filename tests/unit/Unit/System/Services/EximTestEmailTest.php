@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Services;
 use App\System;
 use App\System\Services\Exim;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** The test address is written into the To: header; a line break there adds headers. */
@@ -37,11 +38,12 @@ class EximTestEmailTest extends TestCase
 
     public function test_a_deferred_message_is_not_reported_as_sent(): void
     {
-        $output = <<<'EXIM'
+        $mx = TestNetwork::public(5);
+        $output = <<<EXIM
             LOG: MAIN
               <= root@mail U=root P=local S=361
             delivering 1uPq3x-000012-2b
-            Connecting to mx.example.org [203.0.113.5]:25 ...  failed: Connection refused
+            Connecting to mx.example.org [{$mx}]:25 ...  failed: Connection refused
             LOG: MAIN
               == user@example.org R=dnslookup T=remote_smtp defer (111): Connection refused
             EXIM;
@@ -57,7 +59,7 @@ class EximTestEmailTest extends TestCase
     {
         $delivered = "LOG: MAIN\n  <= root@mail U=root P=local S=361\n"
             . "  SMTP<< 250 2.0.0 Ok: queued as 4ABC\n"
-            . "LOG: MAIN\n  => user@example.org R=dnslookup T=remote_smtp H=mx.example.org [203.0.113.5] C=\"250 2.0.0 Ok\"\n"
+            . "LOG: MAIN\n  => user@example.org R=dnslookup T=remote_smtp H=mx.example.org [".TestNetwork::public(5)."] C=\"250 2.0.0 Ok\"\n"
             . "LOG: MAIN\n  Completed\n";
         $this->assertSame('delivered', Exim::deliveryOutcome($delivered, 0)['status']);
         $this->assertTrue(Exim::deliveryOutcome($delivered, 0)['delivered']);

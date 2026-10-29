@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
@@ -33,13 +34,13 @@ final class DockerIgnore
      */
     public static function excludes(string $projectDir, string $path): bool
     {
-        $file = rtrim($projectDir, '/') . '/' . self::FILENAME;
-        if ($projectDir === '' || !is_file($file)) {
+        $file = rtrim($projectDir, '/').'/'.self::FILENAME;
+        if ($projectDir === '' || ! is_file($file)) {
             return false;
         }
         $path = trim($path, '/');
         $excluded = false;
-        foreach (preg_split('/\R/', (string) @file_get_contents($file)) ?: [] as $line) {
+        foreach (preg_split('/\R/', (string) AccountHomeRead::contents($file)) ?: [] as $line) {
             $line = trim($line);
             if ($line === '' || $line[0] === '#') {
                 continue;
@@ -48,7 +49,7 @@ final class DockerIgnore
             $pattern = trim(ltrim($negate ? substr($line, 1) : $line), '/');
             $pattern = (string) preg_replace('#^(\./)+#', '', $pattern);
             if ($pattern !== '' && self::matches($pattern, $path)) {
-                $excluded = !$negate;
+                $excluded = ! $negate;
             }
         }
 
@@ -74,6 +75,6 @@ final class DockerIgnore
             }
         }
 
-        return preg_match('#^' . $regex . '(?:/.*)?$#', $path) === 1;
+        return preg_match('#^'.$regex.'(?:/.*)?$#', $path) === 1;
     }
 }

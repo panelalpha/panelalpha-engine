@@ -23,7 +23,7 @@ final class EnvTemplates
     /**
      * The first template present.
      *
-     * @param callable(string): bool $exists name => whether that file exists
+     * @param  callable(string): bool  $exists  name => whether that file exists
      */
     public static function first(callable $exists): ?string
     {

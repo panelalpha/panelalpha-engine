@@ -2,14 +2,17 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeOverride;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\HostScript;
-use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
 use App\Lib\Deploy\Platform\StageResolver;
+use App\System;
+use App\System\Filesystem;
+use App\System\Project\Dind as DindProject;
 
 /**
  * Everything the project's app config does to the checkout, before anything is
@@ -66,9 +69,9 @@ class AppConfigBootstrap
         }
 
         $this->dind->noteAppConfigOverwritesTracked([EntrypointWriter::PROJECT_OVERRIDE]);
-        $path = rtrim($projectDir, '/') . '/' . EntrypointWriter::PROJECT_OVERRIDE;
+        $path = rtrim($projectDir, '/').'/'.EntrypointWriter::PROJECT_OVERRIDE;
         $this->dind->shell()->execAsUser(['mkdir', '-p', dirname($path)]);
-        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '755');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($path, $script, $chown, '755');
     }
 
     /**
@@ -78,7 +81,7 @@ class AppConfigBootstrap
      *
      * `override` is layered over the run file whenever present (D8).
      * `replace` goes to {@see EngineArtifacts::APP_CONFIG_COMPOSE}, which
-     * detection ({@see \App\Lib\Deploy\Platform\Probes\ComposeUsableProbe})
+     * detection ({@see ComposeUsableProbe})
      * reads ahead of the repository's own compose file — writing it to the
      * run file directly would run before detection ever sees it, since the
      * run file is not one of detection's own candidate names.
@@ -92,7 +95,7 @@ class AppConfigBootstrap
     {
         $system = $this->dind->system();
         $fs = $system->filesystem();
-        $appConfigCompose = rtrim($projectDir, '/') . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $appConfigCompose = rtrim($projectDir, '/').'/'.EngineArtifacts::APP_CONFIG_COMPOSE;
         $engineOverride = $this->dind->userAppComposeOverridePath();
 
         $content = $appConfig->compose();
@@ -114,14 +117,14 @@ class AppConfigBootstrap
                     "Removed from the app config's compose override, not allowed in hosting: {$what}"
                 );
             }
-            $fs->filePutContents($engineOverride, $hardened['yaml'], $chown, '644');
+            $fs->writeFileReplacingPath($engineOverride, $hardened['yaml'], $chown, '644');
             $this->removeIfExists($appConfigCompose, $system, $fs);
 
             return;
         }
 
         // The same answer inspect's RecipeFileOverlay lays over a clone.
-        $fs->filePutContents($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
+        $fs->writeFileReplacingPath($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
         $this->removeIfExists($engineOverride, $system, $fs);
     }
 
@@ -129,11 +132,11 @@ class AppConfigBootstrap
     {
         $system = $this->dind->system();
         $fs = $system->filesystem();
-        $this->removeIfExists(rtrim($projectDir, '/') . '/' . EngineArtifacts::APP_CONFIG_COMPOSE, $system, $fs);
+        $this->removeIfExists(rtrim($projectDir, '/').'/'.EngineArtifacts::APP_CONFIG_COMPOSE, $system, $fs);
         $this->removeIfExists($this->dind->userAppComposeOverridePath(), $system, $fs);
     }
 
-    private function removeIfExists(string $path, \App\System $system, \App\System\Filesystem $fs): void
+    private function removeIfExists(string $path, System $system, Filesystem $fs): void
     {
         if ($fs->fileExists($path)) {
             $system->exec(['sudo', 'rm', '-f', $path]);
@@ -164,7 +167,7 @@ class AppConfigBootstrap
         $logger = $this->dind->shell()->logger();
         $logger?->info(StageResolver::isOverridden(PlatformStage::PREPARE, $plan)
             ? 'Running prepare commands (replaced by the deploy request)'
-            : 'Running setup commands (' . AppConfig::SETUP_SCRIPT . ')');
+            : 'Running setup commands ('.AppConfig::SETUP_SCRIPT.')');
         $this->dind->strategy()->prepare()->execute(
             $projectDir,
             HostScript::render(null, PlatformStage::PREPARE, null, [], $extra, $staged, $plan),

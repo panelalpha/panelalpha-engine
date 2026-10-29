@@ -10,7 +10,7 @@ class CopiedDeploySnapshotTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
         $this->app->forgetInstance('encrypter');
     }
 
@@ -43,7 +43,7 @@ class CopiedDeploySnapshotTest extends TestCase
 
     public function test_details_for_copied_project_include_deploy_strategy(): void
     {
-        $live = new User();
+        $live = new User;
         $live->details = [
             'template' => 'dind',
             'deploy_strategy' => 'static',
@@ -75,13 +75,13 @@ class CopiedDeploySnapshotTest extends TestCase
 
     public function test_apply_deploy_snapshot_writes_strategy_onto_dest(): void
     {
-        $live = new User();
+        $live = new User;
         $live->details = [
             'deploy_strategy' => 'static',
             'deploy_runtime' => 'nginx',
         ];
 
-        $dest = new User();
+        $dest = new User;
         $dest->details = [
             'template' => 'dind',
             'home_dir' => '/home/stgapp',
@@ -91,6 +91,31 @@ class CopiedDeploySnapshotTest extends TestCase
         $this->assertSame('static', $dest->getDeployStrategy());
         $this->assertSame('nginx', $dest->getDeployRuntime());
         $this->assertSame('dind', $dest->getDetails()['template']);
+    }
+
+    public function test_restoring_a_snapshot_undoes_an_applied_one_and_keeps_every_other_detail(): void
+    {
+        $staging = new User();
+        $staging->details = [
+            'deploy_strategy' => 'compose',
+            'deploy_label' => 'Compose',
+            'git_commit' => 'stg-commit',
+        ];
+        $live = new User();
+        $live->details = [
+            'template' => 'dind',
+            'deploy_strategy' => 'railpack',
+            'git_commit' => 'live-commit',
+        ];
+        $before = User::copiedDeploySnapshot($live->getDetails());
+
+        $live->applyDeploySnapshotFrom($staging);
+        $live->restoreDeploySnapshot($before);
+
+        $this->assertSame(
+            ['template' => 'dind', 'deploy_strategy' => 'railpack', 'git_commit' => 'live-commit'],
+            $live->getDetails(),
+        );
     }
 
     public function test_clone_and_staging_builders_use_copied_project_details(): void
@@ -114,7 +139,12 @@ class CopiedDeploySnapshotTest extends TestCase
         $verifyPos = strpos($clone, 'function verifyNewUsername(', $clonePos);
         $this->assertNotFalse($verifyPos);
         $cloneBlock = substr($clone, $clonePos, $verifyPos - $clonePos);
-        $this->assertStringContainsString('detailsForCopiedProject($newUsername)', $cloneBlock);
+        $this->assertStringContainsString('makeClone($newUsername', $cloneBlock);
         $this->assertStringNotContainsString("'deploy_strategy'", $cloneBlock);
+
+        $cloneFn = strpos($userModel, 'function makeClone(');
+        $this->assertNotFalse($cloneFn);
+        $cloneBuilder = substr($userModel, $cloneFn, (int) strpos($userModel, 'function createCopy(', $cloneFn) - $cloneFn);
+        $this->assertStringContainsString('detailsForCopiedProject($destUsername)', $cloneBuilder);
     }
 }

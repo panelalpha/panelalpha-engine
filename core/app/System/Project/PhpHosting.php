@@ -24,12 +24,12 @@ use Symfony\Component\Yaml\Yaml;
 class PhpHosting implements Runtime
 {
     private ?PhpStack $stackAdapter = null;
+
     private ?PhpRuntime $phpRuntime = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
-    ) {
-    }
+    ) {}
 
     public function kind(): string
     {
@@ -58,7 +58,7 @@ class PhpHosting implements Runtime
 
     public function composeFilePath(): string
     {
-        return $this->project->projectDirPath() . '/docker-compose.yml';
+        return $this->project->projectDirPath().'/docker-compose.yml';
     }
 
     public function exists(): bool
@@ -95,7 +95,7 @@ class PhpHosting implements Runtime
 
     public function createFromTemplate(): void
     {
-        (new EnvironmentSetup())->createFromTemplate($this, $this->stack());
+        (new EnvironmentSetup)->createFromTemplate($this, $this->stack());
     }
 
     public function start(): void
@@ -116,7 +116,7 @@ class PhpHosting implements Runtime
         try {
             $this->system()->exec(TenantNetwork::firewallArgv(), [], 60);
         } catch (\Exception $e) {
-            Log::warning("Tenant network firewall not applied for {$this->username()}: " . trim($e->getMessage()));
+            Log::warning("Tenant network firewall not applied for {$this->username()}: ".trim($e->getMessage()));
         }
     }
 
@@ -173,8 +173,8 @@ class PhpHosting implements Runtime
         if ($image) {
             $this->system()->exec(
                 "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
-                    . " || sudo docker compose -f {$pathEscaped} pull"
-                    . " || sudo docker compose -f {$pathEscaped} build"
+                    ." || sudo docker compose -f {$pathEscaped} pull"
+                    ." || sudo docker compose -f {$pathEscaped} build"
             );
 
             return;
@@ -247,8 +247,7 @@ class PhpHosting implements Runtime
     /**
      * Run $command in the account's php service.
      *
-     * @param list<string> $command
-     *
+     * @param  list<string>  $command
      * @return list<string>
      */
     public function execArgv(array $command): array

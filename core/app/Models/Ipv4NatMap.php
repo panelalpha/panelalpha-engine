@@ -4,13 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
  * @property string $local_ip
  * @property string $public_ip
- * @property \Illuminate\Support\Carbon $created_at
- * @property \Illuminate\Support\Carbon $updated_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
+ *
  * @method static ?Ipv4NatMap find(int $id)
  * @method static Ipv4NatMap findOrFail(int $id)
  * @method static Ipv4NatMap create(array $params)
@@ -26,7 +28,9 @@ class Ipv4NatMap extends Model
     ];
 
     private static ?array $localToPublicMap = null;
+
     private static ?array $publicToLocalMap = null;
+
     private static ?bool $natModeEnabledOverride = null;
 
     /**
@@ -41,11 +45,12 @@ class Ipv4NatMap extends Model
         foreach (self::all() as $record) {
             $map[$record->local_ip] = $record->public_ip;
         }
+
         return $map;
     }
 
     /**
-     * @param array<string, string> $map
+     * @param  array<string, string>  $map
      */
     public static function setLocalToPublicMap(array $map): void
     {
@@ -64,11 +69,12 @@ class Ipv4NatMap extends Model
         foreach (self::all() as $record) {
             $map[$record->public_ip] = $record->local_ip;
         }
+
         return $map;
     }
 
     /**
-     * @param array<string, string> $map
+     * @param  array<string, string>  $map
      */
     public static function setPublicToLocalMap(array $map): void
     {
@@ -90,13 +96,10 @@ class Ipv4NatMap extends Model
         if (self::$natModeEnabledOverride !== null) {
             return self::$natModeEnabledOverride;
         }
+
         return self::count() > 0;
     }
 
-    /**
-     * @param string $localIp
-     * @param string $publicIp
-     */
     public static function upsertMap(string $localIp, string $publicIp): self
     {
         self::$localToPublicMap = null;

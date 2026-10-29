@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Edit a firewall rule
 
-    A field not sent keeps its current value; send null to clear it. The rule gets a new id when what it matches changes; an edit that would make it match the same traffic as another rule is refused.
+    A field not sent keeps its current value; send null to clear it. An edit that changes action or direction without sending scope gets the scope a new rule with them would get (an inbound deny is both, an outbound deny and an allow are host); a published rule stays published. The rule gets a new id when what it matches changes; an edit that would make it match the same traffic as another rule is refused.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -72,7 +72,7 @@ class ProxyRuleCreateTool extends ApiTool
             'transport' => $schema->string()->description('One of: http, tcp, udp.')->required(),
             'listen_ip' => $schema->string(),
             'listen_port' => $schema->integer()->required(),
-            'server_name' => $schema->string()->description('For a user rule, empty or one of the project\'s own domains or aliases. A system rule may name any host.'),
+            'server_name' => $schema->string()->description('For a user rule, empty or one of the project\'s own domains. A system rule may name any host. A domain\'s alias, or a traditional PHP project\'s domain, is refused: that site answers for the name, so the rule would never be served. A rule named after a container project\'s domain serves its aliases too.'),
             'upstream_host' => $schema->string()->description('For a user rule, the project\'s own name. A system rule may name any host or address. Example: shop.')->required(),
             'upstream_port' => $schema->integer()->required(),
             'upstream_protocol' => $schema->string(),

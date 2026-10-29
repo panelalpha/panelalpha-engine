@@ -6,6 +6,7 @@ use App\Lib\Deploy\Inspect\InspectException;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The inspect clone runs in core, so the host it resolves once must be the host
@@ -22,11 +23,11 @@ class SourceResolverEgressTest extends TestCase
 
     public function test_the_clone_is_pinned_to_the_checked_address(): void
     {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => ['93.184.216.34']);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(34)]);
 
         $command = $this->cloneCommand('https://files.example.com/o/r.git');
 
-        $this->assertContains('http.curloptResolve=files.example.com:443:93.184.216.34', $command);
+        $this->assertContains('http.curloptResolve=files.example.com:443:' . TestNetwork::routable(34), $command);
     }
 
     public function test_a_redirecting_remote_is_refused_with_the_final_url(): void

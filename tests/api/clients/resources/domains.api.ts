@@ -5,6 +5,7 @@ import {
   type Domain,
   type LogFile,
   type SslCertificate,
+  type SslCheck,
   type UpdateDomainRequest,
 } from '@/types';
 import { EximApi } from './exim.api';
@@ -105,6 +106,12 @@ export class DomainsApi extends EximApi {
     const response = await this.api.get(
       `projects/${username}/domains/${domain}/installed-ssl-cert`
     );
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async checkSsl(username: string, domain: string): Promise<ApiResponse<SslCheck>> {
+    const response = await this.api.get(`projects/${username}/domains/${domain}/ssl-check`);
     await this.assertStatus(response, 200);
     return response.json();
   }

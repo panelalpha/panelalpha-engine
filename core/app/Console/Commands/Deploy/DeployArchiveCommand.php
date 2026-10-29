@@ -86,7 +86,7 @@ class DeployArchiveCommand extends Command
 
             return null;
         }
-        if (!is_file($file) || !is_readable($file)) {
+        if (! is_file($file) || ! is_readable($file)) {
             $this->error("Archive not found or not readable: {$file}");
 
             return null;
@@ -139,7 +139,7 @@ class DeployArchiveCommand extends Command
         }
 
         $resolved = RequestVault::resolve('env_vars', $envVars, $user->username);
-        $user->setDetails(['env_vars' => EnvVarOverrides::applyIncoming($resolved, $user->getEnvVars())]);
+        $user->setEnvVars(EnvVarOverrides::applyIncoming($resolved, $user->getEnvVars()), $envVars);
         $user->save();
     }
 

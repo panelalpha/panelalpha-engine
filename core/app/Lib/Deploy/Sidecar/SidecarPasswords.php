@@ -25,9 +25,7 @@ final class SidecarPasswords
 
     public const MODE_DERIVED = 'derived';
 
-    private function __construct(private readonly ?string $seed)
-    {
-    }
+    private function __construct(private readonly ?string $seed) {}
 
     public static function legacy(): self
     {
@@ -79,7 +77,7 @@ final class SidecarPasswords
             return self::LEGACY;
         }
 
-        return substr(hash_hmac('sha256', 'sidecar-password:' . strtoupper($variable), $this->seed), 0, 32);
+        return substr(hash_hmac('sha256', 'sidecar-password:'.strtoupper($variable), $this->seed), 0, 32);
     }
 
     /**

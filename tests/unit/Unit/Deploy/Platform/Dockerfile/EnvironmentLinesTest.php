@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\Dockerfile\EntrypointInstall;
 use App\Lib\Deploy\Platform\Dockerfile\EnvironmentLines;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\StageScript;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -32,7 +33,7 @@ class EnvironmentLinesTest extends TestCase
         // merging the recipe's own env over their defaults, and a Dockerfile
         // takes the last ENV for a key - so reordering here would silently
         // flip which of the two wins.
-        $env = array_merge(['HOST' => '0.0.0.0', 'PORT' => '3000'], ['HOST' => '::']);
+        $env = array_merge(['HOST' => TestNetwork::ANY, 'PORT' => '3000'], ['HOST' => '::']);
 
         $this->assertSame(['ENV HOST=::', 'ENV PORT=3000'], EnvironmentLines::of($env));
     }
@@ -62,14 +63,14 @@ class EnvironmentLinesTest extends TestCase
         $this->assertSame(
             [
                 'ENV JAVA_OPTS="-Xmx256m -XX:+UseSerialGC"',
-                'ENV NODE_CONFIG="{\\"hostname\\":\\"0.0.0.0\\"}"',
+                'ENV NODE_CONFIG="{\\"hostname\\":\\"' . TestNetwork::ANY . '\\"}"',
                 'ENV WIN="C:\\\\app"',
                 'ENV GREETING="it\'s # not a comment"',
                 'ENV BIN="$HOME/bin dir"',
             ],
             EnvironmentLines::of([
                 'JAVA_OPTS' => '-Xmx256m -XX:+UseSerialGC',
-                'NODE_CONFIG' => '{"hostname":"0.0.0.0"}',
+                'NODE_CONFIG' => '{"hostname":"' . TestNetwork::ANY . '"}',
                 'WIN' => 'C:\\app',
                 'GREETING' => "it's # not a comment",
                 'BIN' => '$HOME/bin dir',
@@ -150,11 +151,11 @@ class EnvironmentLinesTest extends TestCase
     public function test_the_deploy_phase_is_not_baked_into_the_image(): void
     {
         $lines = EnvironmentLines::of([
-            'HOST' => '0.0.0.0',
+            'HOST' => TestNetwork::ANY,
             PlatformStage::PHASE_ENV => 'upgrade',
             'PORT' => '8000',
         ]);
 
-        $this->assertSame(['ENV HOST=0.0.0.0', 'ENV PORT=8000'], $lines);
+        $this->assertSame(['ENV HOST=' . TestNetwork::ANY, 'ENV PORT=8000'], $lines);
     }
 }

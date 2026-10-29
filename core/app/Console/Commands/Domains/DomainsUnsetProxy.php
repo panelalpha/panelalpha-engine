@@ -2,17 +2,19 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
-use App\System;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\System;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
 
 class DomainsUnsetProxy extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:unset-proxy', 'projects:domains:unset-proxy'];
@@ -34,24 +36,28 @@ class DomainsUnsetProxy extends Command
         $projectOpt = trim((string) $this->option('username'));
         if ($domainName === '') {
             $this->error('--domain is required.');
+
             return 1;
         }
 
         $domain = Domain::findByNameOrAlias($domainName);
-        if (!$domain) {
+        if (! $domain) {
             $this->error("Domain '{$domainName}' not found.");
+
             return 1;
         }
         $domain->loadMissing('user');
         $user = $domain->user;
-        if (!$user) {
+        if (! $user) {
             $this->error('Domain has no project/user.');
+
             return 1;
         }
         if ($projectOpt !== '' && strtolower($projectOpt) !== strtolower($user->username)) {
             $this->error(
                 "Domain '{$domain->domain}' belongs to project '{$user->username}', not '{$projectOpt}'."
             );
+
             return 1;
         }
 
@@ -78,7 +84,7 @@ class DomainsUnsetProxy extends Command
                 'listen' => $listenPort,
                 'current' => $existing
                     ? "{$existing->upstream_host}:{$existing->upstream_port}"
-                        . ($existing->enabled ? '' : ' (disabled)')
+                        .($existing->enabled ? '' : ' (disabled)')
                     : '-',
                 'new' => '-',
                 'action' => $existing ? 'delete' : 'skip',
@@ -88,8 +94,13 @@ class DomainsUnsetProxy extends Command
 
         $toDelete = array_filter($changes, static fn (array $c): bool => $c['existing'] !== null);
         if ($toDelete === []) {
-            $this->warn("No user HTTP proxy rules for {$fqdn} on ports " . implode(', ', $listenPorts) . '.');
+            $this->warn("No user HTTP proxy rules for {$fqdn} on ports ".implode(', ', $listenPorts).'.');
+
             return 0;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
         }
 
         $this->line('');
@@ -108,8 +119,9 @@ class DomainsUnsetProxy extends Command
             $this->comment('Attached tunnel hostname(s) will be removed from ingress until proxy is set again.');
         }
 
-        if (!$this->option('force') && !$this->confirm('Apply these changes?')) {
+        if (! $this->option('force') && ! $this->confirm('Apply these changes?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -124,15 +136,17 @@ class DomainsUnsetProxy extends Command
                 TunnelManager::syncFromProxyRules($user, $domain);
             } catch (CloudflareException $e) {
                 $this->error($e->getMessage());
+
                 return 1;
             } catch (\Throwable $e) {
-                $this->error('Tunnel ingress sync failed: ' . $e->getMessage());
+                $this->error('Tunnel ingress sync failed: '.$e->getMessage());
+
                 return 1;
             }
         }
 
         $domain->projectDomain()->rebuild();
-        (new System())->webserver()->scheduleWebserverReloadInBackground();
+        (new System)->webserver()->scheduleWebserverReloadInBackground();
 
         $this->info($hasTunnels
             ? 'Proxy rules removed; tunnel ingress synced; domain vhost rebuilt.'
@@ -148,14 +162,15 @@ class DomainsUnsetProxy extends Command
     private function resolveListenPorts(): ?array
     {
         $raw = $this->option('port');
-        if (!is_array($raw) || $raw === []) {
+        if (! is_array($raw) || $raw === []) {
             return [80, 443];
         }
 
         $ports = [];
         foreach ($raw as $value) {
-            if (!is_numeric($value) || (int) $value < 1 || (int) $value > 65535) {
+            if (! is_numeric($value) || (int) $value < 1 || (int) $value > 65535) {
                 $this->error("Invalid --port '{$value}'.");
+
                 return null;
             }
             $ports[] = (int) $value;

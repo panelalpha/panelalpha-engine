@@ -31,9 +31,7 @@ final class DeployLock
     /** acquireFor() made the account's directory just for this lock; release() removes it. */
     private bool $ownsDirectory = false;
 
-    public function __construct(private readonly DeployLogPaths $paths)
-    {
-    }
+    public function __construct(private readonly DeployLogPaths $paths) {}
 
     /**
      * Take an account's lock for work that writes no deploy log: a delete, or
@@ -44,7 +42,7 @@ final class DeployLock
     public static function acquireFor(string $username, ?string $holder = null): self
     {
         $paths = new DeployLogPaths($username);
-        $created = !is_dir($paths->directory());
+        $created = ! is_dir($paths->directory());
         LogStorage::ensureDirectory(DeployLogPaths::base());
         LogStorage::ensureDirectory($paths->directory());
 
@@ -64,7 +62,7 @@ final class DeployLock
         if ($handle === false) {
             throw new RuntimeException('Could not open deploy lock file.');
         }
-        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        if (! flock($handle, LOCK_EX | LOCK_NB)) {
             fclose($handle);
             throw new DeployAlreadyRunningException(self::busyMessage($this->paths->username));
         }
@@ -77,7 +75,7 @@ final class DeployLock
     /**
      * Every holder rewrites the file, so what a dead holder wrote never outlives it.
      *
-     * @param resource $handle
+     * @param  resource  $handle
      */
     private static function writeHolder($handle, ?string $holder): void
     {
@@ -111,7 +109,7 @@ final class DeployLock
     public static function heldBy(string $username): ?string
     {
         $lock = new self(new DeployLogPaths($username));
-        if (!$lock->isHeld()) {
+        if (! $lock->isHeld()) {
             return null;
         }
         $holder = @file_get_contents($lock->paths->lock());
@@ -142,7 +140,7 @@ final class DeployLock
         }
         fclose($handle);
 
-        return !$free;
+        return ! $free;
     }
 
     public function release(): void

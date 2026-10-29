@@ -27,8 +27,7 @@ final class Requirement
         public readonly string $constraint,
         public readonly string $source,
         public readonly string $role = self::ROLE_RUNTIME
-    ) {
-    }
+    ) {}
 
     /**
      * `php-8.3`. The canonical name for this requirement, used to build
@@ -36,7 +35,7 @@ final class Requirement
      */
     public function token(): string
     {
-        return $this->id . '-' . $this->version;
+        return $this->id.'-'.$this->version;
     }
 
     public function withRole(string $role): self
@@ -63,7 +62,7 @@ final class Requirement
      * identical stacks resolve to two different image tags and the cache
      * never hits.
      *
-     * @param list<Requirement> $requirements
+     * @param  list<Requirement>  $requirements
      */
     public static function setToken(array $requirements): string
     {

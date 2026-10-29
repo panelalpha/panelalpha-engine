@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Models\Domain;
 use App\System\Project\AbstractApplication as BaseApplication;
 use App\System\Project\Dind as DindRuntime;
 
@@ -24,12 +25,11 @@ class AbstractApplication extends BaseApplication
 
     public function __construct(
         private DindRuntime $project,
-    ) {
-    }
+    ) {}
 
     public function id(): string
     {
-        return 'dind:' . $this->project->username();
+        return 'dind:'.$this->project->username();
     }
 
     public function rootPath(): string
@@ -38,7 +38,7 @@ class AbstractApplication extends BaseApplication
     }
 
     /**
-     * @return list<\App\Models\Domain>
+     * @return list<Domain>
      */
     public function domains(): array
     {
@@ -82,9 +82,9 @@ class AbstractApplication extends BaseApplication
      *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      */
-    public function start(): array
+    public function start(bool $forceRecreate = false): array
     {
-        return (new AppLauncher($this->project))->start();
+        return (new AppLauncher($this->project))->start($forceRecreate);
     }
 
     /**

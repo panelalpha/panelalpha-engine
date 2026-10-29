@@ -68,7 +68,7 @@ final class DevServices
     private const DEV_COMMAND_PATTERN = '/\b(vite|webpack-dev-server|storybook)\s+(dev|serve)\b/';
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function isDevSidecar(string $name, array $service): bool
     {
@@ -84,14 +84,14 @@ final class DevServices
     /** Any path segment of the image repository names a tool: `ghcr.io/buggregator/server`. */
     private static function isDevToolImage(mixed $image): bool
     {
-        if (!is_string($image) || trim($image) === '') {
+        if (! is_string($image) || trim($image) === '') {
             return false;
         }
         $repository = explode('@', strtolower(trim($image)), 2)[0];
         foreach (explode('/', $repository) as $segment) {
             $segment = explode(':', $segment, 2)[0];
             foreach (self::IMAGES as $tool) {
-                if ($segment === $tool || str_starts_with($segment, $tool . '-')) {
+                if ($segment === $tool || str_starts_with($segment, $tool.'-')) {
                     return true;
                 }
             }

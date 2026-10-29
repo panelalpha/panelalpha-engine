@@ -3,7 +3,10 @@
 namespace Tests\Unit\Deploy\Inspect;
 
 use App\Lib\Deploy\Inspect\SourceResolver;
+use App\Lib\Deploy\Source\GitRepoInput;
+use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Inspect has to see the same tree the deploy will.
@@ -56,6 +59,7 @@ class SourceResolverSubmodulesTest extends TestCase
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         if ($this->home !== null) {
             $_SERVER['HOME'] = $_ENV['HOME'] = $this->home;
         }
@@ -104,7 +108,7 @@ class SourceResolverSubmodulesTest extends TestCase
         $this->git($meta, 'init -q --initial-branch=main');
         file_put_contents($meta . '/README.md', "a meta repository\n");
         $this->git($meta, 'add -A && git -c user.name=t -c user.email=t@example.com commit -qm meta');
-        $this->git($meta, 'submodule add -q ' . escapeshellarg($sub) . ' web');
+        $this->git($meta, 'submodule add -q ' . escapeshellarg('file://' . $sub) . ' web');
         $this->git($meta, 'commit -qm submodule');
 
         return $meta;
@@ -119,14 +123,15 @@ class SourceResolverSubmodulesTest extends TestCase
      * the fetch is exercised directly and the wiring is pinned separately,
      * below -- the defect was the call being absent, not the step being wrong.
      */
-    private function initSubmodules(string $checkout): void
+    private function initSubmodules(string $checkout, array $protocols = GitRepoInput::SCHEMES): void
     {
         $method = new \ReflectionMethod(SourceResolver::class, 'initSubmodules');
-        $method->invoke(new SourceResolver($this->tmpDir . '/workspace', 60), $checkout, null);
+        $method->invoke(new SourceResolver($this->tmpDir . '/workspace', 60, null, $protocols), $checkout, null);
     }
 
     public function test_the_application_inside_a_submodule_is_fetched(): void
     {
+        $file = ['https', 'http', 'file'];
         $meta = $this->metaRepository();
         $checkout = $this->tmpDir . '/checkout';
         $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
@@ -134,10 +139,26 @@ class SourceResolverSubmodulesTest extends TestCase
         // What inspect saw before: the directory is there and it is empty.
         $this->assertFileDoesNotExist($checkout . '/web/composer.json');
 
-        $this->initSubmodules($checkout);
+        $this->initSubmodules($checkout, $file);
 
         $this->assertFileExists($checkout . '/web/composer.json', 'the submodule was not fetched');
         $this->assertFileExists($checkout . '/web/index.php');
+    }
+
+    /**
+     * The engine clones over http and https only, and a submodule's child
+     * clone reads the same restriction: a transport the engine does not speak
+     * is left unfetched rather than handed to git.
+     */
+    public function test_a_submodule_on_a_transport_the_engine_does_not_fetch_is_left_alone(): void
+    {
+        $meta = $this->metaRepository();
+        $checkout = $this->tmpDir . '/checkout';
+        $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
+
+        $this->initSubmodules($checkout);
+
+        $this->assertFileDoesNotExist($checkout . '/web/composer.json', 'a file transport was fetched');
     }
 
     /** A repository with no submodules pays one stat and is untouched. */
@@ -168,7 +189,7 @@ class SourceResolverSubmodulesTest extends TestCase
         file_put_contents($meta . '/index.php', "<?php\n");
         file_put_contents(
             $meta . '/.gitmodules',
-            "[submodule \"web\"]\n\tpath = web\n\turl = https://127.0.0.1:1/nope.git\n"
+            "[submodule \"web\"]\n\tpath = web\n\turl = https://" . TestNetwork::LOOPBACK . ":1/nope.git\n"
         );
         $this->git($meta, 'add -A && git -c user.name=t -c user.email=t@example.com commit -qm meta');
 
@@ -261,8 +282,8 @@ class SourceResolverSubmodulesTest extends TestCase
     public function test_a_quoted_or_relative_internal_url_is_not_contacted(): void
     {
         $cases = [
-            'quoted' => ["\turl = \"ssh://git@127.0.0.1/x.git\"", 'https://example.com/owner/repo.git'],
-            'relative' => ["\turl = ../../../127.0.0.1/x.git", 'ssh://git@example.com/owner/repo.git'],
+            'quoted' => ["\turl = \"ssh://git@" . TestNetwork::LOOPBACK . "/x.git\"", 'https://example.com/owner/repo.git'],
+            'relative' => ["\turl = ../../../" . TestNetwork::LOOPBACK . "/x.git", 'ssh://git@example.com/owner/repo.git'],
         ];
         foreach ($cases as $case => [$entry, $origin]) {
             $meta = $this->metaRepository();
@@ -273,7 +294,7 @@ class SourceResolverSubmodulesTest extends TestCase
 
             $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
 
-            $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), "{$case}: git connected to an internal host");
+            $this->assertSame([], preg_grep('/'.preg_quote(TestNetwork::LOOPBACK, '/').'/', $contacts), "{$case}: git connected to an internal host");
             @unlink($this->tmpDir . '/ssh.log');
             $this->removeDir($this->tmpDir . '/sub');
             $this->removeDir($this->tmpDir . '/meta');
@@ -283,19 +304,87 @@ class SourceResolverSubmodulesTest extends TestCase
     /** A nested .gitmodules is checked before its level is fetched, not left to --recursive. */
     public function test_a_nested_internal_submodule_is_not_contacted(): void
     {
+        $file = ['https', 'http', 'file'];
         $meta = $this->metaRepository();
         $sub = $this->tmpDir . '/sub';
-        $this->addGitlink($sub, 'evil', "\turl = ssh://git@127.0.0.1/x.git");
+        $this->addGitlink($sub, 'evil', "\turl = ssh://git@" . TestNetwork::LOOPBACK . "/x.git");
         $this->git($meta . '/web', 'pull -q origin main');
         $this->git($meta, 'add web && git -c user.name=t -c user.email=t@example.com commit -qm bump');
 
         $checkout = $this->tmpDir . '/checkout';
         $this->git($this->tmpDir, 'clone -q ' . escapeshellarg($meta) . ' ' . escapeshellarg($checkout));
 
-        $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
+        $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout, $file));
 
         $this->assertFileExists($checkout . '/web/composer.json', 'the first level was not fetched');
-        $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), 'a nested internal submodule was contacted');
+        $this->assertSame([], preg_grep('/'.preg_quote(TestNetwork::LOOPBACK, '/').'/', $contacts), 'a nested internal submodule was contacted');
+    }
+
+    /**
+     * Every `submodule update` git is asked to run, recorded by a `git` first on
+     * PATH that answers it with a failure and is git otherwise.
+     *
+     * @return list<string>
+     */
+    private function submoduleUpdates(callable $run): array
+    {
+        $realGit = trim((string) shell_exec('command -v git'));
+        $bin = $this->tmpDir . '/bin';
+        $log = $this->tmpDir . '/updates.log';
+        @mkdir($bin, 0700, true);
+        file_put_contents($bin . '/git', "#!/bin/sh\ncase \"\$*\" in *'submodule update'*) echo \"\$*\" >> "
+            . escapeshellarg($log) . "; exit 1;; esac\nexec " . escapeshellarg($realGit) . " \"\$@\"\n");
+        chmod($bin . '/git', 0755);
+
+        $path = (string) getenv('PATH');
+        putenv('PATH=' . $bin . ':' . $path);
+        $_SERVER['PATH'] = $_ENV['PATH'] = $bin . ':' . $path;
+        try {
+            $run();
+        } finally {
+            putenv('PATH=' . $path);
+            $_SERVER['PATH'] = $_ENV['PATH'] = $path;
+        }
+
+        return is_file($log) ? (array) file($log, FILE_IGNORE_NEW_LINES) : [];
+    }
+
+    private function metaWithHttpsSubmodule(): string
+    {
+        $meta = $this->tmpDir . '/https-meta';
+        mkdir($meta, 0700, true);
+        $this->git($meta, 'init -q --initial-branch=main');
+        file_put_contents($meta . '/index.php', "<?php\n");
+        $this->git($meta, 'add -A && git -c user.name=t -c user.email=t@example.com commit -qm meta');
+        $this->addGitlink($meta, 'lib', "\turl = https://sub.example/o/lib.git");
+
+        return $meta;
+    }
+
+    /** A rebinding answer between the check and the fetch must not steer the fetch: it is pinned to the checked address. */
+    public function test_a_submodule_fetch_is_pinned_to_the_checked_address(): void
+    {
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(7)]);
+        $meta = $this->metaWithHttpsSubmodule();
+
+        $updates = $this->submoduleUpdates(fn () => $this->initSubmodules($meta));
+
+        $this->assertCount(1, $updates);
+        $this->assertStringContainsString('http.curloptResolve=sub.example:443:' . TestNetwork::routable(7), $updates[0]);
+    }
+
+    public function test_a_submodule_host_that_rebinds_to_loopback_before_the_pin_is_not_fetched(): void
+    {
+        $answers = 0;
+        OutboundUrl::setResolverForTests(static function (string $host) use (&$answers): array {
+            return ++$answers === 1 ? [TestNetwork::routable(7)] : [TestNetwork::LOOPBACK];
+        });
+        $meta = $this->metaWithHttpsSubmodule();
+
+        $updates = $this->submoduleUpdates(fn () => $this->initSubmodules($meta));
+
+        $this->assertGreaterThan(1, $answers);
+        $this->assertSame([], $updates, 'a submodule whose host rebound to loopback was fetched');
     }
 
     /**

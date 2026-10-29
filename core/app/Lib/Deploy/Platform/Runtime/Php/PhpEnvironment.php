@@ -16,8 +16,8 @@ final class PhpEnvironment
     private const SQLITE_FILE = 'database.sqlite';
 
     /**
-     * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
-     * @param ?string $databaseConfig the project's config/database.php, read but never run
+     * @param  array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string}  $db
+     * @param  ?string  $databaseConfig  the project's config/database.php, read but never run
      * @return array<string, string>
      */
     public static function for(
@@ -38,7 +38,7 @@ final class PhpEnvironment
      * The engine's environment over the matched manifest's `env:`. The manifest
      * fills keys the engine does not set; the engine's own values still win.
      *
-     * @param array<string, string> $engine
+     * @param  array<string, string>  $engine
      * @return array<string, string>
      */
     public static function withManifest(array $engine, mixed $declared): array
@@ -69,7 +69,7 @@ final class PhpEnvironment
      */
     private static function url(?string $appUrl): array
     {
-        if (!is_string($appUrl) || $appUrl === '') {
+        if (! is_string($appUrl) || $appUrl === '') {
             return [];
         }
 
@@ -129,7 +129,7 @@ final class PhpEnvironment
             return self::SQLITE_PATH;
         }
         $wrapped = '/([\'"])database\1\s*=>(?:(?![\'"][\w.-]+[\'"]\s*=>).)*?'
-            . 'database_path\(\s*env\(\s*([\'"])DB_DATABASE\2\s*(?:,\s*([\'"])([^\'"]*)\3\s*)?\)/s';
+            .'database_path\(\s*env\(\s*([\'"])DB_DATABASE\2\s*(?:,\s*([\'"])([^\'"]*)\3\s*)?\)/s';
         if (preg_match($wrapped, $block[2], $match) !== 1) {
             return self::SQLITE_PATH;
         }

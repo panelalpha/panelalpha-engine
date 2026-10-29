@@ -49,7 +49,7 @@ function nonempty(value: string | null | undefined): string | undefined {
   return trimmed;
 }
 
-/** True for 127.0.0.0/8 and IPv6 loopback — including Debian's 127.0.1.1 hostname mapping. */
+/** True for IPv4 and IPv6 loopback — including the address Debian maps the hostname to. */
 export function isLoopbackIp(ip: string | undefined): boolean {
   const trimmed = ip?.trim();
   if (!trimmed) {
@@ -77,7 +77,7 @@ export function isIpLiteral(host: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
 }
 
-/** `198.51.100.10` → `198-51-100-10.panelalpha.direct`, matching DomainPlan::directDomain. */
+/** `a.b.c.d` → `a-b-c-d.panelalpha.direct`, matching DomainPlan::directDomain. */
 export function toPanelAlphaDirectZone(ip: string): string {
   return `${ip.replaceAll('.', '-')}.${PANELALPHA_DIRECT}`;
 }
@@ -152,7 +152,7 @@ export function isThirdPartyIpZone(domain: string | undefined): boolean {
  * Address test sites should resolve to.
  *
  * The engine serves vhosts on `default_ipv4`. DNS of API_BASE_URL is only a
- * hint — on the engine host itself a hostname typically maps to 127.0.1.1 in
+ * hint — on the engine host itself a hostname typically maps to loopback in
  * /etc/hosts, and a proxy hostname maps to the balancer. Prefer the engine.
  */
 export function pickSiteIpv4(options: {
@@ -277,7 +277,7 @@ async function defaultLookup(host: string, family: 4 | 6): Promise<string> {
  * Parent generated extra domains hang off — the engine's own zone, not sslip.io.
  *
  * When API_BASE_URL is a hostname or loopback, ask the engine where it serves
- * sites so a box whose hostname maps to 127.0.1.1 still gets working DNS.
+ * sites so a box whose hostname maps to loopback still gets working DNS.
  */
 export async function resolveSiteBaseDomain(
   apiBaseUrl: string,

@@ -6,21 +6,23 @@ use App\Models\BackupContainer;
 
 class UpdateCommand extends BackupContainerCommand
 {
-    protected $signature = 'backup:container:update {container : Container ID or name}' . self::OPTIONS;
+    protected $signature = 'backup:container:update {container : Container ID or name}'.self::OPTIONS;
 
     protected $description = 'Update a backup container';
 
     public function handle(): int
     {
         $containerArg = $this->argument('container');
-        if (!is_string($containerArg)) {
+        if (! is_string($containerArg)) {
             $this->error('Invalid container identifier.');
+
             return 1;
         }
 
         $container = BackupContainer::findByIdOrName($containerArg);
         if ($container === null) {
             $this->error("Backup container '{$containerArg}' not found.");
+
             return 1;
         }
 
@@ -32,13 +34,19 @@ class UpdateCommand extends BackupContainerCommand
         $refusal = $this->refusal($container, $updates);
         if ($refusal !== null) {
             $this->error($refusal);
+
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 
         $this->showChanges($container, $updates);
 
-        if (!$this->option('force') && !$this->confirm('Apply these changes?')) {
+        if (! $this->option('force') && ! $this->confirm('Apply these changes?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -61,6 +69,7 @@ class UpdateCommand extends BackupContainerCommand
         if ($name !== null) {
             if (BackupContainer::query()->where('name', $name)->where('id', '!=', $container->id)->exists()) {
                 $this->error("A backup container named '{$name}' already exists.");
+
                 return null;
             }
             $updates['name'] = $name;
@@ -68,8 +77,9 @@ class UpdateCommand extends BackupContainerCommand
 
         $driver = $this->stringOption('driver');
         if ($driver !== null) {
-            if (!in_array($driver, self::DRIVERS, true)) {
+            if (! in_array($driver, self::DRIVERS, true)) {
                 $this->error('Driver must be one of: local, s3, ftp, ftps, sftp.');
+
                 return null;
             }
             $updates['driver'] = $driver;
@@ -87,6 +97,7 @@ class UpdateCommand extends BackupContainerCommand
                 $updates['credentials'] = $merged === [] ? null : $merged;
             } catch (\InvalidArgumentException $e) {
                 $this->error($e->getMessage());
+
                 return null;
             }
         } elseif (($updates['driver'] ?? null) === 'local') {
@@ -99,7 +110,7 @@ class UpdateCommand extends BackupContainerCommand
     /**
      * Why the container would be left unusable, or null.
      *
-     * @param array<string, mixed> $updates
+     * @param  array<string, mixed>  $updates
      */
     private function refusal(BackupContainer $container, array $updates): ?string
     {
@@ -132,15 +143,16 @@ class UpdateCommand extends BackupContainerCommand
         $this->line("  Name: {$container->name}");
         $this->line("  Driver: {$container->driver}");
         $this->line("  Location: {$container->location}");
-        $this->line('  Has credentials: ' . ($container->credentials !== null ? 'yes' : 'no'));
+        $this->line('  Has credentials: '.($container->credentials !== null ? 'yes' : 'no'));
 
         $this->info('New values:');
         foreach ($updates as $key => $value) {
             if ($key === 'credentials') {
-                $this->line('  Credentials: ' . ($value === null ? 'none' : 'updated'));
+                $this->line('  Credentials: '.($value === null ? 'none' : 'updated'));
+
                 continue;
             }
-            $this->line('  ' . ucfirst($key) . ": {$value}");
+            $this->line('  '.ucfirst($key).": {$value}");
         }
     }
 

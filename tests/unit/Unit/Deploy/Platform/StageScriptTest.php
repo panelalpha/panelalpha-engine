@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\StageScript;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The entrypoint the stage vocabulary compiles down to.
@@ -158,10 +159,10 @@ class StageScriptTest extends TestCase
                 ['id' => 'serve', 'stage' => 'start', 'serve' => true, 'run' => '{{js.start:npm start}}'],
             ]),
             null,
-            ['serve' => 'npx next start -H 0.0.0.0 -p 3000']
+            ['serve' => 'npx next start -H ' . TestNetwork::ANY . ' -p 3000']
         );
 
-        $this->assertStringContainsString('exec npx next start -H 0.0.0.0 -p 3000', $script);
+        $this->assertStringContainsString('exec npx next start -H ' . TestNetwork::ANY . ' -p 3000', $script);
         $this->assertStringNotContainsString('{{js.start', $script);
     }
 
@@ -176,7 +177,7 @@ class StageScriptTest extends TestCase
                 'id' => 'serve',
                 'stage' => 'start',
                 'serve' => true,
-                'run' => 'if [ -d /app/public ]; then exec php -S 0.0.0.0:8000 -t /app/public; else exec php -S 0.0.0.0:8000 -t /app; fi',
+                'run' => 'if [ -d /app/public ]; then exec php -S ' . TestNetwork::ANY . ':8000 -t /app/public; else exec php -S ' . TestNetwork::ANY . ':8000 -t /app; fi',
             ],
         ]));
 

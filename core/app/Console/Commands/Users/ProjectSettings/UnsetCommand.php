@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Users\ProjectSettings;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User;
@@ -10,6 +11,7 @@ use Illuminate\Console\Command;
 
 class UnsetCommand extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = [
@@ -36,6 +38,7 @@ class UnsetCommand extends Command
 
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
@@ -43,26 +46,33 @@ class UnsetCommand extends Command
             Settings::assertKnownKey($key);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 
         $this->line('');
-        $this->info("Unset project setting '{$key}' for '{$user->username}'");
+        $this->info("About to unset project setting '{$key}' for '{$user->username}'.");
         if ($key === Settings::KEY_CLOUDFLARE_API_TOKEN) {
             $this->comment(
                 'This clears the Cloudflare API token and connector state. '
-                . 'Existing tunnel hostnames require --force (full teardown).'
+                .'Existing tunnel hostnames require --force (full teardown).'
             );
         }
 
-        if (!$force && !$this->confirm('Continue?')) {
+        if (! $force && ! $this->confirm('Continue?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -70,9 +80,11 @@ class UnsetCommand extends Command
             $user->project()->settings()->unset($key, $force);
         } catch (CloudflareException $e) {
             $this->error($e->getMessage());
+
             return 1;
         } catch (\Throwable $e) {
-            $this->error('Failed to unset setting: ' . $e->getMessage());
+            $this->error('Failed to unset setting: '.$e->getMessage());
+
             return 1;
         }
 

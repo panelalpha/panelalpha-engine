@@ -7,6 +7,7 @@ use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\Platform\Runtime\Python\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * What a Python image needs installed before pip can build anything.
@@ -154,7 +155,7 @@ class SystemPackagesTest extends TestCase
 
     /**
      * The bug this fixes: a Flask quickstart's app.py ends in a bare
-     * `app.run()`, which binds 127.0.0.1:5000. Started that way the container
+     * `app.run()`, which binds loopback port 5000. Started that way the container
      * comes up, stays up, and answers nothing on the port the recipe published
      * -- reported `partial`, with an application that looks healthy in `docker
      * ps`. Azure's Flask quickstart ships gunicorn for exactly this reason.
@@ -168,7 +169,7 @@ class SystemPackagesTest extends TestCase
         $command = PythonRuntime::startCommand($dir, ["Flask==3.1.0\ngunicorn\n"]);
 
         $this->assertStringContainsString('gunicorn', $command);
-        $this->assertStringContainsString('--bind 0.0.0.0:' . PythonRuntime::PORT, $command);
+        $this->assertStringContainsString('--bind ' . TestNetwork::ANY . ':' . PythonRuntime::PORT, $command);
         $this->assertStringContainsString('app:app', $command);
     }
 
@@ -179,7 +180,7 @@ class SystemPackagesTest extends TestCase
         $command = PythonRuntime::startCommand($dir, ["fastapi\nuvicorn\n"]);
 
         $this->assertStringContainsString('uvicorn main:app', $command);
-        $this->assertStringContainsString('--host 0.0.0.0', $command);
+        $this->assertStringContainsString('--host ' . TestNetwork::ANY, $command);
     }
 
     /**

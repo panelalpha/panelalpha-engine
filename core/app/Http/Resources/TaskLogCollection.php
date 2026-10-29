@@ -2,26 +2,29 @@
 
 namespace App\Http\Resources;
 
+use App\Lib\Task\TaskLogPage;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 
 class TaskLogCollection extends ResourceCollection
 {
     public $collects = TaskLogResource::class;
 
-    public function __construct($resource, private readonly string $taskStatus, private readonly int $nextAfterId)
+    public function __construct(private readonly TaskLogPage $page, private readonly string $taskStatus)
     {
-        parent::__construct($resource);
+        parent::__construct($page->rows);
     }
 
     /**
-     * @param  \Illuminate\Http\Request  $request
+     * @param  Request  $request
      * @return array<string, mixed>
      */
     public function with($request): array
     {
         return [
             'meta' => [
-                'next_after_id' => $this->nextAfterId,
+                'next_after_id' => $this->page->nextAfterId,
+                'more' => $this->page->more,
                 'task_status' => $this->taskStatus,
             ],
         ];

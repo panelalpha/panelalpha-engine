@@ -14,16 +14,15 @@ final class AccountContainers
 
     public function __construct(
         private System $system,
-    ) {
-    }
+    ) {}
 
     /** The account's own container of that name exists; one with only the name does not count. */
     public function ownsContainerNamed(string $username): bool
     {
         $result = $this->system->runProcess([
             'sudo', 'docker', 'ps', '-a',
-            '--filter', 'name=^/' . preg_quote($username, null) . '$',
-            '--filter', 'label=' . self::WORKING_DIR_LABEL . '=' . $this->system->projectDirPath($username),
+            '--filter', 'name=^/'.preg_quote($username, null).'$',
+            '--filter', 'label='.self::WORKING_DIR_LABEL.'='.$this->system->projectDirPath($username),
             '--format', '{{.Names}}',
         ]);
 
@@ -71,7 +70,7 @@ final class AccountContainers
     }
 
     /**
-     * @param list<string> $psArgs
+     * @param  list<string>  $psArgs
      * @return ?array<string, list<string>> container name => [runtime, ...$fields]
      */
     private function inspectAccounts(array $psArgs, string ...$fields): ?array
@@ -87,15 +86,15 @@ final class AccountContainers
     }
 
     /**
-     * @param list<string> $psArgs
+     * @param  list<string>  $psArgs
      * @return ?list<string> IDs of the containers Compose labelled with a working directory
      */
     private function labelledContainerIds(array $psArgs): ?array
     {
         $ps = $this->system->runProcess([
-            'sudo', 'docker', 'ps', ...$psArgs, '--filter', 'label=' . self::WORKING_DIR_LABEL, '--format', '{{.ID}}',
+            'sudo', 'docker', 'ps', ...$psArgs, '--filter', 'label='.self::WORKING_DIR_LABEL, '--format', '{{.ID}}',
         ], [], 30);
-        if (!$ps->isSuccessful()) {
+        if (! $ps->isSuccessful()) {
             return null;
         }
 
@@ -107,17 +106,17 @@ final class AccountContainers
      * A container gone since it was listed fails inspect but the others still
      * print, so only a failure with no output at all is null.
      *
-     * @param list<string> $ids
-     * @param list<string> $fields
+     * @param  list<string>  $ids
+     * @param  list<string>  $fields
      */
     private function inspectOutput(array $ids, array $fields): ?string
     {
-        $format = '{{.Name}}{{"\t"}}{{.HostConfig.Runtime}}{{"\t"}}{{index .Config.Labels "' . self::WORKING_DIR_LABEL . '"}}';
+        $format = '{{.Name}}{{"\t"}}{{.HostConfig.Runtime}}{{"\t"}}{{index .Config.Labels "'.self::WORKING_DIR_LABEL.'"}}';
         foreach ($fields as $field) {
-            $format .= '{{"\t"}}' . $field;
+            $format .= '{{"\t"}}'.$field;
         }
         $inspect = $this->system->runProcess(['sudo', 'docker', 'inspect', '--format', $format, ...$ids], [], 30);
-        if (!$inspect->isSuccessful() && trim($inspect->getOutput()) === '') {
+        if (! $inspect->isSuccessful() && trim($inspect->getOutput()) === '') {
             return null;
         }
 
@@ -150,31 +149,44 @@ final class AccountContainers
      * Account containers no project owns, left by a create or delete that did
      * not finish. Reported for the operator; never removed here.
      *
-     * @param iterable<string> $projects usernames of every existing project
+     * @param  iterable<string>  $projects  usernames of every existing project
+     * @param  ?array<int, string>  $within  the accounts whose orphans to report, or null for every account
      * @return array{count: int, containers: list<array{name: string, state: string, project: string, cleanup: string}>, warning: ?string}
      */
-    public function orphanReport(iterable $projects): array
+    public function orphanReport(iterable $projects, ?array $within = null): array
     {
         $result = $this->system->runProcess([
             'sudo', 'docker', 'ps', '-a',
-            '--filter', 'label=' . self::WORKING_DIR_LABEL,
-            '--format', '{{.Names}}\t{{.State}}\t{{.Label "' . self::WORKING_DIR_LABEL . '"}}',
+            '--filter', 'label='.self::WORKING_DIR_LABEL,
+            '--format', '{{.Names}}\t{{.State}}\t{{.Label "'.self::WORKING_DIR_LABEL.'"}}',
         ], [], 30);
 
-        if (!$result->isSuccessful()) {
+        if (! $result->isSuccessful()) {
             return [
                 'count' => 0,
                 'containers' => [],
                 'warning' => 'Host containers could not be listed, so leftover account containers were not checked: '
-                    . trim($result->getErrorOutput() ?: $result->getOutput()),
+                    .trim($result->getErrorOutput() ?: $result->getOutput()),
             ];
         }
 
-        return self::report(self::orphansIn($result->getOutput(), $this->system->projectsDirPath(), $projects));
+        $orphans = self::orphansIn($result->getOutput(), $this->system->projectsDirPath(), $projects);
+
+        return self::report($within === null ? $orphans : self::orphansOf($orphans, $within));
     }
 
     /**
-     * @param iterable<string> $projects
+     * @param  list<array{name: string, state: string, project: string, cleanup: string}>  $orphans
+     * @param  array<int, string>  $accounts
+     * @return list<array{name: string, state: string, project: string, cleanup: string}>
+     */
+    private static function orphansOf(array $orphans, array $accounts): array
+    {
+        return array_values(array_filter($orphans, fn (array $orphan): bool => in_array($orphan['project'], $accounts, true)));
+    }
+
+    /**
+     * @param  iterable<string>  $projects
      * @return list<array{name: string, state: string, project: string, cleanup: string}>
      */
     public static function orphansIn(string $psOutput, string $projectsDir, iterable $projects): array
@@ -199,7 +211,7 @@ final class AccountContainers
      * The `docker ps` line as an orphan, when Compose started it from
      * <projects dir>/<account> and no project owns that account.
      *
-     * @param array<string, true> $owned
+     * @param  array<string, true>  $owned
      * @return ?array{name: string, state: string, project: string, cleanup: string}
      */
     private static function orphanOn(string $line, string $projectsDir, array $owned): ?array
@@ -222,24 +234,24 @@ final class AccountContainers
             'name' => $name,
             'state' => $state,
             'project' => $project,
-            'cleanup' => 'docker rm -f ' . $name,
+            'cleanup' => 'docker rm -f '.$name,
         ];
     }
 
     /**
-     * @param list<array{name: string, state: string, project: string, cleanup: string}> $orphans
+     * @param  list<array{name: string, state: string, project: string, cleanup: string}>  $orphans
      * @return array{count: int, containers: list<array{name: string, state: string, project: string, cleanup: string}>, warning: ?string}
      */
     public static function report(array $orphans): array
     {
         $warning = null;
         if ($orphans !== []) {
-            $listed = array_map(fn (array $c) => $c['name'] . ' (' . $c['state'] . ')', $orphans);
+            $listed = array_map(fn (array $c) => $c['name'].' ('.$c['state'].')', $orphans);
             $commands = array_map(fn (array $c) => $c['cleanup'], $orphans);
-            $warning = count($orphans) . ' account container(s) on the host belong to no project: '
-                . implode(', ', $listed) . '. A project create or delete that did not finish, or a reset engine '
-                . 'database, left them behind, and a new project cannot take their name. The engine does not '
-                . 'remove them. To remove them, run on the host: ' . implode('; ', $commands);
+            $warning = count($orphans).' account container(s) on the host belong to no project: '
+                .implode(', ', $listed).'. A project create or delete that did not finish, or a reset engine '
+                .'database, left them behind, and a new project cannot take their name. The engine does not '
+                .'remove them. To remove them, run on the host: '.implode('; ', $commands);
         }
 
         return ['count' => count($orphans), 'containers' => $orphans, 'warning' => $warning];

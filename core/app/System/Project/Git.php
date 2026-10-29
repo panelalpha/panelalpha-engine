@@ -31,7 +31,7 @@ class Git extends WorkTree
             } else {
                 // What the site serves, the same rule WP-CLI uses.
                 $main = $project->model()->getMainDomain();
-                $this->absolutePath = $home . ($main?->getDocumentRoot() ?? '/public_html');
+                $this->absolutePath = $home.($main?->getDocumentRoot() ?? '/public_html');
             }
         } else {
             $this->absolutePath = $project->resolvePath($trimmed);
@@ -73,5 +73,10 @@ class Git extends WorkTree
         }
 
         return $this->runCommand($cmd, $timeout);
+    }
+
+    protected function runsOnHost(): bool
+    {
+        return ! $this->project->runsInDind();
     }
 }

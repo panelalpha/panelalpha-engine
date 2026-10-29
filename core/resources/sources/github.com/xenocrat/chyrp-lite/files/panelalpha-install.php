@@ -61,6 +61,40 @@ function appUrl(): string
 }
 
 /**
+ * The account's database login, from the environment the engine set; empty
+ * when it set none.
+ *
+ * @return array<string, string>
+ */
+function accountDatabase(): array
+{
+    if ((getenv('DB_DATABASE') ?: '') === '') {
+        return [];
+    }
+
+    return [
+        'host' => getenv('DB_HOST') ?: '127.0.0.1',
+        'port' => getenv('DB_PORT') ?: '3306',
+        'username' => getenv('DB_USERNAME') ?: '',
+        'password' => getenv('DB_PASSWORD') ?: '',
+        'database' => getenv('DB_DATABASE'),
+    ];
+}
+
+/** Whether the config's `sql` block disagrees with $wanted on any of its keys. */
+function sqlDiffers(mixed $stored, array $wanted): bool
+{
+    $stored = is_array($stored) ? $stored : [];
+    foreach ($wanted as $key => $value) {
+        if ((string) ($stored[$key] ?? '') !== $value) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * The administrator's login, generated and kept by the engine (`credentials:`)
  * and mounted read-only by the compose override.
  *
@@ -260,28 +294,41 @@ if (!installed()) {
     }
 }
 
-// ------------------------------------------------------ the account's URL
+// ---------------------------------------- the account's URL and database
 //
 // Chyrp stores its own address in the config and builds every link, redirect,
 // feed entry and session cookie domain from it (`secure` is set from the
 // scheme, includes/helpers.php:43). install.php wrote whatever APP_URL was on
 // the first deploy; if the account has been given a different domain since,
-// nothing in Chyrp notices. Done as plain JSON rather than through Config,
-// because the file is a 403 guard line followed by the object and this needs
-// no bootstrap.
+// nothing in Chyrp notices. The database login is in the same file and goes
+// stale the same way: a staging or clone carries ~/.panelalpha over with the
+// source's login in it, while the engine hands the copy a database of its own
+// in DB_*. Both are put back on every run. Done as plain JSON rather than
+// through Config, because the file is a 403 guard line followed by the object
+// and this needs no bootstrap.
 $configFile = STORAGE . '/config.json.php';
 $guard = "<?php header(\"Status: 403\"); exit(\"Access denied.\"); ?>\n";
 $raw = (string) @file_get_contents($configFile);
 $data = json_decode(str_replace($guard, '', $raw), true);
+$rewrite = false;
 
 if (is_array($data) && ($data['url'] ?? null) !== appUrl()) {
     say('pointing the site at ' . appUrl() . ' (was ' . ($data['url'] ?? 'unset') . ')');
     $data['url'] = appUrl();
     $data['chyrp_url'] = appUrl();
+    $rewrite = true;
+}
 
-    if (@file_put_contents($configFile, $guard . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
-        fail('could not rewrite ' . $configFile);
-    }
+$database = accountDatabase();
+
+if (is_array($data) && $database !== [] && sqlDiffers($data['sql'] ?? null, $database)) {
+    say('pointing the site at database ' . $database['database'] . ' (was ' . ($data['sql']['database'] ?? 'unset') . ')');
+    $data['sql'] = array_merge(is_array($data['sql'] ?? null) ? $data['sql'] : [], $database);
+    $rewrite = true;
+}
+
+if ($rewrite && @file_put_contents($configFile, $guard . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+    fail('could not rewrite ' . $configFile);
 }
 
 // ------------------------------------------------- close the two open doors

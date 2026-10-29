@@ -4,6 +4,7 @@ namespace Tests\Unit\Http;
 
 use App\Auth\TokenAbilities;
 use App\Http\Middleware\EnsureProjectNotProtected;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Models\Admin;
 use App\Models\Domain;
 use App\Models\PersonalAccessToken;
@@ -118,6 +119,54 @@ class EnsureProjectNotProtectedTest extends TestCase
             'POST',
             'api/projects/{username}/containers/action',
             ['username' => 'alice'],
+            ['action' => 'up']
+        )));
+    }
+
+    public function test_a_container_up_on_a_compose_project_is_refused(): void
+    {
+        $this->makeUser('carol', [
+            'template' => 'dind',
+            'protected' => 'on',
+            'deploy_strategy' => Strategies::COMPOSE,
+        ]);
+
+        $response = $this->dispatched(
+            'POST',
+            'api/projects/{username}/containers/action',
+            ['username' => 'carol'],
+            ['action' => 'up']
+        );
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame(EnsureProjectNotProtected::CODE, $response->getData(true)['code']);
+        $this->assertFalse($this->nextCalled, 'the middleware let the request through');
+    }
+
+    public function test_a_container_up_on_a_recipe_project_is_allowed(): void
+    {
+        $this->makeUser('dave', [
+            'template' => 'dind',
+            'protected' => 'on',
+            'deploy_strategy' => Strategies::LARAVEL,
+        ]);
+
+        $this->assertSame(200, $this->statusOf($this->request(
+            'POST',
+            'api/projects/{username}/containers/action',
+            ['username' => 'dave'],
+            ['action' => 'up']
+        )));
+    }
+
+    public function test_a_container_up_on_an_unprotected_compose_project_is_allowed(): void
+    {
+        $this->makeUser('erin', ['template' => 'dind', 'deploy_strategy' => Strategies::COMPOSE]);
+
+        $this->assertSame(200, $this->statusOf($this->request(
+            'POST',
+            'api/projects/{username}/containers/action',
+            ['username' => 'erin'],
             ['action' => 'up']
         )));
     }

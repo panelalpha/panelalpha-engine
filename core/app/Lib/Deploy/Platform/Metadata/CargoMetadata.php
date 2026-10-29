@@ -65,7 +65,7 @@ final class CargoMetadata implements PackageMetadata
             ecosystem: $this->id(),
             file: self::FILE,
             name: $name ?? self::directoryName($context),
-            nameSource: $name !== null ? self::FILE . ' package.name' : AppPackage::NAME_FROM_DIRECTORY,
+            nameSource: $name !== null ? self::FILE.' package.name' : AppPackage::NAME_FROM_DIRECTORY,
             description: $package === null ? null : self::tomlString($package, 'description'),
             version: $package === null ? null : self::tomlString($package, 'version'),
             license: $package === null ? null : self::tomlString($package, 'license'),

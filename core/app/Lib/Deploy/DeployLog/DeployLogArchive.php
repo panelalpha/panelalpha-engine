@@ -40,7 +40,7 @@ final class DeployLogArchive
     public static function deploys(string $username): array
     {
         $paths = new DeployLogPaths($username);
-        if (!is_dir($paths->directory())) {
+        if (! is_dir($paths->directory())) {
             return [];
         }
         $latest = (new DeployStatus($paths))->read() ?? [];
@@ -82,7 +82,7 @@ final class DeployLogArchive
         rsort($files);
         $deleted = array_slice($files, $keep);
         foreach ($deleted as $old) {
-            if (!$dryRun) {
+            if (! $dryRun) {
                 @unlink($old);
             }
         }
@@ -111,17 +111,17 @@ final class DeployLogArchive
     {
         // The SafeName rule as everywhere else: a dotless pattern here left a deleted
         // `acme.shop`'s logs on disk forever.
-        if (!SafeName::isSafe($username)) {
+        if (! SafeName::isSafe($username)) {
             return;
         }
 
         $dir = DeployLogPaths::userDir($username);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return;
         }
 
         foreach (scandir($dir) ?: [] as $name) {
-            $path = $dir . '/' . $name;
+            $path = $dir.'/'.$name;
             if ($name !== '.' && $name !== '..' && (is_file($path) || is_link($path))) {
                 @unlink($path);
             }
@@ -135,13 +135,13 @@ final class DeployLogArchive
     private static function accountDirectories(): array
     {
         $base = DeployLogPaths::base();
-        if (!is_dir($base)) {
+        if (! is_dir($base)) {
             return [];
         }
 
         $names = [];
         foreach (scandir($base) ?: [] as $name) {
-            if (is_dir($base . '/' . $name) && SafeName::isSafe($name)) {
+            if (is_dir($base.'/'.$name) && SafeName::isSafe($name)) {
                 $names[] = $name;
             }
         }
@@ -174,7 +174,7 @@ final class DeployLogArchive
     }
 
     /**
-     * @param array<string, mixed> $latest
+     * @param  array<string, mixed>  $latest
      */
     private static function text(array $latest, string $key): ?string
     {

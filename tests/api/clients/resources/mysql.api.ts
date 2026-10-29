@@ -81,6 +81,14 @@ export class MySqlApi extends PhpApi {
     return response.json();
   }
 
+  /** POST /projects/{username}/mysql/users without a status expectation. */
+  async createMySqlUserRaw(
+    username: string,
+    data: { name: string; password: string }
+  ): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.post(`projects/${username}/mysql/users`, { data }));
+  }
+
   async deleteMySqlUser(username: string, name: string): Promise<void> {
     const response = await this.api.delete(`projects/${username}/mysql/users/${name}`);
     await this.assertStatus(response, [200, 204, 404]);

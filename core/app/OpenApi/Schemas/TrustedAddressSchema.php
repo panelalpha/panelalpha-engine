@@ -13,6 +13,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class TrustedAddressSchema
-{
-}
+class TrustedAddressSchema {}

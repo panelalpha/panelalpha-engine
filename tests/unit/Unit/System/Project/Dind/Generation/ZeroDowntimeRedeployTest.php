@@ -2,12 +2,16 @@
 
 namespace Tests\Unit\System\Project\Dind\Generation;
 
+use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * The readings the swap acts on -- where Docker published the
@@ -18,7 +22,7 @@ class ZeroDowntimeRedeployTest extends TestCase
 {
     public function test_the_port_docker_chose_is_read_ipv4_first(): void
     {
-        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort("[::]:32772\n0.0.0.0:32771\n"));
+        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort("[::]:32772\n".TestNetwork::ANY.":32771\n"));
         $this->assertSame(32772, ZeroDowntimeRedeploy::boundPort("[::]:32772\n"));
         $this->assertNull(ZeroDowntimeRedeploy::boundPort(''));
     }
@@ -80,6 +84,17 @@ class ZeroDowntimeRedeployTest extends TestCase
 
         $this->assertSame(['web', 'db'], ZeroDowntimeRedeploy::servicesToPull($config));
         $this->assertSame([], ZeroDowntimeRedeploy::servicesToPull(['services' => []]));
+    }
+
+    /** Railpack builds the app's image in the account, outside compose: a redeploy asks no registry for it. */
+    public function test_the_image_railpack_built_is_not_pulled_ahead(): void
+    {
+        $yaml = GeneratedCompose::withProcesses(
+            DeployCompose::railpack('panelalpha-acme-app:latest', 3000),
+            ['worker' => 'node worker.js']
+        );
+
+        $this->assertSame([], ZeroDowntimeRedeploy::servicesToPull(Yaml::parse($yaml)));
     }
 
     /** A failed redeploy leaves the project as it was; a successful one keeps what it deployed. */

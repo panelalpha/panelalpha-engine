@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\Domain;
 use App\Models\Tunnel;
@@ -11,6 +12,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsDelete extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:delete', 'projects:domains:delete'];
@@ -32,6 +34,7 @@ class DomainsDelete extends Command
         $optionDomain = strtolower(trim((string) ($this->option('domain') ?? '')));
         if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
             $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+
             return 1;
         }
         $domainName = $positional !== '' ? $positional : $optionDomain;
@@ -39,27 +42,36 @@ class DomainsDelete extends Command
 
         if ($domainName === '') {
             $this->error('Domain name is required (positional argument or --domain).');
+
             return 1;
         }
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return 1;
         }
 
         $domain = Domain::findByNameOrAlias($domainName);
-        if (!$domain || (int) $domain->user_id !== (int) $user->id) {
+        if (! $domain || (int) $domain->user_id !== (int) $user->id) {
             $this->error("Domain '{$domainName}' not found for project '{$project}'.");
+
             return 1;
         }
 
         if ($domain->subdomains()->exists()) {
             $this->error("Cannot delete domain '{$domain->domain}' while subdomains still exist.");
+
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 
@@ -82,8 +94,9 @@ class DomainsDelete extends Command
         $table->render();
         $this->comment('This removes the domain, its proxy rules, nginx vhost, and any attached tunnels.');
 
-        if (!$this->option('force') && !$this->confirm('Delete this domain?')) {
+        if (! $this->option('force') && ! $this->confirm('Delete this domain?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -93,7 +106,8 @@ class DomainsDelete extends Command
             $user->project()->syncPhpHandlersScripts();
             $user->project()->syncServices();
         } catch (\Throwable $e) {
-            $this->error('Domain delete failed: ' . $e->getMessage());
+            $this->error('Domain delete failed: '.$e->getMessage());
+
             return 1;
         }
 

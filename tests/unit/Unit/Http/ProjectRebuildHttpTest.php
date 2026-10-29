@@ -17,8 +17,12 @@ use App\Models\Setting;
 use App\Models\SecretVaultEntry;
 use App\Models\Task;
 use App\Models\User;
+use App\System;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\FileManager;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Queue;
+use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -32,6 +36,12 @@ class ProjectRebuildHttpTest extends TestCase
     use InMemoryDatabase;
 
     private string $home;
+
+    /** @var list<list<string>> */
+    private array $accountCommands = [];
+
+    /** @var list<string> paths the account sees and this process cannot */
+    private array $accountOnly = [];
 
     /** @var list<string> */
     private array $usernames = [];
@@ -48,17 +58,55 @@ class ProjectRebuildHttpTest extends TestCase
         $this->home = sys_get_temp_dir() . '/pa-rebuild-http-' . bin2hex(random_bytes(4));
         mkdir($this->home . '/project', 0777, true);
         file_put_contents($this->home . '/project/app.zip', 'PK');
-        $home = $this->home;
-        $this->app->instance(ProjectRebuild::class, new class ($home) extends ProjectRebuild {
-            public function __construct(private string $home)
+        $files = fn (User $user): FileManager => $this->accountFiles($user);
+        $this->app->instance(ProjectRebuild::class, new class ($files) extends ProjectRebuild {
+            public function __construct(private \Closure $files)
             {
             }
 
-            protected function homeOf(User $user): string
+            protected function accountFiles(User $user): FileManager
+            {
+                return ($this->files)($user);
+            }
+        });
+    }
+
+    /**
+     * The account's files in the test home: its commands run as ourselves, with the sudo
+     * setpriv prefix dropped, except for a path only the account can see.
+     */
+    private function accountFiles(User $user): FileManager
+    {
+        $commands = &$this->accountCommands;
+        $accountOnly = &$this->accountOnly;
+
+        return new FileManager(new ProjectAggregate(new class ($this->home, $commands, $accountOnly) extends System {
+            /**
+             * @param list<list<string>> $commands
+             * @param list<string> $accountOnly
+             */
+            public function __construct(private string $home, private array &$commands, private array &$accountOnly)
+            {
+            }
+
+            public function projectHomeDirPath(string $username): string
             {
                 return $this->home;
             }
-        });
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->commands[] = (array) $cmd;
+                $argv = array_slice((array) $cmd, 7);
+                if (in_array(end($argv), $this->accountOnly, true)) {
+                    $argv = ['printf', '%s\n', end($argv)];
+                }
+                $process = new Process($argv);
+                $process->run();
+
+                return $process;
+            }
+        }, $user));
     }
 
     protected function tearDown(): void
@@ -79,7 +127,7 @@ class ProjectRebuildHttpTest extends TestCase
         $username = 'rb' . bin2hex(random_bytes(4));
         $this->usernames[] = $username;
 
-        return $this->makeUser($username, ['template' => 'dind', 'env_vars' => ['KEEP' => 'yes']]);
+        return $this->makeUser($username, ['template' => 'dind', 'UID' => 1001, 'GID' => 1001, 'env_vars' => ['KEEP' => 'yes']]);
     }
 
     public function test_a_rebuild_answers_202_with_a_task_and_queues_the_deploy(): void
@@ -122,7 +170,7 @@ class ProjectRebuildHttpTest extends TestCase
     }
 
     /**
-     * The archive deploy resolves a `vault:<id>` env value the way a rebuild
+     * The archive deploy resolves a `vault:<key>` env value the way a rebuild
      * does, storing the secret rather than the reference.
      */
     public function test_an_archive_deploy_resolves_a_vault_env_var(): void
@@ -140,11 +188,31 @@ class ProjectRebuildHttpTest extends TestCase
 
         $response = $this->postJson("/api/projects/{$user->username}/deploy-archive", [
             'zip_path' => '/project/app.zip',
-            'env_vars' => ['TOKEN' => SecretVaultEntry::PREFIX . $entry->id],
+            'env_vars' => ['TOKEN' => $entry->reference()],
         ]);
 
         $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
         $this->assertSame(['KEEP' => 'yes', 'TOKEN' => 's3cret'], $user->refresh()->getEnvVars());
+        $this->assertSame(['TOKEN'], $user->getVaultEnvKeys(), 'and remembers the vault set it, so it is never revealed');
+    }
+
+    /**
+     * ~/.panelalpha is the account's alone (0700), so the engine's PHP sees nothing there:
+     * the archive is looked up as the account, as the import that reads it does.
+     */
+    public function test_an_archive_only_the_account_can_see_is_deployed(): void
+    {
+        $user = $this->dindUser();
+        $this->accountOnly[] = $this->home . '/.panelalpha/archives/app.zip';
+
+        $response = $this->postJson("/api/projects/{$user->username}/deploy-archive", ['zip_path' => '/.panelalpha/archives/app.zip']);
+
+        $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
+        Queue::assertPushed(RebuildProject::class, static fn (RebuildProject $job): bool => $job->zipPath === '/.panelalpha/archives/app.zip');
+        $this->assertSame(
+            [['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT, 'sh', $this->home . '/.panelalpha/archives/app.zip']],
+            $this->accountCommands
+        );
     }
 
     public function test_an_archive_that_is_not_there_is_a_422_and_queues_nothing(): void

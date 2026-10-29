@@ -16,13 +16,11 @@ final class ManifestReader
     private const MAX_PORT = 65535;
 
     /**
-     * @param array<string, mixed> $raw
-     * @param string $subject how errors name this manifest — its file before
-     *        an id has been read, its id afterwards
+     * @param  array<string, mixed>  $raw
+     * @param  string  $subject  how errors name this manifest — its file before
+     *                           an id has been read, its id afterwards
      */
-    public function __construct(private readonly array $raw, private string $subject)
-    {
-    }
+    public function __construct(private readonly array $raw, private string $subject) {}
 
     /** Name later errors after the manifest's own id. */
     public function nameErrorsAfter(string $subject): void
@@ -41,7 +39,8 @@ final class ManifestReader
     }
 
     /**
-     * @param list<string> $known
+     * @param  list<string>  $known
+     *
      * @throws ManifestException on a key nobody defined
      */
     public function assertNoUnknownKeys(array $known): void
@@ -49,7 +48,7 @@ final class ManifestReader
         $unknown = array_diff(array_keys($this->raw), $known);
         if ($unknown !== []) {
             throw $this->fail(
-                'unknown key(s) ' . implode(', ', $unknown) . '; expected one of ' . implode(', ', $known)
+                'unknown key(s) '.implode(', ', $unknown).'; expected one of '.implode(', ', $known)
             );
         }
     }
@@ -60,7 +59,7 @@ final class ManifestReader
     public function identifier(string $key, ?string $default = null): string
     {
         $value = $this->raw($key) ?? $default;
-        if (!is_string($value) || preg_match(self::IDENTIFIER, $value) !== 1) {
+        if (! is_string($value) || preg_match(self::IDENTIFIER, $value) !== 1) {
             throw $this->fail("'{$key}' must be a lowercase kebab-case string");
         }
 
@@ -73,7 +72,7 @@ final class ManifestReader
     public function text(string $key): string
     {
         $value = $this->raw($key);
-        if (!is_string($value) || trim($value) === '') {
+        if (! is_string($value) || trim($value) === '') {
             throw $this->fail("'{$key}' must be a non-empty string");
         }
 
@@ -89,7 +88,7 @@ final class ManifestReader
         if ($value === null) {
             return null;
         }
-        if (!is_string($value) || trim($value) === '') {
+        if (! is_string($value) || trim($value) === '') {
             throw $this->fail("'{$key}' {$expectation}");
         }
 
@@ -102,7 +101,7 @@ final class ManifestReader
     public function integer(string $key, string $expectation): int
     {
         $value = $this->raw($key);
-        if (!is_int($value)) {
+        if (! is_int($value)) {
             throw $this->fail("'{$key}' {$expectation}");
         }
 
@@ -114,7 +113,8 @@ final class ManifestReader
      * that says nothing about a key is distinguishable from one that picked
      * the default.
      *
-     * @param list<string> $allowed
+     * @param  list<string>  $allowed
+     *
      * @throws ManifestException
      */
     public function optionalEnum(string $key, array $allowed): ?string
@@ -123,22 +123,23 @@ final class ManifestReader
         if ($value === null) {
             return null;
         }
-        if (!is_string($value) || !in_array($value, $allowed, true)) {
-            throw $this->fail("'{$key}' must be one of " . implode(', ', $allowed));
+        if (! is_string($value) || ! in_array($value, $allowed, true)) {
+            throw $this->fail("'{$key}' must be one of ".implode(', ', $allowed));
         }
 
         return $value;
     }
 
     /**
-     * @param list<string> $allowed
+     * @param  list<string>  $allowed
+     *
      * @throws ManifestException
      */
     public function enum(string $key, array $allowed, string $default): string
     {
         $value = $this->raw($key) ?? $default;
-        if (!is_string($value) || !in_array($value, $allowed, true)) {
-            throw $this->fail("'{$key}' must be one of " . implode(', ', $allowed));
+        if (! is_string($value) || ! in_array($value, $allowed, true)) {
+            throw $this->fail("'{$key}' must be one of ".implode(', ', $allowed));
         }
 
         return $value;
@@ -153,7 +154,7 @@ final class ManifestReader
         if ($value === null) {
             return null;
         }
-        if (!is_int($value) || $value < self::MIN_PORT || $value > self::MAX_PORT) {
+        if (! is_int($value) || $value < self::MIN_PORT || $value > self::MAX_PORT) {
             throw $this->fail("'{$key}' must be a TCP port number");
         }
 
@@ -162,12 +163,13 @@ final class ManifestReader
 
     /**
      * @return array<string, mixed>
+     *
      * @throws ManifestException
      */
     public function object(string $key, string $expectation, bool $required = false): array
     {
         $value = $this->raw($key) ?? ($required ? null : []);
-        if (!is_array($value) || ($required && $value === [])) {
+        if (! is_array($value) || ($required && $value === [])) {
             throw $this->fail("'{$key}' {$expectation}");
         }
 

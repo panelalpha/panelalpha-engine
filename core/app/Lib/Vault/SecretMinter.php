@@ -26,11 +26,11 @@ class SecretMinter
     /**
      * A new slot of `$type`, and the raw ref of its paste URL.
      *
-     * @param string  $scope   {@see SecretVaultEntry::SCOPES}
-     * @param ?string $purpose free text, shown on the form and in listings
-     * @param ?array<string, mixed> $verifyWith what the paste is checked against, see {@see PasteCheck}
-     * @param ?string $project a project entry's owner from the start; null lets the first project that reads it own it
-     * @param ?int    $expiresIn seconds until the secret expires and is purged; null never
+     * @param  string  $scope  {@see SecretVaultEntry::SCOPES}
+     * @param  ?string  $purpose  free text, shown on the form and in listings
+     * @param  ?array<string, mixed>  $verifyWith  what the paste is checked against, see {@see PasteCheck}
+     * @param  ?string  $project  a project entry's owner from the start; null lets the first project that reads it own it
+     * @param  ?int  $expiresIn  seconds until the secret expires and is purged; null never
      * @return array{0: SecretVaultEntry, 1: string} the entry and its raw ref
      *
      * @throws ValidationException when `$verifyWith` or `$project` is unusable
@@ -45,7 +45,7 @@ class SecretMinter
     ): array {
         if ($expiresIn !== null && $expiresIn < self::MIN_EXPIRY_SECONDS) {
             throw ValidationException::withMessages([
-                'expires_in' => 'A secret must live at least ' . self::MIN_EXPIRY_SECONDS . ' seconds.',
+                'expires_in' => 'A secret must live at least '.self::MIN_EXPIRY_SECONDS.' seconds.',
             ]);
         }
         $project = self::trimmedOrNull($project);
@@ -82,7 +82,7 @@ class SecretMinter
             ]);
         }
 
-        Validator::make(['project' => $project], ['project' => (new UserStoreRequest())->rules()['username']])->validate();
+        Validator::make(['project' => $project], ['project' => (new UserStoreRequest)->rules()['username']])->validate();
     }
 
     /** Whitespace is not a purpose; store nothing rather than a blank. */

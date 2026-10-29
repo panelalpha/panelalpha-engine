@@ -2,13 +2,14 @@
 
 namespace App\Lib\Domains;
 
-use App\System\Project\Dind\AppCertificate;
 use App\Lib\Ssl\CertificateStatus;
+use App\System\Project\Dind\AppCertificate;
+use App\System\Project\Dind\AppHealth;
 
 /**
  * Whether a visitor can actually open the URL the deploy just reported.
  *
- * {@see \App\System\Project\Dind\AppHealth} answers the question
+ * {@see AppHealth} answers the question
  * one layer down -- is the application serving -- and answers it deliberately
  * against `127.0.0.1`, so that the domain, DNS and TLS cannot colour a verdict
  * about the application itself. That is the right call there and it leaves a
@@ -61,7 +62,7 @@ final class PublicUrl
     /**
      * What is wrong with this project's public URL, if anything.
      *
-     * @param array<string, mixed> $details the account's details
+     * @param  array<string, mixed>  $details  the account's details
      * @return list<string>
      */
     public static function warnings(string $domain, array $details): array
@@ -81,7 +82,7 @@ final class PublicUrl
      * unnoticed. A fallback that does not resolve is left to the warning,
      * which already carries the reason.
      *
-     * @param array<string, mixed> $details the account's details
+     * @param  array<string, mixed>  $details  the account's details
      * @return list<string>
      */
     public static function notices(string $domain, array $details): array
@@ -89,14 +90,14 @@ final class PublicUrl
         $allocation = self::allocation($details);
         $reason = $allocation['fallback_reason'] ?? null;
 
-        if (!is_string($reason) || trim($reason) === '' || ($allocation['publicly_resolvable'] ?? null) === false) {
+        if (! is_string($reason) || trim($reason) === '' || ($allocation['publicly_resolvable'] ?? null) === false) {
             return [];
         }
 
         $source = is_string($allocation['source'] ?? null) ? " ({$allocation['source']})" : '';
 
         return ["Serving under {$domain}{$source}, a fallback name: the preferred public name was skipped: "
-            . rtrim(trim($reason), '.') . '.'];
+            .rtrim(trim($reason), '.').'.'];
     }
 
     /**
@@ -109,7 +110,7 @@ final class PublicUrl
      * self-hosted engine there is. Warning on "we cannot tell" would make
      * partial the normal outcome for them.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     private static function unresolvableWarning(string $domain, array $details): ?string
     {
@@ -125,25 +126,25 @@ final class PublicUrl
         // in a name that works from the next VM along.
         $message = ($allocation['source'] ?? null) === DomainPlan::SOURCE_PANELALPHA_DIRECT
             ? "The application is deployed but not reachable from the internet: {$domain}"
-                . " resolves to this host's private address, so it answers on this network only."
+                ." resolves to this host's private address, so it answers on this network only."
             : "The application is deployed but not reachable from the internet: {$domain}"
-                . ' resolves on this host only.';
+                .' resolves on this host only.';
 
         // Why the better name was not had. This is the field that names the
         // licensing failure, and it is the whole reason an operator can tell
         // "Connect refused us" from "this engine has no public address".
         $reason = $allocation['fallback_reason'] ?? null;
         if (is_string($reason) && trim($reason) !== '') {
-            $message .= ' The public name was skipped: ' . rtrim(trim($reason), '.') . '.';
+            $message .= ' The public name was skipped: '.rtrim(trim($reason), '.').'.';
         }
 
-        return $message . ' Point a domain you control at this host, or redeploy once a public name can be allocated.';
+        return $message.' Point a domain you control at this host, or redeploy once a public name can be allocated.';
     }
 
     /**
      * A certificate the engine serves and a browser will not accept.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     private static function certificateWarning(string $domain, array $details): ?string
     {
@@ -155,7 +156,7 @@ final class PublicUrl
         $ssl = is_array($ssl) ? $ssl : [];
 
         $status = $ssl['status'] ?? null;
-        if (!is_string($status) || !in_array($status, self::REFUSED_BY_BROWSERS, true)) {
+        if (! is_string($status) || ! in_array($status, self::REFUSED_BY_BROWSERS, true)) {
             return null;
         }
 
@@ -163,15 +164,15 @@ final class PublicUrl
         $issuer = $ssl['issuer'] ?? null;
 
         return "https://{$name} is served a certificate browsers will refuse ({$status}"
-            . (is_string($issuer) && $issuer !== '' && $issuer !== 'Unknown' ? ", issued by {$issuer}" : '')
-            . '). Request a real one with `ssl:project-cert:request` once the name resolves to this host.';
+            .(is_string($issuer) && $issuer !== '' && $issuer !== 'Unknown' ? ", issued by {$issuer}" : '')
+            .'). Request a real one with `ssl:project-cert:request` once the name resolves to this host.';
     }
 
     /**
      * The `details.domain` block, or an empty one on a project created before
      * the allocator recorded it.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     private static function allocation(array $details): array

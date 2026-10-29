@@ -11,7 +11,7 @@
 #   PANELALPHA_LXCFS_NO_APPLY 1 to write the drop-ins only: no apt, no systemctl
 #
 # The two overrides exist so the drop-ins can be tested without root. See
-# configure-lxcfs.test.sh.
+# tests/scripts/configure-lxcfs.test.sh.
 
 set -euo pipefail
 

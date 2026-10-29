@@ -2,7 +2,6 @@
 
 namespace App\Lib\Ssl;
 
-
 /**
  * Where a domain's certificate comes from.
  *

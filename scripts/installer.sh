@@ -43,7 +43,7 @@ else
     ENGINE_REPO='https://github.com/panelalpha/engine.git'
 fi
 # A repository clone carries no vendor directory; composer install fills it.
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.2.0-20261028'
 
 # Tagged with the engine version, not a build date, so the tag moves whenever
 # core/composer.json's PHP constraint does -- an unpublished tag does not pull
@@ -130,6 +130,14 @@ DEPLOY_PASSWORD_SET=0
 UPDATE_ENGINE=0
 # 1 when --deploy-only: with --repo on an existing host, skip the engine update.
 FORCE_DEPLOY_ONLY=0
+# One-time code from Connect engine in PanelAlpha Connect (--hub-code). It is a
+# credential while it lives: never log it or send it to monitoring.
+HUB_CODE=''
+# 1 when an engine is already here and --hub-code is all there is to do.
+HUB_ONLY=0
+HUB_FAILED=0
+HUB_ERROR=''
+HUB_ACCOUNT=''
 
 usage() {
     cat <<'USAGE'
@@ -167,6 +175,10 @@ Usage: bash installer.sh [options]
                            and deploy without prompting (non-interactive too)
       --deploy-only        with --repo on an existing install, create the project
                            only (skip the engine update; set by the TUI preflight)
+      --hub-code CODE      connect the engine to PanelAlpha Connect once it is up,
+                           with the code from Connect engine in Connect. Where an
+                           engine is already installed it is only connected; add
+                           --update-engine to update it first.
   -p, --package-host HOST  accepted for get.* compatibility; ignored
       --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
@@ -180,6 +192,7 @@ Environment:
   PANELALPHA_ENGINE_REPO      git clone URL (default: https://github.com/panelalpha/engine.git)
   PANELALPHA_ENGINE_VERSION   branch/tag/commit (default: main when using git)
   PANELALPHA_MONITORING_HOST  monitoring hostname (same as --monitoring-host)
+  PANELALPHA_HUB              PanelAlpha Connect URL for --hub-code (default: https://hub.panelalpha.com)
 
 Installing into a container (CI, dev):
 
@@ -318,6 +331,15 @@ while true; do
         FORCE_DEPLOY_ONLY=1
         shift
         ;;
+    --hub-code)
+        HUB_CODE="$2"
+        shift
+        shift
+        ;;
+    --hub-code=*)
+        HUB_CODE="${1#*=}"
+        shift
+        ;;
     --no-cert-request)
         NO_CERT_REQUEST=1
         shift
@@ -413,6 +435,14 @@ done
 
 if [ "$DEPLOY_NO_PASSWORD" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
     echo "Cannot use --password and --no-password together." >&2
+    trap - EXIT
+    exit 1
+fi
+
+# Checked before anything is installed: a typo found after a ten-minute install
+# costs the code, which lives only ten minutes.
+if [ -n "$HUB_CODE" ] && ! printf '%s' "$HUB_CODE" | grep -Eq '^[A-Za-z0-9 -]{1,16}$'; then
+    echo "--hub-code is not a connect code. Copy the command from Connect engine in PanelAlpha Connect." >&2
     trap - EXIT
     exit 1
 fi
@@ -900,6 +930,18 @@ download_panelalpha_engine() {
     download_engine_from_repository
 }
 
+# Traditional PHP hosting runs git on the host, pinned to the address the engine
+# checked with http.curloptResolve, which git before 2.37 ignores. The engine then
+# refuses such a pull unless the host is in EGRESS_ALLOW_HOSTS; the package
+# source is the operator's, so this only says so.
+warn_old_host_git() {
+    local version
+    version=$(git --version 2>/dev/null | sed -n 's/^git version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p') || version=''
+    if [ -n "$version" ] && [ "$(printf '%s\n' 2.37 "$version" | sort -V | head -1)" != 2.37 ]; then
+        echo_warning "git ${version} is older than 2.37: on traditional PHP hosting the engine refuses a git pull from any host name not in EGRESS_ALLOW_HOSTS until git on this server is upgraded."
+    fi
+}
+
 # Host state: never deleted by an update, whatever an older release shipped at
 # that path. The same paths deploy-from-source.sh keeps out of its upload.
 ENGINE_HOST_STATE=(
@@ -1147,9 +1189,7 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.
-    mkdir -p /opt/panelalpha/shared-hosting/config/modsecurity
-    mkdir -p /opt/panelalpha/shared-hosting/logs/modsecurity
-    cp -Rn /opt/panelalpha/shared-hosting/templates/config/modsecurity/. /opt/panelalpha/shared-hosting/config/modsecurity/.
+    bash /opt/panelalpha/shared-hosting/scripts/seed-modsecurity.sh /opt/panelalpha/shared-hosting
 }
 
 disable_systemd_resolved() {
@@ -1982,6 +2022,57 @@ report_deployed_project() {
     outro_nl
 }
 
+# Connect the engine to PanelAlpha Connect with --hub-code. Like a failed
+# deploy, a failed connect is reported, not fatal: the engine is up, and the
+# operator can run the same command again with a new code.
+connect_hub() {
+    [ -n "$HUB_CODE" ] || return 0
+
+    local out ec=0
+    out=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T \
+        ${PANELALPHA_HUB:+-e} ${PANELALPHA_HUB:+"PANELALPHA_HUB=${PANELALPHA_HUB}"} core \
+        php artisan hub:connect "$HUB_CODE" 2>&1) || ec=$?
+    out=$(printf '%s\n' "$out" | tr -d '\r')
+    printf '%s\n' "$out"
+
+    if [ "$ec" -ne 0 ]; then
+        HUB_FAILED=1
+        HUB_ERROR=$(printf '%s\n' "$out" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | tail -n1 || true)
+        echo_warning "Could not connect to PanelAlpha Connect."
+        return 0
+    fi
+    HUB_ACCOUNT=$(printf '%s\n' "$out" | sed -n 's/^Connected to \(.*\)\.$/\1/p' | tail -n1)
+}
+
+# The connect result for stdout and the TUI ready screen; called from
+# finish_installation, where the outro writers live.
+report_hub_connection() {
+    [ -n "$HUB_CODE" ] || return 0
+
+    if [ "$HUB_FAILED" = 1 ]; then
+        echo_warning "Not connected to PanelAlpha Connect${HUB_ERROR:+: ${HUB_ERROR}}"
+        echo_warning "Get a new code from Connect engine in PanelAlpha Connect and run: pae hub:connect CODE"
+        outro_say 221 'Not connected to PanelAlpha Connect:'
+        [ -z "$HUB_ERROR" ] || outro_say 196 "  ${HUB_ERROR}"
+        outro_c 247 'Get a new code from Connect engine and run: '
+        outro_c 15 'pae hub:connect CODE'
+        outro_nl
+        outro_nl
+        return 0
+    fi
+
+    echo_info "Connected to PanelAlpha Connect: ${HUB_ACCOUNT:-connected}"
+    echo_info "Not your account? Disconnect with: pae hub:disconnect"
+    echo_info ""
+    outro_c 247 'Connected to PanelAlpha Connect: '
+    outro_c 15 "${HUB_ACCOUNT:-connected}"
+    outro_nl
+    outro_c 247 'Not your account? Disconnect with: '
+    outro_c 15 'pae hub:disconnect'
+    outro_nl
+    outro_nl
+}
+
 # Strip a leading v so 2.0.1 and v2.0.1 compare equal.
 normalize_version() {
     printf '%s' "$1" | sed -E 's/^[vV]//'
@@ -2129,6 +2220,9 @@ finish_installation() {
     # when the engine is up but project:create failed (exit stays 0 on install).
     if [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ]; then
         printf '%s\n' "${DEPLOY_FAILED:-0}" >"$RUN_DIR/repo_deploy_failed"
+        if [ -n "$HUB_CODE" ]; then
+            printf '%s\n' "$HUB_FAILED" >"$RUN_DIR/hub_failed"
+        fi
     fi
     local outro_tmp=""
     if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ]; then
@@ -2155,9 +2249,11 @@ finish_installation() {
     }
 
     echo_info ""
-    # Nothing was installed on this run, so the project is the whole report.
-    if [ "$DEPLOY_ONLY" = 1 ]; then
+    # Nothing was installed on this run, so the project and the connection are
+    # the whole report.
+    if [ "$DEPLOY_ONLY" = 1 ] || [ "$HUB_ONLY" = 1 ]; then
         report_deployed_project
+        report_hub_connection
         finish_commit
         return
     fi
@@ -2170,6 +2266,7 @@ finish_installation() {
     echo_info ""
 
     report_deployed_project
+    report_hub_connection
 
     echo_info "API URL: ${API_URL}    new token: pae api:token:create default"
     echo_info "MCP URL: ${MCP_URL}    new token: pae mcp:token:create default"
@@ -2295,12 +2392,42 @@ if [ -n "$DEPLOY_REPO" ]; then
     decide_repo_deploy_mode
 fi
 
+# --hub-code alone on a host that already has an engine only connects it;
+# --update-engine asks for the update as well. With --repo it follows the
+# deploy decision above.
+if [ -n "$HUB_CODE" ] && [ -z "$DEPLOY_REPO" ] && [ "$UPDATE_ENGINE" != 1 ] &&
+    [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ]; then
+    HUB_ONLY=1
+fi
+if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ] && [ -n "$HUB_CODE" ]; then
+    printf '%s\n' "$HUB_ONLY" >"$RUN_DIR/hub_only"
+fi
+
+if [ "$HUB_ONLY" = 1 ]; then
+    check_root
+    echo_info "PanelAlpha engine is already installed on this host"
+    update_progress 50 "Connecting to PanelAlpha Connect"
+    echo_info "Connecting to PanelAlpha Connect"
+    connect_hub
+    update_progress 100 "Finishing"
+    finish_installation
+    # No install or update happened, so there is no install status to report.
+    trap - EXIT
+    exit "$HUB_FAILED"
+fi
+
 # An engine is already here, so --repo is a project to create through the CLI,
 # not a reason to install the engine over the top of itself.
 if [ "$DEPLOY_ONLY" = 1 ]; then
     # before_install, which normally asks, is skipped on this path.
     check_root
     echo_info "PanelAlpha engine is already installed on this host"
+    if [ -n "$HUB_CODE" ]; then
+        # Before the deploy: the code expires ten minutes after it was created.
+        update_progress 45 "Connecting to PanelAlpha Connect"
+        echo_info "Connecting to PanelAlpha Connect"
+        connect_hub
+    fi
     set_installer_phase deploy
     update_progress 50 "Building ${DEPLOY_REPO_LABEL}"
     echo_info "Deploying ${DEPLOY_REPO_LABEL}"
@@ -2310,7 +2437,7 @@ if [ "$DEPLOY_ONLY" = 1 ]; then
     # Neither an install nor an update happened, so there is no install status
     # to report; the trap would send one for a run that changed no engine.
     trap - EXIT
-    exit "$DEPLOY_FAILED"
+    exit $((DEPLOY_FAILED | HUB_FAILED))
 fi
 
 resolve_engine_version
@@ -2344,6 +2471,7 @@ install_docker_engine
 update_progress 25 "Download PanelAlpha engine package"
 echo_info "Download PanelAlpha engine package"
 download_panelalpha_engine
+warn_old_host_git
 
 update_progress 35 "Unzip PanelAlpha engine package"
 echo_info "Unzip PanelAlpha engine package"
@@ -2382,6 +2510,14 @@ clean_installer
 update_progress 90 "Applying additional configuration"
 echo_info "Applying additional configuration"
 post_install_config
+
+# After post_install_config, so the Hub pins the final certificate; before the
+# deploy, because the code expires ten minutes after it was created.
+if [ -n "$HUB_CODE" ]; then
+    update_progress 92 "Connecting to PanelAlpha Connect"
+    echo_info "Connecting to PanelAlpha Connect"
+    connect_hub
+fi
 
 if [ -n "$DEPLOY_REPO" ]; then
     set_installer_phase deploy

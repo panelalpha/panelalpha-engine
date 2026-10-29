@@ -8,6 +8,8 @@ This page covers creating, inspecting, rebuilding, copying, suspending, protecti
 
 Creating a project from a repository *is* the deploy. It is covered in full on [Connecting with Git](connecting-with-git.md). Creating WordPress without a repository, or looking after WordPress you already host, is on [WordPress](wordpress-and-apps.md).
 
+A new project runs in its own container unless you ask for traditional PHP hosting. For that, say so: "Create it on traditional PHP hosting." The assistant then creates the project with the template `default`.
+
 To see what you already have:
 
 ```text
@@ -19,11 +21,11 @@ List the projects on this engine.
 Inspecting tells you what a project contains right now, without redeploying anything.
 
 ```text
-Inspect this project. Tell me the stack, and whether the files have changed
-since the last deploy.
+Inspect this project. Tell me the stack, and whether it still matches the last
+deploy.
 ```
 
-**That last part is the interesting one.** If the files on disk no longer match what the last deploy recorded, somebody uploaded over FTP or edited a file directly. When a site is behaving unexpectedly and nobody deployed recently, that is the first thing to check.
+**That last part is the interesting one.** The inspection compares how the app would be run now (strategy, platform, runtime, port) and the commit with what the last deploy recorded. A difference means the files changed after the deploy, for example over FTP, or a different commit is checked out. It does not compare file contents. When a site is behaving unexpectedly and nobody deployed recently, that is the first thing to check.
 
 ## The application's login
 
@@ -59,7 +61,7 @@ Staging is a linked copy of a live site, for trying changes where visitors canno
 Make a staging copy of this project.
 ```
 
-You get a second project with its own hostname. Break it freely. When you are happy:
+You get a second project with its own hostname: `staging.` in front of the live one's, or, for a project on a free `panelalpha.online` name, a new name of its own there. Break it freely. When you are happy:
 
 ```text
 Push the staging copy live.
@@ -75,7 +77,9 @@ A project can have **one** staging copy, and a staging copy cannot itself have o
 Make a staging copy of this project without its databases.
 ```
 
-**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. The other project keeps its own database users and passwords, so the site there keeps connecting.
+A WordPress site on a traditional PHP project is the exception: its copy is pointed at the databases copied for it, so a staging copy or a clone of it without its databases is refused before anything is copied.
+
+**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. On a container project the pushed app has to come up: one that keeps restarting, is stopped, or still listens on no port after the time a deploy gives it to start, fails the push, and the other side is put back as it was. Once the other side is running the pushed site, the push is done: a leftover copy the engine then fails to remove is reported as a warning on the push, and nothing is put back. The other project keeps its own database users and passwords, so the site there keeps connecting. A database the other side does not have yet is created there, and its users get the permissions the pushed project's users had on it. If the push fails, that database is dropped again and those permissions are taken back.
 
 ```text
 Push the staging copy live, files only.
@@ -89,7 +93,13 @@ Which database tables differ between this project and its staging copy? Then
 push only those tables.
 ```
 
-Container projects have no table push. On a container project, `databases` means the stored data volumes: they are pushed only together with the files, so a push with both left on carries both.
+Each table you push is named by its database and its name. After a full database push, the diff can still list tables. On a WordPress site, the push keeps the other side's own site address, so the data there differs from the pushed side by that address.
+
+Container projects have no table push. On a container project, `databases` covers two things. The MySQL database the engine made for the app is pushed on its own, so a databases-only push carries it. The stored data volumes go only together with the files, so a push with both left on carries both. A databases-only push from a container project that has no such database has nothing to carry, and is refused before either app is stopped. The project's deploy settings, such as how it is built and which commit it runs, go with the files: a databases-only push leaves the other side's own.
+
+Only the volumes your compose file names are copied. An anonymous volume, such as the data directory a database image declares for itself when the compose file gives that service no volume, or an entry that gives only the path inside the container (`- /var/lib/mysql`), is left out of a staging copy, a clone and a push, and the result's warnings name each one that held data. Name the volume in your compose file to have it copied.
+
+**A container project's environment variables go with its files.** A staging copy starts with the live project's variables, and a push that includes the files gives the other side the pushed project's variables, so a later rebuild keeps them. A value that names the project's own address or the database the engine made for it is changed to the copy's, both in the stored variables and in the copied `.env` files, so the copy answers as itself from the start.
 
 ## Cloning
 
@@ -99,7 +109,7 @@ A clone is an independent copy, with no ongoing link and no later push.
 Clone this project.
 ```
 
-It copies the files, the stored data and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases."
+It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
 
 **It does not copy** subdomains, or FTP or SFTP accounts. On a container project it does not copy MySQL databases either: the application's own stored data is copied (unless you ask to leave the databases out, which leaves that data out too), but a database you created for it is not, so create one on the clone. Use clone as a starting template, not as a backup.
 
@@ -116,9 +126,11 @@ A suspended project is also skipped by the engine's automatic health checks, bec
 
 ## Protecting
 
-A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs.
+A project can be marked protected. While it is, an assistant or any other tool using a token cannot delete the project, suspend it, stop or restart it, rebuild or redeploy it, change its environment variables, or push into it. The engine refuses with `project_protected` and nothing runs. Starting it (`up`) is refused too when that would write its run file again from the compose file, so environment variables saved without applying them cannot be applied that way.
 
 Only you can turn protection on or off, on the server, so a tool cannot lift it. The assistant can read the setting but not change it.
+
+A staging copy, a clone or a push from a protected project is still allowed. A container project is paused while its data is copied and then started again exactly as it was: environment variables saved without applying them stay unapplied.
 
 ```bash
 pae project:settings:set protected on --project=<name>
@@ -151,6 +163,8 @@ Only the keys you name are changed; the rest are left alone. To see what is set,
 
 If your repository commits its own `.env` file, the engine leaves that file exactly as committed. Your environment variables go into a separate file, `.env.panelalpha`, which each service that loads `.env` loads after it, so your values win. Code that reads `.env` straight from disk does not see them, and neither does a build step that reads `.env` while the site is being built, as Vite and Next.js do. Only the running application's environment has them. If you need a value at build time, either stop committing `.env`, or make the build read the value from the environment rather than from the file.
 
+The `.env`, `.env.default` and `.env.panelalpha` files the engine creates in the project folder are readable only by the project's own user, and so is a project-folder `.env` that an app config's `files` put there. Compose reads them as that user and hands the values to the application. A `.env` it creates in a subfolder, from that folder's `.env.example` or empty because a compose `env_file:` names it, is readable by every user on the account, secrets included, because a Docker image may copy it in and read it as a user other than root. No other project can read either kind, and a symlink to another project's file does not make the engine read it for a project either: detection, inspection and the deploy all refuse a file that a link puts in another project's home. A file that already exists keeps its permissions and is never made more readable, so a subfolder `.env` you made private stays private.
+
 If your application refuses to start because a setting is missing or still has a placeholder value, the engine recognises that specifically and says so: [Reading errors](../02-getting-started/reading-errors.md).
 
 ### A secret of the project's own
@@ -169,9 +183,11 @@ Every project has plan limits: disk, memory, CPU, bandwidth, and how many databa
 Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 ```
 
+**-1 means unlimited.** Every limit except memory takes `-1` for unlimited, a number of 0 or more, or nothing (`null`), which means no limit was set. Any other negative number is refused. The engine stores and answers `-1` as it is: an unlimited project reports `disk.limit_bytes: -1`, and its usage reports `-1` as the maximum. `pae project:limit:get` prints "no limit" for both. An unlimited CPU or disk I/O limit is left out of the project's container settings.
+
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
-**Every project has a memory limit.** No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
+**Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and only just ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 
 To keep more for the engine, or for other things the server runs, set `DEPLOY_ENGINE_MEMORY` (in MB) in the engine's environment; that lowers the maximum for every project. `DEPLOY_PROJECT_MEMORY_DEFAULT` gives projects created without a limit a smaller default.
 
@@ -179,7 +195,13 @@ The application gets a little less than the number you set. The project itself n
 
 Memory limits are the ones that bite. A build that runs out of memory fails with a message that looks like a code problem but is not: [Reading errors](../02-getting-started/reading-errors.md).
 
-**Some builds do not use the project's memory limit.** Frontend assets, Java, Rust and PHP dependencies are often built on the server, in a separate build container, before the application starts. When `DEPLOY_BUILD_MEMORY` in `.env-core` is left empty, the default, that container gets 8192 MB. Set or not, it never gets more than half the server's RAM, nor the server's RAM less `DEPLOY_ENGINE_MEMORY` (512 MB by default). Only one such build runs at a time, and if the server still runs out of memory, the build is what the kernel stops first. Setting `DEPLOY_BUILD_MEMORY` fixes the figure for every build on the server, up to that ceiling. The deploy log states the figure, and where it came from, in a line starting `Host build container memory`. If a build like this runs out of memory, raise `DEPLOY_BUILD_MEMORY` (it helps up to that ceiling), or deploy on a server with more RAM.
+**A build gets the server's build memory, not the whole server.** When `DEPLOY_BUILD_MEMORY` in `.env-core` is left empty, the default, a build gets 8192 MB. Set or not, it never gets more than half the server's RAM, nor the server's RAM less `DEPLOY_ENGINE_MEMORY` (512 MB by default). Setting `DEPLOY_BUILD_MEMORY` fixes the figure for every build on the server, up to that ceiling. Whatever the figure, if memory runs out while a build runs, the build is what the kernel stops first, before the application.
+
+Frontend assets, Java, Rust and PHP dependencies are often built on the server, in a separate build container, before the application starts. That build does not use the project's memory limit: it gets the build memory above, and only one such build runs at a time. The deploy log states the figure, and where it came from, in a line starting `Host build container memory`.
+
+The image a project builds itself, from its `Dockerfile`, its compose file or an automatic build, is built inside the project. It gets the same build memory, but never more than the project's own memory limit. The deploy log states the figure in a line starting `Image build memory`.
+
+If a build runs out of memory, raise the project's memory limit when that is the lower of the two, otherwise raise `DEPLOY_BUILD_MEMORY` (it helps up to that ceiling), or deploy on a server with more RAM.
 
 ## Cron jobs
 
@@ -207,8 +229,17 @@ One staging copy per project. Push to the existing pair, or delete the existing 
 **"Project is busy".**
 A staging copy or a push is already running on this project. Wait for it to finish and try again.
 
+**"A copy of it needs its own databases" (`wordpress_copy_needs_databases`).**
+You asked for a staging copy or a clone of a WordPress site on a traditional PHP project without its databases. Without them the copy would use the live site's database. Ask again with the databases.
+
 **I cloned a project and the site cannot reach its database.**
 A clone of a container project does not copy MySQL databases. Create the database and user on the clone, then update its environment variables to point at the new one: [Databases](databases.md). A traditional PHP project is copied with its databases, unless you asked for them to be left out. The copy has new database names and passwords, so a site that stores the old ones in its own files needs them updated.
+
+**A push fails with "the copied home holds a symbolic link at its top level".**
+The top level of a project's home holds only what the engine puts there, and the engine never puts a link there. A link at that level of the pushed project is refused before anything on the other side is replaced. Remove the named link from `/home/<project>/` on the server, then push again.
+
+**My staging copy or clone starts with an empty database.**
+The database kept its data in an anonymous volume, which a copy leaves out; the copy's warnings name it. Give that service a named volume in your compose file (for example `db_data:/var/lib/mysql`). The redeploy starts it on that new, empty volume, so export the data first and import it afterwards. Then make the copy again.
 
 **A push or a delete is refused with "project_protected".**
 The project is protected. Turn it off on the server, then ask again: [Protecting](#protecting).
@@ -217,7 +248,7 @@ The project is protected. Turn it off on the server, then ask again: [Protecting
 The application reads that value while it is being built, so it needs a rebuild. See [Environment variables](#environment-variables).
 
 **I raised the memory limit and the application still runs out.**
-You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory`: it says whether the build was sized by the server or by `DEPLOY_BUILD_MEMORY`. See [Limits](#limits).
+You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory` or `Image build memory`: they say how much the build was given and why. See [Limits](#limits).
 
 **The assistant says stored secrets cannot be decoded.**
 Ask the assistant to list the affected secrets and check the engine's system information. The engine's encryption key, `APP_KEY` in `/opt/panelalpha/shared-hosting/.env-core`, may be invalid or may have changed since the secrets were stored. The project's environment variables, Git token, Cloudflare token, registry login or site password then read as empty, and the next save of the project, a redeploy included, stores them empty. Put the previous `APP_KEY` back before you change or redeploy the project. If you no longer have it, ask the assistant to set each named secret again. The application's database password is the exception: it is kept, and deploys are refused until it can be read, because a new one would lock the application out of its own database.
@@ -258,7 +289,7 @@ Mode: modify. Tools: `project_get`, `project_update`, `project_rebuild`, `task_g
 How close is tshop to its limits this month? Include transfer.
 ```
 
-Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (null means unlimited), and the log disk use is shown.
+Mode: read. Tools: `project_usage`. Check: `bandwidth.usage` against `bandwidth.maximum` (-1 means unlimited, null means no limit was set), and the log disk use is shown.
 
 **Offline and back**
 
@@ -307,7 +338,7 @@ Mode: modify. Tools: `env_var_list`, `env_var_set`, `task_get`. Check: the list 
 Clone tshop as tshopcopy. List what was not copied.
 ```
 
-Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain, and no subdomains or FTP or SFTP accounts. A traditional PHP project's databases are copied under the new prefix with new users; a container project's are not.
+Mode: modify. Tools: `project_clone`, `project_get`, `domain_list`, `mysql_database_list`, `ftp_account_list`. Check: the copy has the same limits and files, a staging-style domain (a new `panelalpha.online` name when the source has one), and no subdomains or FTP or SFTP accounts. A traditional PHP project's databases are copied under the new prefix with new users; a container project's are not.
 
 **Staging and back**
 
@@ -335,7 +366,7 @@ On tphpsite, list the database tables that differ from tphpstage, then push
 only the changed table named <table> to staging.
 ```
 
-Mode: read for the first part, modify for the push. Tools: `project_push_diff`, `project_push` with `tables`. Check: the list names the differing tables, only those are replaced, and a container project is refused.
+Mode: read for the first part, modify for the push. Tools: `project_push_diff`, `project_push` with `tables`. Check: the list names the differing tables, each one sent to `project_push` with its `database` and `name`, only those are replaced, and a container project is refused. After a full database push on a WordPress site the diff may still list tables, because the other side keeps its own site address.
 
 **A protected project**
 

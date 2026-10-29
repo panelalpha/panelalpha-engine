@@ -28,8 +28,11 @@ final class PlatformStage
     public const PREPARE = 'prepare';
 
     public const BUILD = 'build';
+
     public const INSTALL = 'install';
+
     public const UPGRADE = 'upgrade';
+
     public const START = 'start';
 
     /**

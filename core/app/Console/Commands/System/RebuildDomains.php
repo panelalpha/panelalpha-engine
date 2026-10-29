@@ -17,11 +17,12 @@ class RebuildDomains extends Command
     public function handle(): int
     {
         try {
-            $system = new System();
+            $system = new System;
             $system->webserver()->rebuildDomains();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
         }
+
         return 0;
     }
 }

@@ -46,8 +46,8 @@ class RebuildProject implements ShouldQueue
     public ?int $userId = null;
 
     /**
-     * @param array<string, list<array<string, mixed>>>|null $stages
-     * @param array<string, string>|null $git a git action's input: `path` and `strategy`, `branch` or `ref`
+     * @param  array<string, list<array<string, mixed>>>|null  $stages
+     * @param  array<string, string>|null  $git  a git action's input: `path` and `strategy`, `branch` or `ref`
      */
     public function __construct(
         public string $username,
@@ -68,7 +68,7 @@ class RebuildProject implements ShouldQueue
             $user = $this->project();
             if ($user === null) {
                 $this->logTask("Not deploying: project '{$this->username}' was deleted.");
-                throw new TaskCancelledException();
+                throw new TaskCancelledException;
             }
 
             $this->bindDeployContext();
@@ -130,7 +130,7 @@ class RebuildProject implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Rebuild job failed'));
         }
     }
@@ -167,7 +167,7 @@ class RebuildProject implements ShouldQueue
         }
 
         if (($problems[0]['code'] ?? null) === 'deploy_cancelled') {
-            return new TaskCancelledException();
+            return new TaskCancelledException;
         }
 
         $messages = array_merge(...array_values($e->errors()));
@@ -176,7 +176,7 @@ class RebuildProject implements ShouldQueue
     }
 
     /**
-     * @param array<string, mixed> $result what the run reported, e.g. the commit a git action left
+     * @param  array<string, mixed>  $result  what the run reported, e.g. the commit a git action left
      */
     private function recordOutcome(User $user, array $result): void
     {

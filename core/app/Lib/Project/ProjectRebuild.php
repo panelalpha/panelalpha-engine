@@ -13,8 +13,8 @@ use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
-use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Lib\Deploy\DeployLog\FailureOutput;
+use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Source\GitUrl;
@@ -25,7 +25,9 @@ use App\Lib\Task\TaskTrigger;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
+use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
@@ -59,7 +61,7 @@ class ProjectRebuild
     /**
      * Queue the run and return its task.
      *
-     * @param array<string, string> $git the git action's input, also shown on the task
+     * @param  array<string, string>  $git  the git action's input, also shown on the task
      */
     public function queue(User $user, string $action, ?string $zipPath, ?DeployPlan $plan, ?string $recipe, array $git = []): Task
     {
@@ -119,8 +121,10 @@ class ProjectRebuild
      * which could queue a second deploy beside a racing one.
      *
      * @template T
-     * @param callable(): T $start
+     *
+     * @param  callable(): T  $start
      * @return T
+     *
      * @throws DeployBusyException
      */
     public function whileIdle(User $user, callable $start): mixed
@@ -171,7 +175,7 @@ class ProjectRebuild
         if ($handle === false) {
             return null;
         }
-        if (!flock($handle, LOCK_EX)) {
+        if (! flock($handle, LOCK_EX)) {
             fclose($handle);
 
             return null;
@@ -204,7 +208,7 @@ class ProjectRebuild
      */
     public static function refuseArchiveOnGitProject(User $user): void
     {
-        if (!$user->hasGitProject()) {
+        if (! $user->hasGitProject()) {
             return;
         }
 
@@ -212,24 +216,25 @@ class ProjectRebuild
             'zip_path',
             'archive_on_git_project',
             "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
-            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
+            .'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
             ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
         );
     }
 
     public function assertArchive(User $user, string $zipPath): void
     {
+        $files = $this->accountFiles($user);
         try {
-            UploadedArchive::inHome($zipPath, rtrim($this->homeOf($user), '/'));
+            UploadedArchive::inHome($zipPath, rtrim($files->homeDirPath(), '/'), $files->resolvedFile(...));
         } catch (\InvalidArgumentException $e) {
             throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
         }
     }
 
-    /** The home the archive import resolves zip_path against. */
-    protected function homeOf(User $user): string
+    /** The home the archive import resolves zip_path against, looked into as the account. */
+    protected function accountFiles(User $user): FileManager
     {
-        return $this->project($user)->homeDirPath();
+        return $this->project($user)->fileManager();
     }
 
     protected function project(User $user): ProjectAggregate
@@ -268,8 +273,9 @@ class ProjectRebuild
      * thrown in the shape the API answers it in -- a ProblemException with a
      * code and the stage, or a refused archive as a 422 on zip_path.
      *
-     * @param array<string, string> $git a git action's input
+     * @param  array<string, string>  $git  a git action's input
      * @return array<string, mixed> what to add to the task's details
+     *
      * @throws ValidationException
      */
     public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
@@ -299,7 +305,7 @@ class ProjectRebuild
      * app was deployed from is kept aside only for the process that changes
      * the checkout, and is put back if the new version fails.
      *
-     * @param array<string, string> $git
+     * @param  array<string, string>  $git
      * @return array{commit: ?string, checkout: array<string, mixed>}
      */
     private function changeCheckout(User $user, string $action, ?DeployLogger $logger, array $git): array
@@ -326,7 +332,7 @@ class ProjectRebuild
     {
         $answered = $e instanceof ProblemException && ($e->problems[0]['code'] ?? null) === 'deploy_cancelled';
 
-        return !$answered && ($e instanceof DeployCancelledException || $logger?->isCancelled() === true);
+        return ! $answered && ($e instanceof DeployCancelledException || $logger?->isCancelled() === true);
     }
 
     /** Finishes the log as cancelled and answers it, naming the stage it was cancelled in. */
@@ -467,7 +473,7 @@ class ProjectRebuild
     /**
      * The health and public-URL verdicts the pipeline finishes its log with, applied to the
      * account record only: a rebuild does not run the pipeline, and the log is finished by
-     * {@see \App\System\Project\Deployment\DeploymentWorkflow::rebuildFromSource()}.
+     * {@see DeploymentWorkflow::rebuildFromSource()}.
      *
      * @return list<string>
      */
@@ -483,6 +489,6 @@ class ProjectRebuild
     private static function alreadyCleanSuccess(User $user): bool
     {
         return $user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []
-            && !$user->isAppStoppedByRequest();
+            && ! $user->isAppStoppedByRequest();
     }
 }

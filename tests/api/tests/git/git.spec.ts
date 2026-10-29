@@ -4,6 +4,7 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { Timeouts } from '@/config/timeouts';
 import type { GitStatus } from '@/types';
 
@@ -16,6 +17,28 @@ test.describe('git API', () => {
     const user = await userFactory.createSimpleUser();
     const response = await api.gitConnectRaw(user.username, { branch: 'main' });
     expectOneOf(response.status, [400, 422]);
+  });
+
+  test('connect refuses an internal or unresolvable host', async ({ api, userFactory }) => {
+    const user = await userFactory.createSimpleUser();
+    for (const repoUrl of [
+      `http://${testNetwork.LOOPBACK}:9/x.git`,
+      `http://${testNetwork.METADATA}/x.git`,
+      'http://[::1]/x.git',
+      'http://0x7f000001:9/x.git',
+      'https://no-such-host.invalid/o/r.git',
+    ]) {
+      const response = await api.gitConnectRaw(user.username, {
+        repo_url: repoUrl,
+        branch: 'main',
+      });
+      await expectStatus(response, 422);
+      const body = response.body as { problems?: { field?: string; code?: string }[] };
+      expect(body.problems?.[0]?.field, repoUrl).toBe('repo_url');
+      expect(body.problems?.[0]?.code, repoUrl).toBe('host_refused');
+    }
+    const status = await api.gitStatus(user.username);
+    expect(status.data.connected, 'nothing was connected').toBe(false);
   });
 
   test('a PHP account reports site_git and is not connected', async ({ api, userFactory }) => {

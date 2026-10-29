@@ -3,6 +3,9 @@
 namespace App\Console;
 
 use App\Exceptions\Handler;
+use App\Models\AppSsoToken;
+use App\Models\MysqlSsoToken;
+use App\Models\TokenRotation;
 use App\Support\RootConsoleOwnership;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
@@ -59,7 +62,7 @@ class Kernel extends ConsoleKernel
      */
     protected function renderException($output, Throwable $e)
     {
-        if (!Handler::renderPlainForConsole($output, $e)) {
+        if (! Handler::renderPlainForConsole($output, $e)) {
             parent::renderException($output, $e);
         }
     }
@@ -75,8 +78,10 @@ class Kernel extends ConsoleKernel
         $this->scheduleLogPruning($schedule);
         $this->scheduleInterruptedWorkRecovery($schedule);
         $this->scheduleExpiredSecretPurges($schedule);
+        $this->scheduleGitCredentialSweep($schedule);
         $this->scheduleTunnelExpiry($schedule);
         $this->scheduleCertificateRenewal($schedule);
+        $this->scheduleImportedDomainSwitch($schedule);
         $this->scheduleHostDiskUpkeep($schedule);
         $this->scheduleMonitoring($schedule);
         $this->scheduleAutomaticBackups($schedule);
@@ -91,18 +96,20 @@ class Kernel extends ConsoleKernel
     /** Compile root's Blade views apart, so files it writes never block the web user's own. */
     private function separateRootViewCache(): void
     {
-        $compiledPath = (string)Config::get('view.compiled');
-        Config::set('view.compiled', $compiledPath . '/console');
+        $compiledPath = (string) Config::get('view.compiled');
+        Config::set('view.compiled', $compiledPath.'/console');
     }
 
     /**
-     * Metrics, the deploy log archive, and task rows. Task lines are a poll
-     * buffer, not the deploy archive: keep the newest 50 deploys per project and
-     * 10 of every other job; daily, since one untrimmed deploy writes thousands of lines.
+     * Metrics, the deploy log archive, Connect's call log (30 days), and task
+     * rows. Task lines are a poll buffer, not the deploy archive: keep the newest
+     * 50 deploys per project and 10 of every other job; daily, since one
+     * untrimmed deploy writes thousands of lines.
      */
     private function scheduleLogPruning(Schedule $schedule): void
     {
         $schedule->command('metrics:prune')->daily()->withoutOverlapping(self::MUTEX_DAILY);
+        $schedule->command('hub:prune')->daily()->withoutOverlapping(self::MUTEX_DAILY);
         $schedule->command('deploy:log:prune')->monthly()->withoutOverlapping(self::MUTEX_WEEKLY);
         $schedule->command('task:prune')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }
@@ -120,16 +127,26 @@ class Kernel extends ConsoleKernel
 
     /**
      * Hourly removal of ACME challenges, expired vault entries (after a grace
-     * hour, so a status check still says `expired`) and spent or expired SSO
-     * tokens, since an unredeemed app token still holds a live session cookie.
+     * hour, so a status check still says `expired`), spent or expired SSO
+     * tokens, since an unredeemed app token still holds a live session cookie,
+     * and the source secrets of WordPress imports left idle for days.
      */
     private function scheduleExpiredSecretPurges(Schedule $schedule): void
     {
         $schedule->command('acme:challenge:prune')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('vault:purge')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('wordpress:migrate:expire-secrets')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('model:prune', [
-            '--model' => [\App\Models\AppSsoToken::class, \App\Models\MysqlSsoToken::class],
+            '--model' => [AppSsoToken::class, MysqlSsoToken::class, TokenRotation::class],
         ])->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+    }
+
+    /**
+     * Reaches a project that never runs git again; stale only, so one running now keeps its files.
+     */
+    private function scheduleGitCredentialSweep(Schedule $schedule): void
+    {
+        $schedule->command('git:credentials:sweep')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
     }
 
     /**
@@ -142,10 +159,25 @@ class Kernel extends ConsoleKernel
         $schedule->command('tunnels:expire')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_FIVE_MINUTES);
     }
 
-    /** Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once. */
+    /**
+     * Renewals are exempt from Let's Encrypt's new-certificate rate limit; off-peak, never two at once.
+     * Proxy rules follow the server's certificates hourly, since certbot changes those outside the engine.
+     */
     private function scheduleCertificateRenewal(Schedule $schedule): void
     {
         $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping(self::MUTEX_DAILY);
+        $schedule->command('proxy:rule:refresh-certificates')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+    }
+
+    /**
+     * Imported sites waiting for their domain's DNS get their certificate and
+     * lose the preview tunnel once the domain points here. A quarter-hour keeps
+     * a domain whose authority check fails under Let's Encrypt's five failed
+     * validations an hour.
+     */
+    private function scheduleImportedDomainSwitch(Schedule $schedule): void
+    {
+        $schedule->command('wordpress:migrate:dns-switch')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
     }
 
     /** Automatic project backups: the command runs the schedules that are due, so a minute is the resolution. */
@@ -169,15 +201,20 @@ class Kernel extends ConsoleKernel
 
     /**
      * Ship spooled telemetry (QUEUE_CONNECTION is `sync`, so a queued job would
-     * sit inside the deploy request), repair accounts sysbox unmapped, measure
-     * project disk use (`du` walks every file, so a quarter-hour; the API reads
-     * the stored figure), sweep application health, and update the AWStats databases.
+     * sit inside the deploy request), repair accounts sysbox unmapped, sample
+     * project CPU and memory every minute (minute rows kept two days, hourly
+     * averages the month), measure project disk use (`du` walks every file, so
+     * a quarter-hour; the API reads the stored figure) and this month's
+     * transfer, sweep application health, and update the AWStats databases.
      */
     private function scheduleMonitoring(Schedule $schedule): void
     {
         $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
+        $schedule->command('metrics:projects:sample')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
+        $schedule->command('metrics:projects:rollup')->hourlyAt(2)->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
+        $schedule->command('metrics:projects:bandwidth')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('project:health:report')->everySixHours()->withoutOverlapping(self::MUTEX_SIX_HOURS);
         $schedule->command('stats:update')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }

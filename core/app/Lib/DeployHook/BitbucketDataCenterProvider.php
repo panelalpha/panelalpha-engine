@@ -34,7 +34,7 @@ final class BitbucketDataCenterProvider extends BitbucketProvider
 
     public function recognises(Request $request): bool
     {
-        return $request->headers->has('X-Event-Key') && !$this->hasCloudHeaders($request);
+        return $request->headers->has('X-Event-Key') && ! $this->hasCloudHeaders($request);
     }
 
     public function parse(Request $request): HookEvent
@@ -62,7 +62,7 @@ final class BitbucketDataCenterProvider extends BitbucketProvider
     {
         $id = is_array($change) ? ($change['ref']['id'] ?? $change['refId'] ?? null) : null;
         $type = is_array($change) ? ($change['type'] ?? null) : null;
-        if (!is_string($id) || $id === '' || !in_array($type, ['ADD', 'UPDATE', 'DELETE'], true)) {
+        if (! is_string($id) || $id === '' || ! in_array($type, ['ADD', 'UPDATE', 'DELETE'], true)) {
             return null;
         }
 

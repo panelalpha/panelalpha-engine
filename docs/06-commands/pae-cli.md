@@ -74,7 +74,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:staging {project}` | Creates a linked staging copy. |
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
-| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. |
+| `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes, at least 6 (256 for a container project), and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. Any other limit takes `-1` for unlimited. Asks you to confirm; `--force` skips that. |
 | `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Without a terminal, such as in a script, it refuses and changes nothing unless you add `--force`. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
@@ -146,7 +146,7 @@ For projects deployed from git, these act on the checkout the engine owns. A pul
 | `pae git:commits {project}` | Lists recent commits. |
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
-| `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
+| `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--register` also adds the webhook at GitHub, GitLab or Bitbucket with the project's git token, `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
 | `pae git:deploy-key {project}` | Creates the project's SSH deploy key and prints its public half to add to the repository. Run again, it prints the same key. `--host` also trusts a git server other than github.com, gitlab.com and bitbucket.org, `--delete` removes the key. |
 
 Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push to deploy](../05-capabilities/push-to-deploy.md).
@@ -181,6 +181,7 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae domain:delete {domain}` | Removes a hostname. |
 | `pae ssl:project-cert:request {domain}` | Requests a Let's Encrypt certificate for a site. |
 | `pae ssl:project-cert:renew --domain={domain} --force` | Renews a site's certificate now. |
+| `pae ssl:check {domain}` | Connects to the site over HTTPS and reports the certificate it really serves. Exits 1 unless visitors get a trusted one. `--json` prints everything. |
 | `pae ssl:engine-cert:request --domain={domain}` | Requests a certificate for the engine itself. |
 | `pae domain:tunnel:create {hostname} --project={project} --domain={domain}` | Attaches a public hostname through a tunnel. |
 | `pae domain:tunnel:delete {hostname}` | Removes a tunnel hostname. |
@@ -189,11 +190,46 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae sites:base-domain {domain}` | Shows or sets the name new projects are given a site under. |
 | `pae domain:php-directives {domain}` | Shows the PHP settings for that hostname, on traditional PHP hosting. |
 | `pae domain:php-directives:set {domain} --settings='{"memory_limit":"256M"}'` | Replaces the whole set of PHP settings for that hostname. `--clear` removes them. Naming one setting drops the others. |
-| `pae domain:wp-cli {domain} {command}` | Runs a WP-CLI command on a WordPress site. |
+| `pae domain:wp-cli {domain} {command}` | Deprecated: use `pae wordpress:command` below. Runs a WP-CLI command on a WordPress site. |
 
 Extra routing is managed with `pae proxy:rule:list`, `pae proxy:rule:create`, `pae proxy:rule:update` and `pae proxy:rule:delete`. Most sites never need one.
 
 Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudflare](../05-capabilities/cloudflare.md).
+
+## WordPress
+
+Every command takes the project first. They work on traditional PHP hosting and on WordPress in the project's own containers. Each one also takes `--path=` (the WordPress directory), `--service=` (the Compose service that runs WordPress) and `--skip-plugins` (load WordPress without its plugins and themes, for a site a broken plugin stops).
+
+| Command | What it does |
+|---|---|
+| `pae wordpress:command {project} {args}` | Runs any WP-CLI command, for example `pae wordpress:command shop plugin list`. |
+| `pae wordpress:plugin:list {project}` | Lists plugins. `--fields=` and `--status=` narrow it. Also `plugin:get`, `plugin:search {term}` (`--per-page=`), `plugin:is-installed`, `plugin:install` (`--force`), `plugin:activate`, `plugin:deactivate`, `plugin:update` and `plugin:delete`, each with the plugin's slug. |
+| `pae wordpress:theme:list {project}` | Lists themes, with the same options. Also `theme:get`, `theme:search`, `theme:is-installed`, `theme:install`, `theme:activate`, `theme:update` and `theme:delete`. |
+| `pae wordpress:user:list {project}` | Lists users. `--role=` and `--fields=` narrow it. Also `user:create {login} {email} {password}` (`--role=`, `--send-email`), `user:update {user}`, `user:password {user} {password}`, `user:delete {user}` (`--reassign=`) and `user:sso {user}` for a one-time login link. |
+| `pae wordpress:user:application-password:list {project} {user}` | Lists a user's application passwords. Also `:create {user} {name}` and `:delete {user} {uuid}`. |
+| `pae wordpress:core:status {project}` | Whether WordPress is installed, and the `state` when it is not. Also `core:check-update`, `core:update {version}`, `core:install {url} {title} {admin_user} {admin_email} {admin_password}` (`--skip-email`) and `core:download` (`--locale=`, `--wp-version=`; traditional PHP hosting only, never over an existing WordPress). |
+| `pae wordpress:cache:flush {project}` | Flushes the object cache and the page caches of the known caching plugins. |
+| `pae wordpress:maintenance:get {project}` / `maintenance:set {project} {1\|0}` | Reads or switches maintenance mode. |
+| `pae wordpress:config:list {project}` | Lists `wp-config.php` entries. Also `config:get`, `config:set`, `config:delete` (`--type=constant`, `variable` or `all`) and `config:create {dbname} {dbuser}`. |
+| `pae wordpress:option:list {project}` | Lists options. Also `option:get {option}` and `option:set {option} {value}`. |
+| `pae wordpress:auto-update:get {project}` / `auto-update:set {project} {core} {plugins} {themes}` | Reads or sets automatic updates: core `off`, `on` or `minor`; plugins and themes `off` or `on`. |
+| `pae wordpress:language:set {project} {language}` | Sets the site language, for example `pl_PL`. |
+| `pae wordpress:search-replace {project} {search} {replacement}` | Replaces a string in the database. Takes only its own flags and table names after that. |
+| `pae wordpress:database:export {project} {file}` | Exports the database to a file only the project's user can read. `--tables=` (comma-separated) limits it. Also `database:import {project} {file}`. |
+
+### Importing a site
+
+| Command | What it does |
+|---|---|
+| `pae wordpress:migrate {url} {username?}` | Starts an import and prints its id. `{username}` is the wp-admin user, left out for `manual_plugin`. `--method=wp_admin` (the default, with the wp-admin user) or `manual_plugin`, `--login-url=`, `--source-ip=`, `--domain=`, `--project=`, `--project-name=`. The password, or the plugin token for `manual_plugin`, comes from `WORDPRESS_MIGRATE_PASSWORD` or `WORDPRESS_MIGRATE_SOURCE_TOKEN`, or a prompt; it is never taken on the command line. |
+| `pae wordpress:migrate:status {id}` | Shows how far an import is, its target, the preview address and the DNS record to set. |
+| `pae wordpress:migrate:resume {id}` | Resumes a failed or stalled import. |
+| `pae wordpress:migrate:cancel {id}` | Cancels an import and removes what it made here. |
+| `pae wordpress:migrate:delete {id}` | Deletes the record of a finished, failed or cancelled import. |
+
+Scheduled: `wordpress:migrate:dns-switch` (every 15 minutes: requests the certificate and removes the preview once an imported domain points here) and `wordpress:migrate:expire-secrets` (every hour: clears the passwords and tokens of imports idle for 7 days).
+
+Context: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 
 ## Tokens
 
@@ -207,7 +243,7 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 | `pae mcp:check` | Checks HTTPS, the token, and that an assistant can connect. Asks for the token, or reads it with `--stdin`. |
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
 | `pae configure mcp-tokens` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
-| `pae mcp:log:list` | Lists recent assistant requests. `--limit=` sets how many (20 by default). |
+| `pae mcp:log:list` | Lists recent assistant requests. `--limit=` sets how many (20 by default). `--token-id=` keeps the requests made with that token, even one deleted since; repeat it for several. `--token-name=` keeps the requests whose token name contains that text, ignoring case. `--project=` keeps the requests that named that project. |
 | `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. It is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
 | `pae api:token:list` | Lists those software tokens. |
 | `pae api:token:delete {id}` | Removes a software token. |
@@ -222,8 +258,10 @@ An application that manages the engine itself, such as a dashboard or an agent r
 |---|---|
 | `pae system:api-access:allow {project} --scope=self` | Allows a project. `--scope` is `self` (only that project, the default), `all` (every project), or a comma-separated list of project names. `--mcp` lets the token call assistant tools as well. Run again with the same scope, nothing changes. A different scope makes a new token. |
 | `pae system:api-access:list` | Lists the allowed projects, their scope, whether they have assistant tools, and the token ids. Never the token itself. |
-| `pae system:api-access:rotate {project}` | Replaces the project's token and keeps its scope. The old token stops working once the application runs on the new one. If that fails, both stay valid and the task says why. |
+| `pae system:api-access:rotate {project}` | Replaces the project's token and keeps its scope, less any project deleted since. The old token stops working once the application runs on the new one. If that fails, both stay valid and the task says why. |
 | `pae system:api-access:deny {project}` | Takes the access away: the token is revoked and the way to the API is closed. |
+
+Deleting a project takes it out of every other project's scope, so a project created later under the same name is not reached. A scope left with no project reaches none until you allow the project again with a new one.
 
 The project's environment gets `PANELALPHA_ENGINE_URL` and `PANELALPHA_ENGINE_TOKEN` on every deploy. `PANELALPHA_ENGINE_CA` is added only when the engine's certificate is not one the project could verify on its own. A token limited to a project cannot change that project's limits or suspend it.
 
@@ -233,10 +271,10 @@ A paste link for a Git or Cloudflare token. The value is never printed back.
 
 | Command | What it does |
 |---|---|
-| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<id>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
+| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<key>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
 | `pae vault:secret:list` | Lists entries: reference, type, purpose, scope, the project that owns it, and whether it is filled. Never the secret. `--scope=` or `--type=` narrows the list. |
-| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is `vault:<id>` or the id from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
-| `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<id>`. |
+| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is the `vault:<key>` from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
+| `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<key>`. |
 
 Context: [A token shared by several projects](../05-capabilities/connecting-with-git.md#a-token-shared-by-several-projects) · [Cloudflare](../05-capabilities/cloudflare.md).
 
@@ -287,6 +325,16 @@ Context: [Security](../05-capabilities/security.md).
 
 Context: [Telemetry](../02-getting-started/what-is-collected.md).
 
+## PanelAlpha Connect
+
+| Command | What it does |
+|---|---|
+| `pae hub:connect CODE` | Connects this engine to the PanelAlpha Connect account that created the code (**Connect engine** in Connect). `--ip`, `--replace`. |
+| `pae hub:status` | Shows the connection, Connect's own view of it, and the last calls Connect made. `--local` skips asking Connect. |
+| `pae hub:disconnect` | Revokes Connect's access at once, then tells Connect. |
+
+Context: [Connect to PanelAlpha Connect](../02-getting-started/connect-to-panelalpha-connect.md).
+
 ## Docker Hub login
 
 Every image download on your server goes to Docker Hub under one login. Without one, your server shares Docker Hub's anonymous limit with everything else on its address.
@@ -305,7 +353,7 @@ Create the token on Docker Hub under **Account settings → Personal access toke
 The engine ships more commands than belong on a daily list. Most are for support to point you at, or for server upkeep the engine normally handles on its own. Each one describes itself with `pae <command> --help`. The main groups:
 
 - **Server upkeep:** `system:version`, `system:database:test`, `system:ip:sync`, `system:domain:rebuild`, `system:modsec:rebuild`, `system:sftp:rebuild`, `system:exim:rebuild`, `system:webserver:update`.
-- **Scheduled jobs:** `backups:run-scheduled` (every minute: starts the automatic backups that are due, set with `project:backup:schedule`), `metrics:projects:disk` (every 15 minutes: measures each project's disk use for `project:usage`), `tunnels:expire` (every five minutes: removes tunnels whose lifetime has passed).
+- **Scheduled jobs:** `backups:run-scheduled` (every minute: starts the automatic backups that are due, set with `project:backup:schedule`), `metrics:projects:disk` (every 15 minutes: measures each project's disk use for `project:usage`), `metrics:projects:sample` (every minute: CPU and memory of each project and its containers), `metrics:projects:rollup` (every hour: hourly averages of those), `metrics:projects:bandwidth` (every hour: this month's transfer on each project), `tunnels:expire` (every five minutes: removes tunnels whose lifetime has passed), `proxy:rule:refresh-certificates` (every hour: serves each extra route on port 443 with the certificate on the server that covers it now, so a renewed, removed or newly added one is picked up), `git:credentials:sweep` (every hour: removes leftover git credential helpers and deploy keys from account homes).
 - **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day; while a deploy is running the image half waits and is retried the next hour: removes deploy base images not selected in `pae configure prewarm` that no deploy has pulled, built or named for 3 days, and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, `--due-after=20h` skips the image half when it last completed within that window, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `system:disk:guard` (every five minutes: keeps host build cache under `DEPLOY_HOST_BUILD_CACHE_MAX`, 10G, and while free space on the Docker root or /home is below `DEPLOY_DISK_PRESSURE_FREE`, 15% by default, prunes the oldest build cache and then base images unused for 6 hours; `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
 - **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, which a runtime restart or a host crash leaves behind; `--dry-run` only prints).
 - **PHP Apache modules (inside a project, not on the VPS):** `apache:mod:enable`, `apache:mod:disable`.
@@ -332,4 +380,4 @@ bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register
 List them with `pae project:deploy:list` - the value you want is `username`.
 
 **A destructive command is asking me to confirm and I am in a script.**
-Most take `--force` to skip the prompt. Be certain before you use it: `pae project:delete --all --force` deletes every project on your VPS with no further questions.
+Most take `--force` to skip the prompt. Run with `--no-interaction` and without `--force`, such a command changes nothing, says so on stderr and exits with 1. Be certain before you use `--force`: `pae project:delete --all --force` deletes every project on your VPS with no further questions.

@@ -62,7 +62,7 @@ final class PhpDocroot
     public const INDEX_FILES = ['index.php', 'index.html'];
 
     /**
-     * @param callable(string): bool $isFile relative path => is a file in the application
+     * @param  callable(string): bool  $isFile  relative path => is a file in the application
      * @return array<string, string> PA_DOCROOT, or nothing to leave it to the image
      */
     public static function environment(mixed $declared, callable $isFile): array
@@ -75,7 +75,7 @@ final class PhpDocroot
         return match ($docroot) {
             '' => [],
             self::ROOT => ['PA_DOCROOT' => '/app'],
-            default => ['PA_DOCROOT' => '/app/' . $docroot],
+            default => ['PA_DOCROOT' => '/app/'.$docroot],
         };
     }
 
@@ -83,13 +83,13 @@ final class PhpDocroot
      * The first candidate with an index one level down, then the root when it
      * has one, else '' so the image keeps today's behaviour.
      *
-     * @param callable(string): bool $isFile
+     * @param  callable(string): bool  $isFile
      */
     public static function detect(callable $isFile): string
     {
         foreach ([...self::CANDIDATES, self::ROOT] as $dir) {
             foreach (self::INDEX_FILES as $index) {
-                if ($isFile($dir === self::ROOT ? $index : $dir . '/' . $index)) {
+                if ($isFile($dir === self::ROOT ? $index : $dir.'/'.$index)) {
                     return $dir;
                 }
             }
@@ -97,7 +97,7 @@ final class PhpDocroot
 
         // Only once the root has had its turn, and only on a front controller.
         foreach (self::LATE_CANDIDATES as $dir) {
-            if ($isFile($dir . '/index.php')) {
+            if ($isFile($dir.'/index.php')) {
                 return $dir;
             }
         }

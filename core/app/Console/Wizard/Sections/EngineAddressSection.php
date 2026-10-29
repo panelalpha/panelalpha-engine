@@ -150,12 +150,12 @@ class EngineAddressSection implements Section
         $lines = [
             sprintf('Address:     %s', $url === '' ? '(not set)' : $url),
             sprintf('Certificate name: %s', match (true) {
-                !$this->database => '(unknown — the database could not be read)',
+                ! $this->database => '(unknown — the database could not be read)',
                 $certDomain === '' => '(default — the .panelalpha.direct name for this address)',
                 default => $certDomain,
             }),
             sprintf('New project tunnel: %s', match (true) {
-                !$this->database => '(unknown — the database could not be read)',
+                ! $this->database => '(unknown — the database could not be read)',
                 default => self::tunnelLabel($this->setting('default_tunnel')),
             }),
         ];
@@ -166,7 +166,7 @@ class EngineAddressSection implements Section
             $lines[] = sprintf(
                 'Serving:     %s, %s, expires %s%s',
                 $certificate['name'] === '' ? '(no name)' : $certificate['name'],
-                $certificate['self_signed'] ? 'self-signed' : 'issued by ' . $certificate['issuer'],
+                $certificate['self_signed'] ? 'self-signed' : 'issued by '.$certificate['issuer'],
                 date('Y-m-d', $certificate['expires']),
                 $served === null ? '  (read on :2011 — the address above did not answer)' : ''
             );
@@ -176,7 +176,7 @@ class EngineAddressSection implements Section
 
         $this->warnAboutEnv();
 
-        if (!$this->database) {
+        if (! $this->database) {
             // The address half is env and still works; the rest needs the
             // settings table, and saying which is which beats one failure.
             warning('The database could not be read, so the certificate name cannot be shown or changed. The address below still can.');
@@ -195,7 +195,7 @@ class EngineAddressSection implements Section
         if ($host === '' || in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
             warning(
                 'No client can reach this engine at that address. Set it to the name or public '
-                . 'address you connect on, including the port.'
+                .'address you connect on, including the port.'
             );
 
             return;
@@ -205,7 +205,7 @@ class EngineAddressSection implements Section
             warning('The address is plain http. Most assistants refuse an MCP server that is not https.');
         }
 
-        if (!$reachable) {
+        if (! $reachable) {
             warning('Nothing answered on that address from here. It may still work from outside, but nothing confirms it.');
         }
 
@@ -217,7 +217,7 @@ class EngineAddressSection implements Section
             warning('The certificate is self-signed, so clients will refuse it unless they were told to trust it. Requesting one below fixes that.');
         }
 
-        if ($reachable && !ServedCertificate::covers($certificate, $host)) {
+        if ($reachable && ! ServedCertificate::covers($certificate, $host)) {
             warning(sprintf(
                 'The certificate does not cover "%s". It is for %s.',
                 $host,
@@ -249,10 +249,10 @@ class EngineAddressSection implements Section
 
     private function setUrl(string $current, bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Address');
+        Screen::draw(self::label().'  ·  Address');
         note(
             "This is what an assistant or an API client is told to connect to, port included.\n"
-            . 'It has to be a name or address reachable from wherever they run, not from here.'
+            .'It has to be a name or address reachable from wherever they run, not from here.'
         );
 
         $url = trim(text(
@@ -282,7 +282,7 @@ class EngineAddressSection implements Section
 
         note(
             "The engine uses this on its next request, so `pae connect` prints the new address now.\n"
-            . 'Clients already connected keep the old one until they are set up again.',
+            .'Clients already connected keep the old one until they are set up again.',
             'warning'
         );
         pause('Press enter to carry on...');
@@ -290,12 +290,12 @@ class EngineAddressSection implements Section
 
     private function setName(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Certificate name');
+        Screen::draw(self::label().'  ·  Certificate name');
         note(
             "The name the engine's certificate is issued for.\n\n"
-            . "It is also the name new sites are given under, so changing it moves where\n"
-            . 'sites created from now on will live. Leave it empty to use the default '
-            . 'built from this engine\'s public address.'
+            ."It is also the name new sites are given under, so changing it moves where\n"
+            .'sites created from now on will live. Leave it empty to use the default '
+            .'built from this engine\'s public address.'
         );
 
         $current = (string) ($this->setting('cert_domain') ?? '');
@@ -356,11 +356,11 @@ class EngineAddressSection implements Section
     {
         $name = (string) ($this->setting('cert_domain') ?? '');
 
-        Screen::draw(self::label() . '  ·  Certificate');
+        Screen::draw(self::label().'  ·  Certificate');
         note(sprintf(
             "About to ask Let's Encrypt for a certificate for %s.\n\n"
-            . "The name has to resolve to this server already, and the engine restarts its\n"
-            . 'webserver around the request, so :2011 is briefly unavailable.',
+            ."The name has to resolve to this server already, and the engine restarts its\n"
+            .'webserver around the request, so :2011 is briefly unavailable.',
             $name === '' ? 'the default name for this address' : $name
         ));
 
@@ -388,7 +388,7 @@ class EngineAddressSection implements Section
             return;
         }
 
-        if ($mode === 'real' && !confirm(
+        if ($mode === 'real' && ! confirm(
             label: 'Request it now? :2011 goes down for a moment.',
             default: true,
         )) {
@@ -402,14 +402,14 @@ class EngineAddressSection implements Section
         };
 
         $result = spin(
-            fn (): array => EngineCertificateRequest::run(new System(), [], $flags),
+            fn (): array => EngineCertificateRequest::run(new System, [], $flags),
             'Talking to Let\'s Encrypt — this takes a minute...'
         );
 
-        Screen::draw(self::label() . '  ·  Certificate');
+        Screen::draw(self::label().'  ·  Certificate');
         note($result['output'] === '' ? '(no output)' : $result['output']);
 
-        if (!$result['successful']) {
+        if (! $result['successful']) {
             warning('The request did not succeed. The output above says why; the usual cause is the name not pointing at this server yet.');
             pause('Press enter to carry on...');
 
@@ -431,14 +431,14 @@ class EngineAddressSection implements Section
 
     private function setTunnel(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  New project tunnel');
+        Screen::draw(self::label().'  ·  New project tunnel');
         note(
             "What a project created without naming a tunnel is published under.\n\n"
-            . "panelalpha: the default, and what an unset setting does. The project gets the best\n"
-            . "            public name this engine has: a configured base domain, or a free\n"
-            . '            panelalpha.online label with a trusted certificate.\n'
-            . 'none:      PanelAlpha Online is never used. The project takes the name under the\n'
-            . '            certificate name above, and nothing is registered.'
+            ."panelalpha: the default, and what an unset setting does. The project gets the best\n"
+            ."            public name this engine has: a configured base domain, or a free\n"
+            .'            panelalpha.online label with a trusted certificate.\n'
+            .'none:      PanelAlpha Online is never used. The project takes the name under the\n'
+            .'            certificate name above, and nothing is registered.'
         );
 
         $choice = (string) select(
@@ -493,7 +493,7 @@ class EngineAddressSection implements Section
             return null;
         }
 
-        if (!str_contains($name, '.')) {
+        if (! str_contains($name, '.')) {
             return 'A certificate name is a full hostname, like panel.example.com.';
         }
 
@@ -510,7 +510,7 @@ class EngineAddressSection implements Section
 
         $host = parse_url($url, PHP_URL_HOST);
 
-        if (!is_string($host) || $host === '' || !str_contains($url, '://')) {
+        if (! is_string($host) || $host === '' || ! str_contains($url, '://')) {
             return 'Give the whole address, including https:// and the port.';
         }
 
@@ -518,7 +518,7 @@ class EngineAddressSection implements Section
     }
 
     /**
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      */
     private function write(array $values, string $said): void
     {
@@ -550,7 +550,7 @@ class EngineAddressSection implements Section
      */
     private function setting(string $key): ?string
     {
-        if (!$this->database) {
+        if (! $this->database) {
             return null;
         }
 

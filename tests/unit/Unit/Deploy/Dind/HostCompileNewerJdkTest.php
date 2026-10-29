@@ -90,6 +90,8 @@ class HostCompileNewerJdkTest extends TestCase
                 $cmd = is_array($cmd) ? $cmd : [$cmd];
                 if (($cmd[1] ?? null) === 'cp') {
                     copy($cmd[2], $cmd[3]);
+                } elseif (($cmd[1] ?? null) === 'mv') {
+                    rename($cmd[count($cmd) - 2], $cmd[count($cmd) - 1]);
                 } elseif (($cmd[1] ?? null) === 'docker' && !in_array('exec', $cmd, true)) {
                     // The compile is a `docker run`; a `docker compose exec` into the
                     // account (the run file's rewrite asks it for its lxcfs files) is not.

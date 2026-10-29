@@ -31,7 +31,7 @@ class DomainPhpDirectivesSetCommand extends Command
             return 1;
         }
 
-        Validator::make(['settings' => $settings], (new DomainReplacePhpDirectivesRequest())->rules())->validate();
+        Validator::make(['settings' => $settings], (new DomainReplacePhpDirectivesRequest)->rules())->validate();
 
         $domainModel = Domain::findByNameOrFail($domain);
         $domainModel->user->project(app(System::class))->php()->replaceDomainDirectives($domainModel, $settings);
@@ -53,7 +53,7 @@ class DomainPhpDirectivesSetCommand extends Command
 
             return null;
         }
-        if (!$clear && !$hasSettings) {
+        if (! $clear && ! $hasSettings) {
             $this->error('Pass --settings or --clear.');
 
             return null;
@@ -64,7 +64,7 @@ class DomainPhpDirectivesSetCommand extends Command
 
         /** @var mixed $decoded */
         $decoded = json_decode((string) $raw, true);
-        if (!is_array($decoded) || (array_is_list($decoded) && $decoded !== [])) {
+        if (! is_array($decoded) || (array_is_list($decoded) && $decoded !== [])) {
             $this->error('--settings must be a JSON object.');
 
             return null;
@@ -72,7 +72,7 @@ class DomainPhpDirectivesSetCommand extends Command
 
         $map = [];
         foreach ($decoded as $key => $value) {
-            if (!is_string($key) || !is_string($value)) {
+            if (! is_string($key) || ! is_string($value)) {
                 $this->error('--settings values must be strings.');
 
                 return null;

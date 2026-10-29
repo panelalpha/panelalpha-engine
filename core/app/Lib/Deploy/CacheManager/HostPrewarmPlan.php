@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\CacheManager;
 
+use Illuminate\Container\Container;
+
 /**
  * What to warm into the host image cache before any customer deploys, and how
  * much disk it may cost.
@@ -26,6 +28,7 @@ namespace App\Lib\Deploy\CacheManager;
 class HostPrewarmPlan
 {
     public const KIND_BUILD = 'build';
+
     public const KIND_PULL = 'pull';
 
     /** Never spend the last of the disk: accounts live on the same filesystem. */
@@ -38,8 +41,8 @@ class HostPrewarmPlan
      * The entries this host warms, highest priority first: only those selected
      * with `pae configure prewarm`, so none by default.
      *
-     * @param list<string> $runtimes limit to these runtimes; empty = all
-     * @param list<string>|null $selected entry ids; null = {@see selected()}
+     * @param  list<string>  $runtimes  limit to these runtimes; empty = all
+     * @param  list<string>|null  $selected  entry ids; null = {@see selected()}
      * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
      */
     public static function catalog(array $runtimes = [], ?array $selected = null): array
@@ -56,7 +59,7 @@ class HostPrewarmPlan
      * Everything images.yaml gives a `prewarm` priority: what an operator may
      * select from, in the order it would be warmed.
      *
-     * @param list<string> $runtimes limit to these runtimes; empty = all
+     * @param  list<string>  $runtimes  limit to these runtimes; empty = all
      * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
      */
     public static function available(array $runtimes = []): array
@@ -115,10 +118,10 @@ class HostPrewarmPlan
     /** A `deploy.*` value, or '' without a Laravel config (plain unit tests). */
     private static function setting(string $key): string
     {
-        if (!\Illuminate\Container\Container::getInstance()->bound('config')) {
+        if (! Container::getInstance()->bound('config')) {
             return '';
         }
-        $value = config('deploy.' . $key, '');
+        $value = config('deploy.'.$key, '');
 
         return is_scalar($value) ? trim((string) $value) : '';
     }
@@ -133,9 +136,9 @@ class HostPrewarmPlan
      * stops there instead, so an unmeasured item can overshoot the budget by
      * its own size and no further.
      *
-     * @param list<array<string, mixed>> $items
-     * @param array<string, int> $sizes ref => measured bytes, where known
-     * @param list<string> $present refs the host already has
+     * @param  list<array<string, mixed>>  $items
+     * @param  array<string, int>  $sizes  ref => measured bytes, where known
+     * @param  list<string>  $present  refs the host already has
      * @return array{selected: list<array<string, mixed>>, skipped: list<array<string, mixed>>, spendable: int}
      */
     public static function select(
@@ -159,6 +162,7 @@ class HostPrewarmPlan
             if (isset($have[$ref])) {
                 $item['reason'] = 'already present';
                 $skipped[] = $item;
+
                 continue;
             }
             $bytes = $sizes[$ref] ?? null;
@@ -166,11 +170,13 @@ class HostPrewarmPlan
             if ($bytes !== null && $spent + $bytes > $spendable) {
                 $item['reason'] = 'over budget';
                 $skipped[] = $item;
+
                 continue;
             }
             if ($bytes === null && $spendable <= $spent) {
                 $item['reason'] = 'over budget';
                 $skipped[] = $item;
+
                 continue;
             }
             $spent += (int) $bytes;
@@ -197,14 +203,14 @@ class HostPrewarmPlan
      * "cannot judge" has to mean keep, since this deletes images that cost
      * minutes to rebuild.
      *
-     * @param list<string> $presentRefs
+     * @param  list<string>  $presentRefs
      * @return list<string>
      */
     public static function staleBuiltImages(array $presentRefs): array
     {
         $stale = [];
         foreach ($presentRefs as $ref) {
-            if (!is_string($ref)) {
+            if (! is_string($ref)) {
                 continue;
             }
             $parts = BuiltImage::parts($ref);
@@ -230,8 +236,8 @@ class HostPrewarmPlan
      * one rarely-warmed image rather than its PHP set. Everything named can be
      * rebuilt; the trade is disk now against a slower deploy later.
      *
-     * @param array<string, int> $sizes ref => bytes on disk, from `docker images`
-     * @param list<array<string, mixed>> $catalog what the warm plan asks for
+     * @param  array<string, int>  $sizes  ref => bytes on disk, from `docker images`
+     * @param  list<array<string, mixed>>  $catalog  what the warm plan asks for
      * @return list<string> least valuable first
      */
     public static function reclaimableBuiltImages(
@@ -255,7 +261,7 @@ class HostPrewarmPlan
 
         $candidates = [];
         foreach ($sizes as $ref => $bytes) {
-            if (!is_string($ref) || !BuiltImage::isOurs($ref)) {
+            if (! is_string($ref) || ! BuiltImage::isOurs($ref)) {
                 continue;
             }
             $candidates[] = [
@@ -315,12 +321,12 @@ class HostPrewarmPlan
             return '?';
         }
         if ($bytes >= 1073741824) {
-            return round($bytes / 1073741824, 1) . 'G';
+            return round($bytes / 1073741824, 1).'G';
         }
         if ($bytes >= 1048576) {
-            return round($bytes / 1048576) . 'M';
+            return round($bytes / 1048576).'M';
         }
 
-        return $bytes . 'B';
+        return $bytes.'B';
     }
 }

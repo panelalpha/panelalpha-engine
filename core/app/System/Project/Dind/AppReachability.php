@@ -29,9 +29,7 @@ final class AppReachability
     /** No domain, or no answering port to compare against. */
     public const SKIPPED = 'skipped';
 
-    public function __construct(private readonly Dind $dind)
-    {
-    }
+    public function __construct(private readonly Dind $dind) {}
 
     /**
      * Ask the question a visitor asks: does this project's domain serve this
@@ -45,7 +43,7 @@ final class AppReachability
      *
      * Never throws: a check that cannot run reports that it could not.
      *
-     * @param list<array<string, mixed>> $ports as {@see check()} produced them
+     * @param  list<array<string, mixed>>  $ports  as {@see check()} produced them
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public function check(array $ports, int $timeout = 5): array
@@ -53,12 +51,12 @@ final class AppReachability
         try {
             return $this->probe($ports, $timeout);
         } catch (\Throwable $e) {
-            return self::skipped(null, 'the check could not run: ' . AppHealth::trimReason($e->getMessage()));
+            return self::skipped(null, 'the check could not run: '.AppHealth::trimReason($e->getMessage()));
         }
     }
 
     /**
-     * @param list<array<string, mixed>> $ports
+     * @param  list<array<string, mixed>>  $ports
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     private function probe(array $ports, int $timeout): array
@@ -102,9 +100,9 @@ final class AppReachability
      * Probe the edge and compare, re-probing while it looks unrouted: the
      * webserver reload the deploy just issued may not have taken effect yet.
      *
-     * @param callable(): array{code: int, hash: string, default404: bool} $probeEdge
-     * @param array{code: int, hash: string, default404: bool} $app
-     * @param (callable(int): void)|null $sleep
+     * @param  callable(): array{code: int, hash: string, default404: bool}  $probeEdge
+     * @param  array{code: int, hash: string, default404: bool}  $app
+     * @param  (callable(int): void)|null  $sleep
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public static function awaitRoute(string $domain, callable $probeEdge, array $app, ?callable $sleep = null): array
@@ -113,7 +111,7 @@ final class AppReachability
         $verdict = self::compareFingerprints($domain, $probeEdge(), $app);
 
         foreach (self::EDGE_RETRY_DELAYS as $delay) {
-            if (!in_array($verdict['verdict'], [self::NOT_ROUTED, self::UNREACHABLE], true)) {
+            if (! in_array($verdict['verdict'], [self::NOT_ROUTED, self::UNREACHABLE], true)) {
                 break;
             }
             $sleep($delay);
@@ -124,8 +122,8 @@ final class AppReachability
     }
 
     /**
-     * @param array{code: int, hash: string, default404: bool} $edge
-     * @param array{code: int, hash: string, default404: bool} $app
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @param  array{code: int, hash: string, default404: bool}  $app
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public static function compareFingerprints(string $domain, array $edge, array $app): array
@@ -136,8 +134,8 @@ final class AppReachability
     }
 
     /**
-     * @param array{code: int, hash: string, default404: bool} $edge
-     * @param array{code: int, hash: string, default404: bool} $app
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @param  array{code: int, hash: string, default404: bool}  $app
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     private static function compare(string $domain, array $edge, array $app): array
@@ -180,7 +178,7 @@ final class AppReachability
                 'verdict' => self::OK,
                 'domain' => $domain,
                 'http_code' => $edge['code'],
-                'detail' => $edge['code'] . ' (the application redirects to its own address when probed locally)',
+                'detail' => $edge['code'].' (the application redirects to its own address when probed locally)',
             ];
         }
 
@@ -193,7 +191,7 @@ final class AppReachability
                 'verdict' => self::OK,
                 'domain' => $domain,
                 'http_code' => $edge['code'],
-                'detail' => $edge['code'] . ' (a redirect to https://' . $domain . '/, where visitors arrive)',
+                'detail' => $edge['code'].' (a redirect to https://'.$domain.'/, where visitors arrive)',
             ];
         }
 
@@ -202,12 +200,12 @@ final class AppReachability
         // the status code -- still catches the domain that answers with
         // somebody else's error page, and stops reporting every CSRF-token
         // application on the host as unreachable.
-        if (!self::bodyIsReproducible($app) && $edge['code'] === $app['code']) {
+        if (! self::bodyIsReproducible($app) && $edge['code'] === $app['code']) {
             return [
                 'verdict' => self::OK,
                 'domain' => $domain,
                 'http_code' => $edge['code'],
-                'detail' => $edge['code'] . ' (the application varies its own response, so only the status was compared)',
+                'detail' => $edge['code'].' (the application varies its own response, so only the status was compared)',
             ];
         }
 
@@ -226,14 +224,14 @@ final class AppReachability
     private static function upgradesToHttps(string $domain, string $location): bool
     {
         $url = parse_url($location);
-        if (!is_array($url) || strtolower($url['scheme'] ?? '') !== 'https') {
+        if (! is_array($url) || strtolower($url['scheme'] ?? '') !== 'https') {
             return false;
         }
 
         return strtolower($url['host'] ?? '') === strtolower($domain)
             && in_array($url['port'] ?? 443, [443], true)
             && in_array($url['path'] ?? '/', ['', '/'], true)
-            && !isset($url['query']);
+            && ! isset($url['query']);
     }
 
     /** @return array{verdict: string, domain: ?string, http_code: ?int, detail: string} */
@@ -243,7 +241,7 @@ final class AppReachability
     }
 
     /**
-     * @param list<array<string, mixed>> $ports
+     * @param  list<array<string, mixed>>  $ports
      * @return array<string, mixed>|null
      */
     private static function firstAnsweringPort(array $ports): ?array
@@ -366,7 +364,7 @@ SH;
      * Absent means not measured, which reads as reproducible: a probe that
      * did not ask the question must not weaken the comparison.
      *
-     * @param array<string, mixed> $app
+     * @param  array<string, mixed>  $app
      */
     private static function bodyIsReproducible(array $app): bool
     {
@@ -378,11 +376,11 @@ SH;
     /**
      * One human-readable line for the reachability verdict.
      *
-     * @param array{verdict: string, domain: ?string, http_code: ?int, detail: string} $result
+     * @param  array{verdict: string, domain: ?string, http_code: ?int, detail: string}  $result
      */
     public static function describe(array $result): string
     {
-        $url = ($result['scheme'] ?? 'http') . '://' . ($result['domain'] ?? '?') . '/';
+        $url = ($result['scheme'] ?? 'http').'://'.($result['domain'] ?? '?').'/';
 
         return match ($result['verdict']) {
             self::OK => "Reachable: {$url} answered {$result['detail']} through the webserver",

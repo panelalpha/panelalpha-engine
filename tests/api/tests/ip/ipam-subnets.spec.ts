@@ -11,6 +11,7 @@ import {
   removeSubnet,
 } from '@/helpers/ipam-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * IP management is an optional module; where it is absent every endpoint answers
@@ -82,7 +83,7 @@ test.describe('IP subnet validation', () => {
   const invalidMasks = [
     [
       'an IPv4 mask above 32',
-      { ip: '192.168.101.0', mask: 33 },
+      { ip: testNetwork.add(IPV4_SUBNET.ip, 256), mask: 33 },
       'IPv4 mask must be between 0 and 32',
     ],
     [
@@ -108,7 +109,7 @@ test.describe('IP subnet validation', () => {
   /** Deleting a subnet out from under a live assignment would strand the user's IP. */
   test('a subnet with an address still assigned cannot be deleted', async ({ api, setupUser }) => {
     const subnetId = await ensureSubnet(api, IPV4_SUBNET);
-    const ipAddress = '192.168.100.10';
+    const ipAddress = testNetwork.private2(10);
 
     try {
       await api.assignIpRaw({

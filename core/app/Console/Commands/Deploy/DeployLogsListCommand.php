@@ -20,7 +20,7 @@ class DeployLogsListCommand extends Command
     {
         $username = $this->argument('project');
         if ($username !== null && $username !== '') {
-            return $this->listDeploys((string)$username);
+            return $this->listDeploys((string) $username);
         }
 
         return $this->listUsers();
@@ -30,7 +30,8 @@ class DeployLogsListCommand extends Command
     {
         $rows = DeployLogger::listUsers();
         if ($rows === []) {
-            $this->info('No deploy logs under ' . DeployLogger::baseDir());
+            $this->info('No deploy logs under '.DeployLogger::baseDir());
+
             return 0;
         }
 
@@ -58,12 +59,14 @@ class DeployLogsListCommand extends Command
         $user = User::findByUsername($username);
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
         $rows = DeployHistory::of($user);
         if ($rows === []) {
             $this->info("No deploy logs for project '{$username}'");
+
             return 0;
         }
 
@@ -90,13 +93,13 @@ class DeployLogsListCommand extends Command
     private static function formatBytes(int $bytes): string
     {
         if ($bytes < 1024) {
-            return $bytes . ' B';
+            return $bytes.' B';
         }
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024, 1) . ' KB';
+            return round($bytes / 1024, 1).' KB';
         }
 
-        return round($bytes / (1024 * 1024), 1) . ' MB';
+        return round($bytes / (1024 * 1024), 1).' MB';
     }
 
     private static function formatTs(?int $ts): string

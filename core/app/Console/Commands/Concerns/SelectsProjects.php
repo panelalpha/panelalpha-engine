@@ -23,14 +23,14 @@ trait SelectsProjects
      */
     protected function selectedProjects(): array|Collection|null
     {
-        if (!$this->namesProjects()) {
+        if (! $this->namesProjects()) {
             return null;
         }
 
         $username = $this->option('username');
         if ($username) {
             $user = User::findByUsername((string) $username);
-            if (!$user) {
+            if (! $user) {
                 $this->error('Invalid username');
 
                 return null;
@@ -51,7 +51,7 @@ trait SelectsProjects
     {
         $this->foldProjectOption();
 
-        if (!$this->option('username') && !$this->option('all')) {
+        if (! $this->option('username') && ! $this->option('all')) {
             $this->error('One of following options is required: `--project=NAME` or `--all`');
 
             return false;

@@ -10,7 +10,7 @@ class DisableMod extends ApacheModCommand
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['apache:disable-mod'];
 
-    protected $signature = 'apache:mod:disable {mod}' . ProjectOptions::SIGNATURE;
+    protected $signature = 'apache:mod:disable {mod}'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Disable an Apache module for a project (or --all projects)';
 

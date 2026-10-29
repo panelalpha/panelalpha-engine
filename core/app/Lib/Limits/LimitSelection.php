@@ -10,15 +10,13 @@ namespace App\Lib\Limits;
 final class LimitSelection
 {
     /** @param array<string, int|float|null> $values keyed by ResourceLimit::$key */
-    private function __construct(private readonly array $values)
-    {
-    }
+    private function __construct(private readonly array $values) {}
 
     /**
      * Why the raw options cannot be accepted, keyed by limit. Checked against
-     * the raw value, because normalize() has already folded -1 into null.
+     * the raw value, because normalize() has already folded every negative into UNLIMITED.
      *
-     * @param  array<string, mixed>  $options console options, keyed by option name
+     * @param  array<string, mixed>  $options  console options, keyed by option name
      * @return array<string, string>
      */
     public static function rejections(array $options): array
@@ -83,12 +81,12 @@ final class LimitSelection
      * True when any selected limit only takes effect after a rebuild. Keys in
      * $except were already applied live, so they do not ask for one.
      *
-     * @param list<string> $except
+     * @param  list<string>  $except
      */
     public function needsRebuild(array $except = []): bool
     {
         foreach (array_keys($this->values) as $key) {
-            if (!in_array($key, $except, true) && ResourceLimit::byKey($key)->needsRebuild) {
+            if (! in_array($key, $except, true) && ResourceLimit::byKey($key)->needsRebuild) {
                 return true;
             }
         }

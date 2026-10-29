@@ -13,8 +13,8 @@ final class CommandScript
     private readonly string $run;
 
     /**
-     * @param array<string, string> $overrides command id => the command as
-     *        resolved for this project, replacing the manifest's default
+     * @param  array<string, string>  $overrides  command id => the command as
+     *                                            resolved for this project, replacing the manifest's default
      */
     public function __construct(
         private readonly PlatformCommand $command,
@@ -34,7 +34,7 @@ final class CommandScript
     {
         return array_values(array_filter([
             $this->descriptionLine(),
-            'pa_step ' . $this->stage . ' ' . ShellQuote::of($this->command->id),
+            'pa_step '.$this->stage.' '.ShellQuote::of($this->command->id),
             $this->runLine(),
         ]));
     }
@@ -45,7 +45,7 @@ final class CommandScript
         // commented, or a subsequent line lands in the entrypoint as bare shell.
         return $this->command->description === null
             ? null
-            : '# ' . str_replace("\n", "\n# ", $this->command->description);
+            : '# '.str_replace("\n", "\n# ", $this->command->description);
     }
 
     /**
@@ -58,7 +58,7 @@ final class CommandScript
         $run = $this->timed($this->run);
 
         return $this->command->optional
-            ? $run . ' || pa_skip ' . $this->stage . ' ' . ShellQuote::of($this->command->id)
+            ? $run.' || pa_skip '.$this->stage.' '.ShellQuote::of($this->command->id)
             : $run;
     }
 
@@ -72,6 +72,6 @@ final class CommandScript
             return $run;
         }
 
-        return 'timeout --foreground ' . $this->command->timeout . ' sh -c ' . ShellQuote::of($run);
+        return 'timeout --foreground '.$this->command->timeout.' sh -c '.ShellQuote::of($run);
     }
 }

@@ -27,8 +27,7 @@ final class CreateInspection
         public readonly ?string $reason = null,
         public readonly ?string $suggestion = null,
         public readonly ?string $skipped = null,
-    ) {
-    }
+    ) {}
 
     /** Not inspected, and why: said once in the deploy log, nowhere else. */
     public static function skipped(string $why): self
@@ -39,7 +38,7 @@ final class CreateInspection
     /**
      * The verdict on an AppInspector report.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     public static function fromReport(array $report): self
     {
@@ -55,8 +54,8 @@ final class CreateInspection
                 $label,
                 is_string($issue) && $issue !== '' ? $issue : 'Detection could not work out how to deploy it.',
                 'Run source_inspect (POST /source/inspect) on the repository to see what detection found, '
-                    . 'then choose a recipe from application.candidates or add a panelalpha.yaml that says '
-                    . 'how to build and start it.'
+                    .'then choose a recipe from application.candidates or add a panelalpha.yaml that says '
+                    .'how to build and start it.'
             );
         }
 
@@ -66,7 +65,7 @@ final class CreateInspection
                 $strategy,
                 $label,
                 'No recipe and no runtime recognises it, so the deploy would serve the '
-                    . '"Project not configured" placeholder page instead of an application.',
+                    .'"Project not configured" placeholder page instead of an application.',
                 'Add a Dockerfile, a compose file or a panelalpha.yaml that says how to build and start it.'
             );
         }
@@ -77,9 +76,9 @@ final class CreateInspection
                 $strategy,
                 $label,
                 'package.json has no start script, so nothing says how to run it as a server; '
-                    . 'a package without one is usually a library, which builds but serves nothing.',
+                    .'a package without one is usually a library, which builds but serves nothing.',
                 'Add a start script that runs the server to package.json, or a panelalpha.yaml that '
-                    . 'names the start command.'
+                    .'names the start command.'
             );
         }
 
@@ -90,12 +89,12 @@ final class CreateInspection
      * Railpack starts a Node project with its start script; a root package.json
      * without one is the shape of a library (lodash, express).
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     private static function nodePackageWithoutStart(array $report): bool
     {
         $packages = $report['metadata']['packages'] ?? null;
-        if (!is_array($packages)) {
+        if (! is_array($packages)) {
             return false;
         }
         foreach ($packages as $package) {
@@ -105,7 +104,7 @@ final class CreateInspection
             ) {
                 $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
 
-                return !in_array('start', $scripts, true);
+                return ! in_array('start', $scripts, true);
             }
         }
 
@@ -129,7 +128,7 @@ final class CreateInspection
         if ($this->verdict === null) {
             return null;
         }
-        if (!$this->warns()) {
+        if (! $this->warns()) {
             return ['verdict' => $this->verdict, 'strategy' => $this->strategy];
         }
 
@@ -156,7 +155,7 @@ final class CreateInspection
 
             return;
         }
-        if (!$this->warns()) {
+        if (! $this->warns()) {
             $logger->info("Repository inspected from its file list: deploys as {$this->label} ({$this->strategy}).");
 
             return;
@@ -185,7 +184,7 @@ final class CreateInspection
     }
 
     /**
-     * @param ?array<string, mixed> $data
+     * @param  ?array<string, mixed>  $data
      */
     public static function fromArray(?array $data): ?self
     {

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Backup\Project;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -9,6 +10,8 @@ use LogicException;
 
 class RestoreCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'project:backup:restore
         {project : Project username}
         {backup : Backup ID}
@@ -30,12 +33,14 @@ class RestoreCommand extends Command
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
         $record = BackupRecord::query()->find($backupId);
         if ($record === null || $record->user_id !== $user->id) {
             $this->error("Backup '{$backupId}' not found for project '{$username}'.");
+
             return 1;
         }
 
@@ -43,11 +48,17 @@ class RestoreCommand extends Command
         $exclude = $this->buildExcludeFilter();
         if ($this->restoreFilterNonEmpty($only) && $this->restoreFilterNonEmpty($exclude)) {
             $this->error('Cannot combine include and exclude');
+
             return 1;
         }
 
-        if (!$this->option('force') && !$this->confirm('Restore this backup?')) {
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
+        if (! $this->option('force') && ! $this->confirm('Restore this backup?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -55,23 +66,25 @@ class RestoreCommand extends Command
             $user->project()->backup($record)->restore($only, $exclude);
         } catch (\RuntimeException $e) {
             $this->error($e->getMessage());
+
             return 1;
         } catch (LogicException $e) {
             $this->error($e->getMessage());
+
             return 1;
         }
 
         $record->refresh();
         $this->info("Restore finished (status: {$record->restoreStatus()}).");
         if ($record->error !== null) {
-            $this->line('Error: ' . $record->error);
+            $this->line('Error: '.$record->error);
         }
 
         return $record->restoreStatus() === 'completed' ? 0 : 1;
     }
 
     /**
-     * @param array<string, mixed> $filter
+     * @param  array<string, mixed>  $filter
      */
     private function restoreFilterNonEmpty(array $filter): bool
     {
@@ -120,7 +133,7 @@ class RestoreCommand extends Command
     private function csvOption(string $name): array
     {
         $value = $this->option($name);
-        if (!is_string($value) || trim($value) === '') {
+        if (! is_string($value) || trim($value) === '') {
             return [];
         }
 

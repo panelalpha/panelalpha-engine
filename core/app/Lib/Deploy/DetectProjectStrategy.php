@@ -5,6 +5,7 @@ namespace App\Lib\Deploy;
 use App\Lib\Deploy\Detect\DetectionResult;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
+use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformSelector;
 use App\Lib\Deploy\Platform\PlatformValues;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -21,6 +22,10 @@ class DetectProjectStrategy
     public const COMPOSE_GENERATED_LABEL = 'static-bootstrap';
 
     /**
+     * @param  ?string  $sourceUrl  the repository the checkout was cloned from,
+     *                              when there was one; an uploaded archive has none.
+     * @param  ?string  $recipe  the recipe the request named, which replaces the
+     *                           whole of the above: no rule is evaluated.
      * @return array{
      *   strategy: string,
      *   label: string,
@@ -37,11 +42,7 @@ class DetectProjectStrategy
      *   static_index: ?string,
      * }
      *
-     * @param ?string $sourceUrl the repository the checkout was cloned from,
-     *        when there was one; an uploaded archive has none.
-     * @param ?string $recipe the recipe the request named, which replaces the
-     *        whole of the above: no rule is evaluated.
-     * @throws \App\Lib\Deploy\Platform\ManifestException on an unknown `$recipe`
+     * @throws ManifestException on an unknown `$recipe`
      */
     public static function detect(
         string $projectDir,
@@ -76,7 +77,7 @@ class DetectProjectStrategy
 
         // The project's app config speaks for the build stage too.
         $appConfig = AppConfigLocator::findCandidate(
-            new LocalAppConfigSource(),
+            new LocalAppConfigSource,
             $context->projectDir,
             $context->sourceUrl
         )['config'] ?? null;

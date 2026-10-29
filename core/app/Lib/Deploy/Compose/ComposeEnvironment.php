@@ -55,9 +55,9 @@ final class ComposeEnvironment
     /**
      * Fold what the app config and the account declared onto a decision's `env`.
      *
-     * @param array<string, mixed> $decision
-     * @param array<string, string> $appConfig the project's `panelalpha.yaml`
-     * @param array<string, string> $account the account's own `env_vars`
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, string>  $appConfig  the project's `panelalpha.yaml`
+     * @param  array<string, string>  $account  the account's own `env_vars`
      * @return array<string, mixed>
      */
     public static function layer(array $decision, array $appConfig, array $account): array
@@ -89,7 +89,7 @@ final class ComposeEnvironment
      * The decision with the engine's own per-account variables added. Reserved,
      * so neither the app config nor the account's env_vars can replace them.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public static function withInstanceSecret(array $decision, string $secret): array
@@ -107,8 +107,8 @@ final class ComposeEnvironment
      * generated compose file is interpolated by Compose, so a `$` in a value is
      * doubled, which is how Compose is told to keep it.
      *
-     * @param array<string, mixed> $decision
-     * @param array<string, string> $values
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, string>  $values
      * @return array<string, mixed>
      */
     public static function withApiAccess(array $decision, array $values): array
@@ -129,7 +129,7 @@ final class ComposeEnvironment
      * Values headed for a compose file's `environment:`, with `$` doubled, which
      * is how Compose is told to keep it instead of interpolating it.
      *
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      * @return array<string, string>
      */
     public static function escapedForCompose(array $values): array
@@ -142,12 +142,12 @@ final class ComposeEnvironment
      * as the compose strategy does for its own file. Written into the
      * generated compose as-is, Compose would interpolate them to ''.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public static function withPublicAddress(array $decision, ?string $publicUrl): array
     {
-        if (!is_array($decision['env'] ?? null)) {
+        if (! is_array($decision['env'] ?? null)) {
             return $decision;
         }
         foreach ($decision['env'] as $key => $value) {
@@ -167,14 +167,14 @@ final class ComposeEnvironment
     }
 
     /**
-     * @param array<string, string> $env
+     * @param  array<string, string>  $env
      * @return array<string, string>
      */
     private static function overridable(array $env): array
     {
         return array_filter(
             $env,
-            static fn (string $key): bool => !self::isReserved($key),
+            static fn (string $key): bool => ! self::isReserved($key),
             ARRAY_FILTER_USE_KEY
         );
     }

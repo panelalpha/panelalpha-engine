@@ -2,6 +2,9 @@
 
 namespace App\Lib\Deploy\Engine;
 
+use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\System;
+
 /**
  * Getting an image to where a build or a `compose up` can use it.
  *
@@ -12,7 +15,7 @@ namespace App\Lib\Deploy\Engine;
  * account pulls from the image's own registry), never a stream between the two
  * daemons; an engine whose halves share one store would make it a no-op.
  *
- * Every method returns a command for {@see \App\System} to run: `host*` runs on
+ * Every method returns a command for {@see System} to run: `host*` runs on
  * the host, everything else inside the account.
  */
 interface ImageStore
@@ -63,7 +66,7 @@ interface ImageStore
      * One script, not N commands, so a cancelled deploy has a single PID to
      * kill. Returned as a script for `['bash', '-c', …]`.
      *
-     * @param list<string> $images
+     * @param  list<string>  $images
      */
     public function parallelImportCommand(EngineAccount $account, array $images, int $concurrency): string;
 
@@ -109,7 +112,7 @@ interface ImageStore
 
     /**
      * Inside the account: $image's declared ports as JSON, in the
-     * `{"5432/tcp":{}}` shape {@see \App\Lib\Deploy\CacheManager\ImageTransfer::parseExposedPorts()}
+     * `{"5432/tcp":{}}` shape {@see ImageTransfer::parseExposedPorts()}
      * reads.
      *
      * @return list<string>
@@ -142,6 +145,15 @@ interface ImageStore
      * @return list<string>
      */
     public function hostEnsureImageArgv(string $image): array;
+
+    /**
+     * On the engine: rebuild $image on the host from $dockerfile and push it
+     * to the cache registry when the host and the registry both lack it. Holds
+     * a lock of that image's own, so a second deploy waits and then finds the
+     * image the first one built instead of building it again; only the push
+     * takes the push lock.
+     */
+    public function hostRebuildCommand(string $image, string $dockerfile): string;
 
     /**
      * Pull a public base image the account already holds again, so a moving

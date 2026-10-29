@@ -2,10 +2,9 @@
 
 namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 
-use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
-
 use App\Lib\Deploy\Platform\Dockerfile\EnvironmentLines;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
+use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
@@ -34,7 +33,7 @@ final class RubyDockerfile
     }
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function generate(
         string $projectDir,
@@ -77,7 +76,7 @@ final class RubyDockerfile
      */
     private function precompilesAssets(): bool
     {
-        if (!$this->app->isRails()) {
+        if (! $this->app->isRails()) {
             return false;
         }
         $gemfile = $this->app->gemfile();

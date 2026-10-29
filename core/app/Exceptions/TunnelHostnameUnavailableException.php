@@ -17,8 +17,8 @@ class TunnelHostnameUnavailableException extends \RuntimeException
     public function __construct(int $attempts)
     {
         parent::__construct(
-            'Could not allocate a free preview hostname under *.' . PanelAlphaConnect::PARENT_DOMAIN
-            . " after {$attempts} attempts.",
+            'Could not allocate a free preview hostname under *.'.PanelAlphaConnect::PARENT_DOMAIN
+            ." after {$attempts} attempts.",
             409
         );
     }

@@ -17,20 +17,20 @@ use App\Lib\Deploy\Port\EnvVarDefault;
 final class WritableProjectBinds
 {
     /**
-     * @param array<string, mixed> $compose the run file, whose relative paths are relative to $projectDir
+     * @param  array<string, mixed>  $compose  the run file, whose relative paths are relative to $projectDir
      * @return array<string, array{image: ?string, user: ?string, sources: list<string>}> service => what it writes
      */
     public static function of(array $compose, string $projectDir): array
     {
         $projectDir = rtrim($projectDir, '/');
         $services = $compose['services'] ?? null;
-        if (!is_array($services) || $projectDir === '') {
+        if (! is_array($services) || $projectDir === '') {
             return [];
         }
 
         $out = [];
         foreach ($services as $name => $service) {
-            if (!is_array($service) || !is_array($service['volumes'] ?? null)) {
+            if (! is_array($service) || ! is_array($service['volumes'] ?? null)) {
                 continue;
             }
             $sources = [];
@@ -121,7 +121,7 @@ final class WritableProjectBinds
      * The checkout root itself is never handed over: it holds .git and the
      * engine's own files.
      *
-     * @param mixed $volume
+     * @param  mixed  $volume
      */
     private static function writableSource($volume, string $projectDir): ?string
     {
@@ -136,7 +136,7 @@ final class WritableProjectBinds
             }
             $source = $parts[0];
         } elseif (is_array($volume)) {
-            if (strtolower((string) ($volume['type'] ?? '')) !== 'bind' || !empty($volume['read_only'])) {
+            if (strtolower((string) ($volume['type'] ?? '')) !== 'bind' || ! empty($volume['read_only'])) {
                 return null;
             }
             $source = EnvVarDefault::resolve((string) ($volume['source'] ?? ''));
@@ -149,13 +149,13 @@ final class WritableProjectBinds
             return null;
         }
         if (str_starts_with($source, './') || str_starts_with($source, '../') || $source === '.') {
-            $source = $projectDir . '/' . $source;
-        } elseif (!str_starts_with($source, '/')) {
+            $source = $projectDir.'/'.$source;
+        } elseif (! str_starts_with($source, '/')) {
             // A named volume.
             return null;
         }
         $source = self::normalised($source);
-        if ($source === null || !str_starts_with($source, $projectDir . '/')) {
+        if ($source === null || ! str_starts_with($source, $projectDir.'/')) {
             return null;
         }
 
@@ -174,11 +174,12 @@ final class WritableProjectBinds
                     return null;
                 }
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $part;
         }
 
-        return '/' . implode('/', $parts);
+        return '/'.implode('/', $parts);
     }
 }

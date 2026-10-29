@@ -14,6 +14,7 @@ use Laravel\Mcp\Request;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** A rule that clashes with one on the host, through the API and the MCP tool, against ufw's own provider. */
@@ -22,10 +23,17 @@ class FirewallRuleClashTest extends TestCase
     use InMemoryDatabase;
 
     /** The engine's SSH allow and an operator's rules, as /etc/ufw/user.rules holds them. */
-    public const RULES = "### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in comment=70616e656c616c7068613a20737368\n"
-        . "### tuple ### allow tcp 3306 0.0.0.0/0 any 203.0.113.7 in comment=6f6666696365\n"
-        . "### tuple ### deny tcp 80,443 0.0.0.0/0 any 192.0.2.1 in\n"
-        . "### tuple ### route:deny tcp 80,443 0.0.0.0/0 any 192.0.2.1 in\n";
+    public static function rules(): string
+    {
+        $any = TestNetwork::ANY_CIDR;
+        $office = TestNetwork::public(7);
+        $denied = TestNetwork::public3(1);
+
+        return "### tuple ### allow tcp 22 {$any} any {$any} in comment=70616e656c616c7068613a20737368\n"
+            . "### tuple ### allow tcp 3306 {$any} any {$office} in comment=6f6666696365\n"
+            . "### tuple ### deny tcp 80,443 {$any} any {$denied} in\n"
+            . "### tuple ### route:deny tcp 80,443 {$any} any {$denied} in\n";
+    }
 
     private object $host;
     private string $lock;
@@ -50,7 +58,7 @@ class FirewallRuleClashTest extends TestCase
                     return FakeProcess::ok('Rule updated');
                 }
 
-                return $cmd === ['cat', '/etc/ufw/user.rules'] ? FakeProcess::ok(FirewallRuleClashTest::RULES) : FakeProcess::failed('No such file');
+                return $cmd === ['cat', '/etc/ufw/user.rules'] ? FakeProcess::ok(FirewallRuleClashTest::rules()) : FakeProcess::failed('No such file');
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
@@ -106,7 +114,7 @@ class FirewallRuleClashTest extends TestCase
 
     public function test_the_api_refuses_an_edit_onto_another_rules_match(): void
     {
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '3306', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '3306', 'source' => TestNetwork::public(7)]);
 
         $response = $this->putJson("/api/firewall/rules/{$office->id()}", ['port' => '22', 'source' => null]);
 
@@ -117,14 +125,14 @@ class FirewallRuleClashTest extends TestCase
 
     public function test_an_address_that_is_every_address_is_refused_before_ufw_is_asked(): void
     {
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '3306', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '3306', 'source' => TestNetwork::public(7)]);
         $cases = [
-            ['POST', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '0.0.0.0/0', 'comment' => 'x'], 'source'],
+            ['POST', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::ANY_CIDR, 'comment' => 'x'], 'source'],
             ['POST', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '::/0', 'comment' => 'x'], 'source'],
-            ['POST', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'source' => '1.2.3.4/0', 'scope' => 'published'], 'source'],
-            ['POST', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'destination' => '0.0.0.0/0'], 'destination'],
-            ['POST', ['action' => 'deny', 'source' => '0.0.0.0/0'], 'source'],
-            ['PUT', ['port' => '22', 'source' => '0.0.0.0/0'], 'source'],
+            ['POST', ['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'source' => TestNetwork::public(4).'/0', 'scope' => 'published'], 'source'],
+            ['POST', ['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'destination' => TestNetwork::ANY_CIDR], 'destination'],
+            ['POST', ['action' => 'deny', 'source' => TestNetwork::ANY_CIDR], 'source'],
+            ['PUT', ['port' => '22', 'source' => TestNetwork::ANY_CIDR], 'source'],
         ];
         foreach ($cases as [$method, $body, $field]) {
             $uri = $method === 'PUT' ? "/api/firewall/rules/{$office->id()}" : '/api/firewall/rules';
@@ -143,10 +151,10 @@ class FirewallRuleClashTest extends TestCase
 
     public function test_a_port_list_in_another_order_is_the_rule_already_there(): void
     {
-        $deny = FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => '192.0.2.1']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => TestNetwork::public3(1)]);
 
         foreach (['allow', 'deny'] as $action) {
-            $response = $this->postJson('/api/firewall/rules', ['action' => $action, 'protocol' => 'tcp', 'port' => '443,80', 'source' => '192.0.2.1']);
+            $response = $this->postJson('/api/firewall/rules', ['action' => $action, 'protocol' => 'tcp', 'port' => '443,80', 'source' => TestNetwork::public3(1)]);
 
             $response->assertStatus(422);
             $this->assertStringStartsWith("Rule {$deny->id()} ", (string) $response->json('errors.rule.0'));

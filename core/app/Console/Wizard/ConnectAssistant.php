@@ -37,8 +37,7 @@ class ConnectAssistant
     public function __construct(
         private readonly string $title,
         private readonly bool $dryRun,
-    ) {
-    }
+    ) {}
 
     /** @return array<int, string> */
     public function receipt(): array
@@ -50,7 +49,7 @@ class ConnectAssistant
     {
         $labels = ClientRegistration::labels();
 
-        Screen::draw($this->title . '  ·  Connect an assistant');
+        Screen::draw($this->title.'  ·  Connect an assistant');
 
         $this->checkAddress();
 
@@ -62,11 +61,11 @@ class ConnectAssistant
             hint: 'Arrow keys to choose. Using something else? Any assistant that speaks MCP will work.',
         );
 
-        if (!isset($labels[$client])) {
+        if (! isset($labels[$client])) {
             return;
         }
 
-        Screen::draw($this->title . '  ·  Connect an assistant');
+        Screen::draw($this->title.'  ·  Connect an assistant');
 
         $name = trim(text(
             label: 'What should this token be called?',
@@ -103,7 +102,7 @@ class ConnectAssistant
 
             $entry = ClientRegistration::for(
                 $client,
-                rtrim((string) config('app.url'), '/') . '/mcp',
+                rtrim((string) config('app.url'), '/').'/mcp',
                 $token->plainTextToken,
             );
         } catch (Throwable $e) {
@@ -118,23 +117,23 @@ class ConnectAssistant
                 sprintf('To connect %s, run this on your own computer:', $entry['label']),
                 '',
             ],
-            array_map(fn (string $line): string => '  ' . $line, $entry['lines']),
+            array_map(fn (string $line): string => '  '.$line, $entry['lines']),
             [
                 '',
                 sprintf(
                     'It carries token %d ("%s"), %s. It is not shown again.',
                     $token->accessToken->id,
                     $name,
-                    $expires === '' ? 'which never expires' : 'which expires in ' . $expires,
+                    $expires === '' ? 'which never expires' : 'which expires in '.$expires,
                 ),
             ],
         );
 
-        Screen::draw($this->title . '  ·  Connect an assistant');
+        Screen::draw($this->title.'  ·  Connect an assistant');
         note(implode("\n", $this->receipt), 'info');
 
         if (isset($entry['note'])) {
-            note('What it does: ' . $entry['note']);
+            note('What it does: '.$entry['note']);
         }
 
         warning('Copy it now. The token inside it is shown only this once.');
@@ -160,7 +159,7 @@ class ConnectAssistant
         if ($host === '' || in_array($host, ['localhost', '127.0.0.1', '::1'], true)) {
             warning(sprintf(
                 "This engine thinks its address is %s, which no assistant can reach.\n"
-                . 'Set APP_URL in .env-core to the address and port you connect on, then restart the engine.',
+                .'Set APP_URL in .env-core to the address and port you connect on, then restart the engine.',
                 $url === '' ? '(unset)' : $url
             ));
 

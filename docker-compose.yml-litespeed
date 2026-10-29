@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-litespeed
-    image: ghcr.io/panelalpha/engine-litespeed:20260527
+    image: ghcr.io/panelalpha/engine-litespeed:v2.2.0-20261028
     pull_policy: missing
     labels:
       - com.panelalpha.webserver=litespeed

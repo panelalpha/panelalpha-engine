@@ -3,6 +3,7 @@ import { CleanupSteps } from '@/helpers/cleanup-step';
 import { getDomainBasePath, removeFileIfPresent } from '@/helpers/file-path-helpers';
 import { uniqueId } from '@/helpers/random';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 
 test.describe('move contents, fetch and chmod', () => {
   test('move-contents moves children and leaves the source directory', async ({
@@ -92,10 +93,10 @@ test.describe('move contents, fetch and chmod', () => {
     const cleanup = new CleanupSteps();
     try {
       for (const url of [
-        'http://127.0.0.1/',
-        'http://169.254.169.254/latest/meta-data/',
+        `http://${testNetwork.LOOPBACK}/`,
+        `http://${testNetwork.METADATA}/latest/meta-data/`,
         'http://[::1]/',
-        'http://10.0.0.5/',
+        `http://${testNetwork.PRIVATE_10}/`,
       ]) {
         const response = await api.fetchFileRaw(user.username, {
           url,
@@ -124,7 +125,7 @@ test.describe('move contents, fetch and chmod', () => {
     const dir = getDomainBasePath(user.domain);
 
     const redirected = await api.fetchFileRaw(user.username, {
-      url: 'https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F',
+      url: `https://httpbin.org/redirect-to?url=http%3A%2F%2F${testNetwork.LOOPBACK}%2F`,
       path: dir,
       filename: 'redirected.txt',
     });

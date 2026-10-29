@@ -990,18 +990,20 @@ mirror_bans() {
 # The stock filters match by process name, which would count the SFTP
 # container's sshd as the host's; the engine's own filters match the source.
 # Trusted addresses (the firewall API, CSF's old allow and ignore lists) are in
-# $F2B_DIR/panelalpha-ignoreip, one per line, "# comment" after it.
+# $F2B_DIR/panelalpha-ignoreip, one per line, "# comment" after it. Core keeps
+# PanelAlpha Connect's caller in panelalpha-api-ignoreip, for engine-api only.
 configure_fail2ban() { # [trusted]: only the trusted list changed
-    local api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions ignore containers
+    local api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions ignore api_ignore containers
     local site_log="$ENGINE_DIR/webserver-logs/nginx-proxy/site-password.log"
     mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")" "$(dirname "$site_log")"
     actions=$(ban_actions)
-    touch "$F2B_DIR/panelalpha-ignoreip" "$api_log" "$site_log"
+    touch "$F2B_DIR/panelalpha-ignoreip" "$F2B_DIR/panelalpha-api-ignoreip" "$api_log" "$site_log"
     ignore=$(f2b_ignoreip)
+    api_ignore="$ignore $(ignore_list "$F2B_DIR/panelalpha-api-ignoreip")"
     containers=$(docker_subnets)
     write_f2b_filters
     write_f2b_ban_action
-    write_f2b_jails "$ignore" "$containers" "$api_log" "$site_log"
+    write_f2b_jails "$ignore" "$containers" "$api_log" "$site_log" "${api_ignore% }"
     systemctl enable fail2ban >/dev/null 2>&1 || true
     reload_fail2ban "$actions" "${1:-}"
 }
@@ -1010,9 +1012,12 @@ configure_fail2ban() { # [trusted]: only the trusted list changed
 # one on a line written "address#comment".
 f2b_ignoreip() {
     local ignore="127.0.0.1/8 ::1"
-    ignore="$ignore $(awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
+    ignore="$ignore $(ignore_list "$F2B_DIR/panelalpha-ignoreip")"
     printf '%s' "${ignore% }"
 }
+
+# A list file's addresses, space-separated, without their "# comment".
+ignore_list() { awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$1" | sort -u | tr '\n' ' '; }
 
 # The host's Docker networks. A tunnel's cloudflared reaches a site from its
 # account's address on one: banning that would cut the account off the host.
@@ -1086,8 +1091,8 @@ ufwlock = exec 9>>"$UFW_LOCK"; flock -w 50 9 || { echo "panelalpha-ufw: no ufw l
 EOF
 }
 
-write_f2b_jails() { # <ignoreip> <docker subnets> <api log> <site-password log>
-    local ignore=$1 containers=$2 api_log=$3 site_log=$4
+write_f2b_jails() { # <ignoreip> <docker subnets> <api log> <site-password log> <api ignoreip>
+    local ignore=$1 containers=$2 api_log=$3 site_log=$4 api_ignore=$5
     cat >"$F2B_DIR/jail.d/panelalpha.local" <<EOF
 # Written by the PanelAlpha engine (scripts/firewall/ufw.sh) on every install
 # and update, and when the firewall API changes the trusted addresses. Those
@@ -1138,6 +1143,9 @@ backend = auto
 port = 2011
 maxretry = 10
 bantime.increment = false
+# A jail's own ignoreip replaces [DEFAULT]'s, so it repeats it, then adds
+# PanelAlpha Connect's caller: SSH, SFTP and FTP can still ban that address.
+ignoreip = ${api_ignore}
 
 # Any site's visitors, often many behind one address, and a ban closes the
 # whole host to them. No increment: a fixed hour is enough to stop guessing.
@@ -1431,7 +1439,7 @@ uninstall() {
     say "ufw disabled and the engine's fail2ban jail removed"
 }
 
-# Sourced by ufw.test.sh for its functions.
+# Sourced by tests/scripts/firewall/ufw.test.sh for its functions.
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 case "${1:-}" in

@@ -10,7 +10,7 @@ export type VaultSecretScope = 'project' | 'global';
  */
 export interface VaultSecretEntry {
   id: number;
-  /** `vault:<id>`; pass it where the secret would go. */
+  /** `vault:<key>`; pass it where the secret would go. */
   ref: string;
   type: string;
   scope: VaultSecretScope;

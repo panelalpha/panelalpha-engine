@@ -29,7 +29,7 @@ final class PortsReport
     private readonly string $projectDir;
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function __construct(string $projectDir, private readonly array $decision)
     {
@@ -37,7 +37,7 @@ final class PortsReport
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array{primary: ?int, source: ?string, routed: list<int>, unrouted: list<PortNote>, refused: list<PortNote>, compose: list<int>, dockerfile_expose: ?int}
      */
     public static function of(string $projectDir, array $decision): array
@@ -71,7 +71,7 @@ final class PortsReport
      * Ports the compose file publishes that the engine leaves alone, and what
      * it would take to reach each one.
      *
-     * @param list<int> $all
+     * @param  list<int>  $all
      * @return list<PortNote>
      */
     private function unrouted(array $all, ?int $primary): array
@@ -104,7 +104,7 @@ final class PortsReport
      * Ports detection refused outright. Never routable: the primary rule for
      * one of these would point the site at a database.
      *
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return list<PortNote>
      */
     private function refused(array $compose): array
@@ -112,7 +112,7 @@ final class PortsReport
         $refused = is_array($compose['refused'] ?? null) ? $compose['refused'] : [];
         $notes = [];
         foreach ($refused as $entry) {
-            if (!is_array($entry) || !isset($entry['port'])) {
+            if (! is_array($entry) || ! isset($entry['port'])) {
                 continue;
             }
             $notes[] = [
@@ -127,7 +127,7 @@ final class PortsReport
     }
 
     /**
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return array{0: ?int, 1: ?string}
      */
     private function primary(array $compose, ?int $expose): array
@@ -176,12 +176,12 @@ final class PortsReport
     private function exposedPort(): ?int
     {
         $dockerfile = $this->decision['dockerfile'] ?? null;
-        if (!is_string($dockerfile) || $dockerfile === '') {
+        if (! is_string($dockerfile) || $dockerfile === '') {
             $dockerfile = DockerfileFinder::find($this->projectDir, []);
         }
 
         return $dockerfile === null
             ? null
-            : DockerfileFinder::exposedPort($this->projectDir . '/' . $dockerfile);
+            : DockerfileFinder::exposedPort($this->projectDir.'/'.$dockerfile);
     }
 }

@@ -18,13 +18,13 @@ return new class extends Migration
             // Lowercase aliases stored in domains.details JSON
             Domain::whereNotNull('details')->get()->each(function (Domain $domain) {
                 $details = $domain->details;
-                if (!empty($details['aliases']) && is_array($details['aliases'])) {
+                if (! empty($details['aliases']) && is_array($details['aliases'])) {
                     $details['aliases'] = array_map('strtolower', $details['aliases']);
                     $domain->details = $details;
                     $domain->save();
                 }
             });
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
         }
     }
 

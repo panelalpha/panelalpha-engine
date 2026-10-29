@@ -5,8 +5,8 @@ namespace Tests\Unit\System;
 use App\Models\User;
 use App\System;
 use App\System\Project;
-use App\System\Projects;
 use App\System\Project\Dind\CopyVolumes;
+use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
 use App\System\Services\Mysql\Privileges;
@@ -26,14 +26,14 @@ class ProjectsPushRollbackTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        $this->root = sys_get_temp_dir() . '/pa-push-rollback-' . bin2hex(random_bytes(6));
-        mkdir($this->root . '/live', 0777, true);
-        mkdir($this->root . '/stg', 0777, true);
+        $this->root = sys_get_temp_dir().'/pa-push-rollback-'.bin2hex(random_bytes(6));
+        mkdir($this->root.'/live', 0777, true);
+        mkdir($this->root.'/stg', 0777, true);
     }
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->root));
+        exec('rm -rf '.escapeshellarg($this->root));
         parent::tearDown();
     }
 
@@ -47,7 +47,7 @@ class ProjectsPushRollbackTest extends TestCase
         $this->assertSame([], $record->restores);
         $this->assertSame([], $record->deleted);
         $this->assertSame([], $record->scripts);
-        $this->assertFileDoesNotExist($this->rollbackDir() . '/live_wp.sql.gz');
+        $this->assertFileDoesNotExist($this->rollbackDir().'/live_wp.sql.gz');
     }
 
     public function test_a_failed_table_rollback_dump_is_never_replayed_into_the_target(): void
@@ -68,9 +68,24 @@ class ProjectsPushRollbackTest extends TestCase
 
         $this->pushFails($record, 'start exploded');
 
-        $this->assertSame([['live_wp', $this->rollbackDir() . '/live_wp.sql.gz']], $record->restores);
+        $this->assertSame([['live_wp', $this->rollbackDir().'/live_wp.sql.gz']], $record->restores);
         $this->assertDirectoryDoesNotExist($this->rollbackDir());
         $this->assertSame('start exploded', User::findByUsernameOrFail('live')->getDetails()['error'] ?? null);
+    }
+
+    public function test_a_rollback_drops_a_created_database_and_revokes_the_grants_the_push_gave_on_it(): void
+    {
+        $record = $this->recorder(failStart: true);
+        $record->privileges = ['stg_wp' => ['stg_wp' => 'ALL PRIVILEGES', 'stg_extra' => 'SELECT, INSERT']];
+        [$stg] = $this->stagingPair();
+        $stg->mysqlDatabases()->create(['database' => 'stg_extra']);
+
+        $this->pushFails($record, 'start exploded');
+
+        $this->assertContains(['live_wp', 'live_extra', 'SELECT, INSERT'], $record->grants);
+        $this->assertSame(['live_wp', 'live_extra'], $record->deleted);
+        $this->assertSame([['live_wp', 'live_extra']], $record->revoked);
+        $this->assertFalse(User::findByUsernameOrFail('live')->mysqlDatabases()->where('database', 'live_extra')->exists());
     }
 
     public function test_a_failed_restore_keeps_the_rollback_dumps_and_says_so(): void
@@ -80,9 +95,9 @@ class ProjectsPushRollbackTest extends TestCase
 
         $e = $this->pushFails($record, 'start exploded');
 
-        $this->assertFileExists($this->rollbackDir() . '/live_wp.sql.gz');
+        $this->assertFileExists($this->rollbackDir().'/live_wp.sql.gz');
         $this->assertStringContainsString("failed: restoring database 'live_wp'", $e->getMessage());
-        $this->assertStringContainsString('kept in ' . $this->rollbackDir(), $e->getMessage());
+        $this->assertStringContainsString('kept in '.$this->rollbackDir(), $e->getMessage());
         $live = User::findByUsernameOrFail('live');
         $this->assertSame('failed', $live->getDetails()['async_status']['push'] ?? null);
         $this->assertSame($e->getMessage(), $live->getDetails()['error'] ?? null);
@@ -98,9 +113,9 @@ class ProjectsPushRollbackTest extends TestCase
             ['database' => 'stg_wp', 'name' => 'wp_options'],
         ]);
 
-        $this->assertFileExists($this->rollbackDir() . '/live_wp.wp_posts.sql.gz');
+        $this->assertFileExists($this->rollbackDir().'/live_wp.wp_posts.sql.gz');
         $this->assertStringContainsString("restoring table 'live_wp.wp_posts'", $e->getMessage());
-        $this->assertStringContainsString('kept in ' . $this->rollbackDir(), $e->getMessage());
+        $this->assertStringContainsString('kept in '.$this->rollbackDir(), $e->getMessage());
     }
 
     public function test_kept_rollback_dumps_refuse_the_next_push_and_stay(): void
@@ -108,11 +123,11 @@ class ProjectsPushRollbackTest extends TestCase
         $record = $this->recorder();
         $this->stagingPair();
         mkdir($this->rollbackDir());
-        file_put_contents($this->rollbackDir() . '/live_wp.sql.gz', 'only copy');
+        file_put_contents($this->rollbackDir().'/live_wp.sql.gz', 'only copy');
 
         $this->pushFails($record, 'restore or remove them before pushing again');
 
-        $this->assertSame('only copy', file_get_contents($this->rollbackDir() . '/live_wp.sql.gz'));
+        $this->assertSame('only copy', file_get_contents($this->rollbackDir().'/live_wp.sql.gz'));
         $this->assertSame([], $record->scripts);
     }
 
@@ -134,7 +149,7 @@ class ProjectsPushRollbackTest extends TestCase
     }
 
     /**
-     * @param list<array{database: string, name: string}>|null $tables
+     * @param  list<array{database: string, name: string}>|null  $tables
      */
     private function pushFails(object $record, string $message, ?array $tables = null): \RuntimeException
     {
@@ -151,7 +166,7 @@ class ProjectsPushRollbackTest extends TestCase
 
     private function rollbackDir(): string
     {
-        return $this->root . '/live/.pre-push-db';
+        return $this->root.'/live/.pre-push-db';
     }
 
     private function recorder(
@@ -161,29 +176,30 @@ class ProjectsPushRollbackTest extends TestCase
         ?string $failCopyOf = null,
     ): object {
         return (object) [
-            'failDumpOf'  => $failDumpOf,
-            'failStart'   => $failStart,
+            'failDumpOf' => $failDumpOf,
+            'failStart' => $failStart,
             'failRestore' => $failRestore,
-            'failCopyOf'  => $failCopyOf,
-            'restores'    => [],
-            'deleted'     => [],
-            'scripts'     => [],
+            'failCopyOf' => $failCopyOf,
+            'restores' => [],
+            'deleted' => [],
+            'scripts' => [],
+            'privileges' => [],
+            'grants' => [],
+            'revoked' => [],
         ];
     }
 
     private function system(object $record): System
     {
-        return new class ($record, $this->root) extends System {
-            public function __construct(private object $record, private string $root)
-            {
-            }
+        return new class($record, $this->root) extends System
+        {
+            public function __construct(private object $record, private string $root) {}
 
             public function project(User $model): Project
             {
-                return new class ($this->root . '/' . $model->username, $this->record) extends Project {
-                    public function __construct(private string $home, private object $record)
-                    {
-                    }
+                return new class($this->root.'/'.$model->username, $this->record) extends Project
+                {
+                    public function __construct(private string $home, private object $record) {}
 
                     public function homeDirPath(): string
                     {
@@ -222,7 +238,7 @@ class ProjectsPushRollbackTest extends TestCase
             }
 
             /**
-             * @param list<string> $argv
+             * @param  list<string>  $argv
              */
             private function exitCode(array $argv): int
             {
@@ -239,12 +255,12 @@ class ProjectsPushRollbackTest extends TestCase
             }
 
             /**
-             * @param list<string> $paths
+             * @param  list<string>  $paths
              */
             private function remove(array $paths): int
             {
                 foreach ($paths as $path) {
-                    exec('rm -rf ' . escapeshellarg($path));
+                    exec('rm -rf '.escapeshellarg($path));
                 }
 
                 return 0;
@@ -303,7 +319,7 @@ class PushRollbackMysql extends Mysql
 
     public function runSitesDbScript(string $script, string $failurePrefix): void
     {
-        if ($this->record->failCopyOf !== null && str_contains($script, "'" . $this->record->failCopyOf . "'")) {
+        if ($this->record->failCopyOf !== null && str_contains($script, "'".$this->record->failCopyOf."'")) {
             throw new \RuntimeException('copy exploded');
         }
 
@@ -314,15 +330,14 @@ class PushRollbackMysql extends Mysql
     {
         $record = $this->record;
 
-        return new class ($record) extends Databases {
+        return new class($record) extends Databases
+        {
             public function __construct(private object $record)
             {
                 parent::__construct(new PDO('sqlite::memory:'));
             }
 
-            public function createDatabase(string $name): void
-            {
-            }
+            public function createDatabase(string $name): void {}
 
             public function deleteDatabase(string $name): void
             {
@@ -338,26 +353,36 @@ class PushRollbackMysql extends Mysql
 
     public function privileges(): Privileges
     {
-        return new class extends Privileges {
-            public function __construct()
+        $record = $this->record;
+
+        return new class($record) extends Privileges
+        {
+            public function __construct(private object $record)
             {
                 parent::__construct(new PDO('sqlite::memory:'), '%');
             }
 
             public function showPrivileges(string $user): array
             {
-                return [];
+                return $this->record->privileges[$user] ?? [];
             }
 
             public function updatePrivileges(string $user, string $database, string $privileges): void
             {
+                $this->record->grants[] = [$user, $database, $privileges];
+            }
+
+            public function revokeIfExists(string $user, string $database): void
+            {
+                $this->record->revoked[] = [$user, $database];
             }
         };
     }
 
     public function tables(): Tables
     {
-        return new class extends Tables {
+        return new class extends Tables
+        {
             public function __construct()
             {
                 parent::__construct(new PDO('sqlite::memory:'));

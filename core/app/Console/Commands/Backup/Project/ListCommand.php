@@ -19,6 +19,7 @@ class ListCommand extends Command
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
@@ -30,6 +31,7 @@ class ListCommand extends Command
 
         if ($backups->isEmpty()) {
             $this->info("No backups for project '{$username}'.");
+
             return 0;
         }
 
@@ -38,8 +40,8 @@ class ListCommand extends Command
             $backups->map(function (BackupRecord $backup): array {
                 $container = $backup->container;
                 $containerLabel = $container !== null
-                    ? $container->name . ' (#' . $container->id . ')'
-                    : '#' . $backup->container_id;
+                    ? $container->name.' (#'.$container->id.')'
+                    : '#'.$backup->container_id;
 
                 return [
                     $backup->id,
@@ -63,12 +65,12 @@ class ListCommand extends Command
     private function formatBytes(int $bytes): string
     {
         if ($bytes < 1024) {
-            return $bytes . ' B';
+            return $bytes.' B';
         }
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024, 1) . ' KB';
+            return round($bytes / 1024, 1).' KB';
         }
 
-        return round($bytes / (1024 * 1024), 1) . ' MB';
+        return round($bytes / (1024 * 1024), 1).' MB';
     }
 }

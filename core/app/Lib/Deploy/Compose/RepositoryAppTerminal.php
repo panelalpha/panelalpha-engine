@@ -16,8 +16,8 @@ final class RepositoryAppTerminal
     private const KEYS = ['tty', 'stdin_open'];
 
     /**
-     * @param array<string, ?string> $composeFiles path relative to the project
-     *        root => its contents (null when absent), in the order to consult
+     * @param  array<string, ?string>  $composeFiles  path relative to the project
+     *                                                root => its contents (null when absent), in the order to consult
      * @return array<string, true> the keys of {@see KEYS} the app service sets
      */
     public static function settings(string $dockerfile, array $composeFiles, ?string $projectIdentity = null): array
@@ -58,22 +58,22 @@ final class RepositoryAppTerminal
     /**
      * The service whose `build:` resolves to $dockerfile.
      *
-     * @param array<string, mixed> $services
+     * @param  array<string, mixed>  $services
      * @return array<string, mixed>|null
      */
     private static function buildingService(array $services, string $composeDir, string $dockerfile): ?array
     {
         foreach ($services as $service) {
-            if (!is_array($service) || !isset($service['build'])) {
+            if (! is_array($service) || ! isset($service['build'])) {
                 continue;
             }
             $build = $service['build'];
             $context = is_array($build) ? ($build['context'] ?? '.') : $build;
             $file = is_array($build) ? ($build['dockerfile'] ?? 'Dockerfile') : 'Dockerfile';
-            if (!is_string($context) || !is_string($file)) {
+            if (! is_string($context) || ! is_string($file)) {
                 continue;
             }
-            if (self::normalise($composeDir . '/' . $context . '/' . $file) === $dockerfile) {
+            if (self::normalise($composeDir.'/'.$context.'/'.$file) === $dockerfile) {
                 return $service;
             }
         }
@@ -85,7 +85,7 @@ final class RepositoryAppTerminal
      * The one service the file runs as its application (MintHCM's
      * `minthcm-web` runs the published image of the Dockerfile we build).
      *
-     * @param array<string, mixed> $services
+     * @param  array<string, mixed>  $services
      * @return array<string, mixed>|null
      */
     private static function applicationService(array $services, ?string $projectIdentity): ?array
@@ -101,7 +101,7 @@ final class RepositoryAppTerminal
     }
 
     /**
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, true>
      */
     private static function terminalOf(array $service): array
@@ -127,6 +127,7 @@ final class RepositoryAppTerminal
             }
             if ($part === '..') {
                 array_pop($parts);
+
                 continue;
             }
             $parts[] = $part;

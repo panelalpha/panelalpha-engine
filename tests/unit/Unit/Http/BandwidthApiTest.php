@@ -177,7 +177,27 @@ class BandwidthApiTest extends TestCase
         $response->assertJsonPath('bandwidth.maximum', 10 * 1024 * 1024);
     }
 
-    public function test_usage_reports_null_maximum_when_unlimited(): void
+    public function test_usage_answers_unlimited_as_minus_one_for_every_limit(): void
+    {
+        $user = $this->makeProject([
+            'disk_space_limit' => -1,
+            'bandwidth_limit' => -1,
+            'mysql_databases_limit' => -1,
+            'ftp_accounts_limit' => -1,
+            'sftp_accounts_limit' => -1,
+            'addon_domains_limit' => -1,
+            'subdomains_limit' => -1,
+        ]);
+
+        $response = $this->getJson("/api/projects/{$user->username}/usage");
+
+        $response->assertOk();
+        foreach (['storage', 'bandwidth', 'addon_domains', 'subdomains', 'ftp_accounts', 'sftp_accounts', 'mysql_databases'] as $key) {
+            $response->assertJsonPath("{$key}.maximum", -1);
+        }
+    }
+
+    public function test_usage_reports_null_maximum_when_no_limit_is_set(): void
     {
         $user = $this->makeProject();
 

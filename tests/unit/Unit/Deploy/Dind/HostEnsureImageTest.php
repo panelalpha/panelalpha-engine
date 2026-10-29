@@ -43,4 +43,21 @@ class HostEnsureImageTest extends TestCase
         $this->assertStringContainsString(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $script);
         $this->assertStringEndsWith('exit 0', $script);
     }
+
+    public function test_our_missing_image_is_rebuilt_under_its_own_lock_and_published_under_the_push_lock(): void
+    {
+        $script = (new DindImageStore())->hostRebuildCommand(self::IMAGE, "FROM php:8.3-apache-bookworm\n");
+
+        // Builds the plain tag the host build runs, then publishes it.
+        $this->assertStringContainsString('docker build', $script);
+        $this->assertStringContainsString('docker push -q '
+            . escapeshellarg(DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE), $script);
+        // Two deploys cannot build the same image: the build holds a lock of
+        // that image's own, exclusively.
+        $this->assertStringContainsString(escapeshellarg(DindImageStore::buildLockPath(self::IMAGE)) . ' && flock -x', $script);
+        // Only the push takes the lock prewarm's trim holds, and shared, so a
+        // long build never holds up another account's image transfer.
+        $this->assertStringContainsString(escapeshellarg(DindImageStore::PUSH_LOCK) . ' && flock -s', $script);
+        $this->assertStringNotContainsString(escapeshellarg(DindImageStore::PUSH_LOCK) . ' && flock -x', $script);
+    }
 }

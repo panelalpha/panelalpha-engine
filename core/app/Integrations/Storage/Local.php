@@ -29,8 +29,7 @@ final class Local extends AbstractStorage
 
     public function __construct(
         private readonly string $root
-    ) {
-    }
+    ) {}
 
     public static function fromContainer(BackupContainer $container): self
     {
@@ -58,7 +57,7 @@ final class Local extends AbstractStorage
     public function readStream(string $key)
     {
         $path = $this->resolveKey($key);
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             throw new RuntimeException("Backup object not found: {$key}");
         }
 
@@ -87,7 +86,7 @@ final class Local extends AbstractStorage
     public function deletePrefix(string $prefix): void
     {
         $dir = $this->resolvePrefixDir($prefix);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return;
         }
 
@@ -109,13 +108,14 @@ final class Local extends AbstractStorage
     public function exists(string $key): bool
     {
         $path = $this->resolveKey($key);
+
         return is_file($path);
     }
 
     public function size(string $key): int
     {
         $path = $this->resolveKey($key);
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             throw new RuntimeException("Backup object not found: {$key}");
         }
 
@@ -134,11 +134,11 @@ final class Local extends AbstractStorage
         if ($root === null) {
             throw new RuntimeException("Backup storage root does not exist: {$this->root}");
         }
-        if (!is_writable($root)) {
+        if (! is_writable($root)) {
             throw new RuntimeException("Backup storage root is not writable: {$this->root}");
         }
 
-        $probe = $root . '/' . self::PROBE_FILE;
+        $probe = $root.'/'.self::PROBE_FILE;
         if (@file_put_contents($probe, 'ok') === false) {
             throw new RuntimeException("Backup storage root is not writable: {$this->root}");
         }
@@ -148,7 +148,7 @@ final class Local extends AbstractStorage
     private function removeBelowRoot(SplFileInfo $entry, ?string $root): void
     {
         $path = $entry->getPathname();
-        if ($path === $root || !str_starts_with($path, $root . '/')) {
+        if ($path === $root || ! str_starts_with($path, $root.'/')) {
             return;
         }
 
@@ -158,6 +158,7 @@ final class Local extends AbstractStorage
     private function rootRealPath(): ?string
     {
         $real = realpath($this->root);
+
         return $real === false ? null : $real;
     }
 
@@ -170,15 +171,15 @@ final class Local extends AbstractStorage
 
         $root = $this->rootRealPath();
         if ($root === null) {
-            return rtrim($this->root, '/') . '/' . $prefix;
+            return rtrim($this->root, '/').'/'.$prefix;
         }
 
-        $candidate = $root . '/' . $prefix;
+        $candidate = $root.'/'.$prefix;
         $dirReal = realpath($candidate);
         if ($dirReal === false) {
             return $candidate;
         }
-        if (!self::isInside($dirReal, $root)) {
+        if (! self::isInside($dirReal, $root)) {
             throw new InvalidArgumentException('Prefix must stay inside the storage root.');
         }
 
@@ -194,10 +195,10 @@ final class Local extends AbstractStorage
 
         $root = $this->rootRealPath();
         if ($root === null) {
-            return rtrim($this->root, '/') . '/' . $relative;
+            return rtrim($this->root, '/').'/'.$relative;
         }
 
-        return $this->confinedToRoot($root . '/' . $relative, $root);
+        return $this->confinedToRoot($root.'/'.$relative, $root);
     }
 
     /**
@@ -211,10 +212,10 @@ final class Local extends AbstractStorage
             if ($parentReal === false) {
                 throw new InvalidArgumentException('Key must stay inside the storage root.');
             }
-            $path = $parentReal . '/' . basename($path);
+            $path = $parentReal.'/'.basename($path);
         }
 
-        if (!self::isInside($path, $root)) {
+        if (! self::isInside($path, $root)) {
             throw new InvalidArgumentException('Key must stay inside the storage root.');
         }
 
@@ -223,7 +224,7 @@ final class Local extends AbstractStorage
 
     private static function isInside(string $path, string $root): bool
     {
-        return $path === $root || str_starts_with($path, $root . '/');
+        return $path === $root || str_starts_with($path, $root.'/');
     }
 
     private function ensureWritableDirectory(string $dir): void
@@ -239,10 +240,10 @@ final class Local extends AbstractStorage
         try {
             $this->privilegedEnsureWritable($dir);
         } catch (RuntimeException $e) {
-            throw new RuntimeException("Could not create backup storage directory {$dir}: " . $e->getMessage(), 0, $e);
+            throw new RuntimeException("Could not create backup storage directory {$dir}: ".$e->getMessage(), 0, $e);
         }
 
-        if (!is_dir($dir) || !is_writable($dir)) {
+        if (! is_dir($dir) || ! is_writable($dir)) {
             throw new RuntimeException("Could not create backup storage directory: {$dir}");
         }
     }
@@ -251,7 +252,7 @@ final class Local extends AbstractStorage
     {
         $root = self::normalizedDir($this->root);
         $dir = self::normalizedDir($dir);
-        if (!self::isInside($dir, $root)) {
+        if (! self::isInside($dir, $root)) {
             throw new RuntimeException("Refusing to create directory outside storage root: {$dir}");
         }
         if (str_contains($dir, '..')) {
@@ -298,7 +299,7 @@ final class Local extends AbstractStorage
     }
 
     /**
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     private function sudo(array $args): void
     {

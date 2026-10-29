@@ -14,13 +14,11 @@ use OpenApi\Attributes as OA;
 
 class UsageController extends Controller
 {
-    public function __construct(private Statistics $statistics, private ProjectUsage $usage)
-    {
-    }
+    public function __construct(private Statistics $statistics, private ProjectUsage $usage) {}
 
     #[OA\Get(
         path: '/projects/{username}/usage',
-        description: 'Includes this calendar month\'s transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited), and the bytes its container logs take as logs.usage.',
+        description: 'Includes this calendar month\'s transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes; -1 when unlimited, null when no limit is set), and the bytes its container logs take as logs.usage.',
         summary: 'Get resource usage for a project',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],
@@ -107,7 +105,7 @@ class UsageController extends Controller
         $user = $this->projectOr404($username);
 
         $owned = $this->usage->ownedDomain($user, $domain);
-        if (!$owned) {
+        if (! $owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));
@@ -123,7 +121,7 @@ class UsageController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/domains/{domain}/visitors',
-        description: 'Unique visitors, total hits, visits by day, and session length. start/end clip DAY-backed fields (total hits, visits.records, visits.total). unique, visits_length, and all visitor breakdowns are the overlapping calendar months, not unique-in-range. Missing AWStats data is zeros, not an error. Period aliases such as last-week stay in the client.',
+        description: 'Unique visitors, total hits, visits by day, and session length. start/end clip DAY-backed fields (total hits, visits.records, visits.total) and bound session_length, the estimated average session length per day in seconds. unique, visits_length (a SESSION histogram), and all visitor breakdowns are the overlapping calendar months, not unique-in-range. Missing AWStats data is zeros, not an error. Period aliases such as last-week stay in the client.',
         summary: 'Get visitor overview for a domain',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],
@@ -144,7 +142,7 @@ class UsageController extends Controller
         $user = $this->projectOr404($username);
 
         $owned = $this->usage->ownedDomain($user, $domain);
-        if (!$owned) {
+        if (! $owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));
@@ -190,7 +188,7 @@ class UsageController extends Controller
         $user = $this->projectOr404($username);
 
         $owned = $this->usage->ownedDomain($user, $domain);
-        if (!$owned) {
+        if (! $owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));

@@ -42,7 +42,7 @@ abstract class RuntimeBaseImage
      * or a package set that is empty or over {@see MAX_PACKAGES} — so the
      * caller keeps the stock path.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public static function tag(string $image, array $packages): ?string
     {
@@ -53,7 +53,7 @@ abstract class RuntimeBaseImage
         if ($repository === null || $upstream === null || static::stubName() === null) {
             return null;
         }
-        if (preg_match('#^' . preg_quote($upstream, '#') . ':([a-z0-9._-]+)$#i', trim($image), $matches) !== 1) {
+        if (preg_match('#^'.preg_quote($upstream, '#').':([a-z0-9._-]+)$#i', trim($image), $matches) !== 1) {
             return null;
         }
         $packages = static::normalizePackages($packages);
@@ -61,14 +61,14 @@ abstract class RuntimeBaseImage
             return null;
         }
 
-        return $repository . ':' . $matches[1] . '-pa' . static::fingerprint($packages);
+        return $repository.':'.$matches[1].'-pa'.static::fingerprint($packages);
     }
 
     /**
      * Sorted and de-duplicated, so the same set resolves to the same tag
      * whatever order the project's manifest mentioned its packages in.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      * @return list<string>
      */
     public static function normalizePackages(array $packages): array
@@ -88,7 +88,7 @@ abstract class RuntimeBaseImage
     }
 
     /**
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public static function fingerprint(array $packages): string
     {
@@ -107,7 +107,7 @@ abstract class RuntimeBaseImage
     }
 
     /**
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      */
     public static function dockerfile(string $image, array $packages): ?string
     {
@@ -117,7 +117,7 @@ abstract class RuntimeBaseImage
         }
 
         return Template::named($stub)->render([
-            static::RUNTIME . '_image' => $image,
+            static::RUNTIME.'_image' => $image,
             'packages' => implode(' ', static::normalizePackages($packages)),
         ]);
     }

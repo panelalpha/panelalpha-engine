@@ -2,33 +2,33 @@
 
 namespace App\System\Project;
 
-use App\Models\Domain as DomainModel;
-use App\Models\User as ModelsUser;
-use App\System;
-use App\System\Project as ProjectAggregate;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\EngineFactory;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Project\ApiAccess;
+use App\Models\Domain as DomainModel;
+use App\Models\User as ModelsUser;
+use App\System;
+use App\System\Project;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\Deployment\DeployableDindProject;
+use App\System\Project\Deployment\DeploymentWorkflow;
+use App\System\Project\Dind\AbstractApplication as DindApplication;
 use App\System\Project\Dind\AccountMemory;
 use App\System\Project\Dind\AccountTeardown;
 use App\System\Project\Dind\AccountTemplate;
 use App\System\Project\Dind\AppCertificate;
 use App\System\Project\Dind\AppCredentialDelivery;
-use App\System\Project\Dind\AppManager;
-use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\AppManager;
 use App\System\Project\Dind\AppPortAlignment;
-use App\System\Project\Dind\AbstractApplication as DindApplication;
-use App\System\Project\Deployment\DeployableDindProject;
-use App\System\Project\Deployment\DeploymentWorkflow;
-use App\Lib\Deploy\Platform\AppConfig\AppConfig;
-use App\Lib\Project\ApiAccess;
 use App\System\Project\Dind\ComposeWriter;
+use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\HostDiskGuard;
-use App\System\Project\Dind\SystemAppConfigSource;
-use App\System\Project\Dind\TenantEgressGuard;
+use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\OuterLifecycle;
@@ -37,12 +37,15 @@ use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\RegistryLogin;
-use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Services\S6ServiceManager;
 use App\System\Project\Dind\Services\ServiceManager;
 use App\System\Project\Dind\Services\SupervisordServiceManager;
+use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Source\Files as SourceFiles;
 use App\System\Project\Dind\Source\GitRepository;
+use App\System\Project\Dind\SystemAppConfigSource;
+use App\System\Project\Dind\TenantEgressGuard;
+use App\System\Project\Dind\WordPressCli;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -54,33 +57,56 @@ class Dind implements DeployableDindProject, Runtime
     private const DAEMON_PROBE_TIMEOUT_SECONDS = 20;
 
     private ?AccountTemplate $accountTemplate = null;
+
     private ?OuterLifecycle $outerLifecycle = null;
+
     private ?Paths $paths = null;
+
     private ?DindApplication $application = null;
+
     private ?DeploymentWorkflow $deployment = null;
+
     private ?ContainerEngine $engine = null;
+
     private ?EngineAccount $engineAccount = null;
+
     private ?ShellOperations $shell = null;
+
     private ?ProjectFiles $projectTree = null;
+
     private ?HostCompile $hostCompile = null;
+
     private ?InnerDocker $innerDocker = null;
+
     private ?Networking $networking = null;
+
     private ?ComposeWriter $composeWriter = null;
+
     private ?DeployStrategy $deployStrategy = null;
+
     private ?AppHealth $appHealth = null;
+
     private ?AppManager $apps = null;
+
     private ?ContainerOperations $containerOperations = null;
+
     private ?AccountTeardown $accountTeardown = null;
+
     private ?AppCertificate $appCertificate = null;
+
     private ?PrepareFromSource $prepareFromSource = null;
+
     private ?ProjectEnvironment $projectEnvironment = null;
+
     private ?AppCredentialDelivery $appCredentials = null;
+
     private ?RegistryLogin $registryLogin = null;
+
+    private ?InnerBuildGuard $innerBuildGuard = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
-    ) {
-    }
+    ) {}
 
     public function kind(): string
     {
@@ -114,7 +140,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function composeFilePath(): string
     {
-        return $this->project->projectDirPath() . '/docker-compose.yml';
+        return $this->project->projectDirPath().'/docker-compose.yml';
     }
 
     public function exists(): bool
@@ -139,7 +165,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function app(): ?DindApplication
     {
-        if (!$this->hasApplication()) {
+        if (! $this->hasApplication()) {
             return null;
         }
 
@@ -193,7 +219,7 @@ class Dind implements DeployableDindProject, Runtime
 
     /**
      * Read paths under ~/project via the host System API.
-     * Home-scoped file operations live on the Project aggregate ({@see \App\System\Project::fileManager()}).
+     * Home-scoped file operations live on the Project aggregate ({@see Project::fileManager()}).
      */
     public function projectTree(): ProjectFiles
     {
@@ -218,6 +244,11 @@ class Dind implements DeployableDindProject, Runtime
     public function apps(): AppManager
     {
         return $this->apps ??= new AppManager($this);
+    }
+
+    public function wordPressCli(): WordPressCli
+    {
+        return new WordPressCli($this);
     }
 
     /**
@@ -263,8 +294,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * @param callable(string, ?string): void $onLine
-     * @param ?callable(): void $onIdle
+     * @param  callable(string, ?string): void  $onLine
+     * @param  ?callable(): void  $onIdle
      */
     public function followServiceLogs(string $service, int $lines, ?string $since, callable $onLine, ?callable $onIdle = null): void
     {
@@ -333,6 +364,12 @@ class Dind implements DeployableDindProject, Runtime
         return $this->registryLogin ??= new RegistryLogin($this);
     }
 
+    /** Image builds in the account's own daemon, held to the build memory while the engine builds. */
+    public function innerBuildGuard(): InnerBuildGuard
+    {
+        return $this->innerBuildGuard ??= new InnerBuildGuard($this);
+    }
+
     /** The login a manifest's `credentials:` declares, written into the account. */
     public function appCredentials(): AppCredentialDelivery
     {
@@ -390,7 +427,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * @param list<string> $rest
+     * @param  list<string>  $rest
      * @return list<string>
      */
     public function userAppComposeCommand(array $rest): array
@@ -412,7 +449,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * @param array<string, mixed> $snapshot
+     * @param  array<string, mixed>  $snapshot
      */
     public function freezeDeploySnapshot(array $snapshot): void
     {
@@ -448,16 +485,26 @@ class Dind implements DeployableDindProject, Runtime
         ));
         foreach ($appConfig->files() as $snippet) {
             $fullPath = "{$projectDir}/{$snippet['path']}";
+            $this->system()->filesystem()->assertNoSymlinkAbove($fullPath, $projectDir);
             $this->shell()->execAsUser(['mkdir', '-p', dirname($fullPath)]);
-            $this->system()->filesystem()->filePutContents($fullPath, $snippet['contents'], $chown, '644');
+            $this->system()->filesystem()->writeFileReplacingPath($fullPath, $snippet['contents'], $chown, self::snippetMode($snippet['path']));
         }
+    }
+
+    /**
+     * A root `.env` is owner-only like every root `.env` the engine writes: the account's
+     * Compose reads it, and ~/project is traversable by every uid on the host.
+     */
+    private static function snippetMode(string $relativePath): string
+    {
+        return preg_replace('#^(?:\./)+#', '', $relativePath) === '.env' ? '600' : '644';
     }
 
     /**
      * Logs each tracked file an app config overwrites (the ADR-0001 exception, D4),
      * so a client can tell why `git status` shows a change.
      *
-     * @param list<string> $relativePaths checkout-relative
+     * @param  list<string>  $relativePaths  checkout-relative
      */
     public function noteAppConfigOverwritesTracked(array $relativePaths): void
     {
@@ -474,13 +521,13 @@ class Dind implements DeployableDindProject, Runtime
     /**
      * Which of the paths the checkout tracks; none when there is no repository or git fails.
      *
-     * @param list<string> $relativePaths
+     * @param  list<string>  $relativePaths
      * @return list<string>
      */
     private function trackedAmong(array $relativePaths): array
     {
         $git = new GitRepository($this);
-        if (!$git->hasRepository()) {
+        if (! $git->hasRepository()) {
             return [];
         }
 
@@ -580,7 +627,7 @@ class Dind implements DeployableDindProject, Runtime
     /** False without an outer compose file: nothing to ask about until recreateOuterCompose() writes it back. */
     public function isRunning(): bool
     {
-        if (!$this->exists()) {
+        if (! $this->exists()) {
             return false;
         }
 
@@ -598,7 +645,7 @@ class Dind implements DeployableDindProject, Runtime
     public function buildIfMissing(): void
     {
         $image = $this->outerImage();
-        if (!$image) {
+        if (! $image) {
             $this->build();
 
             return;
@@ -608,8 +655,8 @@ class Dind implements DeployableDindProject, Runtime
         $pathEscaped = escapeshellarg($this->composeFilePath());
         $this->system()->exec(
             "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
-                . " || sudo docker compose -f {$pathEscaped} pull"
-                . " || sudo docker compose -f {$pathEscaped} build"
+                ." || sudo docker compose -f {$pathEscaped} pull"
+                ." || sudo docker compose -f {$pathEscaped} build"
         );
     }
 
@@ -629,21 +676,13 @@ class Dind implements DeployableDindProject, Runtime
         return is_string($image) ? $image : null;
     }
 
-    public function createDomainConfig(DomainModel $domain): void
-    {
-    }
+    public function createDomainConfig(DomainModel $domain): void {}
 
-    public function reloadWebserver(): void
-    {
-    }
+    public function reloadWebserver(): void {}
 
-    public function rebuildDomain(DomainModel $domain): void
-    {
-    }
+    public function rebuildDomain(DomainModel $domain): void {}
 
-    public function deleteDomainConfig(string $domainName): void
-    {
-    }
+    public function deleteDomainConfig(string $domainName): void {}
 
     public function tearDown(): void
     {
@@ -658,7 +697,7 @@ class Dind implements DeployableDindProject, Runtime
     public function setupEntrypointInitScripts(): void
     {
         $scriptFiles = $this->accountTemplate()->entrypointInitScripts(ApiAccess::allows($this->userModel()));
-        $dir = $this->projectDirPath() . '/entrypoint.d';
+        $dir = $this->projectDirPath().'/entrypoint.d';
         $fs = $this->system()->filesystem();
         $this->system()->runProcess("sudo mkdir -p {$dir}");
         foreach ($scriptFiles as $name => $script) {
@@ -676,29 +715,29 @@ class Dind implements DeployableDindProject, Runtime
      */
     public function rewriteEgressGuard(): void
     {
-        if (!TenantEgressGuard::enabled()) {
+        if (! TenantEgressGuard::enabled()) {
             return;
         }
-        $dir = $this->projectDirPath() . '/entrypoint.d';
-        if (!$this->system()->filesystem()->isDir($dir)) {
+        $dir = $this->projectDirPath().'/entrypoint.d';
+        if (! $this->system()->filesystem()->isDir($dir)) {
             return;
         }
 
         $script = $this->accountTemplate()->entrypointInitScripts(ApiAccess::allows($this->userModel()))[TenantEgressGuard::FILE] ?? null;
         if ($script !== null) {
-            $this->system()->filesystem()->writeFileReplacingPath("{$dir}/" . TenantEgressGuard::FILE, $script);
+            $this->system()->filesystem()->writeFileReplacingPath("{$dir}/".TenantEgressGuard::FILE, $script);
         }
     }
 
     /**
      * A plain unlink, which never opens whatever a tenant left at the name.
      *
-     * @param array<string, string> $scriptFiles
+     * @param  array<string, string>  $scriptFiles
      */
     private function unlinkUnusedInitScripts(string $dir, array $scriptFiles): void
     {
         foreach (['useradd.sh', TenantEgressGuard::FILE] as $name) {
-            if (!isset($scriptFiles[$name])) {
+            if (! isset($scriptFiles[$name])) {
                 $this->system()->runProcess("sudo rm -f {$dir}/{$name}");
             }
         }
@@ -706,7 +745,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function daemonJsonPath(): string
     {
-        return $this->projectDirPath() . '/daemon.json';
+        return $this->projectDirPath().'/daemon.json';
     }
 
     public function daemonJsonContents(): string

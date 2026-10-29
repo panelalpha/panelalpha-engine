@@ -2,13 +2,15 @@
 
 namespace App\Lib\Deploy\Dind;
 
+use App\System\Project\Dind\RegistryLogin;
+
 /**
  * A project's logins to private image registries: the `registry-auth`
  * setting, one `host username token` line per registry.
  *
  * Pure: parsing, which registry an image reference addresses, and the Docker
  * client config that carries the logins. Writing that config into the account
- * for the length of a deploy is {@see \App\System\Project\Dind\RegistryLogin}.
+ * for the length of a deploy is {@see RegistryLogin}.
  */
 final class RegistryAuth
 {
@@ -20,9 +22,7 @@ final class RegistryAuth
     private const DOCKER_HUB_ALIASES = ['docker.io', 'index.docker.io', 'registry-1.docker.io', 'registry.hub.docker.com'];
 
     /** @param list<array{host: string, username: string, token: string}> $entries */
-    private function __construct(private readonly array $entries)
-    {
-    }
+    private function __construct(private readonly array $entries) {}
 
     /**
      * @throws \InvalidArgumentException naming the line that is wrong
@@ -100,7 +100,7 @@ final class RegistryAuth
             return self::DOCKER_HUB;
         }
         $first = substr($image, 0, $slash);
-        if (!str_contains($first, '.') && !str_contains($first, ':') && $first !== 'localhost') {
+        if (! str_contains($first, '.') && ! str_contains($first, ':') && $first !== 'localhost') {
             return self::DOCKER_HUB;
         }
 
@@ -118,7 +118,7 @@ final class RegistryAuth
         $secrets = [];
         foreach ($this->entries as $entry) {
             $secrets[] = $entry['token'];
-            $secrets[] = base64_encode($entry['username'] . ':' . $entry['token']);
+            $secrets[] = base64_encode($entry['username'].':'.$entry['token']);
         }
 
         return $secrets;
@@ -130,10 +130,10 @@ final class RegistryAuth
         $auths = [];
         foreach ($this->entries as $entry) {
             $key = $entry['host'] === self::DOCKER_HUB ? self::DOCKER_HUB_KEY : $entry['host'];
-            $auths[$key] = ['auth' => base64_encode($entry['username'] . ':' . $entry['token'])];
+            $auths[$key] = ['auth' => base64_encode($entry['username'].':'.$entry['token'])];
         }
 
-        return (string) json_encode(['auths' => $auths], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
+        return (string) json_encode(['auths' => $auths], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)."\n";
     }
 
     /** `ghcr.io`, `https://GHCR.io/` and `registry.example.com:5000` alike; null for anything else. */

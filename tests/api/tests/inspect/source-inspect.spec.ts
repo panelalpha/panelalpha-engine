@@ -9,6 +9,7 @@ import { skipUnless } from '@/helpers/test-helpers';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 
 test.describe('source inspect', () => {
   test('inspecting without a token is refused', async ({ anonymousRequest }) => {
@@ -30,10 +31,10 @@ test.describe('source inspect', () => {
 
   test('a source on an internal address is refused', async ({ api }) => {
     for (const source of [
-      'http://127.0.0.1/x.git',
-      'http://169.254.169.254/x.git',
+      `http://${testNetwork.LOOPBACK}/x.git`,
+      `http://${testNetwork.METADATA}/x.git`,
       'http://[::1]/x.git',
-      'http://10.0.0.5/x.git',
+      `http://${testNetwork.PRIVATE_10}/x.git`,
     ]) {
       const response = await api.inspectSourceRaw({ source, type: 'git' });
       await expectStatus(response, 422);

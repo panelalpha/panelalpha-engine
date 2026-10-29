@@ -10,6 +10,7 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Market Radar answers 200 on a page that says nothing about whether it works.
@@ -180,18 +181,18 @@ class MarketRadarSourceRecipeTest extends TestCase
     public function test_a_shell_at_the_root_is_healthy_and_a_dead_database_is_not(): void
     {
         $healthy = $this->report([
-            '/' => new ProbedResponse(200, self::SHELL, 'http://127.0.0.1:4000/'),
-            '/api/health' => new ProbedResponse(200, '{"status":"ok","database":"connected"}', 'http://127.0.0.1:4000/api/health'),
+            '/' => new ProbedResponse(200, self::SHELL, 'http://' . TestNetwork::LOOPBACK . ':4000/'),
+            '/api/health' => new ProbedResponse(200, '{"status":"ok","database":"connected"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
         ]);
 
         $this->assertSame(CheckRunner::SERVING_OK, $healthy['serving']);
         $this->assertSame('pass', $this->check($healthy, 'api-health')['status']);
 
         $broken = $this->report([
-            '/' => new ProbedResponse(200, self::SHELL, 'http://127.0.0.1:4000/'),
+            '/' => new ProbedResponse(200, self::SHELL, 'http://' . TestNetwork::LOOPBACK . ':4000/'),
             // What the backend answers when `SELECT 1` fails: a 500, and the
             // reason in the body.
-            '/api/health' => new ProbedResponse(500, '{"status":"error","database":"unreachable"}', 'http://127.0.0.1:4000/api/health'),
+            '/api/health' => new ProbedResponse(500, '{"status":"error","database":"unreachable"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
         ]);
 
         $failed = $this->check($broken, 'api-health');
@@ -210,8 +211,8 @@ class MarketRadarSourceRecipeTest extends TestCase
     public function test_a_200_reporting_an_unreachable_database_still_fails(): void
     {
         $report = $this->report([
-            '/' => new ProbedResponse(200, self::SHELL, 'http://127.0.0.1:4000/'),
-            '/api/health' => new ProbedResponse(200, '{"status":"error","database":"unreachable"}', 'http://127.0.0.1:4000/api/health'),
+            '/' => new ProbedResponse(200, self::SHELL, 'http://' . TestNetwork::LOOPBACK . ':4000/'),
+            '/api/health' => new ProbedResponse(200, '{"status":"error","database":"unreachable"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
         ]);
 
         $this->assertSame('fail', $this->check($report, 'api-health')['status']);

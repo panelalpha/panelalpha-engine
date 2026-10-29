@@ -21,7 +21,7 @@ final class ProxyRuleUpstream
         }
 
         return "The upstream must be the project's own app, '{$username}': "
-            . "a project's rule cannot reach another project, the engine's services or the host.";
+            ."a project's rule cannot reach another project, the engine's services or the host.";
     }
 
     /** A rule stored before upstreams were checked is never served. */

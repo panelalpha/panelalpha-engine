@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Support\Carbon;
 
 /**
- * @property int    $id
+ * @property int $id
  * @property string $token
  * @property string $username
  * @property string $cookie_name
@@ -35,7 +35,7 @@ class AppSsoToken extends Model
 
     protected $casts = [
         'expires_at' => 'datetime',
-        'used_at'    => 'datetime',
+        'used_at' => 'datetime',
     ];
 
     /**

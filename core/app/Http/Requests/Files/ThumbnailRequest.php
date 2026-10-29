@@ -35,9 +35,9 @@ class ThumbnailRequest extends FormRequest
     {
         return [
             'path' => 'required|string',
-            'width' => 'sometimes|integer|min:' . self::MIN_SIZE . '|max:' . self::MAX_SIZE,
-            'height' => 'sometimes|integer|min:' . self::MIN_SIZE . '|max:' . self::MAX_SIZE,
-            'fit' => 'sometimes|in:' . implode(',', self::FITS),
+            'width' => 'sometimes|integer|min:'.self::MIN_SIZE.'|max:'.self::MAX_SIZE,
+            'height' => 'sometimes|integer|min:'.self::MIN_SIZE.'|max:'.self::MAX_SIZE,
+            'fit' => 'sometimes|in:'.implode(',', self::FITS),
         ];
     }
 }

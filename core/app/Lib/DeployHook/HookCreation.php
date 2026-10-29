@@ -17,6 +17,5 @@ final class HookCreation
         public readonly DeployHook $hook,
         public readonly ?string $secret,
         public readonly bool $created,
-    ) {
-    }
+    ) {}
 }

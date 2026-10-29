@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Which global secrets are stored
 
-    Lists the global entries that have a secret pasted, as `globals` (ref, type, purpose). Any project may use one by passing its `vault:<id>`; nothing uses one unasked.
+    Lists the global entries that have a secret pasted, as `globals` (ref, type, purpose). Any project may use one by passing its `vault:<key>`; nothing uses one unasked.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

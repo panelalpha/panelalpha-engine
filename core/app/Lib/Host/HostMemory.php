@@ -13,14 +13,13 @@ final class HostMemory
     public const ENGINE_DEFAULT_MB = 512;
 
     /**
-     * @param int $totalMb MemTotal
-     * @param int $engineMb DEPLOY_ENGINE_MEMORY: kept back for the engine
+     * @param  int  $totalMb  MemTotal
+     * @param  int  $engineMb  DEPLOY_ENGINE_MEMORY: kept back for the engine
      */
     public function __construct(
         public readonly int $totalMb,
         public readonly int $engineMb = self::ENGINE_DEFAULT_MB,
-    ) {
-    }
+    ) {}
 
     /** The largest `memory_limit` one project may have. */
     public function maxProjectMb(): int

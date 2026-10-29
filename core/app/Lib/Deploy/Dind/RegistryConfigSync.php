@@ -2,12 +2,14 @@
 
 namespace App\Lib\Deploy\Dind;
 
+use App\System\Project\Dind\Inner\ImageSeeding;
+
 /**
  * Deciding what a registry-settings refresh does to a *running* account,
  * from what the host already asked it for a stream, not into one.
  *
  * Laravel-free and read-only: parses `docker inspect`/`docker top` output,
- * decides nothing about the account itself. {@see \App\System\Project\Dind\Inner\ImageSeeding::ensureRegistryConfig()}
+ * decides nothing about the account itself. {@see ImageSeeding::ensureRegistryConfig()}
  * is the only caller, and is what runs the commands and the host signal.
  */
 final class RegistryConfigSync
@@ -28,7 +30,7 @@ final class RegistryConfigSync
     public static function hasDaemonJsonMount(string $inspectedMountsJson): bool
     {
         $mounts = json_decode(trim($inspectedMountsJson), true);
-        if (!is_array($mounts)) {
+        if (! is_array($mounts)) {
             return false;
         }
         foreach ($mounts as $mount) {

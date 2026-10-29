@@ -5,6 +5,7 @@ namespace App\Lib\Task;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Task;
 use App\Models\TaskLog;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -42,7 +43,7 @@ final class DeployLogTail
                 'ts' => time(),
                 'stage' => null,
                 'level' => DeployLogger::LEVEL_INFO,
-                'msg' => 'Last ' . count($lines) . ' lines of the deploy log (the rollback deletes it):',
+                'msg' => 'Last '.count($lines).' lines of the deploy log (the rollback deletes it):',
             ], $now)];
             foreach ($lines as $line) {
                 $rows[] = self::row($task, $line, $now);
@@ -60,7 +61,7 @@ final class DeployLogTail
     }
 
     /**
-     * @param array<string, mixed> $decoded
+     * @param  array<string, mixed>  $decoded
      */
     public static function isKept(array $decoded): bool
     {
@@ -75,14 +76,14 @@ final class DeployLogTail
             return preg_replace($pattern, self::WHERE, $message) ?? $message;
         }
 
-        return rtrim($message) . ' ' . self::WHERE;
+        return rtrim($message).' '.self::WHERE;
     }
 
     /**
-     * @param array<string, mixed> $line
-     * @return array{task_id: int, log: string, created_at: \Illuminate\Support\Carbon}
+     * @param  array<string, mixed>  $line
+     * @return array{task_id: int, log: string, created_at: Carbon}
      */
-    private static function row(Task $task, array $line, \Illuminate\Support\Carbon $now): array
+    private static function row(Task $task, array $line, Carbon $now): array
     {
         return [
             'task_id' => $task->id,

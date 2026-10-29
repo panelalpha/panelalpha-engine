@@ -6,6 +6,7 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Unit tests for SidecarCredentials.
@@ -277,7 +278,7 @@ class SidecarCredentialsTest extends TestCase
 
     public function test_env_from_workstation_app_service_reads_the_list_form(): void
     {
-        $service = ['environment' => ['CONFIGURATION_FROM=env:CFG', 'HOST=0.0.0.0', 'PASSTHROUGH', 'CFG_A=${A:-x}']];
+        $service = ['environment' => ['CONFIGURATION_FROM=env:CFG', 'HOST=' . TestNetwork::ANY, 'PASSTHROUGH', 'CFG_A=${A:-x}']];
 
         $this->assertSame(
             ['CONFIGURATION_FROM' => 'env:CFG', 'CFG_A' => 'x'],

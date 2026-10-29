@@ -52,19 +52,19 @@ final class DeployTimings
      * A stage still running has no `finished_at` and is reported with a null
      * duration rather than timed against `now`.
      *
-     * @param array<string, mixed> $latest decoded latest.json
+     * @param  array<string, mixed>  $latest  decoded latest.json
      * @return list<array{name: string, started_at: ?int, finished_at: ?int, seconds: ?int}>
      */
     public static function stages(array $latest): array
     {
         $stages = $latest['stages'] ?? null;
-        if (!is_array($stages)) {
+        if (! is_array($stages)) {
             return [];
         }
 
         $out = [];
         foreach ($stages as $stage) {
-            if (!is_array($stage) || !isset($stage['name']) || !is_string($stage['name'])) {
+            if (! is_array($stage) || ! isset($stage['name']) || ! is_string($stage['name'])) {
                 continue;
             }
             $started = isset($stage['started_at']) ? (int) $stage['started_at'] : null;
@@ -90,7 +90,7 @@ final class DeployTimings
      * `Image project-app Building`, against about a second each for the network
      * and the container.
      *
-     * @param list<array{ts: int, msg: string}> $entries
+     * @param  list<array{ts: int, msg: string}>  $entries
      * @return list<array{object: string, action: string, seconds: int}>
      */
     public static function composeSteps(array $entries): array
@@ -111,7 +111,8 @@ final class DeployTimings
             $object = "{$kind} {$name}";
 
             if (isset(self::COMPOSE_ACTIONS[$verb])) {
-                $started[$object . '|' . $verb] = $ts;
+                $started[$object.'|'.$verb] = $ts;
+
                 continue;
             }
 
@@ -119,7 +120,7 @@ final class DeployTimings
                 if ($verb !== $end) {
                     continue;
                 }
-                $key = $object . '|' . $begin;
+                $key = $object.'|'.$begin;
                 if (isset($started[$key])) {
                     $out[] = [
                         'object' => $object,
@@ -144,7 +145,7 @@ final class DeployTimings
      * charged the time until the next one. {@see phases()} groups this into six
      * buckets; {@see buildSteps()} covers the inside of the build.
      *
-     * @param list<array{ts: int, level?: string, msg: string}> $entries
+     * @param  list<array{ts: int, level?: string, msg: string}>  $entries
      * @return list<array{at: int, seconds: ?int, level: string, step: string}>
      */
     public static function timeline(array $entries): array
@@ -187,8 +188,8 @@ final class DeployTimings
      * they are fixed by different people. `start_to_answer` is that window with
      * the build subtracted: container start, entrypoint, migrations, reachability.
      *
-     * @param list<array{ts: int, msg: string}> $entries
-     * @param list<array{step: string, command: string, seconds: float, cached: bool}> $steps
+     * @param  list<array{ts: int, msg: string}>  $entries
+     * @param  list<array{step: string, command: string, seconds: float, cached: bool}>  $steps
      * @return list<array{name: string, seconds: float}>
      */
     public static function phases(array $entries, array $steps = []): array
@@ -209,8 +210,7 @@ final class DeployTimings
             }
         }
 
-        $span = static fn (?int $from, ?int $to): ?float =>
-            $from === null || $to === null ? null : (float) max(0, $to - $from);
+        $span = static fn (?int $from, ?int $to): ?float => $from === null || $to === null ? null : (float) max(0, $to - $from);
 
         $buildSeconds = 0.0;
         foreach ($steps as $step) {
@@ -250,7 +250,7 @@ final class DeployTimings
      * `#N CACHED` that follow it. BuildKit's own `[internal]` steps are dropped:
      * they are not layers anyone can make faster.
      *
-     * @param list<string> $lines log message lines, in order
+     * @param  list<string>  $lines  log message lines, in order
      * @return list<array{step: string, command: string, seconds: float, cached: bool}>
      */
     public static function buildSteps(array $lines): array
@@ -284,7 +284,7 @@ final class DeployTimings
         $steps = [];
         foreach ($commands as $n => $command) {
             $steps[] = [
-                'step' => '#' . $n,
+                'step' => '#'.$n,
                 'command' => $command,
                 // A CACHED step scores zero: it cost no build time.
                 'seconds' => round($cached[$n] ?? false ? 0.0 : ($seconds[$n] ?? 0.0), 2),
@@ -304,8 +304,8 @@ final class DeployTimings
      * on a repeat of the same commit. A repeat that reports 0.0 means the cache
      * was destroyed between runs.
      *
-     * @param array<string, mixed> $latest decoded latest.json
-     * @param list<array{ts: int, msg: string}> $entries log entries, in order
+     * @param  array<string, mixed>  $latest  decoded latest.json
+     * @param  list<array{ts: int, msg: string}>  $entries  log entries, in order
      * @return array<string, mixed>
      */
     public static function summarize(array $latest, array $entries = []): array

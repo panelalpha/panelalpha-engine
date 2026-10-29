@@ -3,10 +3,10 @@
 namespace App\Lib\Deploy\CacheManager;
 
 use App\Lib\Deploy\Platform\Runtime\Images;
-use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpApacheConfig;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpIniDefaults;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpProxyHeaders;
+use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Template\Template;
 use App\Lib\Deploy\Template\TemplateLoader;
 
@@ -157,8 +157,8 @@ class PhpBaseImage
      * $packages — allowlisted {@see SYSTEM_PACKAGES} — go into the same
      * suffix, so ffmpeg is a variant too and the plain base stays unchanged.
      *
-     * @param list<string> $extras
-     * @param list<string> $packages
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
      */
     public static function tag(string $phpImage, array $extras = [], array $packages = []): ?string
     {
@@ -174,17 +174,17 @@ class PhpBaseImage
             return null;
         }
 
-        if (preg_match('#^' . preg_quote($upstream, '#') . ':([a-z0-9._-]+)$#i', trim($phpImage), $matches) !== 1) {
+        if (preg_match('#^'.preg_quote($upstream, '#').':([a-z0-9._-]+)$#i', trim($phpImage), $matches) !== 1) {
             return null;
         }
 
-        $tag = $repository . ':' . $matches[1] . '-pa' . $fingerprint;
+        $tag = $repository.':'.$matches[1].'-pa'.$fingerprint;
         $extras = self::normalizeExtras($extras);
         $packages = self::normalizeSystemPackages($packages);
 
         return $extras === [] && $packages === []
             ? $tag
-            : $tag . '-x' . self::variantFingerprint($extras, $packages);
+            : $tag.'-x'.self::variantFingerprint($extras, $packages);
     }
 
     /**
@@ -205,7 +205,7 @@ class PhpBaseImage
      * Sorted and de-duplicated, so the same set resolves to the same tag
      * whatever order a project's requires were read in.
      *
-     * @param list<string> $extras
+     * @param  list<string>  $extras
      * @return list<string>
      */
     public static function normalizeExtras(array $extras): array
@@ -223,7 +223,7 @@ class PhpBaseImage
     }
 
     /**
-     * @param list<string> $extras
+     * @param  list<string>  $extras
      */
     public static function extrasFingerprint(array $extras): string
     {
@@ -234,8 +234,8 @@ class PhpBaseImage
      * The extras-only hash is kept as it was, so every `-x` image a host
      * already holds keeps its name; packages hash in only when there are any.
      *
-     * @param list<string> $extras
-     * @param list<string> $packages
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
      */
     public static function variantFingerprint(array $extras, array $packages = []): string
     {
@@ -244,14 +244,14 @@ class PhpBaseImage
             return self::extrasFingerprint($extras);
         }
 
-        return substr(sha1(implode(' ', self::normalizeExtras($extras)) . ' +apt ' . implode(' ', $packages)), 0, 8);
+        return substr(sha1(implode(' ', self::normalizeExtras($extras)).' +apt '.implode(' ', $packages)), 0, 8);
     }
 
     /**
      * Allowlisted, sorted and de-duplicated. Anything else is dropped here as a
      * last line: the manifest refuses it at load with a message.
      *
-     * @param list<string> $packages
+     * @param  list<string>  $packages
      * @return list<string>
      */
     public static function normalizeSystemPackages(array $packages): array
@@ -272,7 +272,7 @@ class PhpBaseImage
      * The subset of $extras worth baking into a host image, or an empty list
      * when this app should just compile them itself.
      *
-     * @param list<string> $extras
+     * @param  list<string>  $extras
      * @return list<string>
      */
     public static function bakeableExtras(array $extras): array
@@ -299,8 +299,8 @@ class PhpBaseImage
      * already compiled into the variant base the app will build FROM, so they
      * drop out here instead of being installed twice.
      *
-     * @param list<string> $required
-     * @param list<string> $baked
+     * @param  list<string>  $required
+     * @param  list<string>  $baked
      * @return list<string>
      */
     public static function missingExtensions(array $required, array $baked = []): array
@@ -308,7 +308,7 @@ class PhpBaseImage
         $alreadyPresent = array_merge(self::EXTENSIONS, self::normalizeExtras($baked));
         $missing = [];
         foreach ($required as $name) {
-            if (is_string($name) && $name !== '' && !in_array(strtolower($name), $alreadyPresent, true)) {
+            if (is_string($name) && $name !== '' && ! in_array(strtolower($name), $alreadyPresent, true)) {
                 $missing[] = $name;
             }
         }
@@ -320,8 +320,8 @@ class PhpBaseImage
      * Extras get their own layer, so two apps needing different ones share
      * every layer up to the baked set.
      *
-     * @param list<string> $extras
-     * @param list<string> $packages
+     * @param  list<string>  $extras
+     * @param  list<string>  $packages
      */
     public static function dockerfile(string $phpImage, array $extras = [], array $packages = []): ?string
     {

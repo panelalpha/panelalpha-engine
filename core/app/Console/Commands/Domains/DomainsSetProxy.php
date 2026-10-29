@@ -2,19 +2,21 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
-use App\System;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\System;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
 
 class DomainsSetProxy extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     protected $aliases = ['domains:set-proxy', 'projects:domains:set-proxy'];
@@ -39,10 +41,12 @@ class DomainsSetProxy extends Command
 
         if ($domainName === '') {
             $this->error('--domain is required.');
+
             return 1;
         }
         if ($proxyTo === '') {
             $this->error('--proxy-to is required (port or host:port).');
+
             return 1;
         }
 
@@ -63,11 +67,16 @@ class DomainsSetProxy extends Command
             return 1;
         }
 
+        if ($this->refusedWithoutConfirmation()) {
+            return 1;
+        }
+
         $hasTunnels = $domain->hasTunnels();
         $this->showPlan($domain, $listenPorts, $upstreamHost, $upstreamPort, $hasTunnels);
 
-        if (!$this->option('force') && !$this->confirm('Apply these changes?')) {
+        if (! $this->option('force') && ! $this->confirm('Apply these changes?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
@@ -75,7 +84,7 @@ class DomainsSetProxy extends Command
         $tunnelError = $hasTunnels ? $this->syncTunnels($domain) : null;
 
         $domain->projectDomain()->rebuild();
-        (new System())->webserver()->scheduleWebserverReloadInBackground();
+        (new System)->webserver()->scheduleWebserverReloadInBackground();
 
         return $this->reportApplied($tunnelError, $hasTunnels);
     }
@@ -84,20 +93,23 @@ class DomainsSetProxy extends Command
     private function ownedDomain(string $domainName, string $projectOpt): ?Domain
     {
         $domain = Domain::findByNameOrAlias($domainName);
-        if (!$domain) {
+        if (! $domain) {
             $this->error("Domain '{$domainName}' not found.");
+
             return null;
         }
         $domain->loadMissing('user');
         $user = $domain->user;
-        if (!$user) {
+        if (! $user) {
             $this->error('Domain has no project/user.');
+
             return null;
         }
         if ($projectOpt !== '' && strtolower($projectOpt) !== strtolower($user->username)) {
             $this->error(
                 "Domain '{$domain->domain}' belongs to project '{$user->username}', not '{$projectOpt}'."
             );
+
             return null;
         }
 
@@ -116,12 +128,14 @@ class DomainsSetProxy extends Command
             [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $username);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+
             return null;
         }
 
         $refusal = ProxyRuleUpstream::refusal('user', $username, $upstreamHost);
         if ($refusal !== null) {
             $this->error($refusal);
+
             return null;
         }
 
@@ -154,7 +168,7 @@ class DomainsSetProxy extends Command
 
         $current = $existing
             ? "{$existing->upstream_host}:{$existing->upstream_port}"
-                . ($existing->enabled ? '' : ' (disabled)')
+                .($existing->enabled ? '' : ' (disabled)')
             : '-';
 
         return [(string) $listenPort, $current, $new, $existing ? 'update' : 'create'];
@@ -206,7 +220,7 @@ class DomainsSetProxy extends Command
         } catch (CloudflareException $e) {
             return $e->getMessage();
         } catch (\Throwable $e) {
-            return 'Tunnel ingress sync failed: ' . $e->getMessage();
+            return 'Tunnel ingress sync failed: '.$e->getMessage();
         }
 
         return null;
@@ -235,14 +249,15 @@ class DomainsSetProxy extends Command
     private function resolveListenPorts(): ?array
     {
         $raw = $this->option('port');
-        if (!is_array($raw) || $raw === []) {
+        if (! is_array($raw) || $raw === []) {
             return [80, 443];
         }
 
         $ports = [];
         foreach ($raw as $value) {
-            if (!is_numeric($value) || (int) $value < 1 || (int) $value > 65535) {
+            if (! is_numeric($value) || (int) $value < 1 || (int) $value > 65535) {
                 $this->error("Invalid --port '{$value}'.");
+
                 return null;
             }
             $ports[] = (int) $value;

@@ -35,7 +35,7 @@ class ProjectPushRequest extends FormRequest
                 return;
             }
 
-            if (!$this->boolean('files', true) && !$this->boolean('databases', true)) {
+            if (! $this->boolean('files', true) && ! $this->boolean('databases', true)) {
                 throw ProblemException::one(
                     'files',
                     'nothing_to_push',
@@ -45,7 +45,7 @@ class ProjectPushRequest extends FormRequest
 
             $username = $this->route('username');
             $target = $this->input('target');
-            if (!is_string($username) || $username === '' || !is_string($target) || $target === '') {
+            if (! is_string($username) || $username === '' || ! is_string($target) || $target === '') {
                 return;
             }
 
@@ -55,7 +55,10 @@ class ProjectPushRequest extends FormRequest
                 return;
             }
 
-            $problems = self::pushProblems($from, $to);
+            $problems = [
+                ...self::pushProblems($from, $to),
+                ...Projects::emptyContainerPushProblems($from, $to, $this->boolean('files', true), $this->boolean('databases', true)),
+            ];
             if ($problems !== []) {
                 throw ProblemException::of($problems);
             }
@@ -67,11 +70,11 @@ class ProjectPushRequest extends FormRequest
     private function assertTablesApplicable(User $from): void
     {
         $tables = $this->input('tables');
-        if (!is_array($tables) || $tables === []) {
+        if (! is_array($tables) || $tables === []) {
             return;
         }
 
-        if (!$this->boolean('databases', true)) {
+        if (! $this->boolean('databases', true)) {
             throw ProblemException::one(
                 'tables',
                 'tables_not_applicable',

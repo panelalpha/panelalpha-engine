@@ -31,8 +31,9 @@ class DomainAllocator
     private const LOCAL_ATTEMPTS = 10;
 
     /**
-     * @param ?string $requested the caller's `domain`
-     * @param ?string $tunnel the caller's `tunnel`
+     * @param  ?string  $requested  the caller's `domain`
+     * @param  ?string  $tunnel  the caller's `tunnel`
+     *
      * @throws DomainAllocationException when a name the caller named cannot be had
      */
     public function allocate(string $username, ?string $requested = null, ?string $tunnel = null): AllocatedDomain
@@ -75,6 +76,7 @@ class DomainAllocator
 
             if ($domain === null) {
                 $skipped[] = "{$candidate['source']}: every name tried is already on this engine";
+
                 continue;
             }
 
@@ -103,7 +105,7 @@ class DomainAllocator
      * next one. A caller that named the label itself gets the error instead:
      * it asked for that name, not for a name.
      *
-     * @param list<string> $skipped collects why a rung was passed over
+     * @param  list<string>  $skipped  collects why a rung was passed over
      */
     private function allocateOnline(
         string $label,
@@ -114,7 +116,7 @@ class DomainAllocator
         $attempts = $requestedByCaller ? 1 : self::ONLINE_ATTEMPTS;
 
         for ($attempt = 0; $attempt < $attempts; $attempt++) {
-            $fqdn = $label . '.' . DomainPlan::PANELALPHA_ONLINE;
+            $fqdn = $label.'.'.DomainPlan::PANELALPHA_ONLINE;
 
             if (self::takenLocally($fqdn)) {
                 if ($requestedByCaller) {
@@ -124,6 +126,7 @@ class DomainAllocator
                     );
                 }
                 $label = DomainPlan::suffixed($label);
+
                 continue;
             }
 
@@ -131,18 +134,19 @@ class DomainAllocator
                 // The proxy forwards with the Host of the domain it is told to
                 // target, so the target is the public name itself. That is what
                 // lets the application be installed under the name visitors type.
-                $created = (new PanelAlphaConnect())->createSite($fqdn, $targetIp, $label);
+                $created = (new PanelAlphaConnect)->createSite($fqdn, $targetIp, $label);
             } catch (PanelAlphaException $e) {
                 if (self::nameIsTaken($e->getMessage())) {
                     if ($requestedByCaller) {
                         throw new DomainAllocationException(
                             "{$fqdn} is already taken. Labels under "
-                            . DomainPlan::PANELALPHA_ONLINE
-                            . ' are first come, first served across every engine.',
+                            .DomainPlan::PANELALPHA_ONLINE
+                            .' are first come, first served across every engine.',
                             'hostname_taken'
                         );
                     }
                     $label = DomainPlan::suffixed($label);
+
                     continue;
                 }
 
@@ -153,7 +157,7 @@ class DomainAllocator
                 }
 
                 Log::warning("PanelAlpha Online allocation unavailable: {$e->getMessage()}");
-                $skipped[] = DomainPlan::SOURCE_PANELALPHA_ONLINE . ': ' . $e->getMessage();
+                $skipped[] = DomainPlan::SOURCE_PANELALPHA_ONLINE.': '.$e->getMessage();
 
                 return null;
             }
@@ -174,7 +178,7 @@ class DomainAllocator
         }
 
         $skipped[] = DomainPlan::SOURCE_PANELALPHA_ONLINE
-            . ': every label tried is already registered';
+            .': every label tried is already registered';
 
         return null;
     }
@@ -200,7 +204,7 @@ class DomainAllocator
     {
         try {
             if ($message === null) {
-                if (!in_array(Setting::get(self::SETTING_ONLINE_LAST_ERROR), [null, ''], true)) {
+                if (! in_array(Setting::get(self::SETTING_ONLINE_LAST_ERROR), [null, ''], true)) {
                     Setting::set(self::SETTING_ONLINE_LAST_ERROR, '');
                 }
 
@@ -219,15 +223,15 @@ class DomainAllocator
     /** The candidate name, or a suffixed one, that nothing on this engine holds. */
     private function firstFreeLocally(string $domain): ?string
     {
-        if (!self::takenLocally($domain)) {
+        if (! self::takenLocally($domain)) {
             return $domain;
         }
 
         [$label, $parent] = array_pad(explode('.', $domain, 2), 2, '');
 
         for ($attempt = 0; $attempt < self::LOCAL_ATTEMPTS; $attempt++) {
-            $candidate = DomainPlan::suffixed($label) . '.' . $parent;
-            if (!self::takenLocally($candidate)) {
+            $candidate = DomainPlan::suffixed($label).'.'.$parent;
+            if (! self::takenLocally($candidate)) {
                 return $candidate;
             }
         }
@@ -259,7 +263,7 @@ class DomainAllocator
      * that answers for nobody.
      */
     /**
-     * @param array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string} $settings
+     * @param  array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string}  $settings
      */
     private static function resolvability(string $source, array $settings): ?bool
     {

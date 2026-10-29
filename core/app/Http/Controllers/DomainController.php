@@ -6,8 +6,8 @@ use App\Http\Requests\DomainReplacePhpDirectivesRequest;
 use App\Http\Requests\DomainSetPhpVersionRequest;
 use App\Http\Resources\DomainResource;
 use App\Lib\Domains\DomainPhpVersion;
-use App\System;
 use App\Models\Domain;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
@@ -76,7 +76,7 @@ class DomainController extends Controller
 
         /** @var array{version: string} */
         $params = $request->validated();
-        (new DomainPhpVersion())->set($domainModel, $params['version']);
+        (new DomainPhpVersion)->set($domainModel, $params['version']);
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
     }
@@ -102,7 +102,7 @@ class DomainController extends Controller
         $data = $domainModel->user->project($system)->php()->getDomainDirectives($domainModel);
 
         return new JsonResponse([
-            'data' => $data === [] ? new \stdClass() : $data,
+            'data' => $data === [] ? new \stdClass : $data,
         ]);
     }
 

@@ -60,7 +60,7 @@ final class PythonMetadata implements PackageMetadata
             ecosystem: $this->id(),
             file: self::FILE,
             name: $name ?? self::directoryName($context),
-            nameSource: $name !== null ? self::FILE . ' name' : AppPackage::NAME_FROM_DIRECTORY,
+            nameSource: $name !== null ? self::FILE.' name' : AppPackage::NAME_FROM_DIRECTORY,
             description: self::tomlString($section, 'description'),
             version: self::tomlString($section, 'version'),
             license: self::license($section),
@@ -175,7 +175,7 @@ final class PythonMetadata implements PackageMetadata
         if (preg_match('/^[ \t]*authors[ \t]*=[ \t]*\[(.*?)\]/ms', $section, $matches) !== 1) {
             return [];
         }
-        if (!str_contains($matches[1], '{')) {
+        if (! str_contains($matches[1], '{')) {
             return self::tomlList($section, 'authors');
         }
 

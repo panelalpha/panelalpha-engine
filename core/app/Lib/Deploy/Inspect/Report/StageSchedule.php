@@ -2,10 +2,11 @@
 
 namespace App\Lib\Deploy\Inspect\Report;
 
-use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
-use App\Lib\Deploy\Platform\PlatformCommand;
+use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\ManifestException;
+use App\Lib\Deploy\Platform\PlatformCommand;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\PlatformSelector;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -32,7 +33,7 @@ final class StageSchedule
     ];
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function __construct(
         private readonly ProjectContext $context,
@@ -40,11 +41,10 @@ final class StageSchedule
         private readonly ?AppConfig $appConfig = null,
         private readonly ?DeployPlan $plan = null,
         private readonly ?string $recipe = null
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, list<array<string, mixed>>>
      */
     public static function of(
@@ -108,7 +108,7 @@ final class StageSchedule
     }
 
     /**
-     * @param \App\Lib\Deploy\Platform\PlatformManifest $manifest
+     * @param  PlatformManifest  $manifest
      * @return list<PlatformCommand>
      */
     private function commandsFor($manifest, string $stage): array

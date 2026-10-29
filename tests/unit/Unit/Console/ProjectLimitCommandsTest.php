@@ -62,6 +62,17 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
     }
 
+    public function test_force_sets_the_limits_without_a_prompt(): void
+    {
+        $this->makeUser('alice', ['memory_limit' => 256]);
+
+        $this->artisan('project:limit:set --project=alice --memory-limit=512 --force --no-interaction')
+            ->expectsOutputToContain('Limits have been updated.')
+            ->assertExitCode(0);
+
+        $this->assertSame(512, User::findByUsername('alice')->getMemoryLimit());
+    }
+
     public function test_set_writes_every_selected_limit(): void
     {
         $this->makeUser('alice');
@@ -95,17 +106,18 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(900, $user->getInodesLimit(), 'inodes was not mentioned and must not move');
     }
 
-    public function test_minus_one_clears_a_limit_but_disk_space_keeps_it(): void
+    public function test_minus_one_stores_unlimited_on_every_limit(): void
     {
-        $this->makeUser('alice', ['bandwidth_limit' => 50, 'disk_space_limit' => 1024]);
+        $this->makeUser('alice', ['bandwidth_limit' => 50, 'disk_space_limit' => 1024, 'cpu_limit' => 2]);
 
-        $this->artisan('project:limit:set --project=alice --bandwidth-limit=-1 --disk-space-limit=-1')
+        $this->artisan('project:limit:set --project=alice --bandwidth-limit=-1 --disk-space-limit=-1 --cpu-limit=-1')
             ->expectsConfirmation('Do you wish to continue?', 'yes')
             ->assertExitCode(0);
 
         $user = User::findByUsername('alice');
-        $this->assertNull($user->getBandwidthLimit());
+        $this->assertSame(-1, $user->getBandwidthLimit());
         $this->assertSame(-1, $user->getDiskSpaceLimit());
+        $this->assertSame(-1.0, $user->getCpuLimit());
     }
 
     /** Every project has a memory limit, so -1 is refused rather than stored. */
@@ -137,6 +149,26 @@ class ProjectLimitCommandsTest extends TestCase
         } finally {
             HostMemoryProbe::fake(null);
         }
+    }
+
+    /** Docker starts no container with less than 6 MB, so the account would never come up. */
+    public function test_memory_below_dockers_minimum_is_refused(): void
+    {
+        $this->makeUser('alice', ['memory_limit' => 256]);
+
+        $this->assertSame(1, Artisan::call('project:limit:set', ['--project' => 'alice', '--memory-limit' => '5']));
+        $this->assertStringContainsString('at least 6 MB', Artisan::output());
+        $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
+    }
+
+    /** A container project's account runs its own Docker daemon, so 128 MB is refused there and taken elsewhere. */
+    public function test_memory_below_a_container_projects_floor_is_refused_for_it(): void
+    {
+        $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512]);
+
+        $this->assertSame(1, Artisan::call('project:limit:set', ['--project' => 'dock', '--memory-limit' => '128']));
+        $this->assertStringContainsString('dock: The memory limit of a container project must be at least 256 MB', Artisan::output());
+        $this->assertSame(512, User::findByUsername('dock')->getMemoryLimit());
     }
 
     /** An unset memory limit reads back as the default the account runs with. */
@@ -218,16 +250,16 @@ class ProjectLimitCommandsTest extends TestCase
         }
     }
 
-    /** Only disk space stores -1 for "no limit"; anywhere else a -1 reads back as stored. */
-    public function test_get_prints_a_stored_minus_one_as_stored_outside_disk_space(): void
+    public function test_get_prints_a_stored_minus_one_as_no_limit_on_every_limit(): void
     {
-        $this->makeUser('alice', ['disk_space_limit' => -1, 'cpu_limit' => -1]);
+        $this->makeUser('alice', ['disk_space_limit' => -1, 'cpu_limit' => -1, 'bandwidth_limit' => -1]);
 
         $this->assertSame(0, Artisan::call('project:limit:get', ['--project' => 'alice']));
 
         $output = Artisan::output();
         $this->assertStringContainsString("  disk_space_limit: no limit\n", $output);
-        $this->assertStringContainsString("  cpu_limit:        -1 CPUs\n", $output);
+        $this->assertStringContainsString("  cpu_limit:        no limit\n", $output);
+        $this->assertStringContainsString("  bandwidth_limit:  no limit\n", $output);
     }
 
     public function test_set_checks_its_options_before_it_looks_the_project_up(): void

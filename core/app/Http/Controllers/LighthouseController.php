@@ -5,9 +5,9 @@ namespace App\Http\Controllers;
 use App\Lib\Lighthouse\LighthouseFailed;
 use App\Lib\Lighthouse\LighthouseRunner;
 use App\Lib\Lighthouse\LighthouseTarget;
-use App\System;
 use App\Models\Domain;
 use App\Models\Setting;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -30,8 +30,8 @@ class LighthouseController extends Controller
                     type: 'boolean',
                     nullable: true,
                     description: 'Drop every embedded data: URI -- the final screenshot, the filmstrip '
-                        . 'thumbnails, the full-page screenshot -- leaving null and a <key>StrippedBytes '
-                        . 'count. They dwarf the score/metric data and cannot be rendered inline anyway.',
+                        .'thumbnails, the full-page screenshot -- leaving null and a <key>StrippedBytes '
+                        .'count. They dwarf the score/metric data and cannot be rendered inline anyway.',
                     x: ['mcp-default' => '1']
                 ),
                 new OA\Property(
@@ -39,7 +39,7 @@ class LighthouseController extends Controller
                     type: 'boolean',
                     nullable: true,
                     description: 'Return only the scores: the URLs, the category scores and, per audit, its '
-                        . 'title, score and displayed value. No audit details.',
+                        .'title, score and displayed value. No audit details.',
                     x: ['mcp-default' => '1']
                 ),
             ],
@@ -53,7 +53,7 @@ class LighthouseController extends Controller
     )]
     public function generateReport(Request $request): JsonResponse
     {
-        if (!empty(Setting::get('disable-lighthouse'))) {
+        if (! empty(Setting::get('disable-lighthouse'))) {
             return new JsonResponse(['message' => 'lighthouse service is disabled'], 409);
         }
 
@@ -81,7 +81,7 @@ class LighthouseController extends Controller
         // }
 
         $url = $params['url'];
-        $desktop = !empty($params['desktop_preset']);
+        $desktop = ! empty($params['desktop_preset']);
         $localResolve = empty($params['no_local_resolve']);
 
         // Chrome fetches from inside the engine's network: only this engine's
@@ -104,7 +104,7 @@ class LighthouseController extends Controller
         if ($strayed !== null) {
             return new JsonResponse([
                 'message' => "The page redirected to {$strayed}, which is not a domain hosted on this engine; "
-                    . 'the report is withheld.',
+                    .'the report is withheld.',
             ], 422);
         }
 
@@ -124,7 +124,7 @@ class LighthouseController extends Controller
      * the screenshot-thumbnails filmstrip, top-level fullPageScreenshot), and
      * any of them dwarfs the scores. Each becomes null plus <key>StrippedBytes.
      *
-     * @param array<array-key, mixed> $node
+     * @param  array<array-key, mixed>  $node
      */
     private function stripScreenshotData(array &$node): void
     {
@@ -135,7 +135,7 @@ class LighthouseController extends Controller
             } elseif (is_string($value) && str_starts_with($value, 'data:')) {
                 $node[$key] = null;
                 if (is_string($key)) {
-                    $sizes[$key . 'StrippedBytes'] = strlen($value);
+                    $sizes[$key.'StrippedBytes'] = strlen($value);
                 }
             }
         }
@@ -147,13 +147,13 @@ class LighthouseController extends Controller
      * of request tables and traces even with the images gone; this is a few
      * hundred bytes per audit, bounded by how many audits Lighthouse ran.
      *
-     * @param array<string, mixed> $result
+     * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
     private function summary(array $result): array
     {
         $categories = [];
-        foreach ((array)($result['categories'] ?? []) as $id => $category) {
+        foreach ((array) ($result['categories'] ?? []) as $id => $category) {
             $categories[$id] = [
                 'title' => $category['title'] ?? null,
                 'score' => $category['score'] ?? null,
@@ -161,9 +161,9 @@ class LighthouseController extends Controller
         }
 
         $audits = [];
-        foreach ((array)($result['audits'] ?? []) as $id => $audit) {
+        foreach ((array) ($result['audits'] ?? []) as $id => $audit) {
             $audits[$id] = array_filter(
-                array_intersect_key((array)$audit, array_flip([
+                array_intersect_key((array) $audit, array_flip([
                     'title', 'score', 'scoreDisplayMode', 'displayValue', 'numericValue', 'numericUnit', 'errorMessage',
                 ])),
                 fn (mixed $v): bool => $v !== null

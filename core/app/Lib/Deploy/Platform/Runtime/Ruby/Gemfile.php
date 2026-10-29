@@ -14,9 +14,7 @@ final class Gemfile
 
     public const LOCKFILE = 'Gemfile.lock';
 
-    private function __construct(private readonly string $contents, private readonly string $lock = '')
-    {
-    }
+    private function __construct(private readonly string $contents, private readonly string $lock = '') {}
 
     public static function of(ProjectContext $project): self
     {
@@ -36,12 +34,12 @@ final class Gemfile
      */
     public function locks(string $gem): bool
     {
-        return preg_match('/^ {4}' . preg_quote($gem, '/') . ' \(/m', $this->lock) === 1;
+        return preg_match('/^ {4}'.preg_quote($gem, '/').' \(/m', $this->lock) === 1;
     }
 
     public function requires(string $gem): bool
     {
-        $pattern = "/^\s*gem\s+['\"]" . preg_quote($gem, '/') . "['\"]/m";
+        $pattern = "/^\s*gem\s+['\"]".preg_quote($gem, '/')."['\"]/m";
 
         return preg_match($pattern, $this->contents) === 1;
     }
@@ -63,7 +61,7 @@ final class Gemfile
      */
     public function requiresAtRuntime(string $gem): bool
     {
-        if (!$this->requires($gem)) {
+        if (! $this->requires($gem)) {
             return false;
         }
 
@@ -73,10 +71,12 @@ final class Gemfile
             $trimmed = trim($line);
             if (preg_match('/^group\s+(.+?)\s+do\b/', $trimmed, $open) === 1) {
                 $groups[] = self::namesIn($open[1]);
+
                 continue;
             }
             if ($trimmed === 'end' && $groups !== []) {
                 array_pop($groups);
+
                 continue;
             }
             if (preg_match("/^gem\s+['\"]{$quoted}['\"](.*)$/", $trimmed, $decl) !== 1) {
@@ -149,7 +149,7 @@ final class Gemfile
     }
 
     /**
-     * @param list<string> $gems
+     * @param  list<string>  $gems
      */
     public function requiresAny(array $gems): bool
     {

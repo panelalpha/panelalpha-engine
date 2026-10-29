@@ -194,7 +194,7 @@ export class GitApi extends EngineApiBase {
 
   async createDeployHookRaw(
     username: string,
-    data: { path?: string; provider?: string } = {}
+    data: { path?: string; provider?: string; register?: boolean } = {}
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post(`projects/${username}/git/deploy-hook`, { data });
     return this.rawCall(response);

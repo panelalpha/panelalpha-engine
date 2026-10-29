@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** A disabled (parked) hand-made rule must not cost the domain its generated route on the next deploy. */
@@ -21,7 +22,7 @@ class ProxyRuleParkedRuleTest extends TestCase
         $this->recordWebserverApply();
         $this->withoutMiddleware(Authenticate::class);
         $this->makeMainDomain($this->makeUser('alice', ['template' => 'dind']), 'shop.test');
-        $this->hostListens("LISTEN 0 4096 0.0.0.0:2011 0.0.0.0:*");
+        $this->hostListens('LISTEN 0 4096 '.TestNetwork::ANY.':2011 '.TestNetwork::ANY.':*');
     }
 
     public function test_a_parked_rule_leaves_the_generated_route_in_place(): void

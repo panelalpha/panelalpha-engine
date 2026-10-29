@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\PlatformCommand;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Stage\ServeCommand;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The last line of the entrypoint, where the server replaces the shell.
@@ -44,9 +45,9 @@ class ServeCommandTest extends TestCase
 
     public function test_a_command_that_already_execs_is_not_prefixed_again(): void
     {
-        $lines = $this->lines(['id' => 'serve', 'run' => 'exec php -S 0.0.0.0:8080']);
+        $lines = $this->lines(['id' => 'serve', 'run' => 'exec php -S ' . TestNetwork::ANY . ':8080']);
 
-        $this->assertSame('exec php -S 0.0.0.0:8080', end($lines));
+        $this->assertSame('exec php -S ' . TestNetwork::ANY . ':8080', end($lines));
     }
 
     public function test_a_shell_construct_carries_its_own_exec(): void
@@ -54,7 +55,7 @@ class ServeCommandTest extends TestCase
         // PHP's built-in server has to know whether the project has a public/
         // directory. `exec if ...` is a syntax error, so the branches exec
         // themselves and the prefix is dropped.
-        $run = 'if [ -d public ]; then exec php -S 0.0.0.0:8080 -t public; else exec php -S 0.0.0.0:8080; fi';
+        $run = 'if [ -d public ]; then exec php -S ' . TestNetwork::ANY . ':8080 -t public; else exec php -S ' . TestNetwork::ANY . ':8080; fi';
 
         $lines = $this->lines(['id' => 'serve', 'run' => $run]);
 

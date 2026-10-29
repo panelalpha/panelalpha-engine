@@ -18,8 +18,7 @@ class DatabaseCopier
 {
     public function __construct(
         private readonly Mysql $mysql,
-    ) {
-    }
+    ) {}
 
     /**
      * The dump carries the source schema in its triggers, routines and events,
@@ -42,7 +41,7 @@ class DatabaseCopier
             ...$definers->sedExpressions(),
         ];
 
-        return 'sed' . implode('', array_map(self::onSchemaLines(...), $expressions));
+        return 'sed'.implode('', array_map(self::onSchemaLines(...), $expressions));
     }
 
     private static function onSchemaLines(string $expression): string
@@ -53,10 +52,10 @@ class DatabaseCopier
     public static function mapName(string $name, string $fromPrefix, string $toPrefix): string
     {
         if ($fromPrefix !== '' && str_starts_with($name, $fromPrefix)) {
-            return $toPrefix . substr($name, strlen($fromPrefix));
+            return $toPrefix.substr($name, strlen($fromPrefix));
         }
 
-        return $toPrefix . $name;
+        return $toPrefix.$name;
     }
 
     public function copyDatabase(string $from, string $to, DefinerMap $definers): void
@@ -69,7 +68,7 @@ class DatabaseCopier
     }
 
     /**
-     * @param callable(string): void $log
+     * @param  callable(string): void  $log
      */
     public function copyProjectDatabases(User $source, User $dest, callable $log): DatabaseCopyResult
     {
@@ -122,6 +121,43 @@ class DatabaseCopier
     }
 
     /**
+     * A database a push created on the target gets, for each source user, what
+     * that user had on the source database, granted to the target user it maps
+     * to. Without it the target's users could not use the data, nor run the
+     * triggers whose DEFINER the copy gave them.
+     *
+     * @return list<string> a warning when no target user was granted anything
+     */
+    public function grantCreatedDatabase(string $from, string $to, DefinerMap $definers): array
+    {
+        $granted = false;
+        foreach ($definers->accounts() as $sourceUser => $targetUser) {
+            $privileges = $this->mysql->privileges()->showPrivileges($sourceUser)[$from] ?? null;
+            if ($privileges !== null) {
+                $this->mysql->privileges()->updatePrivileges($targetUser, $to, $privileges);
+                $granted = true;
+            }
+        }
+
+        return $granted ? [] : ["Created database '{$to}' with no grants: no user of the target maps to a source user with grants on '{$from}'."];
+    }
+
+    /**
+     * Drops a database a push created and takes back what grantCreatedDatabase()
+     * gave on it: MariaDB keeps a grant on a dropped name, and a database later
+     * created under that name would inherit it.
+     */
+    public function dropCreatedDatabase(string $database, DefinerMap $definers): void
+    {
+        if ($this->mysql->databases()->databaseExists($database)) {
+            $this->mysql->databases()->deleteDatabase($database);
+        }
+        foreach ($definers->accounts() as $targetUser) {
+            $this->mysql->privileges()->revokeIfExists($targetUser, $database);
+        }
+    }
+
+    /**
      * One table of $to, dropped and recreated from $from. The caller dumps the
      * target's own copy first, so a failure can put it back.
      */
@@ -140,31 +176,33 @@ class DatabaseCopier
         Mysql::assertTableName($table);
 
         $this->mysql->runSitesDbScript(
-            'mariadb -uroot ' . escapeshellarg($database)
-            . ' -e ' . escapeshellarg('DROP TABLE IF EXISTS ' . Tables::quote($table)),
+            'mariadb -uroot '.escapeshellarg($database)
+            .' -e '.escapeshellarg('DROP TABLE IF EXISTS '.Tables::quote($table)),
             'table drop failed'
         );
     }
 
     public static function tableRollbackPath(string $rollbackDir, string $database, string $table): string
     {
-        return rtrim($rollbackDir, '/') . '/' . $database . '.' . $table . '.sql.gz';
+        return rtrim($rollbackDir, '/').'/'.$database.'.'.$table.'.sql.gz';
     }
 
     /**
      * Only the selected source tables, each dropped and recreated on its target
-     * database. A target database the project does not own is created first.
+     * database. A target database the project does not own is created first,
+     * with the grants the source users had on the source database.
      * The target's own copy of a replaced table is dumped before it is touched,
      * so a failure part way through restores what it already replaced, and a
      * failure in a later stage restores the whole selection. A restore that
      * fails too surfaces as a RollbackIncompleteException naming what it left.
      *
-     * @param list<array{database: string, name: string}> $tables
+     * @param  list<array{database: string, name: string}>  $tables
      */
     public function replaceTables(User $source, User $target, array $tables, string $rollbackDir): TableReplacement
     {
         $grouped = self::groupByTarget($tables, $source->getMysqlPrefix(), $target->getMysqlPrefix());
         $targetTables = $this->mysql->tables();
+        $definers = DefinerMap::between($source, $target);
         $rollbacks = [];
         $createdDatabases = [];
         $createdTables = [];
@@ -173,7 +211,7 @@ class DatabaseCopier
             $result = $this->replaceSelected(
                 $grouped,
                 $target,
-                DefinerMap::between($source, $target),
+                $definers,
                 $rollbackDir,
                 $targetTables,
                 $rollbacks,
@@ -182,7 +220,8 @@ class DatabaseCopier
             );
         } catch (\Throwable $e) {
             $failures = $this->restoreTables(new TableReplacement(
-                new DatabaseCopyResult(),
+                new DatabaseCopyResult,
+                $definers,
                 $rollbacks,
                 $createdDatabases,
                 $createdTables,
@@ -190,14 +229,14 @@ class DatabaseCopier
             throw $failures === [] ? $e : new RollbackIncompleteException($e, $failures);
         }
 
-        return new TableReplacement($result, $rollbacks, $createdDatabases, $createdTables);
+        return new TableReplacement($result, $definers, $rollbacks, $createdDatabases, $createdTables);
     }
 
     /**
-     * @param array<string, list<array{database: string, name: string}>> $grouped
-     * @param list<array{database: string, table: string, dump: string}> $rollbacks
-     * @param list<string>                                              $createdDatabases
-     * @param list<array{database: string, table: string}>              $createdTables
+     * @param  array<string, list<array{database: string, name: string}>>  $grouped
+     * @param  list<array{database: string, table: string, dump: string}>  $rollbacks
+     * @param  list<string>  $createdDatabases
+     * @param  list<array{database: string, table: string}>  $createdTables
      */
     private function replaceSelected(
         array $grouped,
@@ -214,11 +253,11 @@ class DatabaseCopier
         $warnings = [];
 
         foreach ($grouped as $dest => $selections) {
-            if (!in_array($dest, $owned, true)) {
+            if (! in_array($dest, $owned, true)) {
                 MysqlDatabase::create(['user_id' => $target->id, 'database' => $dest]);
                 $this->mysql->databases()->createDatabase($dest);
                 $createdDatabases[] = $dest;
-                $warnings[] = "Created database '{$dest}' without grants: the target does not own that database.";
+                array_push($warnings, ...$this->grantCreatedDatabase($selections[0]['database'], $dest, $definers));
             }
 
             foreach ($selections as $selection) {
@@ -242,7 +281,7 @@ class DatabaseCopier
             } catch (\Throwable $e) {
                 $failures[] = "restoring table '{$entry['database']}.{$entry['table']}'";
                 Log::warning(
-                    "Push rollback failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
+                    "Push rollback failed for table '{$entry['database']}.{$entry['table']}': ".$e->getMessage()
                 );
             }
         }
@@ -253,19 +292,17 @@ class DatabaseCopier
             } catch (\Throwable $e) {
                 $failures[] = "dropping created table '{$entry['database']}.{$entry['table']}'";
                 Log::warning(
-                    "Push cleanup failed for table '{$entry['database']}.{$entry['table']}': " . $e->getMessage()
+                    "Push cleanup failed for table '{$entry['database']}.{$entry['table']}': ".$e->getMessage()
                 );
             }
         }
 
         foreach ($replacement->createdDatabases as $database) {
             try {
-                if ($this->mysql->databases()->databaseExists($database)) {
-                    $this->mysql->databases()->deleteDatabase($database);
-                }
+                $this->dropCreatedDatabase($database, $replacement->definers);
             } catch (\Throwable $e) {
                 $failures[] = "dropping created database '{$database}'";
-                Log::warning("Push cleanup failed for database '{$database}': " . $e->getMessage());
+                Log::warning("Push cleanup failed for database '{$database}': ".$e->getMessage());
             }
         }
 
@@ -273,9 +310,9 @@ class DatabaseCopier
     }
 
     /**
-     * @param array{database: string, name: string}                $selection
-     * @param list<array{database: string, table: string, dump: string}> $rollbacks
-     * @param list<array{database: string, table: string}>         $createdTables
+     * @param  array{database: string, name: string}  $selection
+     * @param  list<array{database: string, table: string, dump: string}>  $rollbacks
+     * @param  list<array{database: string, table: string}>  $createdTables
      */
     private function replaceTable(
         array $selection,
@@ -300,7 +337,7 @@ class DatabaseCopier
     }
 
     /**
-     * @param list<array{database: string, name: string}> $tables
+     * @param  list<array{database: string, name: string}>  $tables
      * @return array<string, list<array{database: string, name: string}>>
      */
     private static function groupByTarget(array $tables, string $sourcePrefix, string $targetPrefix): array
@@ -315,14 +352,14 @@ class DatabaseCopier
 
     public static function rollbackPath(string $rollbackDir, string $database): string
     {
-        return rtrim($rollbackDir, '/') . '/' . $database . '.sql.gz';
+        return rtrim($rollbackDir, '/').'/'.$database.'.sql.gz';
     }
 
     /**
      * The row is written before the data: a dump that dies mid-stream must
      * still leave a database the destination's teardown can drop.
      *
-     * @param callable(string): void $log
+     * @param  callable(string): void  $log
      * @return array<string, string> source database => destination database
      */
     private function copyDatabases(
@@ -347,11 +384,11 @@ class DatabaseCopier
     }
 
     /**
-     * @param callable(string): void $log
-     * @param array<string, string> $databases
-     * @param array<string, string> $users
-     * @param array<string, string> $passwords
-     * @param list<string>          $warnings
+     * @param  callable(string): void  $log
+     * @param  array<string, string>  $databases
+     * @param  array<string, string>  $users
+     * @param  array<string, string>  $passwords
+     * @param  list<string>  $warnings
      */
     private function copyUsers(
         User $source,
@@ -380,14 +417,15 @@ class DatabaseCopier
     }
 
     /**
-     * @param array<string, string> $databases
-     * @param list<string>          $warnings
+     * @param  array<string, string>  $databases
+     * @param  list<string>  $warnings
      */
     private function copyGrants(string $fromUser, string $toUser, array $databases, array &$warnings): void
     {
         foreach ($this->mysql->privileges()->showPrivileges($fromUser) as $database => $privileges) {
-            if (!isset($databases[$database])) {
+            if (! isset($databases[$database])) {
                 $warnings[] = "Skipped a grant on '{$database}': the source project does not own that database.";
+
                 continue;
             }
 
@@ -412,7 +450,7 @@ class DatabaseCopier
     }
 
     /**
-     * @param array<string, string> $grants
+     * @param  array<string, string>  $grants
      */
     private function reapplyGrants(array $grants, string $database): void
     {
@@ -423,18 +461,18 @@ class DatabaseCopier
 
     private function streamCopy(string $from, string $to, DefinerMap $definers): string
     {
-        $dump = 'mariadb-dump --single-transaction --routines --triggers --events -uroot ' . escapeshellarg($from);
-        $import = 'mariadb -uroot ' . escapeshellarg($to);
+        $dump = 'mariadb-dump --single-transaction --routines --triggers --events -uroot '.escapeshellarg($from);
+        $import = 'mariadb -uroot '.escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to, $definers) . ' | ' . $import;
+        return 'set -o pipefail; '.$dump.' | '.self::rewrite($from, $to, $definers).' | '.$import;
     }
 
     private function streamTableCopy(string $from, string $to, string $table, DefinerMap $definers): string
     {
         $dump = 'mariadb-dump --single-transaction -uroot '
-            . escapeshellarg($from) . ' ' . escapeshellarg($table);
-        $import = 'mariadb -uroot ' . escapeshellarg($to);
+            .escapeshellarg($from).' '.escapeshellarg($table);
+        $import = 'mariadb -uroot '.escapeshellarg($to);
 
-        return 'set -o pipefail; ' . $dump . ' | ' . self::rewrite($from, $to, $definers) . ' | ' . $import;
+        return 'set -o pipefail; '.$dump.' | '.self::rewrite($from, $to, $definers).' | '.$import;
     }
 }

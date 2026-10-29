@@ -14,6 +14,7 @@ use App\System\Project\Dind\Strategy\AccountSecrets;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * Qdrant's recipe: `port: 6333`, and a compose publishing 6333 on a datastore
@@ -97,10 +98,7 @@ class UserComposePortGuessTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
-
-                return $process;
+                return SuccessfulProcess::for($cmd);
             }
         };
 

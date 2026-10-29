@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect\Report;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 
@@ -38,7 +39,7 @@ final class EnvironmentReport
     private readonly string $projectDir;
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function __construct(string $projectDir, private readonly array $decision)
     {
@@ -46,7 +47,7 @@ final class EnvironmentReport
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array{files: list<string>, variables: list<string>, variables_truncated: bool, defaults: array<string, mixed>}
      */
     public static function of(string $projectDir, array $decision): array
@@ -84,8 +85,8 @@ final class EnvironmentReport
 
     private function contents(string $name): ?string
     {
-        $path = $this->projectDir . '/' . $name;
-        $contents = is_file($path) ? @file_get_contents($path) : null;
+        $path = $this->projectDir.'/'.$name;
+        $contents = is_file($path) ? AccountHomeRead::contents($path) : null;
 
         return is_string($contents) && $contents !== '' ? $contents : null;
     }

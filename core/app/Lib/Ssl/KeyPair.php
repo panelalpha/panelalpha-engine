@@ -57,7 +57,7 @@ final class KeyPair
      */
     public static function publicKeyOfCertificate(string $pem): ?string
     {
-        if (trim($pem) === '' || !str_contains($pem, 'CERTIFICATE')) {
+        if (trim($pem) === '' || ! str_contains($pem, 'CERTIFICATE')) {
             return null;
         }
 
@@ -79,7 +79,7 @@ final class KeyPair
      */
     public static function publicKeyOfPrivateKey(string $pem): ?string
     {
-        if (trim($pem) === '' || !preg_match('/-----BEGIN [A-Z ]*PRIVATE KEY-----/', $pem)) {
+        if (trim($pem) === '' || ! preg_match('/-----BEGIN [A-Z ]*PRIVATE KEY-----/', $pem)) {
             return null;
         }
 

@@ -2,28 +2,28 @@
 
 namespace App\System\Project\Dind;
 
-use App\System\Project\Dind as DindProject;
-use App\System\Project\Dind\Source\GitRepository;
-use App\System\Project\Git\Exception as GitException;
 use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
-use App\Lib\Deploy\Compose\ComposeFileInspector;
-use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\DetectProjectStrategy;
-use App\Lib\Deploy\Platform\DeployPlanContext;
-use App\Lib\Deploy\Platform\Strategies;
-use App\Lib\Deploy\Platform\RecipeChoiceContext;
-use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Telemetry\DetectionSignal;
 use App\Lib\Deploy\Telemetry\Telemetry;
-use App\System\Project\Dind\Strategy\ManifestDatabase;
 use App\Models\User as ModelsUser;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Source\GitRepository;
+use App\System\Project\Dind\Strategy\ManifestDatabase;
+use App\System\Project\Git\Exception as GitException;
 
 /**
  * Turning a checkout into something the account can run. The app config bootstraps it first
@@ -92,7 +92,7 @@ class PrepareFromSource
         if ($plan !== null) {
             $decision = $plan->applyToDecision($decision);
             $logger?->info(
-                'Deploy request replaced these stages: ' . implode(', ', $plan->stages())
+                'Deploy request replaced these stages: '.implode(', ', $plan->stages())
             );
         }
 
@@ -100,7 +100,7 @@ class PrepareFromSource
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function assertDeployable(array $decision, string $projectDir, ?string $gitRepo, ?DeployLogger $logger): void
     {
@@ -119,7 +119,7 @@ class PrepareFromSource
      * Record what was detected. `deploy_platform` is the manifest that claimed it (`html` and
      * `static` share a strategy); the recipe's checks dir and the resolved image are frozen, not re-derived.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function freezeSnapshot(array $decision, ?AppConfig $appConfig, string $projectDir, ?string $gitRepo): void
     {
@@ -134,6 +134,8 @@ class PrepareFromSource
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
             AppHealth::DETAIL_START_PERIOD => $appConfig?->startPeriod(),
             'git_commit' => $gitRepo !== null ? $this->readGitCommit($projectDir) : null,
+            // Frozen so a project list can say it without reading every checkout.
+            'deploy_admin_sso' => $this->dind->appConfig($gitRepo)?->supportsAdminSso() ?? false,
         ]);
     }
 
@@ -148,7 +150,7 @@ class PrepareFromSource
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function logDecision(array $decision, ?DeployLogger $logger): void
     {
@@ -164,7 +166,7 @@ class PrepareFromSource
      * Why a compose file the repository ships was not used (a workstation dev compose, or the
      * v1 layout), so a wrong strategy is one log line rather than a silent hunt.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function explainIgnoredComposeFile(array $decision, string $projectDir, ?DeployLogger $logger): void
     {
@@ -196,7 +198,7 @@ class PrepareFromSource
     /**
      * `database:` is provisioned only by the writers that generate the app service.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function warnInertDatabase(array $decision, ?DeployLogger $logger): void
     {
@@ -210,7 +212,7 @@ class PrepareFromSource
      * Detection that reached past the manifests still deploys, but nobody has written a recipe
      * for this project; reported, or the gap is only ever found by a support ticket.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function reportUnreciped(string $username, array $decision, string $projectDir): void
     {
@@ -223,7 +225,7 @@ class PrepareFromSource
     /**
      * The manifest detection chose has the last word, before its own prepare commands run.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function deliverManifestCredentials(array $decision, ?AppConfig $appConfig): void
     {
@@ -239,7 +241,7 @@ class PrepareFromSource
      * the project for every later rule sync; ports are detected after `.env` exists, since compose
      * publishes a host port taken from it.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private function applyDecision(ModelsUser $user, array $decision, ?AppConfig $appConfig, string $projectDir, ?string $gitRepo): void
     {
@@ -307,9 +309,9 @@ class PrepareFromSource
 
     private function writePreCheckScript(string $script): string
     {
-        $path = $this->dind->homeDirPath() . '/' . AppConfig::PRE_CHECK_SCRIPT;
+        $path = $this->dind->homeDirPath().'/'.AppConfig::PRE_CHECK_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
-        $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($path, $script, $chown, '644');
 
         return $path;
     }

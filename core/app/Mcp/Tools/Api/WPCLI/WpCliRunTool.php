@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('wp_cli_run')]
 #[Description(<<<'MARKDOWN'
     Run a WP-CLI command
+
+    Runs a raw WP-CLI argument list against the project's WordPress install. Optional `path` selects the install; omitted, the main domain document root is used. On a project running in its own containers, `path` is as the container sees it, and omitted, the engine finds the container with PHP and WordPress itself. If `--path=` is also present inside `args`, that value wins. Synchronous: the body is exit_code, stdout, and stderr.
     MARKDOWN)]
 #[IsDestructive]
 class WpCliRunTool extends ApiTool
@@ -26,7 +28,7 @@ class WpCliRunTool extends ApiTool
 
     protected function path(): string
     {
-        return '/projects/{username}/wp-cli/command';
+        return '/projects/{username}/wp/command';
     }
 
     /**
@@ -46,6 +48,8 @@ class WpCliRunTool extends ApiTool
     {
         return [
             'args',
+            'path',
+            'service',
         ];
     }
 
@@ -67,6 +71,8 @@ class WpCliRunTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'args' => $schema->array()->description('Example: ["plugin","list","--format=json"].')->required(),
+            'path' => $schema->string()->description('WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. A command that creates it (core download) needs it below an existing folder the project\'s account owns, such as the domain folder: the top of the home belongs to root. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory. Example: /home/demo/demo.example/public_html.'),
+            'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
         ];
     }
 }

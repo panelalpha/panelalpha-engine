@@ -27,24 +27,27 @@ class Delete extends Command
         $usernames = $this->argument('project');
         $forced = (bool) $this->option('force');
 
-        if (!$forced && !$this->input->isInteractive()) {
+        if (! $forced && ! $this->input->isInteractive()) {
             $this->error('Deleting without confirmation requires --force.');
+
             return 1;
         }
 
         if ($this->option('all')) {
             if ($usernames !== []) {
                 $this->error('Pass project names or --all, not both.');
+
                 return 1;
             }
 
             $usernames = array_map(static fn (User $user): string => (string) $user->username, User::getAll());
             if ($usernames === []) {
                 $this->info('No projects on this engine.');
+
                 return 0;
             }
 
-            if (!$this->confirmAll(count($usernames))) {
+            if (! $this->confirmAll(count($usernames))) {
                 return 0;
             }
             $forced = true;
@@ -52,12 +55,13 @@ class Delete extends Command
 
         if ($usernames === []) {
             $this->error('Name at least one project, or pass --all.');
+
             return 1;
         }
 
         $failed = false;
         foreach ($usernames as $username) {
-            $failed = !$this->deleteProject($username, $forced) || $failed;
+            $failed = ! $this->deleteProject($username, $forced) || $failed;
         }
 
         return $failed ? 1 : 0;
@@ -77,17 +81,18 @@ class Delete extends Command
     private function deleteProject(string $username, bool $forced): bool
     {
         $user = User::findByUsername($username);
-        if (!$user) {
+        if (! $user) {
             $this->error("User `{$username}` not found in database.");
+
             return false;
         }
 
-        if (!$forced && !$this->confirm("User `{$username}` will be completely deleted from server, are you sure?")) {
+        if (! $forced && ! $this->confirm("User `{$username}` will be completely deleted from server, are you sure?")) {
             return true;
         }
 
         try {
-            (new ProjectDeleter())->delete($user);
+            (new ProjectDeleter)->delete($user);
             $this->info("User `{$username}` deleted.");
 
             return true;
@@ -97,10 +102,10 @@ class Delete extends Command
             return false;
         } catch (\Throwable $e) {
             Log::warning(
-                "Could not delete user '{$user->username}': " . $e->getMessage(),
+                "Could not delete user '{$user->username}': ".$e->getMessage(),
                 ['exception' => $e],
             );
-            $this->error("ERROR deleting user `{$username}`: " . $e->getMessage());
+            $this->error("ERROR deleting user `{$username}`: ".$e->getMessage());
 
             return false;
         }

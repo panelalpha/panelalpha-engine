@@ -10,6 +10,7 @@ use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use App\Lib\Deploy\Platform\StageResolver;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * An app config's `stage: build` commands never ran.
@@ -223,7 +224,7 @@ class AppConfigBuildCommandsTest extends TestCase
             'web/apps/app/package.json' => (string) json_encode([
                 'name' => '@oriveo/app',
                 'dependencies' => ['next' => '16.0.0'],
-                'scripts' => ['build' => 'next build', 'start' => 'next start --hostname 127.0.0.1 --port 3001'],
+                'scripts' => ['build' => 'next build', 'start' => 'next start --hostname ' . TestNetwork::LOOPBACK . ' --port 3001'],
             ]),
             AppConfigDirectory::DIRNAME . '/' . AppConfigDirectory::CONFIG => "extends: nextjs\napp_root: web\n",
         ];
@@ -246,7 +247,7 @@ class AppConfigBuildCommandsTest extends TestCase
         $this->assertSame('web', $decision['app_root']);
         $this->assertSame('HUSKY=0 LEFTHOOK=0 CI=1 npm ci --no-audit --no-fund', $decision['install_command']);
         $this->assertSame('npm run build:app', $decision['build_command']);
-        $this->assertStringContainsString('next start -H 0.0.0.0 -p 3000', $decision['start_command']);
+        $this->assertStringContainsString('next start -H ' . TestNetwork::ANY . ' -p 3000', $decision['start_command']);
         $this->assertSame('apps/app/.next', $decision['output_directory']);
     }
 }

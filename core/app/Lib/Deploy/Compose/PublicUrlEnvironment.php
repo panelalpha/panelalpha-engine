@@ -80,7 +80,7 @@ final class PublicUrlEnvironment
      * The path-prefix keys a project's own env file sets blank or to a path:
      * that app reads the key as a prefix, so the full URL must not be forced on it.
      *
-     * @param list<?string> $envFiles contents of `.env` / `.env.example`, null when absent
+     * @param  list<?string>  $envFiles  contents of `.env` / `.env.example`, null when absent
      * @return list<string>
      */
     public static function pathPrefixKeysIn(array $envFiles): array

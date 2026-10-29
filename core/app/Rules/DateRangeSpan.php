@@ -19,9 +19,7 @@ final class DateRangeSpan implements DataAwareRule, ValidationRule
     /** @var array<string, mixed> */
     private array $data = [];
 
-    public function __construct(private readonly string $endField)
-    {
-    }
+    public function __construct(private readonly string $endField) {}
 
     /** @param array<string, mixed> $data */
     public function setData(array $data): static
@@ -35,7 +33,7 @@ final class DateRangeSpan implements DataAwareRule, ValidationRule
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         $end = $this->data[$this->endField] ?? null;
-        if (!is_string($value) || !is_string($end)) {
+        if (! is_string($value) || ! is_string($end)) {
             return;
         }
 
@@ -45,8 +43,8 @@ final class DateRangeSpan implements DataAwareRule, ValidationRule
             return;
         }
 
-        if ($start->modify('+' . self::MAX_YEARS . ' years') < $finish) {
-            $fail("The :attribute and {$this->endField} cannot span more than " . self::MAX_YEARS . ' years.');
+        if ($start->modify('+'.self::MAX_YEARS.' years') < $finish) {
+            $fail("The :attribute and {$this->endField} cannot span more than ".self::MAX_YEARS.' years.');
         }
     }
 }

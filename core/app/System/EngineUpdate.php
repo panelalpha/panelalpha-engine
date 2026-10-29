@@ -30,13 +30,11 @@ final class EngineUpdate
     /** After this a placeholder is a run that never started; a real one replaces it within seconds. */
     public const PENDING_GRACE_SECONDS = 300;
 
-    public function __construct(private readonly EngineSystem $system)
-    {
-    }
+    public function __construct(private readonly EngineSystem $system) {}
 
     public function latestDir(): string
     {
-        return self::LOGS_DIR . '/latest';
+        return self::LOGS_DIR.'/latest';
     }
 
     /**
@@ -59,7 +57,7 @@ final class EngineUpdate
     public function latest(): ?array
     {
         $dir = $this->latestDir();
-        if (!$this->system->filesystem()->directoryExists($dir)) {
+        if (! $this->system->filesystem()->directoryExists($dir)) {
             return null;
         }
 
@@ -89,7 +87,7 @@ final class EngineUpdate
         $fs = $this->system->filesystem();
         $pid = $fs->cat("{$dir}/pid");
         $exitCode = self::exitCode($fs->cat("{$dir}/exit_code"));
-        $failed = $exitCode === null ? !$this->isRunning() : $exitCode !== 0;
+        $failed = $exitCode === null ? ! $this->isRunning() : $exitCode !== 0;
         $tailStdout = self::stripAnsi($fs->tail("{$dir}/stdout", self::TAIL_LINES));
         $tailStderr = self::stripAnsi($fs->tail("{$dir}/stderr", self::TAIL_LINES));
 
@@ -144,15 +142,15 @@ final class EngineUpdate
     private function enqueueUpdater(?string $licenseKey): void
     {
         $process = $this->system->runProcess(
-            self::onHost('echo ' . escapeshellarg($this->updaterJob($licenseKey)) . ' | at now')
+            self::onHost('echo '.escapeshellarg($this->updaterJob($licenseKey)).' | at now')
         );
 
         if ($process->getExitCode() !== 0) {
             $this->failPlaceholder($process);
             throw new \Exception(
                 'Failed to run update script: '
-                . ($process->getErrorOutput() ?: $process->getOutput())
-                . ' (exit code ' . (string) $process->getExitCode() . ')'
+                .($process->getErrorOutput() ?: $process->getOutput())
+                .' (exit code '.(string) $process->getExitCode().')'
             );
         }
     }
@@ -163,11 +161,11 @@ final class EngineUpdate
      */
     private function updaterJob(?string $licenseKey): string
     {
-        $updater = 'bash ' . escapeshellarg($this->system->engineDirPath() . '/updater.sh') . ' -f --background';
-        if (!empty($licenseKey)) {
-            $updater .= ' ' . escapeshellarg($licenseKey);
+        $updater = 'bash '.escapeshellarg($this->system->engineDirPath().'/updater.sh').' -f --background';
+        if (! empty($licenseKey)) {
+            $updater .= ' '.escapeshellarg($licenseKey);
         }
-        $tmp = self::LOGS_DIR . '/tmp';
+        $tmp = self::LOGS_DIR.'/tmp';
 
         return "{$updater} > {$tmp}/stdout 2> {$tmp}/stderr || echo \$? > {$tmp}/exit_code";
     }
@@ -177,19 +175,19 @@ final class EngineUpdate
     {
         $logs = self::LOGS_DIR;
         $this->system->runProcess(self::onHost(
-            "mkdir -p {$logs}/tmp && date +%s > {$logs}/tmp/" . self::PENDING_FILE
-            . " && rm -f {$logs}/tmp/pid {$logs}/tmp/exit_code {$logs}/tmp/stdout {$logs}/tmp/stderr"
-            . " && ln -sfn {$logs}/tmp {$logs}/latest"
+            "mkdir -p {$logs}/tmp && date +%s > {$logs}/tmp/".self::PENDING_FILE
+            ." && rm -f {$logs}/tmp/pid {$logs}/tmp/exit_code {$logs}/tmp/stdout {$logs}/tmp/stderr"
+            ." && ln -sfn {$logs}/tmp {$logs}/latest"
         ));
     }
 
     /** A job `at` refused never runs, so the placeholder records the refusal as a failed run. */
     private function failPlaceholder(Process $process): void
     {
-        $tmp = self::LOGS_DIR . '/tmp';
+        $tmp = self::LOGS_DIR.'/tmp';
         $this->system->runProcess(self::onHost(
-            'printf %s ' . escapeshellarg($process->getErrorOutput() ?: $process->getOutput()) . " > {$tmp}/stderr"
-            . ' && echo ' . (int) $process->getExitCode() . " > {$tmp}/exit_code"
+            'printf %s '.escapeshellarg($process->getErrorOutput() ?: $process->getOutput())." > {$tmp}/stderr"
+            .' && echo '.(int) $process->getExitCode()." > {$tmp}/exit_code"
         ));
     }
 
@@ -202,17 +200,17 @@ final class EngineUpdate
         $dir = $this->latestDir();
         $fs = $this->system->filesystem();
 
-        if (!$fs->directoryExists($dir) || self::exitCode($fs->cat("{$dir}/exit_code")) !== null) {
+        if (! $fs->directoryExists($dir) || self::exitCode($fs->cat("{$dir}/exit_code")) !== null) {
             return false;
         }
 
-        $pending = trim((string) $fs->cat("{$dir}/" . self::PENDING_FILE));
+        $pending = trim((string) $fs->cat("{$dir}/".self::PENDING_FILE));
         if ($pending !== '') {
             return self::pendingAge($pending) < self::PENDING_GRACE_SECONDS;
         }
 
         $pid = trim((string) $fs->cat("{$dir}/pid"));
-        if (!ctype_digit($pid)) {
+        if (! ctype_digit($pid)) {
             return false;
         }
 
@@ -222,7 +220,7 @@ final class EngineUpdate
     /** Seconds since the placeholder was seeded; an unreadable timestamp must not block an update. */
     private static function pendingAge(string $started): int
     {
-        if (!ctype_digit($started)) {
+        if (! ctype_digit($started)) {
             return PHP_INT_MAX;
         }
 
@@ -233,8 +231,7 @@ final class EngineUpdate
      * The updater lives outside this container, so every command enters the
      * host's namespaces first.
      *
-     * @param string|list<string> $command
-     *
+     * @param  string|list<string>  $command
      * @return list<string>
      */
     private static function onHost(string|array $command): array

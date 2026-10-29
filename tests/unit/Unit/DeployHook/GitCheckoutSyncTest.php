@@ -68,7 +68,14 @@ class GitCheckoutSyncTest extends TestCase
     private function subcommands(FakeGitRunner $runner): array
     {
         return array_map(
-            static fn (array $argv): string => implode(' ', array_slice($argv, 5)),
+            static function (array $argv): string {
+                $args = array_slice($argv, 5);
+                while (($args[0] ?? null) === '-c') {
+                    $args = array_slice($args, 2);
+                }
+
+                return implode(' ', $args);
+            },
             $runner->commands,
         );
     }

@@ -25,11 +25,17 @@ class ReconcileTasksCommand extends Command
         $retired = TaskReconciler::reconcile($dryRun, $olderThan);
 
         $prefix = $dryRun ? '[dry-run] ' : '';
-        $this->info($prefix . 'Closed ' . count($settled) . ' deploy log(s) left running by a process that is gone.'
-            . ($settled === [] ? '' : ' accounts: ' . implode(', ', $settled)));
-        $this->info($prefix . 'Retired ' . count($retired) . ' orphaned task(s).'
-            . ($retired === [] ? '' : ' ids: ' . implode(', ', $retired)));
+        $this->info($prefix.'Closed '.count($settled).' deploy log(s) left running by a process that is gone.'
+            .($settled === [] ? '' : ' accounts: '.implode(', ', $settled)));
+        $this->info($prefix.self::summary('Retired', $retired[TaskReconciler::RETIRED_ORPHANED], 'orphaned task(s).'));
+        $this->info($prefix.self::summary('Cancelled', $retired[TaskReconciler::RETIRED_CANCELLED], 'task(s) whose deploy was cancelled.'));
 
         return 0;
+    }
+
+    /** @param list<int> $ids */
+    private static function summary(string $verb, array $ids, string $what): string
+    {
+        return $verb.' '.count($ids).' '.$what.($ids === [] ? '' : ' ids: '.implode(', ', $ids));
     }
 }

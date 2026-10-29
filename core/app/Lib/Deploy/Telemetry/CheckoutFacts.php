@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Source\GitUrl;
 
 /**
@@ -41,9 +42,9 @@ final class CheckoutFacts
     /**
      * Read one checkout.
      *
-     * @param callable(list<string>): ?string $run runs a git argv and returns
-     *        its stdout, or null when the command failed. Injected rather than
-     *        called directly so this class stays free of the process layer.
+     * @param  callable(list<string>): ?string  $run  runs a git argv and returns
+     *                                                its stdout, or null when the command failed. Injected rather than
+     *                                                called directly so this class stays free of the process layer.
      * @return array{
      *   present: bool,
      *   remote?: ?string,
@@ -67,7 +68,7 @@ final class CheckoutFacts
             // safe.directory because the tree belongs to the account user and
             // this does not run as them; -C rather than a chdir so nothing
             // about the caller's working directory matters.
-            $out = $run(['git', '-c', 'safe.directory=' . $dir, '-C', $dir, ...$args]);
+            $out = $run(['git', '-c', 'safe.directory='.$dir, '-C', $dir, ...$args]);
 
             return is_string($out) ? trim($out) : null;
         };
@@ -87,8 +88,8 @@ final class CheckoutFacts
             'commit' => $commit,
             'committed_at' => $committedAt,
             'shallow' => $git(['rev-parse', '--is-shallow-repository']) === 'true',
-            'submodules' => self::isFile($dir . '/.gitmodules'),
-            'lfs' => self::usesLfs($dir . '/.gitattributes'),
+            'submodules' => self::isFile($dir.'/.gitmodules'),
+            'lfs' => self::usesLfs($dir.'/.gitattributes'),
         ];
     }
 
@@ -101,7 +102,7 @@ final class CheckoutFacts
      * `https://user:token@host/...` written into it, and that string must not
      * survive being read.
      *
-     * @param callable(list<string>): ?string $git
+     * @param  callable(list<string>): ?string  $git
      */
     private static function remote(callable $git): ?string
     {
@@ -120,7 +121,7 @@ final class CheckoutFacts
      * an unborn HEAD -- a `git init` no deploy ever committed into -- fails
      * the whole command rather than half of it.
      *
-     * @param callable(list<string>): ?string $git
+     * @param  callable(list<string>): ?string  $git
      * @return array{0: ?string, 1: ?int}
      */
     private static function head(callable $git): array
@@ -140,7 +141,7 @@ final class CheckoutFacts
      * detached case, and it is worth telling apart from a branch nobody could
      * read: the first is normal, the second means the checkout is broken.
      *
-     * @param callable(list<string>): ?string $git
+     * @param  callable(list<string>): ?string  $git
      */
     private static function branch(callable $git): ?string
     {
@@ -164,11 +165,11 @@ final class CheckoutFacts
      */
     private static function usesLfs(string $path): bool
     {
-        if (!self::isFile($path)) {
+        if (! self::isFile($path)) {
             return false;
         }
 
-        $contents = @file_get_contents($path, false, null, 0, 64 * 1024);
+        $contents = AccountHomeRead::contents($path, 64 * 1024);
 
         return is_string($contents) && str_contains($contents, 'filter=lfs');
     }

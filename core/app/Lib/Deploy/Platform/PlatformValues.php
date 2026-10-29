@@ -4,20 +4,20 @@ namespace App\Lib\Deploy\Platform;
 
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
-use App\Lib\Deploy\Platform\Runtime\ImageResolver;
-use App\Lib\Deploy\Platform\Runtime\Requirement;
-use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Probes\AngularOutputProbe;
 use App\Lib\Deploy\Platform\Probes\BundlerSpaProbe;
 use App\Lib\Deploy\Platform\Probes\NextWorkspaceProbe;
 use App\Lib\Deploy\Platform\Probes\ViteOutputDir;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Runtime\GoRuntime;
+use App\Lib\Deploy\Platform\Runtime\ImageResolver;
 use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
-use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
-use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Platform\Runtime\Php\AssetPublish;
+use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
+use App\Lib\Deploy\Platform\Runtime\Requirement;
+use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
+use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 
 /**
  * Fills in the parts of a decision that depend on the project, not the
@@ -41,7 +41,7 @@ final class PlatformValues
             return $context;
         }
 
-        $dir = $context->projectDir . '/' . $manifest->appRoot;
+        $dir = $context->projectDir.'/'.$manifest->appRoot;
 
         return is_dir($dir) ? ProjectContext::at($dir) : $context;
     }
@@ -50,7 +50,7 @@ final class PlatformValues
      * The Next workspace the probe found, when the repository root has no
      * package.json to install it from; null otherwise.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function standaloneNextWorkspace(
         PlatformManifest $manifest,
@@ -63,7 +63,7 @@ final class PlatformValues
             return null;
         }
         $relative = AppRoot::relative(['app_root' => (string) ($decision['workspace_relative'] ?? '')]);
-        if ($relative === '' || !is_file($context->projectDir . '/' . $relative . '/package.json')) {
+        if ($relative === '' || ! is_file($context->projectDir.'/'.$relative.'/package.json')) {
             return null;
         }
 
@@ -73,7 +73,7 @@ final class PlatformValues
     /**
      * Resolve every project-dependent field of a decision, in place.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public static function apply(
@@ -92,7 +92,7 @@ final class PlatformValues
             $decision['app_root'] = $standalone;
             $decision['workspace_relative'] = '';
             unset($decision['workspace_package'], $decision['workspace_slug']);
-            $runtimeContext = ProjectContext::at($context->projectDir . '/' . $standalone);
+            $runtimeContext = ProjectContext::at($context->projectDir.'/'.$standalone);
         }
 
         // A manifest naming its own `image` has answered the question, so an
@@ -115,9 +115,9 @@ final class PlatformValues
         // A recipe names its platform, so no detect ran to find the Next
         // workspace; under an app_root it is looked for there.
         if ($manifest->appRoot !== '' && $manifest->outputFrom === 'next-workspace'
-            && !isset($decision['workspace_relative'])
+            && ! isset($decision['workspace_relative'])
         ) {
-            $workspace = (new NextWorkspaceProbe())->evaluate($runtimeContext);
+            $workspace = (new NextWorkspaceProbe)->evaluate($runtimeContext);
             $decision += is_array($workspace) ? $workspace : [];
         }
         $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
@@ -186,7 +186,7 @@ final class PlatformValues
      * so a recipe's `stage: build` never ran. Unchanged when the
      * app config declares no build command.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     public static function withAppConfigBuild(
@@ -231,8 +231,8 @@ final class PlatformValues
      * uses the same vocabulary as the manifest it extends. Anything else is
      * returned unchanged.
      *
-     * @param array<string, mixed> $decision the platform's, for its output
-     *        directory and workspace
+     * @param  array<string, mixed>  $decision  the platform's, for its output
+     *                                          directory and workspace
      */
     public static function resolveJsPlaceholder(
         PlatformManifest $manifest,
@@ -246,7 +246,7 @@ final class PlatformValues
         [, $kind] = $m;
         $default = isset($m[2]) ? trim($m[2]) : '';
         $context = self::appRootContext($manifest, $context);
-        if (!$context->hasFile('package.json')) {
+        if (! $context->hasFile('package.json')) {
             return $default;
         }
 
@@ -268,7 +268,7 @@ final class PlatformValues
         }
         $resolved = NodeRuntime::finalizeProject($partial, $context->projectDir, $context->files);
 
-        return (string) ($resolved[$kind . '_command'] ?? $default);
+        return (string) ($resolved[$kind.'_command'] ?? $default);
     }
 
     /**
@@ -294,7 +294,7 @@ final class PlatformValues
      * Project the resolved commands back onto the legacy decision fields the
      * Dockerfile generators read.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function applyResolvedCommands(PlatformManifest $manifest, array $decision): array
@@ -358,7 +358,7 @@ final class PlatformValues
         if ($manifest->runtimeImage === null || $manifest->requires === []) {
             return $manifest->runtimeImage;
         }
-        if (!str_contains($manifest->runtimeImage, '{version}')) {
+        if (! str_contains($manifest->runtimeImage, '{version}')) {
             return $manifest->runtimeImage;
         }
 
@@ -372,7 +372,7 @@ final class PlatformValues
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function outputDirectory(
         PlatformManifest $manifest,
@@ -402,7 +402,7 @@ final class PlatformValues
     {
         $relative = trim($relative, '/');
 
-        return $relative === '' ? $output : $relative . '/' . $output;
+        return $relative === '' ? $output : $relative.'/'.$output;
     }
 
     /**
@@ -423,7 +423,7 @@ final class PlatformValues
      * Hand the manifest's declared defaults to the recipe layer's package
      * manager resolution and take back what it decides.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private static function applyJs(
@@ -459,7 +459,7 @@ final class PlatformValues
      * The manifest's default build, naming the Angular project whose output is
      * served when the workspace holds several.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     private static function defaultBuild(PlatformManifest $manifest, ProjectContext $context, array $decision): string
     {

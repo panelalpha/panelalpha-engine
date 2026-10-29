@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Exceptions\ProblemException;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
@@ -131,6 +132,83 @@ class FileManagerWritesAsAccountTest extends TestCase
         $files->remove('away');
         $this->assertFalse(is_link($this->homeDir . '/away'));
         $this->assertFileExists('/etc/hostname');
+    }
+
+    /** A classic project's home belongs to root: an upload to `/` must be refused on `path`, not with a shell error. */
+    public function test_an_upload_into_a_folder_the_account_cannot_write_to_is_refused_on_path(): void
+    {
+        $this->assertRefusedAsNotWritable('', '/', fn (FileManager $files) => $files->moveUploadedFile('/', $this->upload()));
+    }
+
+    public function test_an_upload_into_a_missing_folder_below_one_the_account_cannot_write_to_is_refused_on_path(): void
+    {
+        $this->assertRefusedAsNotWritable('', '/media/new', fn (FileManager $files) => $files->moveUploadedFile('media/new', $this->upload()));
+    }
+
+    public function test_a_write_into_a_folder_the_account_cannot_write_to_is_refused_on_path(): void
+    {
+        mkdir($this->homeDir . '/locked');
+        $this->assertRefusedAsNotWritable('/locked', '/locked', fn (FileManager $files) => $files->putContents('locked/index.html', 'x'));
+    }
+
+    public function test_a_mkdir_in_a_folder_the_account_cannot_write_to_is_refused_on_path(): void
+    {
+        $this->assertRefusedAsNotWritable('', '/', fn (FileManager $files) => $files->mkdir('blog'));
+    }
+
+    /** The folder named is the one that exists and is refused, not the missing one above the new folder. */
+    public function test_a_mkdir_with_parents_below_a_folder_the_account_cannot_write_to_is_refused_on_path(): void
+    {
+        $this->assertRefusedAsNotWritable('', '/', fn (FileManager $files) => $files->mkdir('media/new', true));
+
+        mkdir($this->homeDir . '/locked');
+        $this->assertRefusedAsNotWritable('/locked', '/locked', fn (FileManager $files) => $files->mkdir('locked/media/new', true));
+    }
+
+    public function test_a_mkdir_with_parents_of_a_folder_that_exists_still_succeeds_in_a_folder_it_cannot_write_to(): void
+    {
+        mkdir($this->homeDir . '/site');
+        chmod($this->homeDir, 0555);
+        try {
+            $this->files()->mkdir('site', true);
+        } finally {
+            chmod($this->homeDir, 0755);
+        }
+
+        $this->assertDirectoryExists($this->homeDir . '/site');
+    }
+
+    public function test_a_file_the_account_can_write_is_still_replaced_in_a_folder_it_cannot_write_to(): void
+    {
+        file_put_contents($this->homeDir . '/mine.txt', 'old');
+        chmod($this->homeDir, 0555);
+        try {
+            $this->files()->putContents('mine.txt', 'new');
+        } finally {
+            chmod($this->homeDir, 0755);
+        }
+
+        $this->assertSame('new', file_get_contents($this->homeDir . '/mine.txt'));
+    }
+
+    private function assertRefusedAsNotWritable(string $locked, string $named, callable $write): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root writes to a 0555 directory.');
+        }
+        chmod($this->homeDir . $locked, 0555);
+        try {
+            $write($this->files());
+            $this->fail('a file was written into a folder the account cannot write to');
+        } catch (ProblemException $e) {
+            $this->assertSame(422, $e->status);
+            $this->assertSame('path', $e->problems[0]['field']);
+            $this->assertSame('not_writable', $e->problems[0]['code']);
+            $this->assertSame("{$named} is not a folder the project's account can write to: choose a folder inside the project.", $e->problems[0]['message']);
+        } finally {
+            chmod($this->homeDir . $locked, 0755);
+        }
+        $this->assertSame([], glob($this->homeDir . $locked . '/{photo.jpg,index.html,media,blog}', GLOB_BRACE) ?: []);
     }
 
     private function upload(): UploadedFile

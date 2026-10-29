@@ -17,7 +17,6 @@ final class PhphostingSurfacesCutoverTest extends TestCase
             'Http/Controllers/User/FtpAccountController.php',
             'Http/Controllers/User/CronJobController.php',
             'Http/Controllers/User/PhpController.php',
-            'Http/Controllers/User/WpCliController.php',
             'Models/FtpAccount.php',
             'Console/Commands/Apache/EnableMod.php',
             'Console/Commands/Apache/DisableMod.php',

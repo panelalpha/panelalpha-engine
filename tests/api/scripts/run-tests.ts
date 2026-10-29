@@ -13,6 +13,7 @@ import {
 } from '@/config/parallelism';
 import { currentRunId, startLeaseHeartbeat } from '@/fixtures/helper/setup-state';
 import { insecureFetch } from '@/helpers/insecure-fetch';
+import { testNetwork } from '@/helpers/test-network';
 import { ensureEngineEnv, suiteRoot } from './lib/engine-env';
 import { beginLeakCheck, finishLeakCheck, leakCheckEnabled } from './lib/leak-check/run';
 import {
@@ -84,7 +85,9 @@ function printReportHint(split: boolean): void {
   const url = reportListenUrl(resolvePublicReportHost(suiteRoot), port);
   console.log(`\nHTML report: bun run report`);
   console.log(`  then open ${url}`);
-  console.log(`  (or tunnel: ssh -L ${port}:127.0.0.1:${port} <user>@${new URL(url).hostname})\n`);
+  console.log(
+    `  (or tunnel: ssh -L ${port}:${testNetwork.LOOPBACK}:${port} <user>@${new URL(url).hostname})\n`
+  );
   if (split) {
     const profile = process.env.TEST_ENV?.trim();
     const suffix = profile ? `-${profile}` : '';

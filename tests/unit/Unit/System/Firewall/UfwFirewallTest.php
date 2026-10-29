@@ -13,12 +13,21 @@ use App\System\Firewall\Ufw\UfwRules;
 use App\System\ProcessRunner;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\Fail2banHost;
 use Tests\Support\FakeProcess;
+use Tests\Support\TestNetwork;
 
 class UfwFirewallTest extends TestCase
 {
-    private const OFFICE = '### tuple ### allow tcp 22 0.0.0.0/0 any 203.0.113.7 in comment=6f6666696365';
-    private const BAN = '### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in';
+    private static function office(): string
+    {
+        return '### tuple ### allow tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in comment=6f6666696365';
+    }
+
+    private static function ban(): string
+    {
+        return '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in';
+    }
 
     private string $lock;
     private string $trustedLock;
@@ -63,8 +72,10 @@ class UfwFirewallTest extends TestCase
      * delete leaves the store as $deleted instead. With $unbanned set, the
      * store reads as that once fail2ban is told to unban: it banned again.
      */
-    private function host(string $rules = self::OFFICE . "\n" . self::BAN, string $ufwOut = 'Rule added', int $ufwCode = 0, ?string $written = null, ?string $deleted = null): ProcessRunner
+    private function host(?string $rules = null, string $ufwOut = 'Rule added', int $ufwCode = 0, ?string $written = null, ?string $deleted = null): ProcessRunner
     {
+        $rules ??= self::office() . "\n" . self::ban();
+
         return new class ($rules, $ufwOut, $ufwCode, $this->lock, $written, $deleted) implements ProcessRunner {
             /** @var list<list<string>> */
             public array $ran = [];
@@ -201,7 +212,7 @@ class UfwFirewallTest extends TestCase
                 for ($i = 0; $i + 1 < count($a); $i += 2) {
                     $kv[$a[$i]] = $a[$i + 1];
                 }
-                $any = static fn (string $v): string => $v === 'any' ? '0.0.0.0/0' : $v;
+                $any = static fn (string $v): string => $v === 'any' ? TestNetwork::ANY_CIDR : $v;
                 $match = implode(' ', [$kv['proto'], $kv['port'], $any($kv['to']), 'any', $any($kv['from']), $dir]);
                 $new = ($route ? 'route:' : '') . "{$action} {$match}" . ($kv['comment'] === '' ? '' : ' comment=' . bin2hex($kv['comment']));
                 foreach ($this->tuples as $i => $t) {
@@ -288,13 +299,13 @@ class UfwFirewallTest extends TestCase
 
     public function test_status_lists_the_stored_rules_iptables_refuses_by_the_rule_to_delete(): void
     {
-        $refused = self::OFFICE . "\tinvalid port/service `08080' specified\n/etc/ufw/user.rules line 2\tunknown option\n";
+        $refused = self::office() . "\tinvalid port/service `08080' specified\n/etc/ufw/user.rules line 2\tunknown option\n";
         $host = $this->failing(['bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --refused' => FakeProcess::ok($refused)]);
 
         $status = $this->firewall($host)->status()->toArray();
 
         $this->assertSame([
-            ['id' => UfwRules::parseTuple(self::OFFICE)?->id(), 'rule' => 'allow in tcp 22 from 203.0.113.7', 'error' => "invalid port/service `08080' specified"],
+            ['id' => UfwRules::parseTuple(self::office())?->id(), 'rule' => 'allow in tcp 22 from ' . TestNetwork::public(7), 'error' => "invalid port/service `08080' specified"],
             ['id' => null, 'rule' => '/etc/ufw/user.rules line 2', 'error' => 'unknown option'],
         ], $status['refused_rules']);
         $this->assertNotNull($status['refused_rules'][0]['id']);
@@ -312,81 +323,81 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_deny_is_put_above_the_allows(): void
     {
-        $host = $this->host(self::OFFICE, written: self::OFFICE . "\n" . self::BAN);
-        $rule = ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9/32']));
+        $host = $this->host(self::office(), written: self::office() . "\n" . self::ban());
+        $rule = ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9) . '/32']));
 
-        $this->assertSame(['ufw', 'prepend', 'deny', 'in', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
-        $this->assertSame(['ufw', 'route', 'prepend', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[1], 'and above the published ports\' allows');
-        $this->assertSame('198.51.100.9', $rule->source);
+        $this->assertSame(['ufw', 'prepend', 'deny', 'in', 'from', TestNetwork::public2(9), 'to', 'any'], $this->ufwCalls($host)[0]);
+        $this->assertSame(['ufw', 'route', 'prepend', 'deny', 'from', TestNetwork::public2(9), 'to', 'any'], $this->ufwCalls($host)[1], 'and above the published ports\' allows');
+        $this->assertSame(TestNetwork::public2(9), $rule->source);
     }
 
     public function test_an_allow_is_appended(): void
     {
-        $host = $this->host(self::BAN, written: self::OFFICE . "\n" . self::BAN);
-        ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']));
+        $host = $this->host(self::ban(), written: self::office() . "\n" . self::ban());
+        ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]));
 
         $this->assertSame('allow', $this->ufwCalls($host)[0][1]);
     }
 
     public function test_a_rule_for_published_ports_is_a_ufw_route_rule(): void
     {
-        $routes = "### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in\n### tuple ### route:allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in";
-        $allow = '### tuple ### route:allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in';
-        $host = $this->host(self::OFFICE, written: self::OFFICE . "\n" . $allow);
+        $routes = '### tuple ### route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in\n### tuple ### route:allow tcp 8080 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::ANY_CIDR . ' in';
+        $allow = '### tuple ### route:allow tcp 8080 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::ANY_CIDR . ' in';
+        $host = $this->host(self::office(), written: self::office() . "\n" . $allow);
         $firewall = $this->firewall($host);
         $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published']);
 
         $this->assertSame('published', $firewall->addRule($rule)->scope);
         /** @var object{written: ?string} $host */
-        $host->written = self::OFFICE . "\n" . $routes;
-        $firewall->addRule($rule->with(['action' => 'deny', 'source' => '198.51.100.9', 'port' => null, 'protocol' => null]));
+        $host->written = self::office() . "\n" . $routes;
+        $firewall->addRule($rule->with(['action' => 'deny', 'source' => TestNetwork::public2(9), 'port' => null, 'protocol' => null]));
         $firewall->deleteRule($rule->id());
 
         $this->assertSame([
             ['ufw', 'route', 'allow', 'proto', 'tcp', 'from', 'any', 'to', 'any', 'port', '8080'],
-            ['ufw', 'route', 'prepend', 'deny', 'from', '198.51.100.9', 'to', 'any'],
+            ['ufw', 'route', 'prepend', 'deny', 'from', TestNetwork::public2(9), 'to', 'any'],
             ['ufw', 'route', 'delete', 'allow', 'proto', 'tcp', 'from', 'any', 'to', 'any', 'port', '8080'],
         ], array_slice($this->ufwCalls($host), 0, 3));
     }
 
     public function test_deleting_a_ban_on_published_ports_lifts_it_in_fail2ban_too(): void
     {
-        $host = $this->host('### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+        $host = $this->host('### tuple ### route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
 
-        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published'])->id());
+        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9), 'scope' => 'published'])->id());
 
-        $this->assertSame(['ufw', 'route', 'delete', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
+        $this->assertSame(['ufw', 'route', 'delete', 'deny', 'from', TestNetwork::public2(9), 'to', 'any'], $this->ufwCalls($host)[0]);
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertContains(['fail2ban-client', 'unban', '198.51.100.9'], $host->ran);
+        $this->assertContains(['fail2ban-client', 'unban', TestNetwork::public2(9)], $host->ran);
     }
 
     public function test_a_rule_is_deleted_by_what_it_matches_not_by_its_number(): void
     {
         $host = $this->host();
         $firewall = $this->firewall($host);
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         $deleted = $firewall->deleteRule($office->id());
 
         $this->assertSame('office', $deleted->comment);
-        $this->assertSame(['ufw', 'delete', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22'], $this->ufwCalls($host)[0]);
+        $this->assertSame(['ufw', 'delete', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22'], $this->ufwCalls($host)[0]);
     }
 
     public function test_deleting_a_fail2ban_ban_lifts_it_in_fail2ban_too(): void
     {
-        $host = $this->host("### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment=" . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+        $host = $this->host('### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
         $firewall = $this->firewall($host);
 
-        $firewall->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
+        $firewall->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)])->id());
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertContains(['fail2ban-client', 'unban', '198.51.100.9'], $host->ran);
+        $this->assertContains(['fail2ban-client', 'unban', TestNetwork::public2(9)], $host->ran);
     }
 
     public function test_deleting_any_other_rule_leaves_fail2ban_alone(): void
     {
         $host = $this->host();
-        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
+        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)])->id());
 
         /** @var object{ran: list<list<string>>} $host */
         $this->assertSame([], array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client'));
@@ -395,12 +406,12 @@ class UfwFirewallTest extends TestCase
     public function test_deleting_an_allow_that_kept_a_bans_comment_leaves_fail2ban_alone(): void
     {
         // A ban made an allow keeps fail2ban's comment; fail2ban may hold a new ban for the address.
-        $host = $this->host('### tuple ### allow any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+        $host = $this->host('### tuple ### allow any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
 
-        $this->firewall($host)->deleteRule(FirewallRule::fromArray(['action' => 'allow', 'source' => '198.51.100.9'])->id());
+        $this->firewall($host)->deleteRule(FirewallRule::fromArray(['action' => 'allow', 'source' => TestNetwork::public2(9)])->id());
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame([['ufw', 'delete', 'allow', 'in', 'from', '198.51.100.9', 'to', 'any']], $this->ufwCalls($host));
+        $this->assertSame([['ufw', 'delete', 'allow', 'in', 'from', TestNetwork::public2(9), 'to', 'any']], $this->ufwCalls($host));
         $this->assertSame([], array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client')));
     }
 
@@ -408,20 +419,20 @@ class UfwFirewallTest extends TestCase
     {
         $host = $this->host();
         $firewall = $this->firewall($host);
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         $firewall->updateRule($office->id(), $office->with(['comment' => 'home']));
 
         $calls = $this->ufwCalls($host);
         $this->assertSame('delete', $calls[0][1]);
-        $this->assertSame(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'home'], $calls[1]);
+        $this->assertSame(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22', 'comment', 'home'], $calls[1]);
     }
 
     public function test_a_changed_match_adds_the_new_rule_before_removing_the_old(): void
     {
-        $host = $this->host(written: self::OFFICE . "\n" . self::BAN . "\n### tuple ### allow tcp 2222 0.0.0.0/0 any 203.0.113.7 in");
+        $host = $this->host(written: self::office() . "\n" . self::ban() . "\n### tuple ### allow tcp 2222 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in');
         $firewall = $this->firewall($host);
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         $new = $firewall->updateRule($office->id(), $office->with(['port' => '2222']));
 
@@ -435,26 +446,26 @@ class UfwFirewallTest extends TestCase
     {
         // ufw keeps one rule per match: added first, the new rule would be skipped or merged into the old one.
         $c = 'comment=' . bin2hex('office');
-        $deny = "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in\n### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in";
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
-        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $deny = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . " in\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
         $cases = [
-            'a new action' => [self::OFFICE, $office, $office->with(['action' => 'deny', 'scope' => 'both']), "### tuple ### deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}\n### tuple ### route:deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}", [
-                ['ufw', 'delete', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22'],
-                ['ufw', 'prepend', 'deny', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
-                ['ufw', 'route', 'prepend', 'deny', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
+            'a new action' => [self::office(), $office, $office->with(['action' => 'deny', 'scope' => 'both']), '### tuple ### deny tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . " in {$c}\n### tuple ### route:deny tcp 22 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . " in {$c}", [
+                ['ufw', 'delete', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22'],
+                ['ufw', 'prepend', 'deny', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22', 'comment', 'office'],
+                ['ufw', 'route', 'prepend', 'deny', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22', 'comment', 'office'],
             ]],
-            'both ways' => [$deny, $both, $both->with(['direction' => 'both']), self::BOTH, [
-                ['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
-                ['ufw', 'route', 'delete', 'deny', 'from', '203.0.113.7', 'to', 'any'],
-                ['ufw', 'prepend', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
-                ['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', '203.0.113.7'],
-                ['ufw', 'route', 'prepend', 'deny', 'from', '203.0.113.7', 'to', 'any'],
+            'both ways' => [$deny, $both, $both->with(['direction' => 'both']), self::both(), [
+                ['ufw', 'delete', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'],
+                ['ufw', 'route', 'delete', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
+                ['ufw', 'prepend', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'],
+                ['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', TestNetwork::public(7)],
+                ['ufw', 'route', 'prepend', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
             ]],
-            'published ports only' => [$deny, $both, $both->with(['scope' => 'published']), '### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in', [
-                ['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
-                ['ufw', 'route', 'delete', 'deny', 'from', '203.0.113.7', 'to', 'any'],
-                ['ufw', 'route', 'prepend', 'deny', 'from', '203.0.113.7', 'to', 'any'],
+            'published ports only' => [$deny, $both, $both->with(['scope' => 'published']), '### tuple ### route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in', [
+                ['ufw', 'delete', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'],
+                ['ufw', 'route', 'delete', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
+                ['ufw', 'route', 'prepend', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
             ]],
         ];
         foreach ($cases as $case => [$rules, $old, $edit, $written, $calls]) {
@@ -469,9 +480,9 @@ class UfwFirewallTest extends TestCase
 
     public function test_an_edit_that_keeps_one_of_its_ufw_rules_is_still_refused_onto_another_rule(): void
     {
-        $app = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'scope' => 'published']);
-        $host = $this->host(self::OFFICE . "\n### tuple ### route:allow tcp 22 0.0.0.0/0 any 203.0.113.7 in");
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $app = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'scope' => 'published']);
+        $host = $this->host(self::office() . "\n### tuple ### route:allow tcp 22 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in');
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         try {
             // As a deny both ways it would cover published ports too, where the allow for the app holds that match.
@@ -485,9 +496,9 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_ban_edited_in_place_is_lifted_in_fail2ban_before_the_new_rule_goes_in(): void
     {
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
-        $written = "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in\n### tuple ### deny any any 198.51.100.9 any 0.0.0.0/0 out\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in";
-        $host = $this->host('### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'), written: $written, deleted: '');
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]);
+        $written = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in\n### tuple ### deny any any " . TestNetwork::public2(9) . ' any ' . TestNetwork::ANY_CIDR . " out\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in';
+        $host = $this->host('### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'), written: $written, deleted: '');
 
         $this->firewall($host)->updateRule($ban->id(), $ban->with(['direction' => 'both']));
 
@@ -510,8 +521,8 @@ class UfwFirewallTest extends TestCase
     public function test_a_ban_fail2ban_makes_again_while_its_edit_waits_for_the_lock_is_left_as_it_is(): void
     {
         $f2b = 'comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd');
-        $banned = "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}";
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
+        $banned = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b}\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b}";
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]);
         $edits = [
             'a deny both ways, whose inbound halves ufw would skip' => [$ban->with(['direction' => 'both']), ['prepend', 'deny', 'out']],
             'an allow, which ufw would write over the new ban' => [$ban->with(['action' => 'allow', 'scope' => 'host']), ['allow', 'in']],
@@ -524,7 +535,7 @@ class UfwFirewallTest extends TestCase
                 $this->firewall($host)->updateRule($ban->id(), $edit);
                 $this->fail("{$case}: the edit went in over the new ban");
             } catch (FirewallException $e) {
-                $this->assertStringContainsString('Rule ' . $ban->id() . ' (deny in from 198.51.100.9 on host and published ports) already matches', $e->getMessage(), $case);
+                $this->assertStringContainsString('Rule ' . $ban->id() . ' (deny in from ' . TestNetwork::public2(9) . ' on host and published ports) already matches', $e->getMessage(), $case);
             }
             $this->assertSame([], array_values(array_filter($this->ufwCalls($host), fn (array $c): bool => array_slice($c, 1, count($newHalf)) === $newHalf)), "{$case}: nothing of the edit was written");
         }
@@ -534,11 +545,11 @@ class UfwFirewallTest extends TestCase
     {
         $old = 'comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd');
         $new = 'comment=' . bin2hex('by Fail2Ban after 3 attempts against sshd');
-        $outbound = "### tuple ### deny any any 198.51.100.9 any 0.0.0.0/0 out {$old}";
-        $both = "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$old}\n{$outbound}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$old}";
-        $rebanned = "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$new}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$new}";
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '198.51.100.9']);
-        $reban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
+        $outbound = '### tuple ### deny any any ' . TestNetwork::public2(9) . ' any ' . TestNetwork::ANY_CIDR . " out {$old}";
+        $both = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$old}\n{$outbound}\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$old}";
+        $rebanned = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$new}\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$new}";
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public2(9)]);
+        $reban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]);
         // fail2ban bans the address again between the locks; putting the old ban back adds only its outbound half.
         $host = $this->host($both, written: "{$rebanned}\n{$outbound}", deleted: $rebanned);
 
@@ -546,9 +557,9 @@ class UfwFirewallTest extends TestCase
             $this->firewall($host)->updateRule($ban->id(), $ban->with(['direction' => 'in']));
             $this->fail('the edit went in over the new ban');
         } catch (FirewallException $e) {
-            $this->assertStringContainsString('Rule ' . $reban->id() . ' (deny in from 198.51.100.9 on host and published ports) already matches', $e->getMessage());
+            $this->assertStringContainsString('Rule ' . $reban->id() . ' (deny in from ' . TestNetwork::public2(9) . ' on host and published ports) already matches', $e->getMessage());
         }
-        $this->assertContains(['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', '198.51.100.9', 'comment', 'by Fail2Ban after 5 attempts against sshd'], $this->ufwCalls($host), 'the old ban was put back');
+        $this->assertContains(['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', TestNetwork::public2(9), 'comment', 'by Fail2Ban after 5 attempts against sshd'], $this->ufwCalls($host), 'the old ban was put back');
     }
 
     public function test_an_allow_that_kept_a_bans_comment_is_edited_under_one_lock_without_lifting_a_new_ban(): void
@@ -557,22 +568,22 @@ class UfwFirewallTest extends TestCase
         // allow, put back after the refusal or re-added, would be appended over the new ban.
         $f2b = 'comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd');
         $new = 'comment=' . bin2hex('by Fail2Ban after 3 attempts against sshd');
-        $allow = FirewallRule::fromArray(['action' => 'allow', 'source' => '198.51.100.9', 'comment' => 'by Fail2Ban after 5 attempts against sshd']);
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'source' => TestNetwork::public2(9), 'comment' => 'by Fail2Ban after 5 attempts against sshd']);
         $edits = [
-            'made a deny' => [$allow->with(['action' => 'deny', 'scope' => 'both']), "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}", [
+            'made a deny' => [$allow->with(['action' => 'deny', 'scope' => 'both']), '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b}\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b}", [
                 ['ufw', 'delete', true],
                 ['ufw', 'prepend', true],
                 ['ufw', 'route', true],
             ]],
-            'given a new comment' => [$allow->with(['comment' => 'office']), '### tuple ### allow any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('office'), [
+            'given a new comment' => [$allow->with(['comment' => 'office']), '### tuple ### allow any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('office'), [
                 ['ufw', 'delete', true],
                 ['ufw', 'allow', true],
             ]],
         ];
         foreach ($edits as $case => [$edit, $written, $steps]) {
-            $host = $this->host("### tuple ### allow any any 0.0.0.0/0 any 198.51.100.9 in {$f2b}", written: $written, deleted: '');
+            $host = $this->host('### tuple ### allow any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b}", written: $written, deleted: '');
             /** @var object{ran: list<list<string>>, held: list<bool>, unbanned: ?string} $host */
-            $host->unbanned = "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in {$new}\n### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$new}";
+            $host->unbanned = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$new}\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$new}";
 
             $rule = $this->firewall($host)->updateRule($allow->id(), $edit);
 
@@ -588,7 +599,7 @@ class UfwFirewallTest extends TestCase
     }
 
     /** The engine's own SSH allow, as scripts/firewall/ufw.sh writes it. */
-    private const SSH = '### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in comment=70616e656c616c7068613a20737368';
+    private const SSH = '### tuple ### allow tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::ANY_CIDR . ' in comment=70616e656c616c7068613a20737368';
 
     /** Adds $rule to a host holding $rules, expecting a refusal that names $existing; returns the message. */
     private function refusedAdd(string $rules, FirewallRule $rule, FirewallRule $existing): string
@@ -617,10 +628,10 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_duplicate_of_any_rule_is_refused_whatever_its_comment(): void
     {
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
 
-        $message = $this->refusedAdd(self::OFFICE, $office->with(['comment' => 'home']), $office);
-        $this->refusedAdd(self::OFFICE, $office, $office);
+        $message = $this->refusedAdd(self::office(), $office->with(['comment' => 'home']), $office);
+        $this->refusedAdd(self::office(), $office, $office);
 
         $this->assertStringEndsWith('change or delete that rule instead.', $message);
     }
@@ -628,26 +639,26 @@ class UfwFirewallTest extends TestCase
     public function test_a_rule_that_differs_only_in_its_action_is_refused(): void
     {
         // Appended, ufw would turn the deny into the allow; inserted, it would skip the host's deny and write only the route one.
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]);
 
-        $this->refusedAdd(self::OFFICE, $office->with(['action' => 'deny']), $office);
-        $this->refusedAdd(self::BAN, $ban->with(['action' => 'allow', 'scope' => 'host']), $ban);
+        $this->refusedAdd(self::office(), $office->with(['action' => 'deny']), $office);
+        $this->refusedAdd(self::ban(), $ban->with(['action' => 'allow', 'scope' => 'host']), $ban);
     }
 
     public function test_a_rule_sharing_one_ufw_rule_with_another_is_refused(): void
     {
-        $published = '### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in';
-        $outbound = '### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out';
-        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $published = '### tuple ### route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
+        $outbound = '### tuple ### deny any any ' . TestNetwork::public(7) . ' any ' . TestNetwork::ANY_CIDR . ' out';
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
 
-        $this->refusedAdd($published, $deny, FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'published']));
-        $this->refusedAdd($outbound, $deny->with(['direction' => 'both']), FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '203.0.113.7']));
+        $this->refusedAdd($published, $deny, FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7), 'scope' => 'published']));
+        $this->refusedAdd($outbound, $deny->with(['direction' => 'both']), FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => TestNetwork::public(7)]));
     }
 
     public function test_a_rule_written_on_the_host_is_not_written_over_either(): void
     {
-        $limit = '### tuple ### limit tcp 22 0.0.0.0/0 any 0.0.0.0/0 in';
+        $limit = '### tuple ### limit tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::ANY_CIDR . ' in';
 
         $message = $this->refusedAdd($limit, FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22']), UfwRules::parse($limit)[0]);
 
@@ -656,43 +667,43 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_refusal_says_which_ports_the_rule_already_there_is_for(): void
     {
-        $api = '### tuple ### route:allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=' . bin2hex('panelalpha: engine api');
-        $deny = "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in\n### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in";
+        $api = '### tuple ### route:allow tcp 2011 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::ANY_CIDR . ' in comment=' . bin2hex('panelalpha: engine api');
+        $deny = '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . " in\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
         $published = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'scope' => 'published']);
-        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]);
 
         $this->assertStringContainsString('(allow in tcp 2011 on published ports)', $this->refusedAdd($api, $published->with(['comment' => 'mine']), $published));
-        $this->assertStringContainsString('(deny in from 203.0.113.7 on host and published ports)', $this->refusedAdd($deny, $both->with(['action' => 'allow', 'scope' => 'published']), $both));
+        $this->assertStringContainsString('(deny in from ' . TestNetwork::public(7) . ' on host and published ports)', $this->refusedAdd($deny, $both->with(['action' => 'allow', 'scope' => 'published']), $both));
     }
 
     public function test_a_rule_that_matches_nothing_already_there_is_added(): void
     {
-        $host = $this->host(self::SSH . "\n" . self::OFFICE, written: self::SSH . "\n" . self::OFFICE . "\n### tuple ### allow tcp 22 0.0.0.0/0 any 198.51.100.9 in");
+        $host = $this->host(self::SSH . "\n" . self::office(), written: self::SSH . "\n" . self::office() . "\n### tuple ### allow tcp 22 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in');
 
-        $added = $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '198.51.100.9']));
+        $added = $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public2(9)]));
 
-        $this->assertSame('198.51.100.9', $added->source);
+        $this->assertSame(TestNetwork::public2(9), $added->source);
         $this->assertCount(1, $this->ufwWrites($host));
     }
 
     public function test_a_port_list_is_written_and_read_back_in_the_order_ufw_keeps(): void
     {
-        $host = $this->host('', written: '### tuple ### allow tcp 80,443 0.0.0.0/0 any 192.0.2.1 in');
+        $host = $this->host('', written: '### tuple ### allow tcp 80,443 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(1) . ' in');
 
-        $added = $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '443,80', 'source' => '192.0.2.1']));
+        $added = $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '443,80', 'source' => TestNetwork::public3(1)]));
 
         $this->assertSame('80,443', $added->port);
-        $this->assertSame(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '192.0.2.1', 'to', 'any', 'port', '80,443'], $this->ufwCalls($host)[0]);
+        $this->assertSame(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public3(1), 'to', 'any', 'port', '80,443'], $this->ufwCalls($host)[0]);
     }
 
     public function test_an_edit_that_would_match_another_rule_is_refused_and_changes_nothing(): void
     {
-        $other = '### tuple ### allow tcp 2222 0.0.0.0/0 any 203.0.113.7 in';
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $other = '### tuple ### allow tcp 2222 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
         $ssh = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'comment' => 'panelalpha: ssh']);
         $cases = [
-            [self::OFFICE . "\n" . $other, FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2222', 'source' => '203.0.113.7']), $office->with(['port' => '2222']), 'change or delete that rule instead'],
-            [self::OFFICE . "\n" . self::SSH, $ssh, $office->with(['source' => null]), 'the engine opened it and needs it'],
+            [self::office() . "\n" . $other, FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2222', 'source' => TestNetwork::public(7)]), $office->with(['port' => '2222']), 'change or delete that rule instead'],
+            [self::office() . "\n" . self::SSH, $ssh, $office->with(['source' => null]), 'the engine opened it and needs it'],
         ];
         foreach ($cases as [$rules, $existing, $edit, $why]) {
             $host = $this->host($rules);
@@ -719,8 +730,8 @@ class UfwFirewallTest extends TestCase
         $this->expectException(FirewallException::class);
         $this->expectExceptionMessage('Invalid position');
 
-        ($this->firewall($this->host(self::OFFICE, ufwOut: "ERROR: Invalid position '1'", ufwCode: 1)))
-            ->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
+        ($this->firewall($this->host(self::office(), ufwOut: "ERROR: Invalid position '1'", ufwCode: 1)))
+            ->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]));
     }
 
     /** engine#769: ufw refusing the rule is the request's fault (422); failing on the host is 502. */
@@ -864,11 +875,11 @@ class UfwFirewallTest extends TestCase
     /** engine#767: a failed read-back of the new rule must restore the old one, not answer 404. */
     public function test_a_new_rule_that_cannot_be_read_back_puts_the_old_rule_back(): void
     {
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
         // Only the comment changes, so the old rule goes out first and the edit
         // runs through replace(). The new write "succeeds" (written: '') but the
         // store no longer holds the new match, so add()'s read-back is not found.
-        $host = $this->host(self::OFFICE, written: '', deleted: '');
+        $host = $this->host(self::office(), written: '', deleted: '');
         $firewall = $this->firewall($host);
 
         try {
@@ -880,7 +891,7 @@ class UfwFirewallTest extends TestCase
 
         /** @var object{ran: list<list<string>>} $host */
         $this->assertContains(
-            ['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'],
+            ['ufw', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22', 'comment', 'office'],
             $host->ran,
             'the old rule is written back'
         );
@@ -888,8 +899,8 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_comment_change_that_ufw_refuses_puts_the_old_rule_back(): void
     {
-        $host = $this->failing(['ufw allow in proto tcp from 203.0.113.7 to any port 22 comment bad' => FakeProcess::of(1, 'ERROR: Bad comment')]);
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $host = $this->failing(['ufw allow in proto tcp from ' . TestNetwork::public(7) . ' to any port 22 comment bad' => FakeProcess::of(1, 'ERROR: Bad comment')]);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         try {
             ($this->firewall($host))->updateRule($office->id(), $office->with(['comment' => 'bad']));
@@ -899,16 +910,16 @@ class UfwFirewallTest extends TestCase
         }
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertContains(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'], $host->ran);
+        $this->assertContains(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', TestNetwork::public(7), 'to', 'any', 'port', '22', 'comment', 'office'], $host->ran);
     }
 
     public function test_an_edit_reads_the_rule_under_the_lock_and_puts_back_what_it_took_out(): void
     {
         // Another edit of the rule gets the lock first. Read before taking the lock, this edit
         // deleted that edit's rule and, refused, put back the copy it had read.
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7', 'comment' => 'office']);
-        $home = 'allow tcp 22 0.0.0.0/0 any 203.0.113.7 in comment=' . bin2hex('home');
-        $host = $this->ufwStore(self::OFFICE, refuse: '/ comment bad$/');
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7), 'comment' => 'office']);
+        $home = 'allow tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in comment=' . bin2hex('home');
+        $host = $this->ufwStore(self::office(), refuse: '/ comment bad$/');
         /** @var object{ran: list<list<string>>, held: list<bool>, tuples: list<string>, otherEdit: ?list<string>} $host */
         $host->otherEdit = [$home];
 
@@ -932,17 +943,17 @@ class UfwFirewallTest extends TestCase
         // fail2ban bans the address again between the edit's two locks. Such an edit was not checked
         // again: the new rule did not read back (404), or the answer was the new ban as if edited.
         $f2b = static fn (int $n): string => 'comment=' . bin2hex("by Fail2Ban after {$n} attempts against sshd");
-        $rebanned = ["deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(3)}", "route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(3)}"];
+        $rebanned = ['deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(3)}", 'route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(3)}"];
         $comment = 'by Fail2Ban after 5 attempts against sshd';
-        $published = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published', 'comment' => $comment]);
-        $both = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '198.51.100.9', 'comment' => $comment]);
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'comment' => $comment]);
-        $out = "deny any any 198.51.100.9 any 0.0.0.0/0 out {$f2b(5)}";
+        $published = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9), 'scope' => 'published', 'comment' => $comment]);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public2(9), 'comment' => $comment]);
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9), 'comment' => $comment]);
+        $out = 'deny any any ' . TestNetwork::public2(9) . ' any ' . TestNetwork::ANY_CIDR . " out {$f2b(5)}";
         $cases = [
-            'a ban on published ports only, sent back unchanged' => [["route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}"], $published, $published->with([]), $rebanned],
+            'a ban on published ports only, sent back unchanged' => [['route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}"], $published, $published->with([]), $rebanned],
             // Put back as far as ufw takes it beside the new ban: its outbound half.
-            'a ban both ways, sent back unchanged' => [[$out, "deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}", "route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}"], $both, $both->with([]), [$out, ...$rebanned]],
-            'a ban given a new comment' => [["deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}", "route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}"], $ban, $ban->with(['comment' => 'keep out']), $rebanned],
+            'a ban both ways, sent back unchanged' => [[$out, 'deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}", 'route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}"], $both, $both->with([]), [$out, ...$rebanned]],
+            'a ban given a new comment' => [['deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}", 'route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}"], $ban, $ban->with(['comment' => 'keep out']), $rebanned],
         ];
         foreach ($cases as $case => [$tuples, $old, $edit, $left]) {
             $host = $this->ufwStore('### tuple ### ' . implode("\n### tuple ### ", $tuples));
@@ -953,14 +964,14 @@ class UfwFirewallTest extends TestCase
                 $this->firewall($host)->updateRule($old->id(), $edit);
                 $this->fail("{$case}: the edit went in");
             } catch (FirewallClash $e) {
-                $this->assertStringContainsString('Rule ' . $ban->id() . ' (deny in from 198.51.100.9 on host and published ports) already matches', $e->getMessage(), $case);
+                $this->assertStringContainsString('Rule ' . $ban->id() . ' (deny in from ' . TestNetwork::public2(9) . ' on host and published ports) already matches', $e->getMessage(), $case);
             }
             $this->assertSame($left, $host->tuples, "{$case}: the new ban is left as it is");
         }
 
         // fail2ban bans again as it did before, the usual case: the new ban is part of the rule
         // asked for, or all of it, and ufw writes the rest.
-        $again = ["deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}", "route:deny any any 0.0.0.0/0 any 198.51.100.9 in {$f2b(5)}"];
+        $again = ['deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}", 'route:deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in {$f2b(5)}"];
         foreach (['a ban' => [$again, $ban, $again], 'a ban both ways' => [[$out, ...$again], $both, [$out, ...$again]]] as $case => [$tuples, $old, $left]) {
             $host = $this->ufwStore('### tuple ### ' . implode("\n### tuple ### ", $tuples));
             /** @var object{tuples: list<string>, unbanned: ?list<string>} $host */
@@ -976,17 +987,17 @@ class UfwFirewallTest extends TestCase
         // ufw keeps nothing that tells these from the halves of one rule both ways or on both scopes,
         // so the new rule read back as that rule, under neither id: the API answered 404.
         $c = static fn (string $comment): string => 'comment=' . bin2hex($comment);
-        $denyIn = static fn (string $port, string $comment): array => ["deny tcp {$port} 0.0.0.0/0 any 192.0.2.1 in {$c($comment)}", "route:deny tcp {$port} 0.0.0.0/0 any 192.0.2.1 in {$c($comment)}"];
+        $denyIn = static fn (string $port, string $comment): array => ["deny tcp {$port} " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(1) . " in {$c($comment)}", "route:deny tcp {$port} " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(1) . " in {$c($comment)}"];
         $parse = static fn (string $tuple): FirewallRule => UfwRules::parse("### tuple ### {$tuple}")[0];
-        $outbound = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '3306', 'destination' => '192.0.2.1']);
-        $allowOut = $parse("allow tcp 443 192.0.2.1 any 0.0.0.0/0 out {$c('b')}");
-        $denyOut = $parse("deny tcp 25 192.0.2.1 any 0.0.0.0/0 out {$c('a')}");
-        $hostOnly = $parse("deny any any 0.0.0.0/0 any 192.0.2.5 in {$c('c')}");
+        $outbound = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '3306', 'destination' => TestNetwork::public3(1)]);
+        $allowOut = $parse('allow tcp 443 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . " out {$c('b')}");
+        $denyOut = $parse('deny tcp 25 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . " out {$c('a')}");
+        $hostOnly = $parse('deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(5) . " in {$c('c')}");
         $cases = [
-            'the other direction of a rule there' => [['deny tcp 3306 192.0.2.1 any 0.0.0.0/0 out'], null, FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '3306', 'source' => '192.0.2.1']), $outbound, 'both ways'],
-            'an edit of its action' => [["allow tcp 443 192.0.2.1 any 0.0.0.0/0 out {$c('b')}", ...$denyIn('443', 'b')], $allowOut, $allowOut->with(['action' => 'deny']), FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '443', 'source' => '192.0.2.1']), 'both ways'],
-            'an edit of its comment' => [["deny tcp 25 192.0.2.1 any 0.0.0.0/0 out {$c('a')}", ...$denyIn('25', 'b')], $denyOut, $denyOut->with(['comment' => 'b']), FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '25', 'source' => '192.0.2.1']), 'both ways'],
-            'a published deny beside a host one' => [["deny any any 0.0.0.0/0 any 192.0.2.5 in {$c('c')}"], null, FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.5', 'scope' => 'published', 'comment' => 'c']), $hostOnly, 'on host and published ports'],
+            'the other direction of a rule there' => [['deny tcp 3306 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . ' out'], null, FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '3306', 'source' => TestNetwork::public3(1)]), $outbound, 'both ways'],
+            'an edit of its action' => [['allow tcp 443 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . " out {$c('b')}", ...$denyIn('443', 'b')], $allowOut, $allowOut->with(['action' => 'deny']), FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '443', 'source' => TestNetwork::public3(1)]), 'both ways'],
+            'an edit of its comment' => [['deny tcp 25 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . " out {$c('a')}", ...$denyIn('25', 'b')], $denyOut, $denyOut->with(['comment' => 'b']), FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '25', 'source' => TestNetwork::public3(1)]), 'both ways'],
+            'a published deny beside a host one' => [['deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(5) . " in {$c('c')}"], null, FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public3(5), 'scope' => 'published', 'comment' => 'c']), $hostOnly, 'on host and published ports'],
         ];
         foreach ($cases as $case => [$tuples, $old, $rule, $there, $how]) {
             $host = $this->ufwStore('### tuple ### ' . implode("\n### tuple ### ", $tuples));
@@ -1007,36 +1018,39 @@ class UfwFirewallTest extends TestCase
     {
         // Added beside the old rule, the new one would read back as one rule both ways with it.
         $c = 'comment=' . bin2hex('c');
-        $old = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '22', 'destination' => '192.0.2.1', 'comment' => 'c']);
-        $host = $this->ufwStore("### tuple ### deny tcp 22 192.0.2.1 any 0.0.0.0/0 out {$c}");
-        $edit = $old->with(['direction' => 'in', 'source' => '192.0.2.1', 'destination' => null, 'scope' => 'both']);
+        $old = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'protocol' => 'tcp', 'port' => '22', 'destination' => TestNetwork::public3(1), 'comment' => 'c']);
+        $host = $this->ufwStore('### tuple ### deny tcp 22 ' . TestNetwork::public3(1) . ' any ' . TestNetwork::ANY_CIDR . " out {$c}");
+        $edit = $old->with(['direction' => 'in', 'source' => TestNetwork::public3(1), 'destination' => null, 'scope' => 'both']);
 
         $new = $this->firewall($host)->updateRule($old->id(), $edit);
 
         $this->assertSame($edit->id(), $new->id());
         /** @var object{tuples: list<string>} $host */
-        $this->assertSame(["route:deny tcp 22 0.0.0.0/0 any 192.0.2.1 in {$c}", "deny tcp 22 0.0.0.0/0 any 192.0.2.1 in {$c}"], $host->tuples);
+        $this->assertSame(['route:deny tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(1) . " in {$c}", 'deny tcp 22 ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public3(1) . " in {$c}"], $host->tuples);
     }
 
-    private const BOTH = "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in\n### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out\n### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in";
+    private static function both(): string
+    {
+        return '### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . " in\n### tuple ### deny any any " . TestNetwork::public(7) . ' any ' . TestNetwork::ANY_CIDR . " out\n### tuple ### route:deny any any " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
+    }
 
     public function test_a_deny_both_ways_is_added_and_deleted_as_its_host_and_route_rules(): void
     {
-        $host = $this->host('', written: self::BOTH);
+        $host = $this->host('', written: self::both());
         $firewall = $this->firewall($host);
-        $rule = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']);
+        $rule = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7)]);
 
         $added = $firewall->addRule($rule);
         $this->assertSame(['both', 'both'], [$added->direction, $added->scope]);
         $firewall->deleteRule($rule->id());
 
         $this->assertSame([
-            ['ufw', 'prepend', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
-            ['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', '203.0.113.7'],
-            ['ufw', 'route', 'prepend', 'deny', 'from', '203.0.113.7', 'to', 'any'],
-            ['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
-            ['ufw', 'delete', 'deny', 'out', 'from', 'any', 'to', '203.0.113.7'],
-            ['ufw', 'route', 'delete', 'deny', 'from', '203.0.113.7', 'to', 'any'],
+            ['ufw', 'prepend', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'],
+            ['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', TestNetwork::public(7)],
+            ['ufw', 'route', 'prepend', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
+            ['ufw', 'delete', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'],
+            ['ufw', 'delete', 'deny', 'out', 'from', 'any', 'to', TestNetwork::public(7)],
+            ['ufw', 'route', 'delete', 'deny', 'from', TestNetwork::public(7), 'to', 'any'],
         ], $this->ufwCalls($host));
     }
 
@@ -1045,14 +1059,14 @@ class UfwFirewallTest extends TestCase
         $host = $this->failing(['ufw route prepend deny' => FakeProcess::of(1, 'ERROR: Bad source address')]);
 
         try {
-            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']));
+            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public(7)]));
             $this->fail('a deny on the host alone was left in place');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Bad source address', $e->getMessage());
         }
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame(['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'], end($host->ran));
+        $this->assertSame(['ufw', 'delete', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'], end($host->ran));
     }
 
     public function test_when_the_second_half_is_refused_the_first_is_taken_back(): void
@@ -1060,31 +1074,31 @@ class UfwFirewallTest extends TestCase
         $host = $this->failing(['ufw prepend deny out' => FakeProcess::of(1, "ERROR: Bad destination address")]);
 
         try {
-            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'comment' => 'spam']));
+            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7), 'comment' => 'spam']));
             $this->fail('half a rule was left in place');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Bad destination address', $e->getMessage());
         }
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame(['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'], end($host->ran));
+        $this->assertSame(['ufw', 'delete', 'deny', 'in', 'from', TestNetwork::public(7), 'to', 'any'], end($host->ran));
     }
 
     public function test_logs_merge_blocks_and_bans_newest_first(): void
     {
         $host = $this->failing([
             'journalctl' => FakeProcess::ok(
-                "2026-10-01T12:00:00+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=198.51.100.9 DST=10.0.0.1 PROTO=TCP DPT=23\n"
-                . "2026-10-01T12:02:00+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=203.0.113.7 DST=10.0.0.1 PROTO=TCP DPT=8000\n"
+                '2026-10-01T12:00:00+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=' . TestNetwork::public2(9) . ' DST=' . TestNetwork::private(1) . " PROTO=TCP DPT=23\n"
+                . '2026-10-01T12:02:00+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=' . TestNetwork::public(7) . ' DST=' . TestNetwork::private(1) . " PROTO=TCP DPT=8000\n"
             ),
             'date' => FakeProcess::ok("+00:00\n"),
-            'tail -n 5000 /var/log/fail2ban.log' => FakeProcess::ok("2026-10-01 12:01:00,000 fail2ban.actions [1]: NOTICE  [sshd] Ban 198.51.100.9\n"),
+            'tail -n 5000 /var/log/fail2ban.log' => FakeProcess::ok('2026-10-01 12:01:00,000 fail2ban.actions [1]: NOTICE  [sshd] Ban ' . TestNetwork::public2(9) . "\n"),
         ]);
         $firewall = $this->firewall($host);
 
-        $this->assertSame(['203.0.113.7', '198.51.100.9', '198.51.100.9'], array_map(fn ($e) => $e->address, $firewall->logs()));
+        $this->assertSame([TestNetwork::public(7), TestNetwork::public2(9), TestNetwork::public2(9)], array_map(fn ($e) => $e->address, $firewall->logs()));
         $this->assertSame(['ban'], array_map(fn ($e) => $e->type, $firewall->logs(type: 'ban')));
-        $this->assertSame(['ban', 'blocked'], array_map(fn ($e) => $e->type, $firewall->logs(address: '198.51.100.9')));
+        $this->assertSame(['ban', 'blocked'], array_map(fn ($e) => $e->type, $firewall->logs(address: TestNetwork::public2(9))));
         $this->assertCount(1, $firewall->logs(limit: 1));
     }
 
@@ -1092,51 +1106,80 @@ class UfwFirewallTest extends TestCase
     {
         $host = $this->failing([
             'journalctl' => FakeProcess::failed('Compiled without pattern matching support'),
-            'tail -n 5000 /var/log/ufw.log' => FakeProcess::ok("2026-10-01T12:00:00.1+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=198.51.100.9 DST=10.0.0.1 PROTO=TCP DPT=23\n"),
+            'tail -n 5000 /var/log/ufw.log' => FakeProcess::ok('2026-10-01T12:00:00.1+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=' . TestNetwork::public2(9) . ' DST=' . TestNetwork::private(1) . " PROTO=TCP DPT=23\n"),
         ]);
 
         $entries = ($this->firewall($host))->logs(type: 'blocked');
 
-        $this->assertSame(['198.51.100.9'], array_map(fn ($e) => $e->address, $entries));
+        $this->assertSame([TestNetwork::public2(9)], array_map(fn ($e) => $e->address, $entries));
         /** @var object{ran: list<list<string>>} $host */
         $this->assertNotContains(['tail', '-n', '5000', '/var/log/fail2ban.log'], $host->ran, 'blocked only: fail2ban is not read');
     }
 
-    private const TRUSTED_FILE = "198.51.100.7 # office\n2001:db8::/32\n";
+    private static function trustedFile(): string
+    {
+        return TestNetwork::public2(7) . " # office\n2001:db8::/32\n";
+    }
 
     public function test_trusting_an_address_writes_the_list_applies_it_and_lifts_its_ban(): void
     {
-        $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::TRUSTED_FILE)]);
+        $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::trustedFile())]);
         $firewall = $this->firewall($host);
 
-        $this->assertSame(['198.51.100.7', '2001:db8::/32'], array_map(fn ($a) => $a->address, $firewall->trustedAddresses()));
+        $this->assertSame([TestNetwork::public2(7), '2001:db8::/32'], array_map(fn ($a) => $a->address, $firewall->trustedAddresses()));
 
-        $firewall->trust(new TrustedAddress('203.0.113.7/32', 'monitoring'));
+        $firewall->trust(new TrustedAddress(TestNetwork::public(7) . '/32', 'monitoring'));
 
         /** @var object{ran: list<list<string>>} $host */
         $write = array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'sh'))[0];
         $this->assertSame('/etc/fail2ban/panelalpha-ignoreip', $write[3]);
-        $this->assertSame("198.51.100.7 # office\n2001:db8::/32\n203.0.113.7 # monitoring\n", $write[4]);
+        $this->assertSame(TestNetwork::public2(7) . " # office\n2001:db8::/32\n" . TestNetwork::public(7) . " # monitoring\n", $write[4]);
         $this->assertContains(['bash', '/opt/panelalpha/shared-hosting/scripts/firewall.sh', '--fail2ban'], $host->ran);
-        $this->assertContains(['fail2ban-client', 'unban', '203.0.113.7'], $host->ran);
+        $this->assertContains(['fail2ban-client', 'unban', TestNetwork::public(7)], $host->ran);
     }
 
     public function test_trusting_a_range_lifts_the_bans_inside_it_which_the_reload_keeps(): void
     {
         $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::failed('No such file')]);
 
-        ($this->firewall($host))->trust(new TrustedAddress('203.0.113.0/24'));
+        ($this->firewall($host))->trust(new TrustedAddress(TestNetwork::net('PUBLIC')));
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame([['fail2ban-client', 'unban', '203.0.113.0/24']], array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client')));
+        $this->assertSame([['fail2ban-client', 'unban', TestNetwork::net('PUBLIC')]], array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client')));
+    }
+
+    public function test_api_callers_are_exempted_in_their_own_list_applied_only_when_it_changes(): void
+    {
+        $host = new Fail2banHost();
+        $host->files['/etc/fail2ban/panelalpha-ignoreip'] = self::trustedFile();
+        $firewall = $this->firewall($host);
+        $held = [];
+        $wanted = function () use (&$held): array {
+            $held[] = self::lockHeld($this->trustedLock);
+
+            return [new TrustedAddress(TestNetwork::routable(31), 'PanelAlpha Connect')];
+        };
+
+        $firewall->exemptApiCallers($wanted);
+        $firewall->exemptApiCallers($wanted);
+
+        $this->assertSame(TestNetwork::routable(31) . " # PanelAlpha Connect\n", $host->files['/etc/fail2ban/panelalpha-api-ignoreip']);
+        $this->assertSame(self::trustedFile(), $host->files['/etc/fail2ban/panelalpha-ignoreip'], 'the list every jail reads is left alone');
+        $this->assertSame(1, $host->reloads, 'an unchanged list is not applied again');
+        $this->assertSame([true, true], $held, 'decided under the trusted lock');
+
+        $firewall->exemptApiCallers(fn (): array => []);
+
+        $this->assertSame('', $host->files['/etc/fail2ban/panelalpha-api-ignoreip']);
+        $this->assertSame(2, $host->reloads);
     }
 
     public function test_untrusting_removes_it_and_an_unknown_id_is_not_found(): void
     {
-        $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::TRUSTED_FILE)]);
+        $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::trustedFile())]);
         $firewall = $this->firewall($host);
 
-        $removed = $firewall->untrust((new TrustedAddress('198.51.100.7'))->id());
+        $removed = $firewall->untrust((new TrustedAddress(TestNetwork::public2(7)))->id());
 
         $this->assertSame('office', $removed->comment);
         /** @var object{ran: list<list<string>>} $host */
@@ -1193,7 +1236,7 @@ class UfwFirewallTest extends TestCase
             }
         };
 
-        $this->firewall($host)->trust(new TrustedAddress('203.0.113.7'));
+        $this->firewall($host)->trust(new TrustedAddress(TestNetwork::public(7)));
 
         $this->assertNotSame([], $host->trustedHeld);
         $this->assertSame([true], array_values(array_unique($host->trustedHeld)), 'every host command ran holding the trusted lock');
@@ -1208,7 +1251,7 @@ class UfwFirewallTest extends TestCase
         ($this->firewall($this->failing([
             'cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(''),
             'bash /opt/panelalpha/shared-hosting/scripts/firewall.sh' => FakeProcess::failed('firewall: fail2ban did not start'),
-        ])))->trust(new TrustedAddress('203.0.113.7'));
+        ])))->trust(new TrustedAddress(TestNetwork::public(7)));
     }
 
     public function test_a_list_that_cannot_be_written_is_an_error(): void
@@ -1219,7 +1262,7 @@ class UfwFirewallTest extends TestCase
         ($this->firewall($this->failing([
             'cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(''),
             'sh -c' => FakeProcess::failed('Read-only file system'),
-        ])))->trust(new TrustedAddress('203.0.113.7'));
+        ])))->trust(new TrustedAddress(TestNetwork::public(7)));
     }
 
     public function test_switching_it_on_and_off_and_reloading(): void
@@ -1249,16 +1292,16 @@ class UfwFirewallTest extends TestCase
 
     public function test_every_ufw_write_holds_the_host_wide_lock(): void
     {
-        $host = $this->host(self::OFFICE, written: self::OFFICE . "\n" . self::BOTH);
+        $host = $this->host(self::office(), written: self::office() . "\n" . self::both());
         $firewall = $this->firewall($host);
-        $both = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']);
-        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7)]);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public(7)]);
 
         $firewall->addRule($both);
         $firewall->deleteRule($both->id());
         $firewall->updateRule($office->id(), $office->with(['comment' => 'home']));
         /** @var object{written: ?string} $host */
-        $host->written = self::OFFICE . "\n" . self::BOTH . "\n### tuple ### allow tcp 2222 0.0.0.0/0 any 203.0.113.7 in";
+        $host->written = self::office() . "\n" . self::both() . "\n### tuple ### allow tcp 2222 " . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public(7) . ' in';
         $firewall->updateRule($office->id(), $office->with(['port' => '2222']));
         $firewall->enable();
         $firewall->disable();
@@ -1272,9 +1315,9 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_rule_is_written_and_read_back_under_one_hold_of_the_lock(): void
     {
-        $host = $this->host('', written: self::BOTH);
+        $host = $this->host('', written: self::both());
 
-        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']));
+        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7)]));
 
         /** @var object{ran: list<list<string>>, held: list<bool>} $host */
         $this->assertSame(['cat', 'cat', 'sh', 'ufw', 'ufw', 'ufw', 'cat', 'cat'], array_column($host->ran, 0));
@@ -1285,12 +1328,12 @@ class UfwFirewallTest extends TestCase
     {
         // fail2ban's unban action waits for the same lock: asking while holding it would deadlock.
         $comment = bin2hex('by Fail2Ban after 5 attempts against sshd');
-        $host = $this->host("### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment={$comment}");
+        $host = $this->host('### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . " in comment={$comment}");
 
-        $this->firewall($host)->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
+        $this->firewall($host)->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)])->id());
 
         /** @var object{ran: list<list<string>>, held: list<bool>} $host */
-        $unban = array_search(['fail2ban-client', 'unban', '198.51.100.9'], $host->ran, true);
+        $unban = array_search(['fail2ban-client', 'unban', TestNetwork::public2(9)], $host->ran, true);
         $this->assertNotFalse($unban);
         $this->assertFalse($host->held[$unban]);
         $this->assertGreaterThan(array_search('ufw', array_column($host->ran, 0), true), $unban, 'after the rules are gone');
@@ -1298,8 +1341,8 @@ class UfwFirewallTest extends TestCase
 
     public function test_a_ban_given_a_new_comment_is_lifted_in_fail2ban_before_the_rule_is_re_added(): void
     {
-        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
-        $host = $this->ufwStore('### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]);
+        $host = $this->ufwStore('### tuple ### deny any any ' . TestNetwork::ANY_CIDR . ' any ' . TestNetwork::public2(9) . ' in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
 
         $this->firewall($host)->updateRule($ban->id(), $ban->with(['comment' => 'keep out']));
 
@@ -1325,7 +1368,7 @@ class UfwFirewallTest extends TestCase
         flock($other, LOCK_EX);
 
         try {
-            $this->firewall($host, lockWait: 1)->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
+            $this->firewall($host, lockWait: 1)->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public2(9)]));
             $this->fail('the rule was written without the lock');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Another firewall change held ' . $this->lock . ' for over 1 s; nothing was changed', $e->getMessage());
@@ -1451,12 +1494,12 @@ class UfwFirewallTest extends TestCase
         $host = $this->failing(['ufw prepend' => FakeProcess::of(1, '', "ERROR: problem running iptables\n")]);
 
         try {
-            $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'scope' => 'host', 'source' => '198.51.100.7']));
+            $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'scope' => 'host', 'source' => TestNetwork::public2(7)]));
             $this->fail('the failure was swallowed');
         } catch (\App\System\Firewall\FirewallCommandFailed $e) {
             $this->assertSame('problem running iptables', $e->getMessage());
         }
-        $this->assertSame(['snapshot', 'ufw prepend deny in from 198.51.100.7 to any', 'restore', 'ufw reload'], $this->steps($host));
+        $this->assertSame(['snapshot', 'ufw prepend deny in from ' . TestNetwork::public2(7) . ' to any', 'restore', 'ufw reload'], $this->steps($host));
     }
 
     public function test_a_rule_ufw_refuses_itself_needs_nothing_put_back(): void
@@ -1487,10 +1530,10 @@ class UfwFirewallTest extends TestCase
 
     public function test_the_rule_files_are_copied_aside_once_per_change(): void
     {
-        $host = $this->host(self::OFFICE, written: self::OFFICE . "\n" . self::BOTH);
-        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']));
+        $host = $this->host(self::office(), written: self::office() . "\n" . self::both());
+        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => TestNetwork::public(7)]));
         $this->firewall($host)->reload();
 
-        $this->assertSame(['snapshot', 'ufw prepend deny in from 203.0.113.7 to any', 'ufw prepend deny out from any to 203.0.113.7', 'ufw route prepend deny from 203.0.113.7 to any', 'snapshot', 'ufw reload'], $this->steps($host));
+        $this->assertSame(['snapshot', 'ufw prepend deny in from ' . TestNetwork::public(7) . ' to any', 'ufw prepend deny out from any to ' . TestNetwork::public(7), 'ufw route prepend deny from ' . TestNetwork::public(7) . ' to any', 'snapshot', 'ufw reload'], $this->steps($host));
     }
 }

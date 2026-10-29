@@ -4,6 +4,7 @@ namespace Tests\Unit\Models;
 
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -47,7 +48,7 @@ class ProxyRuleGeneratedPrecedenceTest extends TestCase
         ProxyRule::query()->create([
             'owner_scope' => $scope, 'username' => $username, 'enabled' => true, 'transport' => 'http',
             'listen_ip' => '*', 'listen_port' => $port, 'server_name' => 'alice.test',
-            'upstream_host' => $username ?? '10.0.0.5', 'upstream_port' => 8080, 'is_generated' => false,
+            'upstream_host' => $username ?? TestNetwork::private(5), 'upstream_port' => 8080, 'is_generated' => false,
         ]);
     }
 }

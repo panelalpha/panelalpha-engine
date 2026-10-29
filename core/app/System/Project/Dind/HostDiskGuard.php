@@ -23,8 +23,7 @@ final class HostDiskGuard
     public function __construct(
         private readonly System $system,
         private readonly ?int $minimumBytes,
-    ) {
-    }
+    ) {}
 
     /**
      * DEPLOY_HOST_MIN_FREE as bytes, or null when the check is off. Empty means
@@ -63,8 +62,8 @@ final class HostDiskGuard
 
         return sprintf(
             'Deploy refused before it started: the engine host has %s free on %s, below the %s '
-            . 'a deploy needs (DEPLOY_HOST_MIN_FREE). Free disk on the host and deploy again; '
-            . '`pae system:image:prune` removes base images no project has used recently.',
+            .'a deploy needs (DEPLOY_HOST_MIN_FREE). Free disk on the host and deploy again; '
+            .'`pae system:image:prune` removes base images no project has used recently.',
             HostPrewarmPlan::formatBytes($lowest['free']),
             $lowest['path'],
             HostPrewarmPlan::formatBytes($this->minimumBytes)
@@ -103,7 +102,7 @@ final class HostDiskGuard
             return null;
         }
         $fields = preg_split('/\s+/', trim($lines[count($lines) - 1])) ?: [];
-        if (!isset($fields[1], $fields[3]) || !ctype_digit($fields[1]) || !ctype_digit($fields[3])) {
+        if (! isset($fields[1], $fields[3]) || ! ctype_digit($fields[1]) || ! ctype_digit($fields[3])) {
             return null;
         }
 

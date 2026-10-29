@@ -27,7 +27,7 @@ class ComposeCommandTest extends TestCase
 
     public function test_a_numeric_argument_is_kept(): void
     {
-        // `["php", "-S", "0.0.0.0:8080", "-t", 8080]` - YAML makes the bare
+        // `["php", "-S", "<host>:8080", "-t", 8080]` - YAML makes the bare
         // number an int, and dropping it would change the command.
         $this->assertSame('redis-server --port 6379', ComposeCommand::asString(['redis-server', '--port', 6379]));
     }

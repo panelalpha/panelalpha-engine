@@ -31,6 +31,28 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | WordPress migrator plugin release
+    |--------------------------------------------------------------------------
+    |
+    | The pinned release installed on every source and destination site,
+    | repacked so the install zip root is wordpress-migrator/. A download
+    | that does not match sha256 is refused. To move to a newer release,
+    | set both variables to that release's zip URL and its checksum.
+    |
+    */
+    'wordpress_migrator' => [
+        'release_url' => env(
+            'WORDPRESS_MIGRATOR_RELEASE_URL',
+            'https://github.com/panelalpha/panelalpha-wordpress-migrator/releases/download/v1.1.4/wordpress-migrator.zip',
+        ),
+        'sha256' => env(
+            'WORDPRESS_MIGRATOR_SHA256',
+            'f636ceb62c5be51525763f4ae71e669ac0c116d7988eb0190c94b8183a8cb13f',
+        ),
+    ],
+
     // Who may redeem a phpMyAdmin SSO token (PmaSso): comma-separated
     // hostnames, addresses or CIDR ranges. `172.16.0.0/12` restores the old
     // "any private address" rule for a topology this default does not fit.

@@ -35,7 +35,7 @@ abstract class BitbucketProvider implements HookProvider
         return hash_equals(hash_hmac('sha256', $request->getContent(), $secret), strtolower($m[1]));
     }
 
-    public function signsTheBody(): bool
+    public function signsTheBody(Request $request, string $secret): bool
     {
         return true;
     }
@@ -70,12 +70,13 @@ abstract class BitbucketProvider implements HookProvider
      * the tracked branch's must not stop that one from deploying. Only a list
      * with nothing readable in it is an invalid payload.
      *
-     * @param callable(mixed): ?RefChange $toChange null for a change it cannot read
+     * @param  callable(mixed): ?RefChange  $toChange  null for a change it cannot read
+     *
      * @throws InvalidPayload
      */
     protected function pushEvent(string $event, ?string $delivery, mixed $changes, callable $toChange): HookEvent
     {
-        if (!is_array($changes)) {
+        if (! is_array($changes)) {
             throw new InvalidPayload('A push without changes.');
         }
 
@@ -88,8 +89,8 @@ abstract class BitbucketProvider implements HookProvider
     }
 
     /**
-     * @param array<mixed> $changes
-     * @param callable(mixed): ?RefChange $toChange
+     * @param  array<mixed>  $changes
+     * @param  callable(mixed): ?RefChange  $toChange
      * @return list<RefChange>
      */
     private function readableChanges(array $changes, callable $toChange): array
@@ -107,12 +108,13 @@ abstract class BitbucketProvider implements HookProvider
 
     /**
      * @return array<string, mixed>
+     *
      * @throws InvalidPayload
      */
     protected function payload(Request $request): array
     {
         $decoded = json_decode($request->getContent(), true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             throw new InvalidPayload('The push body is not JSON.');
         }
 

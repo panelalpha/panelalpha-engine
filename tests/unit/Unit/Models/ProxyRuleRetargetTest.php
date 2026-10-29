@@ -6,6 +6,7 @@ use App\Models\ProxyRule;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -234,7 +235,7 @@ class ProxyRuleRetargetTest extends TestCase
             'username' => 'shop',
             'enabled' => true,
             'transport' => 'http',
-            'listen_ip' => '10.0.0.5',
+            'listen_ip' => TestNetwork::private(5),
             'listen_port' => 443,
             'server_name' => 'shop.example.test',
             'upstream_host' => 'backend',
@@ -250,7 +251,7 @@ class ProxyRuleRetargetTest extends TestCase
         $rule = $on443->first();
         $this->assertSame($hand->id, $rule->id);
         $this->assertFalse($rule->is_generated);
-        $this->assertSame('10.0.0.5', $rule->listen_ip);
+        $this->assertSame(TestNetwork::private(5), $rule->listen_ip);
         $this->assertSame('backend', $rule->upstream_host);
         $this->assertSame('https', $rule->upstream_protocol);
         $this->assertTrue(ProxyRule::forUser('shop')->where('listen_port', 80)->value('is_generated'));

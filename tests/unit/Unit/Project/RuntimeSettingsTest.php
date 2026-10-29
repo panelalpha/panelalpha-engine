@@ -5,6 +5,7 @@ namespace Tests\Unit\Project;
 use App\Lib\Project\RuntimeSettings;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class RuntimeSettingsTest extends TestCase
 {
@@ -53,7 +54,7 @@ class RuntimeSettingsTest extends TestCase
 
     public function test_redis_keeps_only_allowed_keys_with_valid_values(): void
     {
-        $settings = RuntimeSettings::redis("maxmemory 256mb\nmaxmemory-policy volatile-ttl\nhz five\nactivedefrag yes\nlazyfree-lazy-expire maybe\nsave 900 1\nbind 0.0.0.0");
+        $settings = RuntimeSettings::redis("maxmemory 256mb\nmaxmemory-policy volatile-ttl\nhz five\nactivedefrag yes\nlazyfree-lazy-expire maybe\nsave 900 1\nbind ".TestNetwork::ANY);
 
         $this->assertSame('256mb', $settings['maxmemory']);
         $this->assertSame('volatile-ttl', $settings['maxmemory-policy']);

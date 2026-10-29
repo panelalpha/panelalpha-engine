@@ -61,6 +61,8 @@ const NOT_APPLICABLE_TO_PROJECT = [
   /works? only on container projects|only available for dind users/i,
   // env_var_list on a classic project: it has no env-file surface.
   /environment variables are managed for container projects only/i,
+  // cdn_get before a Cloudflare token is saved on the project.
+  /has no Cloudflare API token/i,
   /no git repository at path/i,
   // git_deploy_hook_show on a project that never had a hook set up: an honest
   // 404, and creating one is a write this smoke must not make.

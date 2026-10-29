@@ -28,18 +28,18 @@ class FileStreamWrapper
     private static array $runAs = ['sudo'];
 
     /**
-     * @var resource|false|null $proc
+     * @var resource|false|null
      */
     private $proc = null;
 
     /**
-     * @var array<resource> $pipes
+     * @var array<resource>
      */
     private array $pipes = [];
 
     public static function register(): void
     {
-        if (!in_array('sudophp', stream_get_wrappers())) {
+        if (! in_array('sudophp', stream_get_wrappers())) {
             stream_wrapper_register('sudophp', __CLASS__);
         }
     }
@@ -48,7 +48,7 @@ class FileStreamWrapper
      * Refuse any path whose real path (checked by the helper, so planted symlinks count) is not under
      * $root. $runAs is the helper's command prefix, required so reading as root is never a default.
      *
-     * @param list<string> $runAs
+     * @param  list<string>  $runAs
      */
     public static function confineTo(?string $root, array $runAs): void
     {
@@ -65,14 +65,16 @@ class FileStreamWrapper
         ];
 
         $this->proc = proc_open($this->helperArgv($mode, $path), $desc, $this->pipes);
-        if (!is_resource($this->proc)) {
+        if (! is_resource($this->proc)) {
             return false;
         }
 
         if ($this->stream_stat() === false) {
             $this->abandonWithWarning();
+
             return false;
         }
+
         return true;
     }
 
@@ -96,7 +98,7 @@ class FileStreamWrapper
         $error = stream_get_contents($this->pipes[2]);
         $this->cleanup();
         trigger_error(
-            'sudophp stream failed: ' . trim($error),
+            'sudophp stream failed: '.trim($error),
             E_USER_WARNING
         );
     }
@@ -113,7 +115,7 @@ class FileStreamWrapper
 
     private function send(string $line): void
     {
-        fwrite($this->pipes[0], $line . "\n");
+        fwrite($this->pipes[0], $line."\n");
         fflush($this->pipes[0]);
     }
 
@@ -124,7 +126,7 @@ class FileStreamWrapper
 
     public function stream_read(int $count): string|bool
     {
-        $this->send('READ ' . $count);
+        $this->send('READ '.$count);
         $resp = $this->recv();
         if (strpos($resp, 'OK') !== 0) {
             return false;
@@ -146,24 +148,27 @@ class FileStreamWrapper
             $data .= $chunk;
             $remaining -= strlen($chunk);
         }
+
         return $data;
     }
 
     public function stream_write(string $data): int
     {
         $lenHex = dechex(strlen($data));
-        $this->send('WRITE ' . $lenHex);
+        $this->send('WRITE '.$lenHex);
         fwrite($this->pipes[0], $data);
         fflush($this->pipes[0]);
         $resp = $this->recv();
+
         return (strpos($resp, 'OK') === 0) ? strlen($data) : 0;
     }
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool
     {
-        $this->send('SEEK ' . $offset . ' ' . $whence);
+        $this->send('SEEK '.$offset.' '.$whence);
         $resp = $this->recv();
-        return (strpos($resp, 'OK') === 0);
+
+        return strpos($resp, 'OK') === 0;
     }
 
     public function stream_tell(): int
@@ -171,8 +176,9 @@ class FileStreamWrapper
         $this->send('TELL');
         $resp = $this->recv();
         if (strpos($resp, 'OK') === 0) {
-            return (int)substr($resp, 3);
+            return (int) substr($resp, 3);
         }
+
         return 0;
     }
 
@@ -180,7 +186,8 @@ class FileStreamWrapper
     {
         $this->send('EOF');
         $resp = $this->recv();
-        return (strpos($resp, 'OK 1') === 0);
+
+        return strpos($resp, 'OK 1') === 0;
     }
 
     /** Waits for the helper's acknowledgement before closing the pipes. */
@@ -197,9 +204,9 @@ class FileStreamWrapper
      */
     public function url_stat(string $path, int $flags): array|bool
     {
-        $probe = new static();
+        $probe = new static;
         $opened = null;
-        if (!@$probe->stream_open($path, 'r', 0, $opened)) {
+        if (! @$probe->stream_open($path, 'r', 0, $opened)) {
             return false;
         }
         $stat = $probe->stream_stat();
@@ -209,6 +216,7 @@ class FileStreamWrapper
         }
         $stat[2] |= 0o666;
         $stat['mode'] |= 0o666;
+
         return $stat;
     }
 
@@ -223,9 +231,10 @@ class FileStreamWrapper
 
         $json = substr($resp, 3);
         $stat = json_decode($json, true);
-        if (!is_array($stat)) {
+        if (! is_array($stat)) {
             return false;
         }
+
         return $stat;
     }
 
@@ -237,6 +246,6 @@ class FileStreamWrapper
     /** @return list<string> */
     protected function helperCommand(): array
     {
-        return [...self::$runAs, 'php', __DIR__ . '/file_stream.php'];
+        return [...self::$runAs, 'php', __DIR__.'/file_stream.php'];
     }
 }

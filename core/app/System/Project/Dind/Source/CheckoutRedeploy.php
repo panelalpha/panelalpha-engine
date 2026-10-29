@@ -12,7 +12,7 @@ class CheckoutRedeploy
 {
     public function afterMutation(GitRepository $git, DindProject $project): void
     {
-        if (!$git->isDeployManaged()) {
+        if (! $git->isDeployManaged()) {
             return;
         }
 

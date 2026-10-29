@@ -19,16 +19,17 @@ use Symfony\Component\HttpFoundation\Response;
 class PmaSso
 {
     /**
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * @param  Closure(Request): (Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
     {
         $peer = $this->peerAddress($request);
-        if ($peer === null || !IpUtils::checkIp($peer, $this->allowedSources())) {
+        if ($peer === null || ! IpUtils::checkIp($peer, $this->allowedSources())) {
             abort(new JsonResponse([
                 'message' => 'Not found',
             ], 404));
         }
+
         return $next($request);
     }
 
@@ -57,6 +58,7 @@ class PmaSso
         foreach ($entries as $entry) {
             if ($this->isAddressOrRange($entry)) {
                 $allowed[] = $entry;
+
                 continue;
             }
             array_push($allowed, ...$this->resolve($entry));

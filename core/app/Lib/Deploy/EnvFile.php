@@ -50,10 +50,12 @@ class EnvFile
                     continue;
                 }
                 $rows[] = ['type' => 'blank'];
+
                 continue;
             }
             if (str_starts_with($trimmed, '#')) {
                 $rows[] = ['type' => 'comment', 'text' => $line];
+
                 continue;
             }
             // `KEY = "v"` is accepted by Compose's dotenv too; the space is not part of the value.
@@ -68,6 +70,7 @@ class EnvFile
                     $row['literal'] = true;
                 }
                 $rows[] = $row;
+
                 continue;
             }
             $rows[] = ['type' => 'comment', 'text' => $line];
@@ -77,7 +80,7 @@ class EnvFile
     }
 
     /**
-     * @param array<int, array<string, string>> $rows
+     * @param  array<int, array<string, string>>  $rows
      */
     public static function serialise(array $rows): string
     {
@@ -89,7 +92,7 @@ class EnvFile
                     if ($key === '') {
                         continue 2;
                     }
-                    $lines[] = $key . '=' . self::quote((string) ($row['value'] ?? ''), ($row['literal'] ?? false) === true);
+                    $lines[] = $key.'='.self::quote((string) ($row['value'] ?? ''), ($row['literal'] ?? false) === true);
                     break;
                 case 'comment':
                     $lines[] = (string) ($row['text'] ?? '');
@@ -100,26 +103,26 @@ class EnvFile
             }
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /**
      * Override existing keys (or append missing ones) with the given map.
      * Only keys present in $overrides are changed; empty override values are skipped.
      *
-     * @param array<string, string> $overrides
+     * @param  array<string, string>  $overrides
      */
     public static function merge(string $baseContents, array $overrides): string
     {
         $filtered = [];
         foreach ($overrides as $key => $value) {
-            if (!is_string($key) || $key === '' || !is_string($value)) {
+            if (! is_string($key) || $key === '' || ! is_string($value)) {
                 continue;
             }
             $filtered[$key] = $value;
         }
         if ($filtered === []) {
-            return $baseContents === '' ? '' : (str_ends_with($baseContents, "\n") ? $baseContents : $baseContents . "\n");
+            return $baseContents === '' ? '' : (str_ends_with($baseContents, "\n") ? $baseContents : $baseContents."\n");
         }
 
         $rows = self::parse($baseContents);
@@ -136,7 +139,7 @@ class EnvFile
             }
         }
         foreach ($filtered as $key => $value) {
-            if (!isset($seen[$key])) {
+            if (! isset($seen[$key])) {
                 $rows[] = ['type' => 'variable', 'key' => $key, 'value' => $value, 'literal' => true];
             }
         }
@@ -159,9 +162,10 @@ class EnvFile
         foreach ($lines as $i => $line) {
             if ($openQuote !== null) {
                 // Inside a multi-line quoted value: Compose reads it as value, not keys.
-                if (preg_match('/(?<!\\\\)' . preg_quote($openQuote, '/') . '/', $line) === 1) {
+                if (preg_match('/(?<!\\\\)'.preg_quote($openQuote, '/').'/', $line) === 1) {
                     $openQuote = null;
                 }
+
                 continue;
             }
             $trimmed = trim($line);
@@ -172,14 +176,15 @@ class EnvFile
             $parts = preg_split('/[=:]/', $statement, 2) ?: [$statement];
             // Compose's own key alphabet: letters, digits, `_ . - [ ]`.
             if (preg_match('/^[\p{L}\p{N}_.\-\[\]]+$/u', rtrim($parts[0])) !== 1) {
-                $lines[$i] = '# ' . $line;
+                $lines[$i] = '# '.$line;
                 $rejected[] = $i + 1;
+
                 continue;
             }
             $value = ltrim($parts[1] ?? '');
             $quote = $value[0] ?? '';
             if (($quote === '"' || $quote === "'")
-                && preg_match('/(?<!\\\\)' . preg_quote($quote, '/') . '/', substr($value, 1)) !== 1) {
+                && preg_match('/(?<!\\\\)'.preg_quote($quote, '/').'/', substr($value, 1)) !== 1) {
                 $openQuote = $quote;
             }
         }
@@ -226,21 +231,21 @@ class EnvFile
         }
         if ($literal && str_contains($value, '$')) {
             if (preg_match("/['\n\r]/", $value) !== 1) {
-                return "'" . $value . "'";
+                return "'".$value."'";
             }
             // Cannot be single-quoted; `$$` is Compose's escape inside double quotes.
             $escaped = str_replace(['\\', '"', "\n", "\r", "\t", '$'], ['\\\\', '\\"', '\\n', '\\r', '\\t', '$$'], $value);
 
-            return '"' . $escaped . '"';
+            return '"'.$escaped.'"';
         }
         $needsQuoting = preg_match('/[\s"\'#\\\\]/', $value) === 1
             || $value[0] === '"' || $value[0] === "'";
-        if (!$needsQuoting) {
+        if (! $needsQuoting) {
             return $value;
         }
         $escaped = str_replace(['\\', '"', "\n", "\r", "\t"], ['\\\\', '\\"', '\\n', '\\r', '\\t'], $value);
 
-        return '"' . $escaped . '"';
+        return '"'.$escaped.'"';
     }
 
     /**
@@ -284,7 +289,7 @@ class EnvFile
      * is unreadable to the engine's user and would silently lose to the
      * example.
      *
-     * @param (callable(string): ?string)|null $read path => contents, null when absent
+     * @param  (callable(string): ?string)|null  $read  path => contents, null when absent
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}
      */
     public static function databaseSettings(string $projectDir, ?callable $read = null): array
@@ -308,8 +313,8 @@ class EnvFile
         $projectDir = rtrim($projectDir, '/');
         $read ??= self::readHostFile(...);
         foreach (['.env', '.env.example'] as $name) {
-            $contents = $read($projectDir . '/' . $name);
-            if (!is_string($contents) || $contents === '') {
+            $contents = $read($projectDir.'/'.$name);
+            if (! is_string($contents) || $contents === '') {
                 continue;
             }
             foreach (self::parse($contents) as $row) {
@@ -330,10 +335,10 @@ class EnvFile
     /** A file on the engine's own filesystem, or null when absent or unreadable. */
     public static function readHostFile(string $path): ?string
     {
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return null;
         }
-        $contents = @file_get_contents($path);
+        $contents = AccountHomeRead::contents($path);
 
         return is_string($contents) ? $contents : null;
     }

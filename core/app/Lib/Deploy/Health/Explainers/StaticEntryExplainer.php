@@ -49,8 +49,8 @@ final class StaticEntryExplainer implements Explainer
 
         if ($entry !== null) {
             return [
-                'detail' => 'The site should be served from ' . $entry . ', which is in ~/project, '
-                    . 'so the deployed configuration is pointing somewhere else.',
+                'detail' => 'The site should be served from '.$entry.', which is in ~/project, '
+                    .'so the deployed configuration is pointing somewhere else.',
                 'fix' => 'Redeploy the project: the running nginx configuration predates the files on disk.',
             ];
         }
@@ -58,14 +58,14 @@ final class StaticEntryExplainer implements Explainer
         // Documents exist and no entry could be chosen: the deployed config
         // names a file that has since gone.
         return [
-            'detail' => self::listing($documents) . ' still in ~/project, but the document the '
-                . 'deployed site is served from is not.',
+            'detail' => self::listing($documents).' still in ~/project, but the document the '
+                .'deployed site is served from is not.',
             'fix' => 'Restore that file, or rename one of the pages above to index.html and redeploy.',
         ];
     }
 
     /**
-     * @param list<string> $documents
+     * @param  list<string>  $documents
      */
     private static function listing(array $documents): string
     {
@@ -74,10 +74,10 @@ final class StaticEntryExplainer implements Explainer
         $names = implode(', ', $shown);
 
         if ($rest > 0) {
-            return $names . ' and ' . $rest . ' more page' . ($rest === 1 ? '' : 's') . ' are';
+            return $names.' and '.$rest.' more page'.($rest === 1 ? '' : 's').' are';
         }
 
-        return count($shown) === 1 ? $names . ' is' : $names . ' are';
+        return count($shown) === 1 ? $names.' is' : $names.' are';
     }
 
     /**
@@ -90,7 +90,7 @@ final class StaticEntryExplainer implements Explainer
     {
         $found = [];
         foreach (scandir($projectDir) ?: [] as $entry) {
-            if (preg_match('/\.html?$/i', $entry) === 1 && is_file($projectDir . '/' . $entry)) {
+            if (preg_match('/\.html?$/i', $entry) === 1 && is_file($projectDir.'/'.$entry)) {
                 $found[] = $entry;
             }
         }

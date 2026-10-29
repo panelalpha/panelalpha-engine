@@ -176,6 +176,11 @@ final class FakeEngine implements ContainerEngine
                 return ['true'];
             }
 
+            public function hostRebuildCommand(string $image, string $dockerfile): string
+            {
+                return 'true';
+            }
+
             public function refreshCommand(EngineAccount $account, string $image): string
             {
                 return 'true';

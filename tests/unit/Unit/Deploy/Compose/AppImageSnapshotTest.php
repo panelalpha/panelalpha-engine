@@ -6,6 +6,7 @@ use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Reading back the image the account will actually run.
@@ -47,7 +48,7 @@ class AppImageSnapshotTest extends TestCase
                 'runtime' => 'command',
                 'strategy' => 'django',
                 'image' => 'panelalpha/python:3.12-slim-pa2a0d75ad',
-                'start_command' => '.venv/bin/python manage.py runserver 0.0.0.0:8000',
+                'start_command' => '.venv/bin/python manage.py runserver ' . TestNetwork::ANY . ':8000',
                 'env' => [],
             ],
             8000,

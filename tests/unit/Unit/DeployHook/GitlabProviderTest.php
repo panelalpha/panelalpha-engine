@@ -10,14 +10,18 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * GitLab's side of the contract, against payloads shaped like the ones GitLab
- * (gitlab.com and self-managed) sends (tests/fixtures/gitlab-hooks). Unlike
- * GitHub there is no signature: the secret token comes back verbatim in
- * `X-Gitlab-Token`, so verification is a constant-time string comparison and
- * says nothing about the body.
+ * (gitlab.com and self-managed) sends (tests/fixtures/gitlab-hooks). A hook
+ * with a signing token sends a Standard Webhooks signature over the id, the
+ * time and the body; one without sends the secret token in `X-Gitlab-Token`,
+ * a constant-time comparison that says nothing about the body.
  */
 class GitlabProviderTest extends TestCase
 {
     private const SECRET = 'a-shared-secret-of-some-length';
+
+    private const SIGNING_KEY = 'a-signing-key-of-thirty-two-byte';
+
+    private const SIGNING_SECRET = 'whsec_YS1zaWduaW5nLWtleS1vZi10aGlydHktdHdvLWJ5dGU=';
 
     private function fixture(string $name): string
     {
@@ -40,6 +44,23 @@ class GitlabProviderTest extends TestCase
             'HTTP_X_GITLAB_TOKEN' => self::SECRET,
             'HTTP_X_GITLAB_EVENT_UUID' => 'e0c2a4b6-0000-4000-8000-000000000001',
             'HTTP_IDEMPOTENCY_KEY' => '7d6f1c1e-0000-4000-8000-000000000001',
+        ]);
+    }
+
+    /** A delivery as GitLab signs it: Standard Webhooks over `{id}.{timestamp}.{body}`. */
+    private function signedRequest(?string $body = null, ?string $signedBody = null, ?int $timestamp = null, string $key = self::SIGNING_KEY): Request
+    {
+        $body ??= $this->fixture('push-main.json');
+        $timestamp ??= time();
+        $id = 'msg_2KWPBgLlAfxdpx2AI54pPJ85f4W';
+        $signature = base64_encode(hash_hmac('sha256', $id . '.' . $timestamp . '.' . ($signedBody ?? $body), $key, true));
+
+        return $this->request($body, [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X_GITLAB_EVENT' => 'Push Hook',
+            'HTTP_WEBHOOK_ID' => $id,
+            'HTTP_WEBHOOK_TIMESTAMP' => (string) $timestamp,
+            'HTTP_WEBHOOK_SIGNATURE' => 'v1,' . $signature,
         ]);
     }
 
@@ -89,6 +110,97 @@ class GitlabProviderTest extends TestCase
         $request = $this->request('{}', ['HTTP_X_GITLAB_EVENT' => 'Push Hook']);
 
         $this->assertFalse((new GitlabProvider())->verify($request, ''));
+    }
+
+    public function test_a_signed_delivery_verifies_with_its_signing_secret(): void
+    {
+        $provider = new GitlabProvider();
+        $request = $this->signedRequest();
+
+        $this->assertTrue($provider->verify($request, self::SIGNING_SECRET));
+        $this->assertTrue($provider->signsTheBody($request, self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_whose_body_was_changed_is_refused(): void
+    {
+        $request = $this->signedRequest(body: str_replace('main', 'evil', $this->fixture('push-main.json')), signedBody: $this->fixture('push-main.json'));
+
+        $this->assertFalse((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_whose_id_was_changed_is_refused(): void
+    {
+        $request = $this->signedRequest();
+        $request->headers->set('webhook-id', 'msg_other');
+
+        $this->assertFalse((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_outside_the_tolerance_is_refused(): void
+    {
+        foreach ([time() - 301, time() + 301] as $timestamp) {
+            $this->assertFalse((new GitlabProvider())->verify($this->signedRequest(timestamp: $timestamp), self::SIGNING_SECRET), (string) $timestamp);
+        }
+    }
+
+    public function test_one_matching_entry_in_a_signature_list_is_enough(): void
+    {
+        $request = $this->signedRequest();
+        $request->headers->set('webhook-signature', 'v1,bm90LWl0 ' . $request->headers->get('webhook-signature'));
+
+        $this->assertTrue((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
+    }
+
+    public function test_a_signature_header_never_falls_back_to_the_token(): void
+    {
+        $request = $this->signedRequest(key: 'another-key-of-thirty-two-bytes!');
+        $request->headers->set('X-Gitlab-Token', self::SIGNING_SECRET);
+
+        $this->assertFalse((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
+    }
+
+    /**
+     * A secret made before 2.2 has no `whsec_` key, so a GitLab webhook that
+     * signs with a signing token of its own is checked by the token it sends.
+     */
+    public function test_a_signed_delivery_to_a_secret_that_cannot_sign_is_checked_by_its_token(): void
+    {
+        $provider = new GitlabProvider();
+        $request = $this->signedRequest();
+        $request->headers->set('X-Gitlab-Token', self::SECRET);
+
+        $this->assertTrue($provider->verify($request, self::SECRET));
+        $this->assertFalse($provider->signsTheBody($request, self::SECRET));
+        $this->assertFalse(GitlabProvider::canSignWith(self::SECRET));
+        $this->assertTrue(GitlabProvider::canSignWith(self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_to_a_secret_that_cannot_sign_still_needs_its_token(): void
+    {
+        $provider = new GitlabProvider();
+        $request = $this->signedRequest();
+
+        $this->assertFalse($provider->verify($request, self::SECRET));
+
+        $request->headers->set('X-Gitlab-Token', 'some-other-secret');
+        $this->assertFalse($provider->verify($request, self::SECRET));
+    }
+
+    public function test_the_token_the_engine_registers_beside_a_signing_secret_verifies(): void
+    {
+        $request = $this->request('{}', ['HTTP_X_GITLAB_EVENT' => 'Push Hook', 'HTTP_X_GITLAB_TOKEN' => GitlabProvider::tokenFor(self::SIGNING_SECRET)]);
+
+        $this->assertTrue((new GitlabProvider())->verify($request, self::SIGNING_SECRET));
+        $this->assertFalse((new GitlabProvider())->signsTheBody($request, self::SIGNING_SECRET));
+        $this->assertNotSame(self::SIGNING_SECRET, GitlabProvider::tokenFor(self::SIGNING_SECRET));
+    }
+
+    public function test_a_signed_delivery_is_identified_by_its_signed_webhook_id(): void
+    {
+        $request = $this->signedRequest();
+        $request->headers->set('Idempotency-Key', 'unsigned-key');
+
+        $this->assertSame('msg_2KWPBgLlAfxdpx2AI54pPJ85f4W', (new GitlabProvider())->parse($request)->deliveryId);
     }
 
     public function test_it_parses_a_branch_push(): void

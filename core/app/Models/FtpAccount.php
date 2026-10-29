@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class FtpAccount extends Model
 {
-    use HasFactory, HasDetails;
+    use HasDetails, HasFactory;
 
     protected $fillable = [
         'user_id',

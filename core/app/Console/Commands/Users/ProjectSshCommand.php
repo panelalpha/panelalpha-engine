@@ -46,15 +46,15 @@ class ProjectSshCommand extends Command
 
     public function handle(): int
     {
-        $project = (string)$this->argument('project');
+        $project = (string) $this->argument('project');
         // Not `command`: Symfony Console already defines an argument of that
         // name on every command - the command's own name.
-        $command = (string)$this->argument('cmd');
+        $command = (string) $this->argument('cmd');
         $cwd = $this->option('cwd');
-        $timeout = (int)$this->option('timeout');
+        $timeout = (int) $this->option('timeout');
 
         if ($timeout < 1 || $timeout > SshCommandRunRequest::MAX_TIMEOUT) {
-            $this->error('--timeout must be between 1 and ' . SshCommandRunRequest::MAX_TIMEOUT . ' seconds');
+            $this->error('--timeout must be between 1 and '.SshCommandRunRequest::MAX_TIMEOUT.' seconds');
 
             return 1;
         }
@@ -64,7 +64,7 @@ class ProjectSshCommand extends Command
             $params['cwd'] = $cwd;
         }
 
-        Validator::make($params, (new SshCommandRunRequest())->rules())->validate();
+        Validator::make($params, (new SshCommandRunRequest)->rules())->validate();
         $user = User::findByUsernameOrFail($project);
         $result = ProjectShell::run($user, $command, $params['cwd'] ?? null, $timeout);
 

@@ -33,36 +33,43 @@ namespace App\Lib\Domains;
 final class DomainPlan
 {
     public const SOURCE_REQUESTED = 'requested';
+
     public const SOURCE_SITES_BASE_DOMAIN = 'sites_base_domain';
+
     public const SOURCE_PANELALPHA_ONLINE = 'panelalpha_online';
+
     public const SOURCE_PANELALPHA_DIRECT = 'panelalpha_direct';
+
     public const SOURCE_LOCAL = 'local';
 
     /** The tunnel a caller can ask for at create time. */
     public const TUNNEL_PANELALPHA = 'panelalpha';
+
     public const TUNNEL_NONE = 'none';
+
     public const TUNNELS = [self::TUNNEL_PANELALPHA, self::TUNNEL_NONE];
 
     /** The Engine setting deciding the tunnel a create that named none gets. */
     public const SETTING_DEFAULT_TUNNEL = 'default_tunnel';
 
     public const PANELALPHA_ONLINE = 'panelalpha.online';
+
     public const PANELALPHA_DIRECT = 'panelalpha.direct';
 
     /**
      * The rungs to try, best first.
      *
-     * @param string $username the project name, which is also the label a
-     *        generated domain is built from
-     * @param ?string $requested the caller's `domain`, if it gave one
-     * @param ?string $tunnel the caller's `tunnel`, if it gave one; a missing one
-     *        becomes `none` only when the `default_tunnel` setting says so. Asking
-     *        for `panelalpha` explicitly outranks a configured base domain -- an
-     *        explicit request beats a default, even the operator's.
-     * @param array{sites_base_domain?: ?string, cert_domain?: ?string, default_ipv4?: ?string, default_tunnel?: ?string} $settings
+     * @param  string  $username  the project name, which is also the label a
+     *                            generated domain is built from
+     * @param  ?string  $requested  the caller's `domain`, if it gave one
+     * @param  ?string  $tunnel  the caller's `tunnel`, if it gave one; a missing one
+     *                           becomes `none` only when the `default_tunnel` setting says so. Asking
+     *                           for `panelalpha` explicitly outranks a configured base domain -- an
+     *                           explicit request beats a default, even the operator's.
+     * @param  array{sites_base_domain?: ?string, cert_domain?: ?string, default_ipv4?: ?string, default_tunnel?: ?string}  $settings
      * @return list<array{domain: string, source: string, label: ?string}>
-     *         `label` is set only on the rung that has to be allocated
-     *         remotely, and is the single label to ask the proxy for.
+     *                                                                     `label` is set only on the rung that has to be allocated
+     *                                                                     remotely, and is the single label to ask the proxy for.
      */
     public static function candidates(
         string $username,
@@ -87,7 +94,7 @@ final class DomainPlan
 
         if ($base !== null && $tunnel !== self::TUNNEL_PANELALPHA) {
             $candidates[] = [
-                'domain' => $username . '.' . $base,
+                'domain' => $username.'.'.$base,
                 'source' => self::SOURCE_SITES_BASE_DOMAIN,
                 'label' => null,
             ];
@@ -115,7 +122,7 @@ final class DomainPlan
             // project lives is still one nobody else can have.
             $label = self::suffixed($username);
             $candidates[] = [
-                'domain' => $label . '.' . self::PANELALPHA_ONLINE,
+                'domain' => $label.'.'.self::PANELALPHA_ONLINE,
                 'source' => self::SOURCE_PANELALPHA_ONLINE,
                 'label' => $label,
             ];
@@ -134,14 +141,14 @@ final class DomainPlan
             // Asking for a tunnel put panelalpha.online first, but a configured
             // base domain is still a better last resort than `.local`.
             $candidates[] = [
-                'domain' => $username . '.' . $base,
+                'domain' => $username.'.'.$base,
                 'source' => self::SOURCE_SITES_BASE_DOMAIN,
                 'label' => null,
             ];
         }
 
         $candidates[] = [
-            'domain' => $username . '.local',
+            'domain' => $username.'.local',
             'source' => self::SOURCE_LOCAL,
             'label' => null,
         ];
@@ -153,7 +160,7 @@ final class DomainPlan
      * The tunnel to walk the ladder with: the caller's own, otherwise `none` only
      * when the setting says so -- `panelalpha` and unset both keep today's ladder.
      *
-     * @param array{default_tunnel?: ?string} $settings
+     * @param  array{default_tunnel?: ?string}  $settings
      */
     public static function resolveTunnel(?string $tunnel, array $settings): ?string
     {
@@ -176,7 +183,7 @@ final class DomainPlan
      * was never a candidate leaves no trace of itself unless something says
      * so, and this is what says so.
      *
-     * @param array{default_ipv4?: ?string} $settings
+     * @param  array{default_ipv4?: ?string}  $settings
      */
     public static function noPublicNameReason(array $settings): ?string
     {
@@ -187,13 +194,13 @@ final class DomainPlan
         // Short on purpose: this rides inside the warning sentence, which
         // already says what the name does answer.
         if (self::ipv4($settings) !== null) {
-            return 'no public IPv4: the host\'s address is private, so ' . self::PANELALPHA_ONLINE
-                . ' could not serve it';
+            return 'no public IPv4: the host\'s address is private, so '.self::PANELALPHA_ONLINE
+                .' could not serve it';
         }
 
         return 'no public IPv4: the host has no IPv4 address on record, so neither '
-            . self::PANELALPHA_ONLINE . ' nor ' . self::PANELALPHA_DIRECT
-            . ' could give it a name at all';
+            .self::PANELALPHA_ONLINE.' nor '.self::PANELALPHA_DIRECT
+            .' could give it a name at all';
     }
 
     /**
@@ -219,13 +226,13 @@ final class DomainPlan
      * holds a certificate for -- one covering the admin name today, and a
      * wildcard over every project tomorrow.
      *
-     * @param array{cert_domain?: ?string, default_ipv4?: ?string} $settings
+     * @param  array{cert_domain?: ?string, default_ipv4?: ?string}  $settings
      */
     public static function directDomain(string $username, array $settings): ?string
     {
         $certDomain = self::normalise($settings['cert_domain'] ?? null);
         if ($certDomain !== null) {
-            return $username . '.' . $certDomain;
+            return $username.'.'.$certDomain;
         }
 
         // Any address, public or private. This rung is DNS and nothing else:
@@ -242,7 +249,7 @@ final class DomainPlan
             return null;
         }
 
-        return $username . '.' . str_replace('.', '-', $ipv4) . '.' . self::PANELALPHA_DIRECT;
+        return $username.'.'.str_replace('.', '-', $ipv4).'.'.self::PANELALPHA_DIRECT;
     }
 
     /**
@@ -252,16 +259,24 @@ final class DomainPlan
      */
     public static function onlineLabel(string $domain): ?string
     {
-        $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
-        $suffix = '.' . self::PANELALPHA_ONLINE;
-
-        if (!str_ends_with($domain, $suffix)) {
+        if (! self::inOnlineZone($domain)) {
             return null;
         }
 
-        $label = substr($domain, 0, -strlen($suffix));
+        $label = substr(self::bareName($domain), 0, -strlen('.'.self::PANELALPHA_ONLINE));
 
         return preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $label) === 1 ? $label : null;
+    }
+
+    /** A name at any depth under panelalpha.online, where the proxy, not this engine, holds the name and its certificate. */
+    public static function inOnlineZone(string $domain): bool
+    {
+        return str_ends_with(self::bareName($domain), '.'.self::PANELALPHA_ONLINE);
+    }
+
+    private static function bareName(string $domain): string
+    {
+        return strtolower(trim($domain, " \t\n\r\0\x0B."));
     }
 
     /**
@@ -273,7 +288,7 @@ final class DomainPlan
     {
         $stem = substr($label, 0, 40);
 
-        return $stem . '-' . bin2hex(random_bytes(2));
+        return $stem.'-'.bin2hex(random_bytes(2));
     }
 
     /** @param array{default_ipv4?: ?string} $settings */
@@ -296,7 +311,7 @@ final class DomainPlan
     /**
      * Whether the address this engine records is one the internet can reach.
      *
-     * @param array{default_ipv4?: ?string} $settings
+     * @param  array{default_ipv4?: ?string}  $settings
      */
     public static function hasPublicIpv4(array $settings): bool
     {

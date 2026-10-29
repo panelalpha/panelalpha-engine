@@ -28,8 +28,9 @@ class DomainsList extends Command
         $query = Domain::with(['user', 'tunnels'])->orderBy('created_at');
         if (is_string($project) && $project !== '') {
             $user = User::findByUsername($project);
-            if (!$user) {
+            if (! $user) {
                 $this->error("No project named '{$project}'");
+
                 return 1;
             }
             $query->where('user_id', $user->id);
@@ -59,10 +60,11 @@ class DomainsList extends Command
             $data,
         );
         $this->info(
-            'Total domains: ' . $totalDomains
-            . ' (+' . $totalAliases . ' aliases, +' . $totalTunnels . ' tunnels)'
+            'Total domains: '.$totalDomains
+            .' (+'.$totalAliases.' aliases, +'.$totalTunnels.' tunnels)'
         );
-        $this->info('Total projects: ' . $totalUsers);
+        $this->info('Total projects: '.$totalUsers);
+
         return 0;
     }
 }

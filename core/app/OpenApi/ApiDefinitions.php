@@ -34,6 +34,7 @@ use OpenApi\Attributes as OA;
 )]
 #[OA\Tag(name: 'Projects', description: 'Hosting project management (formerly "users")')]
 #[OA\Tag(name: 'Domains', description: 'User domain management')]
+#[OA\Tag(name: 'CDN', description: "Cloudflare cache, security level and status for a domain's zone")]
 #[OA\Tag(name: 'Domain PHP', description: 'PHP version per domain')]
 #[OA\Tag(name: 'SSL Certificates', description: 'SSL certificate operations')]
 #[OA\Tag(name: 'Domain Log Files', description: 'Access domain access/error logs')]
@@ -77,10 +78,10 @@ use OpenApi\Attributes as OA;
             property: 'problems',
             type: 'array',
             description: 'Present where the failure had more to say than a sentence. One entry per '
-                . 'thing that is wrong, each with the `field` it belongs to, a stable `code` to '
-                . 'branch on, and the same `message` that appears in `errors`. A failed deploy adds '
-                . '`stage` and `deploy_log_offset`. Codes for a build failure are the deploy '
-                . "explainer's rule slugs, the same identifiers deploy telemetry reports.",
+                .'thing that is wrong, each with the `field` it belongs to, a stable `code` to '
+                .'branch on, and the same `message` that appears in `errors`. A failed deploy adds '
+                .'`stage` and `deploy_log_offset`. Codes for a build failure are the deploy '
+                ."explainer's rule slugs, the same identifiers deploy telemetry reports.",
             items: new OA\Items(
                 properties: [
                     new OA\Property(property: 'field', type: 'string', example: 'domain'),
@@ -134,13 +135,13 @@ class ApiDefinitions
 {
     /** The 409 an operation refused for a protected project answers with, shared by all of them. */
     public const PROTECTED_RESPONSE = 'The project is protected: an API or MCP token may not delete, stop or '
-        . 'redeploy it (`code: project_protected`)';
+        .'redeploy it (`code: project_protected`)';
 
     /** The 403 a project-scoped token gets for naming a project outside its scope in a field. */
     public const OUT_OF_SCOPE_RESPONSE = 'The token is limited to some projects, and this request names one '
-        . 'outside them';
+        .'outside them';
 
     /** The 403 a project-scoped token gets for changing what the operator owns on its own project. */
     public const OPERATOR_ONLY_RESPONSE = 'The token is limited to some projects, and this changes what the '
-        . 'operator owns on a project: only an unscoped token may';
+        .'operator owns on a project: only an unscoped token may';
 }

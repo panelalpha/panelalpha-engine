@@ -8,6 +8,7 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The Apaxy follow-up. Apaxy's product is a directory listing, so
@@ -83,7 +84,7 @@ HTML;
     /** @return array{serving: string, checks: array<string, array<string, mixed>>} */
     private static function report(CheckRunner $runner, string $body): array
     {
-        $report = $runner->run(new ProbedResponse(200, $body, 'http://127.0.0.1:8080/'), null);
+        $report = $runner->run(new ProbedResponse(200, $body, 'http://' . TestNetwork::LOOPBACK . ':8080/'), null);
         $checks = [];
         foreach ($report['checks'] as $check) {
             $checks[$check['group'] . '/' . $check['id']] = $check;

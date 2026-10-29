@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\EnvFile;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class EnvFileTest extends TestCase
 {
@@ -173,13 +174,13 @@ class EnvFileTest extends TestCase
         file_put_contents($this->tmpDir . '/.env.example', "DB_CONNECTION=sqlite\nDB_DATABASE=demo\n");
         file_put_contents(
             $this->tmpDir . '/.env',
-            "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_DATABASE=laravel-crm\nDB_USERNAME=root\nDB_PASSWORD=\n"
+            "DB_CONNECTION=mysql\nDB_HOST=" . TestNetwork::LOOPBACK . "\nDB_DATABASE=laravel-crm\nDB_USERNAME=root\nDB_PASSWORD=\n"
         );
 
         $this->assertSame(
             [
                 'connection' => 'mysql',
-                'host' => '127.0.0.1',
+                'host' => TestNetwork::LOOPBACK,
                 'port' => '3306',
                 'database' => 'laravel-crm',
                 'username' => 'root',
@@ -205,7 +206,7 @@ class EnvFileTest extends TestCase
      */
     public function test_database_settings_read_env_through_the_given_reader(): void
     {
-        file_put_contents($this->tmpDir . '/.env.example', "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n");
+        file_put_contents($this->tmpDir . '/.env.example', "DB_CONNECTION=mysql\nDB_HOST=" . TestNetwork::LOOPBACK . "\n");
         file_put_contents($this->tmpDir . '/.env', "DB_CONNECTION=sqlite\n");
         chmod($this->tmpDir . '/.env', 0000);
         if (is_readable($this->tmpDir . '/.env')) {
@@ -217,7 +218,7 @@ class EnvFileTest extends TestCase
 
         $asAccount = fn (string $path): ?string => match (basename($path)) {
             '.env' => "DB_CONNECTION=sqlite\n",
-            '.env.example' => "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n",
+            '.env.example' => "DB_CONNECTION=mysql\nDB_HOST=" . TestNetwork::LOOPBACK . "\n",
             default => null,
         };
         $this->assertSame('sqlite', EnvFile::databaseSettings($this->tmpDir, $asAccount)['connection']);
@@ -299,12 +300,12 @@ class EnvFileTest extends TestCase
 
     public function test_merge_overrides_in_place_and_appends_new_keys(): void
     {
-        $base = "# app\nAPP_ENV=local\n\nDB_HOST=127.0.0.1\n";
+        $base = "# app\nAPP_ENV=local\n\nDB_HOST=" . TestNetwork::LOOPBACK . "\n";
 
         $merged = EnvFile::merge($base, ['APP_ENV' => 'production', 'NEW_KEY' => 'v']);
 
         $this->assertSame(
-            "# app\nAPP_ENV=production\n\nDB_HOST=127.0.0.1\nNEW_KEY=v\n",
+            "# app\nAPP_ENV=production\n\nDB_HOST=" . TestNetwork::LOOPBACK . "\nNEW_KEY=v\n",
             $merged,
             'existing keys keep their position; new keys are appended'
         );

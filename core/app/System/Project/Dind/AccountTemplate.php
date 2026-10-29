@@ -5,11 +5,12 @@ namespace App\System\Project\Dind;
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DetectAppPort;
-use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Models\Setting;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Project\ContainerLimits;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Services\SupervisordServiceManager;
 
@@ -22,8 +23,7 @@ final class AccountTemplate
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     public function create(): void
     {
@@ -67,8 +67,8 @@ final class AccountTemplate
     }
 
     /**
-     * @param bool $apiAccess whether the project may use the Engine API, which
-     *        its own egress guard has to know about
+     * @param  bool  $apiAccess  whether the project may use the Engine API, which
+     *                           its own egress guard has to know about
      * @return array<string, string>
      */
     public function entrypointInitScripts(bool $apiAccess = false): array
@@ -125,7 +125,7 @@ BASH;
             'ipv6' => false,
             'group' => $username,
             'insecure-registries' => [DindImageStore::CACHE_REGISTRY, DindImageStore::PROXY_REGISTRY],
-            'registry-mirrors' => ['http://' . DindImageStore::PROXY_REGISTRY],
+            'registry-mirrors' => ['http://'.DindImageStore::PROXY_REGISTRY],
             'log-driver' => 'json-file',
             'log-opts' => ServiceHardener::LOG_OPTIONS,
         ], JSON_UNESCAPED_SLASHES);
@@ -146,7 +146,7 @@ BASH;
             $ips = [];
         }
         try {
-            $public = \App\Models\Setting::get('default_ipv4');
+            $public = Setting::get('default_ipv4');
             if (is_string($public) && $public !== '') {
                 $ips[] = $public;
             }
@@ -162,7 +162,7 @@ BASH;
         $appDir = $paths->appDir();
         $hasSources = ProjectContext::listRootFiles($appDir) !== [];
 
-        if ($paths->existingComposeFile() === null && !$model->hasGitProject() && !$hasSources) {
+        if ($paths->existingComposeFile() === null && ! $model->hasGitProject() && ! $hasSources) {
             (new WelcomeBootstrap($this->project, $paths))->writeIfNeeded();
         }
 
@@ -174,13 +174,6 @@ BASH;
      */
     private function templateVars(ModelsUser $user, System $system): array
     {
-        $blockDevice = '';
-        $deviceReadBps = $user->getDeviceReadBps();
-        $deviceWriteBps = $user->getDeviceWriteBps();
-        if ($deviceReadBps !== null || $deviceWriteBps !== null) {
-            $blockDevice = $system->filesystem()->getHomeFilesystemParentBlockDevice();
-        }
-
         [$uid, $gid] = $user->linuxIds();
 
         return [
@@ -188,11 +181,7 @@ BASH;
             'user' => $user->username,
             'uid' => $uid,
             'gid' => $gid,
-            'cpu_limit' => (string) $user->getCpuLimit(),
-            'memory_limit' => (string) $user->effectiveMemoryLimit(),
-            'device_read_bps' => $deviceReadBps,
-            'device_write_bps' => $deviceWriteBps,
-            'block_device' => $blockDevice,
+            ...ContainerLimits::templateVars($user, $system),
             'php_versions' => $system->php()->listAvailablePhpVersions(),
             'proc_mounts' => LxcfsProc::mounts(LxcfsProc::present($system), AccountRuntime::isSysbox()),
         ];

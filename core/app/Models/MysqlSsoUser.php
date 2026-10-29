@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class MysqlSsoUser extends Model
 {
-    use HasFactory, HasDetails;
+    use HasDetails, HasFactory;
 
     protected $fillable = [
         'user_id',

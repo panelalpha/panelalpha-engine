@@ -38,7 +38,7 @@ class FileFetchCommand extends Command
             $params['filename'] = $filename;
         }
 
-        Validator::make($params, (new FetchRequest())->rules())->validate();
+        Validator::make($params, (new FetchRequest)->rules())->validate();
         $user = User::findByUsernameOrFail($project);
         $dir = $user->project()->resolvePath($path);
 
@@ -49,7 +49,7 @@ class FileFetchCommand extends Command
             throw ValidationException::withMessages(['url' => $e->getMessage()]);
         }
 
-        $this->info('Fetched ' . $url . ' into ' . $path);
+        $this->info('Fetched '.$url.' into '.$path);
 
         return 0;
     }

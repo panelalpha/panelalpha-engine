@@ -3,8 +3,11 @@
 namespace Tests\Unit\Deploy\Source;
 
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\IpUtils;
+use Tests\Support\TestNetwork;
 
 /**
  * The probe against real remotes. Grouped `network` so a run without egress
@@ -14,6 +17,13 @@ use PHPUnit\Framework\TestCase;
 #[Group('network')]
 class GitRemoteProbeTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        OutboundUrl::setResolverForTests(null);
+        OutboundUrl::setPolicyForTests(null, null);
+        parent::tearDown();
+    }
+
     public function test_a_public_repository_answers(): void
     {
         $problem = (new GitRemoteProbe())->problem(
@@ -57,7 +67,7 @@ class GitRemoteProbeTest extends TestCase
         $this->assertSame('git_token', $problem['field']);
     }
 
-    public function test_a_host_that_does_not_resolve_is_unreachable_and_retryable(): void
+    public function test_a_host_that_does_not_resolve_is_refused_before_git_runs(): void
     {
         $problem = (new GitRemoteProbe())->problem(
             'git_repo',
@@ -66,8 +76,8 @@ class GitRemoteProbeTest extends TestCase
         );
 
         $this->assertNotNull($problem);
-        $this->assertSame('git_repo_unreachable', $problem['code']);
-        $this->assertTrue($problem['retryable']);
+        $this->assertSame('host_refused', $problem['code']);
+        $this->assertStringContainsString('could not be resolved', $problem['message']);
     }
 
     /**
@@ -120,14 +130,24 @@ class GitRemoteProbeTest extends TestCase
             null
         );
 
-        $this->assertSame('git_repo_unreachable', $problem['code'] ?? null);
+        $this->assertSame('host_refused', $problem['code'] ?? null);
         $this->assertLessThan(30.0, microtime(true) - $started);
     }
 
-    /** @return array{0: ?array<string, mixed>, 1: float} */
+    /**
+     * On the runner's own private address, with private addresses allowed: the probe never
+     * connects to loopback.
+     *
+     * @return array{0: ?array<string, mixed>, 1: float}
+     */
     private function probeSilentListener(GitRemoteProbe $probe): array
     {
-        $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        $address = gethostbyname(gethostname());
+        if (! IpUtils::checkIp($address, [TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR])) {
+            $this->markTestSkipped("needs a private address of its own to listen on, has {$address}");
+        }
+        OutboundUrl::setPolicyForTests(true, null);
+        $server = stream_socket_server("tcp://{$address}:0", $errno, $errstr);
         $this->assertNotFalse($server, "could not open a listener: {$errstr}");
 
         try {
@@ -135,7 +155,7 @@ class GitRemoteProbeTest extends TestCase
             $port = (int) substr((string) $name, strrpos((string) $name, ':') + 1);
 
             $started = microtime(true);
-            $problem = $probe->problem('git_repo', "https://127.0.0.1:{$port}/o/r.git", null);
+            $problem = $probe->problem('git_repo', "https://{$address}:{$port}/o/r.git", null);
 
             return [$problem, microtime(true) - $started];
         } finally {
@@ -203,30 +223,47 @@ class GitRemoteProbeTest extends TestCase
         $this->assertSame(['main', 'feature/nested'], $problem['examples']);
     }
 
-    /** Through the real probe and a real git, against a local remote. */
+    /** The refs a `ls-remote --symref` answers with, one branch and one tag. */
+    private const SYMREF_REFS = "ref: refs/heads/main\tHEAD\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\tHEAD\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/heads/main\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/tags/v1.0\n";
+
+    /** Through the real probe's process, with a stand-in git that prints those refs. */
     public function test_the_probe_asks_about_the_branch_in_the_same_ls_remote(): void
     {
-        $dir = sys_get_temp_dir() . '/pa-branch-probe-' . bin2hex(random_bytes(4));
-        $git = static fn (string ...$args): string => (string) shell_exec(
-            'git -C ' . escapeshellarg($dir) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1'
-        );
-        mkdir($dir);
+        $git = tempnam(sys_get_temp_dir(), 'pa-probe-git-');
+        file_put_contents($git, "#!/bin/sh\nprintf " . escapeshellarg(self::SYMREF_REFS));
+        chmod($git, 0755);
+
+        $probe = new class ($git) extends GitRemoteProbe
+        {
+            public function __construct(private string $git)
+            {
+                parent::__construct();
+            }
+
+            protected function run(array $command): array
+            {
+                $command[array_search('git', $command, true)] = $this->git;
+
+                return parent::run($command);
+            }
+        };
+
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(4)]);
 
         try {
-            $git('init', '-q', '-b', 'main');
-            $git('-c', 'user.email=t@e.st', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
-            $git('tag', 'v1.0');
+            $url = 'https://example.test/o/r.git';
+            $this->assertNull($probe->problem('git_repo', $url, null, 'git_token', 'main'));
+            $this->assertNull($probe->problem('git_repo', $url, null, 'git_token', 'v1.0'));
+            $this->assertNull($probe->problem('git_repo', $url, null), 'no branch, no branch check');
 
-            $probe = new GitRemoteProbe();
-            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'main'));
-            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'v1.0'));
-            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null), 'no branch, no branch check');
-
-            $problem = $probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'no-such-branch-xyz');
+            $problem = $probe->problem('git_repo', $url, null, 'git_token', 'no-such-branch-xyz');
             $this->assertSame('git_branch_not_found', $problem['code'] ?? null);
             $this->assertSame(['main'], $problem['examples']);
         } finally {
-            shell_exec('rm -rf ' . escapeshellarg($dir));
+            unlink($git);
         }
     }
 }

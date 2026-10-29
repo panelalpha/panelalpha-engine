@@ -21,13 +21,13 @@ final class ComposeExtends
     private const MAX_DEPTH = 5;
 
     /**
-     * @param array<string, mixed> $compose paths already relative to the project root
-     * @param callable(string): ?string $read project-relative path => contents, null when unreadable
+     * @param  array<string, mixed>  $compose  paths already relative to the project root
+     * @param  callable(string): ?string  $read  project-relative path => contents, null when unreadable
      * @return array<string, mixed> the compose with every service's `extends` resolved and removed
      */
     public static function resolve(array $compose, callable $read): array
     {
-        if (!is_array($compose['services'] ?? null)) {
+        if (! is_array($compose['services'] ?? null)) {
             return $compose;
         }
 
@@ -41,10 +41,10 @@ final class ComposeExtends
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<array-key, mixed> $siblings the service map `extends` (same-file) resolves against
-     * @param callable(string): ?string $read
-     * @param list<string> $seen file:service keys already on the chain, to catch a cycle
+     * @param  array<string, mixed>  $service
+     * @param  array<array-key, mixed>  $siblings  the service map `extends` (same-file) resolves against
+     * @param  callable(string): ?string  $read
+     * @param  list<string>  $seen  file:service keys already on the chain, to catch a cycle
      * @return array<string, mixed>
      */
     private static function resolveService(array $service, array $siblings, callable $read, array $seen, int $depth): array
@@ -55,7 +55,7 @@ final class ComposeExtends
             return $service;
         }
         if ($depth >= self::MAX_DEPTH) {
-            throw new \InvalidArgumentException('The compose file nests extends: deeper than ' . self::MAX_DEPTH . ' levels.');
+            throw new \InvalidArgumentException('The compose file nests extends: deeper than '.self::MAX_DEPTH.' levels.');
         }
 
         [$targetName, $file] = self::target($extends);
@@ -64,8 +64,8 @@ final class ComposeExtends
         }
 
         if ($file === null) {
-            $key = ':' . $targetName;
-            if (in_array($key, $seen, true) || !is_array($siblings[$targetName] ?? null)) {
+            $key = ':'.$targetName;
+            if (in_array($key, $seen, true) || ! is_array($siblings[$targetName] ?? null)) {
                 throw new \InvalidArgumentException("The compose file extends {$targetName}, which it does not define.");
             }
             $base = self::resolveService($siblings[$targetName], $siblings, $read, array_merge($seen, [$key]), $depth + 1);
@@ -77,13 +77,13 @@ final class ComposeExtends
         if (str_starts_with($relative, '/') || str_starts_with($relative, '..')) {
             throw new \InvalidArgumentException("The compose file extends {$file}, which is outside the project.");
         }
-        $key = $relative . ':' . $targetName;
+        $key = $relative.':'.$targetName;
         if (in_array($key, $seen, true)) {
             throw new \InvalidArgumentException("The compose file extends {$file} in a cycle.");
         }
         $raw = $read($relative);
         $parsed = $raw === null ? null : ComposeYaml::parse($raw);
-        if (!is_array($parsed) || !is_array($parsed['services'][$targetName] ?? null)) {
+        if (! is_array($parsed) || ! is_array($parsed['services'][$targetName] ?? null)) {
             throw new \InvalidArgumentException("The compose file extends {$targetName} from {$file}, which could not be read.");
         }
         $dir = dirname($relative) === '.' ? '' : dirname($relative);
@@ -96,7 +96,6 @@ final class ComposeExtends
     /**
      * The extended service's name and the file it lives in (null = same file).
      *
-     * @param mixed $extends
      * @return array{0: ?string, 1: ?string}
      */
     private static function target(mixed $extends): array
@@ -104,7 +103,7 @@ final class ComposeExtends
         if (is_string($extends)) {
             return [trim($extends) === '' ? null : trim($extends), null];
         }
-        if (!is_array($extends)) {
+        if (! is_array($extends)) {
             return [null, null];
         }
         $service = is_string($extends['service'] ?? null) ? trim($extends['service']) : null;
@@ -119,15 +118,16 @@ final class ComposeExtends
      * Every escaping key the base carries therefore lands in the service, where
      * {@see ServiceHardener} then removes it.
      *
-     * @param array<string, mixed> $base
-     * @param array<string, mixed> $over
+     * @param  array<string, mixed>  $base
+     * @param  array<string, mixed>  $over
      * @return array<string, mixed>
      */
     private static function merge(array $base, array $over): array
     {
         foreach ($over as $key => $value) {
-            if (!array_key_exists($key, $base)) {
+            if (! array_key_exists($key, $base)) {
                 $base[$key] = $value;
+
                 continue;
             }
             $existing = $base[$key];

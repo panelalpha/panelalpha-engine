@@ -6,6 +6,7 @@ use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\StageScript;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * What a host-compiled project's container is told to run.
@@ -14,7 +15,7 @@ use Symfony\Component\Yaml\Yaml;
  * followed the redirect off the homepage, and its first real page was a 500 on
  * `no such table: catalog_book`. The recipe declares `migrate` and
  * `collectstatic` in its install and upgrade stages; the generated compose
- * command was `exec .venv/bin/python manage.py runserver 0.0.0.0:8000` and
+ * command was `exec .venv/bin/python manage.py runserver` on port 8000 and
  * nothing else, because this path never wrote the staged entrypoint that runs
  * a platform's non-start commands. A generated build bakes that script into
  * the image and PHP's shared base carries a shim for it; only the mounted
@@ -29,7 +30,7 @@ class MountedProjectEntrypointTest extends TestCase
             'strategy' => 'django',
             'runtime' => 'command',
             'image' => 'panelalpha/python:3.12-slim',
-            'start_command' => '.venv/bin/python manage.py runserver 0.0.0.0:8000',
+            'start_command' => '.venv/bin/python manage.py runserver ' . TestNetwork::ANY . ':8000',
             'env' => [],
         ] + $extra, 8000, null);
 
@@ -57,7 +58,7 @@ class MountedProjectEntrypointTest extends TestCase
         $service = $this->service();
 
         $this->assertSame(
-            ['sh', '-c', 'exec .venv/bin/python manage.py runserver 0.0.0.0:8000'],
+            ['sh', '-c', 'exec .venv/bin/python manage.py runserver ' . TestNetwork::ANY . ':8000'],
             $service['command']
         );
     }
@@ -78,7 +79,7 @@ class MountedProjectEntrypointTest extends TestCase
     public function test_an_empty_entrypoint_is_not_an_entrypoint(): void
     {
         $this->assertSame(
-            ['sh', '-c', 'exec .venv/bin/python manage.py runserver 0.0.0.0:8000'],
+            ['sh', '-c', 'exec .venv/bin/python manage.py runserver ' . TestNetwork::ANY . ':8000'],
             $this->service(['entrypoint' => '  '])['command']
         );
     }

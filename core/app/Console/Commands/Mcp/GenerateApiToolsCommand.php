@@ -55,6 +55,10 @@ class GenerateApiToolsCommand extends Command
         // write hid it from read-only clients and made every caller ask
         // permission to look something up.
         'POST /projects/verify-new-username',
+        // Logs into the source wp-admin or asks the migrator plugin to check a
+        // token, and reports what it found. Creates no record and changes
+        // nothing on the source or the engine.
+        'POST /wordpress/migrations/test',
     ];
 
     /**
@@ -90,23 +94,31 @@ class GenerateApiToolsCommand extends Command
         // neighbours and one rule -- a project is `name` -- so it is `name`
         // here like everywhere else.
         'POST /bug-reports' => ['project' => 'name'],
+        // Path `username` becomes tool `name` via `*`. Body `name` (the app
+        // password label) would clash, so it is `app_name` — matching the
+        // committed WpAppPasswordCreateTool.
+        'POST /projects/{username}/wp/users/{user}/application-passwords' => ['name' => 'app_name'],
+        // WordPress migration `username` is the source wp-admin login, not a
+        // hosting project. A tool's `username` reads as the project, so the
+        // tool calls it `admin_username`.
+        'POST /wordpress/migrations' => ['username' => 'admin_username'],
+        'POST /wordpress/migrations/test' => ['username' => 'admin_username'],
     ];
 
     /** What a renamed project parameter says about itself when the API said nothing. */
-
     public function handle(): int
     {
         $specPath = base_path($this->option('spec'));
 
-        if (!is_file($specPath)) {
+        if (! is_file($specPath)) {
             $this->error("OpenAPI document not found at {$specPath}. Run: php artisan l5-swagger:generate");
 
             return self::FAILURE;
         }
 
-        $spec = json_decode((string)file_get_contents($specPath), true);
+        $spec = json_decode((string) file_get_contents($specPath), true);
 
-        if (!is_array($spec) || !isset($spec['paths'])) {
+        if (! is_array($spec) || ! isset($spec['paths'])) {
             $this->error('OpenAPI document could not be parsed.');
 
             return self::FAILURE;
@@ -114,7 +126,7 @@ class GenerateApiToolsCommand extends Command
 
         $namesPath = base_path($this->option('names'));
 
-        if (!is_file($namesPath)) {
+        if (! is_file($namesPath)) {
             $this->error("Tool name map not found at {$namesPath}.");
 
             return self::FAILURE;
@@ -139,11 +151,11 @@ class GenerateApiToolsCommand extends Command
 
             $group = $this->group($op['tags']);
             $class = $this->className($name);
-            $dir = base_path($this->option('out')) . '/' . $group;
-            $file = $dir . '/' . $class . '.php';
+            $dir = base_path($this->option('out')).'/'.$group;
+            $file = $dir.'/'.$class.'.php';
 
-            if (!$this->option('dry-run')) {
-                if (!is_dir($dir)) {
+            if (! $this->option('dry-run')) {
+                if (! is_dir($dir)) {
                     mkdir($dir, 0755, true);
                 }
                 file_put_contents($file, $this->render($op, $name, $class, $group));
@@ -153,11 +165,11 @@ class GenerateApiToolsCommand extends Command
             $written++;
         }
 
-        $this->info(($this->option('dry-run') ? 'Would write ' : 'Wrote ') . $written . ' tools.');
+        $this->info(($this->option('dry-run') ? 'Would write ' : 'Wrote ').$written.' tools.');
 
-        if (!$this->option('dry-run')) {
+        if (! $this->option('dry-run')) {
             file_put_contents(
-                base_path($this->option('out')) . '/generated-tools.php',
+                base_path($this->option('out')).'/generated-tools.php',
                 $this->renderRegistry($registry)
             );
             $this->info('Wrote the tool registry.');
@@ -167,7 +179,7 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $paths
+     * @param  array<string, mixed>  $paths
      * @return array<int, array<string, mixed>>
      */
     private function operations(array $paths): array
@@ -175,8 +187,8 @@ class GenerateApiToolsCommand extends Command
         $out = [];
 
         foreach ($paths as $path => $item) {
-            foreach ((array)$item as $verb => $op) {
-                if (!in_array(strtoupper($verb), ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            foreach ((array) $item as $verb => $op) {
+                if (! in_array(strtoupper($verb), ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
                     continue;
                 }
                 // x-mcp-hide: an operation the API keeps that no tool can
@@ -211,8 +223,8 @@ class GenerateApiToolsCommand extends Command
      * silently skipped (a tool quietly disappearing from every client), and a
      * stale entry is the trace of a route that moved.
      *
-     * @param array<int, array<string, mixed>> $operations
-     * @param array<string, string> $map
+     * @param  array<int, array<string, mixed>>  $operations
+     * @param  array<string, string>  $map
      */
     private function checkNameMap(array $operations, array $map): ?int
     {
@@ -223,7 +235,7 @@ class GenerateApiToolsCommand extends Command
             $key = "{$op['method']} {$op['path']}";
             $keys[$key] = true;
 
-            if (!isset($map[$key])) {
+            if (! isset($map[$key])) {
                 $missing[] = [$key, $this->suggestName($op['method'], $op['path'])];
             }
         }
@@ -236,7 +248,7 @@ class GenerateApiToolsCommand extends Command
         }
 
         if ($missing !== []) {
-            $this->error(count($missing) . ' operation(s) have no name in ' . $this->option('names') . ':');
+            $this->error(count($missing).' operation(s) have no name in '.$this->option('names').':');
             foreach ($missing as [$key, $suggestion]) {
                 $this->line("    '{$key}' => '{$suggestion}',");
             }
@@ -245,7 +257,7 @@ class GenerateApiToolsCommand extends Command
         }
 
         if ($stale !== []) {
-            $this->error(count($stale) . ' name(s) refer to an operation that no longer exists:');
+            $this->error(count($stale).' name(s) refer to an operation that no longer exists:');
             foreach ($stale as $key => $name) {
                 $this->line("    '{$key}' => '{$name}',");
             }
@@ -254,7 +266,7 @@ class GenerateApiToolsCommand extends Command
         }
 
         if ($duplicates !== []) {
-            $this->error('Name used by more than one operation: ' . implode(', ', $duplicates));
+            $this->error('Name used by more than one operation: '.implode(', ', $duplicates));
         }
 
         return self::FAILURE;
@@ -291,8 +303,8 @@ class GenerateApiToolsCommand extends Command
         // action; using it beats appending a generic one. Taken before the
         // project prefix is dropped, so /projects/{username}/suspend suggests
         // project_suspend rather than suspend_update.
-        if (!$lastIsParam && count($nouns) > 1 && $method !== 'GET') {
-            $action = (string)array_pop($nouns);
+        if (! $lastIsParam && count($nouns) > 1 && $method !== 'GET') {
+            $action = (string) array_pop($nouns);
         }
 
         // Everything hangs off the project, so repeating it is noise -- unless
@@ -306,11 +318,11 @@ class GenerateApiToolsCommand extends Command
 
     private function className(string $toolName): string
     {
-        return Str::studly($toolName) . 'Tool';
+        return Str::studly($toolName).'Tool';
     }
 
     /**
-     * @param array<int, string> $tags
+     * @param  array<int, string>  $tags
      */
     private function group(array $tags): string
     {
@@ -318,7 +330,7 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $op
+     * @param  array<string, mixed>  $op
      */
     private function render(array $op, string $name, string $class, string $group): string
     {
@@ -342,8 +354,8 @@ class GenerateApiToolsCommand extends Command
         $attrBlock = implode("\n", array_map(fn (string $a): string => "#[{$a}]", $annotations));
 
         $schemaBody = $schema === []
-            ? "        return [];"
-            : "        return [\n" . implode("\n", $schema) . "\n        ];";
+            ? '        return [];'
+            : "        return [\n".implode("\n", $schema)."\n        ];";
 
         $methods = [];
         $methods[] = $this->arrayMethod('pathParams', $pathParams);
@@ -401,14 +413,14 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<int, string> $values
+     * @param  array<int, string>  $values
      */
     /**
-     * @param array<string, mixed> $op
+     * @param  array<string, mixed>  $op
      */
     private function returnsFile(array $op): bool
     {
-        foreach ((array)($op['responses']['200']['content'] ?? []) as $media) {
+        foreach ((array) ($op['responses']['200']['content'] ?? []) as $media) {
             if ((is_array($media) ? ($media['schema']['format'] ?? null) : null) === 'binary') {
                 return true;
             }
@@ -439,7 +451,7 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<string, string> $values
+     * @param  array<string, string>  $values
      */
     private function mapMethod(string $name, array $values): string
     {
@@ -484,8 +496,8 @@ class GenerateApiToolsCommand extends Command
      * renamed parameter says which API parameter it feeds, so a reader of the
      * API docs and a reader of the tool schema can tell they are the same.
      *
-     * @param array<string, mixed> $definition
-     * @param array<string, string> $argumentNames Filled in for renamed parameters.
+     * @param  array<string, mixed>  $definition
+     * @param  array<string, string>  $argumentNames  Filled in for renamed parameters.
      */
     private function argumentLine(
         array $op,
@@ -512,7 +524,7 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $op
+     * @param  array<string, mixed>  $op
      * @return array{0: array<int,string>, 1: array<int,string>, 2: array<int,string>, 3: array<int,string>, 4: array<int,string>, 5: array<string,string>, 6: array<string,string>}
      */
     private function parameters(array $op): array
@@ -523,8 +535,8 @@ class GenerateApiToolsCommand extends Command
         $argumentNames = [];
         $defaults = [];
 
-        foreach ((array)$op['parameters'] as $p) {
-            if (!is_array($p) || !isset($p['name'])) {
+        foreach ((array) $op['parameters'] as $p) {
+            if (! is_array($p) || ! isset($p['name'])) {
                 continue;
             }
 
@@ -536,6 +548,7 @@ class GenerateApiToolsCommand extends Command
             // too rather than becoming the argument.
             if (($p['x-mcp-hide'] ?? false) === true) {
                 $seen[$name] = true;
+
                 continue;
             }
 
@@ -548,11 +561,11 @@ class GenerateApiToolsCommand extends Command
             }
 
             $seen[$name] = true;
-            $definition = (array)($p['schema'] ?? []);
+            $definition = (array) ($p['schema'] ?? []);
             // On a parameter the extensions sit on the parameter, not its schema.
             if (is_scalar($p['x-mcp-default'] ?? null)) {
                 $definition['x-mcp-default'] = $p['x-mcp-default'];
-                $defaults[$name] = (string)$p['x-mcp-default'];
+                $defaults[$name] = (string) $p['x-mcp-default'];
             }
             if (is_string($p['x-mcp-description'] ?? null)) {
                 $definition['x-mcp-description'] = $p['x-mcp-description'];
@@ -561,16 +574,16 @@ class GenerateApiToolsCommand extends Command
                 $op,
                 $name,
                 $definition,
-                (bool)($p['required'] ?? $in === 'path'),
+                (bool) ($p['required'] ?? $in === 'path'),
                 $p['description'] ?? null,
                 $argumentNames
             );
         }
 
         $bodySchema = $op['requestBody']['content']['application/json']['schema'] ?? null;
-        $required = (array)($bodySchema['required'] ?? []);
+        $required = (array) ($bodySchema['required'] ?? []);
 
-        foreach ((array)($bodySchema['properties'] ?? []) as $name => $prop) {
+        foreach ((array) ($bodySchema['properties'] ?? []) as $name => $prop) {
             // x-mcp-hide: a field the API keeps that the tool does not offer,
             // because another tool covers it and every listed field costs every
             // client on every connect.
@@ -595,7 +608,7 @@ class GenerateApiToolsCommand extends Command
             );
             // An agent-only default, e.g. `dind` for a project an agent creates.
             if (is_array($prop) && is_scalar($prop['x-mcp-default'] ?? null)) {
-                $defaults[$name] = (string)$prop['x-mcp-default'];
+                $defaults[$name] = (string) $prop['x-mcp-default'];
             }
         }
 
@@ -603,9 +616,9 @@ class GenerateApiToolsCommand extends Command
         // binary field becomes the virtual arguments UploadArguments describes,
         // because a tool call cannot carry bytes any other way.
         $multipart = $op['requestBody']['content']['multipart/form-data']['schema'] ?? null;
-        $multipartRequired = (array)($multipart['required'] ?? []);
+        $multipartRequired = (array) ($multipart['required'] ?? []);
 
-        foreach ((array)($multipart['properties'] ?? []) as $name => $prop) {
+        foreach ((array) ($multipart['properties'] ?? []) as $name => $prop) {
             if (isset($seen[$name])) {
                 continue;
             }
@@ -617,6 +630,7 @@ class GenerateApiToolsCommand extends Command
                 foreach (UploadArguments::describe($name) as [$virtual, $definition, $required, $description]) {
                     $schema[] = $this->schemaLine($virtual, $definition, $required, $description);
                 }
+
                 continue;
             }
 
@@ -652,7 +666,7 @@ class GenerateApiToolsCommand extends Command
         if ($clashes !== []) {
             throw new \RuntimeException(
                 "{$op['method']} {$op['path']}: more than one parameter would be exposed as "
-                . implode(', ', $clashes) . '. Add a rename for this operation to ARGUMENT_NAMES.'
+                .implode(', ', $clashes).'. Add a rename for this operation to ARGUMENT_NAMES.'
             );
         }
 
@@ -660,7 +674,7 @@ class GenerateApiToolsCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $definition
+     * @param  array<string, mixed>  $definition
      */
     private function schemaLine(
         string $name,
@@ -702,25 +716,25 @@ class GenerateApiToolsCommand extends Command
             $notes[] = trim($description);
         }
         if (isset($definition['enum']) && is_array($definition['enum'])) {
-            $notes[] = 'One of: ' . implode(', ', array_map('strval', $definition['enum'])) . '.';
+            $notes[] = 'One of: '.implode(', ', array_map('strval', $definition['enum'])).'.';
         }
         if (is_scalar($definition['x-mcp-default'] ?? null)) {
-            $notes[] = 'This tool sends ' . $definition['x-mcp-default'] . ' when it is omitted.';
+            $notes[] = 'This tool sends '.$definition['x-mcp-default'].' when it is omitted.';
         }
         // A number or a flag is its type; an example only helps a string.
-        if (isset($definition['example']) && !in_array($type, ['boolean', 'integer', 'number'], true)) {
+        if (isset($definition['example']) && ! in_array($type, ['boolean', 'integer', 'number'], true)) {
             $example = $definition['example'];
-            $notes[] = 'Example: ' . match (true) {
-                is_scalar($example) => (string)$example,
+            $notes[] = 'Example: '.match (true) {
+                is_scalar($example) => (string) $example,
                 default => json_encode($example),
-            } . '.';
+            }.'.';
         }
         if ($suffix !== null) {
             $notes[] = $suffix;
         }
 
         if ($notes !== []) {
-            $call .= "->description('" . $this->escape(implode(' ', $notes)) . "')";
+            $call .= "->description('".$this->escape(implode(' ', $notes))."')";
         }
 
         if ($required) {
@@ -758,23 +772,23 @@ class GenerateApiToolsCommand extends Command
 
     private static function readsOnly(string $method, string $path): bool
     {
-        return in_array($method . ' ' . $path, self::READ_ONLY_OPERATIONS, true);
+        return in_array($method.' '.$path, self::READ_ONLY_OPERATIONS, true);
     }
 
     /**
-     * @param array<string, mixed> $op
+     * @param  array<string, mixed>  $op
      */
     private function description(array $op): string
     {
-        $summary = trim((string)$op['summary']);
+        $summary = trim((string) $op['summary']);
         // x-mcp-description replaces the long form for the tool, which is read
         // on every connect; the API docs keep theirs.
-        $extra = trim((string)($op['x-mcp-description'] ?? $op['description']));
+        $extra = trim((string) ($op['x-mcp-description'] ?? $op['description']));
 
         $text = $summary !== '' ? $summary : "{$op['method']} {$op['path']}";
 
         if ($extra !== '' && $extra !== $summary) {
-            $text .= "\n\n" . $extra;
+            $text .= "\n\n".$extra;
         }
 
         // No "Calls <VERB> /api/..." footer: every client reads every listed
@@ -782,20 +796,20 @@ class GenerateApiToolsCommand extends Command
         // tool changes. The endpoint is in the class, for a human who needs it.
 
         $indented = implode("\n", array_map(
-            fn (string $line): string => $line === '' ? '' : '    ' . $line,
+            fn (string $line): string => $line === '' ? '' : '    '.$line,
             explode("\n", $text)
         ));
 
-        return "<<<'MARKDOWN'\n    " . ltrim($indented) . "\n    MARKDOWN";
+        return "<<<'MARKDOWN'\n    ".ltrim($indented)."\n    MARKDOWN";
     }
 
     private function escape(string $value): string
     {
-        return str_replace(["\\", "'"], ["\\\\", "\\'"], $value);
+        return str_replace(['\\', "'"], ['\\\\', "\\'"], $value);
     }
 
     /**
-     * @param array<int, string> $classes
+     * @param  array<int, string>  $classes
      */
     private function renderRegistry(array $classes): string
     {

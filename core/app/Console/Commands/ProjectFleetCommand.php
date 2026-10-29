@@ -34,14 +34,10 @@ abstract class ProjectFleetCommand extends Command
     }
 
     /** Run once before the loop, after the projects are known; a throw here ends the command. */
-    protected function beforeAll(): void
-    {
-    }
+    protected function beforeAll(): void {}
 
     /** Run once after the loop, whether or not every project succeeded. */
-    protected function afterAll(): void
-    {
-    }
+    protected function afterAll(): void {}
 
     public function handle(): int
     {
@@ -55,7 +51,7 @@ abstract class ProjectFleetCommand extends Command
         $ok = true;
         foreach ($projects as $user) {
             try {
-                $this->output->write($this->progress($user) . "\n");
+                $this->output->write($this->progress($user)."\n");
                 $this->applyTo($user);
                 $this->info($this->finished($user));
             } catch (\Exception $e) {
@@ -66,6 +62,6 @@ abstract class ProjectFleetCommand extends Command
 
         $this->afterAll();
 
-        return (int) !$ok;
+        return (int) ! $ok;
     }
 }

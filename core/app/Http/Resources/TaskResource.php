@@ -2,14 +2,29 @@
 
 namespace App\Http\Resources;
 
+use App\Lib\Task\TaskLogPage;
 use App\Models\Task;
+use App\Models\TaskLog;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 
 class TaskResource extends JsonResource
 {
     /**
-     * @param  \Illuminate\Http\Request  $request
+     * @param  Task  $resource
+     */
+    public function __construct(
+        $resource,
+        private readonly int $afterId = 0,
+        private readonly int $limit = TaskLogPage::DEFAULT_LIMIT,
+    ) {
+        parent::__construct($resource);
+    }
+
+    /**
+     * @param  Request  $request
      * @return array<string, mixed>
      */
     public function toArray($request): array
@@ -17,23 +32,31 @@ class TaskResource extends JsonResource
         $task = $this->resource;
         assert($task instanceof Task);
 
-        $afterId = max(0, (int) $request->query('after_id', 0));
-        $logs = $task->logsAfter($afterId, 2000);
-        $nextAfterId = $logs->isEmpty() ? $afterId : (int) $logs->last()->id;
+        $page = TaskLogPage::read($task, $this->afterId, limit: $this->limit);
 
-        $logPayload = [];
-        foreach ($logs as $log) {
-            $logPayload[] = [
+        return self::taskPayload($task) + [
+            'logs' => self::logRows($page->rows),
+            'next_after_id' => $page->nextAfterId,
+            'more' => $page->more,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, TaskLog>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private static function logRows(Collection $rows): array
+    {
+        $payload = [];
+        foreach ($rows as $log) {
+            $payload[] = [
                 'id' => $log->id,
                 'log' => $log->log,
                 'created_at' => $log->created_at,
             ];
         }
 
-        return self::taskPayload($task) + [
-            'logs' => $logPayload,
-            'next_after_id' => $nextAfterId,
-        ];
+        return $payload;
     }
 
     /**

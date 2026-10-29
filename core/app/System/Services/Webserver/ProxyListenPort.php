@@ -22,9 +22,7 @@ final class ProxyListenPort
     /** The engine's own listeners (scripts/firewall/ufw.sh managed_rules). */
     public const RESERVED = [21, 22, 2011, 2222, 30000, 30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009];
 
-    public function __construct(private System $system)
-    {
-    }
+    public function __construct(private System $system) {}
 
     /** Why a rule may not listen there, or null when it may. */
     public function refusal(string $transport, string $listenIp, int $port): ?string
@@ -60,13 +58,28 @@ final class ProxyListenPort
             : null;
     }
 
+    /**
+     * Why a stored, disabled rule may not be switched on: it takes its port again,
+     * an http rule its name on that port and a tcp/udp rule its address, where
+     * nginx serves one rule.
+     */
+    public function switchOnRefusal(ProxyRule $rule): ?string
+    {
+        $listenIp = $rule->listen_ip ?? '*';
+        $port = (int) $rule->listen_port;
+
+        return $this->refusal($rule->transport, $listenIp, $port)
+            ?? ProxyRuleDuplicate::ruleRefusal($rule->transport, $listenIp, $port, $rule->server_name, (int) $rule->id);
+    }
+
     /** A check that cannot run never refuses a rule. */
     private function boundOnHost(string $protocol, string $listenIp, int $port): bool
     {
         try {
             $listing = $this->system->execOnHost(['ss', '-Hln', $protocol === 'udp' ? '-u' : '-t']);
         } catch (\Throwable $e) {
-            Log::warning('Could not list the host\'s listening sockets for a proxy rule: ' . $e->getMessage());
+            Log::warning('Could not list the host\'s listening sockets for a proxy rule: '.$e->getMessage());
+
             return false;
         }
 
@@ -90,7 +103,7 @@ final class ProxyListenPort
         foreach (preg_split('/\R/', $listing) ?: [] as $line) {
             // State Recv-Q Send-Q Local:Port Peer:Port
             $fields = preg_split('/\s+/', trim($line)) ?: [];
-            if (count($fields) < 4 || !preg_match('/^(.*):(\d+)$/', $fields[3], $m)) {
+            if (count($fields) < 4 || ! preg_match('/^(.*):(\d+)$/', $fields[3], $m)) {
                 continue;
             }
             $address = preg_replace('/%.*$/', '', trim($m[1], '[]')) ?? '';

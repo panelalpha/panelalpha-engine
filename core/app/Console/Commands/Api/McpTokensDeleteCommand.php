@@ -18,18 +18,20 @@ class McpTokensDeleteCommand extends Command
     public function handle(): int
     {
         $root = Admin::rootAccount();
-        $id   = $this->argument('id');
+        $id = $this->argument('id');
 
         /** @var ?PersonalAccessToken */
         $token = $root->tokens()->find($id);
 
-        if (!$token) {
+        if (! $token) {
             $this->error("Token #{$id} not found.");
+
             return 1;
         }
 
         $token->delete();
         $this->info("Token #{$token->id} '{$token->name}' deleted.");
+
         return 0;
     }
 }

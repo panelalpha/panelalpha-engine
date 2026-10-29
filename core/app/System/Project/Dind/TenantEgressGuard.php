@@ -2,13 +2,14 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\System\ComposeProject;
 
 /**
  * Egress rules inside a DinD account, for the code the tenant runs.
  *
  * A second layer. The boundary is the host's firewall on pash-tenants
- * ({@see \App\Lib\Deploy\Dind\TenantNetwork}): the tenant holds
+ * ({@see TenantNetwork}): the tenant holds
  * the inner Docker socket, and a privileged `--net=host` container of their
  * own edits these rules. Accounts not yet moved off pash-default-network,
  * which they share with core, SFTP, FTP and phpMyAdmin, have only this one.
@@ -43,10 +44,11 @@ final class TenantEgressGuard
      * hooked, then every 15s. The account's service manager runs it.
      */
     public const LOOP = 'while :; do [ -f /entrypoint.d/egress-guard.sh ] && sh /entrypoint.d/egress-guard.sh; '
-        . 'if iptables -C DOCKER-USER -j PA-TENANT-EGRESS 2>/dev/null; then sleep 15; else sleep 1; fi; done';
+        .'if iptables -C DOCKER-USER -j PA-TENANT-EGRESS 2>/dev/null; then sleep 15; else sleep 1; fi; done';
 
     /** Names the account resolves through Docker's DNS on pash-default-network. */
-    public const DATABASE_NAMES = ['database-users.shared-hosting.palocal', ComposeProject::NAME . '-sites-db-1'];
+    public const DATABASE_NAMES = ['database-users.shared-hosting.palocal', ComposeProject::NAME.'-sites-db-1'];
+
     public const REGISTRY_NAMES = ['panelalpha-cache-registry', 'panelalpha-registry-proxy'];
 
     /** Ports an account may use on the host: mail and the sites. */
@@ -65,7 +67,7 @@ final class TenantEgressGuard
      */
     public static function enabled(): bool
     {
-        if (!function_exists('config')) {
+        if (! function_exists('config')) {
             return true;
         }
         try {
@@ -82,11 +84,11 @@ final class TenantEgressGuard
     }
 
     /**
-     * @param list<string> $hostIps every IPv4 address of the host (bridges,
-     *        public, NAT); the default gateway and host.docker.internal are
-     *        added in the account itself
-     * @param bool $apiAccess whether this account may use the Engine API, which
-     *        is the host port {@see API_PORT} open in this account
+     * @param  list<string>  $hostIps  every IPv4 address of the host (bridges,
+     *                                 public, NAT); the default gateway and host.docker.internal are
+     *                                 added in the account itself
+     * @param  bool  $apiAccess  whether this account may use the Engine API, which
+     *                           is the host port {@see API_PORT} open in this account
      */
     public static function script(array $hostIps, bool $apiAccess = false): string
     {
@@ -99,7 +101,7 @@ final class TenantEgressGuard
             '__HOST_IPS__' => implode(' ', $hostIps),
             '__DB_NAMES__' => implode(' ', self::DATABASE_NAMES),
             '__REGISTRY_NAMES__' => implode(' ', self::REGISTRY_NAMES),
-            '__HOST_PORTS__' => trim(self::HOST_PORTS . ($apiAccess ? ' ' . self::API_PORT : '')),
+            '__HOST_PORTS__' => trim(self::HOST_PORTS.($apiAccess ? ' '.self::API_PORT : '')),
         ];
 
         return strtr(self::TEMPLATE, $vars);

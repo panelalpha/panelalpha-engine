@@ -16,6 +16,8 @@ use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\StagedRename;
+use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
  * The compose-strategy headline promise (ADR-0001, ticket 04): the client's
@@ -25,8 +27,8 @@ use Symfony\Component\Yaml\Yaml;
  *
  * Driven through the real {@see UserComposeStrategy}, over a stubbed
  * {@see System} that answers a fixed file map and captures every
- * `filePutContents()` write the same way the staged-temp-file-then-`sudo cp`
- * write actually happens (mirroring {@see \Tests\Unit\Deploy\Dind\HostCompilePhpPlatformPinTest}).
+ * write the same way the staged-temp-file-then-`sudo cp`-then-rename
+ * ({@see StagedRename}) write actually happens (mirroring {@see \Tests\Unit\Deploy\Dind\HostCompilePhpPlatformPinTest}).
  */
 class UserComposeStrategyTest extends TestCase
 {
@@ -94,21 +96,35 @@ class UserComposeStrategyTest extends TestCase
                 if (preg_match('/^sudo chmod (\S+) (\S+)$/', $line, $m) === 1) {
                     $this->modes[$m[2]] = $m[1];
                 }
+                if (($moved = StagedRename::of($cmd)) !== null) {
+                    $this->renamed(...$moved);
+                }
 
                 return '';
             }
 
+            private function renamed(string $from, string $to): void
+            {
+                foreach (['copiedTo', 'modes'] as $map) {
+                    if (array_key_exists($from, $this->{$map})) {
+                        $this->{$map}[$to] = $this->{$map}[$from];
+                        unset($this->{$map}[$from]);
+                    }
+                }
+            }
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                if (($moved = StagedRename::of($cmd)) !== null) {
+                    $this->renamed(...$moved);
+                }
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
             }
         };
     }
 
-    private function stubbedDind(System $system, string $composeSourcePath, string $appDir = ''): Dind
+    private function stubbedDind(System $system, string $composeSourcePath, string $appDir = '', array $envVars = []): Dind
     {
         $model = new \App\Models\User();
         $model->username = 'acme';
@@ -132,17 +148,24 @@ class UserComposeStrategyTest extends TestCase
         // process has bootstrapped. Everything else here (ComposeHarden,
         // RubyStrategy::installHostInitializer against a directory that does
         // not exist) is real.
-        $strategy = new class ($dind) extends DeployStrategy {
+        $strategy = new class ($dind, $envVars) extends DeployStrategy {
+            /** @param array<string, string> $envVars */
+            public function __construct(Dind $dind, private array $envVars)
+            {
+                parent::__construct($dind);
+            }
+
             public function secrets(): AccountSecrets
             {
-                return new class ($this) extends AccountSecrets {
-                    public function __construct(object $unused)
+                return new class ($this->envVars) extends AccountSecrets {
+                    /** @param array<string, string> $envVars */
+                    public function __construct(private array $envVars)
                     {
                     }
 
                     public function userEnvVars(): array
                     {
-                        return [];
+                        return $this->envVars;
                     }
 
                     public function for(string $purpose): string
@@ -415,16 +438,25 @@ class UserComposeStrategyTest extends TestCase
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
+                $this->renameStaged($cmd);
 
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(['php', '-r', 'exit(0);']);
-                $process->run();
+                $this->renameStaged($cmd);
 
-                return $process;
+                return SuccessfulProcess::for($cmd);
+            }
+
+            private function renameStaged(string|array $cmd): void
+            {
+                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                if ($staged !== null && isset($this->copiedTo[$staged])) {
+                    $this->copiedTo[$target] = $this->copiedTo[$staged];
+                    unset($this->copiedTo[$staged]);
+                }
             }
         };
     }
@@ -629,6 +661,28 @@ class UserComposeStrategyTest extends TestCase
 
         $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
         $this->assertSame(['9494:9494'], $run['services']['web']['ports']);
+    }
+
+    /**
+     * `up` regenerates the run file from the stored env_vars: a value saved
+     * without being applied is written in when the file is rewritten.
+     */
+    public function test_refresh_run_file_writes_the_accounts_stored_env_vars_into_the_run_file(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $clientYaml = "services:\n  app:\n    image: acme/app:latest\n    ports:\n      - \"8080:80\"\n"
+            . "    environment:\n      APP_SECRET: REPLACE_WITH_LONG_SECRET\n";
+        $dind = $this->stubbedDind(
+            $this->stubbedSystem([$clientPath => $clientYaml]),
+            $clientPath,
+            '',
+            ['APP_SECRET' => 'stored-by-account']
+        );
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame('stored-by-account', $run['services']['app']['environment']['APP_SECRET']);
     }
 
     /** The run file inlines env_vars and generated passwords. */

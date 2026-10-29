@@ -4,24 +4,29 @@ namespace App\System;
 
 use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
-use App\Models\Domain as DomainModel;
-use App\Models\User as ModelsUser;
+use App\Lib\Project\ApiAccess;
 use App\Models\Backup as BackupRecord;
+use App\Models\Domain as DomainModel;
 use App\Models\ProxyRule;
+use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\Backup;
 use App\System\Project\Cron;
-use App\System\Project\Dind;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\RollBackProject;
 use App\System\Project\Deployment\TemplateDeployMechanics;
+use App\System\Project\Dind;
+use App\System\Project\Dind\CopiedImages;
+use App\System\Project\Dind\CopiedRunFile;
+use App\System\Project\Dind\CopyVolumes;
+use App\System\Project\Dind\HeldImage;
 use App\System\Project\Domain as DomainProject;
 use App\System\Project\FileManager;
 use App\System\Project\Ftp;
 use App\System\Project\Git as ProjectGit;
-use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Php;
 use App\System\Project\PhpHosting;
 use App\System\Project\Runtime;
@@ -32,6 +37,9 @@ use Symfony\Component\Process\Process;
 
 class Project
 {
+    /** rsync's exit status when a file left the source while it was being copied. */
+    public const int RSYNC_VANISHED_FILES = 24;
+
     private Runtime $runtime;
 
     private ?DeploymentWorkflow $templateDeployment = null;
@@ -168,17 +176,16 @@ class Project
     }
 
     /**
-     * @param list<string> $args
-     *
+     * @param  list<string>  $args
      * @return array{stdout: string, stderr: string, exit_code: int}
      */
-    public function runWpCli(array $args): array
+    public function runWpCli(array $args, ?string $service = null): array
     {
-        if (!$this->runtime instanceof PhpHosting) {
-            throw new \RuntimeException(
-                'WP-CLI runs only on traditional PHP hosting projects. For WordPress in its own container, '
-                . 'use the app endpoints (users, install, one-click login) or run the command with ssh/command.'
-            );
+        if ($this->runtime instanceof Dind) {
+            return $this->runtime->wordPressCli()->run($args, $service);
+        }
+        if (! $this->runtime instanceof PhpHosting) {
+            throw new \RuntimeException('WP-CLI is not available for this project.');
         }
 
         return $this->runtime->phpRuntime()->runWpCli($args);
@@ -282,11 +289,12 @@ class Project
 
         $this->deleteBackups($user);
         $this->tearDownCloudflare($user);
+        PanelAlphaConnect::releaseProjectSites($user);
         $this->deleteProxyRules($user->username);
         $this->deleteDomains($user);
+        $this->deleteSftpLogins($user);
         $this->tearDownHosting();
         $this->deleteFtpLogins($user);
-        $this->deleteSftpLogins($user);
         $this->deleteMysqlDatabasesAndUsers($user);
         $this->deleteOwnedRows($user);
         DeployLogger::deleteUserLogs($user->username);
@@ -312,7 +320,7 @@ class Project
             Cloudflare::teardownProject($user);
         } catch (\Throwable $e) {
             Log::warning(
-                "Cloudflare project teardown failed for {$user->username}: " . $e->getMessage()
+                "Cloudflare project teardown failed for {$user->username}: ".$e->getMessage()
             );
         }
     }
@@ -333,7 +341,7 @@ class Project
         $user->domains()->delete();
         $this->system->webserver()->deleteDomainsConfigs($domainNames);
         $this->forgetDomainsStatistics($domainNames);
-        if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
+        if (! config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
             $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
         }
     }
@@ -342,7 +350,7 @@ class Project
      * Forgets each domain's statistics so the next project given the same domain
      * starts without its traffic. A failure for one domain is logged and skipped.
      *
-     * @param list<string> $domainNames
+     * @param  list<string>  $domainNames
      */
     protected function forgetDomainsStatistics(array $domainNames): void
     {
@@ -350,7 +358,7 @@ class Project
             try {
                 app(Statistics::class)->forgetDomain($name);
             } catch (\Throwable $e) {
-                Log::warning("Statistics cleanup during project delete failed for {$name}: " . $e->getMessage());
+                Log::warning("Statistics cleanup during project delete failed for {$name}: ".$e->getMessage());
             }
         }
     }
@@ -369,20 +377,24 @@ class Project
     /**
      * SFTP logins live in one host-wide logins.conf, rebuilt without these rows so none stays valid for the
      * next account given this uid and home. Best-effort: a host without the sftp profile must still delete.
+     * Runs before the OS user and the home are removed: open sessions end first and cannot log in again, so
+     * none keeps writing into the home while it is removed.
      */
     private function deleteSftpLogins(ModelsUser $user): void
     {
-        $hadSftpAccounts = $user->sftpAccounts()->exists();
-        $user->sftpAccounts()->delete();
-        if (!$hadSftpAccounts) {
+        $logins = $user->sftpAccounts()->pluck('username')->all();
+        if ($logins === []) {
             return;
         }
+
+        $this->system->sftp()->endSessions($logins);
+        $user->sftpAccounts()->delete();
 
         try {
             $this->sftp()->rebuild();
         } catch (\Throwable $e) {
             Log::warning(
-                "SFTP logins rebuild failed after deleting {$user->username}: " . $e->getMessage()
+                "SFTP logins rebuild failed after deleting {$user->username}: ".$e->getMessage()
             );
         }
     }
@@ -444,7 +456,7 @@ class Project
         try {
             $this->system->rebuildDomains();
         } catch (\Throwable $e) {
-            Log::warning("Webserver rebuild after deleting '{$user->username}' failed: " . $e->getMessage());
+            Log::warning("Webserver rebuild after deleting '{$user->username}' failed: ".$e->getMessage());
         }
     }
 
@@ -458,7 +470,7 @@ class Project
             }
         } catch (\Exception $e) {
             Log::warning(
-                "Could not deprovision project for user '{$this->username()}': " . $e->getMessage(),
+                "Could not deprovision project for user '{$this->username()}': ".$e->getMessage(),
                 ['exception' => $e],
             );
         }
@@ -469,7 +481,7 @@ class Project
 
     private function removeDindRuntimeQuietly(): void
     {
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             return;
         }
 
@@ -477,7 +489,7 @@ class Project
             $this->runtime->remove();
         } catch (\Exception $e) {
             Log::warning(
-                "Could not remove DinD runtime for user '{$this->username()}': " . $e->getMessage(),
+                "Could not remove DinD runtime for user '{$this->username()}': ".$e->getMessage(),
                 ['exception' => $e],
             );
         }
@@ -502,7 +514,7 @@ class Project
     {
         return $this->templateDeployment ??= DeploymentWorkflow::forMechanics(
             new TemplateDeployMechanics($this),
-            new RollBackProject(),
+            new RollBackProject,
             explainNoiseOnlyOutput: false,
         );
     }
@@ -580,7 +592,7 @@ class Project
 
     public function prepareUserAppFromSources(): void
     {
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             return;
         }
 
@@ -614,7 +626,7 @@ class Project
     }
 
     /**
-     * @param list<string> $domainNames
+     * @param  list<string>  $domainNames
      */
     public function deleteDomainsConfigs(array $domainNames): void
     {
@@ -679,11 +691,13 @@ class Project
     }
 
     /**
+     * $forceRecreate recreates every container, so none keeps a mount of files or volumes put back under it.
+     *
      * @return array{stdout: string, stderr: string, exit_code: ?int}
      */
-    public function startUserApp(): array
+    public function startUserApp(bool $forceRecreate = false): array
     {
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             throw new \RuntimeException('startUserApp is not available for this project type.');
         }
 
@@ -692,12 +706,25 @@ class Project
             throw new \RuntimeException('Cannot start application before deploy strategy is set.');
         }
 
-        return $app->start();
+        return $app->start($forceRecreate);
+    }
+
+    /**
+     * Why the user app just started is not running, read as a deploy reads it
+     * ({@see Dind\AppHealth::startFailure()}); null when it runs or there is none.
+     */
+    public function startedAppFailure(): ?string
+    {
+        if (! $this->hasUserApp() || ! $this->runtime instanceof Dind) {
+            return null;
+        }
+
+        return $this->runtime->appHealth()->startFailure();
     }
 
     public function syncGeneratedProxyRules(): void
     {
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             return;
         }
         $this->runtime->networking()->detectAndCreateProxyRules($this->model);
@@ -737,13 +764,24 @@ class Project
         return $volumes->copyVolumeDataToIncoming($source->homeDirPath());
     }
 
+    /**
+     * A warning for each anonymous volume with data this project's copy
+     * leaves out ({@see CopyVolumes::anonymousVolumeWarnings()}).
+     *
+     * @return list<string>
+     */
+    public function anonymousVolumeWarnings(): array
+    {
+        return $this->copyVolumesForClone()?->anonymousVolumeWarnings() ?? [];
+    }
+
     public function copyVolumesForClone(): ?CopyVolumes
     {
         if ($this->runtime()->kind() !== 'dind') {
             return null;
         }
 
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             return null;
         }
         $app = $this->runtime->app();
@@ -754,15 +792,92 @@ class Project
         return $app->copyVolumes();
     }
 
-    public function copyHomeDirFrom(self $source): void
+    /**
+     * Point a run file copied from $source at this project's own database and
+     * address ({@see CopiedRunFile}): the one at $path, or the project's own.
+     */
+    public function repointCopiedRunFile(ModelsUser $source, ?string $path = null): void
     {
-        $src = rtrim($source->homeDirPath(), '/') . '/';
-        $dest = rtrim($this->homeDirPath(), '/') . '/';
+        if ($this->runtime instanceof Dind) {
+            (new CopiedRunFile($this->runtime))->repointFrom($source, $path ?? $this->runtime->userAppComposeFilePath());
+        }
+    }
+
+    /**
+     * Store the env vars the files copied from $source were written with, so
+     * the next rebuild writes them again instead of dropping or reverting them.
+     */
+    public function adoptCopiedEnvVars(ModelsUser $source): void
+    {
+        if (! $this->runtime instanceof Dind) {
+            return;
+        }
+        $details = ModelsUser::copiedEnvDetails($source->getDetails());
+        if (is_array($details['env_vars'])) {
+            $details['env_vars'] = (new CopiedRunFile($this->runtime))
+                ->repointedEnvVars($source, ApiAccess::withoutReservedKeys($details['env_vars']));
+        }
+        if ($this->holdsDetails($details)) {
+            return;
+        }
+        $this->model->setDetails($details);
+        $this->model->save();
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     */
+    private function holdsDetails(array $details): bool
+    {
+        $current = $this->model->getDetails();
+        foreach ($details as $key => $value) {
+            if (($current[$key] ?? null) !== $value) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Get the images a run file copied into this project names into its account
+     * ({@see CopiedImages}): the one at $path, or the project's own.
+     */
+    public function provideCopiedImages(?string $path = null): void
+    {
+        if ($this->runtime instanceof Dind && $this->hasUserApp()) {
+            (new CopiedImages($this->runtime))->provide($path ?? $this->runtime->userAppComposeFilePath());
+        }
+    }
+
+    /**
+     * The image this project's account has under the tag a copied Railpack run
+     * file at $path names, held aside before {@see provideCopiedImages()}
+     * builds it again; null when there is none.
+     */
+    public function holdCopiedImage(string $path): ?HeldImage
+    {
+        if ($this->runtime instanceof Dind && $this->hasUserApp()) {
+            return (new CopiedImages($this->runtime))->holdRailpackImage($path);
+        }
+
+        return null;
+    }
+
+    /**
+     * $sourceRunning for a first copy taken while the source app still runs, so the one taken once
+     * it is stopped moves only what changed: a file the app removes meanwhile is not an error.
+     */
+    public function copyHomeDirFrom(self $source, bool $sourceRunning = false): void
+    {
+        $src = rtrim($source->homeDirPath(), '/').'/';
+        $dest = rtrim($this->homeDirPath(), '/').'/';
 
         $excludes = $this->isDindTemplate() ? ['--exclude=docker/'] : [];
         $this->runCopyProcess(
             ['sudo', 'rsync', '-a', '--delete', ...$excludes, $src, $dest],
-            'Failed to rsync home directory from source'
+            'Failed to rsync home directory from source',
+            $sourceRunning ? [self::RSYNC_VANISHED_FILES] : [],
         );
 
         $this->fixPermissions();
@@ -777,13 +892,13 @@ class Project
         foreach ($subdirs as $subdir) {
             $srcDir = "{$srcProject}/{$subdir}";
             $destDir = "{$destProject}/{$subdir}";
-            if (!is_dir($srcDir)) {
+            if (! is_dir($srcDir)) {
                 continue;
             }
             $this->runCopyProcess([
                 'sudo', 'rsync', '-a', '--delete',
-                rtrim($srcDir, '/') . '/',
-                rtrim($destDir, '/') . '/',
+                rtrim($srcDir, '/').'/',
+                rtrim($destDir, '/').'/',
             ], "Failed to rsync project config '{$subdir}' from source");
         }
 
@@ -900,12 +1015,12 @@ class Project
     {
         Log::warning(sprintf(
             'Disk limit for project %s (%d MB, %d inodes) is NOT enforced: setquota on %s failed: %s. '
-            . 'Turn quota on with scripts/configure-quota.sh.',
+            .'Turn quota on with scripts/configure-quota.sh.',
             $this->username(),
             intdiv($limitBlocks, 1024),
             $limitInodes,
             $mountPoint,
-            trim($process->getErrorOutput()) ?: 'exit ' . (string) $process->getExitCode(),
+            trim($process->getErrorOutput()) ?: 'exit '.(string) $process->getExitCode(),
         ));
     }
 
@@ -915,21 +1030,53 @@ class Project
      */
     public function fixPermissions(): void
     {
-        $uid = $this->model->getUid();
-        $gid = $this->model->getGid();
-        if (!$uid || !$gid) {
-            Log::warning("Cannot fix file permissions for user {$this->username()}, UID/GID is missing");
-
+        $ids = $this->accountIds();
+        if ($ids === null) {
             return;
         }
+        [$uid, $gid] = $ids;
         $home = rtrim($this->homeDirPath(), '/');
 
         foreach (self::pathAndAncestorsTopDown($home) as $dir) {
             $this->secureRootOwnedDirectory($dir);
         }
-        $this->chownHomeContents($home, $uid, $gid);
+        $this->chownTree($home, $uid, $gid, 1);
         $this->restoreProtectedDirectories($home);
         $this->chownLscacheDirectories($home, $uid);
+    }
+
+    /**
+     * Hands a staged copy of the home to the account under the home's own rules: its
+     * contents go to the account, the directory itself stays root-owned like the home
+     * root, so the account can use the copy but cannot add or swap its top-level entries.
+     */
+    public function handStagedHomeToAccount(string $stagedHome): void
+    {
+        $ids = $this->accountIds();
+        if ($ids === null) {
+            return;
+        }
+        $stagedHome = rtrim($stagedHome, '/');
+
+        $this->secureRootOwnedDirectory($stagedHome);
+        $this->chownTree($stagedHome, $ids[0], $ids[1], 1);
+        $this->restoreProtectedDirectories($stagedHome);
+    }
+
+    /**
+     * @return array{0: int, 1: int}|null
+     */
+    private function accountIds(): ?array
+    {
+        $uid = $this->model->getUid();
+        $gid = $this->model->getGid();
+        if (! $uid || ! $gid) {
+            Log::warning("Cannot fix file permissions for user {$this->username()}, UID/GID is missing");
+
+            return null;
+        }
+
+        return [$uid, $gid];
     }
 
     /**
@@ -939,7 +1086,7 @@ class Project
     {
         $dir = $path;
         $dirs = [];
-        while ($dir !== '/' && $dir !== '' && !in_array($dir, $dirs, true)) {
+        while ($dir !== '/' && $dir !== '' && ! in_array($dir, $dirs, true)) {
             $dirs[] = $dir;
             $dir = dirname($dir);
         }
@@ -967,17 +1114,23 @@ class Project
         }
     }
 
-    /** A dind account's `docker/` tree is the inner daemon's and is left alone. */
-    private function chownHomeContents(string $home, int $uid, int $gid): void
+    /**
+     * A dind account's `docker/` tree is the inner daemon's and is left alone.
+     * A push's rollback dumps in .pre-push-db belong to the engine process alone:
+     * the account must neither read nor rewrite what the engine replays into its
+     * databases, and the worker must still read them when a push fails.
+     */
+    private function chownTree(string $root, int $uid, int $gid, int $minDepth): void
     {
-        $excludeArgs = '';
+        $excludeArgs = sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$root}/.pre-push-db"));
         if ($this->isDindTemplate()) {
-            $excludeArgs = sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$home}/docker/*"));
+            $excludeArgs .= sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$root}/docker/*"));
         }
 
         $this->system->runProcess(sprintf(
-            'sudo find %s -mindepth 1%s -exec chown -h %d:%d {} +',
-            escapeshellarg($home),
+            'sudo find %s -mindepth %d%s -exec chown -h %d:%d {} +',
+            escapeshellarg($root),
+            $minDepth,
             $excludeArgs,
             $uid,
             $gid
@@ -987,10 +1140,10 @@ class Project
     private function restoreProtectedDirectories(string $home): void
     {
         $dockerDir = "{$home}/docker";
-        if ($this->isDindTemplate() && $this->system->filesystem()->directoryExists($dockerDir)) {
+        if ($this->isDindTemplate() && $this->isRealDirectory($dockerDir)) {
             $this->system->runProcess("sudo chown root:root {$dockerDir}");
         }
-        if ($this->system->filesystem()->directoryExists("{$home}/.panelalpha")) {
+        if ($this->isRealDirectory("{$home}/.panelalpha")) {
             $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
         }
     }
@@ -998,11 +1151,23 @@ class Project
     private function chownLscacheDirectories(string $home, int $uid): void
     {
         foreach ($this->model->getDomains() as $domain) {
-            $lscacheDir = $home . '/' . $domain->domain . '/.lscache';
-            if ($this->system->filesystem()->directoryExists($lscacheDir)) {
-                $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:' . $uid, $lscacheDir]);
+            $lscacheDir = $home.'/'.$domain->domain.'/.lscache';
+            if ($this->isRealDirectory($lscacheDir)) {
+                $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:'.$uid, $lscacheDir]);
             }
         }
+    }
+
+    /** chown and chmod follow a link named on their command line, so a link is never one of these directories. */
+    private function isRealDirectory(string $path): bool
+    {
+        $filesystem = $this->system->filesystem();
+        if (! $filesystem->isSymlink($path)) {
+            return $filesystem->directoryExists($path);
+        }
+        Log::warning("Leaving '{$path}' alone while fixing permissions: it is a symbolic link.");
+
+        return false;
     }
 
     private function isDindTemplate(): bool
@@ -1076,7 +1241,7 @@ class Project
 
     private function requireDindRuntime(): Dind
     {
-        if (!$this->runtime instanceof Dind) {
+        if (! $this->runtime instanceof Dind) {
             throw new \RuntimeException('This operation requires a DinD project.');
         }
 
@@ -1091,7 +1256,7 @@ class Project
         } catch (\Throwable $cleanupFailure) {
             Log::warning(
                 "Cleanup after failed provision for '{$this->username()}' also failed: "
-                . $cleanupFailure->getMessage(),
+                .$cleanupFailure->getMessage(),
                 ['exception' => $cleanupFailure],
             );
             throw $failure;
@@ -1101,15 +1266,16 @@ class Project
     }
 
     /**
-     * @param list<string> $cmd
+     * @param  list<string>  $cmd
+     * @param  list<int>  $alsoAccepted  exit statuses that are not a failure here
      */
-    private function runCopyProcess(array $cmd, string $context): void
+    private function runCopyProcess(array $cmd, string $context, array $alsoAccepted = []): void
     {
         $process = $this->system->runProcess($cmd);
-        if ($process->isSuccessful()) {
+        if ($process->isSuccessful() || in_array($process->getExitCode(), $alsoAccepted, true)) {
             return;
         }
-        $output = trim($process->getErrorOutput() . ' ' . $process->getOutput());
+        $output = trim($process->getErrorOutput().' '.$process->getOutput());
         throw new \RuntimeException($output !== '' ? "{$context}: {$output}" : $context);
     }
 }

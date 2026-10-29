@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Deployment;
 
+use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
@@ -41,7 +42,7 @@ class DeploymentWorkflowTest extends TestCase
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
         $this->assertStringNotContainsString('UserAccountDeletion', $source);
         $this->assertStringNotContainsString('destroy()', $source);
-        $this->assertStringContainsString('new RetainProject()', $source);
+        $this->assertStringContainsString('new RetainProject', $source);
 
         $retain = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/RetainProject.php');
         $this->assertStringContainsString('FailureRetention::', $retain);
@@ -127,6 +128,31 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertTrue($mechanics->publishedDomain);
         $this->assertFalse($mechanics->ingestedSource);
         $this->assertFalse($mechanics->startedApplication);
+    }
+
+    /** The log said cancelled while the create's task went on to wait for files and ended completed. */
+    public function test_a_cancel_before_the_account_waits_for_files_ends_the_create_cancelled(): void
+    {
+        $model = $this->dindModel();
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->dindWithoutGit = true;
+        $logger = $this->silentDeployLogger();
+        $logger->method('throwIfCancelled')->willThrowException(new DeployCancelledException('Deployment cancelled by user'));
+        $said = [];
+        $logger->method('info')->willReturnCallback(function (string $line) use (&$said): void {
+            $said[] = $line;
+        });
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->run($logger);
+            $this->fail('Expected the create to stop as cancelled');
+        } catch (ProblemException $e) {
+            $this->assertSame('deploy_cancelled', $e->problems[0]['code'] ?? null);
+        }
+
+        $this->assertNotContains(DeployLogger::WAITING_FOR_FILES, $said);
     }
 
     public function test_run_persists_success_when_start_succeeds(): void
@@ -725,6 +751,65 @@ class DeploymentWorkflowTest extends TestCase
         }
     }
 
+    /** A cancelled redeploy closes its log first: the log holds the deploy lock, which the settle after it has to take. */
+    public function test_a_cancelled_redeploy_closes_its_log_before_it_settles(): void
+    {
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $paths = [
+            'checkout' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromCheckout($l),
+            'source' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromSource($l, null),
+            'archive' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->deployFromArchive($l, '/project/app.zip'),
+        ];
+        foreach ($paths as $name => $run) {
+            $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'express']), $domain);
+            $logger = $this->silentDeployLogger();
+            $logger->method('throwIfCancelled')->willThrowException(new DeployCancelledException('Deployment cancelled by user'));
+            $settledWhenClosed = [];
+            $logger->method('finish')->willReturnCallback(function (string $status) use ($mechanics, &$settledWhenClosed): void {
+                $settledWhenClosed[$status] = $mechanics->settled;
+            });
+
+            try {
+                $run(new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics), $logger);
+            } catch (\Exception) {
+            }
+
+            $this->assertSame([DeployLogger::STATUS_CANCELLED => 0], $settledWhenClosed, $name);
+            $this->assertSame([false], $mechanics->settledAsSucceeded, $name);
+        }
+    }
+
+    /** An archive redeploy that fails before its start closes its log first too, or the settle cannot take the lock. */
+    public function test_a_failed_archive_redeploy_closes_its_log_before_it_settles(): void
+    {
+        $domain = new DomainModel;
+        $domain->domain = 'alice.example.test';
+        $failures = [
+            'refused archive' => [new \InvalidArgumentException('zip_path must be inside the account home'), 'zip_path must be inside the account home'],
+            'import error' => [new \RuntimeException('Account alice has no uid/gid recorded; cannot extract as the account.'), 'Account alice has no uid/gid recorded; cannot extract as the account.'],
+            'start failure' => [null, 'Failed to start app: build failed'],
+        ];
+        foreach ($failures as $name => [$failure, $message]) {
+            $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'express']), $domain);
+            $mechanics->archiveException = $failure;
+            $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'build failed'];
+            $logger = $this->silentDeployLogger();
+            $closed = [];
+            $logger->method('finish')->willReturnCallback(function (string $status, ?string $error = null) use ($mechanics, &$closed): void {
+                $closed[] = [$status, $error, $mechanics->settled];
+            });
+
+            try {
+                (new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics))->deployFromArchive($logger, '/project/app.zip');
+            } catch (\Exception) {
+            }
+
+            $this->assertSame([DeployLogger::STATUS_FAILED, $message, 0], $closed[0] ?? null, $name);
+            $this->assertSame([false], $mechanics->settledAsSucceeded, $name);
+        }
+    }
+
     public function test_workflow_exposes_rebuild_from_source(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
@@ -798,6 +883,7 @@ final class RecordingDeployMechanics implements DeployMechanics
     public array $startResult = ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
 
     public bool $dindWithoutGit = false;
+    public bool $removedAccount = false;
     public bool $hasGit = false;
     public bool $publishedDomain = false;
     public bool $ingestedSource = false;
@@ -851,6 +937,11 @@ final class RecordingDeployMechanics implements DeployMechanics
         if ($this->prepareException !== null) {
             throw $this->prepareException;
         }
+    }
+
+    public function removedTheAccount(): bool
+    {
+        return $this->removedAccount;
     }
 
     public function ingestApplicationSource(): void

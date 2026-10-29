@@ -12,18 +12,33 @@ use Illuminate\Support\Facades\Log;
  */
 final class AccountMapping
 {
-    public const RECREATED = 'Recreated the account container: sysbox no longer mapped its image (sysbox was restarted while it ran)';
+    private const RECREATED = 'Recreated the account container';
+
+    private const SYSBOX_RESTARTED = 'sysbox was restarted while it ran';
 
     private const PROBE_TIMEOUT_SECONDS = 30;
 
     private const EXEC_REFUSED = 'unsafe procfs detected';
 
+    /** The sysbox daemon that registers containers; restarting it is what leaves running ones unmapped. */
+    private const SYSBOX_MANAGER_UNIT = 'sysbox-mgr';
+
     /** Starting a container sysbox forgot fails on its own image, e.g. "open etc/docker/daemon.json: permission denied". */
     private const START_REFUSED = '/OCI runtime create failed:.*\b(?:open|lstat|stat|mkdir) \S+: permission denied/s';
 
+    /** What the last probe saw that made the image count as unmapped. */
+    private ?string $seen = null;
+
     public function __construct(
         private DindProject $project,
-    ) {
+    ) {}
+
+    /** The account is recreated because its container's start was refused, not because a probe found it unmapped. */
+    public function afterRefusedStart(): self
+    {
+        $this->seen = 'its start was refused with permission denied on its own image';
+
+        return $this;
     }
 
     /**
@@ -35,10 +50,72 @@ final class AccountMapping
         try {
             $owner = trim($this->project->shell()->execQuiet(['stat', '-c', '%u', '/root'], [], self::PROBE_TIMEOUT_SECONDS));
         } catch (\Throwable $e) {
-            return str_contains($e->getMessage(), self::EXEC_REFUSED) ? true : null;
+            return $this->refusedAcrossSysboxRestart($e->getMessage()) ? $this->saw('exec into it was refused (unsafe procfs detected)') : null;
+        }
+        if (! ctype_digit($owner)) {
+            return null;
         }
 
-        return ctype_digit($owner) ? $owner !== '0' : null;
+        return $owner === '0' ? false : $this->saw("/root inside it was owned by uid {$owner} instead of root");
+    }
+
+    private function saw(string $what): bool
+    {
+        $this->seen = $what;
+
+        return true;
+    }
+
+    /**
+     * Only a container started before sysbox last started can have been forgotten by it. One started since
+     * that refuses exec for another reason, which recreating it again would not fix. Unknown times count as before.
+     */
+    private function refusedAcrossSysboxRestart(string $error): bool
+    {
+        if (! str_contains($error, self::EXEC_REFUSED)) {
+            return false;
+        }
+        $containerStarted = $this->containerStartedAt();
+        $sysboxStarted = $this->sysboxStartedAt();
+
+        return $containerStarted === null || $sysboxStarted === null || $containerStarted < $sysboxStarted;
+    }
+
+    private function startedBeforeSysbox(): bool
+    {
+        $containerStarted = $this->containerStartedAt();
+        $sysboxStarted = $this->sysboxStartedAt();
+
+        return $containerStarted !== null && $sysboxStarted !== null && $containerStarted < $sysboxStarted;
+    }
+
+    private function containerStartedAt(): ?int
+    {
+        $inspect = $this->project->system()->runProcess(
+            ['sudo', 'docker', 'inspect', '--format', '{{.State.StartedAt}}', $this->project->username()],
+            [],
+            self::PROBE_TIMEOUT_SECONDS
+        );
+
+        return $inspect->isSuccessful() ? self::timestamp(preg_replace('/\.\d+/', '', $inspect->getOutput()) ?? '') : null;
+    }
+
+    private function sysboxStartedAt(): ?int
+    {
+        $show = $this->project->system()->runProcessOnHost(
+            ['systemctl', 'show', self::SYSBOX_MANAGER_UNIT, '--property=ActiveEnterTimestamp', '--value'],
+            [],
+            self::PROBE_TIMEOUT_SECONDS
+        );
+
+        return $show->isSuccessful() ? self::timestamp($show->getOutput()) : null;
+    }
+
+    private static function timestamp(string $value): ?int
+    {
+        $time = trim($value) === '' ? false : strtotime(trim($value));
+
+        return $time === false ? null : $time;
     }
 
     /** The error of a start that failed because sysbox no longer maps the container's image. */
@@ -54,7 +131,7 @@ final class AccountMapping
      */
     public function ensureMapped(): bool
     {
-        if (!AccountRuntime::isSysbox() || $this->isUnmapped() !== true) {
+        if (! AccountRuntime::isSysbox() || $this->isUnmapped() !== true) {
             return false;
         }
         if (DeployLock::heldByThisProcess($this->project->username())) {
@@ -89,15 +166,27 @@ final class AccountMapping
     /** The home and ~/docker are bind mounts, so the account keeps its data. */
     public function recreate(): void
     {
+        $recreated = self::RECREATED.': '.$this->cause();
         (new OuterLifecycle($this->project))->recreate();
         $this->project->awaitReady();
-        if ($this->isUnmapped() === true) {
+        if ($this->isUnmapped() !== false) {
             throw new \RuntimeException(
                 "The account container of '{$this->project->username()}' still has its image unmapped after it was recreated; "
-                . 'check that sysbox runs on the host (systemctl status sysbox).'
+                .'check that sysbox runs on the host (systemctl status sysbox).'
             );
         }
-        Log::warning($this->project->username() . ': ' . self::RECREATED);
-        $this->project->shell()->logger()?->warn(self::RECREATED);
+        Log::warning($this->project->username().': '.$recreated);
+        $this->project->shell()->logger()?->warn($recreated);
+    }
+
+    /**
+     * What was seen, and a sysbox restart only when the container provably started before sysbox did:
+     * read before the recreate, which gives the container a new start time.
+     */
+    private function cause(): string
+    {
+        $seen = $this->seen ?? 'its image was unmapped';
+
+        return $this->startedBeforeSysbox() ? "{$seen}; ".self::SYSBOX_RESTARTED : $seen;
     }
 }

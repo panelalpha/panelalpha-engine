@@ -20,10 +20,13 @@ use App\Lib\Deploy\Source\RepoUrl;
 final class AppConfigLocator
 {
     public const KIND_DIRECTORY = 'directory';
+
     public const KIND_MARKDOWN = 'markdown';
+
     public const KIND_YAML = 'yaml';
 
     public const ORIGIN_REPOSITORY = 'repository';
+
     public const ORIGIN_ENGINE = 'engine';
 
     /**
@@ -35,9 +38,9 @@ final class AppConfigLocator
     {
         $project = rtrim($projectDir, '/');
         $candidates = [
-            ['path' => $project . '/' . AppConfigDirectory::DIRNAME, 'kind' => self::KIND_DIRECTORY, 'origin' => self::ORIGIN_REPOSITORY],
-            ['path' => $project . '/' . AppConfig::MARKDOWN_FILENAME, 'kind' => self::KIND_MARKDOWN, 'origin' => self::ORIGIN_REPOSITORY],
-            ['path' => $project . '/' . AppConfig::YAML_FILENAME, 'kind' => self::KIND_YAML, 'origin' => self::ORIGIN_REPOSITORY],
+            ['path' => $project.'/'.AppConfigDirectory::DIRNAME, 'kind' => self::KIND_DIRECTORY, 'origin' => self::ORIGIN_REPOSITORY],
+            ['path' => $project.'/'.AppConfig::MARKDOWN_FILENAME, 'kind' => self::KIND_MARKDOWN, 'origin' => self::ORIGIN_REPOSITORY],
+            ['path' => $project.'/'.AppConfig::YAML_FILENAME, 'kind' => self::KIND_YAML, 'origin' => self::ORIGIN_REPOSITORY],
         ];
 
         $slug = is_string($gitUrl) && $gitUrl !== '' ? RepoUrl::slug($gitUrl) : null;
@@ -46,15 +49,15 @@ final class AppConfigLocator
         }
 
         $candidates[] = [
-            'path' => SourceRecipes::defaultDirectory() . '/' . $slug,
+            'path' => SourceRecipes::defaultDirectory().'/'.$slug,
             'kind' => self::KIND_DIRECTORY,
             'origin' => self::ORIGIN_ENGINE,
         ];
         // The pages the engine shipped before the directories existed. Still
         // read, so a page an operator wrote on a host keeps working.
-        $legacy = PaemdPage::pagesDirectory() . '/' . $slug;
-        $candidates[] = ['path' => $legacy . '/' . AppConfig::MARKDOWN_FILENAME, 'kind' => self::KIND_MARKDOWN, 'origin' => self::ORIGIN_ENGINE];
-        $candidates[] = ['path' => $legacy . '/' . AppConfig::YAML_FILENAME, 'kind' => self::KIND_YAML, 'origin' => self::ORIGIN_ENGINE];
+        $legacy = PaemdPage::pagesDirectory().'/'.$slug;
+        $candidates[] = ['path' => $legacy.'/'.AppConfig::MARKDOWN_FILENAME, 'kind' => self::KIND_MARKDOWN, 'origin' => self::ORIGIN_ENGINE];
+        $candidates[] = ['path' => $legacy.'/'.AppConfig::YAML_FILENAME, 'kind' => self::KIND_YAML, 'origin' => self::ORIGIN_ENGINE];
 
         return $candidates;
     }
@@ -97,7 +100,7 @@ final class AppConfigLocator
      * How to name a candidate in a log line: what it is called inside the
      * project, or the repository slug the engine filed it under.
      *
-     * @param array{path: string, origin: string} $candidate
+     * @param  array{path: string, origin: string}  $candidate
      */
     public static function describe(array $candidate): string
     {
@@ -107,7 +110,7 @@ final class AppConfigLocator
         }
 
         foreach ([SourceRecipes::defaultDirectory(), PaemdPage::pagesDirectory()] as $root) {
-            if (!str_starts_with($path, $root . '/')) {
+            if (! str_starts_with($path, $root.'/')) {
                 continue;
             }
             $relative = substr($path, strlen($root) + 1);
@@ -123,7 +126,26 @@ final class AppConfigLocator
     }
 
     /**
-     * @param array{path: string, kind: string, origin: string} $candidate
+     * The engine's own recipe for a repository, without the checkout: for a
+     * caller that has no project directory to read, or may not read it.
+     */
+    public static function findShipped(AppConfigSource $source, ?string $gitUrl): ?AppConfig
+    {
+        foreach (self::candidates('', $gitUrl) as $candidate) {
+            if ($candidate['origin'] !== self::ORIGIN_ENGINE) {
+                continue;
+            }
+            $appConfig = self::read($source, $candidate);
+            if ($appConfig !== null) {
+                return $appConfig;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array{path: string, kind: string, origin: string}  $candidate
      */
     private static function read(AppConfigSource $source, array $candidate): ?AppConfig
     {
@@ -135,11 +157,11 @@ final class AppConfigLocator
             );
         }
 
-        if (!$source->exists($candidate['path'])) {
+        if (! $source->exists($candidate['path'])) {
             return null;
         }
         $content = $source->read($candidate['path']);
-        if (!is_string($content) || trim($content) === '') {
+        if (! is_string($content) || trim($content) === '') {
             return null;
         }
 

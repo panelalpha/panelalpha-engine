@@ -9,11 +9,10 @@ namespace App\Lib\DeployHook;
 final class HookResponse
 {
     /**
-     * @param array<string, mixed> $body
+     * @param  array<string, mixed>  $body
      */
     public function __construct(
         public readonly int $status,
         public readonly array $body,
-    ) {
-    }
+    ) {}
 }

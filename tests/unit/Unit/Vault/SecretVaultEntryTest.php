@@ -72,9 +72,9 @@ class SecretVaultEntryTest extends VaultTestCase
         $this->assertFalse(RequestVault::isReference('ghp_vault:12'));
 
         [$entry] = $this->entry();
-        $this->assertSame('vault:' . $entry->id, $entry->reference());
-        $this->assertSame($entry->id, SecretVaultEntry::idFromReference($entry->reference()));
-        $this->assertSame($entry->id, SecretVaultEntry::idFromReference((string) $entry->id));
-        $this->assertNull(SecretVaultEntry::idFromReference('vault:abc'));
+        $this->assertMatchesRegularExpression('/^vault:[A-Za-z0-9]{24}$/', $entry->reference());
+        $this->assertSame($entry->id, SecretVaultEntry::findByReference($entry->reference())?->id);
+        $this->assertNull(SecretVaultEntry::findByReference(substr($entry->reference(), strlen('vault:'))));
+        $this->assertNull(SecretVaultEntry::findByReference('vault:abc'));
     }
 }

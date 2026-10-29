@@ -61,6 +61,12 @@ abstract class ApiTool extends Tool
      */
     public const MAX_RESULT_BYTES = 262144;
 
+    /** The page-size argument a too-big result is answered with a smaller one of. */
+    private const PAGE_LIMIT = 'limit';
+
+    /** The id cursor a page starts after. */
+    private const PAGE_CURSOR = 'after_id';
+
     /** The HTTP verb this tool performs. */
     abstract protected function method(): string;
 
@@ -202,15 +208,17 @@ abstract class ApiTool extends Tool
             return Response::error('This endpoint streams its response, which cannot be relayed over MCP. Use the non-streaming equivalent (e.g. task_log_list).');
         }
 
-        return $this->jsonResult($response);
+        return $this->jsonResult($response, $input);
     }
 
     /**
      * A 4xx/5xx from the API is the tool failing, not the transport: it comes back
      * as a tool error so the model retries or reports rather than reading the error
      * body as a successful result.
+     *
+     * @param array<string, mixed> $input
      */
-    private function jsonResult(SymfonyResponse $response): Response
+    private function jsonResult(SymfonyResponse $response, array $input): Response
     {
         $body = $this->decode($response);
         $status = $response->getStatusCode();
@@ -222,17 +230,79 @@ abstract class ApiTool extends Tool
 
         $size = strlen($this->encode($payload));
         if ($size > self::MAX_RESULT_BYTES) {
-            return Response::error(sprintf(
-                'The result is %d KB, over the %d KB a tool returns. Ask for less: use the paging or filter '
-                . 'arguments this tool has, or for command output pipe it through head, tail or grep.',
-                intdiv($size, 1024),
-                intdiv(self::MAX_RESULT_BYTES, 1024)
-            ));
+            return Response::error($this->oversizeMessage($size, $input));
         }
 
         return $status >= 400
             ? Response::error($this->encode($payload))
             : Response::json($payload);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function oversizeMessage(int $size, array $input): string
+    {
+        $over = sprintf(
+            'The result is %d KB, over the %d KB a tool returns. ',
+            intdiv($size, 1024),
+            intdiv(self::MAX_RESULT_BYTES, 1024)
+        );
+
+        return $over . ($this->smallerPageHint($size, $input) ?? 'Ask for less: use the paging or filter '
+            . 'arguments this tool has, or for command output pipe it through head, tail or grep.');
+    }
+
+    /**
+     * For a tool that pages by `limit`: a page size that fits, sized from this
+     * one, and the `after_id` cursor to send again, since nothing of this page was.
+     * Null when the page cannot get smaller.
+     *
+     * @param array<string, mixed> $input
+     */
+    private function smallerPageHint(int $size, array $input): ?string
+    {
+        if (!in_array(self::PAGE_LIMIT, $this->queryParams(), true)) {
+            return null;
+        }
+        $limit = is_numeric($input[self::PAGE_LIMIT] ?? null) ? (int) $input[self::PAGE_LIMIT] : null;
+        if ($limit !== null && $limit <= 1) {
+            return null;
+        }
+
+        return 'Call again with ' . $this->smallerLimit($limit, $size) . $this->sameCursor($input) . '.';
+    }
+
+    private function smallerLimit(?int $limit, int $size): string
+    {
+        $name = $this->argument(self::PAGE_LIMIT);
+        if ($limit === null) {
+            return "a smaller `{$name}`";
+        }
+
+        return sprintf('`%s` %d or less (this call asked for %d)', $name, self::pageThatFits($limit, $size), $limit);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function sameCursor(array $input): string
+    {
+        if (!in_array(self::PAGE_CURSOR, $this->queryParams(), true)) {
+            return '';
+        }
+
+        return sprintf(
+            ' and `%s` %d again, since nothing of this page was returned',
+            $this->argument(self::PAGE_CURSOR),
+            (int) ($input[self::PAGE_CURSOR] ?? 0)
+        );
+    }
+
+    /** Half the rows that would have fit, so the next page has room for longer ones. */
+    private static function pageThatFits(int $limit, int $size): int
+    {
+        return max(1, intdiv($limit * self::MAX_RESULT_BYTES, $size * 2));
     }
 
     /**

@@ -33,7 +33,7 @@ class MigrateEngineArtifacts extends Command
         /** @var bool */
         $all = (bool) $this->option('all');
 
-        if (!$username && !$all) {
+        if (! $username && ! $all) {
             $this->error('One of the following is required: a username, or `--all`.');
 
             return 1;
@@ -41,7 +41,7 @@ class MigrateEngineArtifacts extends Command
 
         if ($username) {
             $user = User::findByUsername($username);
-            if (!$user) {
+            if (! $user) {
                 $this->error('Invalid username');
 
                 return 1;
@@ -54,14 +54,14 @@ class MigrateEngineArtifacts extends Command
     }
 
     /**
-     * @param array<User>|Collection<int, User> $users
+     * @param  array<User>|Collection<int, User>  $users
      */
     private function migrateUsers($users): int
     {
         $ok = true;
         foreach ($users as $user) {
             $runtime = $user->project()->runtime();
-            if (!$runtime instanceof Dind) {
+            if (! $runtime instanceof Dind) {
                 continue;
             }
 
@@ -83,6 +83,6 @@ class MigrateEngineArtifacts extends Command
             }
         }
 
-        return (int) !$ok;
+        return (int) ! $ok;
     }
 }

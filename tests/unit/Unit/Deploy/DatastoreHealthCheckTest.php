@@ -6,6 +6,7 @@ use App\System\Project\Dind\AppHealth;
 use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\HealthCheck;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * An application that answers 200 while its database is down.
@@ -31,10 +32,8 @@ class DatastoreHealthCheckTest extends TestCase
     }
 
     /** market-radar's own services, as compose prints them. */
-    private const UNHEALTHY_MARIADB = <<<'JSON'
-        {"Name":"project-mariadb-1","Service":"mariadb","State":"running","Status":"Up 2 minutes (unhealthy)","Health":"unhealthy","ExitCode":0,"Publishers":[{"URL":"0.0.0.0","TargetPort":3306,"PublishedPort":0}]}
-        {"Name":"project-app-1","Service":"app","State":"running","Status":"Up 2 minutes","ExitCode":0,"Publishers":[{"URL":"0.0.0.0","TargetPort":4000,"PublishedPort":4000}]}
-        JSON;
+    private const UNHEALTHY_MARIADB = '{"Name":"project-mariadb-1","Service":"mariadb","State":"running","Status":"Up 2 minutes (unhealthy)","Health":"unhealthy","ExitCode":0,"Publishers":[{"URL":"' . TestNetwork::ANY . '","TargetPort":3306,"PublishedPort":0}]}' . "\n"
+        . '{"Name":"project-app-1","Service":"app","State":"running","Status":"Up 2 minutes","ExitCode":0,"Publishers":[{"URL":"' . TestNetwork::ANY . '","TargetPort":4000,"PublishedPort":4000}]}';
 
     /** The same stack, healthy: the application's own shape on a good day. */
     private const HEALTHY = <<<'JSON'

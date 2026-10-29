@@ -31,15 +31,15 @@ final class ServiceRole
      * must be in JOB_NAMES and the command a setup verb; a published port,
      * `expose`, healthcheck or `deploy` block vetoes it.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     public static function isJobService(string $name, array $service): bool
     {
-        if (!in_array(strtolower($name), self::JOB_NAMES, true)) {
+        if (! in_array(strtolower($name), self::JOB_NAMES, true)) {
             return false;
         }
         foreach (['ports', 'expose', 'healthcheck', 'deploy'] as $key) {
-            if (!empty($service[$key])) {
+            if (! empty($service[$key])) {
                 return false;
             }
         }
@@ -69,8 +69,8 @@ final class ServiceRole
      * where a wrong yes does damage (choosing the proxy's port). isBacking()
      * defaults to "yes", where a wrong no would drop the database.
      *
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
      */
     public static function isKnownDatastore(string $name, array $service, array $observedPorts = []): bool
     {
@@ -88,10 +88,10 @@ final class ServiceRole
      * Whether a service is a dependency the application needs at runtime.
      * Everything not shown to be the application is kept and started.
      *
-     * @param array<string, mixed> $service
-     * @param list<int> $observedPorts
-     * @param array<string, mixed> $siblings every service in the file, for the
-     *        depends_on shape; omit when asking about a service in isolation
+     * @param  array<string, mixed>  $service
+     * @param  list<int>  $observedPorts
+     * @param  array<string, mixed>  $siblings  every service in the file, for the
+     *                                          depends_on shape; omit when asking about a service in isolation
      */
     public static function isBacking(
         string $name,
@@ -107,7 +107,7 @@ final class ServiceRole
             return false;
         }
 
-        return !self::isApplication($name, $service, $siblings, $projectIdentity);
+        return ! self::isApplication($name, $service, $siblings, $projectIdentity);
     }
 
     /**
@@ -116,8 +116,8 @@ final class ServiceRole
      * earlier by the image being the published build of the repository, or
      * being shared with a sibling (web, worker, scheduler: one app three ways).
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $siblings
      */
     public static function isApplication(
         string $name,
@@ -155,7 +155,7 @@ final class ServiceRole
     {
         $identity = strtolower(trim((string) $projectIdentity, " \t/"));
         $image = strtolower(trim($image));
-        if ($identity === '' || $image === '' || !str_contains($identity, '/')) {
+        if ($identity === '' || $image === '' || ! str_contains($identity, '/')) {
             return false;
         }
 
@@ -173,7 +173,7 @@ final class ServiceRole
     }
 
     /**
-     * @param array<string, mixed> $services
+     * @param  array<string, mixed>  $services
      */
     public static function servicesProvide(array $services, string $engine): bool
     {
@@ -198,8 +198,8 @@ final class ServiceRole
     }
 
     /**
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $siblings
      */
     private static function sharesImageWithSibling(string $name, array $service, array $siblings): bool
     {
@@ -220,8 +220,8 @@ final class ServiceRole
     /**
      * Depends on services in this file, and nothing in it depends on it.
      *
-     * @param array<string, mixed> $service
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $service
+     * @param  array<string, mixed>  $siblings
      */
     private static function isTopOfTheStack(string $name, array $service, array $siblings): bool
     {
@@ -242,7 +242,7 @@ final class ServiceRole
     }
 
     /**
-     * @param array<string, mixed> $siblings
+     * @param  array<string, mixed>  $siblings
      * @return list<array<string, mixed>>
      */
     private static function otherServices(string $name, array $siblings): array

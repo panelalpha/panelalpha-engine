@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\ProjectContext;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * Node, versioned by `engines.node`, then `.nvmrc`, then `.node-version`.
@@ -167,7 +168,7 @@ final class NodeRuntime implements Runtime
      * running Node is 17 or newer; older Node rejects the flag.
      */
     public const LEGACY_OPENSSL_ENV = '{ case "$(node -v 2>/dev/null)" in v1[7-9].*|v[2-9][0-9].*) '
-        . 'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--openssl-legacy-provider";; esac; }';
+        .'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--openssl-legacy-provider";; esac; }';
 
     /**
      * Lockfiles whose text is worth scanning, in the order they are read.
@@ -199,7 +200,7 @@ final class NodeRuntime implements Runtime
      * A const expression, so it cannot read the catalogue: for callers needing
      * a compile-time constant. {@see defaultImage()} honours a configured one.
      */
-    public const IMAGE = 'node:' . self::DEFAULT_MAJOR . '-' . self::IMAGE_VARIANT;
+    public const IMAGE = 'node:'.self::DEFAULT_MAJOR.'-'.self::IMAGE_VARIANT;
 
     /**
      * Above this a declared major is a typo or a misread constraint:
@@ -240,7 +241,7 @@ final class NodeRuntime implements Runtime
     {
         $spec = RuntimeImageCatalog::spec('node', $major);
 
-        return $spec?->from ?? 'node:' . $major . '-' . self::IMAGE_VARIANT;
+        return $spec?->from ?? 'node:'.$major.'-'.self::IMAGE_VARIANT;
     }
 
     /**
@@ -251,8 +252,8 @@ final class NodeRuntime implements Runtime
      * recipe and node:20 from the deploy, so the account seeded one image and
      * ran another.
      *
-     * @param array<string, mixed> $package an already-parsed package.json,
-     *        when the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json,
+     *                                         when the caller has one
      */
     public static function imageFor(string $projectDir, array $package = []): string
     {
@@ -276,7 +277,7 @@ final class NodeRuntime implements Runtime
      * the project. Applying the swap there too keeps the image a Dockerfile
      * builds in and the image a host compile runs in the same tag.
      *
-     * @param array<string, mixed> $package an already-parsed package.json
+     * @param  array<string, mixed>  $package  an already-parsed package.json
      */
     public static function withToolchain(
         string $tag,
@@ -308,8 +309,8 @@ final class NodeRuntime implements Runtime
      * is already pulled for this major by every native build, and the swap only
      * names it, so nothing extra is fetched.
      *
-     * @param array<string, mixed> $package an already-parsed package.json, if
-     *        the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json, if
+     *                                         the caller has one
      */
     public static function needsGitBinary(ProjectContext $context, array $package = []): bool
     {
@@ -374,8 +375,8 @@ final class NodeRuntime implements Runtime
         // git, and died as `npm error syscall spawn git`: a message naming
         // neither the missing binary nor the image choice.
         return preg_match(
-            '/(?:^|[\s\'"&|;(=\[`])git(?:\s+' . self::GIT_GLOBAL_OPTION . ')*'
-            . '\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
+            '/(?:^|[\s\'"&|;(=\[`])git(?:\s+'.self::GIT_GLOBAL_OPTION.')*'
+            .'\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
             $text
         ) === 1;
     }
@@ -443,7 +444,6 @@ final class NodeRuntime implements Runtime
             || preg_match('#^[A-Za-z0-9][\w.-]*/[\w.-]+(?:\#\S*)?$#', $spec) === 1;
     }
 
-
     /**
      * $tag without `-slim`: the full Debian image, the one that can run
      * `node-gyp`.
@@ -455,10 +455,10 @@ final class NodeRuntime implements Runtime
      */
     public static function toolchainImage(string $tag): string
     {
-        $suffix = '-' . self::IMAGE_VARIANT;
+        $suffix = '-'.self::IMAGE_VARIANT;
 
         return str_ends_with($tag, $suffix)
-            ? substr($tag, 0, -strlen($suffix)) . '-' . self::TOOLCHAIN_VARIANT
+            ? substr($tag, 0, -strlen($suffix)).'-'.self::TOOLCHAIN_VARIANT
             : $tag;
     }
 
@@ -481,8 +481,8 @@ final class NodeRuntime implements Runtime
      * ~1.2GB image load on the five that were fine. The cost of the narrower
      * answer is a rare false negative.
      *
-     * @param array<string, mixed> $package an already-parsed package.json, if
-     *        the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json, if
+     *                                         the caller has one
      */
     public static function hasNativeDependency(ProjectContext $context, array $package = []): bool
     {
@@ -516,7 +516,7 @@ final class NodeRuntime implements Runtime
      * A declared toolchain decides; without one, a lockfile that resolves
      * webpack 4 and no webpack 5 does.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     public static function needsLegacyOpenssl(ProjectContext $context, array $package = []): bool
     {
@@ -525,7 +525,7 @@ final class NodeRuntime implements Runtime
             $declared = is_array($package[$section] ?? null) ? $package[$section] : [];
             foreach (self::WEBPACK4_TOOLCHAINS as $name => $fixedIn) {
                 $constraint = $declared[$name] ?? null;
-                if (!is_string($constraint) || preg_match('/^[\s^~=v<>]*\d/', $constraint) !== 1) {
+                if (! is_string($constraint) || preg_match('/^[\s^~=v<>]*\d/', $constraint) !== 1) {
                     continue;
                 }
                 $major = self::parseMajor($constraint);
@@ -540,13 +540,13 @@ final class NodeRuntime implements Runtime
             return false;
         }
         $resolves = static fn (string $major): bool => preg_match(
-            '~(?:"node_modules/webpack"|"webpack"):\s*\{\s*"version":\s*"' . $major . '\.'
-                . '|^"?webpack@[^\n]*:\n\s+version:?\s+"?' . $major . '\.'
-                . '|^\s+/?webpack@' . $major . '\.~m',
+            '~(?:"node_modules/webpack"|"webpack"):\s*\{\s*"version":\s*"'.$major.'\.'
+                .'|^"?webpack@[^\n]*:\n\s+version:?\s+"?'.$major.'\.'
+                .'|^\s+/?webpack@'.$major.'\.~m',
             $lock
         ) === 1;
 
-        return $resolves('4') && !$resolves('5');
+        return $resolves('4') && ! $resolves('5');
     }
 
     /**
@@ -555,18 +555,18 @@ final class NodeRuntime implements Runtime
      */
     public static function withLegacyOpenssl(string $build, string $projectDir): string
     {
-        if (trim($build) === '' || $projectDir === '' || !self::needsLegacyOpenssl(ProjectContext::at($projectDir))) {
+        if (trim($build) === '' || $projectDir === '' || ! self::needsLegacyOpenssl(ProjectContext::at($projectDir))) {
             return $build;
         }
 
-        return self::LEGACY_OPENSSL_ENV . ' && ' . $build;
+        return self::LEGACY_OPENSSL_ENV.' && '.$build;
     }
 
     /**
      * Does the parsed package.json name node-gyp anywhere — as a dependency,
      * or in a script that runs it?
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function mentionsNodeGyp(array $package): bool
     {
@@ -582,14 +582,14 @@ final class NodeRuntime implements Runtime
     /**
      * Does the parsed package.json name one of {@see NATIVE_DEPENDENCIES}?
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function declaresNativeDependency(array $package): bool
     {
         $mapSections = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
         foreach ($mapSections as $section) {
             $declared = $package[$section] ?? null;
-            if (!is_array($declared)) {
+            if (! is_array($declared)) {
                 continue;
             }
             foreach (array_keys($declared) as $name) {
@@ -608,14 +608,14 @@ final class NodeRuntime implements Runtime
      *
      * Read from package.json `pnpm` and from pnpm-workspace.yaml.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function pnpmAllowsNativeBuild(ProjectContext $context, array $package): bool
     {
         $sources = [is_array($package['pnpm'] ?? null) ? $package['pnpm'] : []];
         if ($context->hasFile('pnpm-workspace.yaml')) {
             try {
-                $workspace = \Symfony\Component\Yaml\Yaml::parse((string) $context->contents('pnpm-workspace.yaml'));
+                $workspace = Yaml::parse((string) $context->contents('pnpm-workspace.yaml'));
                 if (is_array($workspace)) {
                     $sources[] = $workspace;
                 }
@@ -650,8 +650,8 @@ final class NodeRuntime implements Runtime
     private static function lockMarksNative(string $lock): bool
     {
         foreach (self::NATIVE_DEPENDENCIES as $name) {
-            $path = 'node_modules/' . preg_quote($name, '/');
-            if (preg_match('~"?[^"\s]*' . $path . '"?[^}]*hasinstallscript~', $lock) === 1) {
+            $path = 'node_modules/'.preg_quote($name, '/');
+            if (preg_match('~"?[^"\s]*'.$path.'"?[^}]*hasinstallscript~', $lock) === 1) {
                 return true;
             }
         }
@@ -683,10 +683,10 @@ final class NodeRuntime implements Runtime
      */
     private static function mentions(mixed $map, string $needle): bool
     {
-        if (!is_array($map)) {
+        if (! is_array($map)) {
             return false;
         }
-        $pattern = '/(?<![a-z0-9_.-])' . preg_quote($needle, '/') . '(?![a-z0-9_.-])/';
+        $pattern = '/(?<![a-z0-9_.-])'.preg_quote($needle, '/').'(?![a-z0-9_.-])/';
         foreach ($map as $key => $value) {
             foreach ([$key, $value] as $candidate) {
                 if (is_string($candidate) && preg_match($pattern, strtolower($candidate)) === 1) {
@@ -775,7 +775,7 @@ final class NodeRuntime implements Runtime
 
     public function resolve(ProjectContext $context): ?Requirement
     {
-        if (!$context->hasFile('package.json')) {
+        if (! $context->hasFile('package.json')) {
             return null;
         }
 
@@ -809,7 +809,7 @@ final class NodeRuntime implements Runtime
      * `engines.node` counts only when the project declared nothing: Angular 22
      * refuses Node 20, and the engine default was picking it.
      *
-     * @param array<string, mixed> $package an already-parsed package.json
+     * @param  array<string, mixed>  $package  an already-parsed package.json
      * @return array{0: string, 1: string, 2: ?string} raw constraint, source, resolved major
      */
     private static function selectedVersion(ProjectContext $context, array $package = []): array
@@ -839,24 +839,24 @@ final class NodeRuntime implements Runtime
      * Node a pinned package manager needs, from its own `engines.node`.
      * Only majors with a floor above what the images have always shipped.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return array{0: string, 1: string}|null
      */
     private static function packageManagerFloor(array $package): ?array
     {
         $field = $package['packageManager'] ?? null;
-        if (!is_string($field) || preg_match('/^pnpm@(\d+)/', trim($field), $m) !== 1 || (int) $m[1] < 11) {
+        if (! is_string($field) || preg_match('/^pnpm@(\d+)/', trim($field), $m) !== 1 || (int) $m[1] < 11) {
             return null;
         }
 
-        return ['>=22.13', 'package.json packageManager ' . trim($field)];
+        return ['>=22.13', 'package.json packageManager '.trim($field)];
     }
 
     /**
      * The highest `engines.node` floor among the root's direct dependencies,
      * as the lockfile recorded it. Yarn and Bun lockfiles carry no engines.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return array{0: string, 1: string}|null
      */
     private static function dependencyFloor(ProjectContext $context, array $package): ?array
@@ -872,7 +872,7 @@ final class NodeRuntime implements Runtime
         }
 
         foreach (['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'] as $lockfile) {
-            if (!$context->hasFile($lockfile)) {
+            if (! $context->hasFile($lockfile)) {
                 continue;
             }
             $engines = $lockfile === 'pnpm-lock.yaml'
@@ -884,7 +884,7 @@ final class NodeRuntime implements Runtime
                 $constraint = $engines[$name] ?? null;
                 $major = $constraint === null ? null : self::parseMajor($constraint);
                 if ($major !== null && ($best === null || $major > $best[2])) {
-                    $best = [$constraint, $name . ' engines.node in ' . $lockfile, $major];
+                    $best = [$constraint, $name.' engines.node in '.$lockfile, $major];
                 }
             }
 
@@ -897,19 +897,19 @@ final class NodeRuntime implements Runtime
     /**
      * `engines.node` per top-level package in an npm lockfile (v2/v3).
      *
-     * @param array<string, mixed> $lock
+     * @param  array<string, mixed>  $lock
      * @return array<string, string>
      */
     private static function npmLockEngines(array $lock): array
     {
         $engines = [];
         foreach ((array) ($lock['packages'] ?? []) as $path => $entry) {
-            if (!is_string($path) || !str_starts_with($path, 'node_modules/') || !is_array($entry)) {
+            if (! is_string($path) || ! str_starts_with($path, 'node_modules/') || ! is_array($entry)) {
                 continue;
             }
             $name = substr($path, strlen('node_modules/'));
             $node = $entry['engines']['node'] ?? null;
-            if (!str_contains($name, '/node_modules/') && is_string($node)) {
+            if (! str_contains($name, '/node_modules/') && is_string($node)) {
                 $engines[$name] = $node;
             }
         }
@@ -933,14 +933,16 @@ final class NodeRuntime implements Runtime
             if ($line !== '' && $line[0] !== ' ') {
                 $inPackages = rtrim($line) === 'packages:';
                 $current = null;
+
                 continue;
             }
-            if (!$inPackages) {
+            if (! $inPackages) {
                 continue;
             }
             // v9 `'@scope/name@1.2.3':`, v6 `/@scope/name@1.2.3:`.
             if (preg_match("#^  '?/?((?:@[^/\\s']+/)?[^@\\s'/]+)@\\S*:\\s*$#", $line, $m) === 1) {
                 $current = $m[1];
+
                 continue;
             }
             if ($current !== null && preg_match("/^    engines: \\{node: '?([^',}]+)'?/", $line, $m) === 1) {
@@ -952,7 +954,7 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * @param array<string, mixed> $package an already-parsed package.json
+     * @param  array<string, mixed>  $package  an already-parsed package.json
      * @return array{0: string, 1: string} the raw constraint and where it came from
      */
     private static function declaredVersion(ProjectContext $context, array $package = []): array
@@ -982,7 +984,7 @@ final class NodeRuntime implements Runtime
     private static function openRange(string $constraint): ?array
     {
         $pattern = '/^>(=)?\s*v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?'
-            . '(?:\s*,?\s*<(=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?)?$/i';
+            .'(?:\s*,?\s*<(=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?)?$/i';
         if (preg_match($pattern, trim($constraint), $m) !== 1) {
             return null;
         }
@@ -1032,8 +1034,8 @@ final class NodeRuntime implements Runtime
      * workspace — which is why a manifest writes `{{js.build:npx next build}}`
      * instead of a literal.
      *
-     * @param array<string, mixed> $partial the manifest's defaults
-     * @param array<string, true> $files
+     * @param  array<string, mixed>  $partial  the manifest's defaults
+     * @param  array<string, true>  $files
      * @return array<string, mixed>
      */
     public static function finalizeProject(array $partial, string $projectDir, array $files): array
@@ -1062,8 +1064,8 @@ final class NodeRuntime implements Runtime
      * Only a default the recipe supplied is replaced; a project's own `start`
      * script is left alone.
      *
-     * @param array<string, mixed> $resolved the decision `finalizeWith` produced
-     * @param array<string, mixed> $package parsed package.json
+     * @param  array<string, mixed>  $resolved  the decision `finalizeWith` produced
+     * @param  array<string, mixed>  $package  parsed package.json
      */
     private static function withEntryPointDefault(
         array $resolved,
@@ -1085,7 +1087,7 @@ final class NodeRuntime implements Runtime
 
         $main = self::entryPoint($package, $context);
         if ($main !== null) {
-            $resolved['start_command'] = 'node ' . $main;
+            $resolved['start_command'] = 'node '.$main;
         }
 
         return $resolved;
@@ -1125,7 +1127,7 @@ final class NodeRuntime implements Runtime
      * server, purely because of JSON key order. Falls back to the first entry
      * for the single-bin case (CNCjs declares only `cnc`).
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function firstBin(array $package): ?string
     {
@@ -1133,7 +1135,7 @@ final class NodeRuntime implements Runtime
         if (is_string($bin)) {
             return $bin;
         }
-        if (!is_array($bin)) {
+        if (! is_array($bin)) {
             return null;
         }
 
@@ -1157,8 +1159,8 @@ final class NodeRuntime implements Runtime
         $candidate = trim($candidate);
 
         return $candidate !== ''
-            && !str_starts_with($candidate, '/')
-            && !str_contains($candidate, '..');
+            && ! str_starts_with($candidate, '/')
+            && ! str_contains($candidate, '..');
     }
 
     /**
@@ -1166,8 +1168,8 @@ final class NodeRuntime implements Runtime
      * scripts: an author's own `build`/`start` script beats the recipe's
      * default, which is only there for projects that ship neither.
      *
-     * @param array<string, mixed> $partial
-     * @param array<string, mixed> $scripts
+     * @param  array<string, mixed>  $partial
+     * @param  array<string, mixed>  $scripts
      * @return array{
      *   strategy: string,
      *   label: string,
@@ -1211,7 +1213,7 @@ final class NodeRuntime implements Runtime
             'HUSKY' => '0',
             'CI' => '1',
         ];
-        if (!empty($partial['env']) && is_array($partial['env'])) {
+        if (! empty($partial['env']) && is_array($partial['env'])) {
             $env = array_merge($env, $partial['env']);
         }
 
@@ -1237,8 +1239,8 @@ final class NodeRuntime implements Runtime
      * `vue-tsc &&`, `tsc &&`) and prefer `build-only` when the project has it.
      * Later steps (`astro build && node process-html.mjs`) are kept.
      *
-     * @param array<string, mixed> $scripts
-     * @param array<string, mixed> $partial
+     * @param  array<string, mixed>  $scripts
+     * @param  array<string, mixed>  $partial
      */
     public static function nginxAssetBuildCommand(string $pm, array $scripts, array $partial = []): string
     {
@@ -1253,13 +1255,13 @@ final class NodeRuntime implements Runtime
                     // Exported, not a `PATH=… cmd` prefix: that reaches only the
                     // first command, and reveal.js's `vite build && vite build -c …`
                     // died on `sh: 1: vite: not found` at the second.
-                    return self::NODE_MODULES_BIN_PATH . ' && ' . $stripped;
+                    return self::NODE_MODULES_BIN_PATH.' && '.$stripped;
                 }
             }
 
             return JsPackageManager::scriptCommand($pm, 'build');
         }
-        if (!empty($partial['default_build'])) {
+        if (! empty($partial['default_build'])) {
             return (string) $partial['default_build'];
         }
 
@@ -1273,9 +1275,9 @@ final class NodeRuntime implements Runtime
     {
         $script = trim($script);
         $pattern = '/^(?:npx\s+|pnpm\s+(?:exec|dlx)\s+|yarn\s+(?:run\s+|exec\s+)?)?'
-            . '(?:vue-tsc|tsc|astro\s+check|svelte-check|ng\s+lint|eslint|'
-            . 'npm\s+run\s+typecheck|pnpm\s+run\s+typecheck|yarn\s+typecheck)'
-            . '(?:\s+[^&|;]*)?\s*&&\s*/i';
+            .'(?:vue-tsc|tsc|astro\s+check|svelte-check|ng\s+lint|eslint|'
+            .'npm\s+run\s+typecheck|pnpm\s+run\s+typecheck|yarn\s+typecheck)'
+            .'(?:\s+[^&|;]*)?\s*&&\s*/i';
         $guard = 0;
         while ($guard++ < 8 && preg_match($pattern, $script) === 1) {
             $script = trim((string) preg_replace($pattern, '', $script, 1));
@@ -1293,7 +1295,7 @@ final class NodeRuntime implements Runtime
      */
     public static function safeOutputDir(mixed $dir, string $fallback = 'dist'): string
     {
-        if (!is_string($dir) || $dir === '') {
+        if (! is_string($dir) || $dir === '') {
             return $fallback;
         }
         $dir = trim(str_replace('\\', '/', $dir), '/');

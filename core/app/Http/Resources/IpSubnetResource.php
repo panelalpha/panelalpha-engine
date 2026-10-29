@@ -8,7 +8,6 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 class IpSubnetResource extends JsonResource
 {
-
     public function toArray(Request $request): array
     {
         $subnet = $this->resource;

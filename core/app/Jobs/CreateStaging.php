@@ -50,7 +50,7 @@ class CreateStaging implements ShouldQueue
                 throw new \RuntimeException("Staging '{$this->destUsername}' has no live parent.");
             }
 
-            $result = (new System())->projects()->copy(
+            $result = (new System)->projects()->copy(
                 $source->username,
                 $dest->username,
                 $this->copyDatabases,
@@ -86,7 +86,7 @@ class CreateStaging implements ShouldQueue
     public function failed(\Throwable $e): void
     {
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e);
         }
 
@@ -117,7 +117,7 @@ class CreateStaging implements ShouldQueue
         }
 
         try {
-            (new System())->project($source)->copyVolumesForClone()?->resumeAfterCopy();
+            (new System)->project($source)->copyVolumesForClone()?->resumeSourceAfterCopy();
         } catch (\Throwable $ignored) {
         }
     }
@@ -128,7 +128,7 @@ class CreateStaging implements ShouldQueue
             $dest->project()->destroy();
         } catch (\Throwable $cleanup) {
             Log::error('CreateStaging cleanup failed', [
-                'dest'      => $this->destUsername,
+                'dest' => $this->destUsername,
                 'exception' => $cleanup,
             ]);
         }

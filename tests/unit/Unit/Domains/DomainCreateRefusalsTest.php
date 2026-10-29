@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\Domain;
 use App\Models\User;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -51,6 +52,18 @@ class DomainCreateRefusalsTest extends TestCase
                 'message' => 'Subdomains limit of 0 reached.',
                 'error_type' => 'subdomains_limit_reached',
             ]);
+    }
+
+    /** A stored -1 is no limit, so the name is what the refusal names, not the limit. */
+    public function test_http_an_unlimited_addon_limit_is_not_a_refusal(): void
+    {
+        $user = $this->makeUser('alice', ['addon_domains_limit' => -1]);
+        $this->addDomain($user, 'taken.test', 'addon');
+
+        $this->store(['domain' => 'taken.test', 'type' => 'addon'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.domain.0', 'Domain already exists.')
+            ->assertJsonMissingPath('error_type');
     }
 
     public function test_http_refuses_a_taken_domain_and_a_taken_alias(): void
@@ -102,7 +115,7 @@ class DomainCreateRefusalsTest extends TestCase
             ['one.test --project=nobody', "Project 'nobody' not found."],
             ['one.test --project=alice --proxy-to=nope:x', "Invalid --proxy-to 'nope:x'. Expected port (e.g. 8080) or host:port (e.g. myproject:8080)."],
             ['one.test --project=alice --proxy-to=bob:80', "The upstream must be the project's own app, 'alice'"],
-            ['one.test --project=alice --proxy-to=172.25.0.2:3306', "The upstream must be the project's own app, 'alice'"],
+            ['one.test --project=alice --proxy-to='.TestNetwork::container2(2).':3306', "The upstream must be the project's own app, 'alice'"],
             ['one.test --project=alice', 'Addon domains limit of 1 reached.'],
             ['a.alice.example.test --project=alice --type=sub', '--parent-domain is required when --type=sub.'],
             ['a.x.test --project=alice --type=sub --parent-domain=x.test', "Parent domain 'x.test' not found for project 'alice'."],

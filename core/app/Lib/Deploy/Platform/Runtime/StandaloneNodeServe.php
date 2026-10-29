@@ -53,13 +53,13 @@ class StandaloneNodeServe
     private const NODE = 'node';
 
     /**
-     * @param callable(string): bool $exists
+     * @param  callable(string): bool  $exists
      */
     public static function firstEntry(string $projectDir, callable $exists): ?string
     {
         $root = rtrim($projectDir, '/');
         foreach (self::ENTRIES as $relative) {
-            if ($exists($root . '/' . $relative)) {
+            if ($exists($root.'/'.$relative)) {
                 return $relative;
             }
         }
@@ -90,10 +90,10 @@ class StandaloneNodeServe
      */
     public static function nestedOutputDirs(string $projectDir, string $listing): array
     {
-        $root = rtrim($projectDir, '/') . '/';
+        $root = rtrim($projectDir, '/').'/';
         $dirs = [];
         foreach (preg_split('/\R/', trim($listing)) ?: [] as $line) {
-            if (!str_starts_with($line, $root)
+            if (! str_starts_with($line, $root)
                 || str_starts_with(substr($line, strlen($root)), '.output/')
                 || preg_match('#^(.+/\.output)/server/index\.m?js$#', substr($line, strlen($root)), $m) !== 1
             ) {
@@ -116,7 +116,7 @@ class StandaloneNodeServe
 
     public static function missingEntryMessage(): string
     {
-        return 'Build finished but no server entry was produced (' . implode(', ', self::ENTRIES) . ')';
+        return 'Build finished but no server entry was produced ('.implode(', ', self::ENTRIES).')';
     }
 
     /**
@@ -127,7 +127,7 @@ class StandaloneNodeServe
     {
         $binary = $image === HostNodeBuild::BUN_IMAGE ? self::BUN : self::NODE;
 
-        return $binary . ' ' . self::FILENAME;
+        return $binary.' '.self::FILENAME;
     }
 
     public static function script(): string
@@ -146,7 +146,7 @@ class StandaloneNodeServe
     private static function entriesLiteral(): string
     {
         $items = array_map(
-            static fn (string $entry): string => "  '" . $entry . "',",
+            static fn (string $entry): string => "  '".$entry."',",
             self::ENTRIES
         );
 

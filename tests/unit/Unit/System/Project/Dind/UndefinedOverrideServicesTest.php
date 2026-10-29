@@ -62,6 +62,26 @@ class UndefinedOverrideServicesTest extends TestCase
         $this->assertSame(EngineArtifacts::RUN_COMPOSE_OVERRIDE, basename($dind->userAppComposeOverridePath()));
     }
 
+    /** The override sits in the tenant's project directory; root must not read or write through a symlink there. */
+    public function test_a_symlinked_override_is_refused_before_it_is_read(): void
+    {
+        $dind = $this->dind();
+        file_put_contents($dind->userAppComposeFilePath(), "services:\n  app:\n    image: project-app\n");
+        $outside = $this->tmpRoot . '/victim.yml';
+        $victim = "services:\n  node:\n    restart: \"no\"\n";
+        file_put_contents($outside, $victim);
+        symlink($outside, $dind->userAppComposeOverridePath());
+
+        try {
+            $dind->strategy()->dropUndefinedOverrideServices(null);
+            $this->fail('A symlinked override was rewritten.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('it is a symlink', $e->getMessage());
+        }
+
+        $this->assertSame($victim, file_get_contents($outside));
+    }
+
     private function dind(): Dind
     {
         $model = new ModelsUser;

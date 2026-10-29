@@ -23,9 +23,7 @@ final class GitAccessToken implements DataAwareRule, ProblemRule
     private array $data = [];
 
     /** @param string $repoField the sibling holding the repository URL */
-    public function __construct(private readonly string $repoField = 'git_repo')
-    {
-    }
+    public function __construct(private readonly string $repoField = 'git_repo') {}
 
     /** @param array<string, mixed> $data */
     public function setData(array $data): static
@@ -41,10 +39,10 @@ final class GitAccessToken implements DataAwareRule, ProblemRule
             return;
         }
 
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             $this->reject([
                 'field' => $attribute,
-                'code' => $attribute . '_malformed',
+                'code' => $attribute.'_malformed',
                 'message' => 'A Git token must be a string.',
             ], $fail);
 
@@ -60,14 +58,14 @@ final class GitAccessToken implements DataAwareRule, ProblemRule
 
         // Second, so a pasted Authorization header is named as one rather
         // than blamed on the repository URL.
-        if (!$this->repoCanCarryAToken()) {
+        if (! $this->repoCanCarryAToken()) {
             $this->reject([
                 'field' => $attribute,
-                'code' => $attribute . '_requires_https_repo',
+                'code' => $attribute.'_requires_https_repo',
                 'message' => 'A Git token requires an HTTPS repository URL without embedded '
-                    . 'credentials. It is injected at clone time, so it needs a remote that '
-                    . 'can carry it safely.',
-                'expected' => 'https://<host>/<owner>/<repo>[.git] in ' . $this->repoField,
+                    .'credentials. It is injected at clone time, so it needs a remote that '
+                    .'can carry it safely.',
+                'expected' => 'https://<host>/<owner>/<repo>[.git] in '.$this->repoField,
             ], $fail);
         }
     }

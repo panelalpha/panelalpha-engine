@@ -24,13 +24,12 @@ final class DefinerMap
     private const string ANY_DEFINER = 'DEFINER=`\([^`]\|``\)*`\(@`\([^`]\|``\)*`\)\{0,1\}';
 
     /**
-     * @param array<string, string> $accounts source user => destination user
+     * @param  array<string, string>  $accounts  source user => destination user
      */
     private function __construct(
         private readonly array $accounts,
         private readonly string $orphan,
-    ) {
-    }
+    ) {}
 
     /**
      * Between two projects as they are now: only users the destination owns.
@@ -63,8 +62,8 @@ final class DefinerMap
     }
 
     /**
-     * @param list<string> $sourceUsers
-     * @param list<string> $destUsers
+     * @param  list<string>  $sourceUsers
+     * @param  list<string>  $destUsers
      */
     public static function map(string $fromPrefix, string $toPrefix, array $sourceUsers, array $destUsers): self
     {
@@ -104,10 +103,10 @@ final class DefinerMap
     {
         $expressions = [];
         foreach ($this->accounts as $from => $to) {
-            $expressions[] = 's/DEFINER=' . self::account($from) . '/DEFINER\n' . self::account($to) . '/g';
+            $expressions[] = 's/DEFINER='.self::account($from).'/DEFINER\n'.self::account($to).'/g';
         }
 
-        $expressions[] = 's/' . self::ANY_DEFINER . '/DEFINER=' . self::account($this->orphan) . '/g';
+        $expressions[] = 's/'.self::ANY_DEFINER.'/DEFINER='.self::account($this->orphan).'/g';
         $expressions[] = 's/DEFINER\n/DEFINER=/g';
 
         return $expressions;
@@ -115,16 +114,16 @@ final class DefinerMap
 
     private static function account(string $user): string
     {
-        return '`' . $user . '`@`' . self::HOST . '`';
+        return '`'.$user.'`@`'.self::HOST.'`';
     }
 
     private static function orphanFor(string $prefix): string
     {
-        if ($prefix !== '' && !self::isPlainName($prefix)) {
+        if ($prefix !== '' && ! self::isPlainName($prefix)) {
             throw new \RuntimeException('Invalid MySQL prefix');
         }
 
-        return $prefix . self::ORPHAN;
+        return $prefix.self::ORPHAN;
     }
 
     private static function isPlainName(string $name): bool

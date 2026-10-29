@@ -2,13 +2,13 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
-use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\System\Project\Dind as DindProject;
 
 /**
  * Everything that has to happen on the account between the clone and the
@@ -39,7 +39,7 @@ class PrepareStage
     /**
      * The manifest behind a decision, when one produced it.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function manifestFor(array $decision, ?AppConfig $appConfig = null): ?PlatformManifest
     {
@@ -74,10 +74,10 @@ class PrepareStage
 
     public function execute(string $projectDir, string $commands, int $timeout = self::TIMEOUT_SECONDS): void
     {
-        $setupScriptPath = "{$projectDir}/" . AppConfig::SETUP_SCRIPT;
+        $setupScriptPath = "{$projectDir}/".AppConfig::SETUP_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
         // Write script as the user (644) so execAsUser can read and execute it.
-        $this->dind->system()->filesystem()->filePutContents($setupScriptPath, $commands, $chown, '644');
+        $this->dind->system()->filesystem()->writeFileReplacingPath($setupScriptPath, $commands, $chown, '644');
         // Use a container-side timeout slightly shorter than the PHP-side timeout.
         // This ensures bash and all its child processes (docker compose run, etc.) are
         // killed by SIGTERM/SIGKILL *inside* the container before Symfony sends SIGKILL
@@ -86,9 +86,9 @@ class PrepareStage
         $innerTimeout = max(60, $timeout - self::INNER_TIMEOUT_MARGIN);
         // Run as the user: setup scripts may call `docker compose`, which requires the
         // docker group membership that execAsUser provides via su.
-        $script = 'cd ' . escapeshellarg($projectDir)
-            . " && timeout --foreground --kill-after=30 {$innerTimeout} bash "
-            . escapeshellarg($setupScriptPath);
+        $script = 'cd '.escapeshellarg($projectDir)
+            ." && timeout --foreground --kill-after=30 {$innerTimeout} bash "
+            .escapeshellarg($setupScriptPath);
         $shell = $this->dind->shell();
         $shell->execAsUserWithProjectEnv(['bash', '-c', $script], $timeout);
         $shell->exec(['rm', '-f', $setupScriptPath]);

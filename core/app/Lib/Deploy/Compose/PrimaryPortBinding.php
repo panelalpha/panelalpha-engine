@@ -17,7 +17,7 @@ use App\Lib\Deploy\Port\PortMapping;
 final class PrimaryPortBinding
 {
     /**
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return array{compose: array<string, mixed>, published: ?int}
      */
     public static function apply(array $compose): array
@@ -38,7 +38,7 @@ final class PrimaryPortBinding
 
         // Publish it on the service that only exposes it.
         foreach ($services as $name => $service) {
-            if (!is_array($service) || !self::offers($service, $primary)) {
+            if (! is_array($service) || ! self::offers($service, $primary)) {
                 continue;
             }
             $ports = isset($service['ports']) && is_array($service['ports']) ? array_values($service['ports']) : [];
@@ -54,7 +54,7 @@ final class PrimaryPortBinding
     /**
      * A `ports:` entry that publishes $port on the host (account container).
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function publishesToHost(array $service, int $port): bool
     {
@@ -71,7 +71,7 @@ final class PrimaryPortBinding
     /**
      * The service offers $port through `expose:` or a `ports:` container port.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function offers(array $service, int $port): bool
     {
@@ -91,7 +91,7 @@ final class PrimaryPortBinding
     }
 
     /**
-     * @param mixed $declared
+     * @param  mixed  $declared
      * @return list<mixed>
      */
     private static function entries($declared): array

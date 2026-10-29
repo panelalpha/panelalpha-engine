@@ -17,7 +17,7 @@ use App\Lib\Deploy\Template\Template;
  * no-op, and `/.git/config`, `/lang/en.json`, `/tmp/` and every `.php` file
  * under vendor/ answered 200.
  *
- * {@see \App\Lib\Deploy\Platform\Runtime\Php\PhpProxyHeaders} covers the one
+ * {@see PhpProxyHeaders} covers the one
  * thing the old router did that Apache cannot know about on its own.
  *
  * No Laravel dependencies -- unit-testable.

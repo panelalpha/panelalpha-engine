@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\ManifestException;
+use App\Lib\Deploy\Platform\PlatformCommand;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -15,7 +16,7 @@ use Illuminate\Validation\ValidationException;
  * shape, and rejects it in the same words — a caller who learned it from one
  * endpoint has learned it everywhere. It is deliberately not a validation rule
  * on each FormRequest: what makes a command legal is the manifest grammar
- * ({@see \App\Lib\Deploy\Platform\PlatformCommand::fromArray}), and restating
+ * ({@see PlatformCommand::fromArray}), and restating
  * that grammar in Laravel rules would give two definitions of the same thing,
  * to disagree with each other later.
  *

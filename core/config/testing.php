@@ -12,6 +12,6 @@ return [
      * ./core mount at /var/www/html. `coverage_host_dir` is the same directory
      * on the host, for containers core starts through the host Docker daemon.
      */
-    'coverage_dir' => dirname(base_path()) . '/tests/coverage',
-    'coverage_host_dir' => EnginePaths::ENGINE_DIR . '/tests/coverage',
+    'coverage_dir' => dirname(base_path()).'/tests/coverage',
+    'coverage_host_dir' => EnginePaths::ENGINE_DIR.'/tests/coverage',
 ];

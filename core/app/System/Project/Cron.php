@@ -3,6 +3,7 @@
 namespace App\System\Project;
 
 use App\Exceptions\DockerErrorException;
+use App\Exceptions\ProblemException;
 use App\System\Project as UserProject;
 use Dsc\Cron\Crontab;
 use Dsc\Cron\Job;
@@ -12,12 +13,11 @@ class Cron
 {
     public function __construct(
         private readonly UserProject $project,
-    ) {
-    }
+    ) {}
 
     public function crontabPath(): string
     {
-        return $this->project->projectDirPath() . '/crontabs/www-data';
+        return $this->project->projectDirPath().'/crontabs/www-data';
     }
 
     /**
@@ -27,7 +27,7 @@ class Cron
     {
         $file = $this->crontabPath();
         $system = $this->project->system();
-        if (!is_file($file)) {
+        if (! is_file($file)) {
             $system->exec(['sudo', 'touch', $file]);
         }
         $chown = $chown ?? '33:33';
@@ -48,6 +48,9 @@ class Cron
      */
     public function list(): array
     {
+        if (! $this->hasCrontab()) {
+            return [];
+        }
         $crontab = $this->loadCrontab();
 
         $jobs = [];
@@ -78,7 +81,6 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * } $params
-     *
      * @return array{
      *   hash: string,
      *   command: string,
@@ -91,9 +93,10 @@ class Cron
      */
     public function create(array $params): array
     {
+        $this->ensureWritableCrontab();
         $crontab = $this->loadCrontab();
 
-        $job = new Job();
+        $job = new Job;
         $job->setCommand($params['command']);
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
@@ -119,6 +122,7 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * }
+     *
      * @throws Exception
      */
     public function delete(string $hash): array
@@ -143,7 +147,6 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * } $params
-     *
      * @return array{
      *   hash: string,
      *   command: string,
@@ -153,6 +156,7 @@ class Cron
      *   month: string,
      *   day_of_week: string
      * }
+     *
      * @throws Exception
      */
     public function update(string $hash, array $params): array
@@ -175,9 +179,38 @@ class Cron
         return $this->jobToArray($job);
     }
 
+    /** The deploy that renders the account writes the crontab, so none before it means no jobs. */
+    private function hasCrontab(): bool
+    {
+        return is_file($this->crontabPath());
+    }
+
+    /**
+     * Before the first deploy there is no account to load a job into, and that
+     * deploy creates the crontab; after it, a lost crontab is created as setup does.
+     *
+     * @throws ProblemException
+     * @throws DockerErrorException
+     */
+    private function ensureWritableCrontab(): void
+    {
+        if ($this->hasCrontab()) {
+            return;
+        }
+        if (! $this->project->exists()) {
+            throw ProblemException::conflict(
+                'project',
+                'project_not_deployed',
+                "Project '{$this->project->username()}' has not been deployed yet, and its first deploy creates the crontab. "
+                    .'Add the cron job once that deploy has finished.',
+            );
+        }
+        $this->ensureCrontabFile($this->project->model()->getChownString());
+    }
+
     private function loadCrontab(): Crontab
     {
-        $crontab = new Crontab();
+        $crontab = new Crontab;
         $contents = $this->project->system()->filesystem()->fileGetContents($this->crontabPath());
         foreach (explode("\n", $contents) as $line) {
             $line = trim($line);
@@ -204,7 +237,7 @@ class Cron
             return Job::parse($line);
         }
 
-        $job = new Job();
+        $job = new Job;
         $job->setMinute($parts[0]);
         $job->setHour($parts[1]);
         $job->setDayOfMonth($parts[2]);
@@ -220,7 +253,7 @@ class Cron
     {
         $this->project->system()->filesystem()->filePutContents(
             $this->crontabPath(),
-            $crontab->render() . PHP_EOL,
+            $crontab->render().PHP_EOL,
         );
     }
 

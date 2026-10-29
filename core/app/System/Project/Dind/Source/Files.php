@@ -25,8 +25,7 @@ final class Files
     public function __construct(
         private DindProject $project,
         private string $stageRoot = self::ARCHIVE_STAGE_DIR,
-    ) {
-    }
+    ) {}
 
     /**
      * Import an uploaded archive into ~/project. Leftovers of killed imports are swept first:
@@ -42,7 +41,7 @@ final class Files
         $projectDir = $this->tree()->appDirPath();
         $chown = $user->getChownString();
 
-        $archive = UploadedArchive::inHome($zipPath, $home);
+        $archive = UploadedArchive::inHome($zipPath, $home, $this->project->project()->fileManager()->resolvedFile(...));
         $uid = $user->getUid();
         $gid = $user->getGid();
         if ($uid === null || $gid === null) {
@@ -51,9 +50,9 @@ final class Files
             );
         }
 
-        $stageDir = $this->stageRoot . '/' . bin2hex(random_bytes(8));
-        $staged = $stageDir . '/' . $archive->stagedName();
-        $tmp = $home . '/.panelalpha/' . self::EXTRACT_PREFIX . bin2hex(random_bytes(8));
+        $stageDir = $this->stageRoot.'/'.bin2hex(random_bytes(8));
+        $staged = $stageDir.'/'.$archive->stagedName();
+        $tmp = $home.'/.panelalpha/'.self::EXTRACT_PREFIX.bin2hex(random_bytes(8));
 
         try {
             $this->logger()?->info('Copying the project archive into the stage directory');
@@ -120,8 +119,8 @@ final class Files
             '--delete',
             '--checksum',
             '--no-times',
-            rtrim($source, '/') . '/',
-            rtrim($projectDir, '/') . '/',
+            rtrim($source, '/').'/',
+            rtrim($projectDir, '/').'/',
         ]);
         if ($chown) {
             $system->exec(['sudo', 'chown', '-R', $chown, $projectDir]);
@@ -134,7 +133,7 @@ final class Files
     private function sweepStale(): void
     {
         $this->sweepDirectories($this->stageRoot);
-        $this->sweepDirectories(rtrim($this->project->homeDirPath(), '/') . '/.panelalpha', self::EXTRACT_PREFIX);
+        $this->sweepDirectories(rtrim($this->project->homeDirPath(), '/').'/.panelalpha', self::EXTRACT_PREFIX);
     }
 
     /**
@@ -160,7 +159,7 @@ final class Files
         try {
             $listing = $this->project->system()->exec([
                 'sudo', 'find', $root, '-mindepth', '1', '-maxdepth', '1',
-                '-type', 'd', '-name', $prefix . '*', '-mmin', '+' . self::STALE_MINUTES,
+                '-type', 'd', '-name', $prefix.'*', '-mmin', '+'.self::STALE_MINUTES,
                 '-print',
             ], [], 60);
         } catch (\Throwable) {

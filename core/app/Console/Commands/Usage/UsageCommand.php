@@ -20,8 +20,8 @@ abstract class UsageCommand extends Command
     }
 
     /**
-     * @param array<string, mixed> $input
-     * @param array<string, string> $rules
+     * @param  array<string, mixed>  $input
+     * @param  array<string, string>  $rules
      * @return array<string, mixed>
      */
     protected function validated(array $input, array $rules): array

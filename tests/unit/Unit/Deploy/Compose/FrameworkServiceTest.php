@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Compose;
 use App\Lib\Deploy\Compose\FrameworkService;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The one service a generated compose file describes, in whichever of three
@@ -133,12 +134,12 @@ class FrameworkServiceTest extends TestCase
 
     public function test_a_running_service_is_told_where_to_listen(): void
     {
-        // 0.0.0.0 rather than localhost: a server bound to loopback inside a
+        // All interfaces rather than localhost: a server bound to loopback inside a
         // container is unreachable from the proxy.
         $service = $this->service([], 4000);
 
-        $this->assertSame('0.0.0.0', $service['environment']['HOST']);
-        $this->assertSame('0.0.0.0', $service['environment']['HOSTNAME']);
+        $this->assertSame(TestNetwork::ANY, $service['environment']['HOST']);
+        $this->assertSame(TestNetwork::ANY, $service['environment']['HOSTNAME']);
         $this->assertSame('4000', $service['environment']['PORT']);
         $this->assertSame(['.env'], $service['env_file']);
     }

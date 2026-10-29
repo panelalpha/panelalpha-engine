@@ -53,7 +53,7 @@ final class ComposerMetadata implements PackageMetadata
 
     public function read(ProjectContext $context): ?AppPackage
     {
-        if (!$context->isFile(self::FILE)) {
+        if (! $context->isFile(self::FILE)) {
             return null;
         }
         $composer = self::map($context->composer());
@@ -66,7 +66,7 @@ final class ComposerMetadata implements PackageMetadata
             ecosystem: $this->id(),
             file: self::FILE,
             name: $name ?? self::directoryName($context),
-            nameSource: $name !== null ? self::FILE . ' name' : AppPackage::NAME_FROM_DIRECTORY,
+            nameSource: $name !== null ? self::FILE.' name' : AppPackage::NAME_FROM_DIRECTORY,
             description: self::text($composer['description'] ?? null),
             version: self::text($composer['version'] ?? null),
             license: implode(', ', self::stringList($composer['license'] ?? null)) ?: null,
@@ -111,7 +111,7 @@ final class ComposerMetadata implements PackageMetadata
         $versions = [];
         foreach (['packages', 'packages-dev'] as $section) {
             foreach (self::map($lock[$section] ?? null) as $package) {
-                if (!is_array($package)) {
+                if (! is_array($package)) {
                     continue;
                 }
                 $name = self::text($package['name'] ?? null);
@@ -129,14 +129,14 @@ final class ComposerMetadata implements PackageMetadata
     }
 
     /**
-     * @param array<string, mixed> $require
+     * @param  array<string, mixed>  $require
      * @return array<string, mixed>
      */
     private static function packagesOnly(array $require): array
     {
         return array_filter(
             $require,
-            static fn (string $name): bool => !self::isPlatform($name),
+            static fn (string $name): bool => ! self::isPlatform($name),
             ARRAY_FILTER_USE_KEY
         );
     }
@@ -144,14 +144,14 @@ final class ComposerMetadata implements PackageMetadata
     /**
      * The platform half of `require`, constraints kept as declared.
      *
-     * @param array<string, mixed> $require
+     * @param  array<string, mixed>  $require
      * @return array<string, string>
      */
     private static function platformOnly(array $require): array
     {
         $platform = [];
         foreach ($require as $name => $constraint) {
-            if (!is_string($name) || !self::isPlatform($name)) {
+            if (! is_string($name) || ! self::isPlatform($name)) {
                 continue;
             }
             $platform[strtolower($name)] = self::text($constraint) ?? '*';
@@ -170,7 +170,7 @@ final class ComposerMetadata implements PackageMetadata
      */
     private const PLATFORM_PACKAGE_REGEX =
         '{^(?:php(?:-64bit|-ipv6|-zts|-debug)?|hhvm|(?:ext|lib)-[a-z0-9](?:[_.-]?[a-z0-9]+)*'
-        . '|composer-(?:plugin|runtime)-api)$}iD';
+        .'|composer-(?:plugin|runtime)-api)$}iD';
 
     private static function isPlatform(string $name): bool
     {

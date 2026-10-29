@@ -6,7 +6,7 @@ use App\Models\SecretVaultEntry;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The current request's fields, with `vault:<id>` read in place of a secret.
+ * The current request's fields, with `vault:<key>` read in place of a secret.
  *
  * The vault only proxies what a caller passes: a controller reads its request
  * parameter here and stores the secret it gets back. Nothing else reads the
@@ -16,7 +16,7 @@ class RequestVault
 {
     /**
      * Request field `$field` as `$project` may use it. A literal (or null, or
-     * '') passes through; `vault:<id>` becomes its secret; an array field
+     * '') passes through; `vault:<key>` becomes its secret; an array field
      * (`env_vars`) has each value read the same way.
      *
      * - the entry must have been created for `$type`, the field name unless
@@ -30,6 +30,7 @@ class RequestVault
      * unassigned until a project reads it; one a project owns is refused.
      *
      * @return mixed the field's value, with every reference read
+     *
      * @throws ValidationException naming `$field` when a reference cannot be used
      */
     public static function get(string $field, ?string $project, ?string $type = null): mixed
@@ -42,6 +43,7 @@ class RequestVault
      * that did not come in as a request.
      *
      * @return mixed the value, with every reference read
+     *
      * @throws ValidationException naming `$field` when a reference cannot be used
      */
     public static function resolve(string $field, mixed $value, ?string $project, ?string $type = null): mixed
@@ -55,7 +57,7 @@ class RequestVault
 
     private static function read(mixed $value, ?string $project, string $type, string $field): mixed
     {
-        if (!self::isReference($value)) {
+        if (! self::isReference($value)) {
             return $value;
         }
 
@@ -63,7 +65,7 @@ class RequestVault
         $ref = trim((string) $value);
 
         if ($entry === null) {
-            self::fail($field, "No vault entry for '{$ref}'. Use the `vault:<id>` vault_secret_create returned.");
+            self::fail($field, "No vault entry for '{$ref}'. Use the `vault:<key>` vault_secret_create returned.");
         }
         if ($entry->type !== $type) {
             self::fail($field, "Vault entry {$ref} holds a '{$entry->type}', not a '{$type}'.");
@@ -75,7 +77,7 @@ class RequestVault
             self::fail($field, "Vault entry {$ref} has no secret pasted yet. Open the URL vault_secret_create returned.");
         }
 
-        if (!$entry->isGlobal()) {
+        if (! $entry->isGlobal()) {
             if ($entry->project === null && $project !== null) {
                 // Conditional, so two projects racing for one entry cannot both win.
                 SecretVaultEntry::query()->whereKey($entry->id)->whereNull('project')->update(['project' => $project]);
@@ -102,12 +104,24 @@ class RequestVault
         return is_string($value) && str_starts_with(trim($value), SecretVaultEntry::PREFIX);
     }
 
-    /** The entry a reference names, whatever its state; null for a literal or an unknown id. */
+    /**
+     * The keys of an array field (`env_vars`) whose value is a `vault:<key>`.
+     *
+     * @param  array<mixed>  $values
+     * @return list<string>
+     */
+    public static function referencedKeys(array $values): array
+    {
+        return array_values(array_filter(
+            array_keys(array_filter($values, self::isReference(...))),
+            'is_string'
+        ));
+    }
+
+    /** The entry a reference names, whatever its state; null for a literal or an unknown key. */
     public static function entry(?string $value): ?SecretVaultEntry
     {
-        $id = self::isReference($value) ? SecretVaultEntry::idFromReference(trim((string) $value)) : null;
-
-        return $id === null ? null : SecretVaultEntry::query()->find($id);
+        return self::isReference($value) ? SecretVaultEntry::findByReference(trim((string) $value)) : null;
     }
 
     private static function fail(string $field, string $message): never

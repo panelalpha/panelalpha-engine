@@ -17,7 +17,7 @@ class SweepGenerationsCommand extends Command
         foreach ($settled as $line) {
             $this->line($line);
         }
-        $this->info('Settled ' . count($settled) . ' project(s).');
+        $this->info('Settled '.count($settled).' project(s).');
 
         return 0;
     }

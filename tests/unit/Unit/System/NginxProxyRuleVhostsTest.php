@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Services\Webserver\NginxProxy;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -42,7 +43,7 @@ class NginxProxyRuleVhostsTest extends TestCase
 
     public function test_a_rule_named_exactly_after_a_domain_is_left_to_the_domain_vhost(): void
     {
-        $this->render([$this->rule(4, 8081, 'alice.test', '10.0.0.5')]);
+        $this->render([$this->rule(4, 8081, 'alice.test', TestNetwork::private(5))]);
 
         $this->assertSame([], $this->files(), 'a domain-owned name belongs in vhosts/alice.test.conf');
     }

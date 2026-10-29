@@ -62,7 +62,7 @@ final class GoMetadata implements PackageMetadata
             // The last segment, because `github.com/acme/shop` names the
             // repository and `shop` names the application.
             name: $module === null ? self::directoryName($context) : basename($module),
-            nameSource: $module === null ? AppPackage::NAME_FROM_DIRECTORY : self::FILE . ' module',
+            nameSource: $module === null ? AppPackage::NAME_FROM_DIRECTORY : self::FILE.' module',
             repository: $module !== null && str_contains($module, '.') ? $module : null,
             // Constraints and versions are the same map: go.mod records the
             // selected version, so there is no range to report separately.
@@ -119,7 +119,7 @@ final class GoMetadata implements PackageMetadata
     }
 
     /**
-     * @param array<string, string> $requires
+     * @param  array<string, string>  $requires
      */
     private static function addRequire(array &$requires, string $line): void
     {

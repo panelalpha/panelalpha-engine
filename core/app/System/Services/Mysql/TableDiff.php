@@ -13,8 +13,7 @@ class TableDiff
 {
     public function __construct(
         private readonly Mysql $mysql,
-    ) {
-    }
+    ) {}
 
     /**
      * The names are the source project's, so they can be handed straight back to
@@ -51,7 +50,7 @@ class TableDiff
 
         return [
             'tables_structure_diff' => $structure,
-            'tables_data_diff'      => $data,
+            'tables_data_diff' => $data,
         ];
     }
 
@@ -59,7 +58,7 @@ class TableDiff
      * A table the target does not hold at all is a structure difference; its
      * data is not compared, because there is nothing to compare against.
      *
-     * @param list<string> $targetNames
+     * @param  list<string>  $targetNames
      * @return array{structure: bool, data: bool}
      */
     private function tableDifference(
@@ -69,13 +68,13 @@ class TableDiff
         string $name,
         array $targetNames,
     ): array {
-        if (!in_array($name, $targetNames, true)) {
+        if (! in_array($name, $targetNames, true)) {
             return ['structure' => true, 'data' => false];
         }
 
         return [
             'structure' => $tables->createStatement($from, $name) !== $tables->createStatement($to, $name),
-            'data'      => $tables->checksum($from, $name) !== $tables->checksum($to, $name),
+            'data' => $tables->checksum($from, $name) !== $tables->checksum($to, $name),
         ];
     }
 }

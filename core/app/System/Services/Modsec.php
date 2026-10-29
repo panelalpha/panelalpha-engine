@@ -22,6 +22,7 @@ class Modsec
 
     /** The rule set the operator writes through the API; enabled and included like the shipped ones. */
     public const CUSTOM_RULESET = 'custom';
+
     public const CUSTOM_RULES_FILE = 'custom.conf';
 
     /**
@@ -29,6 +30,7 @@ class Modsec
      * of the engine's own rules (1000000-1009999).
      */
     public const CUSTOM_ID_MIN = 1100000;
+
     public const CUSTOM_ID_MAX = 1199999;
 
     public const CUSTOM_RULES_MAX_BYTES = 262144;
@@ -115,8 +117,11 @@ class Modsec
      * Then a plain browser GET for /, which nothing should deny.
      */
     private const CHECK_PATH = '/panelalpha-modsecurity-check/';
+
     private const CHECK_STATUS = '418';
+
     private const CHECK_BODY_ARG = 'panelalpha_check';
+
     private const CHECK_REQUESTS = ['first', 'phase1', 'phase2', 'phase3', 'body', 'plain'];
 
     /**
@@ -149,24 +154,23 @@ class Modsec
 
     public function __construct(
         private EngineSystem $system,
-    ) {
-    }
+    ) {}
 
     public function getRulesets(): array
     {
-        $dir = $this->system->engineDirPath() . '/config/modsecurity/rulesets';
-        $sets = glob($dir . "/*", GLOB_ONLYDIR);
+        $dir = $this->system->engineDirPath().'/config/modsecurity/rulesets';
+        $sets = glob($dir.'/*', GLOB_ONLYDIR);
 
         $rulesets = [];
         foreach ($sets as $set) {
             $name = basename($set);
-            if (!is_dir($set . '/rules')) {
+            if (! is_dir($set.'/rules')) {
                 continue;
             }
-            $configFiles = glob($set . '/rules/*.conf*');
+            $configFiles = glob($set.'/rules/*.conf*');
             $files = [];
             foreach ($configFiles as $file) {
-                if (!is_file($file)) {
+                if (! is_file($file)) {
                     continue;
                 }
                 if (Str::endsWith($file, [
@@ -182,12 +186,14 @@ class Modsec
                 'config_files' => $files,
             ];
         }
+
         return $rulesets;
     }
 
     public function rulesetExists(string $name): bool
     {
-        $dir = $this->system->engineDirPath() . '/config/modsecurity/rulesets/' . $name;
+        $dir = $this->system->engineDirPath().'/config/modsecurity/rulesets/'.$name;
+
         return is_dir($dir);
     }
 
@@ -201,15 +207,15 @@ class Modsec
      */
     public function listAuditLogFiles(): array
     {
-        $dir = $this->system->engineDirPath() . '/logs/modsecurity';
-        if (!is_dir($dir)) {
+        $dir = $this->system->engineDirPath().'/logs/modsecurity';
+        if (! is_dir($dir)) {
             return [];
         }
         $files = [];
         $fileNames = [];
 
         foreach (scandir($dir) as $file) {
-            if (!is_file($dir . '/' . $file)) {
+            if (! is_file($dir.'/'.$file)) {
                 continue;
             }
             $fileNames[] = $file;
@@ -231,7 +237,7 @@ class Modsec
     {
         $config = Setting::getModsecConfig();
 
-        $mainConfPath = $this->system->engineDirPath() . '/config/modsecurity/main.conf';
+        $mainConfPath = $this->system->engineDirPath().'/config/modsecurity/main.conf';
 
         $mode = 'Off';
         switch ($config['mode']) {
@@ -257,29 +263,30 @@ class Modsec
     private function renderMainConf(string $mode, ?string $customRules = null): string
     {
         $config = Setting::getModsecConfig();
-        $mainConfTemplatePath = $this->system->engineDirPath() . '/templates/config/modsecurity-main.conf.blade.php';
+        $mainConfTemplatePath = $this->system->engineDirPath().'/templates/config/modsecurity-main.conf.blade.php';
         $mainConfTemplate = $this->system->filesystem()->fileGetContents($mainConfTemplatePath);
 
         $rulesets = $config['enabled_rulesets'];
         // In the place the live config loads them: what they do to CRS depends on
         // whether they come before it. Enabled later, a rule set is appended.
-        if ($customRules !== null && !in_array(self::CUSTOM_RULESET, $rulesets, true)) {
+        if ($customRules !== null && ! in_array(self::CUSTOM_RULESET, $rulesets, true)) {
             $rulesets[] = self::CUSTOM_RULESET;
         }
         $includeFiles = [];
         foreach ($rulesets as $ruleset) {
             if ($customRules !== null && $ruleset === self::CUSTOM_RULESET) {
                 $includeFiles[] = $customRules;
+
                 continue;
             }
-            $dir = $this->system->engineDirPath() . '/config/modsecurity/rulesets/' . $ruleset;
-            if (!is_dir($dir)) {
+            $dir = $this->system->engineDirPath().'/config/modsecurity/rulesets/'.$ruleset;
+            if (! is_dir($dir)) {
                 continue;
             }
-            if (is_file($dir . '/setup.conf')) {
-                $includeFiles[] = $dir . '/setup.conf';
+            if (is_file($dir.'/setup.conf')) {
+                $includeFiles[] = $dir.'/setup.conf';
             }
-            $includeFiles[] = $dir . '/rules/*.conf';
+            $includeFiles[] = $dir.'/rules/*.conf';
         }
 
         return Blade::render($mainConfTemplate, [
@@ -304,6 +311,7 @@ class Modsec
 
         if (in_array($slug, ['nginx', 'nginx-proxy'], true)) {
             $webserver->scheduleWebserverReloadInBackground();
+
             return;
         }
 
@@ -311,9 +319,8 @@ class Modsec
     }
 
     /**
-     * @param string $ruleset
-     * @param array<string> $enable
-     * @param array<string> $disable
+     * @param  array<string>  $enable
+     * @param  array<string>  $disable
      */
     public function toggleConfigFiles(string $ruleset, array $enable = [], array $disable = []): void
     {
@@ -324,8 +331,8 @@ class Modsec
             }
         }
 
-        $dir = $this->system->engineDirPath() . '/config/modsecurity/rulesets/' . $ruleset . '/rules';
-        if (!is_dir($dir)) {
+        $dir = $this->system->engineDirPath().'/config/modsecurity/rulesets/'.$ruleset.'/rules';
+        if (! is_dir($dir)) {
             return;
         }
 
@@ -336,17 +343,17 @@ class Modsec
 
         $shouldRestart = false;
         foreach ($enable as $filename) {
-            $filePath = $dir . '/' . $filename;
-            if (is_file($filePath . '.disabled')) {
-                $this->runProcessOrFail(['sudo', 'mv', $filePath . '.disabled', $filePath]);
+            $filePath = $dir.'/'.$filename;
+            if (is_file($filePath.'.disabled')) {
+                $this->runProcessOrFail(['sudo', 'mv', $filePath.'.disabled', $filePath]);
                 $shouldRestart = true;
             }
         }
 
         foreach ($disable as $filename) {
-            $filePath = $dir . '/' . $filename;
+            $filePath = $dir.'/'.$filename;
             if (is_file($filePath)) {
-                $this->runProcessOrFail(['sudo', 'mv', $filePath, $filePath . '.disabled']);
+                $this->runProcessOrFail(['sudo', 'mv', $filePath, $filePath.'.disabled']);
                 $shouldRestart = true;
             }
         }
@@ -387,19 +394,19 @@ class Modsec
         }
 
         $webserver = $this->currentWebserver();
-        $testDir = $this->system->engineDirPath() . '/config/modsecurity/.custom-rules-test-' . bin2hex(random_bytes(6));
+        $testDir = $this->system->engineDirPath().'/config/modsecurity/.custom-rules-test-'.bin2hex(random_bytes(6));
         try {
-            $candidate = $testDir . '/' . self::CUSTOM_RULES_FILE;
+            $candidate = $testDir.'/'.self::CUSTOM_RULES_FILE;
             $this->system->filesystem()->writeFileReplacingPath($candidate, $rules);
             // On, so the check sees whether the candidate turns it off.
-            $this->system->filesystem()->writeFileReplacingPath($testDir . '/main.conf', $this->renderMainConf('On', $candidate));
+            $this->system->filesystem()->writeFileReplacingPath($testDir.'/main.conf', $this->renderMainConf('On', $candidate));
 
             $problem = $this->configTest($webserver, $testDir);
         } finally {
             $this->system->runProcess(['sudo', 'rm', '-rf', $testDir]);
         }
         if ($problem !== null) {
-            throw new \InvalidArgumentException('The webserver refused the rules: ' . $problem);
+            throw new \InvalidArgumentException('The webserver refused the rules: '.$problem);
         }
 
         $live = $this->customRulesPath();
@@ -408,7 +415,7 @@ class Modsec
             : null;
         $this->system->filesystem()->writeFileReplacingPath($live, $rules);
 
-        if (!$this->customRulesEnabled() || Setting::getModsecConfig()['mode'] === 'off') {
+        if (! $this->customRulesEnabled() || Setting::getModsecConfig()['mode'] === 'off') {
             return;
         }
 
@@ -424,7 +431,7 @@ class Modsec
         }
         if ($problem !== null) {
             $this->restoreCustomRules($live, $previous);
-            throw new \InvalidArgumentException('The webserver refused the rules in place, so the previous rules stay live: ' . $problem);
+            throw new \InvalidArgumentException('The webserver refused the rules in place, so the previous rules stay live: '.$problem);
         }
 
         $this->restartWebserver();
@@ -446,7 +453,7 @@ class Modsec
     public static function customRulesProblem(string $rules): ?string
     {
         if (strlen($rules) > self::CUSTOM_RULES_MAX_BYTES) {
-            return 'The rules are larger than ' . (self::CUSTOM_RULES_MAX_BYTES / 1024) . ' KB.';
+            return 'The rules are larger than '.(self::CUSTOM_RULES_MAX_BYTES / 1024).' KB.';
         }
 
         // Anywhere, even in a comment or a message: the mode is the setting for
@@ -455,8 +462,8 @@ class Modsec
         foreach ([$rules, preg_replace('/\\\\\R[ \t]*/', '', $rules)] as $text) {
             if (stripos((string) $text, 'ruleengine') !== false) {
                 return 'SecRuleEngine and ctl:ruleEngine are not accepted in custom rules, in any spelling, not even in a comment '
-                    . 'or a message. The engine\'s mode is the ModSecurity setting for every site; a rule that changes it '
-                    . 'switches protection off or to detection-only. To exempt requests from a rule, use ctl:ruleRemoveById.';
+                    .'or a message. The engine\'s mode is the ModSecurity setting for every site; a rule that changes it '
+                    .'switches protection off or to detection-only. To exempt requests from a rule, use ctl:ruleRemoveById.';
             }
         }
 
@@ -485,8 +492,8 @@ class Modsec
             foreach ($m[0] as [, $offset]) {
                 if ($offset !== 0) {
                     return 'A line may hold only one directive, at its start. Put each SecRule, SecAction or SecMarker on '
-                        . 'its own line (a chained rule is several lines, each a SecRule). A directive name may not appear '
-                        . 'anywhere else on the line, not even inside quotes: "' . Str::limit($line, 80) . '"';
+                        .'its own line (a chained rule is several lines, each a SecRule). A directive name may not appear '
+                        .'anywhere else on the line, not even inside quotes: "'.Str::limit($line, 80).'"';
                 }
             }
 
@@ -494,12 +501,12 @@ class Modsec
                 return 'A directive must not be quoted.';
             }
             $directive = strtolower($tokens[0]['value']);
-            if (!array_key_exists($directive, self::CUSTOM_DIRECTIVES)) {
+            if (! array_key_exists($directive, self::CUSTOM_DIRECTIVES)) {
                 return "Only rule directives are accepted (SecRule, SecAction, SecMarker, SecRuleRemoveBy*, SecRuleUpdate*By*), not {$directive}.";
             }
-            if (!self::argumentsFit($directive, array_slice($tokens, 1))) {
+            if (! self::argumentsFit($directive, array_slice($tokens, 1))) {
                 return 'There is more on this line than its directive takes, and ModSecurity would read the rest as another '
-                    . 'directive. Only a # comment may follow the last argument: "' . Str::limit($line, 80) . '"';
+                    .'directive. Only a # comment may follow the last argument: "'.Str::limit($line, 80).'"';
             }
             // Errs towards refusing: an `id:` written inside a msg is checked too.
             preg_match_all('/(?:^|[\s",])id\s*:\s*\'?\s*(\d+)/i', $line, $m);
@@ -507,7 +514,7 @@ class Modsec
                 $id = (int) $id;
                 if ($id < self::CUSTOM_ID_MIN || $id > self::CUSTOM_ID_MAX) {
                     return "Rule id {$id} is outside the range kept for custom rules, "
-                        . self::CUSTOM_ID_MIN . '-' . self::CUSTOM_ID_MAX . '.';
+                        .self::CUSTOM_ID_MIN.'-'.self::CUSTOM_ID_MAX.'.';
                 }
                 if (isset($ids[$id])) {
                     return "Rule id {$id} is used twice.";
@@ -525,14 +532,14 @@ class Modsec
             // into later phases, so where it lands depends on what is loaded around these.
             if (preg_match('/(?<![a-z0-9_])skip\s*:/i', $line)) {
                 return 'skip is not accepted in custom rules: it counts the rules ModSecurity runs next, in every rule set '
-                    . 'and into later phases. Use skipAfter with a SecMarker after the rules to skip.';
+                    .'and into later phases. Use skipAfter with a SecMarker after the rules to skip.';
             }
             if ($directive === 'secmarker') {
                 // libmodsecurity drops single quotes around the name as well.
                 $markers[preg_replace("/\\A'(.*)'\\z/s", '$1', $tokens[1]['value'] ?? '')] = $at;
             }
             if (preg_match_all('/(?<![a-z0-9_])skipafter\s*:\s*\'?([^\'",\s]*)/i', $line, $m)) {
-                if (!in_array($directive, ['secrule', 'secaction'], true)) {
+                if (! in_array($directive, ['secrule', 'secaction'], true)) {
                     return 'skipAfter is accepted only in a SecRule or SecAction, before the SecMarker it names.';
                 }
                 foreach ($m[1] as $name) {
@@ -546,8 +553,8 @@ class Modsec
         foreach ($skipAfters as [$name, $at]) {
             if (($markers[$name] ?? -1) <= $at) {
                 return "skipAfter:{$name} names no SecMarker after it in these rules (names are case-sensitive). ModSecurity "
-                    . 'would skip rules outside these, in every rule set and in later phases, for every request it matches. '
-                    . "Put SecMarker {$name} after the rules it should skip.";
+                    .'would skip rules outside these, in every rule set and in later phases, for every request it matches. '
+                    ."Put SecMarker {$name} after the rules it should skip.";
             }
         }
 
@@ -582,16 +589,17 @@ class Modsec
                             continue;
                         }
                         if ($swallowed[0] !== '#') {
-                            return 'Line ' . ($n + 1) . ' is a commented-out SecRule/SecAction that ends in \\. '
-                                . 'ModSecurity reads line ' . ($m + 1) . ' as part of the comment, so that rule would never load. '
-                                . 'Comment that line too, or remove the backslash.';
+                            return 'Line '.($n + 1).' is a commented-out SecRule/SecAction that ends in \\. '
+                                .'ModSecurity reads line '.($m + 1).' as part of the comment, so that rule would never load. '
+                                .'Comment that line too, or remove the backslash.';
                         }
-                        if (!str_ends_with(rtrim($physical[$m]), '\\')) {
+                        if (! str_ends_with(rtrim($physical[$m]), '\\')) {
                             break;
                         }
                     }
                     $n = $m;
                 }
+
                 // An ordinary comment, even one ending in \, is left out: libmodsecurity
                 // ends it at the newline, so the next line is a directive of its own.
                 continue;
@@ -603,11 +611,11 @@ class Modsec
             while ($n + 1 < $count && str_ends_with(rtrim($current), '\\')) {
                 $head = substr(rtrim($current), 0, -1);
                 if (self::isComplete($head)) {
-                    return 'Line ' . ($n + 1) . ' ends in \\ after a complete directive. ModSecurity does not carry a '
-                        . 'finished directive onto the next line; it reads that line as a directive of its own. '
-                        . 'Remove the backslash.';
+                    return 'Line '.($n + 1).' ends in \\ after a complete directive. ModSecurity does not carry a '
+                        .'finished directive onto the next line; it reads that line as a directive of its own. '
+                        .'Remove the backslash.';
                 }
-                $current = $head . ' ' . $physical[$n + 1];
+                $current = $head.' '.$physical[$n + 1];
                 $n++;
             }
             $logical[] = $current;
@@ -620,11 +628,11 @@ class Modsec
     private static function isComplete(string $text): bool
     {
         $tokens = self::tokenize(trim($text));
-        if ($tokens === [] || $tokens[0]['quoted'] || !$tokens[count($tokens) - 1]['closed']) {
+        if ($tokens === [] || $tokens[0]['quoted'] || ! $tokens[count($tokens) - 1]['closed']) {
             return false;
         }
         $directive = strtolower($tokens[0]['value']);
-        if (!array_key_exists($directive, self::CUSTOM_DIRECTIVES)) {
+        if (! array_key_exists($directive, self::CUSTOM_DIRECTIVES)) {
             return false;
         }
         $takes = self::CUSTOM_DIRECTIVES[$directive];
@@ -637,13 +645,13 @@ class Modsec
      * comment aside. A directive taking the rest of the line takes one quoted
      * value or bare words.
      *
-     * @param list<array{value: string, quoted: bool, closed: bool}> $arguments
+     * @param  list<array{value: string, quoted: bool, closed: bool}>  $arguments
      */
     private static function argumentsFit(string $directive, array $arguments): bool
     {
         $taken = [];
         foreach ($arguments as $argument) {
-            if (!$argument['quoted'] && str_starts_with($argument['value'], '#')) {
+            if (! $argument['quoted'] && str_starts_with($argument['value'], '#')) {
                 break;
             }
             $taken[] = $argument;
@@ -664,7 +672,7 @@ class Modsec
         // Include alone needs a blank after it; the Sec* names take nothing.
         $words = array_map(fn (string $w): string => $w === 'include' ? 'include(?=[ \t])' : $w, $words);
 
-        return '/(?<![A-Za-z0-9_])(?:' . implode('|', $words) . ')/i';
+        return '/(?<![A-Za-z0-9_])(?:'.implode('|', $words).')/i';
     }
 
     /**
@@ -684,6 +692,7 @@ class Modsec
             $c = $line[$i];
             if ($c === ' ' || $c === "\t") {
                 $i++;
+
                 continue;
             }
             if ($c === '"') {
@@ -694,6 +703,7 @@ class Modsec
                     if ($line[$i] === '\\' && $i + 1 < $len) {
                         $value .= $line[$i + 1];
                         $i += 2;
+
                         continue;
                     }
                     if ($line[$i] === '"') {
@@ -705,13 +715,15 @@ class Modsec
                     $i++;
                 }
                 $tokens[] = ['value' => $value, 'quoted' => true, 'closed' => $closed];
+
                 continue;
             }
             $value = '';
             while ($i < $len && $line[$i] !== ' ' && $line[$i] !== "\t" && $line[$i] !== '"') {
                 if ($line[$i] === '\\' && $i + 1 < $len) {
-                    $value .= $line[$i] . $line[$i + 1];
+                    $value .= $line[$i].$line[$i + 1];
                     $i += 2;
+
                     continue;
                 }
                 $value .= $line[$i];
@@ -728,35 +740,35 @@ class Modsec
     /**
      * Why a SecRule's operator would not be read as the operator it names, or null.
      *
-     * @param list<array{value: string, quoted: bool, closed: bool}> $tokens
+     * @param  list<array{value: string, quoted: bool, closed: bool}>  $tokens
      */
     private static function operatorProblem(array $tokens): ?string
     {
         // SecRule VARIABLES OPERATOR [ACTIONS]: the operator is the third argument.
-        if (!isset($tokens[2])) {
+        if (! isset($tokens[2])) {
             return null;
         }
         $operator = $tokens[2]['value'];
-        if (!preg_match('/\A\s*!?\s*@/', $operator)) {
+        if (! preg_match('/\A\s*!?\s*@/', $operator)) {
             // No operator named: libmodsecurity reads it as an @rx, which is fine.
             return null;
         }
         $shown = Str::limit($operator, 100);
         // libmodsecurity takes an operator only right after the quote or the `!`.
-        if (!preg_match('/\A!?@(\w*)([\s\S]*)\z/', $operator, $m)) {
+        if (! preg_match('/\A!?@(\w*)([\s\S]*)\z/', $operator, $m)) {
             return "The operator \"{$shown}\" has a space before the @, so ModSecurity would read it as a regular expression, "
-                . 'not as an operator. To match a literal @, use @rx.';
+                .'not as an operator. To match a literal @, use @rx.';
         }
         $name = strtolower($m[1]);
-        if (!in_array($name, self::OPERATORS, true)) {
+        if (! in_array($name, self::OPERATORS, true)) {
             return "Unknown operator @{$m[1]}. ModSecurity would read \"{$shown}\" as a regular expression, "
-                . 'so the rule would not do what it says. To match a literal @, use @rx.';
+                .'so the rule would not do what it says. To match a literal @, use @rx.';
         }
         // These operators take no argument: quoted with anything but spaces after the
         // name, libmodsecurity reads the whole text as a regex instead.
         if ($tokens[2]['quoted'] && in_array($name, self::NO_ARG_OPERATORS, true) && trim($m[2]) !== '') {
             return "The operator @{$m[1]} takes no argument. ModSecurity would read \"{$shown}\" as a regular expression, "
-                . 'so the rule would not do what it says.';
+                .'so the rule would not do what it says.';
         }
 
         return null;
@@ -771,9 +783,9 @@ class Modsec
     public static function configTestCommand(string $webserver, string $testDir): ?string
     {
         return match ($webserver) {
-            'nginx', 'nginx-proxy' => 'sh -c ' . escapeshellarg(self::CHECK_SCRIPT)
-                . ' sh ' . escapeshellarg($testDir) . ' ' . escapeshellarg(self::CHECK_PATH) . ' ' . escapeshellarg(self::CHECK_BODY_ARG),
-            'apache' => 'httpd -t -f ' . escapeshellarg($testDir . '/httpd.conf'),
+            'nginx', 'nginx-proxy' => 'sh -c '.escapeshellarg(self::CHECK_SCRIPT)
+                .' sh '.escapeshellarg($testDir).' '.escapeshellarg(self::CHECK_PATH).' '.escapeshellarg(self::CHECK_BODY_ARG),
+            'apache' => 'httpd -t -f '.escapeshellarg($testDir.'/httpd.conf'),
             default => null,
         };
     }
@@ -781,7 +793,7 @@ class Modsec
     public static function configTestConfig(string $webserver, string $testDir): string
     {
         if ($webserver === 'apache') {
-            $rules = $testDir . '/main.conf';
+            $rules = $testDir.'/main.conf';
 
             return implode("\n", [
                 'ServerRoot "/usr/local/apache2"',
@@ -838,8 +850,8 @@ class Modsec
     public static function checkRules(string $testDir): string
     {
         $deny = fn (int $id, int $phase, string $variable, string $operator): string => "SecRule {$variable} \"{$operator}\" "
-            . "\"id:{$id},phase:{$phase},deny,status:" . self::CHECK_STATUS . ',nolog,noauditlog"';
-        $path = fn (string $name): string => '@streq ' . self::CHECK_PATH . $name;
+            ."\"id:{$id},phase:{$phase},deny,status:".self::CHECK_STATUS.',nolog,noauditlog"';
+        $path = fn (string $name): string => '@streq '.self::CHECK_PATH.$name;
 
         return implode("\n", [
             $deny(1099990, 1, 'REQUEST_URI', $path('first')),
@@ -850,7 +862,7 @@ class Modsec
             $deny(1099991, 1, 'REQUEST_URI', $path('phase1')),
             $deny(1099992, 2, 'REQUEST_URI', $path('phase2')),
             $deny(1099993, 3, 'REQUEST_URI', $path('phase3')),
-            $deny(1099994, 2, 'ARGS_POST:' . self::CHECK_BODY_ARG, '@streq 1'),
+            $deny(1099994, 2, 'ARGS_POST:'.self::CHECK_BODY_ARG, '@streq 1'),
             '',
         ]);
     }
@@ -872,23 +884,23 @@ class Modsec
         }
         if ($answers['first'] !== self::CHECK_STATUS) {
             return 'with these rules in place, a request that a rule loaded before them denies gets through. '
-                . 'They would switch ModSecurity off or to detection-only, or remove the rules before them, for every site.';
+                .'They would switch ModSecurity off or to detection-only, or remove the rules before them, for every site.';
         }
         foreach ([1, 2, 3] as $phase) {
             if ($answers["phase{$phase}"] === '204') {
                 return "with these rules in place, a request that a phase {$phase} rule loaded after them denies gets through. "
-                    . "They would stop the later rules in phase {$phase}, for every site "
-                    . '(an allow, a skip or skipAfter, or a ctl that matches every request).';
+                    ."They would stop the later rules in phase {$phase}, for every site "
+                    .'(an allow, a skip or skipAfter, or a ctl that matches every request).';
             }
         }
         if ($answers['body'] === '204') {
             return 'with these rules in place, a request body that a rule loaded after them denies gets through. '
-                . 'They would stop ModSecurity reading request bodies, for every site (a ctl that matches every request).';
+                .'They would stop ModSecurity reading request bodies, for every site (a ctl that matches every request).';
         }
         // A set that denies every request passes the checks above, and takes every site down.
         if ($answers['plain'] !== '204') {
             return "with these rules in place, an ordinary request with nothing in it to block is answered {$answers['plain']} "
-                . 'instead of reaching the site. These rules would deny ordinary requests, on every site.';
+                .'instead of reaching the site. These rules would deny ordinary requests, on every site.';
         }
 
         return null;
@@ -936,7 +948,7 @@ class Modsec
             return "custom rules cannot be checked on the {$webserver} webserver, so they are not applied";
         }
         $this->system->filesystem()->writeFileReplacingPath(
-            $testDir . ($webserver === 'apache' ? '/httpd.conf' : '/nginx.conf'),
+            $testDir.($webserver === 'apache' ? '/httpd.conf' : '/nginx.conf'),
             self::configTestConfig($webserver, $testDir)
         );
         if ($webserver === 'apache') {
@@ -945,9 +957,9 @@ class Modsec
 
         // A parse proves only that the rules load. Whatever they do to the engine,
         // however spelt, shows when the scratch config answers the check requests.
-        $this->system->filesystem()->writeFileReplacingPath($testDir . '/check.conf', self::checkRules($testDir));
+        $this->system->filesystem()->writeFileReplacingPath($testDir.'/check.conf', self::checkRules($testDir));
         $process = $this->runInWebserver($command);
-        $output = $process->getErrorOutput() . "\n" . $process->getOutput();
+        $output = $process->getErrorOutput()."\n".$process->getOutput();
 
         return self::configTestProblem($process->getExitCode(), $output) ?? self::checkProblem($output);
     }
@@ -963,7 +975,7 @@ class Modsec
         }
         $problem = $this->testInWebserver($command);
         // A refusal outside the rules names other sites' files; that goes to the log only.
-        if ($problem !== null && !str_contains($problem, 'Rules error')) {
+        if ($problem !== null && ! str_contains($problem, 'Rules error')) {
             Log::warning('Webserver config test failed with the new custom ModSecurity rules in place', ['verdict' => $problem]);
 
             return 'the webserver configuration does not pass its own test; what it said is in the engine log';
@@ -978,15 +990,15 @@ class Modsec
 
         return self::configTestProblem(
             $process->getExitCode(),
-            $process->getErrorOutput() . "\n" . $process->getOutput()
+            $process->getErrorOutput()."\n".$process->getOutput()
         );
     }
 
     private function runInWebserver(string $command): Process
     {
         return $this->system->runProcessOnHost(
-            'sudo docker compose -f ' . escapeshellarg($this->system->composeFilePath())
-                . ' exec -T sites-http ' . $command,
+            'sudo docker compose -f '.escapeshellarg($this->system->composeFilePath())
+                .' exec -T sites-http '.$command,
             [],
             self::CONFIG_TEST_TIMEOUT
         );
@@ -1004,22 +1016,22 @@ class Modsec
     /** custom.conf, or custom.conf.disabled when the file was switched off through toggleConfigFiles(). */
     private function customRulesPath(): string
     {
-        $path = $this->system->engineDirPath() . '/config/modsecurity/rulesets/' . self::CUSTOM_RULESET
-            . '/rules/' . self::CUSTOM_RULES_FILE;
+        $path = $this->system->engineDirPath().'/config/modsecurity/rulesets/'.self::CUSTOM_RULESET
+            .'/rules/'.self::CUSTOM_RULES_FILE;
 
-        return !$this->system->filesystem()->fileExists($path)
-            && $this->system->filesystem()->fileExists($path . '.disabled')
-            ? $path . '.disabled'
+        return ! $this->system->filesystem()->fileExists($path)
+            && $this->system->filesystem()->fileExists($path.'.disabled')
+            ? $path.'.disabled'
             : $path;
     }
 
     /**
-     * @param array<string> $cmd
+     * @param  array<string>  $cmd
      */
     private function runProcessOrFail(array $cmd): void
     {
         $process = $this->system->runProcess($cmd);
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $message = trim($process->getErrorOutput() ?: $process->getOutput());
             throw new \RuntimeException($message !== '' ? $message : 'ModSecurity config file toggle failed');
         }

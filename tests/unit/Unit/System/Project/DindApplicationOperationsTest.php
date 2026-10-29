@@ -132,7 +132,7 @@ class DindApplicationOperationsTest extends TestCase
         ];
     }
 
-    /** The app was stopped, so nothing was noted as running: what the redeploy created is looked for, not the stack taken down. */
+    /** The app was stopped, and the redeploy noted it: what the redeploy created is looked for, not the stack taken down. */
     public function test_cancelling_a_redeploy_of_a_stopped_app_looks_for_what_it_created(): void
     {
         $this->app->useStoragePath($this->tmpRoot . '/storage');
@@ -140,6 +140,7 @@ class DindApplicationOperationsTest extends TestCase
         file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
         file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
         $deploy = DeployLogger::start('alice');
+        (new GenerationState('alice'))->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
 
         (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
 

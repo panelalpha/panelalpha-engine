@@ -76,27 +76,60 @@ class ResourceLimitTest extends TestCase
         }
     }
 
-    /**
-     * The one asymmetry in the table, kept because it is what is already on
-     * disk: disk_space_limit stores -1 for "no limit", everything else null.
-     */
-    public function test_only_disk_space_keeps_minus_one(): void
+    #[DataProvider('everyLimit')]
+    public function test_every_limit_stores_minus_one_as_unlimited(string $key): void
     {
-        $this->assertSame(-1, ResourceLimit::byKey('disk_space_limit')->normalize('-1'));
+        $limit = ResourceLimit::byKey($key);
+        $expected = $limit->isFloat ? (float) ResourceLimit::UNLIMITED : ResourceLimit::UNLIMITED;
 
+        $this->assertSame($expected, $limit->normalize('-1'));
+        $this->assertSame($expected, $limit->normalize(-1));
+        $this->assertSame($expected, $limit->normalize('-99'), 'clamped to UNLIMITED');
+    }
+
+    #[DataProvider('everyLimit')]
+    public function test_every_limit_reads_minus_one_back_as_no_limit(string $key): void
+    {
+        $this->assertSame('no limit', ResourceLimit::byKey($key)->format(ResourceLimit::UNLIMITED));
+        $this->assertSame('no limit', ResourceLimit::byKey($key)->format(null));
+    }
+
+    /** @return array<string, array{string}> */
+    public static function everyLimit(): array
+    {
+        return array_combine(ResourceLimit::keys(), array_map(static fn (string $k): array => [$k], ResourceLimit::keys()));
+    }
+
+    public function test_a_fraction_of_a_cpu_below_zero_is_unlimited_not_a_negative_quota(): void
+    {
+        $this->assertSame(-1.0, ResourceLimit::byKey('cpu_limit')->normalize('-0.5'));
+    }
+
+    public function test_only_disk_space_starts_unlimited_on_a_new_project(): void
+    {
         foreach (ResourceLimit::all() as $limit) {
-            if ($limit->key === 'disk_space_limit') {
-                continue;
-            }
-            $this->assertNull($limit->normalize('-1'), "{$limit->key} should store null for -1");
+            $this->assertSame($limit->key === 'disk_space_limit', $limit->startsUnlimited, $limit->key);
         }
     }
 
-    public function test_normalize_clamps_below_minus_one(): void
+    public function test_enforced_drops_unset_and_unlimited_and_keeps_a_real_value(): void
     {
-        $this->assertSame(-1, ResourceLimit::byKey('disk_space_limit')->normalize('-99'));
-        $this->assertNull(ResourceLimit::byKey('bandwidth_limit')->normalize('-99'));
-        $this->assertNull(ResourceLimit::byKey('cpu_limit')->normalize('-99'));
+        $this->assertNull(ResourceLimit::enforced(null));
+        $this->assertNull(ResourceLimit::enforced(-1));
+        $this->assertNull(ResourceLimit::enforced(-1.0));
+        $this->assertSame(0, ResourceLimit::enforced(0));
+        $this->assertSame(1.5, ResourceLimit::enforced(1.5));
+        $this->assertSame(1000, ResourceLimit::enforced(1000));
+    }
+
+    public function test_a_count_limit_is_reached_only_once_the_count_meets_it(): void
+    {
+        $this->assertNull(ResourceLimit::reached(null, 0), 'an unset limit never caps');
+        $this->assertNull(ResourceLimit::reached(ResourceLimit::UNLIMITED, 0), 'unlimited never caps');
+        $this->assertSame(0, ResourceLimit::reached(0, 0));
+        $this->assertNull(ResourceLimit::reached(3, 2), 'room left');
+        $this->assertSame(3, ResourceLimit::reached(3, 3));
+        $this->assertSame(3, ResourceLimit::reached(3, 4), 'answered past the limit too');
     }
 
     /**
@@ -163,6 +196,14 @@ class ResourceLimitTest extends TestCase
             'bare count null' => ['ftp_accounts_limit', null, 'no limit'],
             'inodes' => ['inodes_limit', 900, '900'],
         ];
+    }
+
+    public function test_scaling_never_multiplies_unlimited_or_an_unset_limit(): void
+    {
+        $this->assertSame(10 * 1048576, ResourceLimit::scaled(10, 1048576));
+        $this->assertSame(0, ResourceLimit::scaled(0, 1048576));
+        $this->assertSame(ResourceLimit::UNLIMITED, ResourceLimit::scaled(-1, 1048576));
+        $this->assertNull(ResourceLimit::scaled(null, 1048576));
     }
 
     public function test_rebuild_flags_match_what_the_runtime_bakes_in(): void

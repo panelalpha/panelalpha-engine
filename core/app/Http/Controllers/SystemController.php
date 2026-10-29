@@ -2,21 +2,23 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\TokenAbilities;
 use App\Exceptions\DockerErrorException;
+use App\Http\Requests\EximConfigUpdateRequest;
+use App\Http\Requests\EximTestEmailSendRequest;
+use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Mail\EximConfigSecrets;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
-use App\Lib\Vault\RequestVault;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
-use App\Rules\EximSecret;
-use App\Rules\UpstreamHost;
 use App\System;
 use App\System\AccountContainers;
 use App\System\Network;
@@ -41,20 +43,22 @@ class SystemController extends Controller
     )]
     public function info(): JsonResponse
     {
-        $system = new System();
+        $system = new System;
         $webserver = $system->webserver();
         $url = self::engineUrl();
+        $caller = TokenAbilities::forCurrentRequest();
 
         $data = [
             'version' => config('system.version'),
             'url' => $url !== '' ? $url : null,
-            'api_url' => $url !== '' ? $url . '/api' : null,
-            'mcp_url' => $url !== '' ? $url . '/mcp' : null,
+            'api_url' => $url !== '' ? $url.'/api' : null,
+            'mcp_url' => $url !== '' ? $url.'/mcp' : null,
             'cert_domain' => Setting::get('cert_domain'),
             'default_tunnel' => self::defaultTunnel(),
             'served_certificate' => self::servedCertificate($url),
             ...self::sitesDomain(),
             'default_ipv4' => Setting::get('default_ipv4'),
+            'host' => HostFacts::hostFor($caller, $system),
             'default_ipv6' => Setting::get('default_ipv6'),
             'ipv4_nat_mode' => Ipv4NatMap::isNatModeEnabled(),
             'ipv4_nat_maps' => Ipv4NatMap::all(),
@@ -62,8 +66,8 @@ class SystemController extends Controller
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
             'panelalpha_online' => self::panelalphaOnline(),
-            'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
-            'orphan_account_containers' => self::orphanAccountContainers($system),
+            'unreadable_secrets' => self::unreadableSecrets($caller, User::query()->cursor()),
+            'orphan_account_containers' => self::orphanAccountContainers($system, $caller),
         ];
 
         return new JsonResponse([
@@ -116,37 +120,39 @@ class SystemController extends Controller
     }
 
     /**
-     * Account containers no project owns. Reported only: the operator removes them, the engine never does.
+     * Account containers no project owns; a token scoped to projects sees only
+     * those of the projects in its scope. Reported only: the operator removes
+     * them, the engine never does.
      *
      * @return array{count: int, containers: list<array<string, string>>, warning: ?string}
      */
-    private static function orphanAccountContainers(System $system): array
+    private static function orphanAccountContainers(System $system, TokenAbilities $caller): array
     {
         return (new AccountContainers($system))
-            ->orphanReport(User::query()->pluck('username'));
+            ->orphanReport(User::query()->pluck('username'), $caller->projects());
     }
 
     /**
      * The one place that names the APP_KEY: a project only knows it cannot
      * decode its secrets, the server knows that many projects at once point
-     * at the key.
+     * at the key. A token scoped to projects sees only the projects in its scope.
      *
-     * @param iterable<User> $users
+     * @param  iterable<User>  $users
      * @return array{count: int, projects: list<string>, warning: ?string}
      */
-    public static function unreadableSecrets(iterable $users): array
+    public static function unreadableSecrets(TokenAbilities $caller, iterable $users): array
     {
         $projects = [];
         foreach ($users as $user) {
-            if ($user->unreadableSecrets() !== []) {
+            if ($caller->mayReachProject((string) $user->username) && $user->unreadableSecrets() !== []) {
                 $projects[] = (string) $user->username;
             }
         }
 
-        $warning = $projects === [] ? null : count($projects) . ' project(s) hold secrets the engine cannot '
-            . 'decode: ' . implode(', ', $projects) . '. The APP_KEY may be invalid, or changed since they were '
-            . 'stored. Restore the previous APP_KEY before those projects are saved again, or their secrets are '
-            . 'stored empty.';
+        $warning = $projects === [] ? null : count($projects).' project(s) hold secrets the engine cannot '
+            .'decode: '.implode(', ', $projects).'. The APP_KEY may be invalid, or changed since they were '
+            .'stored. Restore the previous APP_KEY before those projects are saved again, or their secrets are '
+            .'stored empty.';
 
         return ['count' => count($projects), 'projects' => $projects, 'warning' => $warning];
     }
@@ -165,11 +171,11 @@ class SystemController extends Controller
      * judged against the host clients connect to.
      *
      * @return array<string, mixed>|null null when there is no readable
-     *         certificate on disk at all
+     *                                   certificate on disk at all
      */
     private static function servedCertificate(string $url): ?array
     {
-        $pem = (new EngineCertificate())->served();
+        $pem = (new EngineCertificate)->served();
         if ($pem === null) {
             return null;
         }
@@ -204,11 +210,11 @@ class SystemController extends Controller
     #[OA\Put(
         path: '/system/ssl-config',
         summary: 'Set how certificates for project sites are obtained',
-        description: "Only the fields present are changed. `issuer` self_signed (the default) means "
-            . "the engine signs each project domain's certificate itself; acme means it obtains one "
-            . "from an authority over HTTP-01 as each domain is created, which needs the domain to "
-            . "resolve to this host. `sites_base_domain` is what a project without a domain of its "
-            . "own is named under: <project>.<that>.",
+        description: 'Only the fields present are changed. `issuer` self_signed (the default) means '
+            ."the engine signs each project domain's certificate itself; acme means it obtains one "
+            .'from an authority over HTTP-01 as each domain is created, which needs the domain to '
+            .'resolve to this host. `sites_base_domain` is what a project without a domain of its '
+            .'own is named under: <project>.<that>.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -219,15 +225,15 @@ class SystemController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'The domain new projects are named under. Empty clears it. A wildcard '
-                        . 'zone the fleet shares is accepted and reported as shared_zone: certificates '
-                        . "there spend an allowance every engine on it draws on."
+                        .'zone the fleet shares is accepted and reported as shared_zone: certificates '
+                        .'there spend an allowance every engine on it draws on.'
                 ),
                 new OA\Property(
                     property: 'acme_directory_url',
                     type: 'string',
                     nullable: true,
                     description: "Any RFC 8555 directory URL. 'staging' and 'live' are shorthands for "
-                        . "Let's Encrypt's. Empty restores the default."
+                        ."Let's Encrypt's. Empty restores the default."
                 ),
                 new OA\Property(property: 'acme_email', type: 'string', nullable: true, description: 'ACME account contact; empty clears it.'),
                 new OA\Property(
@@ -235,12 +241,12 @@ class SystemController extends Controller
                     type: 'boolean',
                     nullable: true,
                     description: 'Whether to obtain certificates for names on a wildcard zone the whole '
-                        . 'fleet shares (panelalpha.direct, nip.io, sslip.io). Off by default: those are '
-                        . "one registered domain each for every engine, and Let's Encrypt counts 50 new "
-                        . 'certificates per registered domain per week across all of them. On, a project '
-                        . 'on the default name gets a real certificate like any other; off, it keeps the '
-                        . 'self-signed one and the reason is logged. Domains a customer owns are never '
-                        . 'affected either way.'
+                        .'fleet shares (panelalpha.direct, nip.io, sslip.io). Off by default: those are '
+                        ."one registered domain each for every engine, and Let's Encrypt counts 50 new "
+                        .'certificates per registered domain per week across all of them. On, a project '
+                        .'on the default name gets a real certificate like any other; off, it keeps the '
+                        .'self-signed one and the reason is logged. Domains a customer owns are never '
+                        .'affected either way.'
                 ),
             ],
         )),
@@ -283,7 +289,7 @@ class SystemController extends Controller
     private static function saveSitesBaseDomain(string $requested): void
     {
         $base = strtolower(trim($requested, " \t\n\r\0\x0B."));
-        if ($base !== '' && !SharedZones::isPubliclyIssuable($base)) {
+        if ($base !== '' && ! SharedZones::isPubliclyIssuable($base)) {
             throw ValidationException::withMessages([
                 'sites_base_domain' => "{$base} is not a hostname sites can be named under.",
             ]);
@@ -326,12 +332,12 @@ class SystemController extends Controller
     #[OA\Put(
         path: '/system/engine-certificate',
         summary: "Request the engine's own Let's Encrypt certificate",
-        description: "Obtains the certificate :2011 serves, for `domain` or the cert_domain setting. "
-            . "**This briefly takes every hosted site offline**: certbot needs the host's :80 and "
-            . "sites-http holds it, so the webserver is stopped for the length of the challenge and "
-            . "brought back after — usually seconds. It is not the mechanism project certificates "
-            . "use. Blocks until the request finishes, up to 15 minutes. Use dry_run first: it runs "
-            . "the full challenge against staging and writes nothing.",
+        description: 'Obtains the certificate :2011 serves, for `domain` or the cert_domain setting. '
+            ."**This briefly takes every hosted site offline**: certbot needs the host's :80 and "
+            .'sites-http holds it, so the webserver is stopped for the length of the challenge and '
+            .'brought back after — usually seconds. It is not the mechanism project certificates '
+            .'use. Blocks until the request finishes, up to 15 minutes. Use dry_run first: it runs '
+            .'the full challenge against staging and writes nothing.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -366,7 +372,7 @@ class SystemController extends Controller
         ]);
 
         $result = EngineCertificateRequest::run(
-            new System(),
+            new System,
             [
                 'domain' => isset($params['domain']) ? (string) $params['domain'] : null,
                 'email' => isset($params['email']) ? (string) $params['email'] : null,
@@ -377,10 +383,10 @@ class SystemController extends Controller
 
         $url = self::engineUrl();
 
-        if (!$result['successful']) {
+        if (! $result['successful']) {
             throw ValidationException::withMessages([
                 'domain' => 'The certificate was not issued; the served certificate is unchanged. '
-                    . $result['output'],
+                    .$result['output'],
             ]);
         }
 
@@ -395,14 +401,14 @@ class SystemController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return list<string> the certificate script's flags the request switched on
      */
     private static function certificateFlags(array $params): array
     {
         $flags = [];
         foreach (['staging' => 'staging', 'force_renewal' => 'force-renewal', 'skip_dns_check' => 'skip-dns-check', 'dry_run' => 'dry-run'] as $field => $flag) {
-            if (!empty($params[$field])) {
+            if (! empty($params[$field])) {
                 $flags[] = $flag;
             }
         }
@@ -436,7 +442,7 @@ class SystemController extends Controller
             'license_key' => 'nullable|string',
         ]);
         $licenseKey = null;
-        if (!empty($params['license_key'])) {
+        if (! empty($params['license_key'])) {
             $licenseKey = $params['license_key'];
         }
 
@@ -522,7 +528,7 @@ class SystemController extends Controller
      */
     private static function assertWebserverChoice(string $webserver): void
     {
-        if (!in_array($webserver, [
+        if (! in_array($webserver, [
             'nginx',
             'nginx-proxy',
             'apache',
@@ -544,7 +550,7 @@ class SystemController extends Controller
     /** @throws ValidationException when a serial number is sent for anything but LiteSpeed */
     private static function serialNumberFor(string $webserver, ?string $serialNumber): ?string
     {
-        $serialNumber = !empty($serialNumber) && trim($serialNumber) !== '' ? trim($serialNumber) : null;
+        $serialNumber = ! empty($serialNumber) && trim($serialNumber) !== '' ? trim($serialNumber) : null;
 
         if ($serialNumber !== null && $webserver !== 'litespeed') {
             throw ValidationException::withMessages([
@@ -572,7 +578,7 @@ class SystemController extends Controller
     )]
     public function resetWebserverPanelPassword(): JsonResponse
     {
-        $system = new System();
+        $system = new System;
         $webserver = $system->webserver();
 
         try {
@@ -616,7 +622,7 @@ class SystemController extends Controller
             'serial_number' => 'required|string',
         ]);
 
-        $system = new System();
+        $system = new System;
         $webserver = $system->webserver();
 
         try {
@@ -639,6 +645,8 @@ class SystemController extends Controller
     #[OA\Get(
         path: '/system/exim-config',
         summary: 'Get Exim mail server configuration',
+        description: 'A stored password or API token (sendgrid_api_token, mailchannels_password, amazon_ses_smtp_password, smtp_password) is never returned: '
+            .'it is null, and `<field>_set` says whether one is stored. Sending this answer back to PUT keeps them; PUT `clear_secrets` clears one.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         responses: [
@@ -650,7 +658,7 @@ class SystemController extends Controller
     public function getEximConfig(): JsonResponse
     {
         return new JsonResponse([
-            'data' => Setting::getEximConfig(),
+            'data' => EximConfigSecrets::masked(Setting::getEximConfig()),
         ]);
     }
 
@@ -660,53 +668,60 @@ class SystemController extends Controller
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            description: 'Fields are merged into the stored config; one that is absent keeps its value, one sent as null or "" clears it.',
+            description: 'Fields are merged into the stored config; one that is absent keeps its value, one sent as null or "" clears it. '
+                .'A password or API token (sendgrid_api_token, mailchannels_password, amazon_ses_smtp_password, smtp_password) sent as null or "" '
+                .'keeps its stored value, so the GET answer can be sent back unchanged; name it in `clear_secrets` to clear it. '
+                .'A password or API token may be a `vault:<key>`; a username (mailchannels_username, amazon_ses_smtp_username, '
+                .'smtp_username) is not a secret, and a `vault:` reference sent for one is refused with 422.',
             properties: [
                 new OA\Property(property: 'smarthost_provider', type: 'string', nullable: true),
                 new OA\Property(property: 'sendgrid_api_token', type: 'string', nullable: true),
-                new OA\Property(property: 'mailchannels_username', type: 'string', nullable: true),
+                new OA\Property(property: 'mailchannels_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'mailchannels_password', type: 'string', nullable: true),
                 new OA\Property(property: 'amazon_ses_smtp_endpoint', type: 'string', nullable: true),
                 new OA\Property(property: 'amazon_ses_starttls_port', type: 'string', nullable: true),
-                new OA\Property(property: 'amazon_ses_smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'amazon_ses_smtp_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'amazon_ses_smtp_password', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_host', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_port', type: 'string', nullable: true),
-                new OA\Property(property: 'smtp_username', type: 'string', nullable: true),
+                new OA\Property(property: 'smtp_username', type: 'string', nullable: true, description: 'The username itself; a `vault:` reference is refused, since a username is not a secret.'),
                 new OA\Property(property: 'smtp_password', type: 'string', nullable: true),
                 new OA\Property(property: 'smtp_implicit_tls', type: 'boolean', nullable: true),
                 new OA\Property(property: 'sender_domain', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'clear_secrets',
+                    type: 'array',
+                    items: new OA\Items(type: 'string', enum: EximConfigSecrets::HIDDEN_FIELDS),
+                    nullable: true,
+                    description: 'Stored passwords or API tokens to clear.',
+                ),
             ],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Config updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 422, description: 'Validation error: a host that is not a hostname or an IP, a port that is not 1-65535', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error: a host that is not a hostname or an IP, a port that is not 1-65535, a `vault:` reference for a username', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function updateEximConfig(Request $request): JsonResponse
+    public function updateEximConfig(EximConfigUpdateRequest $request, System $system): JsonResponse
     {
-        self::withoutTrailingDots($request);
-        $sent = $request->only(self::EXIM_SECRET_FIELDS);
-        $request->merge(self::resolveEximSecrets($sent));
-        $params = $request->validate(self::eximConfigRules());
+        $params = $request->config();
 
-        $system = new System();
         Setting::updateEximConfig($params);
         $system->exim()->rebuildEximConfig();
 
         return new JsonResponse([
-            'data' => self::eximConfigAnswer($params, $sent),
+            'data' => self::eximConfigAnswer($params, $request->sentCredentials()),
         ]);
     }
 
     /**
      * The saved fields with each credential as the caller sent it, so a
-     * `vault:<id>` is answered as the reference and never as its secret.
+     * `vault:<key>` is answered as the reference and never as its secret.
      *
-     * @param array<string, mixed> $saved
-     * @param array<string, mixed> $sent
+     * @param  array<string, mixed>  $saved
+     * @param  array<string, mixed>  $sent
      * @return array<string, mixed>
      */
     private static function eximConfigAnswer(array $saved, array $sent): array
@@ -714,122 +729,18 @@ class SystemController extends Controller
         return array_replace($saved, array_intersect_key($sent, $saved));
     }
 
-    /**
-     * The mail credentials, which may be a `vault:<id>`.
-     *
-     * @var list<string>
-     */
-    private const EXIM_SECRET_FIELDS = [
-        'sendgrid_api_token',
-        'mailchannels_username',
-        'mailchannels_password',
-        'amazon_ses_smtp_username',
-        'amazon_ses_smtp_password',
-        'smtp_username',
-        'smtp_password',
-    ];
-
-    /**
-     * Resolves `vault:<id>` mail credentials. Runs before validation, so EximSecret checks the secret that reaches passwd.client.
-     *
-     * @param array<string, mixed> $params
-     * @return array<string, mixed>
-     */
-    private static function resolveEximSecrets(array $params): array
-    {
-        foreach (self::EXIM_SECRET_FIELDS as $field) {
-            if (array_key_exists($field, $params)) {
-                $params[$field] = RequestVault::resolve($field, $params[$field], null);
-            }
-        }
-
-        return $params;
-    }
-
-    /**
-     * What the Exim config takes, saved by PUT /system/exim-config and by a
-     * test email's `config`. Hosts, ports and the sender domain end up in
-     * update-exim4.conf.conf, which update-exim4.conf pastes into a sed
-     * expression: a `|` there broke the apply with a raw sed error. `smtp_host`
-     * takes no port, since smtp_port is appended to it as `::<port>`.
-     *
-     * @return array<string, mixed>
-     */
-    private static function eximConfigRules(string $prefix = ''): array
-    {
-        $host = ['string', 'nullable', new UpstreamHost()];
-        $port = self::EXIM_PORT_RULE;
-        $secret = ['string', 'nullable', new EximSecret()];
-        $rules = [
-            'smarthost_provider' => 'string|nullable',
-            'sendgrid_api_token' => $secret,
-            'mailchannels_username' => $secret,
-            'mailchannels_password' => $secret,
-            'amazon_ses_smtp_endpoint' => $host,
-            'amazon_ses_starttls_port' => $port,
-            'amazon_ses_smtp_username' => $secret,
-            'amazon_ses_smtp_password' => $secret,
-            'smtp_host' => $host,
-            'smtp_port' => $port,
-            'smtp_username' => $secret,
-            'smtp_password' => $secret,
-            'smtp_implicit_tls' => 'boolean|nullable',
-            'sender_domain' => [...$host, self::senderDomainIsNotAnAddress(...)],
-        ];
-
-        $prefixed = [];
-        foreach ($rules as $field => $rule) {
-            $prefixed[$prefix . $field] = $rule;
-        }
-
-        return $prefixed;
-    }
-
-    /**
-     * `digits_between` refuses " 587" and "587\n", which `integer` alone takes and MCP passes
-     * through untrimmed; `integer` stays so `between` compares the number.
-     */
-    private const EXIM_PORT_RULE = 'string|nullable|digits_between:1,5|integer|between:1,65535';
-
-    /** Senders are rewritten to this domain, and an IP address is not one. */
-    private static function senderDomainIsNotAnAddress(string $attribute, mixed $value, \Closure $fail): void
-    {
-        if (is_string($value) && filter_var($value, FILTER_VALIDATE_IP) !== false) {
-            $fail('The :attribute must be a domain name, not an IP address.');
-        }
-    }
-
-    /**
-     * `smtp.example.com.` names the same host and was accepted before; it is
-     * stored without the dot, so the hostname rule and Exim's readhost take it.
-     */
-    private static function withoutTrailingDots(Request $request, ?string $under = null): void
-    {
-        $input = $under === null ? $request->all() : $request->input($under);
-        if (!is_array($input)) {
-            return;
-        }
-        foreach (['smtp_host', 'amazon_ses_smtp_endpoint', 'sender_domain'] as $field) {
-            $value = $input[$field] ?? null;
-            if (is_string($value) && strlen($value) > 1 && str_ends_with($value, '.')) {
-                $input[$field] = substr($value, 0, -1);
-            }
-        }
-        $request->merge($under === null ? $input : [$under => $input]);
-    }
-
     #[OA\Post(
         path: '/system/exim-send-test-email',
         summary: 'Send a test email via Exim',
         description: 'exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce. '
-            . 'A `config` sent here is merged into the stored mail config and the Exim config rebuilt before the send, so it is not a throwaway: omit `config` to test the settings already stored, or expect the host\'s mail to run on what you send.',
+            .'A `config` sent here is merged into the stored mail config and the Exim config rebuilt before the send, so it is not a throwaway: omit `config` to test the settings already stored, or expect the host\'s mail to run on what you send.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['email'],
             properties: [
                 new OA\Property(property: 'email', type: 'string', format: 'email'),
-                new OA\Property(property: 'config', type: 'object', nullable: true, description: 'Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value.'),
+                new OA\Property(property: 'config', type: 'object', nullable: true, description: 'Merged into the stored mail config and applied (Exim rebuilt) before the send; a field left out keeps its stored value, and so does a password or API token sent as null.'),
             ],
         )),
         responses: [
@@ -839,38 +750,25 @@ class SystemController extends Controller
             new OA\Response(response: 422, description: 'Validation error: the recipient, or a config value PUT /system/exim-config refuses', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function sendTestEmail(Request $request): JsonResponse
+    public function sendTestEmail(EximTestEmailSendRequest $request): JsonResponse
     {
-        self::withoutTrailingDots($request, 'config');
-        if (is_array($request->input('config'))) {
-            $request->merge(['config' => self::resolveEximSecrets($request->input('config'))]);
-        }
         /**
          * @var array{
          *   email: string,
          *   config?: array
          * } $params
          */
-        $params = $request->validate([
-            'email' => self::TEST_EMAIL_RULE,
-            ...self::eximConfigRules('config.'),
-        ]);
+        $params = $request->validated();
 
-        $system = new System();
+        $system = new System;
         self::applyTestEmailConfig($system, $params['config'] ?? null);
 
         $result = $system->exim()->sendTestEmail($params['email']);
 
         return new JsonResponse([
-            'data' => $result
+            'data' => $result,
         ]);
     }
-
-    /**
-     * The address goes into the message's To: header, where a line break adds headers. It is checked
-     * as Exim::sendTestEmail() checks it, so a refusal is a 422, not that method's exception.
-     */
-    private const TEST_EMAIL_RULE = 'required|string|email:rfc,filter|max:254';
 
     /** `config` is optional: without it the test email goes out through the settings already stored. */
     private static function applyTestEmailConfig(System $system, mixed $config): void
@@ -894,9 +792,9 @@ class SystemController extends Controller
             'default_ipv6' => 'nullable|ip|ipv6',
         ]);
 
-        $system = new System();
+        $system = new System;
 
-        if (!empty($params['default_ipv4'])) {
+        if (! empty($params['default_ipv4'])) {
             Setting::set('default_ipv4', $params['default_ipv4']);
         }
         if (array_key_exists('default_ipv6', $params)) {
@@ -906,7 +804,8 @@ class SystemController extends Controller
         $reloaded = $system->rebuildDomains();
 
         $response = $this->info();
-        return $response->setData([...(array) $response->getData(true), 'reload_pending' => !$reloaded]);
+
+        return $response->setData([...(array) $response->getData(true), 'reload_pending' => ! $reloaded]);
     }
 
     public function listIpv4NatMaps(): JsonResponse
@@ -937,12 +836,12 @@ class SystemController extends Controller
 
         $map = Ipv4NatMap::upsertMap($params['local_ip'], $params['public_ip']);
 
-        $system = new System();
+        $system = new System;
         $reloaded = $system->rebuildDomains();
 
         return new JsonResponse([
             'data' => $map,
-            'reload_pending' => !$reloaded,
+            'reload_pending' => ! $reloaded,
         ]);
     }
 
@@ -951,12 +850,12 @@ class SystemController extends Controller
         $map = Ipv4NatMap::findOrFail($id);
         $map->delete();
 
-        $system = new System();
+        $system = new System;
         $reloaded = $system->rebuildDomains();
 
         return new JsonResponse([
             'data' => $map,
-            'reload_pending' => !$reloaded,
+            'reload_pending' => ! $reloaded,
         ]);
     }
 
@@ -974,16 +873,16 @@ class SystemController extends Controller
         ]);
 
         $lookupUrl = $params['lookup_url'] ?? Network::DEFAULT_IPV4_NAT_LOOKUP_URL;
-        $replaceDefaultIpv4 = !empty($params['replace_default_ipv4']);
+        $replaceDefaultIpv4 = ! empty($params['replace_default_ipv4']);
 
-        $result = (new System())->network()->rebuildIpv4NatMaps($lookupUrl, $replaceDefaultIpv4);
+        $result = (new System)->network()->rebuildIpv4NatMaps($lookupUrl, $replaceDefaultIpv4);
 
-        $system = new System();
+        $system = new System;
         $reloaded = $system->rebuildDomains();
 
         return new JsonResponse([
             'data' => $result,
-            'reload_pending' => !$reloaded,
+            'reload_pending' => ! $reloaded,
         ]);
     }
 }

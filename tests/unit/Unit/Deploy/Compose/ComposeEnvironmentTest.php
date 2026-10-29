@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpEnvironment;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * What an account may set on the environment its own application runs with.
@@ -97,7 +98,7 @@ class ComposeEnvironmentTest extends TestCase
         $decision = ComposeEnvironment::layer(
             ['env' => []],
             [],
-            ['PORT' => '9000', 'HOST' => '127.0.0.1', 'HOSTNAME' => 'localhost', 'DB_PASSWORD' => 'theirs']
+            ['PORT' => '9000', 'HOST' => TestNetwork::LOOPBACK, 'HOSTNAME' => 'localhost', 'DB_PASSWORD' => 'theirs']
         );
 
         $this->assertSame(['DB_PASSWORD' => 'theirs'], $decision['env']);

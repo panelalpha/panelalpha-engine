@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
+
 /**
  * npm/yarn/pnpm/bun mechanics shared by every JS recipe: which manager a repo
  * uses, the install/build/start command for each, and the install-time quirks
@@ -14,8 +16,8 @@ class JsPackageManager
      * `yarn.lock`, `package-lock.json`/`npm-shrinkwrap.json`. Then the
      * `packageManager` field of package.json; then npm.
      *
-     * @param array<string, true> $files
-     * @param array<string, mixed> $package
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
      */
     public static function detectPackageManager(array $files, array $package = []): string
     {
@@ -52,16 +54,16 @@ class JsPackageManager
     public static function scriptCommand(string $packageManager, string $script): string
     {
         if ($packageManager === 'yarn') {
-            return 'yarn ' . $script;
+            return 'yarn '.$script;
         }
         if ($packageManager === 'pnpm') {
-            return $script === 'start' ? 'pnpm start' : 'pnpm run ' . $script;
+            return $script === 'start' ? 'pnpm start' : 'pnpm run '.$script;
         }
         if ($packageManager === 'bun') {
-            return 'bun run ' . $script;
+            return 'bun run '.$script;
         }
 
-        return $script === 'start' ? 'npm start' : 'npm run ' . $script;
+        return $script === 'start' ? 'npm start' : 'npm run '.$script;
     }
 
     /**
@@ -71,9 +73,9 @@ class JsPackageManager
     public static function workspacesScriptCommand(string $packageManager, string $script): string
     {
         return match ($packageManager) {
-            'pnpm' => 'pnpm -r --if-present run ' . $script,
-            'bun' => "bun run --filter '*' " . $script,
-            default => 'npm run ' . $script . ' --workspaces --if-present',
+            'pnpm' => 'pnpm -r --if-present run '.$script,
+            'bun' => "bun run --filter '*' ".$script,
+            default => 'npm run '.$script.' --workspaces --if-present',
         };
     }
 
@@ -82,7 +84,7 @@ class JsPackageManager
      * `bun.lock` outranks `bun.lockb`; `package-lock.json` outranks
      * `npm-shrinkwrap.json`.
      *
-     * @param array<string, true> $files
+     * @param  array<string, true>  $files
      */
     public static function lockfileName(string $packageManager, array $files): ?string
     {
@@ -125,8 +127,8 @@ class JsPackageManager
      * `--frozen-lockfile` when a lockfile exists; `corepack enable && yarn
      * install`; `npm ci` with a lockfile, `npm install` without.
      *
-     * @param array<string, true> $files
-     * @param array<string, mixed> $package
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
      */
     public static function installCommand(
         string $pm,
@@ -147,10 +149,10 @@ class JsPackageManager
             $flags = $lock !== null
                 ? self::yarnLockfileFlag($files, $package, $projectDir)
                 : '';
-            $flags = trim($flags . ' ' . self::yarnEnginesFlag($files, $package, $projectDir));
+            $flags = trim($flags.' '.self::yarnEnginesFlag($files, $package, $projectDir));
 
             return self::withCiInstallEnv(
-                self::ENSURE_COREPACK . ' && corepack enable && yarn install' . ($flags === '' ? '' : ' ' . $flags)
+                self::ENSURE_COREPACK.' && corepack enable && yarn install'.($flags === '' ? '' : ' '.$flags)
             );
         }
 
@@ -174,7 +176,7 @@ class JsPackageManager
             return $command;
         }
 
-        return 'HUSKY=0 LEFTHOOK=0 CI=1 ' . $command;
+        return 'HUSKY=0 LEFTHOOK=0 CI=1 '.$command;
     }
 
     /**
@@ -188,7 +190,7 @@ class JsPackageManager
     public static function isGitHookInstallerScript(string $script, bool $sourcePresent = false): bool
     {
         return self::referencesGitHookTool($script)
-            || (!$sourcePresent && self::referencesLocalScript($script));
+            || (! $sourcePresent && self::referencesLocalScript($script));
     }
 
     private static function referencesGitHookTool(string $script): bool
@@ -223,14 +225,14 @@ class JsPackageManager
         }
 
         $pattern = '#(?:^|[\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx)\s+'
-            . '(?:\./)?((?:[\w.-]+/)*[\w.-]+\.(?:cjs|mjs|js|ts|sh))\b#i';
+            .'(?:\./)?((?:[\w.-]+/)*[\w.-]+\.(?:cjs|mjs|js|ts|sh))\b#i';
 
         if (preg_match_all($pattern, $script, $matches) === 0) {
             return false;
         }
 
         foreach ($matches[1] as $path) {
-            if (!str_starts_with(strtolower($path), 'node_modules/')) {
+            if (! str_starts_with(strtolower($path), 'node_modules/')) {
                 return true;
             }
         }
@@ -242,12 +244,12 @@ class JsPackageManager
     public const INSTALL_LIFECYCLE_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return array<string, mixed>
      */
     public static function stripGitHookInstallerScripts(array $package, bool $sourcePresent = false): array
     {
-        if (!isset($package['scripts']) || !is_array($package['scripts'])) {
+        if (! isset($package['scripts']) || ! is_array($package['scripts'])) {
             return $package;
         }
         foreach (self::INSTALL_LIFECYCLE_SCRIPTS as $name) {
@@ -278,41 +280,41 @@ class JsPackageManager
         $localRule = $sourcePresent
             ? ''
             : 'const local=/(?:^|[\\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx)\\s+(?:\\.\\/)?((?:[\\w.-]+\\/)*[\\w.-]+\\.(?:cjs|mjs|js|ts|sh))\\b/gi;'
-                . 'const localHit=s=>{local.lastIndex=0;let m;'
-                . 'while((m=local.exec(s))!==null){'
-                . 'if(m[1].toLowerCase().indexOf("node_modules/")!==0)return true;}'
-                . 'return false;};';
+                .'const localHit=s=>{local.lastIndex=0;let m;'
+                .'while((m=local.exec(s))!==null){'
+                .'if(m[1].toLowerCase().indexOf("node_modules/")!==0)return true;}'
+                .'return false;};';
         $localTest = $sourcePresent ? '' : '||localHit(s)';
 
         $js = 'const fs=require("fs");'
-            . 'const p=JSON.parse(fs.readFileSync("package.json","utf8"));'
-            . 'if(!p.scripts)process.exit(0);'
-            . 'const re=/\\b(husky|lefthook|simple-git-hooks|yorkie|pre-commit)\\b/i;'
-            . $localRule
-            . 'let removed=false;'
-            . 'for(const k of["preinstall","install","postinstall","prepare"]){'
-            . 'const s=p.scripts[k];'
-            . 'if(typeof s!=="string")continue;'
-            . 'if(re.test(s)' . $localTest . '){delete p.scripts[k];removed=true;}'
-            . '}'
-            . 'if(removed)fs.writeFileSync("package.json",JSON.stringify(p));';
+            .'const p=JSON.parse(fs.readFileSync("package.json","utf8"));'
+            .'if(!p.scripts)process.exit(0);'
+            .'const re=/\\b(husky|lefthook|simple-git-hooks|yorkie|pre-commit)\\b/i;'
+            .$localRule
+            .'let removed=false;'
+            .'for(const k of["preinstall","install","postinstall","prepare"]){'
+            .'const s=p.scripts[k];'
+            .'if(typeof s!=="string")continue;'
+            .'if(re.test(s)'.$localTest.'){delete p.scripts[k];removed=true;}'
+            .'}'
+            .'if(removed)fs.writeFileSync("package.json",JSON.stringify(p));';
 
         $runner = $pm === 'bun' ? 'bun' : 'node';
 
         // Bounded and allowed to fail: without the strip `npm install` runs
         // `husky install` in a tree with no .git and fails, which is visible,
         // while an unbounded RUN that hangs pins a core.
-        return 'timeout ' . self::STRIP_TIMEOUT_SECONDS . ' '
-            . $runner . ' -e ' . "'" . $js . "'"
-            . ' || true';
+        return 'timeout '.self::STRIP_TIMEOUT_SECONDS.' '
+            .$runner.' -e '."'".$js."'"
+            .' || true';
     }
 
     /**
      * npm/bun/pnpm workspace root: install needs every package.json, not only
      * the root manifest.
      *
-     * @param array<string, mixed> $package
-     * @param array<string, true> $files
+     * @param  array<string, mixed>  $package
+     * @param  array<string, true>  $files
      */
     public static function isJsWorkspace(array $package, array $files = []): bool
     {
@@ -336,7 +338,7 @@ class JsPackageManager
      * single-package repo into a broken workspace. `--dangerously-allow-all-builds`
      * (10.9+) is added only for a project declaring no build policy.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function pnpmInstallCommand(
         bool $frozenLockfile,
@@ -347,12 +349,12 @@ class JsPackageManager
         $install = $frozenLockfile ? 'pnpm install --frozen-lockfile' : 'pnpm install';
         if (
             self::pnpmSupportsDangerouslyAllowAllBuilds($spec)
-            && !self::pnpmDeclaresBuildPolicy($package, $projectDir)
+            && ! self::pnpmDeclaresBuildPolicy($package, $projectDir)
         ) {
             $install .= ' --dangerously-allow-all-builds';
         }
 
-        return self::ENSURE_COREPACK . ' && corepack enable && corepack prepare ' . $spec . ' --activate && ' . $install;
+        return self::ENSURE_COREPACK.' && corepack enable && corepack prepare '.$spec.' --activate && '.$install;
     }
 
     /**
@@ -382,7 +384,7 @@ class JsPackageManager
      *
      * Read from `package.json` `pnpm` and from pnpm-workspace.yaml.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function pnpmDeclaresBuildPolicy(array $package, ?string $projectDir): bool
     {
@@ -397,18 +399,18 @@ class JsPackageManager
         if ($projectDir === null) {
             return false;
         }
-        $path = rtrim($projectDir, '/') . '/pnpm-workspace.yaml';
-        if (!is_file($path)) {
+        $path = rtrim($projectDir, '/').'/pnpm-workspace.yaml';
+        if (! is_file($path)) {
             return false;
         }
-        $raw = file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
+        $raw = AccountHomeRead::contents($path);
+        if (! is_string($raw) || $raw === '') {
             return false;
         }
 
         $keys = implode('|', self::PNPM_BUILD_POLICY_KEYS);
 
-        return preg_match('/^[ \t]*(' . $keys . ')[ \t]*:/mi', $raw) === 1;
+        return preg_match('/^[ \t]*('.$keys.')[ \t]*:/mi', $raw) === 1;
     }
 
     /**
@@ -422,8 +424,8 @@ class JsPackageManager
      * lockfile's header — `__metadata:` is Berry, `# yarn lockfile v1` is
      * Classic. With no Berry signal at all it answers Classic.
      *
-     * @param array<string, true> $files
-     * @param array<string, mixed> $package
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
      */
     private static function yarnLockfileFlag(array $files, array $package, ?string $projectDir): string
     {
@@ -441,8 +443,8 @@ class JsPackageManager
      * failed a static build at Node 20 with `Found incompatible module`.
      * Yarn 2+ does not enforce `engines`, and the flag is unknown to it.
      *
-     * @param array<string, true> $files
-     * @param array<string, mixed> $package
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
      */
     private static function yarnEnginesFlag(array $files, array $package, ?string $projectDir): string
     {
@@ -455,8 +457,8 @@ class JsPackageManager
     /**
      * The Yarn major, or null when nothing in the project says which it is.
      *
-     * @param array<string, true> $files
-     * @param array<string, mixed> $package
+     * @param  array<string, true>  $files
+     * @param  array<string, mixed>  $package
      */
     private static function yarnMajor(array $files, array $package, ?string $projectDir): ?int
     {
@@ -473,11 +475,11 @@ class JsPackageManager
             return null;
         }
 
-        $path = rtrim($projectDir, '/') . '/yarn.lock';
-        if (!is_file($path)) {
+        $path = rtrim($projectDir, '/').'/yarn.lock';
+        if (! is_file($path)) {
             return null;
         }
-        $raw = (string) @file_get_contents($path);
+        $raw = (string) AccountHomeRead::contents($path);
         if (preg_match('/^__metadata:/m', $raw) === 1) {
             return 2;
         }
@@ -499,8 +501,8 @@ class JsPackageManager
      * `gulp default` runs `composer licenses` from a gulp task -- and the
      * install hooks of workspace members named by a literal path.
      *
-     * @param array<string, mixed> $package
-     * @param (callable(string): ?string)|null $read
+     * @param  array<string, mixed>  $package
+     * @param  (callable(string): ?string)|null  $read
      */
     public static function scriptsCallPhp(array $package, string $build, ?callable $read = null): bool
     {
@@ -513,14 +515,14 @@ class JsPackageManager
         $visited = '';
         while ($pending !== []) {
             $body = (string) array_shift($pending);
-            $visited .= $body . "\n";
+            $visited .= $body."\n";
             if (preg_match('/(?:^|[\s;&|(])(?:php|composer)(?:\s|$)/', $body) === 1) {
                 return true;
             }
             preg_match_all('/\b(?:(?:npm|pnpm)\s+run(?:-script)?|yarn(?:\s+run)?)\s+([\w:.-]+)/', $body, $m);
             foreach ($m[1] as $name) {
                 foreach (["pre{$name}", $name, "post{$name}"] as $script) {
-                    if (!isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
+                    if (! isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
                         $seen[$script] = true;
                         $pending[] = $scripts[$script];
                     }
@@ -532,7 +534,7 @@ class JsPackageManager
         }
 
         foreach (self::TASK_RUNNER_FILES as $runner => $files) {
-            if (preg_match('/\b' . $runner . '\b/i', $visited) !== 1) {
+            if (preg_match('/\b'.$runner.'\b/i', $visited) !== 1) {
                 continue;
             }
             foreach ($files as $file) {
@@ -548,7 +550,7 @@ class JsPackageManager
             if (str_contains($workspace, '*')) {
                 continue;
             }
-            $member = json_decode((string) $read($workspace . '/package.json'), true);
+            $member = json_decode((string) $read($workspace.'/package.json'), true);
             if (is_array($member) && self::scriptsCallPhp($member, '')) {
                 return true;
             }
@@ -568,7 +570,7 @@ class JsPackageManager
      * node_modules and its link step deletes any it finds. From file contents,
      * so a caller reading through the account's filesystem can ask.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     public static function isYarnPnp(array $package, ?string $yarnrc, ?string $yarnLock): bool
     {
@@ -586,13 +588,13 @@ class JsPackageManager
     }
 
     /**
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      */
     private static function corepackPnpmSpec(array $package): string
     {
         $field = $package['packageManager'] ?? '';
         if (is_string($field) && preg_match('/^pnpm@(\d+(?:\.\d+){0,2})/', $field, $matches) === 1) {
-            return 'pnpm@' . $matches[1];
+            return 'pnpm@'.$matches[1];
         }
 
         return 'pnpm@10';
@@ -611,7 +613,7 @@ class JsPackageManager
             return false;
         }
         // pnpm@10 (no minor) resolves to latest 10.x, which includes 10.9+.
-        if (!isset($matches[2]) || $matches[2] === '') {
+        if (! isset($matches[2]) || $matches[2] === '') {
             return true;
         }
 
@@ -623,8 +625,8 @@ class JsPackageManager
      * root script (injecting `--filter` into a bare `turbo build`), else the
      * framework default from `$partial['default_<kind>']`.
      *
-     * @param array<string, mixed> $scripts
-     * @param array<string, mixed> $partial
+     * @param  array<string, mixed>  $scripts
+     * @param  array<string, mixed>  $partial
      */
     public static function resolveLifecycleCommand(
         string $pm,
@@ -634,10 +636,10 @@ class JsPackageManager
     ): string {
         $slug = trim((string) ($partial['workspace_slug'] ?? ''));
         $pkg = trim((string) ($partial['workspace_package'] ?? ''));
-        $defaultKey = 'default_' . $kind;
+        $defaultKey = 'default_'.$kind;
 
-        if ($slug !== '' && self::hasScript($scripts, $kind . ':' . $slug)) {
-            return self::scriptCommand($pm, $kind . ':' . $slug);
+        if ($slug !== '' && self::hasScript($scripts, $kind.':'.$slug)) {
+            return self::scriptCommand($pm, $kind.':'.$slug);
         }
 
         if (self::hasScript($scripts, $kind)) {
@@ -692,12 +694,12 @@ class JsPackageManager
         $filter = $packageName;
         $turbo = preg_match('/\bturbo\s+run\b/', $originalBody) === 1
             || $kind !== 'build'
-            ? 'turbo run ' . $kind . ' --filter=' . $filter . '...'
-            : 'turbo build --filter=' . $filter . '...';
+            ? 'turbo run '.$kind.' --filter='.$filter.'...'
+            : 'turbo build --filter='.$filter.'...';
 
         $prefix = '';
         if (preg_match('/^(dotenv(?:\s+-c)?(?:\s+--)?)\s+/', trim($originalBody), $m) === 1) {
-            $prefix = $m[1] . ' ';
+            $prefix = $m[1].' ';
         }
 
         $runner = match ($pm) {
@@ -707,13 +709,13 @@ class JsPackageManager
             default => 'npx ',
         };
 
-        return $prefix . $runner . $turbo;
+        return $prefix.$runner.$turbo;
     }
 
     /**
      * A script is present only when it exists and is a non-empty string.
      *
-     * @param array<string, mixed> $scripts
+     * @param  array<string, mixed>  $scripts
      */
     public static function hasScript(array $scripts, string $name): bool
     {
@@ -729,7 +731,7 @@ class JsPackageManager
      * not the place to take `../../..` from. A glob is returned as written.
      * A string in this field names no directory.
      *
-     * @param array<string, mixed> $package
+     * @param  array<string, mixed>  $package
      * @return list<string>
      */
     public static function workspaces(array $package): array
@@ -738,13 +740,13 @@ class JsPackageManager
         if (is_array($workspaces) && array_key_exists('packages', $workspaces)) {
             $workspaces = $workspaces['packages'];
         }
-        if (!is_array($workspaces)) {
+        if (! is_array($workspaces)) {
             return [];
         }
 
         $paths = [];
         foreach ($workspaces as $workspace) {
-            if (!is_string($workspace)) {
+            if (! is_string($workspace)) {
                 continue;
             }
             // Absolute first, on the untrimmed string: trimming the leading
@@ -774,13 +776,13 @@ class JsPackageManager
      * there stops on `Missing script: "build"` and every Blade `@vite` answers
      * 500 with ViteManifestNotFoundException.
      *
-     * @param array<string, mixed> $package the root package.json, decoded
-     * @param callable(string): ?array<string, mixed> $packageAt a workspace
-     *        path => the package.json under it, decoded, or null when there is
-     *        none to read
+     * @param  array<string, mixed>  $package  the root package.json, decoded
+     * @param  callable(string): ?array<string, mixed>  $packageAt  a workspace
+     *                                                              path => the package.json under it, decoded, or null when there is
+     *                                                              none to read
      * @return array{workspace: string, script: string}|null null when neither
-     *         the root nor a declared workspace builds anything; `workspace`
-     *         is '' for the root
+     *                                                       the root nor a declared workspace builds anything; `workspace`
+     *                                                       is '' for the root
      */
     public static function buildTarget(array $package, callable $packageAt): ?array
     {
@@ -792,7 +794,7 @@ class JsPackageManager
         foreach (self::workspaces($package) as $workspace) {
             $workspacePackage = $packageAt($workspace);
             $workspaceScripts = is_array($workspacePackage) ? ($workspacePackage['scripts'] ?? null) : null;
-            if (!is_array($workspaceScripts) || !self::hasScript($workspaceScripts, 'build')) {
+            if (! is_array($workspaceScripts) || ! self::hasScript($workspaceScripts, 'build')) {
                 continue;
             }
 
@@ -811,6 +813,6 @@ class JsPackageManager
      */
     public static function inWorkspace(string $command, string $workspace): string
     {
-        return 'cd ' . escapeshellarg($workspace) . ' && ' . $command;
+        return 'cd '.escapeshellarg($workspace).' && '.$command;
     }
 }

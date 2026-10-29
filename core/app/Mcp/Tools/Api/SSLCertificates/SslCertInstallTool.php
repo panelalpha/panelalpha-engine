@@ -73,7 +73,7 @@ class SslCertInstallTool extends ApiTool
             'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'cert' => $schema->string()->description('PEM-encoded certificate')->required(),
-            'key' => $schema->string()->description('PEM-encoded private key')->required(),
+            'key' => $schema->string()->description('PEM-encoded private key, or a `vault:<key>` from vault_secret_create (type `key`) holding it')->required(),
             'ca' => $schema->string()->description('PEM-encoded CA bundle'),
         ];
     }

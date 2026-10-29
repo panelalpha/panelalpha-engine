@@ -8,17 +8,17 @@ use Illuminate\Validation\ValidationException;
 trait NormalizesBackupContainerCredentials
 {
     /**
-     * Read a `vault:<id>` in each secret key, typed by the key's name. A backup
+     * Read a `vault:<key>` in each secret key, typed by the key's name. A backup
      * route has no project, so only a global entry can be used.
      *
-     * @param array<string, mixed> $credentials
-     * @param list<string> $secretKeys
+     * @param  array<string, mixed>  $credentials
+     * @param  list<string>  $secretKeys
      * @return array<string, mixed>
      */
     private function resolveCredentialSecrets(array $credentials, array $secretKeys): array
     {
         foreach ($secretKeys as $key) {
-            if (!array_key_exists($key, $credentials)) {
+            if (! array_key_exists($key, $credentials)) {
                 continue;
             }
             $credentials[$key] = RequestVault::resolve($key, $credentials[$key], null);
@@ -41,7 +41,7 @@ trait NormalizesBackupContainerCredentials
 
     /**
      * Credential keys per remote driver: the ones that must be present, the ones
-     * a `vault:<id>` may stand for, and every one kept.
+     * a `vault:<key>` may stand for, and every one kept.
      */
     private const CREDENTIAL_KEYS = [
         's3' => [
@@ -85,15 +85,15 @@ trait NormalizesBackupContainerCredentials
 
         throw ValidationException::withMessages([
             'location' => 'Local backup location must be under a path this engine persists ('
-                . implode(', ', self::PERSISTENT_LOCATION_ROOTS)
-                . '); anywhere else it lives inside the engine container and is lost when that container is recreated.',
+                .implode(', ', self::PERSISTENT_LOCATION_ROOTS)
+                .'); anywhere else it lives inside the engine container and is lost when that container is recreated.',
         ]);
     }
 
     private static function isUnderPersistentRoot(string $path): bool
     {
         foreach (self::PERSISTENT_LOCATION_ROOTS as $root) {
-            if ($path === $root || str_starts_with($path . '/', $root . '/')) {
+            if ($path === $root || str_starts_with($path.'/', $root.'/')) {
                 return true;
             }
         }
@@ -102,7 +102,7 @@ trait NormalizesBackupContainerCredentials
     }
 
     /**
-     * @param ?array<string, mixed> $credentials
+     * @param  ?array<string, mixed>  $credentials
      * @return ?array<string, mixed>
      */
     public function normalizeCredentials(string $driver, ?array $credentials): ?array
@@ -111,7 +111,7 @@ trait NormalizesBackupContainerCredentials
             return null;
         }
 
-        if (!is_array($credentials)) {
+        if (! is_array($credentials)) {
             throw ValidationException::withMessages([
                 'credentials' => 'Credentials are required for non-local backup storage.',
             ]);
@@ -130,8 +130,8 @@ trait NormalizesBackupContainerCredentials
     /**
      * The kept keys in their listed order, without the null or empty ones.
      *
-     * @param array<string, mixed> $credentials
-     * @param list<string> $keys
+     * @param  array<string, mixed>  $credentials
+     * @param  list<string>  $keys
      * @return array<string, mixed>
      */
     private static function keptCredentials(array $credentials, array $keys): array
@@ -145,15 +145,15 @@ trait NormalizesBackupContainerCredentials
     }
 
     /**
-     * @param array<string, mixed> $credentials
-     * @param list<string> $keys
+     * @param  array<string, mixed>  $credentials
+     * @param  list<string>  $keys
      */
     private function requireCredentialKeys(array $credentials, array $keys, string $field): void
     {
         $messages = [];
         foreach ($keys as $key) {
             $value = $credentials[$key] ?? null;
-            if (!is_string($value) || $value === '') {
+            if (! is_string($value) || $value === '') {
                 $messages["{$field}.{$key}"] = "The {$key} field is required.";
             }
         }

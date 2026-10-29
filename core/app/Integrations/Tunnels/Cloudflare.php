@@ -4,12 +4,15 @@ namespace App\Integrations\Tunnels;
 
 use App\Lib\Apis\Cloudflare as CloudflareApi;
 use App\Lib\Apis\Cloudflare\CloudflareException;
-use App\System;
-use App\System\Project\Dind;
+use App\Lib\Apis\Cloudflare\CloudflareFailure;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\Models\User;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\SitePasswordProtection;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -18,15 +21,25 @@ use Illuminate\Support\Facades\Log;
  * Token, remote cfd_tunnel, DNS CNAME, ingress from ProxyRules, and cloudflared
  * as an account service. Public hostname rows live in `tunnels`; PanelAlpha Online
  * is {@see PanelAlphaConnect}, dispatched by {@see TunnelManager}.
+ *
+ * Cloudflare refusing or failing a call is a {@see CloudflareFailure} or a
+ * ProblemException naming the token permission that call needs.
  */
 class Cloudflare
 {
     /** The account service that runs cloudflared. */
     private const CONNECTOR = 'cloudflared';
 
+    /** The token permissions the calls need, as Cloudflare's dashboard names them. */
+    private const TUNNEL_EDIT = 'Account · Cloudflare Tunnel · Edit';
+
+    private const ZONE_READ = 'Zone · Zone · Read';
+
+    private const DNS_EDIT = 'Zone · DNS · Edit';
+
     public static function tunnelName(string $username): string
     {
-        return 'panelalpha-' . $username;
+        return 'panelalpha-'.$username;
     }
 
     public static function clientFor(User $user): CloudflareApi
@@ -35,8 +48,8 @@ class Cloudflare
         if ($token === null) {
             throw new CloudflareException(
                 "Project '{$user->username}' has no Cloudflare API token. "
-                . 'Run: pae projects:settings:set --project=' . $user->username
-                . ' cloudflare-api-token TOKEN'
+                .'Run: pae projects:settings:set --project='.$user->username
+                .' cloudflare-api-token TOKEN'
             );
         }
 
@@ -126,22 +139,25 @@ class Cloudflare
     public static function unreadableTunnelTokenMessage(string $username): string
     {
         return "The Cloudflare tunnel token stored for '{$username}' cannot be decoded, so its tunnel is left as it is. "
-            . "Reconnect it: `pae project:settings:unset --project={$username} cloudflare-api-token --force`, "
-            . 'set the cloudflare-api-token setting again and re-create the tunnel hostnames.';
+            ."Reconnect it: `pae project:settings:unset --project={$username} cloudflare-api-token --force`, "
+            .'set the cloudflare-api-token setting again and re-create the tunnel hostnames.';
     }
 
     /**
      * Attach a Cloudflare public hostname to an existing local domain.
      * Caller must have already run {@see TunnelManager::assertCreatable}.
+     * The zone is looked up first, so a token that cannot read it creates no tunnel.
      */
     public static function createHostname(User $user, Domain $domain, string $hostname): Tunnel
     {
         self::assertDinD($user);
 
         $client = self::clientFor($user);
-        $cfTunnel = self::ensureTunnel($user);
-        $zone = $client->findZoneForHostname($hostname);
-        $record = $client->ensureDnsCname($zone['id'], $hostname, $cfTunnel['tunnel_id']);
+        $zone = self::zoneFor($client, $hostname);
+        $cfTunnel = self::onTunnel(fn (): array => self::ensureTunnel($user));
+        $record = self::onDns(
+            fn (): array => $client->ensureDnsCname($zone['id'], $hostname, $cfTunnel['tunnel_id'])
+        );
 
         $tunnel = Tunnel::create([
             'domain_id' => $domain->id,
@@ -173,27 +189,35 @@ class Cloudflare
 
         try {
             $client = new CloudflareApi($token);
-            $details = $tunnel->getDetails();
-            $zoneId = is_string($details['cloudflare_zone_id'] ?? null) ? $details['cloudflare_zone_id'] : null;
-            $recordId = is_string($details['cloudflare_dns_record_id'] ?? null) ? $details['cloudflare_dns_record_id'] : null;
-
-            if ($zoneId && $recordId) {
-                $client->deleteDnsRecord($zoneId, $recordId);
-            } elseif ($zoneId) {
-                $existing = $client->findDnsRecord($zoneId, $tunnel->hostname);
-                if ($existing !== null) {
-                    $client->deleteDnsRecord($zoneId, $existing['id']);
-                }
-            }
-
-            $ingress = $client->getIngress($accountId, $tunnelId);
-            $updated = CloudflareApi::removeHostnameIngress($ingress, $tunnel->hostname);
-            $client->putIngress($accountId, $tunnelId, $updated);
+            self::onDns(fn () => self::deleteDnsRecordOf($client, $tunnel));
+            self::onTunnel(fn () => self::removeFromIngress($client, $accountId, $tunnelId, $tunnel->hostname));
         } catch (\Throwable $e) {
             Log::warning(
-                "Cloudflare tunnel row teardown failed for {$tunnel->hostname}: " . $e->getMessage()
+                "Cloudflare tunnel row teardown failed for {$tunnel->hostname}: ".$e->getMessage()
             );
         }
+    }
+
+    private static function deleteDnsRecordOf(CloudflareApi $client, Tunnel $tunnel): void
+    {
+        $details = $tunnel->getDetails();
+        $zoneId = is_string($details['cloudflare_zone_id'] ?? null) ? $details['cloudflare_zone_id'] : null;
+        $recordId = is_string($details['cloudflare_dns_record_id'] ?? null) ? $details['cloudflare_dns_record_id'] : null;
+
+        if ($zoneId && $recordId) {
+            $client->deleteDnsRecord($zoneId, $recordId);
+        } elseif ($zoneId) {
+            $existing = $client->findDnsRecord($zoneId, $tunnel->hostname);
+            if ($existing !== null) {
+                $client->deleteDnsRecord($zoneId, $existing['id']);
+            }
+        }
+    }
+
+    private static function removeFromIngress(CloudflareApi $client, string $accountId, string $tunnelId, string $hostname): void
+    {
+        $ingress = CloudflareApi::removeHostnameIngress($client->getIngress($accountId, $tunnelId), $hostname);
+        $client->putIngress($accountId, $tunnelId, $ingress);
     }
 
     /**
@@ -213,7 +237,7 @@ class Cloudflare
 
         self::assertDinD($user);
         $client = self::clientFor($user);
-        $cfTunnel = self::ensureTunnel($user);
+        $cfTunnel = self::onTunnel(fn (): array => self::ensureTunnel($user));
 
         $rules = ProxyRule::query()
             ->where('transport', 'http')
@@ -222,13 +246,14 @@ class Cloudflare
             ->orderBy('listen_port')
             ->get();
 
-        $ingress = $client->getIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id']);
+        $ingress = self::onTunnel(fn (): array => $client->getIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id']));
 
         if ($rules->isEmpty()) {
             foreach ($cloudflare as $tunnel) {
                 $ingress = CloudflareApi::removeHostnameIngress($ingress, $tunnel->hostname);
             }
-            $client->putIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id'], $ingress);
+            self::onTunnel(fn () => $client->putIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id'], $ingress));
+
             return;
         }
 
@@ -242,7 +267,7 @@ class Cloudflare
             throw new CloudflareException('Upstream port must be 1-65535.');
         }
 
-        $passwordOn = \App\System\Project\SitePasswordProtection::isEnabled($user);
+        $passwordOn = SitePasswordProtection::isEnabled($user);
         if ($passwordOn) {
             // Hairpin through host nginx-proxy so the site password gate applies.
             // DinD compose already maps host.docker.internal → host-gateway.
@@ -258,7 +283,7 @@ class Cloudflare
             }
         } else {
             $origin = CloudflareApi::originServiceUrl($upstreamPort);
-            $originRequest = new \stdClass();
+            $originRequest = new \stdClass;
         }
 
         foreach ($cloudflare as $tunnel) {
@@ -272,10 +297,11 @@ class Cloudflare
             $details = $tunnel->getDetails();
             $zoneId = is_string($details['cloudflare_zone_id'] ?? null) ? $details['cloudflare_zone_id'] : null;
             if ($zoneId === null || $zoneId === '') {
-                $zone = $client->findZoneForHostname($tunnel->hostname);
-                $zoneId = $zone['id'];
+                $zoneId = self::zoneFor($client, $tunnel->hostname)['id'];
             }
-            $record = $client->ensureDnsCname($zoneId, $tunnel->hostname, $cfTunnel['tunnel_id']);
+            $record = self::onDns(
+                fn (): array => $client->ensureDnsCname($zoneId, $tunnel->hostname, $cfTunnel['tunnel_id'])
+            );
             $tunnel->setDetails([
                 'cloudflare_zone_id' => $zoneId,
                 'cloudflare_dns_record_id' => $record['id'],
@@ -283,7 +309,40 @@ class Cloudflare
             $tunnel->save();
         }
 
-        $client->putIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id'], $ingress);
+        self::onTunnel(fn () => $client->putIngress($cfTunnel['account_id'], $cfTunnel['tunnel_id'], $ingress));
+    }
+
+    /**
+     * @return array{id: string, name: string}
+     */
+    private static function zoneFor(CloudflareApi $client, string $hostname): array
+    {
+        return self::needing(self::ZONE_READ, 'zone', fn (): array => $client->findZoneForHostname($hostname));
+    }
+
+    private static function onDns(callable $call): mixed
+    {
+        return self::needing(self::DNS_EDIT, 'zone', $call);
+    }
+
+    private static function onTunnel(callable $call): mixed
+    {
+        return self::needing(self::TUNNEL_EDIT, 'account', $call);
+    }
+
+    /**
+     * Only an answer from Cloudflare is classified: the engine's own refusals carry no
+     * HTTP status and keep their message.
+     */
+    private static function needing(string $permission, string $resource, callable $call): mixed
+    {
+        try {
+            return $call();
+        } catch (ConnectionException $e) {
+            throw CloudflareFailure::of($e, $permission, $resource);
+        } catch (CloudflareException $e) {
+            throw $e->responseStatus() === null ? $e : CloudflareFailure::of($e, $permission, $resource);
+        }
     }
 
     /**
@@ -307,7 +366,7 @@ class Cloudflare
                 $tunnel->delete();
             } catch (\Throwable $e) {
                 Log::warning(
-                    "Cloudflare tunnel teardown failed for {$tunnel->hostname}: " . $e->getMessage()
+                    "Cloudflare tunnel teardown failed for {$tunnel->hostname}: ".$e->getMessage()
                 );
                 try {
                     $tunnel->delete();
@@ -323,7 +382,7 @@ class Cloudflare
                 $client->deleteTunnel($accountId, $tunnelId);
             } catch (\Throwable $e) {
                 Log::warning(
-                    "Cloudflare tunnel teardown failed for {$user->username}: " . $e->getMessage()
+                    "Cloudflare tunnel teardown failed for {$user->username}: ".$e->getMessage()
                 );
             }
         }
@@ -341,7 +400,7 @@ class Cloudflare
             self::disableConnector($user);
         } catch (\Throwable $e) {
             Log::warning(
-                "Could not stop cloudflared for {$user->username}: " . $e->getMessage()
+                "Could not stop cloudflared for {$user->username}: ".$e->getMessage()
             );
         }
 
@@ -364,14 +423,14 @@ class Cloudflare
      */
     public static function connectorEnvPath(User $user): string
     {
-        return $user->project()->homeDirPath() . '/.panelalpha/cloudflared.env';
+        return $user->project()->homeDirPath().'/.panelalpha/cloudflared.env';
     }
 
     public static function removeConnectorToken(User $user): void
     {
         try {
             $path = self::connectorEnvPath($user);
-            (new System())->exec(['sudo', 'rm', '-f', $path]);
+            (new System)->exec(['sudo', 'rm', '-f', $path]);
         } catch (\Throwable $e) {
             // best-effort
         }
@@ -385,7 +444,7 @@ class Cloudflare
     public static function renderConnector(User $user, bool $autostart, ?string $tunnelToken = null): void
     {
         $runtime = $user->project()->runtime();
-        if (!($runtime instanceof Dind)) {
+        if (! ($runtime instanceof Dind)) {
             return;
         }
 
@@ -412,14 +471,14 @@ class Cloudflare
     public static function reloadConnector(User $user): void
     {
         $runtime = $user->project()->runtime();
-        if (!($runtime instanceof Dind)) {
+        if (! ($runtime instanceof Dind)) {
             return;
         }
         try {
             $runtime->services()->apply(self::CONNECTOR);
         } catch (\Throwable $e) {
             // Container may be down during account create / teardown.
-            Log::info("cloudflared reload skipped for {$user->username}: " . $e->getMessage());
+            Log::info("cloudflared reload skipped for {$user->username}: ".$e->getMessage());
         }
     }
 
@@ -444,7 +503,7 @@ class Cloudflare
      */
     public static function disableConnector(User $user): void
     {
-        if (!($user->project()->runtime() instanceof Dind)) {
+        if (! ($user->project()->runtime() instanceof Dind)) {
             return;
         }
         self::renderConnector($user, false);
@@ -459,7 +518,7 @@ class Cloudflare
 
     public static function assertDinD(User $user): void
     {
-        if (!($user->project()->runtime() instanceof Dind)) {
+        if (! ($user->project()->runtime() instanceof Dind)) {
             throw new CloudflareException(
                 "Cloudflare tunnels are only supported for DinD projects ('{$user->username}' is not DinD)."
             );

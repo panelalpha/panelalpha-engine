@@ -22,25 +22,23 @@ final class ProjectName implements ProblemRule
     public const EXAMPLES = ['shop', 'blog2', 'myapp01'];
 
     /** @param string $field the name the caller sent it under: `name` or `username` */
-    public function __construct(private readonly string $field = 'username')
-    {
-    }
+    public function __construct(private readonly string $field = 'username') {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         // Not a string: the `string` rule beside this one says so.
-        if (!is_string($value) || preg_match('/' . self::PATTERN . '/', $value) === 1) {
+        if (! is_string($value) || preg_match('/'.self::PATTERN.'/', $value) === 1) {
             return;
         }
 
         $suggestion = self::suggest($value);
-        $shown = mb_strlen($value) > 40 ? mb_substr($value, 0, 40) . '…' : $value;
+        $shown = mb_strlen($value) > 40 ? mb_substr($value, 0, 40).'…' : $value;
 
         $this->reject(array_filter([
             'field' => $this->field,
-            'code' => $this->field . '_invalid',
-            'message' => "'{$shown}' is not a valid project name. A project name is " . self::EXPECTED . '.'
-                . ($suggestion !== null ? " For example: {$suggestion}." : ''),
+            'code' => $this->field.'_invalid',
+            'message' => "'{$shown}' is not a valid project name. A project name is ".self::EXPECTED.'.'
+                .($suggestion !== null ? " For example: {$suggestion}." : ''),
             'expected' => self::EXPECTED,
             'pattern' => self::PATTERN,
             'suggestion' => $suggestion,

@@ -2,6 +2,10 @@
 
 namespace App\Models;
 
+use App\Jobs\ApplyEnvVars;
+use App\Jobs\DeployProject;
+use App\Jobs\RebuildProject;
+use App\Lib\Task\TaskReconciler;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -12,9 +16,13 @@ use Laravel\Sanctum\PersonalAccessToken;
 class Task extends Model
 {
     public const STATUS_QUEUED = 'queued';
+
     public const STATUS_RUNNING = 'running';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const STATUS_FAILED = 'failed';
+
     public const STATUS_CANCELLED = 'cancelled';
 
     /** @var list<string> */
@@ -42,8 +50,8 @@ class Task extends Model
      * @var list<class-string>
      */
     public const DEPLOY_JOB_TYPES = [
-        \App\Jobs\DeployProject::class,
-        \App\Jobs\RebuildProject::class,
+        DeployProject::class,
+        RebuildProject::class,
     ];
 
     /**
@@ -54,9 +62,9 @@ class Task extends Model
      * @var list<class-string>
      */
     public const DEPLOY_LOCK_JOB_TYPES = [
-        \App\Jobs\DeployProject::class,
-        \App\Jobs\RebuildProject::class,
-        \App\Jobs\ApplyEnvVars::class,
+        DeployProject::class,
+        RebuildProject::class,
+        ApplyEnvVars::class,
     ];
 
     /** The message a refused `since` answers with, on the API and over MCP. */
@@ -122,14 +130,6 @@ class Task extends Model
     public function logs(): HasMany
     {
         return $this->hasMany(TaskLog::class);
-    }
-
-    /**
-     * @return Collection<int, TaskLog>
-     */
-    public function logsAfter(int $afterId, int $limit = 2000): Collection
-    {
-        return $this->logsPage(afterId: $afterId, limit: $limit);
     }
 
     /**
@@ -200,7 +200,7 @@ class Task extends Model
      *
      * Deploys are the only job types that write a per-account deploy log, and
      * the only ones whose liveness can be read from the pid that log records —
-     * {@see \App\Lib\Task\TaskReconciler} relies on both facts.
+     * {@see TaskReconciler} relies on both facts.
      */
     public function isDeploy(): bool
     {
@@ -210,7 +210,7 @@ class Task extends Model
     /**
      * Merging `details` from this copy is safe: nothing else writes a queued task's details.
      *
-     * @param array<string, mixed> $details merged into `details` by the same write
+     * @param  array<string, mixed>  $details  merged into `details` by the same write
      */
     public function markRunning(?string $jobId = null, array $details = []): bool
     {
@@ -238,7 +238,7 @@ class Task extends Model
      * Decided by the row, not by this copy of it: a worker taking the task and
      * a delete cancelling it may each have read it as queued.
      *
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function leaveQueued(array $values): bool
     {
@@ -263,7 +263,7 @@ class Task extends Model
     /**
      * Merge fields into `details` from the worker that owns the row right now.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     public function mergeDetails(array $details): bool
     {
@@ -298,14 +298,14 @@ class Task extends Model
      * row: a cancel and a finishing worker may each hold a running copy.
      * `details` set in memory (the reconciler does) is written by the same update.
      *
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function settle(array $values): bool
     {
         if ($this->isTerminal()) {
             return false;
         }
-        if (!array_key_exists('details', $values) && $this->isDirty('details')) {
+        if (! array_key_exists('details', $values) && $this->isDirty('details')) {
             $values['details'] = $this->castAttributeAsJson('details', $this->details);
         }
 

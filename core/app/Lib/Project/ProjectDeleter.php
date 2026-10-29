@@ -2,14 +2,15 @@
 
 namespace App\Lib\Project;
 
+use App\Auth\TokenAbilities;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\ProjectBusyException;
 use App\Jobs\CreateStaging;
 use App\Lib\Deploy\DeployLog\DeployLock;
-use App\Lib\Project\ApiAccess;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Lib\Task\TaskReconciler;
+use App\Models\PersonalAccessToken;
 use App\Models\Task;
 use App\Models\User;
 use App\Support\JobBudget;
@@ -38,17 +39,17 @@ class ProjectDeleter
     private $inQueue;
 
     /**
-     * @param null|callable(Task): ?bool $inQueue whether a task's job is still queued or
-     *        reserved by a worker; {@see TaskReconciler::queueCheck()} by default
+     * @param  null|callable(Task): ?bool  $inQueue  whether a task's job is still queued or
+     *                                               reserved by a worker; {@see TaskReconciler::queueCheck()} by default
      */
     public function __construct(
         ?TaskCanceller $canceller = null,
         ?callable $inQueue = null,
         ?ApiAccess $apiAccess = null,
     ) {
-        $this->canceller = $canceller ?? new TaskCanceller(new ProcessTreeKiller(new System()));
+        $this->canceller = $canceller ?? new TaskCanceller(new ProcessTreeKiller(new System));
         $this->inQueue = $inQueue ?? TaskReconciler::queueCheck();
-        $this->apiAccess = $apiAccess ?? new ApiAccess();
+        $this->apiAccess = $apiAccess ?? new ApiAccess;
     }
 
     /**
@@ -70,7 +71,9 @@ class ProjectDeleter
             $user->project()->assertDeletable();
             $this->cancelQueued($user);
             $this->releaseApiAccess($user);
+            $this->removeFromApiAccessScopes($user);
             $this->destroy($user);
+            $this->forgetTokenScopes($user->username);
         } finally {
             $lock->release();
         }
@@ -91,12 +94,63 @@ class ProjectDeleter
         try {
             $this->apiAccess->deny($user, apply: false);
         } catch (\Throwable $e) {
-            Log::warning("Could not remove the Engine API access of '{$user->username}': " . $e->getMessage());
+            $this->assertApiAccessReleased($user, $e);
+            Log::warning("Could not remove the Engine API access of '{$user->username}': ".$e->getMessage());
         }
     }
 
     /**
-     * @param bool $lockHeldElsewhere the account's deploy lock is held, so not by this delete
+     * An allowance that outlived its project would hand its token to the next
+     * project created under the same name, so the delete stops instead.
+     */
+    private function assertApiAccessReleased(User $user, \Throwable $failure): void
+    {
+        if ($this->apiAccess->entryFor($user) === null) {
+            return;
+        }
+
+        throw new \RuntimeException(
+            "Could not remove the Engine API access of '{$user->username}', so the project was not deleted: ".$failure->getMessage(),
+            0,
+            $failure,
+        );
+    }
+
+    /**
+     * An allowance still naming this project would hand the name to the token
+     * its next rotation mints; when it cannot be taken out, the delete stops.
+     */
+    private function removeFromApiAccessScopes(User $user): void
+    {
+        try {
+            $this->apiAccess->removeFromScopes($user->username);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                "Could not remove '{$user->username}' from the Engine API scope of other projects, so the project was not deleted: ".$e->getMessage(),
+                0,
+                $e,
+            );
+        }
+    }
+
+    /**
+     * Another token scoped to this name would reach the next project created
+     * under it; it keeps its scope, without this project.
+     */
+    private function forgetTokenScopes(string $username): void
+    {
+        foreach (PersonalAccessToken::query()->cursor() as $token) {
+            $abilities = TokenAbilities::of($token);
+            $projects = $abilities->projects() ?? [];
+            if (in_array($username, $projects, true)) {
+                $token->forceFill(['abilities' => $abilities->withProjects(array_values(array_diff($projects, [$username])))])->save();
+            }
+        }
+    }
+
+    /**
+     * @param  bool  $lockHeldElsewhere  the account's deploy lock is held, so not by this delete
+     *
      * @throws ProjectBusyException
      */
     private function assertIdle(User $user, bool $lockHeldElsewhere = false): void
@@ -162,7 +216,7 @@ class ProjectDeleter
      */
     private static function stillWorking(Task $task, bool $lockHeldElsewhere): bool
     {
-        return $lockHeldElsewhere || !TaskReconciler::workerGone($task);
+        return $lockHeldElsewhere || ! TaskReconciler::workerGone($task);
     }
 
     /**
@@ -178,7 +232,7 @@ class ProjectDeleter
             ->orderBy('id')
             ->get();
         foreach ($queued as $task) {
-            if (!$this->canceller->cancelQueued($task)) {
+            if (! $this->canceller->cancelQueued($task)) {
                 $this->assertIdle($user);
             }
         }

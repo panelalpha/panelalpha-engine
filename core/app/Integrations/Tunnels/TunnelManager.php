@@ -55,9 +55,9 @@ class TunnelManager
         if ($hostname === '') {
             throw new CloudflareException('Tunnel hostname is required.');
         }
-        if (!in_array($provider, Tunnel::PROVIDERS, true)) {
+        if (! in_array($provider, Tunnel::PROVIDERS, true)) {
             throw new CloudflareException(
-                "Unsupported tunnel provider '{$provider}'. Supported: " . implode(', ', Tunnel::PROVIDERS)
+                "Unsupported tunnel provider '{$provider}'. Supported: ".implode(', ', Tunnel::PROVIDERS)
             );
         }
         if ($domain->user_id !== $user->id) {
@@ -78,7 +78,7 @@ class TunnelManager
         );
 
         if (Tunnel::hostnameExists($hostname)
-            || (Domain::domainOrAliasExists($hostname) && !$attachedToItsOwnName)
+            || (Domain::domainOrAliasExists($hostname) && ! $attachedToItsOwnName)
         ) {
             // domainOrAliasExists already includes tunnels; keep message clear.
             throw new CloudflareException("Hostname '{$hostname}' is already in use.");
@@ -141,8 +141,8 @@ class TunnelManager
                     $purpose,
                     $expiresAt
                 );
-            } catch (CloudflareException | PanelAlphaException $e) {
-                if (!DomainAllocator::nameIsTaken($e->getMessage())) {
+            } catch (CloudflareException|PanelAlphaException $e) {
+                if (! DomainAllocator::nameIsTaken($e->getMessage())) {
                     throw $e;
                 }
             }
@@ -160,7 +160,7 @@ class TunnelManager
             $label .= $alphabet[random_int(0, strlen($alphabet) - 1)];
         }
 
-        return $label . '.' . PanelAlphaConnect::PARENT_DOMAIN;
+        return $label.'.'.PanelAlphaConnect::PARENT_DOMAIN;
     }
 
     private static function createWithProvider(
@@ -229,7 +229,7 @@ class TunnelManager
 
         $tunnel->delete();
 
-        if ($wasCloudflare && !Tunnel::projectHasCloudflareTunnels($user)) {
+        if ($wasCloudflare && ! Tunnel::projectHasCloudflareTunnels($user)) {
             Cloudflare::disableConnector($user);
         }
     }
@@ -240,13 +240,13 @@ class TunnelManager
      */
     private static function rebuildForSibling(Domain $domain, Tunnel $tunnel): void
     {
-        if (!$tunnel->isPanelAlpha()
+        if (! $tunnel->isPanelAlpha()
             || PanelAlphaConnect::servesItsOwnPublicName((string) $domain->domain, (string) $tunnel->hostname, Tunnel::PROVIDER_PANELALPHA)
         ) {
             return;
         }
         $domain->projectDomain()->rebuild();
-        (new System())->reloadWebserver();
+        (new System)->reloadWebserver();
     }
 
     public static function teardownDomain(User $user, Domain $domain): void
@@ -257,7 +257,7 @@ class TunnelManager
                 self::forgetTunnel($user, $tunnel);
             } catch (\Throwable $e) {
                 Log::warning(
-                    "Tunnel teardown failed for {$tunnel->hostname}: " . $e->getMessage()
+                    "Tunnel teardown failed for {$tunnel->hostname}: ".$e->getMessage()
                 );
                 try {
                     $tunnel->delete();

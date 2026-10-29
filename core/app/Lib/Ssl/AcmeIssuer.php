@@ -2,8 +2,8 @@
 
 namespace App\Lib\Ssl;
 
-use App\System;
 use App\Lib\HttpAcmeChallengeStore;
+use App\System;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use skoerfgen\ACMECert\ACMECert;
@@ -55,8 +55,8 @@ final class AcmeIssuer implements Issuer
         ?System $system = null,
         private readonly bool $sharedZoneAllowed = false
     ) {
-        $this->store = $store ?? new HttpAcmeChallengeStore();
-        $this->system = $system ?? new System();
+        $this->store = $store ?? new HttpAcmeChallengeStore;
+        $this->system = $system ?? new System;
     }
 
     public function id(): string
@@ -89,7 +89,7 @@ final class AcmeIssuer implements Issuer
 
         $client = new ACMECert($this->directoryUrl);
         $client->setLogger(static function (string $message): void {
-            Log::info('[acme] ' . $message);
+            Log::info('[acme] '.$message);
         });
         $client->loadAccountKey((new AcmeAccountKey($this->system))->pem());
         $client->register(true, $this->email === null || $this->email === '' ? [] : $this->email);
@@ -147,7 +147,7 @@ final class AcmeIssuer implements Issuer
                     // A token left behind is served for 24 hours and then
                     // pruned by `acme:challenge:prune`. Failing the issuance
                     // over it would be the worse outcome.
-                    Log::warning("Could not remove the ACME challenge for {$name}: " . $e->getMessage());
+                    Log::warning("Could not remove the ACME challenge for {$name}: ".$e->getMessage());
                 }
             };
         };
@@ -162,7 +162,7 @@ final class AcmeIssuer implements Issuer
      * `.well-known` part already (the vhost aliases it), so only the last
      * segment belongs to it.
      *
-     * @param array<string, mixed> $opts
+     * @param  array<string, mixed>  $opts
      */
     private static function token(array $opts): string
     {

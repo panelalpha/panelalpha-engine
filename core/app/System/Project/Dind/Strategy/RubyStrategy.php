@@ -2,21 +2,21 @@
 
 namespace App\System\Project\Dind\Strategy;
 
-use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\PlatformManifest;
-use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RailsProxy;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RailsSecret;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyDockerfile;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyEnvironment;
-use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyServer;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
+use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
+use App\System\Project\Dind as DindProject;
 
 /**
  * Rails and plain Rack applications.
@@ -43,7 +43,7 @@ class RubyStrategy
     }
 
     /**
-     * @param array{port_hint: ?int, ...} $decision
+     * @param  array{port_hint: ?int, ...}  $decision
      */
     public function apply(
         array $decision,
@@ -101,7 +101,7 @@ class RubyStrategy
     }
 
     /**
-     * @param array{port_hint: ?int, ...} $decision
+     * @param  array{port_hint: ?int, ...}  $decision
      */
     private function port(array $decision): int
     {
@@ -121,8 +121,8 @@ class RubyStrategy
             RubyRuntime::imageFor($app->project),
             SystemPackages::for($app->gemfile())
         );
-        $this->dind->system()->filesystem()->filePutContents(
-            $app->project->projectDir . '/' . RubyDockerfile::FILENAME,
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
+            $app->project->projectDir.'/'.RubyDockerfile::FILENAME,
             (new RubyDockerfile($app, $port, $base))->render(),
             $chown,
             '644'
@@ -139,7 +139,7 @@ class RubyStrategy
      */
     private function environment(RubyApp $app, string $projectDir, ?string $chown): array
     {
-        if (!$app->isRails()) {
+        if (! $app->isRails()) {
             return RubyEnvironment::for($app);
         }
         $this->installHostInitializer($projectDir, $chown);
@@ -172,15 +172,15 @@ class RubyStrategy
      */
     public function installHostInitializer(string $projectDir, ?string $chown): void
     {
-        if (!is_file($projectDir . '/config/application.rb')) {
+        if (! is_file($projectDir.'/config/application.rb')) {
             return;
         }
-        $dir = $projectDir . '/config/initializers';
-        if (!is_dir($dir)) {
+        $dir = $projectDir.'/config/initializers';
+        if (! is_dir($dir)) {
             return;
         }
-        $this->dind->system()->filesystem()->filePutContents(
-            $dir . '/zz_panelalpha_hosts.rb',
+        $this->dind->system()->filesystem()->writeFileReplacingPath(
+            $dir.'/zz_panelalpha_hosts.rb',
             RailsProxy::hostAuthorizationInitializer($this->dind->publicAppUrl()),
             $chown,
             '644'

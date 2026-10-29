@@ -47,7 +47,7 @@ class ClientRegistration
                 'lines' => [
                     sprintf(
                         'Add the GitHub marketplace %s and install engine@panelalpha with server_url=%s'
-                        . ' and api_token=%s. Confirm panelalpha-engine is connected, then list the projects on this engine.',
+                        .' and api_token=%s. Confirm panelalpha-engine is connected, then list the projects on this engine.',
                         self::SKILLS_REPO,
                         $url,
                         $token
@@ -58,7 +58,7 @@ class ClientRegistration
                 'label' => 'Codex',
                 // Plugin install has no --config, so skills and MCP are separate lines.
                 // Codex reads the token from the environment; it has no inline form.
-                'note' => 'first two lines install the create/debug skills from ' . self::SKILLS_REPO,
+                'note' => 'first two lines install the create/debug skills from '.self::SKILLS_REPO,
                 'lines' => [
                     sprintf('codex plugin marketplace add %s', self::SKILLS_REPO),
                     'codex plugin add engine@panelalpha',
@@ -77,9 +77,9 @@ class ClientRegistration
                 'lines' => [
                     sprintf(
                         'Add the GitHub marketplace %s and install engine@panelalpha. Then set'
-                        . ' PANELALPHA_MCP_TOKEN=%s and run: codex mcp add panelalpha-engine --url %s'
-                        . ' --bearer-token-env-var PANELALPHA_MCP_TOKEN. Confirm panelalpha-engine is connected,'
-                        . ' then list the projects on this engine.',
+                        .' PANELALPHA_MCP_TOKEN=%s and run: codex mcp add panelalpha-engine --url %s'
+                        .' --bearer-token-env-var PANELALPHA_MCP_TOKEN. Confirm panelalpha-engine is connected,'
+                        .' then list the projects on this engine.',
                         self::SKILLS_REPO,
                         $token,
                         $url
@@ -94,7 +94,7 @@ class ClientRegistration
             ],
             'grok' => [
                 'label' => 'Grok Build',
-                'note' => 'first two lines install the create/debug skills from ' . self::SKILLS_REPO,
+                'note' => 'first two lines install the create/debug skills from '.self::SKILLS_REPO,
                 'lines' => [
                     sprintf('grok plugin marketplace add %s', self::SKILLS_REPO),
                     'grok plugin install engine --trust',
@@ -104,8 +104,8 @@ class ClientRegistration
             'opencode' => [
                 'label' => 'OpenCode',
                 // --header takes KEY=VALUE here, not "KEY: VALUE".
-                'note' => 'skills: point opencode.json at ' . self::SKILLS_REPO
-                    . '/engine/opencode.js (the npm package is not published yet)',
+                'note' => 'skills: point opencode.json at '.self::SKILLS_REPO
+                    .'/engine/opencode.js (the npm package is not published yet)',
                 'lines' => [
                     sprintf('opencode mcp add panelalpha-engine --url %s --header "Authorization=Bearer %s"', $url, $token),
                 ],
@@ -124,7 +124,7 @@ class ClientRegistration
                 'label' => 'Cursor',
                 // The deeplink installs MCP locally; only the skills plugin
                 // is installed through chat, without the engine credentials.
-                'note' => 'open the MCP install link on your computer, then install the engine plugin from ' . self::SKILLS_REPO,
+                'note' => 'open the MCP install link on your computer, then install the engine plugin from '.self::SKILLS_REPO,
                 'lines' => array_merge(
                     [
                         'Open this link on your computer and confirm adding panelalpha-engine in Cursor:',
@@ -139,7 +139,7 @@ class ClientRegistration
                         '',
                         'Then install the engine plugin (create and debug skills). Paste into a Cursor Agent chat (plugin only):',
                         sprintf('Add the GitHub marketplace %s and install engine.', self::SKILLS_REPO),
-                        'Or use Customize -> Plugins -> import https://github.com/' . self::SKILLS_REPO . ' and install engine',
+                        'Or use Customize -> Plugins -> import https://github.com/'.self::SKILLS_REPO.' and install engine',
                     ],
                 ),
             ],
@@ -148,7 +148,7 @@ class ClientRegistration
                 // Current Windsurf (Devin Local) registers through the Devin CLI.
                 // Cascade still reads ~/.codeium/windsurf/mcp_config.json; that
                 // path is on the operator page, not printed here.
-                'note' => 'first line installs the create/debug skills from ' . self::SKILLS_REPO . '#engine',
+                'note' => 'first line installs the create/debug skills from '.self::SKILLS_REPO.'#engine',
                 'lines' => [
                     sprintf('devin plugins install %s#engine', self::SKILLS_REPO),
                     sprintf(
@@ -160,9 +160,9 @@ class ClientRegistration
             ],
             'pi' => [
                 'label' => 'Pi',
-                'note' => 'skills: pi install git:github.com/' . self::SKILLS_REPO
-                    . '. Install the adapter once: pi install npm:pi-mcp-adapter, then paste into'
-                    . ' ~/.config/mcp/mcp.json (all projects) or .mcp.json (this project)',
+                'note' => 'skills: pi install git:github.com/'.self::SKILLS_REPO
+                    .'. Install the adapter once: pi install npm:pi-mcp-adapter, then paste into'
+                    .' ~/.config/mcp/mcp.json (all projects) or .mcp.json (this project)',
                 'lines' => self::httpMcpJsonLines($url, $token),
             ],
             'hermes' => [
@@ -170,7 +170,7 @@ class ClientRegistration
                 // --auth header is required. Hermes has no --header: it reads
                 // the token from ~/.hermes/.env as MCP_PANELALPHA_ENGINE_API_KEY.
                 'note' => 'first two lines install the create/debug skills and write the token;'
-                    . ' hermes mcp add still asks whether to enable every tool',
+                    .' hermes mcp add still asks whether to enable every tool',
                 'lines' => [
                     sprintf('hermes plugins install %s/engine --enable', self::SKILLS_REPO),
                     sprintf("echo \"MCP_PANELALPHA_ENGINE_API_KEY='%s'\" >> ~/.hermes/.env", $token),
@@ -180,7 +180,7 @@ class ClientRegistration
             'openclaw' => [
                 'label' => 'OpenClaw',
                 // --transport streamable-http is required; omitting it is SSE or stdio.
-                'note' => 'first line installs the create/debug skills from the ' . self::SKILLS_REPO . ' marketplace',
+                'note' => 'first line installs the create/debug skills from the '.self::SKILLS_REPO.' marketplace',
                 'lines' => [
                     sprintf('openclaw plugins install engine --marketplace %s', self::SKILLS_REPO),
                     sprintf(
@@ -222,7 +222,7 @@ class ClientRegistration
         $all = self::all($url, $token);
         $key = strtolower(trim($client));
 
-        if (!isset($all[$key])) {
+        if (! isset($all[$key])) {
             throw new InvalidArgumentException(
                 sprintf('Unknown client "%s". Known clients: %s.', $client, implode(', ', self::clients()))
             );
@@ -236,10 +236,10 @@ class ClientRegistration
         // Cursor expects one server's transport config, not an mcpServers file.
         $config = json_encode([
             'url' => $url,
-            'headers' => ['Authorization' => 'Bearer ' . $token],
+            'headers' => ['Authorization' => 'Bearer '.$token],
         ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
-        return 'cursor://anysphere.cursor-deeplink/mcp/install?' . http_build_query([
+        return 'cursor://anysphere.cursor-deeplink/mcp/install?'.http_build_query([
             'name' => self::SERVER_NAME,
             'config' => base64_encode($config),
         ], '', '&', PHP_QUERY_RFC3986);
@@ -256,7 +256,7 @@ class ClientRegistration
         return [
             '{',
             '  "mcpServers": {',
-            '    "' . self::SERVER_NAME . '": {',
+            '    "'.self::SERVER_NAME.'": {',
             sprintf('      "url": "%s",', $url),
             '      "headers": {',
             sprintf('        "Authorization": "Bearer %s"', $token),

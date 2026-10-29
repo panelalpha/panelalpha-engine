@@ -2,9 +2,9 @@
 
 namespace App\System\Project\Dind\Inner;
 
-use App\System\Project\Dind\InnerDocker;
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\Engine\AccountStorage;
+use App\System\Project\Dind\InnerDocker;
 
 /**
  * The inner daemon's disk (data-root under ~/docker), which comes out of the account's quota.
@@ -29,7 +29,7 @@ class StorageReclaim
         try {
             $needed = $this->canAggressivelyReclaim() && $this->isLowOnDiskForBuild();
         } catch (\Throwable $e) {
-            $this->inner->host()->logWarn('Could not check inner Docker disk before the build: ' . $e->getMessage());
+            $this->inner->host()->logWarn('Could not check inner Docker disk before the build: '.$e->getMessage());
 
             return;
         }
@@ -104,14 +104,14 @@ class StorageReclaim
      * Best-effort: a prune that times out or meets a daemon error must not fail
      * the deploy it was meant to help, and the next prune still runs.
      *
-     * @param list<string> $argv
+     * @param  list<string>  $argv
      */
     private function prune(array $argv): void
     {
         try {
             $this->inner->dind()->shell()->exec($argv, [], 300);
         } catch (\Throwable $e) {
-            $this->inner->host()->logWarn('Could not reclaim inner Docker disk (' . implode(' ', $argv) . '): ' . $e->getMessage());
+            $this->inner->host()->logWarn('Could not reclaim inner Docker disk ('.implode(' ', $argv).'): '.$e->getMessage());
         }
     }
 

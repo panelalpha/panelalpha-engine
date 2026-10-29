@@ -13,6 +13,7 @@ use App\Rules\GitAccessToken;
 use App\Rules\GitRepositoryUrl;
 use App\Rules\ProjectName;
 use App\Rules\RedirectUrl;
+use App\Rules\UnlimitedOrAtLeastZero;
 use App\System\Project\Git\Ref as GitRef;
 
 /**
@@ -27,18 +28,12 @@ final class NewProjectRules
      * the project name. A missing `memory_limit` becomes the default, since every
      * project has one, and a schemeless `git_repo` (`github.com/owner/repo`) is accepted.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      * @return array{0: array<string, mixed>, 1: string}
      */
     public static function normalised(array $input): array
     {
-        $changes = [];
-        $nameField = 'username';
-
-        if (self::namesTheProjectAsName($input)) {
-            $changes['username'] = $input['name'];
-            $nameField = 'name';
-        }
+        [$changes, $nameField] = self::normalisedName($input);
 
         if (array_key_exists('domain', $input)) {
             $changes['domain'] = self::normalisedDomain($input['domain']);
@@ -57,14 +52,39 @@ final class NewProjectRules
     }
 
     /**
+     * Whether a create makes a container project: one named `dind`, or one with a `git_repo`, which deploys into it.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public static function createsContainer(array $input): bool
+    {
+        $gitRepo = $input['git_repo'] ?? null;
+
+        return ($input['template'] ?? null) === 'dind' || (is_string($gitRepo) && trim($gitRepo) !== '');
+    }
+
+    /**
+     * The project name alone, for a request that takes nothing else of a create.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{0: array<string, mixed>, 1: string}
+     */
+    public static function normalisedName(array $input): array
+    {
+        return self::namesTheProjectAsName($input)
+            ? [['username' => $input['name']], 'name']
+            : [[], 'username'];
+    }
+
+    /**
      * `name` is what every other client calls this field, so it is accepted as an alias of the
      * documented `username` rather than ignored, which would derive a name the caller never asked for.
      *
-     * @param array<string, mixed> $input
+     * @param  array<string, mixed>  $input
      */
     private static function namesTheProjectAsName(array $input): bool
     {
-        return !array_key_exists('username', $input) && array_key_exists('name', $input);
+        return ! array_key_exists('username', $input) && array_key_exists('name', $input);
     }
 
     /** MCP and the CLI skip the trimming middleware, and `example.com\n` must not be a second name for `example.com`. */
@@ -78,29 +98,30 @@ final class NewProjectRules
      * DeployPlanInput, `recipe` against the recipe registry, and whether the remote has
      * `git_branch` by ProjectCreator's repository probe, the one check that leaves the host.
      *
-     * @param string $nameField what the caller called the project name
-     * @param mixed  $domain    the normalised `domain` field
+     * @param  string  $nameField  what the caller called the project name
+     * @param  mixed  $domain  the normalised `domain` field
+     * @param  bool  $container  whether the create makes a container project ({@see createsContainer()})
      * @return array<string, mixed>
      */
-    public static function rules(string $nameField, mixed $domain): array
+    public static function rules(string $nameField, mixed $domain, bool $container): array
     {
         return [
-            'username' => ['string', new ProjectName($nameField)],
-            'domain' => 'string|regex:' . DomainName::REGEX,
-            'domain_redirect_url' => ['url', 'nullable', new RedirectUrl()],
+            'username' => self::nameRules($nameField),
+            'domain' => 'string|regex:'.DomainName::REGEX,
+            'domain_redirect_url' => ['url', 'nullable', new RedirectUrl],
             'email' => 'email',
-            'disk_space_limit' => 'integer|nullable|min:-1',
-            'memory_limit' => ['integer', 'min:1', new AccountMemoryLimit()],
-            'cpu_limit' => 'numeric|nullable|min:0',
-            'device_read_bps' => 'integer|nullable|min:-1',
-            'device_write_bps' => 'integer|nullable|min:-1',
-            'bandwidth_limit' => 'integer|nullable|min:0',
-            'mysql_databases_limit' => 'integer|nullable|min:-1',
-            'ftp_accounts_limit' => 'integer|nullable|min:-1',
-            'sftp_accounts_limit' => 'integer|nullable|min:-1',
-            'addon_domains_limit' => 'integer|nullable|min:-1',
-            'subdomains_limit' => 'integer|nullable|min:-1',
-            'inodes_limit' => 'integer|nullable|min:-1',
+            'disk_space_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'memory_limit' => ['integer', new AccountMemoryLimit(container: $container)],
+            'cpu_limit' => ['numeric', 'nullable', new UnlimitedOrAtLeastZero],
+            'device_read_bps' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'device_write_bps' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'bandwidth_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'mysql_databases_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'ftp_accounts_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'sftp_accounts_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'addon_domains_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'subdomains_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
+            'inodes_limit' => ['integer', 'nullable', new UnlimitedOrAtLeastZero],
             'php_fpm_pool_settings' => 'string|nullable',
             'lsphp_settings' => 'string|nullable',
             'redis_config' => 'string|nullable',
@@ -110,7 +131,7 @@ final class NewProjectRules
             'tunnel' => [
                 'string',
                 'nullable',
-                'in:' . implode(',', DomainPlan::TUNNELS),
+                'in:'.implode(',', DomainPlan::TUNNELS),
                 self::onlineTunnelServesTheDomain($domain),
             ],
             'git_repo' => ['nullable', ...self::gitRepositoryRules()],
@@ -124,6 +145,18 @@ final class NewProjectRules
     }
 
     /**
+     * A project name's shape, without the `required` the caller decides: a
+     * create may leave the name to the engine.
+     *
+     * @param  string  $nameField  what the caller called the project name
+     * @return array<int, mixed>
+     */
+    public static function nameRules(string $nameField): array
+    {
+        return ['string', new ProjectName($nameField)];
+    }
+
+    /**
      * The repository URL grammar, without the `nullable` or `required` the
      * caller decides: a create may omit it, an attach may not.
      *
@@ -131,7 +164,7 @@ final class NewProjectRules
      */
     public static function gitRepositoryRules(): array
     {
-        return ['string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()];
+        return ['string', 'max:'.GitRepoInput::MAX_LENGTH, new GitRepositoryUrl];
     }
 
     /**
@@ -151,7 +184,7 @@ final class NewProjectRules
      */
     public static function gitTokenRules(): array
     {
-        return ['nullable', 'string', 'max:' . GitTokenInput::MAX_LENGTH, new GitAccessToken()];
+        return ['nullable', 'string', 'max:'.GitTokenInput::MAX_LENGTH, new GitAccessToken];
     }
 
     /**
@@ -162,7 +195,7 @@ final class NewProjectRules
     public static function envVarRules(): array
     {
         return [
-            'env_vars' => ['array', 'nullable', 'max:200', new EnvVarKeysNotReserved()],
+            'env_vars' => ['array', 'nullable', 'max:200', new EnvVarKeysNotReserved],
             'env_vars.*' => 'string|nullable|max:8192',
         ];
     }
@@ -180,8 +213,8 @@ final class NewProjectRules
             if (is_string($domain) && $domain !== '' && DomainPlan::onlineLabel($domain) === null) {
                 $fail(
                     'A PanelAlpha Online tunnel serves the name it is attached to, so the domain '
-                    . 'must be that name. Omit `domain` to have one allocated, or set a Cloudflare '
-                    . 'token on the project and use the tunnels endpoint for ' . $domain . '.'
+                    .'must be that name. Omit `domain` to have one allocated, or set a Cloudflare '
+                    .'token on the project and use the tunnels endpoint for '.$domain.'.'
                 );
             }
         };
@@ -190,7 +223,7 @@ final class NewProjectRules
     private static function validRefName(): \Closure
     {
         return function (string $attribute, mixed $value, \Closure $fail): void {
-            if (is_string($value) && $value !== '' && !GitRef::isValidName($value)) {
+            if (is_string($value) && $value !== '' && ! GitRef::isValidName($value)) {
                 $fail("'{$value}' is not a valid branch or tag name.");
             }
         };

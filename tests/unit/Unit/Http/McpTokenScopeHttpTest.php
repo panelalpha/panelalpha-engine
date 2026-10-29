@@ -130,6 +130,27 @@ class McpTokenScopeHttpTest extends TestCase
         $this->assertSame(['alice'], array_values(array_unique(array_column($filtered->json('data'), 'project'))));
     }
 
+    public function test_a_project_scoped_token_cannot_read_or_write_the_activity_log(): void
+    {
+        $this->postJson('/api/mcp-activity-logs', [
+            'token_name' => 'assistant',
+            'project' => 'bob',
+            'tool_name' => 'project_get',
+            'status' => 'success',
+        ])->assertStatus(201);
+
+        $this->actingAsScopedToken('alice');
+
+        $this->getJson('/api/mcp-activity-logs')->assertStatus(403)->assertJsonMissing(['project' => 'bob']);
+        $this->getJson('/api/mcp-activity-logs?project=alice')->assertStatus(403);
+        $this->postJson('/api/mcp-activity-logs', [
+            'token_name' => 'assistant',
+            'project' => 'alice',
+            'tool_name' => 'project_get',
+            'status' => 'success',
+        ])->assertStatus(403);
+    }
+
     public function test_a_project_scoped_token_cannot_manage_tokens(): void
     {
         $this->actingAsScopedToken('alice');

@@ -12,7 +12,7 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.1.2-20261021
+    image: ghcr.io/panelalpha/engine-core:v2.2.0-20261028
     pull_policy: missing
     restart: always
     post_start:
@@ -73,7 +73,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-exim
-    image: ghcr.io/panelalpha/engine-exim:20260526
+    image: ghcr.io/panelalpha/engine-exim:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: exim.shared-hosting.palocal
@@ -94,7 +94,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-dns-proxy
-    image: ghcr.io/panelalpha/engine-dns-proxy:20260526
+    image: ghcr.io/panelalpha/engine-dns-proxy:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: dns-proxy.shared-hosting.palocal
@@ -113,7 +113,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-metrics
-    image: ghcr.io/panelalpha/engine-metrics:20260526
+    image: ghcr.io/panelalpha/engine-metrics:v2.2.0-20261028
     pull_policy: missing
     volumes_from:
       - core
@@ -141,7 +141,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database
-    image: ghcr.io/panelalpha/app-database:20260525
+    image: ghcr.io/panelalpha/app-database:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: database-core.shared-hosting.palocal
@@ -163,7 +163,7 @@ services:
       context: ./config/pure-ftpd/build
       args:
         VERSION: 1.0.51
-    image: ghcr.io/panelalpha/engine-pure-ftpd:20260105
+    image: ghcr.io/panelalpha/engine-pure-ftpd:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: pure-ftpd.shared-hosting.palocal
@@ -184,7 +184,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-sftp
-    image: ghcr.io/panelalpha/engine-sftp:20260526
+    image: ghcr.io/panelalpha/engine-sftp:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: sftp.shared-hosting.palocal
@@ -214,7 +214,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database
-    image: ghcr.io/panelalpha/app-database:20260525
+    image: ghcr.io/panelalpha/app-database:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: database-users.shared-hosting.palocal
@@ -244,7 +244,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-phpmyadmin-users
-    image: ghcr.io/panelalpha/engine-phpmyadmin-users:v2.1.2-20261022
+    image: ghcr.io/panelalpha/engine-phpmyadmin-users:v2.2.0-20261028
     pull_policy: missing
     restart: always
     hostname: phpmyadmin-users.shared-hosting.palocal
@@ -393,7 +393,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-lighthouse
-    image: ghcr.io/panelalpha/engine-lighthouse:v2.1.2-20261022
+    image: ghcr.io/panelalpha/engine-lighthouse:v2.2.0-20261028
     pull_policy: missing
     init: true
     restart: "always"

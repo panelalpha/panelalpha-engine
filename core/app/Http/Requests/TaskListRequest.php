@@ -11,6 +11,7 @@ use Illuminate\Validation\Validator;
 class TaskListRequest extends FormRequest
 {
     public const SCOPE_MINE = 'mine';
+
     public const SCOPE_ALL = 'all';
 
     public const DEFAULT_PER_PAGE = 50;
@@ -91,7 +92,7 @@ class TaskListRequest extends FormRequest
     private function requestedStatuses(): array
     {
         $raw = $this->query('status');
-        if (!is_string($raw)) {
+        if (! is_string($raw)) {
             return [];
         }
 

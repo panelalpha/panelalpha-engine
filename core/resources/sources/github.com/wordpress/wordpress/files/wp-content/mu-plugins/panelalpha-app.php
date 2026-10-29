@@ -3,7 +3,8 @@
  * Plugin Name: PanelAlpha
  * Description: CLI user management and SSO login handler for PanelAlpha app management.
  */
-if (PHP_SAPI === 'cli') {
+// Only when run as a script: WP-CLI and wp-cron load this file too.
+if (PHP_SAPI === 'cli' && (get_included_files()[0] ?? '') === __FILE__) {
     global $argv;
     // For the install action use the provided URL's host so wp_guess_url() returns the
     // right value.  For all other actions fall back to localhost (the real siteurl comes

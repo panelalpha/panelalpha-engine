@@ -22,12 +22,12 @@ class ArchiveDrop
      * Copied into the engine's temp directory first: the account-side write
      * makes its source readable, and the operator's own file keeps its mode.
      *
-     * @param string $extension the format suffix the import reads the archive by
+     * @param  string  $extension  the format suffix the import reads the archive by
      * @return string the archive's path inside the project, as zip_path takes it
      */
     public function put(User $user, string $file, string $extension): string
     {
-        $name = '.deploy-archive-' . Str::lower(Str::random(12)) . $extension;
+        $name = '.deploy-archive-'.Str::lower(Str::random(12)).$extension;
         $copy = (string) tempnam(sys_get_temp_dir(), 'pa-archive-');
         copy($file, $copy);
 
@@ -37,7 +37,7 @@ class ArchiveDrop
             @unlink($copy);
         }
 
-        return self::TARGET_DIR . '/' . $name;
+        return self::TARGET_DIR.'/'.$name;
     }
 
     /** Removed whatever the deploy did; nothing else reads it once the deploy has imported it. */

@@ -10,7 +10,7 @@ class EnableMod extends ApacheModCommand
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['apache:enable-mod'];
 
-    protected $signature = 'apache:mod:enable {mod}' . ProjectOptions::SIGNATURE;
+    protected $signature = 'apache:mod:enable {mod}'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Enable an Apache module for a project (or --all projects)';
 

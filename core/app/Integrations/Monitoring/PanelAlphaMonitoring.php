@@ -2,6 +2,7 @@
 
 namespace App\Integrations\Monitoring;
 
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Apis\PanelAlpha;
 
 /**
@@ -9,7 +10,7 @@ use App\Lib\Apis\PanelAlpha;
  *
  * Metrics and telemetry — deploy reports, recovered signals, bug reports —
  * all of which are observations about this installation. Separate from the
- * Connect ({@see \App\Integrations\Tunnels\PanelAlphaConnect}): Connect is an
+ * Connect ({@see PanelAlphaConnect}): Connect is an
  * *integration* the engine calls to get something done (a WithoutDNS name
  * created, a licence resolved), and this is a sink the engine talks at. They
  * are two services, deployed apart, reachable apart, and an install may

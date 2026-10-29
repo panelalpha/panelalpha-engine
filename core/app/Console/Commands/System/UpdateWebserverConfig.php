@@ -22,12 +22,13 @@ class UpdateWebserverConfig extends Command
         $value = $this->argument('value');
 
         try {
-            $system = new System();
+            $system = new System;
             $webserver = $system->webserver();
             $webserver->updateConfig($name, $value);
             $this->info("`{$name}` set to `{$value}`");
         } catch (\Exception $e) {
-            $this->error("[ERROR] " . $e->getMessage());
+            $this->error('[ERROR] '.$e->getMessage());
+
             return 1;
         }
 

@@ -45,10 +45,10 @@ class StepWatchdog
     private float $lastDiskCheckAt;
 
     /**
-     * @param ?\Closure(): bool $busy asked once the limit is reached; true means
-     *        the step is working, not hung, and gets another window
-     * @param ?\Closure(): ?string $diskFull asked every DISK_CHECK_SECONDS; a
-     *        reason stops the step, so a pull cannot fill the host
+     * @param  ?\Closure(): bool  $busy  asked once the limit is reached; true means
+     *                                   the step is working, not hung, and gets another window
+     * @param  ?\Closure(): ?string  $diskFull  asked every DISK_CHECK_SECONDS; a
+     *                                          reason stops the step, so a pull cannot fill the host
      */
     public function __construct(
         private readonly int $idleSeconds,
@@ -93,6 +93,7 @@ class StepWatchdog
             if ($this->idleSeconds > 0 && $silent >= $this->idleSeconds) {
                 if ($this->isBusy()) {
                     $this->lastOutputAt = microtime(true);
+
                     continue;
                 }
                 // Before the kill: killTree() polls the process, and what it
@@ -120,12 +121,12 @@ class StepWatchdog
             // A reading that cannot be taken is not a reason to stop a step.
             return;
         }
-        if (!is_string($why) || $why === '') {
+        if (! is_string($why) || $why === '') {
             return;
         }
 
         self::killTree($process);
-        throw new DiskLimitException(self::DISK_MARKER . " ({$why})");
+        throw new DiskLimitException(self::DISK_MARKER." ({$why})");
     }
 
     /** A probe that cannot answer says "not busy": the limit then holds as before. */
@@ -144,9 +145,9 @@ class StepWatchdog
     public function message(int $silentSeconds): string
     {
         $label = self::shorten($this->label, self::MAX_LABEL);
-        $line = $this->lastLine === '' ? '(none)' : '"' . self::shorten($this->lastLine, self::MAX_LINE) . '"';
+        $line = $this->lastLine === '' ? '(none)' : '"'.self::shorten($this->lastLine, self::MAX_LINE).'"';
 
-        return self::MARKER . ": \"{$label}\" printed nothing for {$silentSeconds}s. Last output: {$line}";
+        return self::MARKER.": \"{$label}\" printed nothing for {$silentSeconds}s. Last output: {$line}";
     }
 
     /**
@@ -187,7 +188,7 @@ class StepWatchdog
     private function remember(string $data): void
     {
         // \r-separated progress bars count as lines too.
-        $lines = preg_split('/[\r\n]+/', $this->partial . $data) ?: [];
+        $lines = preg_split('/[\r\n]+/', $this->partial.$data) ?: [];
         $this->partial = (string) array_pop($lines);
         foreach ([...$lines, $this->partial] as $line) {
             if (trim($line) !== '') {
@@ -197,8 +198,8 @@ class StepWatchdog
     }
 
     /**
-     * @param list<int> $pids
-     * @param list<int> $groups
+     * @param  list<int>  $pids
+     * @param  list<int>  $groups
      */
     private static function signal(array $pids, array $groups, int $signal): void
     {
@@ -211,7 +212,7 @@ class StepWatchdog
     }
 
     /**
-     * @param list<int> $pids
+     * @param  list<int>  $pids
      */
     private static function anyAlive(array $pids, int $except): bool
     {
@@ -229,7 +230,7 @@ class StepWatchdog
     }
 
     /**
-     * @param array<int, array{ppid: int, pgrp: int, state: string}> $table
+     * @param  array<int, array{ppid: int, pgrp: int, state: string}>  $table
      * @return list<int>
      */
     private static function descendants(int $pid, array $table): array
@@ -239,7 +240,7 @@ class StepWatchdog
         while ($queue !== []) {
             $parent = array_shift($queue);
             foreach ($table as $child => $info) {
-                if ($info['ppid'] === $parent && !in_array($child, $found, true)) {
+                if ($info['ppid'] === $parent && ! in_array($child, $found, true)) {
                     $found[] = $child;
                     $queue[] = $child;
                 }
@@ -252,7 +253,7 @@ class StepWatchdog
     /**
      * ppid, process group and state from /proc/<pid>/stat.
      *
-     * @param list<int>|null $only
+     * @param  list<int>|null  $only
      * @return array<int, array{ppid: int, pgrp: int, state: string}>
      */
     private static function processTable(?array $only = null): array
@@ -264,7 +265,7 @@ class StepWatchdog
         $table = [];
         foreach ($paths as $path) {
             $stat = @file_get_contents($path);
-            if (!is_string($stat) || ($close = strrpos($stat, ')')) === false) {
+            if (! is_string($stat) || ($close = strrpos($stat, ')')) === false) {
                 continue;
             }
             // The command name may contain spaces and parens; fields follow the last ')'.
@@ -286,6 +287,6 @@ class StepWatchdog
     {
         $text = trim((string) preg_replace('/\s+/', ' ', $text));
 
-        return mb_strlen($text) > $max ? mb_substr($text, 0, $max - 1) . '…' : $text;
+        return mb_strlen($text) > $max ? mb_substr($text, 0, $max - 1).'…' : $text;
     }
 }

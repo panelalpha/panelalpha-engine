@@ -32,8 +32,8 @@ use Illuminate\Support\Facades\RateLimiter;
  *     looked at yet, and nothing the request said is written down beyond the
  *     provider's name.
  *  3. Only now is the body read, because only now is it the sender's.
- *  4. Have we already acted on this delivery, or on this signed push body?
- *     A redelivery is a no-op, and so is a replay under a new delivery id.
+ *  4. Have we already seen this delivery, or this signed push body? A
+ *     redelivery is a no-op, and so is a replay under a new delivery id.
  *  5. What does it say, and is it for the branch this checkout tracks? A push
  *     can name several refs (Bitbucket sends them in one delivery); it deploys,
  *     once, if any of them is the tracked branch moving forward.
@@ -43,19 +43,22 @@ class HookReceiver
     /** Unverified requests (no recognised provider, or a bad signature) a single hook tolerates in a minute before 429. */
     private const int MAX_UNVERIFIED_REQUESTS_PER_MINUTE = 30;
 
+    /** How long a hook remembers a signed push body it received; a replay of an older one is acted on again. */
+    private const int DIGEST_RETENTION_DAYS = 90;
+
     /** @var list<HookProvider> */
     private array $providers;
 
     /**
-     * @param list<HookProvider>|null $providers
+     * @param  list<HookProvider>|null  $providers
      */
     public function __construct(?array $providers = null)
     {
         $this->providers = $providers ?? [
-            new GithubProvider(),
-            new GitlabProvider(),
-            new BitbucketCloudProvider(),
-            new BitbucketDataCenterProvider(),
+            new GithubProvider,
+            new GitlabProvider,
+            new BitbucketCloudProvider,
+            new BitbucketDataCenterProvider,
         ];
     }
 
@@ -71,7 +74,7 @@ class HookReceiver
         }
 
         $secret = $hook->secret();
-        if ($secret === null || !$provider->verify($request, $secret)) {
+        if ($secret === null || ! $this->proves($hook, $provider, $request, $secret)) {
             return $this->rejectUnproven($hook, $provider->name(), 'missing or invalid signature', 401, 'Invalid signature.');
         }
 
@@ -88,6 +91,24 @@ class HookReceiver
         }
 
         return $this->accept($hook, $provider, $request, $event);
+    }
+
+    /**
+     * Once a signed delivery has reached a hook, only signed ones are accepted, so a static
+     * token captured from one of them cannot be sent on its own with any body.
+     */
+    private function proves(DeployHook $hook, HookProvider $provider, Request $request, string $secret): bool
+    {
+        if (! $provider->verify($request, $secret)) {
+            return false;
+        }
+        if (! $provider->signsTheBody($request, $secret)) {
+            return ! $hook->expectsSignatures();
+        }
+
+        $hook->rememberSignedDelivery();
+
+        return true;
     }
 
     /**
@@ -158,14 +179,23 @@ class HookReceiver
         ?string $reason,
         ?RefChange $change,
     ): ?HookDelivery {
-        $guardBody = $event->kind === HookEvent::PUSH && $provider->signsTheBody();
+        $guardBody = $this->guardsTheBody($hook, $provider, $request, $event);
         try {
-            return DB::transaction(fn () => !$guardBody || $this->firstSeen($hook, $request)
+            return DB::transaction(fn () => ! $guardBody || $this->firstSeen($hook, $request)
                 ? $this->record($hook, $provider->name(), $event, $outcome, $reason, $change)
                 : null);
         } catch (UniqueConstraintViolationException) {
             return null;
         }
+    }
+
+    /**
+     * Every signed push is remembered, ignored ones too: whether a push deploys
+     * depends on the branch tracked when it arrives, which can change before a replay.
+     */
+    private function guardsTheBody(DeployHook $hook, HookProvider $provider, Request $request, HookEvent $event): bool
+    {
+        return $event->kind === HookEvent::PUSH && $provider->signsTheBody($request, (string) $hook->secret());
     }
 
     private function startWork(DeployHook $hook, HookDelivery $delivery, string $outcome): void
@@ -201,7 +231,7 @@ class HookReceiver
     /** Scoped to one hook, so an attack on one project never throttles another. */
     private function throttleKey(DeployHook $hook): string
     {
-        return 'deploy-hook-unverified:' . $hook->id;
+        return 'deploy-hook-unverified:'.$hook->id;
     }
 
     private function alreadyRecorded(DeployHook $hook, string $deliveryId): bool
@@ -214,6 +244,8 @@ class HookReceiver
 
     private function firstSeen(DeployHook $hook, Request $request): bool
     {
+        $this->forgetOldDigests($hook);
+
         return DB::table('hook_payload_digests')->insertOrIgnore([
             'deploy_hook_id' => $hook->id,
             'digest' => hash('sha256', $request->getContent()),
@@ -221,10 +253,18 @@ class HookReceiver
         ]) === 1;
     }
 
+    private function forgetOldDigests(DeployHook $hook): void
+    {
+        DB::table('hook_payload_digests')
+            ->where('deploy_hook_id', $hook->id)
+            ->where('created_at', '<', now()->subDays(self::DIGEST_RETENTION_DAYS))
+            ->delete();
+    }
+
     /**
      * @return array{0: string, 1: ?string, 2: ?RefChange} outcome, why when
-     *         ignored, and the change it rests on: the one that deploys or, for
-     *         an ignored push, the first, so the row still names a ref
+     *                                                     ignored, and the change it rests on: the one that deploys or, for
+     *                                                     an ignored push, the first, so the row still names a ref
      */
     private function decide(DeployHook $hook, HookEvent $event): array
     {
@@ -233,7 +273,7 @@ class HookReceiver
         }
 
         if ($event->kind !== HookEvent::PUSH) {
-            return [HookDelivery::OUTCOME_IGNORED, 'unsupported event: ' . $event->event, null];
+            return [HookDelivery::OUTCOME_IGNORED, 'unsupported event: '.$event->event, null];
         }
 
         if ($event->changes === []) {
@@ -260,7 +300,7 @@ class HookReceiver
 
         $reason = count($reasons) === 1
             ? $reasons[0]
-            : 'none of ' . count($reasons) . ' changes deploys: ' . implode('; ', $reasons);
+            : 'none of '.count($reasons).' changes deploys: '.implode('; ', $reasons);
 
         return [HookDelivery::OUTCOME_IGNORED, $reason, $event->changes[0]];
     }
@@ -275,11 +315,11 @@ class HookReceiver
         }
 
         if ($change->branch === null) {
-            return 'not a branch push: ' . $change->ref;
+            return 'not a branch push: '.$change->ref;
         }
 
         if ($change->deleted) {
-            return 'branch deleted: ' . $change->branch;
+            return 'branch deleted: '.$change->branch;
         }
 
         if ($tracked === null) {

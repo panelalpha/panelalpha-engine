@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List the branches and tags of a remote Git repository
 
-    Reads a remote with `git ls-remote --symref`, without cloning it or touching any account, so a branch picker can be shown before a project exists. Runs globally, not for one project. `branches` is the default branch first, then by name; `tags` is by name. `default_branch` is the branch HEAD pointed at, or null when the remote named none. A public repository needs no token; a private one takes a `git_token` (a `vault:<id>` is accepted in its place). A repository URL whose host resolves to an internal address is refused 422 with `problems[{field: repository, code: host_refused}]`.
+    Reads a remote with `git ls-remote --symref`, without cloning it or touching any account, so a branch picker can be shown before a project exists. Runs globally, not for one project. `branches` is the default branch first, then by name; `tags` is by name. `default_branch` is the branch HEAD pointed at, or null when the remote named none. A public repository needs no token; a private one takes a `git_token` (a `vault:<key>` is accepted in its place). A repository URL whose host resolves to an internal address, or does not resolve at all, is refused 422 with `problems[{field: repository, code: host_refused}]`.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -52,7 +52,7 @@ class SourceRefsTool extends ApiTool
     {
         return [
             'repository' => $schema->string()->description('Repository URL. The scheme may be left out; the host is not guessed for owner/repo shorthand. Example: https://github.com/owner/repo.git.')->required(),
-            'git_token' => $schema->string()->description('Access token for a private HTTPS repository. A `vault:<id>` of a global vault entry is accepted in place of the literal token; a project entry is accepted while no project owns it, and listing does not assign it. Omitted, the remote is read anonymously.'),
+            'git_token' => $schema->string()->description('Access token for a private HTTPS repository. A `vault:<key>` of a global vault entry is accepted in place of the literal token; a project entry is accepted while no project owns it, and listing does not assign it. Omitted, the remote is read anonymously.'),
             'limit' => $schema->integer()->min(1)->max(1000)->description('Most branches and, separately, most tags to return. Default 200.'),
         ];
     }

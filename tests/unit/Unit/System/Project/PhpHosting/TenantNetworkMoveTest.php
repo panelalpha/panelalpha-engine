@@ -8,6 +8,7 @@ use App\System\Filesystem;
 use App\System\Project\Dind\TenantNetworkMove as DindTenantNetworkMove;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\TenantNetworkMove;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -86,7 +87,7 @@ class TenantNetworkMoveTest extends TestCase
                     return '';
                 }
                 if ($argv === TenantNetwork::accountNetworksArgv('alice')) {
-                    return (string) json_encode(array_fill_keys($this->test->networks, ['IPAddress' => '10.200.128.9']));
+                    return (string) json_encode(array_fill_keys($this->test->networks, ['IPAddress' => TestNetwork::container(9)]));
                 }
                 if (array_slice($argv, 0, 4) === ['sudo', 'docker', 'network', 'connect']) {
                     $this->test->events[] = 'connect';

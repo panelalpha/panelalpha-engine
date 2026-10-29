@@ -29,7 +29,7 @@ class ApiAccessAllowCommand extends Command
             return 1;
         }
 
-        $access = new ApiAccess();
+        $access = new ApiAccess;
         $before = $access->entryFor($user);
 
         try {
@@ -57,7 +57,7 @@ class ApiAccessAllowCommand extends Command
 
         $this->info(sprintf(
             'Allowed %s to use the Engine API, scope %s%s, token id %s. Its containers may reach the API port, '
-            . 'and the URL, token and certificate are applied to the project now and delivered again on every deploy.',
+            .'and the URL, token and certificate are applied to the project now and delivered again on every deploy.',
             $user->username,
             ApiAccess::scopeLabel($entry['scope']),
             ($entry['mcp'] ?? false) ? ' including MCP tools' : '',

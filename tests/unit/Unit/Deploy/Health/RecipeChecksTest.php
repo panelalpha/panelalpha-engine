@@ -7,6 +7,7 @@ use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Checks a source recipe ships beside its manifest.
@@ -164,8 +165,8 @@ class RecipeChecksTest extends TestCase
 
         $report = CheckRunner::forWithDirectory('compose', [], $this->dir . '/checks')
             ->runByPath([
-                '/' => new \App\Lib\Deploy\Health\ProbedResponse(200, '<div id="root"></div>', 'http://127.0.0.1:4000/'),
-                '/api/health' => new \App\Lib\Deploy\Health\ProbedResponse(200, '{"database":"unreachable"}', 'http://127.0.0.1:4000/api/health'),
+                '/' => new \App\Lib\Deploy\Health\ProbedResponse(200, '<div id="root"></div>', 'http://' . TestNetwork::LOOPBACK . ':4000/'),
+                '/api/health' => new \App\Lib\Deploy\Health\ProbedResponse(200, '{"database":"unreachable"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
             ], null);
 
         $found = null;

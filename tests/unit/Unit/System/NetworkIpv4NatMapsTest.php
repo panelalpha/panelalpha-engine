@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Network;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class NetworkIpv4NatMapsTest extends TestCase
@@ -16,13 +17,17 @@ class NetworkIpv4NatMapsTest extends TestCase
 
     public function test_local_ipv4_addresses_excludes_loopback_and_unspecified(): void
     {
-        $output = <<<'TXT'
+        $loopback = TestNetwork::LOOPBACK;
+        $address = TestNetwork::private(5);
+        $broadcast = TestNetwork::private(255);
+        $thisNetwork = TestNetwork::THIS_NETWORK;
+        $output = <<<TXT
 1: lo: <LOOPBACK,UP>
-    inet 127.0.0.1/8 scope host lo
+    inet {$loopback}/8 scope host lo
 2: eth0: <BROADCAST,UP>
-    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0
+    inet {$address}/24 brd {$broadcast} scope global eth0
 3: dummy0:
-    inet 0.0.0.1/32 scope global dummy0
+    inet {$thisNetwork}/32 scope global dummy0
 TXT;
 
         $process = $this->createStub(Process::class);
@@ -41,6 +46,6 @@ TXT;
 
         $ips = (new Network($system))->localIpv4Addresses();
 
-        $this->assertSame(['10.0.0.5'], $ips);
+        $this->assertSame([$address], $ips);
     }
 }

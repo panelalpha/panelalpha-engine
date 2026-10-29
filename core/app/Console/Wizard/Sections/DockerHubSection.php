@@ -29,7 +29,7 @@ class DockerHubSection implements Section
 
     public function __construct()
     {
-        $this->login = new DockerHubLogin(new System());
+        $this->login = new DockerHubLogin(new System);
     }
 
     public static function key(): string
@@ -79,7 +79,7 @@ class DockerHubSection implements Section
     }
 
     /**
-     * @param array{username: string, token: string}|null $current
+     * @param  array{username: string, token: string}|null  $current
      */
     private function header(?array $current): void
     {
@@ -91,11 +91,11 @@ class DockerHubSection implements Section
         } else {
             $check = $this->login->check($current['username'], $current['token']);
             $lines[] = "Login:       {$current['username']}";
-            $lines[] = 'Rate limit:  ' . ($check['ok']
-                ? ($check['remaining'] ?? '?') . ' left of ' . ($check['limit'] ?? '?')
+            $lines[] = 'Rate limit:  '.($check['ok']
+                ? ($check['remaining'] ?? '?').' left of '.($check['limit'] ?? '?')
                 : (string) $check['error']);
         }
-        $lines[] = 'Host daemon: ' . match ($this->login->hostMirrors()) {
+        $lines[] = 'Host daemon: '.match ($this->login->hostMirrors()) {
             true => 'pulls through registry-proxy too',
             false => 'pulls Docker Hub directly',
             default => 'could not be asked',
@@ -106,29 +106,29 @@ class DockerHubSection implements Section
 
     private function setLogin(bool $dryRun): void
     {
-        Screen::draw(self::label() . '  ·  Login');
+        Screen::draw(self::label().'  ·  Login');
         note("Create a personal access token on Docker Hub with the Public Repo Read-only scope.\n"
-            . 'registry-proxy serves whatever this login can read to every account on the engine.');
+            .'registry-proxy serves whatever this login can read to every account on the engine.');
 
         $username = trim(text('Docker Hub username', validate: fn (string $v) => DockerHubLogin::badUsername(trim($v))));
         $token = trim(password('Access token', validate: fn (string $v) => DockerHubLogin::badToken(trim($v))));
 
         $check = $this->login->check($username, $token);
-        if (!$check['ok']) {
+        if (! $check['ok']) {
             warning((string) $check['error']);
             pause('Press enter to carry on...');
 
             return;
         }
-        note("Docker Hub accepts it: {$username}" . ($check['limit'] !== null ? ", {$check['limit']}" : ''), 'info');
+        note("Docker Hub accepts it: {$username}".($check['limit'] !== null ? ", {$check['limit']}" : ''), 'info');
 
         $private = $this->login->pullablePrivateRepositories($username, $token);
         if ($private === null) {
             warning('Could not check whether this token reaches private repositories.');
         } elseif ($private !== []) {
             warning("This token can pull private repositories, which every account could then pull:\n  "
-                . implode("\n  ", $private));
-            if (!confirm('Save it anyway?', default: false)) {
+                .implode("\n  ", $private));
+            if (! confirm('Save it anyway?', default: false)) {
                 return;
             }
         }
@@ -143,7 +143,7 @@ class DockerHubSection implements Section
         try {
             $this->login->save($username, $token);
         } catch (Throwable $e) {
-            warning('Could not save it: ' . trim($e->getMessage()));
+            warning('Could not save it: '.trim($e->getMessage()));
             pause('Press enter to carry on...');
 
             return;
@@ -156,7 +156,7 @@ class DockerHubSection implements Section
 
     private function clearLogin(bool $dryRun): void
     {
-        if (!confirm('Pull from Docker Hub anonymously again?', default: false)) {
+        if (! confirm('Pull from Docker Hub anonymously again?', default: false)) {
             return;
         }
         if ($dryRun) {
@@ -169,7 +169,7 @@ class DockerHubSection implements Section
         try {
             $this->login->clear();
         } catch (Throwable $e) {
-            warning('Could not remove it: ' . trim($e->getMessage()));
+            warning('Could not remove it: '.trim($e->getMessage()));
             pause('Press enter to carry on...');
 
             return;

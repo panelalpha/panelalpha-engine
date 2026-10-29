@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -10,7 +11,7 @@ use App\System\Project\Dind as DindProject;
  * Always through the System API rather than PHP's own filesystem functions:
  * ~/project is inside the account container and root-owned on the host, so a
  * plain file_get_contents() would answer for the wrong tree — or for nothing
- * at all. {@see \App\Lib\Deploy\Platform\Probes\ProcfileWebProbe} reads host
+ * at all. {@see ProcfileWebProbe} reads host
  * paths directly and is right to; anything asking what the *account* has must
  * come through here.
  *
@@ -32,7 +33,7 @@ class ProjectFiles
     {
         $system = $this->project->system();
         $fs = $system->filesystem();
-        if (!$fs->fileExists($path)) {
+        if (! $fs->fileExists($path)) {
             return null;
         }
         $contents = $fs->fileGetContents($path);
@@ -43,6 +44,6 @@ class ProjectFiles
     /** The same, for a file named relative to a project directory. */
     public function readIn(string $projectDir, string $name): ?string
     {
-        return $this->read(rtrim($projectDir, '/') . '/' . $name);
+        return $this->read(rtrim($projectDir, '/').'/'.$name);
     }
 }

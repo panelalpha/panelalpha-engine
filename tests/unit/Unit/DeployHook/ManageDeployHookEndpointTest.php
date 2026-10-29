@@ -6,6 +6,7 @@ use App\Lib\DeployHook\DeployHooks;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 
 /**
  * Show, rotate and delete over REST -- the rest of the management surface the
@@ -160,7 +161,7 @@ class ManageDeployHookEndpointTest extends DeployHookTestCase
         $response->assertJsonPath('data.path', 'project');
         $response->assertJsonPath('data.warning', DeployHooks::FORCE_PULL_WARNING);
         $this->assertNotSame($oldUrl, $response->json('data.url'));
-        $this->assertMatchesRegularExpression('#^https://203\.0\.113\.10/hooks/[0-9a-f]{40}$#', (string) $response->json('data.url'));
+        $this->assertMatchesRegularExpression('#^https://'.preg_quote(TestNetwork::public(10), '#').'/hooks/[0-9a-f]{40}$#', (string) $response->json('data.url'));
         $secret = (string) $response->json('data.secret');
         $this->assertNotSame('', $secret);
         $this->assertNotSame(self::SECRET, $secret);

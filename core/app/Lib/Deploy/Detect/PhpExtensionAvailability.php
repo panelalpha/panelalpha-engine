@@ -49,7 +49,7 @@ final class PhpExtensionAvailability
             return null;
         }
 
-        $names = implode(', ', array_map(static fn (string $e): string => 'ext-' . $e, $missing));
+        $names = implode(', ', array_map(static fn (string $e): string => 'ext-'.$e, $missing));
 
         return count($missing) === 1
             ? "This project requires the PHP extension {$names}, which is not in the image it would run on."

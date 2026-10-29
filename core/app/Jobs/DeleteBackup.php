@@ -61,12 +61,12 @@ class DeleteBackup implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $record = BackupRecord::query()->find($this->backupId);
-        if ($record !== null && !in_array($record->deleteStatus(), ['completed', 'failed'], true)) {
+        if ($record !== null && ! in_array($record->deleteStatus(), ['completed', 'failed'], true)) {
             $this->recordFailure($record, $e?->getMessage() ?? 'Delete job failed');
         }
 
         $task = $this->task();
-        if ($task !== null && !$task->isTerminal()) {
+        if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Delete job failed'));
         }
     }

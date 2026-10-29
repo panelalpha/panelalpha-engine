@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use App\System;
+use App\Http\Requests\DeployCancelRequest;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployTimings;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Models\Task;
 use App\Models\User;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -31,13 +32,13 @@ class DeployLogController extends Controller
         path: '/projects/{username}/deploy-log',
         summary: 'Poll the deploy log (JSON-lines) from a byte-like line offset',
         description: 'Returns a page of lines from `offset`. While `more` is true there are lines after this '
-            . 'page: ask again with `offset` set to `next_offset`. `max_bytes` bounds a page by size as well '
-            . 'as by line count.'
-            . "\n\n"
-            . 'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
-            . '`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
+            .'page: ask again with `offset` set to `next_offset`. `max_bytes` bounds a page by size as well '
+            .'as by line count.'
+            ."\n\n"
+            .'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
+            .'`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
         x: ['mcp-description' => 'A page of the latest deploy log from `offset`. While `more` is true, call again '
-            . 'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure.'],
+            .'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -62,8 +63,8 @@ class DeployLogController extends Controller
     {
         $this->getDindUser($username);
 
-        $offset = max(0, (int)$request->query('offset', 0));
-        $maxBytes = $request->filled('max_bytes') ? max(1024, (int)$request->query('max_bytes')) : null;
+        $offset = max(0, (int) $request->query('offset', 0));
+        $maxBytes = $request->filled('max_bytes') ? max(1024, (int) $request->query('max_bytes')) : null;
 
         $logger = DeployLogger::current($username);
         if ($logger === null) {
@@ -113,7 +114,7 @@ class DeployLogController extends Controller
      * Stage durations come from latest.json and cost nothing; the build breakdown re-reads the whole log,
      * so it is computed only once the deploy has stopped or when asked for, keeping polling cheap.
      *
-     * @param array<string, mixed>|null $latest
+     * @param  array<string, mixed>|null  $latest
      */
     private function wantsBuildTimings(?array $latest, Request $request): bool
     {
@@ -125,7 +126,8 @@ class DeployLogController extends Controller
     #[OA\Post(
         path: '/projects/{username}/deploy-cancel',
         summary: 'Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up',
-        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`.',
+        description: 'A deploy still waiting in the queue has no process yet: its task is cancelled, and the answer names it in `task_id`. '
+            .'Container projects only (`template: dind`); a PHP hosting project answers 422 with the code `'.DeployCancelRequest::CONTAINER_ONLY.'`.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -138,19 +140,20 @@ class DeployLogController extends Controller
             new OA\Response(response: 409, description: 'No running or queued deploy', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'message', type: 'string')],
             )),
+            new OA\Response(response: 422, description: 'The project is not a container project', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function cancel(string $username): JsonResponse
+    public function cancel(string $username, DeployCancelRequest $request): JsonResponse
     {
-        $user = $this->getDindUser($username);
+        $user = $this->projectOr404($username);
 
         $result = DeployLogger::requestCancel($username);
-        if (!$result['cancelled']) {
+        if (! $result['cancelled']) {
             return $this->cancelQueuedDeploy($username);
         }
 
         if ($result['pid'] !== null) {
-            (new ProcessTreeKiller(new System()))->kill($result['pid']);
+            (new ProcessTreeKiller(new System))->kill($result['pid']);
         }
 
         $this->tearDownHalfStartedApp($user, $username);
@@ -168,11 +171,11 @@ class DeployLogController extends Controller
             ->orderByDesc('id')
             ->first();
 
-        if (!$task instanceof Task) {
+        if (! $task instanceof Task) {
             return new JsonResponse(['message' => 'No running or queued deploy to cancel'], 409);
         }
 
-        if (!(new TaskCanceller(new ProcessTreeKiller(new System())))->cancelQueued($task)) {
+        if (! (new TaskCanceller(new ProcessTreeKiller(new System)))->cancelQueued($task)) {
             return new JsonResponse(['message' => "Deploy task {$task->id} has just started; cancel it again."], 409);
         }
 

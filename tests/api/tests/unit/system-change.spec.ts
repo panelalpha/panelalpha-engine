@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { describeFinishedChange, hasExitCode } from '@/helpers/system-change';
+import { testNetwork } from '@/helpers/test-network';
 import type { SystemChangeStatus } from '@/types';
 
 // latest_update as a host reported it after an update that failed (2026-10-05).
@@ -10,8 +11,7 @@ const failedUpdate: SystemChangeStatus = {
   exit_code: 1,
   tail_stdout:
     'docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d command failed with exit code 1\n[INFO] Worker exited with code 1\n',
-  tail_stderr:
-    ' Container shared-hosting-core-1 Started \nError response from daemon: failed to bind host port 127.0.0.1:5000/tcp: address already in use\n',
+  tail_stderr: ` Container shared-hosting-core-1 Started \nError response from daemon: failed to bind host port ${testNetwork.LOOPBACK}:5000/tcp: address already in use\n`,
   from_version: null,
   to_version: null,
   logs_path: '/opt/panelalpha/log/engine-updates/latest',
@@ -42,7 +42,7 @@ test.describe('describeFinishedChange', () => {
         '  [INFO] Worker exited with code 1',
         'stderr tail:',
         '  Container shared-hosting-core-1 Started',
-        '  Error response from daemon: failed to bind host port 127.0.0.1:5000/tcp: address already in use',
+        `  Error response from daemon: failed to bind host port ${testNetwork.LOOPBACK}:5000/tcp: address already in use`,
       ].join('\n')
     );
   });

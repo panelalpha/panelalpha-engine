@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class MysqlDatabase extends Model
 {
-    use HasFactory, HasDetails;
+    use HasDetails, HasFactory;
 
     protected $fillable = [
         'user_id',

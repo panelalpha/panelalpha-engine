@@ -25,6 +25,4 @@ use OpenApi\Attributes as OA;
     ],
     type: 'object',
 )]
-class FtpAccountSchema
-{
-}
+class FtpAccountSchema {}

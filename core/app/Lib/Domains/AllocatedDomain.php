@@ -15,14 +15,14 @@ namespace App\Lib\Domains;
 final class AllocatedDomain
 {
     /**
-     * @param string $source one of DomainPlan's SOURCE_* constants
-     * @param ?bool $publiclyResolvable null where it depends on DNS the
-     *        engine does not control, and so cannot be answered here
-     * @param string $tlsTerminatedAt `proxy` for a name the WithoutDNS proxy
-     *        serves -- its certificate is the trusted one visitors see, and
-     *        the engine's own is irrelevant -- `engine` for everything else
-     * @param ?array{path: string, path_fqdn: string, wdns_site_id: ?int, valid_until: ?string, target_ip: string} $allocation
-     *        what the proxy registered, for the tunnel row the caller writes
+     * @param  string  $source  one of DomainPlan's SOURCE_* constants
+     * @param  ?bool  $publiclyResolvable  null where it depends on DNS the
+     *                                     engine does not control, and so cannot be answered here
+     * @param  string  $tlsTerminatedAt  `proxy` for a name the WithoutDNS proxy
+     *                                   serves -- its certificate is the trusted one visitors see, and
+     *                                   the engine's own is irrelevant -- `engine` for everything else
+     * @param  ?array{path: string, path_fqdn: string, wdns_site_id: ?int, valid_until: ?string, target_ip: string}  $allocation
+     *                                                                                                                            what the proxy registered, for the tunnel row the caller writes
      */
     public function __construct(
         public readonly string $domain,
@@ -32,8 +32,7 @@ final class AllocatedDomain
         public readonly string $tlsTerminatedAt = 'engine',
         public readonly ?string $fallbackReason = null,
         public readonly ?array $allocation = null,
-    ) {
-    }
+    ) {}
 
     /** The `details.domain` block on the project record. */
     public function toDetails(): array

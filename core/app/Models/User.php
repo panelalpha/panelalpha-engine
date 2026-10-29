@@ -4,14 +4,19 @@ namespace App\Models;
 
 use App\Exceptions\MissingLinuxUserException;
 use App\Exceptions\NotFoundException;
+use App\Lib\Deploy\Credentials\AppCredentials;
+use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Domains\CopyDomain;
+use App\Lib\Domains\DomainPlan;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Project\NewProjectDetails;
 use App\Lib\Project\ProjectIpAddresses;
 use App\Lib\Project\RuntimeSettings;
+use App\Lib\Vault\RequestVault;
+use App\System;
 use App\System\Project as AppSystemProject;
 use App\System\Project\Dind\AppDatabase;
-use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -47,11 +52,14 @@ use Laravel\Sanctum\HasApiTokens;
  * @property int $mysql_databases_count
  * @property Collection<array-key, IpAssigned> $assignedIpAddresses
  * @property Collection<int, Backup> $backups
+ *
  * @psalm-property ?UserDetails $details
+ *
  * @psalm-type UserDetails = array{
  *   mysql_prefix?: string,
  *   ...
  * }
+ *
  * @method static ?User find(int $id)
  * @method static User findOrFail(int $id)
  */
@@ -88,19 +96,29 @@ class User extends Authenticatable
         'deploy_checks_dir',
         'deploy_image',
         'deploy_start_period',
+        'deploy_admin_sso',
         'git_commit',
         'git_branch',
     ];
 
+    /**
+     * What a project's env files are written from, which keys its last deploy
+     * merged into `.env`, and which values a vault reference set.
+     */
+    private const COPIED_ENV_KEYS = ['env_vars', 'used_custom_env_vars', 'env_override_keys', self::DETAIL_VAULT_ENV_KEYS];
+
     /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
     public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
-        . 'token, the cloudflare-api-token or registry-auth setting, or the site password.';
+        .'token, the cloudflare-api-token or registry-auth setting, or the site password.';
 
     /** The `details` key of the `protected` project setting. */
     public const string DETAIL_PROTECTED = 'protected';
 
     /** The only value that key stores; absent means the project is not protected. */
     public const string PROTECTED_ON = 'on';
+
+    /** The `details` key listing the env vars a vault reference set. */
+    public const string DETAIL_VAULT_ENV_KEYS = 'env_vault_keys';
 
     protected $fillable = [
         'username',
@@ -156,7 +174,7 @@ class User extends Authenticatable
     }
 
     /**
-     * @param array<string, mixed> $patch
+     * @param  array<string, mixed>  $patch
      */
     public function mergeAsyncStatus(array $patch): void
     {
@@ -178,7 +196,7 @@ class User extends Authenticatable
      * app without re-running detection. `Dind::app()` keys off
      * `deploy_strategy`; without it `startUserApp()` throws.
      *
-     * @param array<string, mixed> $sourceDetails from getDetails()
+     * @param  array<string, mixed>  $sourceDetails  from getDetails()
      * @return array<string, mixed>
      */
     public static function copiedDeploySnapshot(array $sourceDetails): array
@@ -194,9 +212,27 @@ class User extends Authenticatable
     }
 
     /**
+     * The env details for a project the source's files were copied into, so
+     * its next rebuild writes the env files it was copied with. A key the
+     * source lacks is cleared: the copied files carry none of it.
+     *
+     * @param  array<string, mixed>  $sourceDetails  from getDetails()
+     * @return array<string, mixed>
+     */
+    public static function copiedEnvDetails(array $sourceDetails): array
+    {
+        $out = [];
+        foreach (self::COPIED_ENV_KEYS as $key) {
+            $out[$key] = $sourceDetails[$key] ?? null;
+        }
+
+        return $out;
+    }
+
+    /**
      * Resource limits plus the frozen deploy snapshot for a copied project.
      *
-     * @param array<string, mixed> $extra
+     * @param  array<string, mixed>  $extra
      * @return array<string, mixed>
      */
     public function detailsForCopiedProject(string $destUsername, array $extra = []): array
@@ -219,45 +255,89 @@ class User extends Authenticatable
         $this->setDetails($snapshot);
     }
 
-    public function makePendingStaging(string $destUsername, string $destDomain, string $source = 'api'): self
+    /**
+     * The copied deploy fields as they were before applyDeploySnapshotFrom(): one the project did not have then is removed.
+     *
+     * @param  array<string, mixed>  $snapshot  {@see copiedDeploySnapshot()} of its details then
+     */
+    public function restoreDeploySnapshot(array $snapshot): void
+    {
+        $this->details = array_merge(
+            array_diff_key($this->getDetails(), array_flip(self::COPIED_DEPLOY_KEYS)),
+            $snapshot,
+        );
+    }
+
+    /** Call once every check on the copy passed: a panelalpha.online name is bought here. */
+    public function makePendingStaging(string $destUsername, CopyDomain $copyDomain, string $source = 'api'): self
     {
         $newDetails = $this->detailsForCopiedProject($destUsername, [
             'async_status' => [
                 'staging' => 'running',
-                'source'  => $source,
+                'source' => $source,
             ],
         ]);
 
-        $dest = new self([
-            'username' => $destUsername,
-            'domain'   => $destDomain,
-            'email'    => $this->email,
-            'status'   => 'pending',
-            'staging'  => $this->id,
-            'details'  => $newDetails,
+        return self::createCopy($destUsername, $copyDomain, [
+            'email' => $this->email,
+            'status' => 'pending',
+            'staging' => $this->id,
+            'details' => $newDetails,
         ]);
+    }
 
+    /** Call once every check on the clone passed: a panelalpha.online name is bought here. */
+    public function makeClone(string $destUsername, CopyDomain $copyDomain): self
+    {
+        return self::createCopy($destUsername, $copyDomain, [
+            'email' => $this->email,
+            'details' => $this->detailsForCopiedProject($destUsername),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private static function createCopy(string $destUsername, CopyDomain $copyDomain, array $attributes): self
+    {
+        $destDomain = $copyDomain->claim($destUsername);
+        try {
+            return self::saveCopy($destUsername, $destDomain, $copyDomain, $attributes);
+        } catch (\Throwable $failure) {
+            $copyDomain->release();
+            throw $failure;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private static function saveCopy(string $destUsername, string $destDomain, CopyDomain $copyDomain, array $attributes): self
+    {
+        $dest = new self(['username' => $destUsername, 'domain' => $destDomain] + $attributes);
         $dest->save();
         self::createMainDomain($dest, $destDomain);
+        $copyDomain->attachTo($dest);
 
         return $dest;
     }
 
-    /** The staging copy's main domain, with a www alias when no project holds that name yet. */
+    /** A copy's main domain, with a www alias when it would answer and no project holds that name yet. */
     private static function createMainDomain(self $dest, string $destDomain): void
     {
-        $wwwAliasAvailable = !Domain::domainOrAliasExists('www.' . $destDomain);
-        $domainAliases = $wwwAliasAvailable ? ['www.' . $destDomain] : [];
+        $wwwAliasAvailable = DomainPlan::wwwAliasWouldAnswer($destDomain)
+            && ! Domain::domainOrAliasExists('www.'.$destDomain);
+        $domainAliases = $wwwAliasAvailable ? ['www.'.$destDomain] : [];
 
         $domainModel = Domain::make([
             'user_id' => $dest->id,
-            'domain'  => $destDomain,
-            'type'    => 'main',
+            'domain' => $destDomain,
+            'type' => 'main',
             'details' => [
-                'document_root'    => "/{$destDomain}/public_html",
+                'document_root' => "/{$destDomain}/public_html",
                 'redirect_enabled' => false,
-                'redirect_url'     => null,
-                'aliases'          => $domainAliases,
+                'redirect_url' => null,
+                'aliases' => $domainAliases,
             ],
         ]);
         $domainModel->save();
@@ -283,6 +363,7 @@ class User extends Authenticatable
     {
         /** @var Collection<array-key, self> */
         $users = self::get();
+
         return $users->all();
     }
 
@@ -292,7 +373,7 @@ class User extends Authenticatable
     public function getDetails(): array
     {
         $details = is_null($this->details) ? [] : $this->details;
-        if (!is_array($details)) {
+        if (! is_array($details)) {
             return [];
         }
 
@@ -321,8 +402,8 @@ class User extends Authenticatable
     /**
      * Apply $transform to every non-empty secret string: the top-level ones, then each site_git token.
      *
-     * @param array<string, mixed> $details
-     * @param callable(string): ?string $transform
+     * @param  array<string, mixed>  $details
+     * @param  callable(string): ?string  $transform
      * @return array<string, mixed>
      */
     private function transformSecretStrings(array $details, callable $transform): array
@@ -332,7 +413,7 @@ class User extends Authenticatable
                 $details[$key] = $transform($details[$key]);
             }
         }
-        if (!isset($details['site_git']) || !is_array($details['site_git'])) {
+        if (! isset($details['site_git']) || ! is_array($details['site_git'])) {
             return $details;
         }
         foreach ($details['site_git'] as $path => $entry) {
@@ -353,7 +434,7 @@ class User extends Authenticatable
      * An app database password read back as null because it could not be decrypted
      * keeps its ciphertext: the app's own config still holds that password.
      *
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     private function keepUnreadableAppDatabasePassword(array $details): array
@@ -367,7 +448,7 @@ class User extends Authenticatable
     }
 
     /**
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     private function decryptJsonDetails(array $details): array
@@ -384,7 +465,7 @@ class User extends Authenticatable
     }
 
     /**
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
     private function encryptJsonDetails(array $details): array
@@ -423,7 +504,7 @@ class User extends Authenticatable
             return $value;
         }
 
-        return self::ENCRYPTED_SECRET_PREFIX . Crypt::encryptString($value);
+        return self::ENCRYPTED_SECRET_PREFIX.Crypt::encryptString($value);
     }
 
     /**
@@ -468,12 +549,12 @@ class User extends Authenticatable
             return null;
         }
 
-        $warning = 'Stored secrets cannot be decoded: ' . implode(', ', $names) . '. They read as empty, and '
-            . 'the next save of this project, a redeploy included, stores them empty. '
-            . self::UNREADABLE_SECRETS_REMEDY;
+        $warning = 'Stored secrets cannot be decoded: '.implode(', ', $names).'. They read as empty, and '
+            .'the next save of this project, a redeploy included, stores them empty. '
+            .self::UNREADABLE_SECRETS_REMEDY;
         if (in_array(AppDatabase::PASSWORD_DETAIL, $names, true)) {
             $warning .= ' The app database password is kept, and a deploy refuses while it cannot be decoded: '
-                . 'a new one would lock the app out of its database.';
+                .'a new one would lock the app out of its database.';
         }
 
         return $warning;
@@ -505,7 +586,7 @@ class User extends Authenticatable
      */
     private function decryptSecretString(string $value): ?string
     {
-        if (!str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX)) {
+        if (! str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX)) {
             return $value;
         }
 
@@ -514,7 +595,7 @@ class User extends Authenticatable
         } catch (\Throwable $e) {
             Log::warning(
                 "Could not decrypt stored secret for user '{$this->username}' "
-                    . '(APP_KEY rotated?): ' . $e->getMessage()
+                    .'(APP_KEY rotated?): '.$e->getMessage()
             );
 
             return null;
@@ -546,12 +627,13 @@ class User extends Authenticatable
     {
         $prefix = $this->getMysqlPrefix();
 
-        return Str::startsWith($name, $prefix) ? $name : $prefix . $name;
+        return Str::startsWith($name, $prefix) ? $name : $prefix.$name;
     }
 
     public function getMainDomain(): ?Domain
     {
         $query = $this->domains()->getQuery()->where('type', 'main');
+
         /** @var ?Domain */
         return $query->first();
     }
@@ -569,14 +651,56 @@ class User extends Authenticatable
         return $this->domains->all();
     }
 
+    /** The domain whose document root contains $path, matched by the longest root. */
     public function findDomainByDocumentRoot(string $path): ?Domain
     {
-        $relPath = Str::after($path, $this->getHomeDir());
-        $query = $this->domains()
-            ->getQuery()
-            ->whereJsonContains('details->document_root', $relPath);
-        /** @var ?Domain */
-        return $query->first();
+        $target = $this->accountRelativePath($path);
+        if ($target === null) {
+            return null;
+        }
+
+        return $this->mostSpecificDomain($this->domains()->get(), $target);
+    }
+
+    private function mostSpecificDomain(Collection $domains, string $target): ?Domain
+    {
+        $match = null;
+        $matchLength = 0;
+        foreach ($domains as $domain) {
+            $root = $this->accountRelativePath($domain->getDocumentRoot());
+            if ($root === null || ! $this->rootContains($root, $target)) {
+                continue;
+            }
+            if (strlen($root) > $matchLength) {
+                $match = $domain;
+                $matchLength = strlen($root);
+            }
+        }
+
+        return $match;
+    }
+
+    /** A trimmed path with the home prefix and trailing slashes removed. */
+    private function accountRelativePath(string $path): ?string
+    {
+        $path = trim($path);
+        if ($path === '') {
+            return null;
+        }
+
+        $home = rtrim($this->getHomeDir(), '/');
+        if ($home !== '' && ($path === $home || str_starts_with($path, $home.'/'))) {
+            $path = substr($path, strlen($home));
+        }
+
+        $path = '/'.ltrim($path, '/');
+
+        return $path === '/' ? $path : rtrim($path, '/');
+    }
+
+    private function rootContains(string $root, string $path): bool
+    {
+        return $path === $root || str_starts_with($path, rtrim($root, '/').'/');
     }
 
     public function ftpAccounts(): HasMany
@@ -639,7 +763,7 @@ class User extends Authenticatable
     private static ?array $assignedIpAddressesOverride = null;
 
     /**
-     * @param array<IpAssigned> $ips
+     * @param  array<IpAssigned>  $ips
      */
     public static function setAssignedIpAddressesOverride(array $ips): void
     {
@@ -659,6 +783,7 @@ class User extends Authenticatable
         if (self::$assignedIpAddressesOverride !== null) {
             return self::$assignedIpAddressesOverride;
         }
+
         return $this->assignedIpAddresses->all();
     }
 
@@ -671,12 +796,13 @@ class User extends Authenticatable
                 $names[] = $alias;
             }
         }
+
         return $names;
     }
 
-    public function project(?\App\System $system = null): AppSystemProject
+    public function project(?System $system = null): AppSystemProject
     {
-        return ($system ?? new \App\System())->project($this);
+        return ($system ?? new System)->project($this);
     }
 
     /** The stored value for one limit, cast, or null when it is unset. */
@@ -834,9 +960,10 @@ class User extends Authenticatable
         if ($ftpAccountQuota === null) {
             return $limit;
         }
-        if ($limit > -1 && $ftpAccountQuota > $limit) {
+        if (! ResourceLimit::isUnlimited($limit) && $ftpAccountQuota > $limit) {
             return $limit;
         }
+
         return $ftpAccountQuota;
     }
 
@@ -845,12 +972,13 @@ class User extends Authenticatable
     {
         /** @var mixed */
         $homeDir = $this->getDetails()['home_dir'] ?? null;
-        if ($homeDir === "/var/www") {
+        if ($homeDir === '/var/www') {
             return $this->project()->homeDirPath();
         }
-        if (!empty($homeDir) && is_string($homeDir)) {
+        if (! empty($homeDir) && is_string($homeDir)) {
             return $homeDir;
         }
+
         return "/home/{$this->username}";
     }
 
@@ -868,6 +996,7 @@ class User extends Authenticatable
      * The account's own UID and GID, never a fallback.
      *
      * @return array{int, int}
+     *
      * @throws MissingLinuxUserException
      */
     public function linuxIds(): array
@@ -888,34 +1017,35 @@ class User extends Authenticatable
         if ($uid && $gid) {
             return "{$uid}:{$gid}";
         }
+
         return null;
     }
 
     public function getConfig(): array
     {
         return [
-            "home_dir" => $this->getHomeDir(),
-            "mysql_prefix" => $this->getMysqlPrefix(),
-            "disk_space_limit" => $this->getDiskSpaceLimit(),
-            "memory_limit" => $this->getMemoryLimit(),
-            "cpu_limit" => $this->getCpuLimit(),
-            "device_read_bps" => $this->getDeviceReadBps(),
-            "device_write_bps" => $this->getDeviceWriteBps(),
-            "bandwidth_limit" => $this->getBandwidthLimit(),
-            "mysql_databases_limit" => $this->getMysqlDatabasesLimit(),
-            "ftp_accounts_limit" => $this->getFtpAccountsLimit(),
-            "sftp_accounts_limit" => $this->getSftpAccountsLimit(),
-            "addon_domains_limit" => $this->getAddonDomainsLimit(),
-            "subdomains_limit" => $this->getSubdomainsLimit(),
-            "inodes_limit" => $this->getInodesLimit(),
-            "php_fpm_pool_settings" => $this->getPhpFpmPoolSettings(),
-            "lsphp_settings" => $this->getLsPhpSettings(),
-            "redis_config" => $this->getRedisConfig(),
-            "dedicated_ipv4" => $this->dedicatedIpv4Enabled(),
-            "dedicated_ipv6" => $this->dedicatedIpv6Enabled(),
-            "ip_addresses" => $this->getIpAddresses(),
-            "UID" => $this->getUid(),
-            "GID" => $this->getGid(),
+            'home_dir' => $this->getHomeDir(),
+            'mysql_prefix' => $this->getMysqlPrefix(),
+            'disk_space_limit' => $this->getDiskSpaceLimit(),
+            'memory_limit' => $this->getMemoryLimit(),
+            'cpu_limit' => $this->getCpuLimit(),
+            'device_read_bps' => $this->getDeviceReadBps(),
+            'device_write_bps' => $this->getDeviceWriteBps(),
+            'bandwidth_limit' => $this->getBandwidthLimit(),
+            'mysql_databases_limit' => $this->getMysqlDatabasesLimit(),
+            'ftp_accounts_limit' => $this->getFtpAccountsLimit(),
+            'sftp_accounts_limit' => $this->getSftpAccountsLimit(),
+            'addon_domains_limit' => $this->getAddonDomainsLimit(),
+            'subdomains_limit' => $this->getSubdomainsLimit(),
+            'inodes_limit' => $this->getInodesLimit(),
+            'php_fpm_pool_settings' => $this->getPhpFpmPoolSettings(),
+            'lsphp_settings' => $this->getLsPhpSettings(),
+            'redis_config' => $this->getRedisConfig(),
+            'dedicated_ipv4' => $this->dedicatedIpv4Enabled(),
+            'dedicated_ipv6' => $this->dedicatedIpv6Enabled(),
+            'ip_addresses' => $this->getIpAddresses(),
+            'UID' => $this->getUid(),
+            'GID' => $this->getGid(),
         ];
     }
 
@@ -1042,7 +1172,7 @@ class User extends Authenticatable
 
     public function hasGitProject(): bool
     {
-        return !empty($this->getGitRepo());
+        return ! empty($this->getGitRepo());
     }
 
     public function getGitBranch(): ?string
@@ -1092,7 +1222,7 @@ class User extends Authenticatable
     /** A details value that is a non-empty string once trimmed, else null. */
     private static function trimmed(mixed $value): ?string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
 
@@ -1104,7 +1234,7 @@ class User extends Authenticatable
     {
         $value = $this->getDetails()[$key] ?? null;
 
-        return !empty($value) && is_string($value) ? $value : null;
+        return ! empty($value) && is_string($value) ? $value : null;
     }
 
     /** A details value that is a non-zero int, else null. */
@@ -1112,7 +1242,7 @@ class User extends Authenticatable
     {
         $value = $this->getDetails()[$key] ?? null;
 
-        return !empty($value) && is_int($value) ? $value : null;
+        return ! empty($value) && is_int($value) ? $value : null;
     }
 
     public function getCloudflareAccountId(): ?string
@@ -1170,7 +1300,7 @@ class User extends Authenticatable
     }
 
     /**
-     * @param array{repo_url: string, branch: string, token: ?string} $entry
+     * @param  array{repo_url: string, branch: string, token: ?string}  $entry
      */
     public function putSiteGit(string $pathKey, array $entry): void
     {
@@ -1182,7 +1312,7 @@ class User extends Authenticatable
     public function forgetSiteGit(string $pathKey): void
     {
         $site = $this->siteGitEntries();
-        if (!array_key_exists($pathKey, $site)) {
+        if (! array_key_exists($pathKey, $site)) {
             return;
         }
         unset($site[$pathKey]);
@@ -1200,7 +1330,7 @@ class User extends Authenticatable
     /**
      * Saves only a project that already exists.
      *
-     * @param array<array-key, mixed> $site
+     * @param  array<array-key, mixed>  $site
      */
     private function storeSiteGit(array $site): void
     {
@@ -1243,7 +1373,7 @@ class User extends Authenticatable
     public function getEnvVars(): array
     {
         $details = $this->getDetails();
-        if (empty($details['env_vars']) || !is_array($details['env_vars'])) {
+        if (empty($details['env_vars']) || ! is_array($details['env_vars'])) {
             return [];
         }
         $result = [];
@@ -1256,6 +1386,47 @@ class User extends Authenticatable
         return $result;
     }
 
+    /**
+     * Stores the env overrides, remembering which keys a `vault:<key>` set: such a
+     * value is the vault's, and is never revealed. `$sent` is the map the caller
+     * sent, references unread; a key it set to a value of its own is no longer
+     * the vault's.
+     *
+     * @param  array<string, string>  $vars
+     */
+    public function setEnvVars(array $vars, mixed $sent): void
+    {
+        $this->setDetails([
+            'env_vars' => $vars,
+            self::DETAIL_VAULT_ENV_KEYS => $this->vaultEnvKeysAfter(is_array($sent) ? $sent : [], $vars),
+        ]);
+    }
+
+    /**
+     * The env var keys whose stored value a vault reference set.
+     *
+     * @return list<string>
+     */
+    public function getVaultEnvKeys(): array
+    {
+        $keys = $this->getDetails()[self::DETAIL_VAULT_ENV_KEYS] ?? [];
+
+        return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
+    }
+
+    /**
+     * @param  array<mixed>  $sent
+     * @param  array<string, string>  $vars
+     * @return list<string>
+     */
+    private function vaultEnvKeysAfter(array $sent, array $vars): array
+    {
+        $kept = array_diff($this->getVaultEnvKeys(), array_map('strval', array_keys($sent)));
+        $keys = array_unique([...$kept, ...RequestVault::referencedKeys($sent)]);
+
+        return array_values(array_intersect($keys, array_keys($vars)));
+    }
+
     private static function isUsableEnvVar(mixed $key, mixed $value): bool
     {
         return is_string($key) && $key !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)
@@ -1264,7 +1435,7 @@ class User extends Authenticatable
 
     /**
      * The application login the engine generated and delivers on every
-     * deploy, as {@see \App\Lib\Deploy\Credentials\AppCredentials} stores it.
+     * deploy, as {@see AppCredentials} stores it.
      *
      * @return ?array<string, mixed>
      */
@@ -1285,7 +1456,7 @@ class User extends Authenticatable
     {
         $details = $this->getDetails();
 
-        return !empty($details['used_custom_env_vars']);
+        return ! empty($details['used_custom_env_vars']);
     }
 
     public function getAppPort(): ?int
@@ -1324,21 +1495,28 @@ class User extends Authenticatable
         return ($this->getDetails()['deployed_before'] ?? false) === true;
     }
 
+    /** Whether a deploy now upgrades an application that already ran ({@see PlatformStage::phaseFor()}). */
+    public function deploysAsUpgrade(): bool
+    {
+        return PlatformStage::phaseFor($this->getDeploymentStatus(), $this->hasDeployedBefore()) === PlatformStage::UPGRADE;
+    }
+
     public function getDeploymentWarnings(): array
     {
         $details = $this->getDetails();
         if (
-            !empty($details['deployment_warnings'])
+            ! empty($details['deployment_warnings'])
             && is_array($details['deployment_warnings'])
         ) {
             return $details['deployment_warnings'];
         }
+
         return [];
     }
 
     public function hasDeploymentWarnings(): bool
     {
-        return !empty($this->getDeploymentWarnings());
+        return ! empty($this->getDeploymentWarnings());
     }
 
     /**

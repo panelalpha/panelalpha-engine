@@ -10,6 +10,23 @@ const HANDLED = [200, 204, 400, 422, 500, 502, 503] as const;
 const APPLIED = [200, 204] as const;
 const REFUSED = [400, 422] as const;
 
+/** Answered as null with a `<field>_set` flag; sending the null back would clear the stored value. */
+const HIDDEN_SECRETS = [
+  'sendgrid_api_token',
+  'mailchannels_password',
+  'amazon_ses_smtp_password',
+  'smtp_password',
+] as const;
+
+function withoutHiddenSecrets(config: EximConfig): EximConfig {
+  const kept = { ...config };
+  for (const field of HIDDEN_SECRETS) {
+    delete kept[field];
+    delete kept[`${field}_set`];
+  }
+  return kept;
+}
+
 test.describe('Exim configuration', () => {
   /**
    * Mail routing is engine-wide, so every test that writes to it puts the
@@ -18,7 +35,7 @@ test.describe('Exim configuration', () => {
   let original: EximConfig;
 
   test.beforeEach(async ({ api }) => {
-    original = (await api.getEximConfig()).data;
+    original = withoutHiddenSecrets((await api.getEximConfig()).data);
   });
 
   test.afterEach(async ({ api }) => {
@@ -61,6 +78,51 @@ test.describe('Exim configuration', () => {
     ];
 
     expect(expectedFields.filter((field) => !(field in config))).toHaveLength(0);
+  });
+
+  test('a stored password is answered as null and flagged as set', async ({ api }) => {
+    const saved = await api.updateEximConfigRaw({ ...original, smtp_password: 'smtp-pass' });
+    expectOneOf(saved.status, APPLIED);
+
+    const { data } = await api.getEximConfig();
+
+    expect(data.smtp_password).toBeNull();
+    expect(data.smtp_password_set).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('smtp-pass');
+  });
+
+  test('the read answer sent back keeps a stored password', async ({ api }) => {
+    expectOneOf(
+      (await api.updateEximConfigRaw({ ...original, smtp_password: 'smtp-pass' })).status,
+      APPLIED
+    );
+
+    const echoed = await api.updateEximConfigRaw((await api.getEximConfig()).data);
+    expectOneOf(echoed.status, APPLIED);
+
+    expect((await api.getEximConfig()).data.smtp_password_set).toBe(true);
+  });
+
+  test('clear_secrets clears a stored password', async ({ api }) => {
+    expectOneOf(
+      (await api.updateEximConfigRaw({ ...original, smtp_password: 'smtp-pass' })).status,
+      APPLIED
+    );
+
+    const cleared = await api.updateEximConfigRaw({ clear_secrets: ['smtp_password'] });
+    expectOneOf(cleared.status, APPLIED);
+
+    expect((await api.getEximConfig()).data.smtp_password_set).toBe(false);
+  });
+
+  test('a username sent as a vault reference is refused, a username is not a secret', async ({
+    api,
+  }) => {
+    for (const field of ['mailchannels_username', 'amazon_ses_smtp_username', 'smtp_username']) {
+      const refused = await api.updateEximConfigRaw({ [field]: 'vault:aaaaaaaaaaaaaaaaaaaaaaaa' });
+      expectOneOf(refused.status, [422], field);
+      expect(JSON.stringify(refused.body), field).toContain('not a secret');
+    }
   });
 
   const providerUpdates = [
@@ -147,7 +209,9 @@ test.describe('Exim configuration', () => {
 
         await expectStatus(response, 422, JSON.stringify(response.body));
         expect((response.body as { errors?: object }).errors).toHaveProperty('smtp_host');
-        expect((await api.getEximConfig()).data, 'nothing was saved').toEqual(original);
+        expect(withoutHiddenSecrets((await api.getEximConfig()).data), 'nothing was saved').toEqual(
+          original
+        );
       }
     );
   }

@@ -10,7 +10,8 @@ namespace App\Lib\Deploy\Source;
  *
  *  - {@see assertSafeListing()} takes a names-only listing (`unzip -Z1`,
  *    `tar -tzf`) and rejects absolute paths and `..` traversal. Names-only
- *    means filenames containing spaces survive intact.
+ *    means filenames containing spaces survive intact. tar escapes every
+ *    byte it cannot print, so its names are {@see unescapeTarNames()} first.
  *  - {@see assertRegularMembersOnly()} takes a verbose listing (`unzip -Z`,
  *    `tar -tvzf`), reads nothing but the leading mode column, and rejects
  *    anything that is not a regular file, a directory or a symlink.
@@ -26,6 +27,8 @@ namespace App\Lib\Deploy\Source;
  *    whose disk limit is the default `-1` will happily take them. This is an
  *    early reject on a self-declared number, though, and an archive is free to
  *    lie -- {@see ArchiveUnpackedSize} is what actually decides.
+ *  - {@see assertUnzipKeepsNames()} refuses a zip name unzip would not write
+ *    as `unzip -Z1` lists it, so every other check judges the name on disk.
  *
  * The caller must also make the archive immutable before listing it — see
  * Dind::importProjectArchive(), which stages a root-owned copy. Otherwise the
@@ -37,6 +40,12 @@ class ArchiveSafety
 {
     private const MAX_ENTRIES = 100000;
 
+    private const NAME_UNZIP_RENAMES = '/[\x00-\x1f\x7f\xff]|\^[@-_]|;\d*\z/';
+
+    private const TAR_ESCAPES = [
+        '\\' => '\\', 'a' => "\x07", 'b' => "\x08", 'f' => "\f", 'n' => "\n", 'r' => "\r", 't' => "\t", 'v' => "\v",
+    ];
+
     /**
      * A backstop against a zip bomb, not a quota. It sits well above any real
      * application upload so it never becomes the thing that rejects a customer's
@@ -46,24 +55,69 @@ class ArchiveSafety
 
     public static function assertSafeListing(string $listing): void
     {
-        $entries = preg_split('/\r?\n/', $listing);
-        if ($entries === false) {
-            throw new \InvalidArgumentException('Could not inspect archive contents.');
+        self::assertSafeNames(self::names($listing));
+    }
+
+    /**
+     * @param  list<string>  $names  as the extractor writes them; a tar name is
+     *                               {@see unescapeTarNames()} first, and only a zip
+     *                               name may use `\` as a separator
+     */
+    public static function assertSafeNames(array $names, bool $backslashSeparates = true): void
+    {
+        if (count($names) > self::MAX_ENTRIES) {
+            throw new \InvalidArgumentException('Archive contains too many entries.');
         }
 
-        $count = 0;
-        foreach ($entries as $entry) {
-            $entry = rtrim($entry, "\r");
-            if ($entry === '') {
-                continue;
-            }
-            $count++;
-            if ($count > self::MAX_ENTRIES) {
-                throw new \InvalidArgumentException('Archive contains too many entries.');
-            }
-
-            self::assertSafePath($entry);
+        foreach ($names as $name) {
+            self::assertSafePath($name, $backslashSeparates);
         }
+    }
+
+    /**
+     * unzip writes a name without its control bytes, 0x7f, 0xff and a trailing `;<digits>` (a VMS
+     * version), which `unzip -Z1` all lists. It lists a control byte as `^X`, so a literal `^X` goes too.
+     *
+     * @param  list<string>  $names  as `unzip -Z1` lists them
+     */
+    public static function assertUnzipKeepsNames(array $names): void
+    {
+        foreach ($names as $name) {
+            if (preg_match(self::NAME_UNZIP_RENAMES, $name) === 1) {
+                throw new \InvalidArgumentException('Archive contains a file name unzip would rename on extraction, such as one with a control character, byte 0xff or a trailing ";1".');
+            }
+        }
+    }
+
+    /**
+     * GNU tar prints names in its `escape` quoting style: `\\`, the C escapes and
+     * `\ooo` for every byte the locale cannot print, which in core's C locale is
+     * every non-ASCII one. The extractor writes the raw bytes, so the checks must too.
+     *
+     * @param  list<string>  $names  lines of `tar --quoting-style=escape -t`
+     * @return list<string>
+     */
+    public static function unescapeTarNames(array $names): array
+    {
+        return array_map(self::unescapeTarName(...), $names);
+    }
+
+    private static function unescapeTarName(string $name): string
+    {
+        return (string) preg_replace_callback(
+            '/\\\\([0-3][0-7]{2}|.?)/s',
+            static fn (array $escape): string => self::tarEscaped($escape[1]),
+            $name
+        );
+    }
+
+    private static function tarEscaped(string $code): string
+    {
+        if (strlen($code) === 3) {
+            return chr((int) octdec($code));
+        }
+
+        return self::TAR_ESCAPES[$code] ?? throw new \InvalidArgumentException('Archive contains an invalid path.');
     }
 
     private const LINK_MESSAGE = 'Archive contains a symbolic link, which could redirect extraction outside the project directory.';
@@ -99,11 +153,11 @@ class ArchiveSafety
     }
 
     /**
-     * The symlink members of a `tar -tvzf` listing, name => target. The name
-     * is matched against the names-only listing, so neither may hold spaces
-     * or ` -> ` ambiguously; a link line that cannot be read refuses.
+     * The symlink members of a `tar -tvzf` listing, name => target, both
+     * unescaped. The name is matched against the names-only listing, so neither
+     * may hold spaces or ` -> ` ambiguously; a link line that cannot be read refuses.
      *
-     * @param list<string> $names {@see names()} of the same archive
+     * @param  list<string>  $names  {@see names()} of the same archive, still escaped
      * @return array<string, string>
      */
     public static function tarLinks(string $listing, array $names): array
@@ -114,11 +168,11 @@ class ArchiveSafety
             if (preg_match('/^l\S{9}[.+@]?\s+\S+\s+\d+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s(.*)$/', $line, $match) !== 1) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
             }
-            $found = array_values(array_filter($names, static fn (string $name): bool => str_starts_with($match[1], $name . ' -> ')));
+            $found = array_values(array_filter($names, static fn (string $name): bool => str_starts_with($match[1], $name.' -> ')));
             if (count($found) !== 1) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
             }
-            $links[$found[0]] = substr($match[1], strlen($found[0]) + 4);
+            $links[self::unescapeTarName($found[0])] = self::unescapeTarName(substr($match[1], strlen($found[0]) + 4));
         }
 
         return $links;
@@ -128,14 +182,14 @@ class ArchiveSafety
      * The symlink members of an `unzip -Z` listing, by name. Zip keeps the
      * target as the member's contents, so the caller reads it from there.
      *
-     * @param list<string> $names {@see names()} of the same archive
+     * @param  list<string>  $names  {@see names()} of the same archive
      * @return list<string>
      */
     public static function zipLinkNames(string $listing, array $names): array
     {
         $links = [];
         foreach (self::linkLines($listing) as $line) {
-            $found = array_values(array_filter($names, static fn (string $name): bool => str_ends_with($line, ' ' . $name)));
+            $found = array_values(array_filter($names, static fn (string $name): bool => str_ends_with($line, ' '.$name)));
             usort($found, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
             if ($found === []) {
                 throw new \InvalidArgumentException(self::LINK_MESSAGE);
@@ -164,10 +218,11 @@ class ArchiveSafety
      * empty target, one whose `..` climbs above the archive root, one that
      * passes through another symlink on the way, and any member stored
      * below a symlink. Walking the target over real directories only, the
-     * lexical answer is the one the filesystem gives.
+     * lexical answer is the one the filesystem gives. A `\` in a link's name
+     * or target is refused: whether it separates decides how far `..` climbs.
      *
-     * @param array<string, string> $links link member => target
-     * @param list<string> $names every member
+     * @param  array<string, string>  $links  link member => target
+     * @param  list<string>  $names  every member
      */
     public static function assertLinksStayInside(array $links, array $names): void
     {
@@ -175,7 +230,10 @@ class ArchiveSafety
             return;
         }
         $linkPaths = [];
-        foreach (array_keys($links) as $link) {
+        foreach ($links as $link => $target) {
+            if (str_contains((string) $link, '\\') || str_contains($target, '\\')) {
+                throw new \InvalidArgumentException(self::LINK_MESSAGE);
+            }
             $linkPaths[implode('/', self::components((string) $link))] = true;
         }
 
@@ -204,6 +262,7 @@ class ArchiveSafety
                         throw new \InvalidArgumentException(self::LINK_MESSAGE);
                     }
                     array_pop($at);
+
                     continue;
                 }
                 $at[] = $part;
@@ -294,13 +353,15 @@ class ArchiveSafety
         return null;
     }
 
-    public static function assertSafePath(string $path): void
+    public static function assertSafePath(string $path, bool $backslashSeparates = true): void
     {
         if (str_contains($path, "\0")) {
             throw new \InvalidArgumentException('Archive contains an invalid path.');
         }
 
-        $path = str_replace('\\', '/', $path);
+        if ($backslashSeparates) {
+            $path = str_replace('\\', '/', $path);
+        }
         if (str_starts_with($path, '/') || preg_match('/^[a-zA-Z]:\//', $path) === 1) {
             throw new \InvalidArgumentException('Archive contains an absolute path.');
         }

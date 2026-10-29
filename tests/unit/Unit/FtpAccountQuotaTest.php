@@ -8,9 +8,8 @@ use Illuminate\Http\Request;
 use Tests\TestCase;
 
 /**
- * pure-ftpd reads a 0 max size as no limit, so an FTP account created without
- * a quota, or with quota 0, must be reported as unlimited. The old getQuota()
- * cast a missing value to 0 and the controller stored "limited to 0 MB".
+ * getQuota() answers null when the request asks for an account with no quota
+ * of its own; a missing quota and an explicit 0 are the same request.
  */
 class FtpAccountQuotaTest extends TestCase
 {

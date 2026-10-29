@@ -12,14 +12,15 @@ use App\Http\Resources\MysqlDatabaseResource;
 use App\Http\Resources\TaskResource;
 use App\Jobs\RenameMysqlDatabase;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Limits\ResourceLimit;
 use App\Models\MysqlDatabase;
 use App\Models\Task;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind\AppDatabase;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class DatabaseController extends Controller
@@ -47,7 +48,7 @@ class DatabaseController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
 
         $databases = [];
         foreach ($user->getMysqlDatabases() as $db) {
@@ -73,8 +74,8 @@ class DatabaseController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbname
+     * @param  string  $username
+     * @param  string  $dbname
      * @return MysqlDatabaseResource
      */
     public function show($username, $dbname)
@@ -83,7 +84,7 @@ class DatabaseController extends Controller
 
         /** @var ?MysqlDatabase */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(new JsonResponse([
                 'message' => 'MySQL database not found',
             ], 404));
@@ -109,22 +110,21 @@ class DatabaseController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param MysqlDatabaseStoreRequest $request
+     * @param  string  $username
      * @return MysqlDatabaseResource
      */
     public function store($username, MysqlDatabaseStoreRequest $request)
     {
         /** @var ?User */
         $user = User::query()->withCount('mysqlDatabases')->where('username', $username)->first();
-        if (!$user) {
+        if (! $user) {
             abort(new JsonResponse([
                 'message' => 'Project not found',
             ], 404));
         }
 
-        $limit = $user->getMysqlDatabasesLimit();
-        if ($limit !== null && $limit <= $user->mysql_databases_count) {
+        $limit = ResourceLimit::reached($user->getMysqlDatabasesLimit(), $user->mysql_databases_count);
+        if ($limit !== null) {
             abort(new JsonResponse([
                 'message' => "MySQL databases limit of {$limit} reached.",
                 'error_type' => 'mysql_databases_limit_reached',
@@ -139,8 +139,8 @@ class DatabaseController extends Controller
         $params = $request->validated();
         $dbname = $params['name'];
 
-        if (!Str::startsWith($dbname, $user->getMysqlPrefix())) {
-            $dbname = $user->getMysqlPrefix() . $dbname;
+        if (! Str::startsWith($dbname, $user->getMysqlPrefix())) {
+            $dbname = $user->getMysqlPrefix().$dbname;
         }
 
         // Check for reserved MySQL database names
@@ -153,7 +153,7 @@ class DatabaseController extends Controller
         // Validate final database name length (MySQL limit is 64 characters)
         if (strlen($dbname) > self::MAX_NAME_LENGTH) {
             throw ValidationException::withMessages([
-                'name' => 'Database name with prefix exceeds 64 characters (MySQL limit). Current length: ' . strlen($dbname) . ' characters.',
+                'name' => 'Database name with prefix exceeds 64 characters (MySQL limit). Current length: '.strlen($dbname).' characters.',
             ]);
         }
 
@@ -163,7 +163,7 @@ class DatabaseController extends Controller
             ]);
         }
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->databases()->createDatabase($dbname);
 
         /** @var MysqlDatabase */
@@ -190,8 +190,8 @@ class DatabaseController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbname
+     * @param  string  $username
+     * @param  string  $dbname
      * @return MysqlDatabaseResource
      */
     public function destroy($username, $dbname)
@@ -202,13 +202,13 @@ class DatabaseController extends Controller
          * @var ?MysqlDatabase $db
          */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(new JsonResponse([
                 'message' => 'MySQL database not found',
             ], 404));
         }
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->databases()->deleteDatabase($db->database);
         foreach ($user->mysqlUsers as $dbuser) {
             $mysql->privileges()->revokeIfExists($dbuser->user, $db->database);
@@ -222,9 +222,9 @@ class DatabaseController extends Controller
         path: '/projects/{username}/mysql/databases/{dbname}/rename',
         summary: 'Rename a MySQL database',
         description: 'Renames one of a project\'s MySQL databases: copies its data, moves the grants of every project '
-            . 'MySQL user to the new name, updates the stored row and drops the old database. Works for classic and '
-            . 'dind projects. Refuses the deploy-managed dind application database (<prefix>app) and a name another '
-            . 'database of the project already uses. Returns HTTP 202 with the rename Task; poll `GET /tasks/{id}`.',
+            .'MySQL user to the new name, updates the stored row and drops the old database. Works for classic and '
+            .'dind projects. Refuses the deploy-managed dind application database (<prefix>app) and a name another '
+            .'database of the project already uses. Returns HTTP 202 with the rename Task; poll `GET /tasks/{id}`.',
         security: [['bearerAuth' => []]],
         tags: ['MySQL Databases'],
         parameters: [
@@ -275,7 +275,7 @@ class DatabaseController extends Controller
     {
         /** @var ?MysqlDatabase $db */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
-        if (!$db) {
+        if (! $db) {
             abort(new JsonResponse([
                 'message' => 'MySQL database not found',
             ], 404));
@@ -298,7 +298,7 @@ class DatabaseController extends Controller
             throw ProblemException::one(
                 'name',
                 'name_too_long',
-                'Database name with prefix exceeds ' . self::MAX_NAME_LENGTH . ' characters (MySQL limit). Current length: ' . strlen($name) . ' characters.'
+                'Database name with prefix exceeds '.self::MAX_NAME_LENGTH.' characters (MySQL limit). Current length: '.strlen($name).' characters.'
             );
         }
 
@@ -306,7 +306,7 @@ class DatabaseController extends Controller
             throw ProblemException::one(
                 'name',
                 'managed_database',
-                "The application database '" . AppDatabase::nameFor($user) . "' is managed by the deploy and cannot be renamed."
+                "The application database '".AppDatabase::nameFor($user)."' is managed by the deploy and cannot be renamed."
             );
         }
 
@@ -318,7 +318,7 @@ class DatabaseController extends Controller
     /** The database AppDatabase::provision() recreates on every deploy. */
     private function isManagedDatabase(User $user, string $name): bool
     {
-        if ($user->getTemplate() !== 'dind' && !$user->hasGitProject()) {
+        if ($user->getTemplate() !== 'dind' && ! $user->hasGitProject()) {
             return false;
         }
 

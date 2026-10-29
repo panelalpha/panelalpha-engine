@@ -3,59 +3,64 @@
 namespace App\Console\Commands\Domains;
 
 use App\Models\Domain;
+use App\Models\User;
+use App\System\Project\PhpHosting\WordPress\WpCli as WordPressWpCli;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
 class WpCli extends Command
 {
-    /** The old spelling still answers, so nothing scripted against it breaks. */
-    protected $aliases = ['domains:wp-cli'];
-
     protected $signature = 'domain:wp-cli {domain} {arg*}';
 
-    protected $description = "Runs WP-CLI command as domain's user, using the domain's document root as --path if not provided.";
+    protected $description = 'Deprecated: prefer wordpress:command {username}. Runs WP-CLI as the domain\'s project user, using that domain\'s document root as --path if not provided.';
 
     public function handle(): int
     {
         $domainName = $this->argument('domain');
         assert(is_string($domainName));
         $domain = Domain::findByName($domainName);
-        if (!$domain) {
+        if (! $domain) {
             $this->error("Domain `{$domainName}` not found in database.");
+
             return 1;
         }
 
         $user = $domain->user;
-        if (!$user) {
+        if (! $user) {
             $this->error("User #{$domain->user_id} of domain `{$domainName}` not found in database.");
+
             return 1;
         }
 
         $args = $this->argument('arg');
         assert(is_array($args));
+        /** @var list<string> $wpCliArgs */
         $wpCliArgs = [];
-        $addPath = true;
+        $hasPathInArgs = false;
         foreach ($args as $arg) {
             assert(is_string($arg));
             if (Str::startsWith($arg, '--path=')) {
-                $addPath = false;
+                $hasPathInArgs = true;
             }
             $wpCliArgs[] = $arg;
         }
 
-        if ($addPath) {
-            $domainRootDir = $user->project()->homeDirPath() . $domain->getDocumentRoot();
-            $wpCliArgs[] = "--path=" . $domainRootDir;
-        }
+        $result = WordPressWpCli::for($user, $this->documentRootPath($user, $domain, $hasPathInArgs))->run($wpCliArgs);
 
-        $result = $user->project()->runWpCli($wpCliArgs);
-
-        $this->line("stdout:");
+        $this->line('stdout:');
         $this->info(trim($result['stdout']));
-        $this->line("stderr:");
+        $this->line('stderr:');
         $this->warn(trim($result['stderr']));
-        $this->line("exit_code: " . $result['exit_code']);
+        $this->line('exit_code: '.$result['exit_code']);
 
         return 0;
+    }
+
+    /** A container project's install is found in its containers, not under a domain's document root. */
+    private function documentRootPath(User $user, Domain $domain, bool $hasPathInArgs): ?string
+    {
+        $cli = WordPressWpCli::for($user);
+
+        return $hasPathInArgs || $cli->runsInContainer() ? null : $cli->resolveDomainPath($domain);
     }
 }

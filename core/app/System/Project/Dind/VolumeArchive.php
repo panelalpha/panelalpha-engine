@@ -15,23 +15,24 @@ final class VolumeArchive
 {
     /** The job's own budget, so a long tar fails here and cleans up before the job's alarm kills the worker. */
     private const COMPOSE_TIMEOUT = JobBudget::COMMAND_SECONDS;
+
     private const VOLUME_TAR_IMAGE = 'alpine:3.20';
+
     private const VOLUME_SCRATCH_SUBDIR = '.panelalpha-backup-scratch';
 
     public function __construct(
         private DindProject $project,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array{services?: mixed, volumes?: mixed} $compose
+     * @param  array{services?: mixed, volumes?: mixed}  $compose
      * @return list<array{name: string, docker_name: string}>
      */
     public static function volumesFromCompose(array $compose): array
     {
         $services = $compose['services'] ?? [];
         $declared = $compose['volumes'] ?? [];
-        if (!is_array($services) || !is_array($declared)) {
+        if (! is_array($services) || ! is_array($declared)) {
             return [];
         }
 
@@ -69,7 +70,7 @@ final class VolumeArchive
         );
 
         $decoded = json_decode($output, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             throw new RuntimeException('Failed to parse inner compose config JSON');
         }
 
@@ -85,7 +86,7 @@ final class VolumeArchive
     {
         $scratchDir = $this->userPath(self::VOLUME_SCRATCH_SUBDIR);
         $basename = basename($dest);
-        $scratchFile = rtrim($scratchDir, '/') . '/' . $basename;
+        $scratchFile = rtrim($scratchDir, '/').'/'.$basename;
 
         $this->ensureDirectoryOnHost($scratchDir);
 
@@ -94,15 +95,15 @@ final class VolumeArchive
             'run',
             '--rm',
             '-v',
-            $dockerName . ':/data:ro',
+            $dockerName.':/data:ro',
             '-v',
-            $scratchDir . ':/out',
+            $scratchDir.':/out',
             self::VOLUME_TAR_IMAGE,
             'tar',
             '-C',
             '/data',
             '-czf',
-            '/out/' . $basename,
+            '/out/'.$basename,
             '.',
         ], [], self::COMPOSE_TIMEOUT);
 
@@ -121,7 +122,7 @@ final class VolumeArchive
                 120,
             );
         } catch (\Throwable $e) {
-            if (!str_contains($e->getMessage(), 'already exists')) {
+            if (! str_contains($e->getMessage(), 'already exists')) {
                 throw $e;
             }
         }
@@ -205,7 +206,7 @@ SH);
 
         $scratchDir = $this->userPath(self::VOLUME_SCRATCH_SUBDIR);
         $basename = basename($archivePath);
-        $scratchArchive = rtrim($scratchDir, '/') . '/' . $basename;
+        $scratchArchive = rtrim($scratchDir, '/').'/'.$basename;
 
         $this->ensureDirectoryOnHost($scratchDir);
         $this->project->system()->execOnHost(['cp', $archivePath, $scratchArchive]);
@@ -215,9 +216,9 @@ SH);
             'run',
             '--rm',
             '-v',
-            $dockerName . ':/data',
+            $dockerName.':/data',
             '-v',
-            $scratchArchive . ':/archive:ro',
+            $scratchArchive.':/archive:ro',
             self::VOLUME_TAR_IMAGE,
             'sh',
             '-c',
@@ -237,7 +238,7 @@ SH);
             'run',
             '--rm',
             '-v',
-            $dockerName . ':/data',
+            $dockerName.':/data',
             self::VOLUME_TAR_IMAGE,
             'sh',
             '-c',
@@ -254,7 +255,7 @@ SH);
         );
         $name = trim($output);
         if ($name === '') {
-            throw new RuntimeException('Docker volume inspect returned empty name for: ' . $dockerName);
+            throw new RuntimeException('Docker volume inspect returned empty name for: '.$dockerName);
         }
 
         return $name;
@@ -262,14 +263,14 @@ SH);
 
     private function assertDockerVolumeName(string $name): void
     {
-        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/D', $name)) {
+        if (! preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/D', $name)) {
             throw new RuntimeException('Invalid docker volume name');
         }
     }
 
     private function userPath(string $relative): string
     {
-        return rtrim($this->project->homeDirPath(), '/') . '/' . ltrim($relative, '/');
+        return rtrim($this->project->homeDirPath(), '/').'/'.ltrim($relative, '/');
     }
 
     private function ensureDirectoryOnHost(string $path): void
@@ -279,7 +280,7 @@ SH);
 
     private function cleanScratchDir(string $path): void
     {
-        if (!$this->pathExistsOnHost($path)) {
+        if (! $this->pathExistsOnHost($path)) {
             return;
         }
 

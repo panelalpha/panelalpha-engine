@@ -5,10 +5,12 @@ import {
   AJAX_ACTION,
   AJAX_PLUGIN_CONTENTS,
   AJAX_PLUGIN_FILENAME,
+  ELEMENTOR_SAVE_ACTIONS,
   isAuthorEnumerationMitigated,
   isBlockedBody,
   isBlockedResponse,
   isBlockedStatus,
+  MADE_UP_SIGN_IN_COOKIE,
   modSecMatchesSnapshot,
   modsecUnavailableReason,
   restoreModSec,
@@ -215,6 +217,21 @@ test.describe('ModSecurity WAF', () => {
             .toBe(true);
         });
 
+        await test.step('a made-up sign-in cookie does not skip CRS rules on another admin-ajax action', async () => {
+          const response = await anonymousRequest.post(ajaxUrl, {
+            form: { action: AJAX_ACTION, actions: ELEMENTOR_SAVE_ACTIONS },
+            headers: { Cookie: MADE_UP_SIGN_IN_COOKIE, 'X-Requested-With': 'XMLHttpRequest' },
+            ignoreHTTPSErrors: true,
+          });
+
+          expect
+            .soft(
+              isBlockedStatus(response.status()) || isBlockedBody(await response.text()),
+              `admin-ajax ${AJAX_ACTION} answered ${response.status()} with an injection-like actions field`
+            )
+            .toBe(true);
+        });
+
         await test.step('repeated wp-login.php requests never produce a server error', async () => {
           const url = `https://${setupUser.domain}/wp-login.php`;
           const statuses: number[] = [];
@@ -274,6 +291,18 @@ test.describe('ModSecurity WAF', () => {
           expectNotOneOf(response.status(), [403, 406], 'admin-ajax GET was blocked by the WAF');
           await expectStatus(response, 200);
           expect(await response.text()).toContain('"success":true');
+        });
+      });
+
+      await test.step('an Elementor editor save with a sign-in cookie gets through', async () => {
+        await recordingFailure(async () => {
+          const response = await anonymousRequest.post(ajaxUrl, {
+            form: { action: 'elementor_ajax', actions: ELEMENTOR_SAVE_ACTIONS },
+            headers: { Cookie: MADE_UP_SIGN_IN_COOKIE, 'X-Requested-With': 'XMLHttpRequest' },
+            ignoreHTTPSErrors: true,
+          });
+
+          expectNotOneOf(response.status(), [403, 406], 'an Elementor save was blocked by the WAF');
         });
       });
 

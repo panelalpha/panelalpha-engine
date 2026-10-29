@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Services\Exim;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class EximRebuildTest extends TestCase
@@ -162,7 +163,7 @@ class EximRebuildTest extends TestCase
     {
         $this->assertSame('[2001::db8::::25]::587', Exim::smarthost('2001:db8::25', '587'));
         $this->assertSame('[::::1]::2525', Exim::smarthost('::1', '2525'));
-        $this->assertSame('192.0.2.10::587', Exim::smarthost('192.0.2.10', '587'));
+        $this->assertSame(TestNetwork::public3(10) . '::587', Exim::smarthost(TestNetwork::public3(10), '587'));
         $this->assertSame('smtp.example.net::465', Exim::smarthost('smtp.example.net', '465'));
 
         $system = $this->recordingSystem();
@@ -201,17 +202,23 @@ class EximRebuildTest extends TestCase
     public function test_rebuild_listens_on_this_hosts_docker0_and_relays_for_the_tenant_network(): void
     {
         $system = $this->recordingSystem();
+        $gateway = TestNetwork::container(1);
+        $tenantGateway = TestNetwork::private(1);
+        $tenants = TestNetwork::prefix($tenantGateway, 16);
         $exim = $this->eximWithConfig($system, [], [
-            'bridge' => ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
-            'pash-tenants' => ['subnet' => '10.200.0.0/16', 'gateway' => '10.200.0.1'],
+            'bridge' => ['subnet' => TestNetwork::prefix($gateway, 16), 'gateway' => $gateway],
+            'pash-tenants' => ['subnet' => $tenants, 'gateway' => $tenantGateway],
         ]);
 
         $exim->rebuildEximConfig();
 
         $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
-        $this->assertStringContainsString("dc_local_interfaces='127.0.0.1 ; 172.20.0.1'", $updateConf);
-        $this->assertStringNotContainsString('172.17.0.1', $updateConf);
-        $this->assertStringContainsString("dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12 ; 10.200.0.0/16'", $updateConf);
+        $this->assertStringContainsString(sprintf("dc_local_interfaces='%s ; %s'", TestNetwork::LOOPBACK, $gateway), $updateConf);
+        $this->assertStringNotContainsString(Exim::FALLBACK_BRIDGE_GATEWAY, $updateConf);
+        $this->assertStringContainsString(
+            sprintf("dc_relay_nets='%s ; %s ; %s'", TestNetwork::LOOPBACK_CIDR, TestNetwork::PRIVATE_172_CIDR, $tenants),
+            $updateConf
+        );
     }
 
     public function test_rebuild_falls_back_to_dockers_default_when_nothing_can_be_inspected(): void
@@ -222,30 +229,42 @@ class EximRebuildTest extends TestCase
         $exim->rebuildEximConfig();
 
         $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
-        $this->assertStringContainsString("dc_local_interfaces='127.0.0.1 ; 172.17.0.1'", $updateConf);
-        $this->assertStringContainsString("dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12'", $updateConf);
+        $this->assertStringContainsString(
+            sprintf("dc_local_interfaces='%s ; %s'", TestNetwork::LOOPBACK, Exim::FALLBACK_BRIDGE_GATEWAY),
+            $updateConf
+        );
+        $this->assertStringContainsString(
+            sprintf("dc_relay_nets='%s ; %s'", TestNetwork::LOOPBACK_CIDR, TestNetwork::PRIVATE_172_CIDR),
+            $updateConf
+        );
     }
 
     public function test_rebuild_networks_rewrites_only_the_listen_and_relay_lines(): void
     {
         $path = $this->tmpRoot . '/config/exim/update-exim4.conf.conf';
+        $loopback = TestNetwork::LOOPBACK;
+        $fallback = Exim::FALLBACK_BRIDGE_GATEWAY;
+        $relayed = TestNetwork::LOOPBACK_CIDR . ' ; ' . TestNetwork::PRIVATE_172_CIDR;
+        $gateway = TestNetwork::container(1);
+        $tenantGateway = TestNetwork::add(TestNetwork::private(1), 65536);
+        $tenants = TestNetwork::prefix($tenantGateway, 16);
         file_put_contents($path, "dc_readhost='panelalpha.engine'\n"
             . "dc_relay_nets=''\n"
             . "dc_hide_mailname='true'\n"
-            . "dc_local_interfaces='127.0.0.1 ; 172.17.0.1'\n"
-            . "dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12'\n");
+            . "dc_local_interfaces='{$loopback} ; {$fallback}'\n"
+            . "dc_relay_nets='{$relayed}'\n");
         $system = $this->recordingSystem();
         $exim = $this->eximWithConfig($system, [], [
-            'bridge' => ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
-            'pash-tenants' => ['subnet' => '10.201.0.0/16', 'gateway' => '10.201.0.1'],
+            'bridge' => ['subnet' => TestNetwork::prefix($gateway, 16), 'gateway' => $gateway],
+            'pash-tenants' => ['subnet' => $tenants, 'gateway' => $tenantGateway],
         ]);
 
         $exim->rebuildNetworks();
 
         $this->assertSame("dc_readhost='panelalpha.engine'\n"
             . "dc_hide_mailname='true'\n"
-            . "dc_local_interfaces='127.0.0.1 ; 172.20.0.1'\n"
-            . "dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12 ; 10.201.0.0/16'\n", file_get_contents($path));
+            . "dc_local_interfaces='{$loopback} ; {$gateway}'\n"
+            . "dc_relay_nets='{$relayed} ; {$tenants}'\n", file_get_contents($path));
         $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
     }
 
@@ -271,15 +290,20 @@ class EximRebuildTest extends TestCase
 
     public function test_parse_network_addresses(): void
     {
+        $gateway = TestNetwork::container(1);
+        $subnet = TestNetwork::prefix($gateway, 16);
+        $tenantGateway = TestNetwork::private(1);
+        $tenants = TestNetwork::prefix($tenantGateway, 16);
+
         $this->assertSame(
-            ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
-            Exim::parseNetworkAddresses("172.20.0.0/16 172.20.0.1\n")
+            ['subnet' => $subnet, 'gateway' => $gateway],
+            Exim::parseNetworkAddresses("{$subnet} {$gateway}\n")
         );
         $this->assertSame(
-            ['subnet' => '10.200.0.0/16', 'gateway' => '10.200.0.1'],
-            Exim::parseNetworkAddresses("fd00::/64 fd00::1\n10.200.0.0/16 10.200.0.1\n")
+            ['subnet' => $tenants, 'gateway' => $tenantGateway],
+            Exim::parseNetworkAddresses("fd00::/64 fd00::1\n{$tenants} {$tenantGateway}\n")
         );
-        $this->assertSame(['subnet' => '172.17.0.0/16'], Exim::parseNetworkAddresses('172.17.0.0/16 '));
+        $this->assertSame(['subnet' => TestNetwork::DOCKER_BRIDGE_CIDR], Exim::parseNetworkAddresses(TestNetwork::DOCKER_BRIDGE_CIDR . ' '));
         $this->assertSame([], Exim::parseNetworkAddresses(''));
         $this->assertSame([], Exim::parseNetworkAddresses('ok-stdout'));
     }

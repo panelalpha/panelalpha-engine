@@ -29,7 +29,7 @@ final class EngineFactory
      * Register an implementation, or replace one. Re-registering drops any
      * cached instance, so it takes effect immediately.
      *
-     * @param callable(): ContainerEngine $factory
+     * @param  callable(): ContainerEngine  $factory
      */
     public static function register(string $name, callable $factory): void
     {
@@ -97,7 +97,7 @@ final class EngineFactory
      */
     public static function configuredName(): string
     {
-        if (!function_exists('config')) {
+        if (! function_exists('config')) {
             return self::DIND;
         }
         try {
@@ -113,8 +113,8 @@ final class EngineFactory
 
     private static function bootDefaults(): void
     {
-        if (!isset(self::$factories[self::DIND])) {
-            self::$factories[self::DIND] = static fn (): ContainerEngine => new DindEngine();
+        if (! isset(self::$factories[self::DIND])) {
+            self::$factories[self::DIND] = static fn (): ContainerEngine => new DindEngine;
         }
     }
 

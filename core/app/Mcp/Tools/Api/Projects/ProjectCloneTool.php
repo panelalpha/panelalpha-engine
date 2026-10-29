@@ -21,7 +21,11 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Creates a new project with the same resource limits and settings as the
     source, derives a staging domain when none is provided, and copies the
     source's home directory (including named Docker volumes) and project config
-    files to the new project after provisioning completes.
+    files to the new project after provisioning completes. A source on a free
+    panelalpha.online name gets a clone with a new name of its own there,
+    since a name below it would not be served over HTTPS. An anonymous volume
+    (an image's own VOLUME the compose file does not name) is not copied: the
+    response's `warnings` names each one that held data.
 
     Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
     addresses are NOT cloned.
@@ -81,7 +85,7 @@ class ProjectCloneTool extends ApiTool
             'name' => $schema->string()->description('Source project\'s name.')->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
-            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the clone prefix. Defaults to true.'),
+            'copy_databases' => $schema->boolean()->description('Copy the source project\'s MySQL databases under the clone prefix. Defaults to true. A classic WordPress site cannot be copied without them: false is refused with 422 `wordpress_copy_needs_databases` before anything is copied.'),
         ];
     }
 }

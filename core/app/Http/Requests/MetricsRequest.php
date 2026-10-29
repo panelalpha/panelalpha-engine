@@ -10,21 +10,19 @@ class MetricsRequest extends FormRequest
     {
         return true;
     }
-    
+
     public function rules(): array
     {
         return [
             'type' => [
                 'nullable',
                 'string',
-                'regex:/^(load_average_minute|load_average_five|load_average_fifteen|ram_usage|swap_usage|disk_in|disk_out|net_in|net_out|uptime)(,(load_average_minute|load_average_five|load_average_fifteen|ram_usage|swap_usage|disk_in|disk_out|net_in|net_out|uptime))*$/'
+                'regex:/^(load_average_minute|load_average_five|load_average_fifteen|ram_usage|swap_usage|disk_in|disk_out|net_in|net_out|uptime)(,(load_average_minute|load_average_five|load_average_fifteen|ram_usage|swap_usage|disk_in|disk_out|net_in|net_out|uptime))*$/',
             ],
             'start_date' => 'nullable|date|before_or_equal:end_date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
         ];
     }
-    
-    
 
     public function messages(): array
     {

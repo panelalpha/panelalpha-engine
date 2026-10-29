@@ -14,6 +14,7 @@ use App\System\Project\PhpHosting;
 final class PhpErrorLogConfig
 {
     private const INI_FILE = 'default.ini';
+
     private const POOL_FILE = 'fpm/pool.d/www.conf';
 
     /** @var array<string, string> directive => line appended when it is absent */
@@ -46,10 +47,10 @@ final class PhpErrorLogConfig
      * is replaced by an account-owned copy, since the account cannot chown it.
      */
     private const ENSURE_FILE_SCRIPT = 'f=$1; if [ -L "$f" ]; then rm -f -- "$f" || exit 1; fi; '
-        . 'if [ -e "$f" ] && [ ! -f "$f" ]; then exit 0; fi; '
-        . 'if [ -f "$f" ] && [ "$(stat -c %u:%g -- "$f")" != "$2" ]; then '
-        . 't=$(mktemp -- "$f.XXXXXX") || exit 1; cat -- "$f" > "$t" 2>/dev/null; mv -f -- "$t" "$f" || exit 1; fi; '
-        . 'touch -- "$f" && chmod 664 -- "$f"';
+        .'if [ -e "$f" ] && [ ! -f "$f" ]; then exit 0; fi; '
+        .'if [ -f "$f" ] && [ "$(stat -c %u:%g -- "$f")" != "$2" ]; then '
+        .'t=$(mktemp -- "$f.XXXXXX") || exit 1; cat -- "$f" > "$t" 2>/dev/null; mv -f -- "$t" "$f" || exit 1; fi; '
+        .'touch -- "$f" && chmod 664 -- "$f"';
 
     public function apply(PhpHosting $project): void
     {
@@ -57,8 +58,8 @@ final class PhpErrorLogConfig
         $projectDir = $system->projectDirPath($project->username());
 
         foreach ($system->php()->listAvailablePhpVersions() as $version) {
-            $this->appendMissingLines("{$projectDir}/php/{$version}/" . self::INI_FILE, $this->iniLines($version));
-            $this->appendMissingLines("{$projectDir}/php/{$version}/" . self::POOL_FILE, self::POOL_LINES);
+            $this->appendMissingLines("{$projectDir}/php/{$version}/".self::INI_FILE, $this->iniLines($version));
+            $this->appendMissingLines("{$projectDir}/php/{$version}/".self::POOL_FILE, self::POOL_LINES);
         }
 
         $this->ensureLogDir($project, "{$projectDir}/log/php");
@@ -81,21 +82,21 @@ final class PhpErrorLogConfig
      * A directive already in the file is left alone, so a project that carries
      * its own value keeps it.
      *
-     * @param array<string, string> $lines
+     * @param  array<string, string>  $lines
      */
     private function appendMissingLines(string $path, array $lines): void
     {
-        if (!is_file($path)) {
+        if (! is_file($path)) {
             return;
         }
 
         $contents = (string) file_get_contents($path);
         $changed = false;
         foreach ($lines as $directive => $line) {
-            if (preg_match('/^\s*' . preg_quote($directive, '/') . '\s*=/mi', $contents) === 1) {
+            if (preg_match('/^\s*'.preg_quote($directive, '/').'\s*=/mi', $contents) === 1) {
                 continue;
             }
-            $contents = rtrim($contents, "\n") . "\n{$line}\n";
+            $contents = rtrim($contents, "\n")."\n{$line}\n";
             $changed = true;
         }
 
@@ -134,7 +135,7 @@ final class PhpErrorLogConfig
             return;
         }
 
-        $file = $dir . '/' . PhpErrorLog::FILE_NAME;
+        $file = $dir.'/'.PhpErrorLog::FILE_NAME;
         $account = $project->project()->fileManager();
         $project->system()->exec($account->asAccount(['sh', '-c', self::ENSURE_FILE_SCRIPT, 'sh', $file, $owner]));
     }

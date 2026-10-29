@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Http\Middleware\TrimStrings;
 use App\Models\Setting;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** `GET /projects/{project}/domains/{domain}/mail-dns` without a lookup: what to publish, and where. */
@@ -29,7 +30,7 @@ class DomainMailDnsHttpTest extends TestCase
 
     public function test_direct_sending_lists_the_records_for_the_domain_itself(): void
     {
-        Setting::setRuntimeSettings(['default_ipv4' => '203.0.113.10', 'default_ipv6' => null, 'exim' => null]);
+        Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::public(10), 'default_ipv6' => null, 'exim' => null]);
 
         $data = $this->getJson('/api/projects/alice/domains/shop.example.test/mail-dns')->assertOk()->json('data');
 
@@ -37,14 +38,14 @@ class DomainMailDnsHttpTest extends TestCase
         $this->assertSame('direct', $data['relay']);
         $this->assertFalse($data['checked']);
         $this->assertSame(['spf', 'dkim', 'dmarc', 'mx'], array_column($data['records'], 'type'));
-        $this->assertSame('v=spf1 ip4:203.0.113.10 ~all', $data['records'][0]['expected']);
+        $this->assertSame('v=spf1 ip4:'.TestNetwork::public(10).' ~all', $data['records'][0]['expected']);
         $this->assertArrayNotHasKey('status', $data['records'][0]);
     }
 
     public function test_a_relay_sender_domain_moves_the_records(): void
     {
         Setting::setRuntimeSettings([
-            'default_ipv4' => '203.0.113.10',
+            'default_ipv4' => TestNetwork::public(10),
             'exim' => json_encode(['smarthost_provider' => 'sendgrid', 'sender_domain' => 'mail.host.example']),
         ]);
 

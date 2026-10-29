@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import { rand } from '@/helpers/random';
 import { delay } from '@/helpers/retry';
 import { TEST_SSL_CERT, TEST_SSL_KEY } from '@/test-data/static/test-ssl-cert';
@@ -111,5 +112,80 @@ test.describe('installed-ssl-cert lookups', () => {
 
     expectOneOf(response.status(), [404, 422]);
     expect((await response.text()).toLowerCase()).toMatch(/user|not found|validation|missing/);
+  });
+});
+
+test.describe('ssl-check reads what the domain really serves', () => {
+  const statuses = [
+    'trusted',
+    'self_signed',
+    'untrusted_issuer',
+    'expired',
+    'not_yet_valid',
+    'domain_mismatch',
+    'unreadable',
+    'not_resolving',
+    'refused_address',
+    'unreachable',
+  ];
+
+  test('the main domain answers a handshake on this host', async ({ api, setupUser }) => {
+    const { data } = await api.checkSsl(setupUser.username, setupUser.domain);
+
+    expect(data.domain).toBe(setupUser.domain);
+    expect(statuses).toContain(data.status);
+    expect(Array.isArray(data.dns.addresses)).toBe(true);
+    expect(data.engine?.answered, data.engine?.error ?? '').toBe(true);
+    expect(statuses).toContain(data.engine?.certificate?.status);
+    expect(data.engine?.certificate?.fingerprint_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(data.engine?.certificate?.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(data.engine?.certificate?.signer).toBeTruthy();
+    expect(data.engine?.certificate?.key?.type).toBeTruthy();
+    if (data.public?.certificate) {
+      expect(data.expires_at).toBe(data.public.certificate.expires_at);
+      expect(data.signer).toEqual(data.public.certificate.signer);
+    }
+  });
+
+  test('an installed certificate is the one the webserver presents', async ({
+    api,
+    domainFactory,
+    settings,
+    setupUser,
+  }) => {
+    const domain = await domainFactory.createAddonDomain(setupUser.username, setupUser.domain);
+
+    try {
+      await api.installSslCertificate(
+        setupUser.username,
+        domain,
+        TEST_SSL_CERT,
+        TEST_SSL_KEY,
+        TEST_SSL_CERT
+      );
+
+      const deadline =
+        Date.now() + Math.max(settings.timing.propagationDelay * 6, SSL_LIST_MAX_WAIT_MS);
+      let served: boolean | null | undefined = null;
+
+      while (served !== true && Date.now() < deadline) {
+        served = (await api.checkSsl(setupUser.username, domain)).data.engine?.serves_installed;
+        if (served !== true) {
+          await delay(SSL_LIST_RETRY_DELAY_MS);
+        }
+      }
+
+      expect(served, `${domain} never served the certificate installed on it`).toBe(true);
+    } finally {
+      await domainFactory.deleteDomain(setupUser.username, domain);
+    }
+  });
+
+  test('an unknown domain is refused', async ({ authedRequest, setupUser }) => {
+    const response = await authedRequest.get(
+      `projects/${setupUser.username}/domains/missing-${rand()}.${setupUser.domain}/ssl-check`
+    );
+
+    await expectStatus(response, 404);
   });
 });

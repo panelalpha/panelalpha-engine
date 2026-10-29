@@ -12,8 +12,8 @@ use App\Models\MysqlUser;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind\AppDatabase;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class UserController extends Controller
@@ -35,15 +35,15 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      */
     public function index($username): MysqlUserCollection
     {
         $user = $this->projectOr404($username);
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysqlUsers = [];
-        foreach($user->mysqlUsers as $mysqlUser) {
+        foreach ($user->mysqlUsers as $mysqlUser) {
             $privs = $mysql->privileges()->showPrivileges($mysqlUser->user);
             $mysqlUser->databases = array_keys($privs);
             $mysqlUsers[] = $mysqlUser;
@@ -67,8 +67,8 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
+     * @param  string  $username
+     * @param  string  $dbuser
      * @return MysqlUserResource
      */
     public function show($username, $dbuser)
@@ -99,7 +99,7 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
+     * @param  string  $username
      * @return MysqlUserResource
      */
     public function store($username, MysqlUserStoreRequest $request)
@@ -110,13 +110,13 @@ class UserController extends Controller
         $params = $request->validated();
         $dbuser = $params['name'];
 
-        if (!Str::startsWith($dbuser, $user->getMysqlPrefix())) {
-            $dbuser = $user->getMysqlPrefix() . $dbuser;
+        if (! Str::startsWith($dbuser, $user->getMysqlPrefix())) {
+            $dbuser = $user->getMysqlPrefix().$dbuser;
         }
 
         $this->refuseUnusableName($user, $dbuser);
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->users()->createUser($dbuser, $params['password']);
 
         /** @var MysqlUser */
@@ -143,8 +143,8 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
+     * @param  string  $username
+     * @param  string  $dbuser
      * @return MysqlUserResource
      */
     public function destroy($username, $dbuser)
@@ -153,7 +153,7 @@ class UserController extends Controller
 
         $dbuser = $this->mysqlUserOr404($user, $dbuser);
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->users()->deleteUser($dbuser->user);
         $dbuser->delete();
 
@@ -179,8 +179,8 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
+     * @param  string  $username
+     * @param  string  $dbuser
      * @return MysqlUserResource
      */
     public function rename($username, $dbuser, MysqlUserRenameRequest $request)
@@ -200,7 +200,7 @@ class UserController extends Controller
 
         $this->refuseUnusableName($user, $newName, $dbuser->user);
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->users()->renameUser($dbuser->user, $newName);
         $dbuser->update([
             'user' => $newName,
@@ -228,8 +228,8 @@ class UserController extends Controller
         ],
     )]
     /**
-     * @param string $username
-     * @param string $dbuser
+     * @param  string  $username
+     * @param  string  $dbuser
      * @return MysqlUserResource
      */
     public function changePassword($username, $dbuser, MysqlUserChangePasswordRequest $request)
@@ -245,7 +245,7 @@ class UserController extends Controller
          */
         $params = $request->validated();
 
-        $mysql = (new System())->mysql();
+        $mysql = (new System)->mysql();
         $mysql->users()->changeUserPassword($dbuser->user, $params['password']);
         $dbuser->touch();
         $this->keepAppDatabasePassword($user, $dbuser, $params['password']);
@@ -257,7 +257,7 @@ class UserController extends Controller
     {
         /** @var ?MysqlUser $mysqlUser */
         $mysqlUser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
-        if (!$mysqlUser) {
+        if (! $mysqlUser) {
             abort(404, 'Not found');
         }
 
@@ -288,7 +288,7 @@ class UserController extends Controller
 
         if (strlen($name) > self::MAX_NAME_LENGTH) {
             throw ValidationException::withMessages([
-                'name' => 'MySQL user name with prefix exceeds ' . self::MAX_NAME_LENGTH . ' characters (MySQL limit). Current length: ' . strlen($name) . ' characters.',
+                'name' => 'MySQL user name with prefix exceeds '.self::MAX_NAME_LENGTH.' characters (MySQL limit). Current length: '.strlen($name).' characters.',
             ]);
         }
 

@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-openlitespeed
-    image: ghcr.io/panelalpha/engine-openlitespeed:20260527
+    image: ghcr.io/panelalpha/engine-openlitespeed:v2.2.0-20261028
     pull_policy: missing
     labels:
       - com.panelalpha.webserver=openlitespeed

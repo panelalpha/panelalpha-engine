@@ -19,9 +19,7 @@ final class AccountMemory
 {
     private const SERVICE = 'dind';
 
-    public function __construct(private readonly Dind $project)
-    {
-    }
+    public function __construct(private readonly Dind $project) {}
 
     public function apply(): void
     {
@@ -31,7 +29,7 @@ final class AccountMemory
         if ($this->project->isRunning()) {
             // Swap equal to memory, as the template sets it: no swap at all.
             $this->project->system()->exec([
-                'sudo', 'docker', 'update', '--memory', $mb . 'm', '--memory-swap', $mb . 'm', $container,
+                'sudo', 'docker', 'update', '--memory', $mb.'m', '--memory-swap', $mb.'m', $container,
             ]);
         }
     }
@@ -56,11 +54,11 @@ final class AccountMemory
     public static function withLimit(string $composeYaml, int $mb): array
     {
         $compose = Yaml::parse($composeYaml);
-        if (!is_array($compose) || !is_array($compose['services'][self::SERVICE] ?? null)) {
-            throw new RuntimeException("No '" . self::SERVICE . "' service in the account's compose file.");
+        if (! is_array($compose) || ! is_array($compose['services'][self::SERVICE] ?? null)) {
+            throw new RuntimeException("No '".self::SERVICE."' service in the account's compose file.");
         }
-        $compose['services'][self::SERVICE]['mem_limit'] = $mb . 'M';
-        $compose['services'][self::SERVICE]['memswap_limit'] = $mb . 'M';
+        $compose['services'][self::SERVICE]['mem_limit'] = $mb.'M';
+        $compose['services'][self::SERVICE]['memswap_limit'] = $mb.'M';
 
         $name = $compose['services'][self::SERVICE]['container_name'] ?? null;
 

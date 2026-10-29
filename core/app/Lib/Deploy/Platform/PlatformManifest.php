@@ -5,8 +5,9 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\Health\CheckRegistry;
-use App\Lib\Deploy\Platform\Runtime\Requirement;
+use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
+use App\Lib\Deploy\Platform\Runtime\Requirement;
 
 /**
  * One platform or app, as declared by a YAML file under `resources/platforms/` or
@@ -16,10 +17,15 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
 final class PlatformManifest
 {
     public const RUNTIME_NODE = 'node';
+
     public const RUNTIME_NGINX = 'nginx';
+
     public const RUNTIME_COMMAND = 'command';
+
     public const RUNTIME_PHP = 'php';
+
     public const RUNTIME_COMPOSE = 'compose';
+
     public const RUNTIME_DOCKERFILE = 'dockerfile';
 
     private const RUNTIMES = [
@@ -57,10 +63,10 @@ final class PlatformManifest
     public const PORT_SCHEMES = ['http', 'https'];
 
     /**
-     * @param array<string, mixed> $detect
-     * @param list<PlatformCommand> $commands
-     * @param array<string, string> $env
-     * @param array<string, mixed> $extra
+     * @param  array<string, mixed>  $detect
+     * @param  list<PlatformCommand>  $commands
+     * @param  array<string, string>  $env
+     * @param  array<string, mixed>  $extra
      */
     private function __construct(
         public readonly string $id,
@@ -137,8 +143,7 @@ final class PlatformManifest
         public readonly array $env,
         public readonly array $extra,
         public readonly string $source
-    ) {
-    }
+    ) {}
 
     /** Is this a runtime the engine knows how to build for? */
     public static function isRuntime(string $runtime): bool
@@ -153,11 +158,12 @@ final class PlatformManifest
     }
 
     /**
-     * @param array<string, mixed> $raw decoded manifest JSON
-     * @param bool $requireDetect false for a recipe that is looked up rather
-     *        than detected — {@see SourceRecipes}, where the path the file
-     *        sits at is the rule and a `detect` block would be a second,
-     *        contradictable answer to a question already settled
+     * @param  array<string, mixed>  $raw  decoded manifest JSON
+     * @param  bool  $requireDetect  false for a recipe that is looked up rather
+     *                               than detected — {@see SourceRecipes}, where the path the file
+     *                               sits at is the rule and a `detect` block would be a second,
+     *                               contradictable answer to a question already settled
+     *
      * @throws ManifestException
      */
     public static function fromArray(
@@ -216,11 +222,12 @@ final class PlatformManifest
      * unknown reference and reports `serving: unknown, checks: []`.
      *
      * @return list<string>
+     *
      * @throws ManifestException
      */
     private static function readChecks(ManifestReader $reader, ?string $recipeChecks = null): array
     {
-        if (!$reader->has('check')) {
+        if (! $reader->has('check')) {
             return [];
         }
 
@@ -228,15 +235,15 @@ final class PlatformManifest
         if (is_string($raw)) {
             $raw = [$raw];
         }
-        if (!is_array($raw)) {
-            throw $reader->fail("check must be a check reference or a list of them");
+        if (! is_array($raw)) {
+            throw $reader->fail('check must be a check reference or a list of them');
         }
 
         $checks = [];
         foreach ($raw as $reference) {
             // The group may begin with `_`: the baseline group every application is asked
             // is `_baseline`. The id stays a plain lowercase slug, as HealthCheck enforces.
-            if (!is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*(/[a-z0-9][a-z0-9-]*)?$#', $reference) !== 1) {
+            if (! is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*(/[a-z0-9][a-z0-9-]*)?$#', $reference) !== 1) {
                 throw $reader->fail("check entries must be 'group' or 'group/id'");
             }
             if (in_array($reference, $checks, true)) {
@@ -281,9 +288,9 @@ final class PlatformManifest
             ? explode('/', $reference, 2)
             : [$reference, null];
 
-        if (!isset($groups[$group])) {
+        if (! isset($groups[$group])) {
             throw $reader->fail(
-                "check '{$reference}': no group '{$group}'; the groups are " . implode(', ', array_keys($groups))
+                "check '{$reference}': no group '{$group}'; the groups are ".implode(', ', array_keys($groups))
             );
         }
         if ($id === null) {
@@ -307,8 +314,9 @@ final class PlatformManifest
      * naming the `error` check that asks the question instead. Without that
      * last rule a skip could hide an outage.
      *
-     * @param list<string> $checks this manifest's own `check:` list
+     * @param  list<string>  $checks  this manifest's own `check:` list
      * @return list<array{check: string, reason: string, covered_by: ?string}>
+     *
      * @throws ManifestException
      */
     private static function readCheckSkips(
@@ -321,7 +329,7 @@ final class PlatformManifest
         if ($raw === null) {
             return [];
         }
-        if (!is_array($raw) || !array_is_list($raw)) {
+        if (! is_array($raw) || ! array_is_list($raw)) {
             throw $reader->fail('check_skip must be a list of {check, reason} entries');
         }
 
@@ -346,19 +354,19 @@ final class PlatformManifest
 
         $skips = [];
         foreach ($raw as $entry) {
-            if (!is_array($entry) || array_is_list($entry) || array_diff(array_keys($entry), ['check', 'reason', 'covered_by']) !== []) {
+            if (! is_array($entry) || array_is_list($entry) || array_diff(array_keys($entry), ['check', 'reason', 'covered_by']) !== []) {
                 throw $reader->fail('check_skip entries take check, reason and covered_by only');
             }
             $reference = $entry['check'] ?? null;
-            if (!is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $reference) !== 1) {
+            if (! is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $reference) !== 1) {
                 throw $reader->fail("check_skip: 'check' must name one check as 'group/id'");
             }
             $reason = $entry['reason'] ?? null;
-            if (!is_string($reason) || trim($reason) === '') {
+            if (! is_string($reason) || trim($reason) === '') {
                 throw $reader->fail("check_skip '{$reference}': a reason is required, and it is shown in the health report");
             }
             $cover = $entry['covered_by'] ?? null;
-            if ($cover !== null && (!is_string($cover) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $cover) !== 1)) {
+            if ($cover !== null && (! is_string($cover) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $cover) !== 1)) {
                 throw $reader->fail("check_skip '{$reference}': covered_by must name one check as 'group/id'");
             }
             if (isset($skips[$reference])) {
@@ -369,25 +377,25 @@ final class PlatformManifest
 
         if ($asked !== null && $shipped !== null) {
             foreach ($skips as $reference => $skip) {
-                if (!isset($shipped[$reference])) {
+                if (! isset($shipped[$reference])) {
                     throw $reader->fail("check_skip '{$reference}': the engine ships no such check");
                 }
-                if (!isset($asked[$reference])) {
+                if (! isset($asked[$reference])) {
                     throw $reader->fail("check_skip '{$reference}': this manifest is never asked that check");
                 }
                 $cover = $skip['covered_by'];
                 if ($cover !== null) {
-                    if ($cover === $reference || isset($skips[$cover]) || !isset($asked[$cover])) {
+                    if ($cover === $reference || isset($skips[$cover]) || ! isset($asked[$cover])) {
                         throw $reader->fail(
                             "check_skip '{$reference}': covered_by '{$cover}' must be another check this manifest is asked and does not skip"
                         );
                     }
                 }
-                if ($asked[$reference]->severity === \App\Lib\Deploy\Health\HealthCheck::SEVERITY_ERROR
-                    && ($cover === null || $asked[$cover]->severity !== \App\Lib\Deploy\Health\HealthCheck::SEVERITY_ERROR)) {
+                if ($asked[$reference]->severity === HealthCheck::SEVERITY_ERROR
+                    && ($cover === null || $asked[$cover]->severity !== HealthCheck::SEVERITY_ERROR)) {
                     throw $reader->fail(
                         "check_skip '{$reference}' has severity error: name the error check that asks the question "
-                        . 'instead in covered_by, or a skip could hide an outage'
+                        .'instead in covered_by, or a skip could hide an outage'
                     );
                 }
             }
@@ -465,6 +473,7 @@ final class PlatformManifest
      * half-substituted value falls back to the Dockerfile's own default.
      *
      * @return array<string, string>
+     *
      * @throws ManifestException
      */
     private static function readBuildArgs(ManifestReader $reader): array
@@ -472,10 +481,10 @@ final class PlatformManifest
         $declared = $reader->object('build_args', 'must be an object of arg name => value');
         $args = [];
         foreach ($declared as $name => $value) {
-            if (!is_string($name) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
+            if (! is_string($name) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
                 throw $reader->fail("'{$name}' is not a valid Dockerfile build-arg name");
             }
-            if (!is_string($value) && !is_int($value)) {
+            if (! is_string($value) && ! is_int($value)) {
                 throw $reader->fail("build_args.{$name}: must be a string");
             }
             $args[$name] = (string) $value;
@@ -491,23 +500,24 @@ final class PlatformManifest
      * that deploys green without ffmpeg accepts uploads it can never convert.
      *
      * @return list<string>
+     *
      * @throws ManifestException
      */
     private static function readSystemPackages(ManifestReader $reader): array
     {
-        if (!$reader->has('system_packages') || $reader->raw('system_packages') === null) {
+        if (! $reader->has('system_packages') || $reader->raw('system_packages') === null) {
             return [];
         }
         $raw = $reader->raw('system_packages');
-        if (!is_array($raw) || !array_is_list($raw)) {
+        if (! is_array($raw) || ! array_is_list($raw)) {
             throw $reader->fail('system_packages must be a list of package names');
         }
         $allowed = PhpBaseImage::SYSTEM_PACKAGES;
         foreach ($raw as $name) {
-            if (!is_string($name) || !in_array($name, $allowed, true)) {
+            if (! is_string($name) || ! in_array($name, $allowed, true)) {
                 $shown = is_scalar($name) ? (string) $name : gettype($name);
                 throw $reader->fail(
-                    "system_packages: '{$shown}' is not one the engine can add; allowed: " . implode(', ', $allowed)
+                    "system_packages: '{$shown}' is not one the engine can add; allowed: ".implode(', ', $allowed)
                 );
             }
         }
@@ -530,7 +540,7 @@ final class PlatformManifest
         if ($raw === null) {
             return null;
         }
-        if ($raw !== false && (!is_string($raw) || trim($raw) === '')) {
+        if ($raw !== false && (! is_string($raw) || trim($raw) === '')) {
             throw $reader->fail('frontend_build must be false or a non-empty command');
         }
         if (($reader->raw('runtime') ?? self::RUNTIME_COMMAND) !== self::RUNTIME_PHP) {
@@ -546,13 +556,14 @@ final class PlatformManifest
      * wsgi.py the project has. `commands_from` maps a command id to the resolver.
      *
      * @return array<string, string>
+     *
      * @throws ManifestException
      */
     private static function readCommandResolvers(ManifestReader $reader): array
     {
         $declared = $reader->object('commands_from', 'must be an object of command id => resolver');
         foreach ($declared as $commandId => $resolver) {
-            if (!is_string($commandId) || !is_string($resolver) || trim($resolver) === '') {
+            if (! is_string($commandId) || ! is_string($resolver) || trim($resolver) === '') {
                 throw $reader->fail("'commands_from' entries must be command id => resolver name");
             }
         }
@@ -575,25 +586,25 @@ final class PlatformManifest
 
         $requires = [];
         foreach ($declared as $runtimeId => $spec) {
-            if (!is_string($runtimeId) || !preg_match('/^[a-z0-9][a-z0-9-]*$/', $runtimeId)) {
+            if (! is_string($runtimeId) || ! preg_match('/^[a-z0-9][a-z0-9-]*$/', $runtimeId)) {
                 throw $reader->fail("'{$runtimeId}' is not a valid runtime name");
             }
             if (is_string($spec)) {
                 $spec = ['role' => $spec];
             }
-            if (!is_array($spec)) {
+            if (! is_array($spec)) {
                 throw $reader->fail("requires.{$runtimeId}: must be a role name or an object");
             }
             $role = $spec['role'] ?? Requirement::ROLE_RUNTIME;
-            if (!in_array($role, [Requirement::ROLE_RUNTIME, Requirement::ROLE_BUILD], true)) {
+            if (! in_array($role, [Requirement::ROLE_RUNTIME, Requirement::ROLE_BUILD], true)) {
                 throw $reader->fail(
                     "requires.{$runtimeId}: 'role' must be '"
-                    . Requirement::ROLE_RUNTIME . "' or '" . Requirement::ROLE_BUILD . "'"
+                    .Requirement::ROLE_RUNTIME."' or '".Requirement::ROLE_BUILD."'"
                 );
             }
             $unknown = array_diff(array_keys($spec), ['role', 'optional']);
             if ($unknown !== []) {
-                throw $reader->fail("requires.{$runtimeId}: unknown key(s) " . implode(', ', $unknown));
+                throw $reader->fail("requires.{$runtimeId}: unknown key(s) ".implode(', ', $unknown));
             }
             $requires[$runtimeId] = ['role' => $role, 'optional' => (bool) ($spec['optional'] ?? false)];
         }
@@ -610,7 +621,7 @@ final class PlatformManifest
         $commands = [];
         $seen = [];
         foreach (array_values($reader->object('commands', 'must be a list')) as $index => $entry) {
-            if (!is_array($entry)) {
+            if (! is_array($entry)) {
                 throw $reader->fail("commands[{$index}]: must be an object");
             }
             $command = PlatformCommand::fromArray($entry, $id, $index);
@@ -637,10 +648,10 @@ final class PlatformManifest
 
         $env = [];
         foreach ($declared as $key => $value) {
-            if (!is_string($key) || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+            if (! is_string($key) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
                 throw $reader->fail("'{$key}' is not a valid environment variable name");
             }
-            if (!is_string($value) && !is_int($value) && !is_bool($value)) {
+            if (! is_string($value) && ! is_int($value) && ! is_bool($value)) {
                 throw $reader->fail("env.{$key}: must be a string, integer or boolean");
             }
             $env[$key] = is_bool($value) ? ($value ? 'true' : 'false') : (string) $value;
@@ -674,9 +685,9 @@ final class PlatformManifest
      * This manifest in the shape the deploy pipeline reads. `install_command`,
      * `build_command` and `start_command` are projections of the staged commands.
      *
-     * @param array<string, mixed> $probeData what the probes found while this manifest
-     *        was matched — the workspace a Next app lives in, the Dockerfile a repo
-     *        shipped.
+     * @param  array<string, mixed>  $probeData  what the probes found while this manifest
+     *                                           was matched — the workspace a Next app lives in, the Dockerfile a repo
+     *                                           shipped.
      * @return array<string, mixed>
      */
     public function describe(ProjectContext $context, array $probeData = []): array

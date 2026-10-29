@@ -59,12 +59,15 @@ export class McpApi extends EngineApiBase {
   }
 
   async listMcpActivityLogs(
-    options: { tokenName?: string; project?: string; page?: number } = {}
+    options: { tokenIds?: number[]; tokenName?: string; project?: string; page?: number } = {}
   ): Promise<{
     data: McpActivityLog[];
     [key: string]: unknown;
   }> {
     const params = new URLSearchParams();
+    for (const tokenId of options.tokenIds ?? []) {
+      params.append('token_ids[]', String(tokenId));
+    }
     if (options.tokenName) {
       params.set('token_name', options.tokenName);
     }

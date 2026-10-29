@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Port;
 
 use App\Lib\Deploy\Port\EnvVarDefault;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Compose values written as shell expressions, resolved the way Compose
@@ -46,7 +47,7 @@ class EnvVarDefaultTest extends TestCase
 
     public function test_several_variables_in_one_value_are_all_resolved(): void
     {
-        $this->assertSame('127.0.0.1:8090:8000', EnvVarDefault::resolve('${HOST:-127.0.0.1}:${PORT:-8090}:8000'));
+        $this->assertSame(TestNetwork::LOOPBACK . ':8090:8000', EnvVarDefault::resolve('${HOST:-' . TestNetwork::LOOPBACK . '}:${PORT:-8090}:8000'));
     }
 
     public function test_a_plain_value_is_left_alone(): void
@@ -84,8 +85,8 @@ class EnvVarDefaultTest extends TestCase
     {
         $this->assertSame('25:25', EnvVarDefault::resolve('${SMTP_PORT:-25}:25'));
         $this->assertSame(
-            '127.0.0.1:19991:12345',
-            EnvVarDefault::resolve('${DOVEADM_PORT:-127.0.0.1:19991}:12345')
+            TestNetwork::LOOPBACK . ':19991:12345',
+            EnvVarDefault::resolve('${DOVEADM_PORT:-' . TestNetwork::LOOPBACK . ':19991}:12345')
         );
     }
 }

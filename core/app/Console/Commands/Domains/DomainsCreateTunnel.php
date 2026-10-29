@@ -2,11 +2,13 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Domain;
+use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -14,6 +16,7 @@ use Symfony\Component\Console\Helper\Table;
 
 class DomainsCreateTunnel extends Command
 {
+    use ConfirmsChanges;
     use ResolvesProject;
 
     /**
@@ -52,40 +55,48 @@ class DomainsCreateTunnel extends Command
         $optionHostname = strtolower(trim((string) ($this->option('hostname') ?? '')));
         if ($positional !== '' && $optionHostname !== '' && $positional !== $optionHostname) {
             $this->error("Conflicting hostnames: argument '{$positional}' vs --hostname='{$optionHostname}'.");
+
             return 1;
         }
         $hostname = $positional !== '' ? $positional : $optionHostname;
 
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
         if ($domainOpt === '') {
             $this->error('--domain is required.');
+
             return 1;
         }
         if ($hostname === '') {
             $this->error('Tunnel hostname is required (positional argument or --hostname).');
+
             return 1;
         }
-        if (!in_array($provider, Tunnel::PROVIDERS, true)) {
-            $this->error('--provider must be one of: ' . implode(', ', Tunnel::PROVIDERS));
+        if (! in_array($provider, Tunnel::PROVIDERS, true)) {
+            $this->error('--provider must be one of: '.implode(', ', Tunnel::PROVIDERS));
+
             return 1;
         }
-        if (!filter_var($hostname, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+        if (! filter_var($hostname, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
             $this->error("Invalid tunnel hostname '{$hostname}'.");
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return 1;
         }
 
         $domain = Domain::findByNameOrAlias($domainOpt);
-        if (!$domain || (int) $domain->user_id !== (int) $user->id) {
+        if (! $domain || (int) $domain->user_id !== (int) $user->id) {
             $this->error("Domain '{$domainOpt}' not found for project '{$project}'.");
+
             return 1;
         }
 
@@ -94,8 +105,13 @@ class DomainsCreateTunnel extends Command
         // calls, so the two cannot drift apart.
         try {
             [$hostname, $provider] = TunnelManager::assertCreatable($user, $domain, $hostname, $provider);
-        } catch (CloudflareException | PanelAlphaException $e) {
+        } catch (CloudflareException|PanelAlphaException $e) {
             $this->error($e->getMessage());
+
+            return 1;
+        }
+
+        if ($this->refusedWithoutConfirmation()) {
             return 1;
         }
 
@@ -117,28 +133,31 @@ class DomainsCreateTunnel extends Command
             $this->comment('Local domain keeps nginx routing; the public hostname is exposed via the tunnel.');
         }
 
-        if (!$this->option('force') && !$this->confirm('Create this tunnel?')) {
+        if (! $this->option('force') && ! $this->confirm('Create this tunnel?')) {
             $this->info('Cancelled.');
+
             return 0;
         }
 
         try {
             $tunnel = TunnelManager::createTunnel($user, $domain, $hostname, $provider);
-        } catch (CloudflareException | PanelAlphaException $e) {
+        } catch (CloudflareException|PanelAlphaException $e) {
             $this->error($e->getMessage());
+
             return 1;
         } catch (\Throwable $e) {
-            $this->error('Tunnel create failed: ' . $e->getMessage());
+            $this->error('Tunnel create failed: '.$e->getMessage());
+
             return 1;
         }
 
         $this->info("Tunnel '{$tunnel->hostname}' ({$tunnel->provider}) attached to '{$domain->domain}'.");
-        $rulesExist = \App\Models\ProxyRule::query()
+        $rulesExist = ProxyRule::query()
             ->where('transport', 'http')
             ->where('enabled', true)
             ->where('server_name', $domain->domain)
             ->exists();
-        if (!$rulesExist) {
+        if (! $rulesExist) {
             $this->line('No proxy rules yet — run domains:set-proxy so the tunnel has an upstream.');
         }
         $this->line('');

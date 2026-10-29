@@ -1,0 +1,25 @@
+set -e
+# $1 cgroup  $2 memory.max  $3 guard file  $4 token  $5 seconds  $6 oom_score_adj
+#
+# The account's dockerd (cgroupfs driver, no cgroup-parent) starts every
+# BuildKit RUN step, of a Dockerfile, a compose or a Railpack build alike, in a
+# cgroup of its own below $1. Its limit holds the whole build; the account's own
+# limit is left as it is.
+mkdir -p "$1"
+echo +memory > "${1%/*}/cgroup.subtree_control"
+echo "$2" > "$1/memory.max"
+if [ -e "$1/memory.swap.max" ]; then echo 0 > "$1/memory.swap.max"; fi
+# A step inherits dockerd's -500, so an OOM took the app before the build.
+# While the guard file holds this token, for at most $5 seconds, every process
+# of a step is raised to $6 within a second of appearing; its children inherit it.
+echo "$4" > "$3"
+setsid sh -c '
+while read -r token < "$1" && [ "$token" = "$2" ] && [ "$3" -gt 0 ]; do
+  for procs in "$4"/*/cgroup.procs; do
+    while read -r pid; do
+      read -r adj < "/proc/$pid/oom_score_adj" && [ "$adj" = "$5" ] || echo "$5" > "/proc/$pid/oom_score_adj"
+    done < "$procs"
+  done 2>/dev/null
+  sleep 1
+  set -- "$1" "$2" $(($3 - 1)) "$4" "$5"
+done' build-guard "$3" "$4" "$5" "$1" "$6" </dev/null >/dev/null 2>&1 &

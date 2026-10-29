@@ -2,8 +2,13 @@ services:
   db:
     image: mysql:8.0
     restart: unless-stopped
+    # The image reads the passwords only into an empty datadir; this wrapper
+    # sets them on one made earlier too, so the volume always matches db.env.
+    entrypoint: ["/bin/bash", "/etc/panelalpha/mysql-entrypoint.sh"]
+    command: ["mysqld"]
     volumes:
       - db_data:/var/lib/mysql
+      - ./panelalpha/mysql-entrypoint.sh:/etc/panelalpha/mysql-entrypoint.sh:ro
     # MYSQL_PASSWORD and MYSQL_ROOT_PASSWORD, written once by hooks/prepare.sh
     # outside ~/project so a redeploy does not regenerate them.
     env_file:
@@ -61,6 +66,57 @@ services:
         condition: service_healthy
       wp-content:
         condition: service_completed_successfully
+
+  # The MariaDB client in wp-cli has no caching_sha2_password plugin, which
+  # MySQL 8 gives every new user, so the wordpress user is switched to
+  # mysql_native_password on every start, which also covers a database made
+  # before this service existed. A failure is logged here and leaves the site
+  # as it was: only WP-CLI's database commands need it.
+  db-auth:
+    image: mysql:8.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -u root -e
+        "ALTER USER 'wordpress'@'%' IDENTIFIED WITH mysql_native_password BY '$$MYSQL_PASSWORD'"
+        || echo 'Could not switch the wordpress user to mysql_native_password; WP-CLI database commands will fail to log in.' >&2
+    env_file:
+      - ../.panelalpha/wordpress/db.env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # WP-CLI's database commands (wp db query, export and import) run the MySQL
+  # client, which the wordpress image does not have; the engine runs them here.
+  # Same tree and environment as the wordpress service, so wp-config.php reads
+  # the same credentials. It only waits for WP-CLI to be run in it. The client
+  # names on PATH are panelalpha/mysql-client.sh, copied out executable.
+  wp-cli:
+    image: wordpress:cli
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /tmp/panelalpha-bin &&
+        for c in mysql mysqldump mysqlcheck; do
+        install -m 0755 /etc/panelalpha/mysql-client.sh /tmp/panelalpha-bin/$$c || exit 1;
+        done &&
+        exec tail -f /dev/null
+    volumes:
+      - ./:/var/www/html
+      - wp_content:/var/www/html/wp-content
+      - ./panelalpha/mysql-client.sh:/etc/panelalpha/mysql-client.sh:ro
+    env_file:
+      - ../.panelalpha/wordpress/wordpress.env
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      PATH: /tmp/panelalpha-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    depends_on:
+      wordpress:
+        condition: service_started
 
 volumes:
   db_data: {}

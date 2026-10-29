@@ -52,7 +52,7 @@ class InstallFingerprint
     /**
      * Hash the machine facts into an id.
      *
-     * @param array<string, mixed> $facts
+     * @param  array<string, mixed>  $facts
      */
     public static function derive(array $facts): string
     {
@@ -69,12 +69,12 @@ class InstallFingerprint
             return '';
         }
 
-        return substr(hash('sha256', 'panelalpha-install|' . implode('|', $material)), 0, self::LENGTH);
+        return substr(hash('sha256', 'panelalpha-install|'.implode('|', $material)), 0, self::LENGTH);
     }
 
     public static function isValidId(mixed $id): bool
     {
-        return is_string($id) && preg_match('/^[a-f0-9]{' . self::LENGTH . '}$/', $id) === 1;
+        return is_string($id) && preg_match('/^[a-f0-9]{'.self::LENGTH.'}$/', $id) === 1;
     }
 
     /**
@@ -82,11 +82,11 @@ class InstallFingerprint
      */
     public static function readPin(string $path = self::PIN_FILE): ?string
     {
-        if (!is_file($path) || !is_readable($path)) {
+        if (! is_file($path) || ! is_readable($path)) {
             return null;
         }
         $raw = @file_get_contents($path);
-        if (!is_string($raw)) {
+        if (! is_string($raw)) {
             return null;
         }
         $id = trim($raw);
@@ -100,21 +100,21 @@ class InstallFingerprint
      */
     public static function writePin(string $id, string $path = self::PIN_FILE): bool
     {
-        if (!self::isValidId($id)) {
+        if (! self::isValidId($id)) {
             return false;
         }
 
         $dir = dirname($path);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return false;
         }
 
-        $tmp = $path . '.tmp.' . getmypid();
-        if (@file_put_contents($tmp, $id . "\n", LOCK_EX) === false) {
+        $tmp = $path.'.tmp.'.getmypid();
+        if (@file_put_contents($tmp, $id."\n", LOCK_EX) === false) {
             return false;
         }
         @chmod($tmp, 0600);
-        if (!@rename($tmp, $path)) {
+        if (! @rename($tmp, $path)) {
             @unlink($tmp);
 
             return false;

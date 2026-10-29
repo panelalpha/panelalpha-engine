@@ -3,7 +3,9 @@
 namespace Tests\Unit\Deploy\Source;
 
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A remote that cuts the protocol-v2 ref listing over HTTP/2, as GitHub's
@@ -16,12 +18,14 @@ class GitRemoteProbeHttp11RetryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(4)]);
         $this->dir = sys_get_temp_dir() . '/probe-h11-' . bin2hex(random_bytes(6));
         mkdir($this->dir);
     }
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         foreach (glob($this->dir . '/*') ?: [] as $file) {
             unlink($file);
         }

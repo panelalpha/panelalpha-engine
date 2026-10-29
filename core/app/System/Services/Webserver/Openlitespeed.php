@@ -67,15 +67,15 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * @param ?array<Domain> $domains
+     * @param  ?array<Domain>  $domains
      */
     public function rebuildConfig(?array $domains = null): void
     {
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/httpd_config.conf';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/httpd_config.conf';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
-        $listenerTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/listener-openlitespeed.blade.php');
-        $virtualHostTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/virtualHost-openlitespeed.blade.php');
-        $virtualHostConfigTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath() . '/virtualHostConfig-openlitespeed.blade.php');
+        $listenerTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/listener-openlitespeed.blade.php');
+        $virtualHostTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/virtualHost-openlitespeed.blade.php');
+        $virtualHostConfigTemplate = $this->system->filesystem()->fileGetContents($this->system->templatesDirPath().'/virtualHostConfig-openlitespeed.blade.php');
 
         $users = User::getAll();
         $allDomains = [];
@@ -107,34 +107,34 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
         if (config('env.APP_LITE_PROXY_ENABLED')) {
             /** @var mixed */
             $caDomain = config('env.APP_LITE_CA_DOMAIN');
-            if (empty($caDomain) || !is_string($caDomain)) {
+            if (empty($caDomain) || ! is_string($caDomain)) {
                 $caDomain = '*';
             }
             /** @var mixed */
             $aaDomain = config('env.APP_LITE_AA_DOMAIN');
-            if (empty($aaDomain) || !is_string($aaDomain)) {
+            if (empty($aaDomain) || ! is_string($aaDomain)) {
                 $aaDomain = '*';
             }
 
-            if (!config('env.APP_LITE_CA_PORT')) {
+            if (! config('env.APP_LITE_CA_PORT')) {
                 $otherListenerMaps['app-lite-ca'] = [$caDomain];
             }
-            if (!config('env.APP_LITE_AA_PORT')) {
+            if (! config('env.APP_LITE_AA_PORT')) {
                 $otherListenerMaps['app-lite-aa'] = [$aaDomain];
             }
             $appLiteCaPort = Config::getIntValue('env.APP_LITE_CA_PORT');
             if (
                 $appLiteCaPort
-                && !in_array($appLiteCaPort, [80, 443])
+                && ! in_array($appLiteCaPort, [80, 443])
             ) {
-                $otherListeners[] = $this->getListenerString('listener-app-lite-ca', (string)$appLiteCaPort, 'app-lite-ca', [$caDomain]);
+                $otherListeners[] = $this->getListenerString('listener-app-lite-ca', (string) $appLiteCaPort, 'app-lite-ca', [$caDomain]);
             }
             $appLiteAaPort = Config::getIntValue('env.APP_LITE_AA_PORT');
             if (
                 $appLiteAaPort
-                && !in_array($appLiteAaPort, [80, 443])
+                && ! in_array($appLiteAaPort, [80, 443])
             ) {
-                $otherListeners[] = $this->getListenerString('listener-app-lite-aa', (string)$appLiteAaPort, 'app-lite-aa', [$aaDomain]);
+                $otherListeners[] = $this->getListenerString('listener-app-lite-aa', (string) $appLiteAaPort, 'app-lite-aa', [$aaDomain]);
             }
             $otherVhosts[] = $this->getVhostString('app-lite-ca');
             $otherVhosts[] = $this->getVhostString('app-lite-aa');
@@ -152,7 +152,7 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
             ];
             $listenersStrings[] = Blade::render($listenerTemplate, $templateVars);
         }
-        foreach($otherListeners as $otherListener) {
+        foreach ($otherListeners as $otherListener) {
             $listenersStrings[] = $otherListener;
         }
 
@@ -162,10 +162,10 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
         $virtualHosts = [];
         foreach ($allDomains as $domain) {
             $user = $domain->getUser();
-            $cacheStorePath = $this->system->projectHomeDirPath($user->username) . "/" . $domain->domain . "/.lscache";
+            $cacheStorePath = $this->system->projectHomeDirPath($user->username).'/'.$domain->domain.'/.lscache';
             if ($cacheEnabled) {
-                $this->system->runProcess(["sudo", "mkdir", "-p", $cacheStorePath]);
-                $this->system->runProcess(["sudo", "chown", "-R", "nobody:{$user->username}", $cacheStorePath]);
+                $this->system->runProcess(['sudo', 'mkdir', '-p', $cacheStorePath]);
+                $this->system->runProcess(['sudo', 'chown', '-R', "nobody:{$user->username}", $cacheStorePath]);
             }
             $connection = $this->projectDomain($domain);
             $project = $connection->project();
@@ -178,12 +178,12 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
                 'suspended' => $user->status === 'suspended',
                 'php_port' => $this->phpPortForVersion($domain->getPhpVersion()),
                 'lsphp_max_conns' => $user->getLsPhpMaxConns(),
-                'cache_enabled' => $cacheEnabled ? "1" : "0",
+                'cache_enabled' => $cacheEnabled ? '1' : '0',
                 'cache_store_path' => $cacheStorePath,
             ];
             $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
             if ($connection->hasServableCertificate()) {
-                $certDir = $project->projectDirPath() . "/ssl-certs";
+                $certDir = $project->projectDirPath().'/ssl-certs';
                 $keyFile = "{$certDir}/{$domain->domain}.key";
                 $pemFile = "{$certDir}/{$domain->domain}.pem";
                 $templateVars['ssl_enabled'] = true;
@@ -191,14 +191,14 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
                 $templateVars['ssl_cert_key_file'] = $keyFile;
             }
             $virtualHostConfig = Blade::render($virtualHostConfigTemplate, $templateVars);
-            $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts/' . $domain->domain . '.conf';
+            $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts/'.$domain->domain.'.conf';
             $this->system->filesystem()->filePutContents($virtualHostConfigPath, $virtualHostConfig, '994:994');
 
             $this->system->exec([
                 'sudo',
                 'mkdir',
                 '-p',
-                $this->system->engineDirPath() . '/webserver-logs/openlitespeed/' . $domain->domain,
+                $this->system->engineDirPath().'/webserver-logs/openlitespeed/'.$domain->domain,
             ]);
 
             $virtualHosts[] = Blade::render($virtualHostTemplate, $templateVars);
@@ -207,7 +207,7 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
         $this->rebuildFallbackVirtualHostConfig();
         $virtualHosts[] = $this->fallbackVirtualHost();
 
-        foreach($otherVhosts as $otherVhost) {
+        foreach ($otherVhosts as $otherVhost) {
             $virtualHosts[] = $otherVhost;
         }
 
@@ -216,7 +216,7 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
         $newConfig = $this->removeBlocks($currentConfig, 'listener');
         $newConfig = $this->removeBlocks($newConfig, 'virtualhost');
 
-        $newConfig = trim($newConfig) . "\n\n" . trim($listenersString) . "\n\n" . trim($virtualHostsString);
+        $newConfig = trim($newConfig)."\n\n".trim($listenersString)."\n\n".trim($virtualHostsString);
         $newConfig = preg_replace('/\R{3,}/', "\n\n", $newConfig);
 
         $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
@@ -225,7 +225,8 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
 
     private function fallbackVirtualHost(): string
     {
-        $vhRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $vhRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+
         return <<<CONFIG
 virtualhost fallback {
   vhRoot $vhRoot
@@ -239,8 +240,8 @@ CONFIG;
 
     private function rebuildFallbackVirtualHostConfig(): void
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/openlitespeed/fallback';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/openlitespeed/fallback';
         $virtualHostConfig = <<<CONFIG
 docRoot $docRoot
 errorpage 404 {
@@ -266,7 +267,7 @@ rewrite  {
 }
 CONFIG;
 
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts/fallback.conf';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts/fallback.conf';
         $this->system->filesystem()->filePutContents($virtualHostConfigPath, $virtualHostConfig, '994:994');
         $this->system->exec([
             'sudo',
@@ -278,12 +279,12 @@ CONFIG;
 
     private function rebuildAppProxyVirtualHostConfig(): void
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
         $appProxyVars = $this->getAppProxyVars();
 
         // CA
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/openlitespeed/app-lite-ca';
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts/app-lite-ca.conf';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/openlitespeed/app-lite-ca';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts/app-lite-ca.conf';
         $virtualHostConfig = $this->getProxyVhostConfigString(
             'proxy-app-lite-ca',
             $docRoot,
@@ -302,8 +303,8 @@ CONFIG;
         ]);
 
         // AA
-        $logDir = $this->system->engineDirPath() . '/webserver-logs/openlitespeed/app-lite-aa';
-        $virtualHostConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts/app-lite-aa.conf';
+        $logDir = $this->system->engineDirPath().'/webserver-logs/openlitespeed/app-lite-aa';
+        $virtualHostConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts/app-lite-aa.conf';
         $virtualHostConfig = $this->getProxyVhostConfigString(
             'proxy-app-lite-aa',
             $docRoot,
@@ -323,12 +324,13 @@ CONFIG;
     }
 
     /**
-     * @param array<string> $domains
+     * @param  array<string>  $domains
      */
     private function getListenerString(string $name, string $port, string $vhost, array $domains): string
     {
         $mapDomains = implode(', ', $domains);
         $cert = $this->getSslCertVars();
+
         return <<<CONFIG
 listener $name {
   address                 *:$port
@@ -342,7 +344,8 @@ CONFIG;
 
     private function getVhostString(string $name): string
     {
-        $docRoot = $this->system->engineDirPath() . '/webserver-config/document-root';
+        $docRoot = $this->system->engineDirPath().'/webserver-config/document-root';
+
         return <<<CONFIG
 virtualhost $name {
   vhRoot $docRoot
@@ -395,22 +398,23 @@ CONFIG;
     private function removeBlocks(string $config, string $blockName): string
     {
         $offset = 0;
-        $from = stripos($config, $blockName . " ", $offset);
+        $from = stripos($config, $blockName.' ', $offset);
         while ($from !== false) {
-            $to = strpos($config, "}", $from);
+            $to = strpos($config, '}', $from);
             if ($to === false) {
                 throw new \Exception("Cannot find closing tag for {$blockName} block");
             }
             $to++;
-            if (!Str::contains(substr($config, $from, $to - $from), '{')) {
+            if (! Str::contains(substr($config, $from, $to - $from), '{')) {
                 $from = $to;
+
                 continue;
             }
             $before = substr($config, 0, $from);
             $after = substr($config, $to);
             $config = "{$before}{$after}";
             $offset = $from;
-            $from = strpos($config, $blockName . " ", $offset);
+            $from = strpos($config, $blockName.' ', $offset);
         }
 
         return $config;
@@ -480,9 +484,9 @@ CONFIG;
     private function replaceVhostBlocks(string $config, string $blocks): string
     {
         $offset = 0;
-        $from = strpos($config, "virtualhost ", $offset);
+        $from = strpos($config, 'virtualhost ', $offset);
         while ($from !== false) {
-            $to = strpos($config, "}", $from);
+            $to = strpos($config, '}', $from);
             if ($to === false) {
                 throw new \Exception('Cannot find closing tag for virtualhost block');
             }
@@ -491,21 +495,21 @@ CONFIG;
             $after = substr($config, $to);
             $config = "{$before}{$after}";
             $offset = $from;
-            $from = strpos($config, "virtualhost", $offset);
+            $from = strpos($config, 'virtualhost', $offset);
         }
 
-        $config = trim($config) . "\n" . $blocks;
+        $config = trim($config)."\n".$blocks;
 
         return $config;
     }
 
     /**
-     * @param array<string> $mapDirectives
+     * @param  array<string>  $mapDirectives
      */
     private function replaceMapsDirectives(string $config, array $mapDirectives): string
     {
         $offset = 0;
-        $from = stripos($config, "listener", $offset);
+        $from = stripos($config, 'listener', $offset);
         while ($from !== false) {
             $to = stripos($config, '}', $from);
             if ($to === false) {
@@ -521,7 +525,7 @@ CONFIG;
             $newLines = [];
             foreach ($lines as $line) {
                 $trimmedLine = trim($line);
-                if (substr($trimmedLine, 0, 4) == "map ") {
+                if (substr($trimmedLine, 0, 4) == 'map ') {
                     continue;
                 }
                 $newLines[] = $line;
@@ -535,7 +539,7 @@ CONFIG;
             $config = "{$before}{$newListenerBlock}{$after}";
 
             $offset = $from + strlen($newListenerBlock);
-            $from = stripos($config, "listener", $offset);
+            $from = stripos($config, 'listener', $offset);
         }
 
         return $config;
@@ -576,24 +580,25 @@ CONFIG;
 
     public function listDomains(): array
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts';
+        $dir = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts';
         $domains = [];
         foreach ((new \FilesystemIterator($dir)) as $file) {
-            if (!($file instanceof \SplFileInfo)) {
+            if (! ($file instanceof \SplFileInfo)) {
                 continue;
             }
             if ($file->getExtension() == 'conf') {
                 $domains[] = substr($file->getFilename(), 0, -5);
             }
         }
+
         return $domains;
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
-        $dir = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts';
+        $dir = $this->system->engineDirPath().'/webserver-config/openlitespeed/vhosts';
         foreach ($domainNames as $domainName) {
-            $configFile = $dir . '/' . $domainName . '.conf';
+            $configFile = $dir.'/'.$domainName.'.conf';
             // The glob stays a glob; the name is a positional argument, never shell.
             $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }
@@ -617,16 +622,17 @@ CONFIG;
      */
     private function updateSerialNumber(string $serialNumber): void
     {
-        $configDir = $this->system->engineDirPath() . '/webserver-config/' . $this->getSlug();
+        $configDir = $this->system->engineDirPath().'/webserver-config/'.$this->getSlug();
         $configFiles = $this->system->filesystem()->ls($configDir);
 
-        if (!in_array('serial.no', $configFiles)) {
-            $this->system->filesystem()->filePutContents($configDir . '/serial.no', $serialNumber, '994:994');
+        if (! in_array('serial.no', $configFiles)) {
+            $this->system->filesystem()->filePutContents($configDir.'/serial.no', $serialNumber, '994:994');
+
             // $this->reload();
             return;
         }
 
-        $backupFileSuffix = ".bak" . time();
+        $backupFileSuffix = '.bak'.time();
         $moveFiles = [
             "{$configDir}/serial.no" => "{$configDir}/serial.no{$backupFileSuffix}",
             "{$configDir}/license.key" => "{$configDir}/license.key{$backupFileSuffix}",
@@ -642,7 +648,7 @@ CONFIG;
             ]);
         }
 
-        $this->system->filesystem()->filePutContents($configDir . '/serial.no', $serialNumber, '994:994');
+        $this->system->filesystem()->filePutContents($configDir.'/serial.no', $serialNumber, '994:994');
         // $this->system->exec([
         //     'sudo',
         //     'docker',
@@ -660,38 +666,39 @@ CONFIG;
         $removeBackups = [];
         foreach ($configFiles as $filename) {
 
-            if (!Str::startsWith($filename, [
+            if (! Str::startsWith($filename, [
                 'serial.no.bak',
                 'license.key.bak',
-                'trial.key.bak'
+                'trial.key.bak',
             ])) {
                 continue;
             }
             $suffix = Str::afterLast($filename, 'serial.no.bak');
-            if (!$suffix) {
+            if (! $suffix) {
                 continue;
             }
             if (count($keepBackups) < 10) {
-                if (!in_array($suffix, $keepBackups)) {
+                if (! in_array($suffix, $keepBackups)) {
                     $keepBackups[] = $suffix;
                 }
+
                 continue;
             }
             $removeBackups[] = $suffix;
         }
         foreach ($removeBackups as $removeSuffix) {
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/serial.no.bak{$removeSuffix}"]);
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/license.key.bak{$removeSuffix}"]);
-            $this->system->runProcess(["sudo", "rm", "{$configDir}/trial.key.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/serial.no.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/license.key.bak{$removeSuffix}"]);
+            $this->system->runProcess(['sudo', 'rm', "{$configDir}/trial.key.bak{$removeSuffix}"]);
         }
     }
 
     private function replaceModsecurity(string $config, string $blocks): string
     {
         $offset = 0;
-        $from = strpos($config, "virtualhost ", $offset);
+        $from = strpos($config, 'virtualhost ', $offset);
         while ($from !== false) {
-            $to = strpos($config, "}", $from);
+            $to = strpos($config, '}', $from);
             if ($to === false) {
                 throw new \Exception('Cannot find closing tag for virtualhost block');
             }
@@ -700,25 +707,24 @@ CONFIG;
             $after = substr($config, $to);
             $config = "{$before}{$after}";
             $offset = $from;
-            $from = strpos($config, "virtualhost", $offset);
+            $from = strpos($config, 'virtualhost', $offset);
         }
 
-        $config = trim($config) . "\n" . $blocks;
+        $config = trim($config)."\n".$blocks;
 
         return $config;
     }
-
 
     public function toggleModsecurity(): void
     {
         $config = Setting::getModsecConfig();
 
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/httpd_config.conf';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/httpd_config.conf';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
 
         $blockExists = stripos($currentConfig, 'module mod_security') !== false;
 
-        if ($config['mode'] === 'off' && !$blockExists) {
+        if ($config['mode'] === 'off' && ! $blockExists) {
             return;
         }
 
@@ -727,6 +733,7 @@ CONFIG;
         if ($config['mode'] === 'off') {
             $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
             $this->restart();
+
             return;
         }
 
@@ -735,24 +742,24 @@ CONFIG;
         $modsecString .= "  modsecurity_rules_file /opt/modsecurity/main.conf\n";
         $modsecString .= "}\n";
 
-        $newConfig = trim($newConfig) . "\n\n" . $modsecString;
+        $newConfig = trim($newConfig)."\n\n".$modsecString;
         $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
         $this->restart();
     }
 
     public function toggleLscache(): void
     {
-        $disabled = !empty(Setting::get('disable-lscache'));
-        $cacheStorePath = $this->system->engineDirPath() . '/data/lscache';
-        $cacheLsEnabled = $disabled ? "0" : "1";
-        $this->system->runProcess(["sudo", "mkdir", "-p", $cacheStorePath]);
-        $this->system->runProcess(["sudo", "chown", "-R", "nobody:www-data", $cacheStorePath]);
+        $disabled = ! empty(Setting::get('disable-lscache'));
+        $cacheStorePath = $this->system->engineDirPath().'/data/lscache';
+        $cacheLsEnabled = $disabled ? '0' : '1';
+        $this->system->runProcess(['sudo', 'mkdir', '-p', $cacheStorePath]);
+        $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:www-data', $cacheStorePath]);
 
-        $currentConfigPath = $this->system->engineDirPath() . '/webserver-config/openlitespeed/httpd_config.conf';
+        $currentConfigPath = $this->system->engineDirPath().'/webserver-config/openlitespeed/httpd_config.conf';
         $currentConfig = $this->system->filesystem()->fileGetContents($currentConfigPath);
 
         $blockExists = stripos($currentConfig, 'module cache') !== false;
-        if ($disabled && !$blockExists) {
+        if ($disabled && ! $blockExists) {
             return;
         }
 
@@ -760,10 +767,11 @@ CONFIG;
         if ($disabled) {
             $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
             $this->reload();
+
             return;
         }
 
-        $configString = "";
+        $configString = '';
         $configString .= "module cache {\n";
         $configString .= "  internal 1\n";
         $configString .= "  checkPrivateCache 1\n";
@@ -783,7 +791,7 @@ CONFIG;
         $configString .= "  ls_enabled {$cacheLsEnabled}\n";
         $configString .= "}\n";
 
-        $newConfig = trim($newConfig) . "\n\n" . $configString;
+        $newConfig = trim($newConfig)."\n\n".$configString;
         $this->system->filesystem()->filePutContents($currentConfigPath, $newConfig);
         $this->rebuildConfig();
         $this->reload();

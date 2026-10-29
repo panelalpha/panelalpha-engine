@@ -74,7 +74,7 @@ final class ArchiveUnpackedSize
      */
     private static function countZip(string $path, int $maxBytes, int $archiveBytes): int
     {
-        $zip = new \ZipArchive();
+        $zip = new \ZipArchive;
         if ($zip->open($path) !== true) {
             throw new \RuntimeException('Could not read the uploaded archive.');
         }
@@ -125,7 +125,7 @@ final class ArchiveUnpackedSize
     }
 
     /**
-     * @param resource $stream
+     * @param  resource  $stream
      */
     private static function drain(
         $stream,
@@ -134,7 +134,7 @@ final class ArchiveUnpackedSize
         int $archiveBytes,
         bool $gz = false
     ): int {
-        while (!($gz ? gzeof($stream) : feof($stream))) {
+        while (! ($gz ? gzeof($stream) : feof($stream))) {
             $chunk = $gz ? gzread($stream, self::CHUNK) : fread($stream, self::CHUNK);
             if ($chunk === false || $chunk === '') {
                 break;

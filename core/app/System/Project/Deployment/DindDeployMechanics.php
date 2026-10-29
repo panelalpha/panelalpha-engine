@@ -25,10 +25,11 @@ use RuntimeException;
  */
 final class DindDeployMechanics implements DeployMechanics
 {
+    private bool $removedTheAccount = false;
+
     public function __construct(
         private Dind $dind,
-    ) {
-    }
+    ) {}
 
     public function user(): ModelsUser
     {
@@ -52,9 +53,13 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function isDindWithoutGit(): bool
     {
-        return $this->user()->getTemplate() === 'dind' && !$this->user()->hasGitProject();
+        return $this->user()->getTemplate() === 'dind' && ! $this->user()->hasGitProject();
     }
 
+    /**
+     * The account build cannot be stopped part way: a cancel asked for meanwhile is honoured
+     * once it ends, and the new account is removed as after a failed build.
+     */
     public function prepareHostingEnvironment(): void
     {
         $project = $this->aggregate();
@@ -73,6 +78,12 @@ final class DindDeployMechanics implements DeployMechanics
         $project->fixPermissions();
         $project->configureQuota();
         $project->waitForAllRunning();
+        $this->deleteHostingIfItFails($project, fn () => $this->logger()?->throwIfCancelled());
+    }
+
+    public function removedTheAccount(): bool
+    {
+        return $this->removedTheAccount;
     }
 
     public function ingestApplicationSource(): void
@@ -113,7 +124,7 @@ final class DindDeployMechanics implements DeployMechanics
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
         $project = $this->aggregate();
-        if (!$this->reclonesOnRebuild($zipPath)) {
+        if (! $this->reclonesOnRebuild($zipPath)) {
             $this->stopApplicationBeforeWipe(copyBack: true);
         }
         $this->logger()?->info('Preparing the account directories and Linux user');
@@ -141,7 +152,7 @@ final class DindDeployMechanics implements DeployMechanics
             return;
         }
         $mounts = $read['mounts'] ?? null;
-        $this->logger()?->info('Stopped the app first: ' . ($mounts === null ? 'its mounts could not be read' : implode(', ', $mounts)));
+        $this->logger()?->info('Stopped the app first: '.($mounts === null ? 'its mounts could not be read' : implode(', ', $mounts)));
 
         $wasRunning = $this->aggregate()->isRunning();
         $result = $app->projectAction('down');
@@ -154,7 +165,7 @@ final class DindDeployMechanics implements DeployMechanics
      * An app that mounts nothing under ~/project keeps serving (`up -d` recreates it last),
      * and so does one whose checkout could be moved aside.
      *
-     * @param ?array{mounts: list<string>, containers: list<string>, running: list<string>} $read
+     * @param  ?array{mounts: list<string>, containers: list<string>, running: list<string>}  $read
      */
     private function keepsServingThroughWipe(?array $read, bool $copyBack): bool
     {
@@ -170,19 +181,19 @@ final class DindDeployMechanics implements DeployMechanics
     }
 
     /**
-     * @param array{exit_code: int, stdout: string, stderr: string} $result
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
      */
     private function warnAppNotStopped(array $result): void
     {
         Log::warning(
             "Could not stop the app before the wipe rebuild of {$this->user()->username}: "
-            . trim($result['stderr'] ?: $result['stdout']),
+            .trim($result['stderr'] ?: $result['stdout']),
         );
     }
 
     private function reclonesOnRebuild(?string $zipPath): bool
     {
-        return $this->user()->hasGitProject() && !$this->hasArchive($zipPath);
+        return $this->user()->hasGitProject() && ! $this->hasArchive($zipPath);
     }
 
     private function hasArchive(?string $zipPath): bool
@@ -238,14 +249,17 @@ final class DindDeployMechanics implements DeployMechanics
         (new RoutingSnapshot($this->dind))->take();
     }
 
-    /** A pull, a branch change or a push moves the checkout, and with it the submodule commits it records. */
+    /**
+     * A pull, a branch change or a push moves the checkout, and with it the submodule commits it records.
+     * Once the project has deployed, one the deployed commit already declared keeps its checkout when it cannot be fetched.
+     */
     private function fetchSubmodulesOfCheckout(): void
     {
         $user = $this->user();
-        if (!$user->hasGitProject()) {
+        if (! $user->hasGitProject()) {
             return;
         }
-        (new GitRepository($this->dind))->fetchSubmodules((string) $user->getGitRepo(), $user->getGitToken());
+        (new GitRepository($this->dind))->fetchSubmodules((string) $user->getGitRepo(), $user->getGitToken(), $user->deploysAsUpgrade());
     }
 
     /** A pull or an archive builds on a copy; the running app keeps the tree it was deployed from. */
@@ -257,7 +271,7 @@ final class DindDeployMechanics implements DeployMechanics
         if ((new CheckoutAside($this->dind))->keptByThisProcess()) {
             $this->logger()?->info(
                 'Kept the running app up during the build; the checkout it was deployed from moved to ~/'
-                . CheckoutAside::DIR . ' before the change, and comes back if the new version fails'
+                .CheckoutAside::DIR.' before the change, and comes back if the new version fails'
             );
 
             return;
@@ -269,12 +283,12 @@ final class DindDeployMechanics implements DeployMechanics
     }
 
     /**
-     * @param array{mounts: list<string>, containers: list<string>, running: list<string>} $read
+     * @param  array{mounts: list<string>, containers: list<string>, running: list<string>}  $read
      */
     private function keepCheckoutForRunningApp(array $read, bool $copyBack): bool
     {
         $binds = $read['mounts'] !== [];
-        if (!(new CheckoutAside($this->dind))->moveAside($read['running'], $copyBack, $binds)) {
+        if (! (new CheckoutAside($this->dind))->moveAside($read['running'], $copyBack, $binds)) {
             return false;
         }
         $this->logger()?->info($this->checkoutMovedAsideMessage($read['mounts']));
@@ -283,17 +297,17 @@ final class DindDeployMechanics implements DeployMechanics
     }
 
     /**
-     * @param list<string> $mounts
+     * @param  list<string>  $mounts
      */
     private function checkoutMovedAsideMessage(array $mounts): string
     {
         if ($mounts === []) {
             return 'Kept the running app up during the build; the checkout it was deployed from moved to ~/'
-                . CheckoutAside::DIR . ', and comes back if the new version fails';
+                .CheckoutAside::DIR.', and comes back if the new version fails';
         }
 
-        return 'Kept the running app up during the build: ' . implode(', ', $mounts)
-            . ', so the checkout it reads moved to ~/' . CheckoutAside::DIR . ' until the new version replaces it';
+        return 'Kept the running app up during the build: '.implode(', ', $mounts)
+            .', so the checkout it reads moved to ~/'.CheckoutAside::DIR.' until the new version replaces it';
     }
 
     public function publishDomain(DomainModel $domain): void
@@ -324,7 +338,7 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function customEnvFailureHint(): ?string
     {
-        if (!$this->user()->usedCustomEnvVars()) {
+        if (! $this->user()->usedCustomEnvVars()) {
             return null;
         }
 
@@ -374,6 +388,7 @@ final class DindDeployMechanics implements DeployMechanics
             $step();
         } catch (\Exception $e) {
             $this->deleteHostingQuietly($project);
+            $this->removedTheAccount = true;
             throw $e;
         }
     }

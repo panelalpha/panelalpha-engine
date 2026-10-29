@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Vault;
 
+use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Models\SecretVaultEntry;
 use Illuminate\Console\Command;
 
@@ -12,13 +13,15 @@ use Illuminate\Console\Command;
  * is the first half of *replacing* one. Delete, then
  * `vault:secret:create` a new link.
  *
- * Addressed by its `vault:<id>` or the bare id `vault:secret:list` prints.
+ * Addressed by the `vault:<key>` `vault:secret:list` prints.
  * A project that already used it keeps the copy it stored.
  */
 class VaultSecretDeleteCommand extends Command
 {
+    use ConfirmsChanges;
+
     protected $signature = 'vault:secret:delete
-                            {ref : The id from vault:secret:list, or vault:<id>}
+                            {ref : The vault:<key> from vault:secret:list}
                             {--force : Skip the confirmation}';
 
     protected $description = 'Delete a vault entry and its secret';
@@ -28,19 +31,22 @@ class VaultSecretDeleteCommand extends Command
         /** @var string $ref */
         $ref = $this->argument('ref');
 
-        $id = SecretVaultEntry::idFromReference($ref);
-        $entry = $id === null ? null : SecretVaultEntry::query()->find($id);
+        $entry = SecretVaultEntry::findByReference(trim($ref));
 
         if ($entry === null) {
-            $this->error("No vault entry for '{$ref}'. Use an id from vault:secret:list.");
+            $this->error("No vault entry for '{$ref}'. Use a reference from vault:secret:list.");
 
             return self::FAILURE;
         }
 
-        $what = "entry {$entry->id} ({$entry->type}, {$entry->scope}"
-            . ($entry->purpose !== null ? ", \"{$entry->purpose}\"" : '') . ')';
+        if ($this->refusedWithoutConfirmation()) {
+            return self::FAILURE;
+        }
 
-        if (!$this->option('force') && !$this->confirm("Delete {$what}? The secret cannot be recovered.")) {
+        $what = "entry {$entry->id} ({$entry->type}, {$entry->scope}"
+            .($entry->purpose !== null ? ", \"{$entry->purpose}\"" : '').')';
+
+        if (! $this->option('force') && ! $this->confirm("Delete {$what}? The secret cannot be recovered.")) {
             $this->line('Left alone.');
 
             return self::SUCCESS;

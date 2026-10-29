@@ -23,7 +23,7 @@ final class AppFacts
     public const MAX_ALSO = 4;
 
     /**
-     * @param list<AppPackage> $packages primary first
+     * @param  list<AppPackage>  $packages  primary first
      * @return array<string, mixed> empty when nothing named this application
      */
     public static function build(
@@ -33,7 +33,7 @@ final class AppFacts
         string $installId
     ): array {
         $primary = $packages[0] ?? null;
-        if (!$primary instanceof AppPackage) {
+        if (! $primary instanceof AppPackage) {
             return [];
         }
 
@@ -80,7 +80,7 @@ final class AppFacts
      */
     private static function identity(AppPackage $package, bool $private, string $installId): array
     {
-        if (!$package->isNamed() || $package->name === null) {
+        if (! $package->isNamed() || $package->name === null) {
             return [];
         }
 
@@ -99,11 +99,11 @@ final class AppFacts
     /** Salted per install, exactly as a private repository path is. */
     private static function hash(string $installId, string $ecosystem, string $name): string
     {
-        return substr(hash('sha256', $installId . '|' . $ecosystem . '|' . $name), 0, 16);
+        return substr(hash('sha256', $installId.'|'.$ecosystem.'|'.$name), 0, 16);
     }
 
     /**
-     * @param list<Framework> $frameworks
+     * @param  list<Framework>  $frameworks
      * @return list<array<string, mixed>>
      */
     private static function frameworks(array $frameworks): array
@@ -130,7 +130,7 @@ final class AppFacts
      * Runtime requirements in full, extensions capped: the runtime constraint is
      * always the interesting one, so the `ext-*`/`lib-*` list is what gets trimmed.
      *
-     * @param array<string, string> $platform
+     * @param  array<string, string>  $platform
      * @return array<string, string>
      */
     private static function platform(array $platform): array
@@ -138,11 +138,12 @@ final class AppFacts
         $runtime = [];
         $extensions = [];
         foreach ($platform as $name => $constraint) {
-            if (!is_string($name) || !is_string($constraint)) {
+            if (! is_string($name) || ! is_string($constraint)) {
                 continue;
             }
             if (str_starts_with($name, 'ext-') || str_starts_with($name, 'lib-')) {
                 $extensions[$name] = $constraint;
+
                 continue;
             }
             $runtime[$name] = $constraint;
@@ -157,7 +158,7 @@ final class AppFacts
     /**
      * Dependency counts, integers only.
      *
-     * @param array<string, int> $counts
+     * @param  array<string, int>  $counts
      * @return array<string, int>
      */
     private static function counts(array $counts): array
@@ -178,14 +179,14 @@ final class AppFacts
      * Vite front end is a composer.json and a package.json, and which halves a
      * project has changes what a failed build means.
      *
-     * @param list<AppPackage> $packages
+     * @param  list<AppPackage>  $packages
      * @return list<string>
      */
     private static function also(array $packages): array
     {
         $others = [];
         foreach (array_slice($packages, 1) as $package) {
-            if ($package instanceof AppPackage && !in_array($package->ecosystem, $others, true)) {
+            if ($package instanceof AppPackage && ! in_array($package->ecosystem, $others, true)) {
                 $others[] = $package->ecosystem;
             }
         }

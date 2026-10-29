@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Controllers\ServerMetricsController;
+use App\Lib\Host\ServerMetricsHistory;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -27,6 +28,7 @@ class ServerMetricsControllerTest extends TestCase
 
         $this->runMigration('2025_07_16_091653_create_server_metrics_table.php');
         $this->runMigration('2025_08_08_084810_add_index_to_server_metrics_table.php');
+        $this->runMigration('2026_09_28_000000_add_disk_percent_to_server_metrics_table.php');
 
         $this->controller = new ServerMetricsController();
     }
@@ -43,7 +45,7 @@ class ServerMetricsControllerTest extends TestCase
         $migration->up();
     }
 
-    private function insertMetric(Carbon $timestamp, float $cpu, float $ram): void
+    private function insertMetric(Carbon $timestamp, float $cpu, float $ram, ?float $disk = null): void
     {
         DB::table('server_metrics')->insert([
             'timestamp' => $timestamp->format('Y-m-d H:i:s'),
@@ -61,6 +63,7 @@ class ServerMetricsControllerTest extends TestCase
             'net_out_bps' => 0,
             'net_in_pps' => 0,
             'net_out_pps' => 0,
+            'disk_percent' => $disk,
         ]);
     }
 
@@ -138,6 +141,77 @@ class ServerMetricsControllerTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('UNIX_TIMESTAMP', $sql);
         $this->assertStringContainsString('`timestamp` >= ?', $sql);
         $this->assertStringStartsWith('select `timestamp`, `cpu_percent`', $sql);
+    }
+
+    public function test_history_averages_each_bucket_in_sql_on_sqlite(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-28 12:34:56', 'UTC'));
+        try {
+            // 24h buckets are 10 minutes; the last complete one starts 12:20.
+            $this->insertMetric(Carbon::parse('2026-09-28 12:21:00', 'UTC'), 10.0, 20.0, 50.0);
+            $this->insertMetric(Carbon::parse('2026-09-28 12:29:55', 'UTC'), 30.0, 40.0, 52.0);
+            $this->insertMetric(Carbon::parse('2026-09-28 12:00:05', 'UTC'), 70.0, 80.0);
+            $this->insertMetric(Carbon::parse('2026-09-28 12:31:00', 'UTC'), 999.0, 999.0); // still running
+            $this->insertMetric(Carbon::parse('2026-09-27 12:19:59', 'UTC'), 999.0, 999.0); // before the window
+
+            $body = ServerMetricsHistory::for('24h');
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertSame(['range' => '24h', 'bucket_seconds' => 600, 'from' => '2026-09-27 12:30:00', 'to' => '2026-09-28 12:20:00'], $body['meta']);
+        $this->assertCount(144, $body['data']);
+
+        $last = end($body['data']);
+        $this->assertSame('2026-09-28 12:20:00', $last['period']);
+        $this->assertEquals(20.0, $last['cpu_percent']);
+        $this->assertEquals(30.0, $last['ram_percent']);
+        $this->assertEquals(51.0, $last['disk_percent']);
+
+        // A bucket whose rows predate disk_percent reports it as null, not zero.
+        $noon = $body['data'][141];
+        $this->assertSame('2026-09-28 12:00:00', $noon['period']);
+        $this->assertEquals(70.0, $noon['cpu_percent']);
+        $this->assertArrayHasKey('disk_percent', $noon);
+        $this->assertNull($noon['disk_percent']);
+
+        $this->assertSame(['period' => '2026-09-27 12:30:00'], $body['data'][0]);
+    }
+
+    public function test_history_ranges_have_their_own_bucket_sizes(): void
+    {
+        foreach (['1h' => [60, 60], '7d' => [3600, 168], '30d' => [21600, 120]] as $range => [$bucket, $points]) {
+            $body = ServerMetricsHistory::for($range);
+            $this->assertSame($bucket, $body['meta']['bucket_seconds'], $range);
+            $this->assertCount($points, $body['data'], $range);
+        }
+    }
+
+    public function test_history_groups_by_bucket_without_float_division_on_mysql_grammar(): void
+    {
+        $query = $this->withMysqlDefault(fn () => (new ReflectionMethod(ServerMetricsHistory::class, 'query'))->invoke(
+            null,
+            Carbon::now('UTC')->subDay(),
+            Carbon::now('UTC'),
+            600
+        ));
+
+        $sql = $query->toSql();
+        $this->assertStringContainsString("TIMESTAMPDIFF(SECOND, '1970-01-01 00:00:00', `timestamp`) DIV 600", $sql);
+        $this->assertStringContainsString('AVG(`disk_percent`) AS `disk_percent`', $sql);
+        $this->assertStringContainsString('group by bucket', $sql);
+    }
+
+    public function test_cpu_percent_is_the_busy_share_between_two_reads(): void
+    {
+        // user nice system idle iowait irq softirq steal
+        $before = "cpu  100 0 100 700 100 0 0 0 0 0\ncpu0 1 2 3 4\n";
+        $after = "cpu  160 0 140 760 120 10 10 0 0 0\ncpu0 1 2 3 4\n";
+
+        // 200 ticks passed, 80 of them idle or iowait
+        $this->assertSame(60.0, ServerMetricsController::cpuPercentBetween($before, $after));
+        $this->assertNull(ServerMetricsController::cpuPercentBetween($before, $before));
+        $this->assertNull(ServerMetricsController::cpuPercentBetween('', $after));
     }
 
     // toSql() never touches PDO, but tearDown()'s Schema::dropIfExists does --

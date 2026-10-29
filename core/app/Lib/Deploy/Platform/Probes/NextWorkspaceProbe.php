@@ -43,7 +43,7 @@ final class NextWorkspaceProbe implements PlatformProbe
         $rootHasNext = $context->hasDep('next');
         $workspace = self::findWorkspaceApp($context->projectDir);
 
-        if (!$rootHasConfig && !$rootHasNext && $workspace === null) {
+        if (! $rootHasConfig && ! $rootHasNext && $workspace === null) {
             return false;
         }
 
@@ -75,23 +75,23 @@ final class NextWorkspaceProbe implements PlatformProbe
         $bestScore = PHP_INT_MIN;
 
         foreach (['apps', 'packages', 'clients', 'web'] as $group) {
-            $base = $projectDir . '/' . $group;
-            if (!is_dir($base)) {
+            $base = $projectDir.'/'.$group;
+            if (! is_dir($base)) {
                 continue;
             }
             $entries = ProjectContext::entries($base);
             foreach ($entries as $name) {
-                if ($name === '.' || $name === '..' || !is_dir($base . '/' . $name)) {
+                if ($name === '.' || $name === '..' || ! is_dir($base.'/'.$name)) {
                     continue;
                 }
-                $dir = $base . '/' . $name;
+                $dir = $base.'/'.$name;
                 $package = ProjectContext::readPackageJson($dir);
                 if ($package === null) {
                     continue;
                 }
                 $hasNext = ProjectContext::packageHasDep($package, 'next');
                 $hasConfig = ProjectContext::firstConfigContents($dir, 'next.config') !== null;
-                if (!$hasNext && !$hasConfig) {
+                if (! $hasNext && ! $hasConfig) {
                     continue;
                 }
 
@@ -111,14 +111,14 @@ final class NextWorkspaceProbe implements PlatformProbe
                     $bestScore = $score;
                     $best = [
                         'dir' => $dir,
-                        'relative' => $group . '/' . $name,
+                        'relative' => $group.'/'.$name,
                         'package' => $package,
                     ];
                 }
             }
 
             // Directory named `web` that is itself the Next package (no child).
-            if ($group === 'web' && is_file($base . '/package.json') && !is_dir($base . '/web')) {
+            if ($group === 'web' && is_file($base.'/package.json') && ! is_dir($base.'/web')) {
                 $package = ProjectContext::readPackageJson($base);
                 if ($package !== null
                     && (ProjectContext::packageHasDep($package, 'next')

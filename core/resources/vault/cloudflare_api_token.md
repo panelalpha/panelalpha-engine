@@ -6,6 +6,11 @@ Create one at **[My Profile → API Tokens](https://dash.cloudflare.com/profile/
 - **Account** → Cloudflare Tunnel → **Edit**
 - **Zone** → DNS → **Edit**
 
+To purge the cache or change the security level from the engine, add two more:
+
+- **Zone** → Cache Purge → **Purge**
+- **Zone** → Zone Settings → **Edit**
+
 Under **Account Resources** select the account, and under **Zone Resources**
 the zone the tunnel will be on.
 

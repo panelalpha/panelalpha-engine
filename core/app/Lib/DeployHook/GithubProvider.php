@@ -49,7 +49,7 @@ final class GithubProvider implements HookProvider
         return hash_equals($expected, strtolower($m[1]));
     }
 
-    public function signsTheBody(): bool
+    public function signsTheBody(Request $request, string $secret): bool
     {
         return true;
     }
@@ -72,13 +72,14 @@ final class GithubProvider implements HookProvider
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
+     *
      * @throws InvalidPayload
      */
     private function pushEvent(string $event, ?string $delivery, array $payload): HookEvent
     {
         $ref = $payload['ref'] ?? null;
-        if (!is_string($ref) || $ref === '') {
+        if (! is_string($ref) || $ref === '') {
             throw new InvalidPayload('A push without a ref.');
         }
 
@@ -102,6 +103,7 @@ final class GithubProvider implements HookProvider
 
     /**
      * @return array<string, mixed>
+     *
      * @throws InvalidPayload
      */
     private function payload(Request $request): array
@@ -113,7 +115,7 @@ final class GithubProvider implements HookProvider
         }
 
         $decoded = json_decode($body, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             throw new InvalidPayload('The push body is not JSON.');
         }
 
@@ -132,7 +134,7 @@ final class GithubProvider implements HookProvider
     {
         parse_str($body, $fields);
         $payload = $fields['payload'] ?? null;
-        if (!is_string($payload)) {
+        if (! is_string($payload)) {
             throw new InvalidPayload('A form-encoded push without a payload field.');
         }
 

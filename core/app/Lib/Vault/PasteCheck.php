@@ -37,7 +37,7 @@ final class PasteCheck
 
     /** @param ?\Closure(string): Cloudflare $cloudflare builds the client for a pasted token */
     public function __construct(
-        private readonly GitRemoteProbe $probe = new GitRemoteProbe(),
+        private readonly GitRemoteProbe $probe = new GitRemoteProbe,
         ?\Closure $cloudflare = null,
     ) {
         $this->cloudflare = $cloudflare ?? static fn (string $token): Cloudflare => new Cloudflare($token);
@@ -46,7 +46,7 @@ final class PasteCheck
     /**
      * `verify_with` as it will be stored. Called at mint time.
      *
-     * @param ?array<string, mixed> $verifyWith
+     * @param  ?array<string, mixed>  $verifyWith
      * @return ?array<string, string>
      *
      * @throws ValidationException
@@ -67,8 +67,8 @@ final class PasteCheck
         $unknown = array_diff(array_keys($verifyWith), $allowed);
         if ($unknown !== []) {
             throw ValidationException::withMessages([
-                'verify_with' => 'Unknown key(s) ' . implode(', ', $unknown) . " for '{$type}'. "
-                    . 'Expected: ' . implode(', ', $allowed) . '.',
+                'verify_with' => 'Unknown key(s) '.implode(', ', $unknown)." for '{$type}'. "
+                    .'Expected: '.implode(', ', $allowed).'.',
             ]);
         }
 
@@ -80,13 +80,13 @@ final class PasteCheck
     /**
      * The repository is held to the rule project_create applies to git_repo when a token comes with it.
      *
-     * @param array<string, mixed> $verifyWith
+     * @param  array<string, mixed>  $verifyWith
      * @return array<string, string>
      */
     private static function prepareGit(array $verifyWith): array
     {
         $repo = $verifyWith['repo_url'] ?? null;
-        if (!is_string($repo) || trim($repo) === '') {
+        if (! is_string($repo) || trim($repo) === '') {
             throw ValidationException::withMessages([
                 'verify_with.repo_url' => 'The repository the token must be able to read.',
             ]);
@@ -101,14 +101,14 @@ final class PasteCheck
     }
 
     /**
-     * @param array<string, mixed> $verifyWith
+     * @param  array<string, mixed>  $verifyWith
      * @return array<string, string>
      */
     private static function prepareCloudflare(array $verifyWith): array
     {
         $host = $verifyWith['hostname'] ?? null;
         $host = is_string($host) ? strtolower(trim($host)) : '';
-        if ($host === '' || !str_contains($host, '.')
+        if ($host === '' || ! str_contains($host, '.')
             || filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false
         ) {
             throw ValidationException::withMessages([
@@ -148,7 +148,7 @@ final class PasteCheck
         }
 
         $repo = $entry->verify_with['repo_url'] ?? null;
-        if (!is_string($repo) || $repo === '') {
+        if (! is_string($repo) || $repo === '') {
             return ['rejected' => null, 'verification' => null];
         }
 
@@ -173,7 +173,7 @@ final class PasteCheck
         if ($result->outcome === GitProbeResult::VERIFIED
             && $this->probe->check('repo_url', $repo, null)->outcome === GitProbeResult::VERIFIED) {
             return GitProbeResult::unchecked(['message' => 'This repository is public, so the token was not needed '
-                . 'to read it and could not be tested.']);
+                .'to read it and could not be tested.']);
         }
 
         return $result;
@@ -209,9 +209,9 @@ final class PasteCheck
             return $this->cloudflareFailure($e, $host, $step);
         }
 
-        $target = 'Cloudflare account ' . ($account['name'] !== '' ? $account['name'] : $account['id']);
+        $target = 'Cloudflare account '.($account['name'] !== '' ? $account['name'] : $account['id']);
         if (isset($zone)) {
-            $target .= ', zone ' . $zone['name'];
+            $target .= ', zone '.$zone['name'];
         }
 
         return ['rejected' => null, 'verification' => [
@@ -232,7 +232,7 @@ final class PasteCheck
         $account = $client->resolveAccount();
         $step = 'tunnels';
         $client->findTunnelByName($account['id'], 'panelalpha-vault-check');
-        if (!is_string($host)) {
+        if (! is_string($host)) {
             return [$account, null];
         }
 
@@ -250,7 +250,7 @@ final class PasteCheck
 
         return self::rejected(match ($step) {
             'tunnels' => 'This token cannot manage Cloudflare Tunnels. Give it Account > Cloudflare Tunnel > Edit. '
-                . '(' . $e->getMessage() . ')',
+                .'('.$e->getMessage().')',
             default => $e->getMessage(),
         });
     }
@@ -278,7 +278,7 @@ final class PasteCheck
     {
         return ['rejected' => null, 'verification' => [
             'result' => 'unchecked',
-            'target' => is_string($host) ? 'Cloudflare, zone for ' . $host : 'Cloudflare',
+            'target' => is_string($host) ? 'Cloudflare, zone for '.$host : 'Cloudflare',
             'checked_at' => Carbon::now()->toIso8601String(),
             'reason' => $reason,
         ]];
@@ -303,6 +303,6 @@ final class PasteCheck
         $host = is_array($parts) ? (string) ($parts['host'] ?? '') : '';
         $path = is_array($parts) ? trim((string) ($parts['path'] ?? ''), '/') : '';
 
-        return $host === '' ? $repoUrl : $host . '/' . preg_replace('/\.git$/', '', $path);
+        return $host === '' ? $repoUrl : $host.'/'.preg_replace('/\.git$/', '', $path);
     }
 }

@@ -2,9 +2,9 @@
 
 namespace App\System\Project\Dind\Inner;
 
-use App\System\Project\Dind\InnerDocker;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Dind\DindBuildStorage;
+use App\System\Project\Dind\InnerDocker;
 
 /**
  * Running host-side work on behalf of an account's deploy, and saying so in
@@ -39,7 +39,7 @@ class HostCommands
     {
         try {
             $this->inner->dind()->system()->runProcess(
-                ['sudo', 'sh', '-c', 'nohup sh -c ' . escapeshellarg($script) . ' >/dev/null 2>&1 &'],
+                ['sudo', 'sh', '-c', 'nohup sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &'],
                 [],
                 5
             );
@@ -51,7 +51,7 @@ class HostCommands
     /**
      * Host-side docker/build steps that must honour deploy cancellation via PID.
      *
-     * @param list<string>|string $cmd
+     * @param  list<string>|string  $cmd
      */
     public function cancellable(array|string $cmd, int $timeout): void
     {
@@ -68,7 +68,7 @@ class HostCommands
         $logger->throwIfCancelled();
         $process = $shell->streamProcess($argv, [], $timeout, $logger);
         $logger->throwIfCancelled();
-        if (!$process->isSuccessful()) {
+        if (! $process->isSuccessful()) {
             $message = $process->getErrorOutput() ?: $process->getOutput();
             throw new \Exception($message !== '' ? $message : 'Host Docker command failed');
         }
@@ -81,7 +81,7 @@ class HostCommands
      */
     public function failDeployIfDiskFull(string $output): void
     {
-        if (!DindBuildStorage::isDiskFullError($output)) {
+        if (! DindBuildStorage::isDiskFullError($output)) {
             return;
         }
 

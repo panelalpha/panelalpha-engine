@@ -10,17 +10,24 @@ namespace App\System\Services\Mysql;
 final class DatabaseCopyResult
 {
     /**
-     * @param array<string, string> $databases source database => destination database
-     * @param array<string, string> $users     source user => destination user
-     * @param array<string, string> $passwords destination user => password
-     * @param list<string>          $warnings
+     * @param  array<string, string>  $databases  source database => destination database
+     * @param  array<string, string>  $users  source user => destination user
+     * @param  array<string, string>  $passwords  destination user => password
+     * @param  list<string>  $warnings
      */
     public function __construct(
         public readonly array $databases = [],
         public readonly array $users = [],
         public readonly array $passwords = [],
         public readonly array $warnings = [],
-    ) {
+    ) {}
+
+    /**
+     * @param  list<string>  $warnings
+     */
+    public function withWarnings(array $warnings): self
+    {
+        return new self($this->databases, $this->users, $this->passwords, [...$this->warnings, ...$warnings]);
     }
 
     /**

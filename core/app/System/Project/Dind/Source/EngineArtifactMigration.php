@@ -25,9 +25,9 @@ use Closure;
 final class EngineArtifactMigration
 {
     /**
-     * @param Closure(string $from, string $to): void $moveFile same-owner rename
-     * @param Closure(string $from, string $to): void $copyFile new file, ownership follows $from
-     * @param Closure(string $path): void $deleteFile
+     * @param  Closure(string $from, string $to): void  $moveFile  same-owner rename
+     * @param  Closure(string $from, string $to): void  $copyFile  new file, ownership follows $from
+     * @param  Closure(string $path): void  $deleteFile
      */
     public function __construct(
         private GitRepository $git,
@@ -37,8 +37,7 @@ final class EngineArtifactMigration
         private Closure $moveFile,
         private Closure $copyFile,
         private Closure $deleteFile,
-    ) {
-    }
+    ) {}
 
     public static function forProject(DindProject $dind): self
     {
@@ -56,7 +55,7 @@ final class EngineArtifactMigration
                 $system->exec(['sudo', 'mv', '-f', $from, $to]);
             },
             static function (string $from, string $to) use ($system): void {
-                $system->exec(['sudo', 'cp', '-p', $from, $to]);
+                $system->exec(['sudo', 'cp', '-p', '--no-dereference', '--remove-destination', $from, $to]);
             },
             static function (string $path) use ($system): void {
                 $system->exec(['sudo', 'rm', '-f', $path]);
@@ -81,7 +80,7 @@ final class EngineArtifactMigration
 
     private function path(string $name): string
     {
-        return rtrim($this->projectDir, '/') . '/' . $name;
+        return rtrim($this->projectDir, '/').'/'.$name;
     }
 
     private function relative(string $absolute): string
@@ -108,7 +107,7 @@ final class EngineArtifactMigration
             if (is_file($path) && ComposeFileInspector::isGeneratedBootstrapCompose($path)) {
                 ($this->moveFile)($path, $run);
 
-                return ['moved ' . $candidate . ' to ' . EngineArtifacts::RUN_COMPOSE . ' (recipe-generated compose)'];
+                return ['moved '.$candidate.' to '.EngineArtifacts::RUN_COMPOSE.' (recipe-generated compose)'];
             }
         }
 
@@ -126,12 +125,12 @@ final class EngineArtifactMigration
     private function migrateStashes(): array
     {
         $report = [];
-        $stashes = glob($this->path('*') . EngineArtifacts::LEGACY_STASH_SUFFIX) ?: [];
+        $stashes = glob($this->path('*').EngineArtifacts::LEGACY_STASH_SUFFIX) ?: [];
         foreach ($stashes as $stash) {
             $original = substr($stash, 0, -strlen(EngineArtifacts::LEGACY_STASH_SUFFIX));
             $name = basename($original);
 
-            if (!is_file($original)) {
+            if (! is_file($original)) {
                 ($this->moveFile)($stash, $original);
                 $report[] = "restored {$name} from its stash (nothing had taken its place)";
 
@@ -177,24 +176,24 @@ final class EngineArtifactMigration
         }
 
         ($this->copyFile)($source, $run);
-        $report = ['copied ' . basename($source) . ' to ' . EngineArtifacts::RUN_COMPOSE . ' (the version already running)'];
+        $report = ['copied '.basename($source).' to '.EngineArtifacts::RUN_COMPOSE.' (the version already running)'];
 
         // An app config in `replace` mode had written its compose file over
         // this one. Keep that under the app config's reserved name before git
         // restores the client's, or the next `up` (ticket 05) would regenerate
         // the run file from the client's compose instead of the app config's.
         $appConfigCompose = $this->path(EngineArtifacts::APP_CONFIG_COMPOSE);
-        if ($this->appConfigComposeMode === AppConfig::COMPOSE_REPLACE && !is_file($appConfigCompose)) {
+        if ($this->appConfigComposeMode === AppConfig::COMPOSE_REPLACE && ! is_file($appConfigCompose)) {
             ($this->copyFile)($source, $appConfigCompose);
-            $report[] = 'copied ' . basename($source) . ' to ' . EngineArtifacts::APP_CONFIG_COMPOSE
-                . " (this account's app config replaces the compose file)";
+            $report[] = 'copied '.basename($source).' to '.EngineArtifacts::APP_CONFIG_COMPOSE
+                ." (this account's app config replaces the compose file)";
         }
 
         if ($this->git->hasRepository()) {
             $relative = $this->relative($source);
             if ($this->git->fileDiffersFromHead($relative)) {
                 $this->git->restoreFromHead($relative);
-                $report[] = 'restored ' . basename($source) . ' from git (it had been hardened in place)';
+                $report[] = 'restored '.basename($source).' from git (it had been hardened in place)';
             }
         }
 
@@ -214,7 +213,7 @@ final class EngineArtifactMigration
     private function migrateAppConfigOverride(): array
     {
         $legacy = $this->path(Paths::CLIENT_OVERRIDE_FILENAME);
-        if ($this->appConfigComposeMode !== AppConfig::COMPOSE_OVERRIDE || !is_file($legacy)) {
+        if ($this->appConfigComposeMode !== AppConfig::COMPOSE_OVERRIDE || ! is_file($legacy)) {
             return [];
         }
 
@@ -222,8 +221,8 @@ final class EngineArtifactMigration
         ($this->moveFile)($legacy, $target);
 
         return [
-            'moved ' . Paths::CLIENT_OVERRIDE_FILENAME . ' to ' . EngineArtifacts::RUN_COMPOSE_OVERRIDE
-                . " (this account's app config layers an override)",
+            'moved '.Paths::CLIENT_OVERRIDE_FILENAME.' to '.EngineArtifacts::RUN_COMPOSE_OVERRIDE
+                ." (this account's app config layers an override)",
         ];
     }
 
@@ -237,18 +236,18 @@ final class EngineArtifactMigration
     private function migrateComposerPin(): array
     {
         $composerJson = $this->path('composer.json');
-        if (!is_file($composerJson) || !$this->git->hasRepository()) {
+        if (! is_file($composerJson) || ! $this->git->hasRepository()) {
             return [];
         }
 
         $relative = $this->relative($composerJson);
-        if (!$this->git->fileDiffersFromHead($relative)) {
+        if (! $this->git->fileDiffersFromHead($relative)) {
             return [];
         }
 
         $head = $this->git->readFromHead($relative);
         $current = @file_get_contents($composerJson);
-        if ($head === null || $current === false || !self::differsOnlyByPlatformPin($head, $current)) {
+        if ($head === null || $current === false || ! self::differsOnlyByPlatformPin($head, $current)) {
             return [];
         }
 
@@ -261,7 +260,7 @@ final class EngineArtifactMigration
     {
         $headDecoded = json_decode($head, true);
         $currentDecoded = json_decode($current, true);
-        if (!is_array($headDecoded) || !is_array($currentDecoded)) {
+        if (! is_array($headDecoded) || ! is_array($currentDecoded)) {
             return false;
         }
 

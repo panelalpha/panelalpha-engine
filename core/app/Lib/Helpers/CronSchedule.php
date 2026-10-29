@@ -46,7 +46,7 @@ final class CronSchedule
      * fixing a cron expression should see everything wrong with it in one
      * round trip.
      *
-     * @param array<string, mixed> $schedule keyed by field name
+     * @param  array<string, mixed>  $schedule  keyed by field name
      * @return array<string, list<string>>
      */
     public static function errors(array $schedule): array
@@ -76,7 +76,7 @@ final class CronSchedule
      */
     public static function fieldErrors(string $field, string $value): array
     {
-        if (!isset(self::FIELDS[$field])) {
+        if (! isset(self::FIELDS[$field])) {
             throw new \InvalidArgumentException("Unknown cron field '{$field}'");
         }
 
@@ -95,6 +95,7 @@ final class CronSchedule
             if ($part === '') {
                 // `1,,5` is a typo, not an empty schedule — say which.
                 $errors[] = 'Empty list element';
+
                 continue;
             }
             $error = self::tokenError(strtolower($part), $field);
@@ -120,7 +121,7 @@ final class CronSchedule
         // class exists to catch.
         if (str_contains($token, '/')) {
             [$base, $step] = array_pad(explode('/', $token, 2), 2, '');
-            if (!ctype_digit($step) || (int) $step <= 0) {
+            if (! ctype_digit($step) || (int) $step <= 0) {
                 return "Invalid step value in '{$token}'";
             }
             $token = $base;
@@ -172,7 +173,7 @@ final class CronSchedule
             || $toValue < $rules['min'] || $toValue > $rules['max']
         ) {
             return "Range values out of bounds in '{$token}' "
-                . "(allowed {$rules['min']}-{$rules['max']})";
+                ."(allowed {$rules['min']}-{$rules['max']})";
         }
 
         // `fri-mon` is not a weekend: crond reads a range forwards only.
@@ -184,7 +185,7 @@ final class CronSchedule
     /**
      * A range endpoint as a number, by name or by digits. Null when neither.
      *
-     * @param array<string, int> $names
+     * @param  array<string, int>  $names
      */
     private static function numeric(string $value, array $names): ?int
     {

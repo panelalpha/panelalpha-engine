@@ -3,6 +3,7 @@
 namespace Tests\Unit\System\Project\Dind\Generation;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Models\ProxyRule;
 use App\Models\User;
 use App\System;
@@ -316,6 +317,29 @@ class GenerationSweepTest extends TestCase
             'because the new version had not passed its health check; it does not answer: it answers HTTP 500. The new version\'s second copy keeps serving the site until it does',
             $this->lastLine()
         );
+    }
+
+    /** A checkout another live process moved aside stays its own, but a deploy that succeeded no longer counts as stopped. */
+    public function test_a_successful_deploy_forgets_a_stopped_mark_beside_a_checkout_another_process_holds(): void
+    {
+        $other = proc_open(['sleep', '30'], [], $pipes);
+        $this->assertIsResource($other, 'could not start a process to own the checkout');
+        try {
+            $pid = proc_get_status($other)['pid'];
+            $state = new GenerationState($this->username);
+            $state->put(GenerationState::CHECKOUT, ['path' => '/home/u/.project-prev', 'containers' => ['old1'], 'owner' => ['pid' => $pid, 'start' => ProcessIdentity::startTime($pid), 'at' => time()]]);
+            $state->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+
+            $this->assertNull(GenerationSweep::settleIfIdle($this->project(), false));
+            $this->assertNotNull($state->get(GenerationState::STOPPED), 'a cancel of a failed one still reads it');
+
+            $this->assertNull(GenerationSweep::settleIfIdle($this->project(), true));
+            $this->assertNull($state->get(GenerationState::STOPPED));
+            $this->assertNotNull($state->get(GenerationState::CHECKOUT), 'the other process still holds it');
+        } finally {
+            proc_terminate($other);
+            proc_close($other);
+        }
     }
 
     public function test_a_deploy_killed_after_it_finished_is_settled_as_the_success_it_was(): void

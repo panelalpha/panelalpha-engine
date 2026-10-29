@@ -36,14 +36,14 @@ final class PhpDocrootExplainer implements Explainer
     public function explain(ProjectContext $context, ProbedResponse $response): array
     {
         foreach (self::ENTRY_POINTS as $entry) {
-            if (!$context->isFile($entry)) {
+            if (! $context->isFile($entry)) {
                 continue;
             }
 
             return str_contains($entry, '/')
                 ? [
-                    'detail' => 'The entry point is ' . $entry . ', so the document root should be '
-                        . dirname($entry) . ' rather than the project root.',
+                    'detail' => 'The entry point is '.$entry.', so the document root should be '
+                        .dirname($entry).' rather than the project root.',
                     'fix' => PhpEntryExplainer::docrootFix($context, dirname($entry)),
                 ]
                 : [

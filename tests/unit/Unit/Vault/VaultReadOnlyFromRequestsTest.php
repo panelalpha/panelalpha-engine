@@ -12,16 +12,17 @@ use App\System\Project\Settings;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TestNetwork;
 
 /**
  * The vault only proxies what a caller passes. A request that names
- * `vault:<id>` gets the secret, stored on the project as any value would be;
+ * `vault:<key>` gets the secret, stored on the project as any value would be;
  * nothing else -- the User getters, settings, telemetry -- reads the vault,
  * so `use_count` stays 0 on every path that was not given a reference.
  */
 class VaultReadOnlyFromRequestsTest extends VaultTestCase
 {
-    private const LOOPBACK_REPO = 'http://127.0.0.1:1/acme/app.git';
+    private const LOOPBACK_REPO = 'http://'.TestNetwork::LOOPBACK.':1/acme/app.git';
 
     protected function setUp(): void
     {
@@ -65,7 +66,7 @@ class VaultReadOnlyFromRequestsTest extends VaultTestCase
 
         // The clone itself fails (nothing listens on port 1); the token was handed to it.
         $this->postJson('/api/source/inspect', [
-            'source' => 'https://127.0.0.1:1/acme/app.git',
+            'source' => 'https://'.TestNetwork::LOOPBACK.':1/acme/app.git',
             'type' => 'git',
             'git_token' => $entry->reference(),
         ])->assertStatus(422)->assertJsonMissingValidationErrors('git_token');
@@ -80,7 +81,7 @@ class VaultReadOnlyFromRequestsTest extends VaultTestCase
         $this->withoutMiddleware(Authenticate::class);
 
         $this->postJson('/api/source/inspect', [
-            'source' => 'https://127.0.0.1:1/acme/app.git',
+            'source' => 'https://'.TestNetwork::LOOPBACK.':1/acme/app.git',
             'type' => 'git',
             'git_token' => $entry->reference(),
         ])->assertStatus(422)->assertJsonValidationErrors('git_token');
@@ -99,7 +100,7 @@ class VaultReadOnlyFromRequestsTest extends VaultTestCase
             'username' => 'shop',
             'email' => 'p@example.com',
             'tunnel' => 'none',
-            'git_repo' => 'https://127.0.0.1:1/acme/app.git',
+            'git_repo' => 'https://'.TestNetwork::LOOPBACK.':1/acme/app.git',
             'git_token' => $entry->reference(),
         ])->assertStatus(422)->assertJsonPath('problems.0.code', 'name_taken');
 

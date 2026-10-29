@@ -152,21 +152,21 @@ class MysqlController extends Controller
     {
         $token = MysqlSsoToken::claim($value);
 
-        if (!$token) {
+        if (! $token) {
             throw ValidationException::withMessages([
-                'token' => 'Invalid token'
+                'token' => 'Invalid token',
             ]);
         }
 
         if ($token->expired()) {
             throw ValidationException::withMessages([
-                'token' => 'Invalid token expired'
+                'token' => 'Invalid token expired',
             ]);
         }
 
         if ($token->user->status === 'suspended') {
             throw ValidationException::withMessages([
-                'token' => 'Invalid token'
+                'token' => 'Invalid token',
             ]);
         }
 

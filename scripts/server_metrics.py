@@ -9,6 +9,10 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# The host disk projects live on (every account's files and images are under
+# /home), reached through volumes_from: core. Same path as core's DataDisk.
+DATA_DISK = "/home"
+
 # int-updater.sh sets DB_CONNECTION=mysql (docker-compose.yml's CORE_DB_*
 # overrides) only for a host it found already running core-db -- everyone
 # else, sqlite is the default. Both backends' drivers are always installed
@@ -70,6 +74,17 @@ def counter_rate(prev, cur, field, elapsed):
             total += max(0, counters[field] - prev[name][field])
     return total / elapsed
 
+# Share of the disk no longer available, as core's /metrics/current computes
+# it: (total - available) / total. psutil's own percent leaves the root
+# reserve out, like df, and would disagree with the live figure by ~2 points.
+def data_disk_percent():
+    try:
+        usage = psutil.disk_usage(DATA_DISK)
+        return round((usage.total - usage.free) / usage.total * 100, 2)
+    except (OSError, ZeroDivisionError) as e:
+        logging.error(f"Cannot read {DATA_DISK} usage: {e}")
+        return None
+
 def collect_metrics(prev_metrics):
     try:
         now = time.time()
@@ -103,6 +118,7 @@ def collect_metrics(prev_metrics):
             "net_out_bps": counter_rate(prev_net, net, "bytes_sent", elapsed),
             "net_in_pps": counter_rate(prev_net, net, "packets_recv", elapsed),
             "net_out_pps": counter_rate(prev_net, net, "packets_sent", elapsed),
+            "disk_percent": data_disk_percent(),
         }
 
     except Exception as e:
@@ -173,7 +189,7 @@ def main():
 
     interval = get_interval()
     placeholder = "%s" if mysql_mode else "?"
-    values_clause = ", ".join([placeholder] * 15)
+    values_clause = ", ".join([placeholder] * 16)
 
     try:
         while True:
@@ -199,7 +215,8 @@ def main():
                     net_in_bps,
                     net_out_bps,
                     net_in_pps,
-                    net_out_pps
+                    net_out_pps,
+                    disk_percent
                 )
                 VALUES ({values_clause})
             """
@@ -219,6 +236,7 @@ def main():
                 metrics["net_out_bps"],
                 metrics["net_in_pps"],
                 metrics["net_out_pps"],
+                metrics["disk_percent"],
             )
 
             # A locked database (core mid-write under WAL) is transient --

@@ -8,6 +8,7 @@ use App\Models\HookDelivery;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Support\Facades\DB;
+use Tests\Support\TestNetwork;
 
 /**
  * Creating a hook: what it hands back, that asking again is safe, and that
@@ -31,11 +32,19 @@ class DeployHooksTest extends DeployHookTestCase
 
         $this->assertTrue($creation->created);
         $this->assertMatchesRegularExpression(
-            '#^https://203\.0\.113\.10/hooks/[0-9a-f]{40}$#',
+            '#^https://'.preg_quote(TestNetwork::public(10), '#').'/hooks/[0-9a-f]{40}$#',
             $creation->hook->url(),
         );
         $this->assertNotNull($creation->secret);
         $this->assertGreaterThanOrEqual(32, strlen($creation->secret));
+    }
+
+    public function test_a_new_secret_is_a_standard_webhooks_signing_secret(): void
+    {
+        $secret = (string) (new DeployHooks())->create($this->user(), $this->git())->secret;
+
+        $this->assertStringStartsWith(DeployHook::SIGNING_SECRET_PREFIX, $secret);
+        $this->assertSame(32, strlen((string) base64_decode(substr($secret, strlen(DeployHook::SIGNING_SECRET_PREFIX)), true)));
     }
 
     public function test_the_url_never_says_whose_project_it_is(): void

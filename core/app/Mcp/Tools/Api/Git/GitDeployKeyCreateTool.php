@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a git deploy key
 
-    Create the project's SSH deploy key, or return the one it has: `public_key` is the line to add to the repository as a read-only deploy key, then connect an SSH remote with git_connect. The private key is stored encrypted and never returned. Host keys are pinned: github.com, gitlab.com and bitbucket.org from their published keys; for another host pass `host` (`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their `fingerprints` returned to check. 201 when the key was created, 200 when it existed; never rotates (delete and create again for a new key).
+    Create the project's SSH deploy key, or return the one it has: `public_key` is the line to add to the repository as a read-only deploy key, then connect an SSH remote with git_connect. The private key is stored encrypted and never returned. Host keys are pinned: github.com, gitlab.com and bitbucket.org from their published keys; for another host pass `host` (`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their `fingerprints` returned to check. A `host` that resolves to an internal address, or does not resolve at all, is refused 422 with `problems[{field: host, code: host_refused}]` before anything is connected. 201 when the key was created, 200 when it existed; never rotates (delete and create again for a new key).
     MARKDOWN)]
 #[IsDestructive]
 class GitDeployKeyCreateTool extends ApiTool

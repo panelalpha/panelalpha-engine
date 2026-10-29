@@ -17,7 +17,7 @@ final class MysqlSidecar
     public const IMAGE = 'mariadb:11';
 
     /**
-     * @param array{connection?: string} $db
+     * @param  array{connection?: string}  $db
      */
     public static function isNeeded(array $db): bool
     {
@@ -31,13 +31,13 @@ final class MysqlSidecar
      * A legacy account keeps the blank: its data directory was initialised
      * with `app` for a user, or an empty root password.
      *
-     * @param array<string, string> $db
+     * @param  array<string, string>  $db
      * @return array<string, string>
      */
     public static function withPassword(array $db, SidecarPasswords $passwords): array
     {
         $settings = DatabaseSettings::fromArray($db);
-        if ($passwords->isLegacy() || !$settings->isMysql() || $settings->password() !== '') {
+        if ($passwords->isLegacy() || ! $settings->isMysql() || $settings->password() !== '') {
             return $db;
         }
         $db['password'] = $passwords->for(self::isRootAccount($settings) ? 'MYSQL_ROOT_PASSWORD' : 'MYSQL_PASSWORD');
@@ -46,7 +46,7 @@ final class MysqlSidecar
     }
 
     /**
-     * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
+     * @param  array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string}  $db
      * @return array<string, mixed>
      */
     public static function service(array $db, ?SidecarPasswords $passwords = null): array
@@ -72,8 +72,8 @@ final class MysqlSidecar
      *
      * `$db` is expected to have been through {@see withPassword()} already.
      *
-     * @param array<string, mixed> $decision
-     * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
+     * @param  array<string, mixed>  $decision
+     * @param  array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string}  $db
      * @return array<string, mixed>
      */
     public static function withSidecar(array $decision, array $db, ?SidecarPasswords $passwords = null): array

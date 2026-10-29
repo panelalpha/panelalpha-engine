@@ -10,15 +10,15 @@ class Users
     public function __construct(
         protected PDO $pdo,
         protected string $host,
-    ) {
-    }
+    ) {}
 
     public function userExists(string $name): bool
     {
         $conn = new Connection($this->pdo);
-        $query = "SELECT 1 FROM mysql.user WHERE user = ?";
+        $query = 'SELECT 1 FROM mysql.user WHERE user = ?';
         $result = $conn->select($query, [$name]);
-        return !empty($result);
+
+        return ! empty($result);
     }
 
     public function createUser(string $name, string $password): void
@@ -47,6 +47,6 @@ class Users
         $conn = new Connection($this->pdo);
         $query = "ALTER USER ?@'{$this->host}' IDENTIFIED BY ?";
         $conn->statement($query, [$name, $password]);
-        $conn->statement("FLUSH PRIVILEGES");
+        $conn->statement('FLUSH PRIVILEGES');
     }
 }

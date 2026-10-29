@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Telemetry;
 
 use App\Lib\Deploy\Telemetry\NotificationPreferences;
-use App\Lib\Deploy\Telemetry\Telemetry;
 use App\Models\Setting;
 use Illuminate\Console\Command;
 

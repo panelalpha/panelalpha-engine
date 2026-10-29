@@ -129,7 +129,7 @@ class ProjectDiskTest extends TestCase
             'limit_bytes' => 2048 * 1024 * 1024,
             'measured_at' => '2026-10-07T09:15:00Z',
         ], $projects['shop']['disk']);
-        $this->assertNull($projects['blog']['disk']['limit_bytes'], '-1 is unlimited');
+        $this->assertSame(-1, $projects['blog']['disk']['limit_bytes'], '-1 is unlimited, never scaled');
         $this->assertNull($projects['blog']['disk']['docker_bytes']);
         $this->assertSame(7, $projects['blog']['disk']['total_bytes']);
         $this->assertNull($projects['fresh']['disk'], 'not measured yet');

@@ -28,8 +28,8 @@ final class DockerfileBuilder
     ];
 
     /**
-     * @param array<string, mixed> $recipe
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, mixed>  $recipe
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function generate(array $recipe, array $files, string $projectDir = ''): string
     {

@@ -28,7 +28,7 @@ class McpActivityLogMiddleware
 
     public function handle(Request $request, Closure $next): mixed
     {
-        $body = json_decode((string)$request->getContent(), true);
+        $body = json_decode((string) $request->getContent(), true);
 
         $toolName = is_array($body) && ($body['method'] ?? null) === 'tools/call'
             ? ($body['params']['name'] ?? null)
@@ -36,7 +36,7 @@ class McpActivityLogMiddleware
 
         $response = $next($request);
 
-        if (!is_string($toolName) || $toolName === '') {
+        if (! is_string($toolName) || $toolName === '') {
             return $response;
         }
 
@@ -53,7 +53,7 @@ class McpActivityLogMiddleware
 
         // laravel/mcp answers a direct call with a plain Response, not a
         // JsonResponse, so read the body whatever the class.
-        $reply = json_decode((string)$response->getContent(), true);
+        $reply = json_decode((string) $response->getContent(), true);
         $this->log($request, $toolName, $arguments, is_array($reply) ? $reply : null, $response->isSuccessful());
 
         return $response;
@@ -98,7 +98,7 @@ class McpActivityLogMiddleware
         $reply = null;
 
         foreach (preg_split('/\R/', $sent) ?: [] as $line) {
-            if (!str_starts_with($line, 'data: ')) {
+            if (! str_starts_with($line, 'data: ')) {
                 continue;
             }
 
@@ -113,7 +113,7 @@ class McpActivityLogMiddleware
     }
 
     /**
-     * @param array<string, mixed>|null $reply
+     * @param  array<string, mixed>|null  $reply
      */
     private function log(Request $request, string $toolName, mixed $arguments, ?array $reply, bool $delivered): void
     {
@@ -136,14 +136,14 @@ class McpActivityLogMiddleware
 
         try {
             McpActivityLog::create([
-                'token_id'      => $token instanceof PersonalAccessToken ? $token->id : null,
-                'token_name'    => $token->name ?? 'unknown',
-                'project'       => self::projectOf($toolName, $input),
-                'tool_name'     => $toolName,
+                'token_id' => $token instanceof PersonalAccessToken ? $token->id : null,
+                'token_name' => $token->name ?? 'unknown',
+                'project' => self::projectOf($toolName, $input),
+                'tool_name' => $toolName,
                 // Credentials are stripped by McpActivityLog's own mutator, so
                 // no write path can forget to.
-                'input'         => is_array($input) && $input !== [] ? $input : null,
-                'status'        => $status,
+                'input' => is_array($input) && $input !== [] ? $input : null,
+                'status' => $status,
                 'error_message' => $errorMessage,
             ]);
         } catch (\Throwable $e) {
@@ -162,7 +162,7 @@ class McpActivityLogMiddleware
     {
         $argument = self::projectArguments()[$toolName] ?? null;
 
-        if ($argument === null || !is_array($input)) {
+        if ($argument === null || ! is_array($input)) {
             return null;
         }
 
@@ -181,7 +181,7 @@ class McpActivityLogMiddleware
         $map = [];
 
         foreach (ToolRegistry::all() as $class) {
-            $tool = new $class();
+            $tool = new $class;
             $argument = $tool instanceof ApiTool ? $tool->projectArgument() : null;
 
             if ($argument !== null) {
@@ -196,7 +196,7 @@ class McpActivityLogMiddleware
      * A tool failure surfaces as result.isError; a dispatch failure (unknown
      * tool, bad params) surfaces as a JSON-RPC error object.
      *
-     * @param array<string, mixed>|null $reply
+     * @param  array<string, mixed>|null  $reply
      * @return array{0: string, 1: string|null}
      */
     private function outcome(?array $reply, bool $delivered): array
@@ -206,14 +206,14 @@ class McpActivityLogMiddleware
         }
 
         if (isset($reply['error'])) {
-            return ['error', (string)($reply['error']['message'] ?? 'Unknown error')];
+            return ['error', (string) ($reply['error']['message'] ?? 'Unknown error')];
         }
 
         return $this->resultOutcome(is_array($reply['result'] ?? null) ? $reply['result'] : []);
     }
 
     /**
-     * @param array<string, mixed> $result
+     * @param  array<string, mixed>  $result
      * @return array{0: string, 1: string|null}
      */
     private function resultOutcome(array $result): array
@@ -230,7 +230,7 @@ class McpActivityLogMiddleware
      * ran none (bad arguments, output limit) and the call itself is what gets
      * logged. Calls after the first failure never ran and are left out.
      *
-     * @param array<string, mixed>|null $reply
+     * @param  array<string, mixed>|null  $reply
      * @return array<int, array{0: string, 1: mixed, 2: array<string, mixed>}>|null
      */
     private function catalogueCalls(mixed $arguments, ?array $reply): ?array
@@ -240,14 +240,14 @@ class McpActivityLogMiddleware
         $results = is_array($summary) ? ($summary['results'] ?? null) : null;
         $calls = is_array($arguments) ? ($arguments['calls'] ?? null) : null;
 
-        if (!is_array($results) || $results === [] || !is_array($calls)) {
+        if (! is_array($results) || $results === [] || ! is_array($calls)) {
             return null;
         }
 
         $ran = [];
 
         foreach (array_values($results) as $i => $result) {
-            if (!is_array($result) || !is_string($result['name'] ?? null)) {
+            if (! is_array($result) || ! is_string($result['name'] ?? null)) {
                 return null;
             }
 
@@ -258,7 +258,7 @@ class McpActivityLogMiddleware
     }
 
     /**
-     * @param array<int, mixed> $content
+     * @param  array<int, mixed>  $content
      */
     private function firstText(mixed $content): ?string
     {

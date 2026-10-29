@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Source;
 
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
@@ -22,7 +23,11 @@ use App\System\Project\Git\WorkTree;
 class GitRepository extends WorkTree
 {
     private ?ProjectTree $tree = null;
+
     private ?ShellOperations $shell = null;
+
+    /** @var ?array{declared: list<string>, checkedOut: list<string>} the submodules of the checkout a re-clone replaces */
+    private ?array $replacedCheckout = null;
 
     public function __construct(
         private DindProject $project,
@@ -32,7 +37,7 @@ class GitRepository extends WorkTree
         $trimmed = trim((string) $relativePath);
 
         if ($trimmed === '') {
-            $this->absolutePath = $home . '/project';
+            $this->absolutePath = $home.'/project';
         } else {
             $this->absolutePath = $this->resolveRelative($home, $trimmed);
         }
@@ -43,7 +48,7 @@ class GitRepository extends WorkTree
     public static function forProjectDir(DindProject $project, string $projectDir): self
     {
         $home = rtrim($project->homeDirPath(), '/');
-        $relative = str_starts_with($projectDir, $home . '/')
+        $relative = str_starts_with($projectDir, $home.'/')
             ? substr($projectDir, strlen($home) + 1)
             : 'project';
 
@@ -73,12 +78,12 @@ class GitRepository extends WorkTree
         $logger?->info($this->cloningMessage($gitRepo, $branch));
 
         $this->cloneAndAdopt($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
-        $logger?->ok(self::clonedMessage($branch ?? $this->readHeadBranch()));
+        $logger?->ok($this->clonedMessage($branch));
         if ($this->wantsFullHistory($gitRepo)) {
             $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
             $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
         }
-        $this->fetchSubmodules($gitRepo, $gitToken);
+        $this->fetchSubmodules($gitRepo, $gitToken, $beforeReplacing !== null && $user->deploysAsUpgrade());
     }
 
     private function cloningMessage(string $gitRepo, ?string $branch): string
@@ -90,10 +95,16 @@ class GitRepository extends WorkTree
             : "Cloning repository {$safeRepo}";
     }
 
-    /** Names the branch the clone landed on, so the deploy history can tell a default-branch create's branch. */
-    private static function clonedMessage(?string $branch): string
+    /**
+     * Names the branch and the commit the clone landed on: a create or a rebuild logs its
+     * start before either is known, and the deploy history reads both from here.
+     */
+    private function clonedMessage(?string $branch): string
     {
-        return $branch !== null ? "Repository cloned (branch: {$branch})" : 'Repository cloned';
+        return DeployStartLine::cloned(
+            $branch ?? $this->readHeadBranch(),
+            $this->quietly(fn (): ?string => $this->readHeadCommit()),
+        );
     }
 
     private function cloneAndAdopt(
@@ -143,6 +154,7 @@ class GitRepository extends WorkTree
             throw $e;
         }
 
+        $this->replacedCheckout = $this->submodulesOfHead();
         $beforeReplacing();
         $this->emptyDirectoryFor($gitProjectDir);
         $this->tree()->moveStagingInto($stagingDir, $gitProjectDir);
@@ -178,30 +190,174 @@ class GitRepository extends WorkTree
     /**
      * The submodules the checkout records, or the ones the app config names. One that
      * cannot be fetched fails the deploy: a build without it fails later, on a missing
-     * file that says nothing about the submodule.
+     * file that says nothing about the submodule. $keepPrevious on a redeploy of a project
+     * that deployed before: a submodule the deployed commit already declared keeps whatever
+     * checkout it had, with a warning.
      */
-    public function fetchSubmodules(string $gitRepo, ?string $gitToken): void
+    public function fetchSubmodules(string $gitRepo, ?string $gitToken, bool $keepPrevious = false): void
     {
-        if (!is_file($this->absolutePath . '/.gitmodules')) {
+        if (! is_file($this->absolutePath.'/.gitmodules')) {
             return;
         }
         $logger = $this->project->shell()->logger();
         $paths = $this->wantedSubmodules($gitRepo);
         if ($paths !== null && $paths !== []) {
-            $logger?->info('Fetching only the submodules the app config names: ' . implode(', ', $paths));
+            $logger?->info('Fetching only the submodules the app config names: '.implode(', ', $paths));
         }
 
         try {
-            if (!$this->initSubmodules($gitToken, $paths)) {
+            if (! $this->initSubmodules($gitToken, $paths)) {
                 return;
             }
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw new \RuntimeException(DeployFailureExplainer::SUBMODULE_FAILURE . ': ' . GitUrl::sanitize($e->getMessage()), 0, $e);
+            $this->submodulesNotFetched($e, $keepPrevious, $paths);
+
+            return;
         }
 
         $logger?->ok('Submodules fetched');
+    }
+
+    /**
+     * Only a submodule the deployed commit already declared may stay as it was. One new in this
+     * commit fails the deploy as on a first deploy, and so do one a re-clone would drop and a
+     * checkout git cannot read.
+     *
+     * @param  ?list<string>  $paths
+     *
+     * @throws \RuntimeException unless $keepPrevious and every submodule left behind was declared before
+     */
+    private function submodulesNotFetched(\Throwable $e, bool $keepPrevious, ?array $paths): void
+    {
+        $failure = DeployFailureExplainer::SUBMODULE_FAILURE.': '.GitUrl::sanitize($e->getMessage());
+        $missing = $keepPrevious ? $this->submodulesWithoutCheckout($paths) : null;
+        if ($missing === null) {
+            throw new \RuntimeException($failure, 0, $e);
+        }
+        $previous = $this->previousSubmodules();
+        $lost = array_values(array_intersect($missing, $previous['checkedOut']));
+        if ($lost !== [] || array_diff($missing, $previous['declared']) !== []) {
+            throw new \RuntimeException($failure.self::lostByReclone($lost), 0, $e);
+        }
+        $this->project->shell()->logger()?->warn($failure.'. '.self::goesOnWithout($missing));
+    }
+
+    /** @param list<string> $lost */
+    private static function lostByReclone(array $lost): string
+    {
+        return $lost === []
+            ? ''
+            : '. A rebuild clones the repository afresh, so the checkout of '.implode(', ', $lost)
+                .' the previous deploy had cannot be kept';
+    }
+
+    /** @param list<string> $missing */
+    private static function goesOnWithout(array $missing): string
+    {
+        return $missing === []
+            ? 'The deploy goes on with the submodule checkout the previous deploy had.'
+            : 'The deploy goes on without '.implode(', ', $missing).': there is no earlier checkout of it to keep.';
+    }
+
+    /**
+     * The submodules HEAD declares that have no files, or null when git could not tell.
+     *
+     * @param  ?list<string>  $paths
+     * @return ?list<string>
+     */
+    private function submodulesWithoutCheckout(?array $paths): ?array
+    {
+        $declared = $this->declaredSubmodules('HEAD', $paths);
+        if ($declared === null) {
+            return null;
+        }
+        $checkedOut = $this->checkedOutSubmodules($declared);
+
+        return $checkedOut === null ? null : array_values(array_diff($declared, $checkedOut));
+    }
+
+    /**
+     * What the checkout had before this deploy: the one a re-clone replaced, else the commit
+     * the previous deploy recorded, whose submodules a pull leaves in place.
+     *
+     * @return array{declared: list<string>, checkedOut: list<string>}
+     */
+    private function previousSubmodules(): array
+    {
+        if ($this->replacedCheckout !== null) {
+            return $this->replacedCheckout;
+        }
+        $commit = $this->user()->getGitCommit();
+
+        return ['declared' => $commit === null ? [] : ($this->declaredSubmodules($commit, null) ?? []), 'checkedOut' => []];
+    }
+
+    /** @return array{declared: list<string>, checkedOut: list<string>} */
+    private function submodulesOfHead(): array
+    {
+        $declared = $this->declaredSubmodules('HEAD', null) ?? [];
+
+        return ['declared' => $declared, 'checkedOut' => $this->checkedOutSubmodules($declared) ?? $declared];
+    }
+
+    /**
+     * The submodule paths `.gitmodules` declares at $rev, of $paths when the app config names them;
+     * null when git could not read them.
+     *
+     * @param  ?list<string>  $paths
+     * @return ?list<string>
+     */
+    private function declaredSubmodules(string $rev, ?array $paths): ?array
+    {
+        try {
+            $out = $this->quietly(fn (): string => $this->git(['config', '--blob', $rev.':.gitmodules', '-z', '--get-regexp', '^submodule\..*\.path$']));
+        } catch (GitException) {
+            return null;
+        }
+        $declared = [];
+        foreach (explode("\0", $out) as $entry) {
+            $newline = strpos($entry, "\n");
+            if ($newline !== false) {
+                $declared[] = substr($entry, $newline + 1);
+            }
+        }
+
+        return array_values(array_unique($paths === null ? $declared : array_intersect($declared, $paths)));
+    }
+
+    /**
+     * The submodules of $paths with files checked out, or null when git could not tell. An
+     * initialised but empty submodule lists nothing, an uninitialised one only its own path.
+     *
+     * @param  list<string>  $paths
+     * @return ?list<string>
+     */
+    private function checkedOutSubmodules(array $paths): ?array
+    {
+        if ($paths === []) {
+            return [];
+        }
+        try {
+            $files = explode("\0", $this->quietly(fn (): string => $this->git(['--literal-pathspecs', 'ls-files', '--recurse-submodules', '-z', '--', ...$paths])));
+        } catch (GitException) {
+            return null;
+        }
+
+        return array_values(array_filter($paths, static fn (string $path): bool => self::anyUnder($files, $path)));
+    }
+
+    /** @param list<string> $files */
+    private static function anyUnder(array $files, string $path): bool
+    {
+        foreach ($files as $file) {
+            if (str_starts_with($file, $path.'/')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -250,6 +406,11 @@ class GitRepository extends WorkTree
         return $this->shell()->execAsUserQuiet($cmd, [], $timeout);
     }
 
+    protected function runsOnHost(): bool
+    {
+        return false;
+    }
+
     private function tree(): ProjectTree
     {
         return $this->tree ??= new ProjectTree($this->project);
@@ -266,6 +427,6 @@ class GitRepository extends WorkTree
             throw new \InvalidArgumentException('Project-relative paths only.');
         }
 
-        return $home . '/' . ltrim($trimmed, '/');
+        return $home.'/'.ltrim($trimmed, '/');
     }
 }

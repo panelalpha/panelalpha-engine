@@ -2,8 +2,8 @@
 
 namespace App\System\Project\Dind\Generation;
 
-use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind as DindProject;
 
 /**
  * The version that served before a redeploy, started again once its containers were replaced: from the
@@ -16,9 +16,7 @@ final class PreviousVersion
     /** How long it gets to answer again: it answered before the redeploy. */
     private const ANSWER_SECONDS = 180;
 
-    public function __construct(private readonly DindProject $project)
-    {
-    }
+    public function __construct(private readonly DindProject $project) {}
 
     public function restorable(): bool
     {
@@ -34,7 +32,7 @@ final class PreviousVersion
     public function start(): ?string
     {
         $binds = CheckoutAside::bindsMovedAside($this->project->username());
-        if (!(new CheckoutAside($this->project))->bringBack()) {
+        if (! (new CheckoutAside($this->project))->bringBack()) {
             return 'its checkout could not be put back';
         }
         $port = (new RoutingSnapshot($this->project))->restoreDetails();
@@ -66,7 +64,7 @@ final class PreviousVersion
         try {
             $this->project->shell()->execAsUserQuiet($this->project->userAppComposeCommand($up), [], self::COMPOSE_TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            return 'it did not start: ' . AppHealth::trimReason($e->getMessage());
+            return 'it did not start: '.AppHealth::trimReason($e->getMessage());
         }
 
         return null;

@@ -80,7 +80,7 @@ final class MavenMetadata implements PackageMetadata
             ecosystem: $this->id(),
             file: self::FILE,
             name: $artifactId ?? self::directoryName($context),
-            nameSource: $artifactId !== null ? self::FILE . ' artifactId' : AppPackage::NAME_FROM_DIRECTORY,
+            nameSource: $artifactId !== null ? self::FILE.' artifactId' : AppPackage::NAME_FROM_DIRECTORY,
             description: self::at($pom, 'description') ?? $title,
             version: self::at($pom, 'version') ?? self::at($pom, 'parent', 'version'),
             license: self::at($pom, 'licenses', 'license', 'name'),
@@ -139,7 +139,7 @@ final class MavenMetadata implements PackageMetadata
     private static function at(?\SimpleXMLElement $node, string ...$names): ?string
     {
         foreach ($names as $name) {
-            if (!$node instanceof \SimpleXMLElement) {
+            if (! $node instanceof \SimpleXMLElement) {
                 return null;
             }
             $node = $node->{$name};
@@ -157,11 +157,11 @@ final class MavenMetadata implements PackageMetadata
     private static function each(\SimpleXMLElement $node, string $wrapper, string $child): array
     {
         $parent = $node->{$wrapper};
-        if (!$parent instanceof \SimpleXMLElement) {
+        if (! $parent instanceof \SimpleXMLElement) {
             return [];
         }
         $children = $parent->{$child};
-        if (!$children instanceof \SimpleXMLElement) {
+        if (! $children instanceof \SimpleXMLElement) {
             return [];
         }
 

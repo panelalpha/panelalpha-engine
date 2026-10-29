@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Source;
 
+use App\Lib\Http\OutboundUrl;
+use App\Lib\Net\EgressRefusedException;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
@@ -45,8 +47,7 @@ class GitRemoteProbe
     public function __construct(
         private readonly int $timeout = self::TIMEOUT_SECONDS,
         private readonly int $attempts = self::ATTEMPTS,
-    ) {
-    }
+    ) {}
 
     /**
      * Null when the remote handed over its refs.
@@ -97,7 +98,7 @@ class GitRemoteProbe
         $askPass = null;
 
         try {
-            $command = GitUrl::withoutRedirects(self::symrefCommand($repoUrl));
+            $command = self::refsCommand($repoUrl);
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
                 $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token, $repoUrl);
@@ -143,7 +144,7 @@ class GitRemoteProbe
                 ? ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref',
                     '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*']
                 : ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--heads', '--', $repoUrl];
-            $command = GitUrl::withoutRedirects($command);
+            $command = self::pinned(GitUrl::withoutRedirects($command), $repoUrl);
 
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
@@ -165,6 +166,8 @@ class GitRemoteProbe
             }
 
             return $result;
+        } catch (\InvalidArgumentException $e) {
+            return GitProbeResult::refused(['field' => $repoField, 'code' => EgressRefusedException::CODE, 'message' => $e->getMessage()]);
         } catch (\Throwable $e) {
             return GitProbeResult::unchecked();
         } finally {
@@ -185,7 +188,7 @@ class GitRemoteProbe
      * ref listing is retried over HTTP/1.1, as the account's clone and fetches
      * do ({@see GitUrl::overHttp11()}).
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
      */
     private function runWithRetry(array $command): array
@@ -193,7 +196,7 @@ class GitRemoteProbe
         $attempt = 0;
         do {
             $run = $this->run($command);
-            if (!$run['ok'] && GitUrl::refusedOverHttp2($run['stderr'])) {
+            if (! $run['ok'] && GitUrl::refusedOverHttp2($run['stderr'])) {
                 $run = $this->run(GitUrl::overHttp11($command));
             }
         } while ($run['timedOut'] && ++$attempt < $this->attempts);
@@ -202,7 +205,7 @@ class GitRemoteProbe
     }
 
     /**
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
      */
     protected function run(array $command): array
@@ -211,6 +214,7 @@ class GitRemoteProbe
 
         // ls-remote needs no repository, and a broken one in the cwd would fail it.
         $process = new Process($command, sys_get_temp_dir(), [
+            ...GitTransport::env(GitTransport::schemes()),
             'GIT_TERMINAL_PROMPT' => '0',
             // The terminal is not the only thing that waits: an askpass
             // program still launches unless it is pointed somewhere harmless.
@@ -239,7 +243,7 @@ class GitRemoteProbe
     }
 
     /**
-     * @param array{timedOut: bool, ok: bool, stderr: string} $result
+     * @param  array{timedOut: bool, ok: bool, stderr: string}  $result
      */
     private function interpret(
         array $result,
@@ -257,8 +261,8 @@ class GitRemoteProbe
 
             return GitProbeResult::unchecked($this->problemOf($repoField, 'timeout',
                 "{$host} did not answer within {$this->timeout}s{$tries}. This says nothing about whether "
-                . 'the repository exists or is public: it was not checked, so nothing was created. '
-                . 'Retry; if it keeps timing out, the host is down or slow to reach from this engine.',
+                .'the repository exists or is public: it was not checked, so nothing was created. '
+                .'Retry; if it keeps timing out, the host is down or slow to reach from this engine.',
                 true));
         }
         if ($result['ok']) {
@@ -275,14 +279,14 @@ class GitRemoteProbe
 
         // A forge will not admit a private repository exists to a caller it
         // has not authenticated, so these two answers must read as one.
-        if ($this->matches($stderr, 'auth') || (!$hasToken && $this->matches($stderr, 'missing'))) {
+        if ($this->matches($stderr, 'auth') || (! $hasToken && $this->matches($stderr, 'missing'))) {
             return GitProbeResult::refused($hasToken
                 ? $this->problemOf($tokenField, 'rejected',
                     "The token was refused by {$host}. Check it has not expired and that it "
-                    . 'grants read access to this repository.')
+                    .'grants read access to this repository.')
                 : $this->problemOf($repoField, 'requires_token',
                     'This repository is private, or does not exist. Pass a read token as '
-                    . "`{$tokenField}`, or check the address."));
+                    ."`{$tokenField}`, or check the address."));
         }
         if ($this->matches($stderr, 'missing')) {
             return GitProbeResult::refused($this->problemOf($repoField, 'not_found',
@@ -290,7 +294,39 @@ class GitRemoteProbe
         }
 
         return GitProbeResult::refused($this->problemOf($repoField, 'unreadable',
-            'The repository could not be read: ' . $this->firstLine($result['stderr'])));
+            'The repository could not be read: '.$this->firstLine($result['stderr'])));
+    }
+
+    /**
+     * @return list<string>
+     *
+     * @throws GitRefsUnavailableException when core may no longer contact the host
+     */
+    private static function refsCommand(string $repoUrl): array
+    {
+        try {
+            return self::pinned(GitUrl::withoutRedirects(self::symrefCommand($repoUrl)), $repoUrl);
+        } catch (\InvalidArgumentException $e) {
+            throw new GitRefsUnavailableException(GitRefsUnavailableException::UNREACHABLE, $e->getMessage());
+        }
+    }
+
+    /**
+     * Pinned to an address the egress check accepts, resolved in the process that runs git, so a DNS
+     * answer that changes after the caller's check cannot steer ls-remote to an internal address.
+     *
+     * @param  list<string>  $command
+     * @return list<string>
+     *
+     * @throws \InvalidArgumentException when the host no longer resolves, or resolves to an address core must not contact
+     */
+    private static function pinned(array $command, string $repoUrl): array
+    {
+        $scheme = strtolower((string) parse_url($repoUrl, PHP_URL_SCHEME));
+
+        return in_array($scheme, GitRepoInput::SCHEMES, true)
+            ? GitUrl::withResolve($command, OutboundUrl::pin($repoUrl, GitRepoInput::SCHEMES))
+            : $command;
     }
 
     /** @return list<string> */
@@ -301,7 +337,8 @@ class GitRemoteProbe
     }
 
     /**
-     * @param array{timedOut: bool, ok: bool, stderr: string} $run
+     * @param  array{timedOut: bool, ok: bool, stderr: string}  $run
+     *
      * @throws GitRefsUnavailableException
      */
     private function interpretRefs(array $run, string $repoUrl, bool $hasToken): GitRefs
@@ -346,12 +383,12 @@ class GitRemoteProbe
         $message = $heads === [] && $tags === []
             ? "{$host} lists no branches or tags for this repository, so '{$branch}' cannot be checked out."
             : "{$host} has no branch or tag named '{$branch}'."
-                . ($suggestion !== null ? " Did you mean '{$suggestion}'?" : '')
-                . ($default !== null ? " The default branch is '{$default}'; omit `{$field}` to use it." : '');
+                .($suggestion !== null ? " Did you mean '{$suggestion}'?" : '')
+                .($default !== null ? " The default branch is '{$default}'; omit `{$field}` to use it." : '');
 
         return array_filter([
             'field' => $field,
-            'code' => $field . '_not_found',
+            'code' => $field.'_not_found',
             'message' => $message,
             'expected' => 'the name of a branch or tag in the repository',
             'suggestion' => $suggestion,
@@ -360,8 +397,8 @@ class GitRemoteProbe
     }
 
     /**
-     * @param list<string> $heads
-     * @param list<string> $tags
+     * @param  list<string>  $heads
+     * @param  list<string>  $tags
      */
     public static function closestRef(string $branch, array $heads, array $tags): ?string
     {
@@ -409,17 +446,17 @@ class GitRemoteProbe
 
     private function makeWorkspace(): ?string
     {
-        $dir = sys_get_temp_dir() . '/pa-probe-' . bin2hex(random_bytes(8));
+        $dir = sys_get_temp_dir().'/pa-probe-'.bin2hex(random_bytes(8));
 
         return @mkdir($dir, 0700) ? $dir : null;
     }
 
     private function writeAskPass(string $workspace, string $token, string $repoUrl): ?string
     {
-        $path = $workspace . '/askpass.sh';
+        $path = $workspace.'/askpass.sh';
         $written = file_put_contents($path, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX);
 
-        return $written === false || !chmod($path, 0700) ? null : $path;
+        return $written === false || ! chmod($path, 0700) ? null : $path;
     }
 
     /** @return array<string, mixed> */
@@ -431,7 +468,7 @@ class GitRemoteProbe
     ): array {
         return array_filter([
             'field' => $field,
-            'code' => $field . '_' . $code,
+            'code' => $field.'_'.$code,
             'message' => $message,
             // Resend unchanged -- a different instruction from every other
             // problem this endpoint raises.

@@ -23,7 +23,7 @@ class DomainBandwidthCommand extends UsageCommand
             'start' => $this->option('start'),
             'end' => $this->option('end'),
             'group_by' => $this->option('group-by'),
-        ], (new BandwidthSeriesRequest())->rules());
+        ], (new BandwidthSeriesRequest)->rules());
         $domain = $this->domain($usage, $this->project());
 
         return $this->printJson($statistics->domainBandwidth($domain->domain, $range['start'], $range['end'], $range['group_by']));

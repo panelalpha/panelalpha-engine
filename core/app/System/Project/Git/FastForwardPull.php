@@ -27,7 +27,7 @@ trait FastForwardPull
      */
     private function fastForwardOnly(string $branch): void
     {
-        $ref = 'origin/' . $branch;
+        $ref = 'origin/'.$branch;
 
         try {
             $this->git(['merge', '--ff-only', $ref]);
@@ -46,12 +46,12 @@ trait FastForwardPull
 
         // A checkout with no commits yet has no history to have diverged from.
         $hasHead = $this->headCommitExists();
-        if ($hasHead && !$this->headIsAncestorOf($ref)) {
+        if ($hasHead && ! $this->headIsAncestorOf($ref)) {
             return new FastForwardRefused(
-                'Cannot fast-forward: the local branch and ' . $ref . ' have diverged '
-                . '(the remote history was rewritten, or this checkout has commits the remote does not). '
-                . 'Nothing was changed. Use strategy `force` to reset to the remote, '
-                . 'or `push_first` to merge and push.',
+                'Cannot fast-forward: the local branch and '.$ref.' have diverged '
+                .'(the remote history was rewritten, or this checkout has commits the remote does not). '
+                .'Nothing was changed. Use strategy `force` to reset to the remote, '
+                .'or `push_first` to merge and push.',
             );
         }
 
@@ -62,8 +62,8 @@ trait FastForwardPull
 
             return new FastForwardRefused(
                 'Cannot fast-forward: the pull would overwrite local changes at: '
-                . implode(', ', $named) . ($more > 0 ? ' and ' . $more . ' more' : '')
-                . '. Nothing was changed. Commit, stash or remove them, or use strategy `force`.',
+                .implode(', ', $named).($more > 0 ? ' and '.$more.' more' : '')
+                .'. Nothing was changed. Commit, stash or remove them, or use strategy `force`.',
                 $blocking,
             );
         }
@@ -131,7 +131,7 @@ trait FastForwardPull
      * True when a local path sits where `$incoming` needs a directory
      * (`a` is a local file, the incoming commit adds `a/b`).
      *
-     * @param array<string, true> $localPaths
+     * @param  array<string, true>  $localPaths
      */
     private function hasLocalFileAbove(string $incoming, array $localPaths): bool
     {
@@ -158,7 +158,7 @@ trait FastForwardPull
     }
 
     /**
-     * @param list<string> $args
+     * @param  list<string>  $args
      * @return list<string>
      */
     private function nulSeparated(array $args): array

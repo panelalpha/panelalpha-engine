@@ -25,12 +25,14 @@ class ListCommand extends Command
         $project = trim((string) $this->option('username'));
         if ($project === '') {
             $this->error('--project is required.');
+
             return 1;
         }
 
         $user = User::findByUsername($project);
-        if (!$user) {
+        if (! $user) {
             $this->error("Project '{$project}' not found.");
+
             return 1;
         }
 

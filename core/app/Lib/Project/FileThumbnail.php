@@ -38,9 +38,7 @@ final class FileThumbnail
 
     private const TIME_SECONDS = 30;
 
-    public function __construct(private readonly ?System $system = null)
-    {
-    }
+    public function __construct(private readonly ?System $system = null) {}
 
     /** The ETag of this thumbnail, or null when the account has no such readable file. */
     public function etag(User $user, string $path, int $width, int $height, string $fit): ?string
@@ -111,7 +109,7 @@ final class FileThumbnail
      * The source bytes, capped: a file that grew since the stat is refused
      * rather than read whole.
      *
-     * @param array{stream: string, stat: array<string, mixed>} $source
+     * @param  array{stream: string, stat: array<string, mixed>}  $source
      */
     private function readSource(array $source): ?string
     {
@@ -129,7 +127,7 @@ final class FileThumbnail
     private function assertDecodable(string $bytes, string $format): void
     {
         self::configureLimits();
-        $probe = new Imagick();
+        $probe = new Imagick;
         $probe->setFormat($format);
         try {
             $probe->pingImageBlob($bytes);
@@ -143,7 +141,7 @@ final class FileThumbnail
 
     private function decode(string $bytes, string $format): Imagick
     {
-        $image = new Imagick();
+        $image = new Imagick;
         $image->setFormat($format);
         try {
             $image->readImageBlob($bytes);

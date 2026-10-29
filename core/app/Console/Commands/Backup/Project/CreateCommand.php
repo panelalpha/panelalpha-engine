@@ -24,18 +24,21 @@ class CreateCommand extends Command
 
         if ($containerIdOrName === null) {
             $this->error('The --container option is required.');
+
             return 1;
         }
 
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
+
             return 1;
         }
 
         $container = BackupContainer::findByIdOrName($containerIdOrName);
         if ($container === null) {
             $this->error("Backup container '{$containerIdOrName}' not found.");
+
             return 1;
         }
 
@@ -45,6 +48,7 @@ class CreateCommand extends Command
             $user->project()->backup($backup)->run();
         } catch (LogicException $e) {
             $this->error($e->getMessage());
+
             return 1;
         } catch (Throwable) {
             $backup->refresh();
@@ -54,7 +58,7 @@ class CreateCommand extends Command
 
         $this->info("Backup created (ID: {$backup->id}, status: {$backup->backupStatus()}).");
         if ($backup->error !== null) {
-            $this->line('Error: ' . $backup->error);
+            $this->line('Error: '.$backup->error);
         }
 
         return $backup->backupStatus() === 'completed' ? 0 : 1;
@@ -63,7 +67,7 @@ class CreateCommand extends Command
     private function stringOption(string $name): ?string
     {
         $value = $this->option($name);
-        if (!is_string($value) || $value === '') {
+        if (! is_string($value) || $value === '') {
             return null;
         }
 

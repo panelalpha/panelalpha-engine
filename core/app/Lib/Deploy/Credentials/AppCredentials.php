@@ -29,10 +29,10 @@ final class AppCredentials
      * declared field generated (or adopted from `adopt_from`), the project's
      * own env_vars winning, and fields no longer declared dropped.
      *
-     * @param ?array<string, mixed> $stored
-     * @param array<string, string> $envVars
-     * @param \Closure(string): ?array<string, string> $readAdopt the dotenv at a home-relative path, or null
-     *        — asked for {@see ENV_FILE} first: what the engine delivered before survives a lost record
+     * @param  ?array<string, mixed>  $stored
+     * @param  array<string, string>  $envVars
+     * @param  \Closure(string): ?array<string, string>  $readAdopt  the dotenv at a home-relative path, or null
+     *                                                               — asked for {@see ENV_FILE} first: what the engine delivered before survives a lost record
      * @return array{stored: ?array<string, mixed>, generated: list<string>, adopted: list<string>, overridden: list<string>}
      */
     public static function reconcile(
@@ -123,7 +123,7 @@ final class AppCredentials
 
         if ($symbol) {
             $at = random_int(1, self::PASSWORD_LENGTH);
-            $password = substr($password, 0, $at) . self::SYMBOLS[random_int(0, strlen(self::SYMBOLS) - 1)] . substr($password, $at);
+            $password = substr($password, 0, $at).self::SYMBOLS[random_int(0, strlen(self::SYMBOLS) - 1)].substr($password, $at);
         }
 
         return $password;
@@ -133,22 +133,22 @@ final class AppCredentials
      * Single-quoted: literal to Compose's env_file reader and to `. file` in sh,
      * which is why a value with a quote or a newline is never delivered.
      *
-     * @param array<string, mixed> $stored
+     * @param  array<string, mixed>  $stored
      */
     public static function envFile(array $stored): string
     {
         $lines = ['# Written by the engine on every deploy; GET /projects/{name}/app-credentials returns it.'];
         foreach (self::fields($stored) as $name => $field) {
-            $lines[] = $name . "='" . $field['value'] . "'";
+            $lines[] = $name."='".$field['value']."'";
         }
 
-        return implode("\n", $lines) . "\n";
+        return implode("\n", $lines)."\n";
     }
 
     /**
      * The values a log must never show: the passwords. A username is public by nature.
      *
-     * @param ?array<string, mixed> $stored
+     * @param  ?array<string, mixed>  $stored
      * @return list<string>
      */
     public static function secretValues(?array $stored): array
@@ -166,7 +166,7 @@ final class AppCredentials
     /**
      * What GET /projects/{username} says: that credentials exist and where to get them. Never a value.
      *
-     * @param ?array<string, mixed> $stored
+     * @param  ?array<string, mixed>  $stored
      * @return array{available: bool, fields: list<array{name: string, kind: string}>, login_url: ?string, endpoint: string}
      */
     public static function pointer(?array $stored, ?string $publicUrl, string $username): array
@@ -180,14 +180,14 @@ final class AppCredentials
             'available' => $fields !== [],
             'fields' => $fields,
             'login_url' => $fields === [] ? null : self::loginUrl($publicUrl, $stored['login_path'] ?? null),
-            'endpoint' => '/api/projects/' . $username . '/app-credentials',
+            'endpoint' => '/api/projects/'.$username.'/app-credentials',
         ];
     }
 
     /**
      * What GET /projects/{username}/app-credentials returns.
      *
-     * @param ?array<string, mixed> $stored
+     * @param  ?array<string, mixed>  $stored
      * @return array{available: bool, login_url: ?string, created_at: ?string, fields: list<array{name: string, kind: string, value: string}>}
      */
     public static function reveal(?array $stored, ?string $publicUrl): array
@@ -214,13 +214,13 @@ final class AppCredentials
             return null;
         }
 
-        return rtrim($publicUrl, '/') . (is_string($path) && $path !== '' ? $path : '/');
+        return rtrim($publicUrl, '/').(is_string($path) && $path !== '' ? $path : '/');
     }
 
     /**
      * The well-formed stored fields, whatever an older or hand-edited record holds.
      *
-     * @param ?array<string, mixed> $stored
+     * @param  ?array<string, mixed>  $stored
      * @return array<string, array{kind: string, value: string}>
      */
     private static function fields(?array $stored): array

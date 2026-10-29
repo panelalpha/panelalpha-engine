@@ -68,14 +68,41 @@ class RoutingSnapshotTest extends TestCase
         $this->assertNull($state->get(GenerationState::ROUTES));
     }
 
+    /** Containers that could not be read are not "nothing runs": the app may be live, and a cancel must not take it as stopped. */
+    public function test_taking_a_snapshot_that_cannot_read_the_containers_notes_it_apart(): void
+    {
+        $state = new GenerationState($this->username);
+        $state->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+
+        (new RoutingSnapshot($this->unreadableProject()))->take();
+
+        $this->assertNotNull($state->get(GenerationState::UNREAD));
+        $this->assertNull($state->get(GenerationState::STOPPED), 'an earlier redeploy\'s mark says nothing about now');
+        $this->assertNull($state->get(GenerationState::ROUTES));
+    }
+
+    public function test_a_snapshot_that_reads_the_containers_forgets_an_earlier_unread_mark(): void
+    {
+        $state = new GenerationState($this->username);
+        $state->put(GenerationState::UNREAD, ['owner' => GenerationState::owner()]);
+        $routed = [];
+
+        (new RoutingSnapshot($this->project(3000, $routed)))->take();
+
+        $this->assertNull($state->get(GenerationState::UNREAD));
+        $this->assertNotNull($state->get(GenerationState::STOPPED));
+    }
+
     /** Settling a redeploy forgets it, so a later cancel of another deploy does not stop a running app. */
     public function test_settling_a_redeploy_forgets_the_stopped_mark(): void
     {
         (new GenerationState($this->username))->put(GenerationState::STOPPED, ['owner' => GenerationState::owner()]);
+        (new GenerationState($this->username))->put(GenerationState::UNREAD, ['owner' => GenerationState::owner()]);
         $routed = [];
         (new RoutingSnapshot($this->project(3000, $routed)))->settle(true);
 
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::STOPPED));
+        $this->assertNull((new GenerationState($this->username))->get(GenerationState::UNREAD));
     }
 
     /** The operator's rule to the old port goes where the new version answers. */
@@ -231,6 +258,19 @@ class RoutingSnapshotTest extends TestCase
         $project->method('networking')->willReturn($networking);
         $project->method('shell')->willReturn(new ShellOperations($project));
         $system->method('exec')->willReturn('');
+
+        return $project;
+    }
+
+    /** An account whose inner dockerd does not answer. */
+    private function unreadableProject(): Dind
+    {
+        $system = $this->createStub(System::class);
+        $system->method('exec')->willThrowException(new \RuntimeException('Cannot connect to the Docker daemon'));
+        $project = $this->createStub(Dind::class);
+        $project->method('username')->willReturn($this->username);
+        $project->method('system')->willReturn($system);
+        $project->method('shell')->willReturn(new ShellOperations($project));
 
         return $project;
     }

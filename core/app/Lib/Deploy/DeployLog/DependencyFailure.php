@@ -114,12 +114,12 @@ final class DependencyFailure
     {
         $cause = self::oneLine($cause);
         $probe = str_replace(']', ')', self::oneLine($probe));
-        $head = self::PREFIX . "{$name} did not start ({$state})";
+        $head = self::PREFIX."{$name} did not start ({$state})";
         if ($probe !== '') {
             $head .= " [health check: {$probe}]";
         }
 
-        return $cause === '' ? $head : $head . ': ' . $cause;
+        return $cause === '' ? $head : $head.': '.$cause;
     }
 
     private static function oneLine(string $text): string

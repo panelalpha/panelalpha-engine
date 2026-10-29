@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordingFirewall;
 use Tests\Support\RecordingSystem;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -190,6 +191,59 @@ PEM;
             $this->token((int) $second['token_id'])->abilities,
         );
         $this->assertQueuedApply('alice', (int) $first['token_id'], 2);
+    }
+
+    public function test_removing_a_project_from_the_scopes_leaves_every_other_name(): void
+    {
+        $access = $this->access();
+        $this->makeUser('carol', self::CONTAINER_DETAILS);
+        $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        $access->allow($this->user('carol'), ['bob'], false);
+        $access->allow($this->user('bob'), ApiAccess::SCOPE_SELF, false);
+
+        $access->removeFromScopes('bob');
+
+        $this->assertSame(['alice'], $access->entryFor($this->user('alice'))['scope']);
+        $this->assertSame([], $access->entryFor($this->user('carol'))['scope'], 'a list left empty is not widened to self');
+        $this->assertSame(ApiAccess::SCOPE_SELF, $access->entryFor($this->user('bob'))['scope']);
+    }
+
+    public function test_rotating_never_grants_a_name_its_token_no_longer_reaches(): void
+    {
+        $access = $this->access();
+        $first = $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        $this->token((int) $first['token_id'])
+            ->forceFill(['abilities' => ['api', 'project', 'project:alice']])
+            ->save();
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame(['alice'], $second['scope']);
+        $this->assertSame(['api', 'project', 'project:alice'], $this->token((int) $second['token_id'])->abilities);
+    }
+
+    public function test_rotating_drops_a_name_that_is_no_longer_a_project(): void
+    {
+        $access = $this->access();
+        $access->allow($this->user('alice'), ['alice', 'bob'], false);
+        User::query()->where('username', 'bob')->delete();
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame(['alice'], $second['scope']);
+        $this->assertSame(['api', 'project', 'project:alice'], $this->token((int) $second['token_id'])->abilities);
+    }
+
+    public function test_rotating_a_scope_left_with_no_project_mints_a_token_that_reaches_none(): void
+    {
+        $access = $this->access();
+        $access->allow($this->user('alice'), ['bob'], false);
+        $access->removeFromScopes('bob');
+
+        $second = $access->rotate($this->user('alice'));
+
+        $this->assertSame([], $second['scope']);
+        $this->assertSame(['api', 'project'], $this->token((int) $second['token_id'])->abilities);
     }
 
     public function test_rotating_a_project_that_is_not_allowed_is_refused(): void
@@ -546,11 +600,11 @@ PEM;
         $access = $this->access();
         $access->allow($this->user('alice'), ApiAccess::SCOPE_SELF, false);
 
-        foreach (['https://1.2.3.4:2011', 'https://1.2.3.4', 'https://1.2.3.4/'] as $appUrl) {
+        foreach (['https://'.TestNetwork::public(4).':2011', 'https://'.TestNetwork::public(4), 'https://'.TestNetwork::public(4).'/'] as $appUrl) {
             config(['app.url' => $appUrl]);
 
             $this->assertSame(
-                'https://1.2.3.4:2011/api',
+                'https://'.TestNetwork::public(4).':2011/api',
                 $access->envFor($this->user('alice'))[ApiAccess::ENV_URL],
                 $appUrl
             );
@@ -562,7 +616,7 @@ PEM;
         $access = $this->access();
         $access->allow($this->user('alice'), ApiAccess::SCOPE_SELF, false);
 
-        foreach (['', 'not-a-url', '1.2.3.4:2011', 'https://1.2.3.4:2011/panel'] as $appUrl) {
+        foreach (['', 'not-a-url', TestNetwork::public(4).':2011', 'https://'.TestNetwork::public(4).':2011/panel'] as $appUrl) {
             config(['app.url' => $appUrl]);
 
             $env = $access->envFor($this->user('alice'));

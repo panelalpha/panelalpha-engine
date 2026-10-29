@@ -7,14 +7,14 @@ export const vaultSecretScopeSchema = z.enum(['project', 'global']);
 /**
  * A listed or fetched entry.
  *
- * `ref` is `vault:<id>`, the reference a request passes. The paste URL's
+ * `ref` is `vault:<key>`, the reference a request passes. The paste URL's
  * token is not: only its hash is stored. There is no passthrough: the secret
  * must never appear on a read path, and a field the schema does not name
  * fails the test instead of slipping by.
  */
 export const vaultSecretEntrySchema = z.strictObject({
   id: z.number().int().positive(),
-  ref: z.string().regex(/^vault:\d+$/),
+  ref: z.string().regex(/^vault:[A-Za-z0-9]{24}$/),
   type: z.string(),
   scope: vaultSecretScopeSchema,
   // The project a `project` entry belongs to; null until one claims it, and always for a global.

@@ -19,6 +19,7 @@ class ListCommand extends Command
 
         if ($containers->isEmpty()) {
             $this->info('No backup containers found.');
+
             return 0;
         }
 

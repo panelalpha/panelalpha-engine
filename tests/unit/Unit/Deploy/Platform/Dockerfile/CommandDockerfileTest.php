@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Dockerfile;
 
 use App\Lib\Deploy\Platform\Dockerfile\BuildRecipe;
 use App\Lib\Deploy\Platform\Dockerfile\CommandDockerfile;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -48,11 +49,11 @@ class CommandDockerfileTest extends TestCase
 
     public function test_the_server_is_told_to_listen_where_the_proxy_looks(): void
     {
-        // 0.0.0.0 rather than localhost: a server bound to loopback inside a
+        // All interfaces rather than localhost: a server bound to loopback inside a
         // container answers nothing from outside it.
         $dockerfile = $this->render(['image' => 'python:3.12']);
 
-        $this->assertStringContainsString('ENV HOST=0.0.0.0', $dockerfile);
+        $this->assertStringContainsString('ENV HOST=' . TestNetwork::ANY, $dockerfile);
         $this->assertStringContainsString('ENV PORT=8000', $dockerfile);
         $this->assertStringContainsString('EXPOSE 8000', $dockerfile);
     }
@@ -76,7 +77,7 @@ class CommandDockerfileTest extends TestCase
 
         $this->assertStringContainsString('ENV HOST=::', $dockerfile);
         $this->assertStringContainsString('ENV DJANGO_SETTINGS_MODULE=app.settings.production', $dockerfile);
-        $this->assertStringNotContainsString('ENV HOST=0.0.0.0', $dockerfile);
+        $this->assertStringNotContainsString('ENV HOST=' . TestNetwork::ANY, $dockerfile);
     }
 
     public function test_the_staged_entrypoint_is_installed_rather_than_a_start_command(): void

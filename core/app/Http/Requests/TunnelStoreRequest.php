@@ -19,8 +19,8 @@ class TunnelStoreRequest extends FormRequest
     {
         return [
             'hostname' => ['nullable', 'string', 'max:253', 'required_if:provider,cloudflare'],
-            'provider' => ['sometimes', 'string', 'in:' . implode(',', Tunnel::PROVIDERS)],
-            'purpose' => ['sometimes', 'string', 'in:' . implode(',', Tunnel::PURPOSES)],
+            'provider' => ['sometimes', 'string', 'in:'.implode(',', Tunnel::PROVIDERS)],
+            'purpose' => ['sometimes', 'string', 'in:'.implode(',', Tunnel::PURPOSES)],
             'ttl_minutes' => ['sometimes', 'integer', 'min:5', 'max:43200'],
         ];
     }
@@ -32,7 +32,7 @@ class TunnelStoreRequest extends FormRequest
     {
         return [
             'hostname.required_if' => 'A hostname is required for the cloudflare provider.',
-            'purpose.in' => 'purpose must be one of: ' . implode(', ', Tunnel::PURPOSES) . '.',
+            'purpose.in' => 'purpose must be one of: '.implode(', ', Tunnel::PURPOSES).'.',
             'ttl_minutes.min' => 'ttl_minutes must be at least 5 minutes.',
             'ttl_minutes.max' => 'ttl_minutes must be at most 43200 minutes (30 days).',
         ];

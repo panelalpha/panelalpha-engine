@@ -37,7 +37,7 @@ final class LighthouseTarget
         // The engine's own services, by the names Docker's DNS answers to
         // on the network the lighthouse container shares with them.
         '*.palocal',
-        ComposeProject::NAME . '-*',
+        ComposeProject::NAME.'-*',
         'panelalpha-*',
         'core', 'core-db', 'mail', 'metrics', 'sites-dns', 'sites-db',
         'sites-phpmyadmin', 'sites-http', 'ftp', 'sftp', 'cache-registry',
@@ -45,9 +45,7 @@ final class LighthouseTarget
     ];
 
     /** @param Closure(string): bool $isOwnDomain */
-    public function __construct(private Closure $isOwnDomain)
-    {
-    }
+    public function __construct(private Closure $isOwnDomain) {}
 
     public static function forThisEngine(): self
     {
@@ -67,10 +65,10 @@ final class LighthouseTarget
         }
 
         $parts = parse_url($url);
-        $scheme = strtolower((string)($parts['scheme'] ?? ''));
-        $host = strtolower(rtrim((string)($parts['host'] ?? ''), '.'));
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower(rtrim((string) ($parts['host'] ?? ''), '.'));
 
-        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
+        if (! in_array($scheme, ['http', 'https'], true) || $host === '') {
             throw self::refuse('The url must be an http or https address.');
         }
         if (isset($parts['user']) || isset($parts['pass'])) {
@@ -79,7 +77,7 @@ final class LighthouseTarget
         if (filter_var(trim($host, '[]'), FILTER_VALIDATE_IP) !== false) {
             throw self::refuse('An IP address is not accepted; use one of the domains hosted on this engine.');
         }
-        if (!($this->isOwnDomain)($host)) {
+        if (! ($this->isOwnDomain)($host)) {
             throw self::refuse("{$host} is not a domain hosted on this engine.");
         }
 
@@ -124,27 +122,27 @@ final class LighthouseTarget
      * domains -- a redirect the resolver rules did not catch. A hop they did
      * block ends on chrome-error://, which carries nothing, and passes.
      *
-     * @param array<string, mixed> $report
+     * @param  array<string, mixed>  $report
      */
     public function strayedTo(array $report): ?string
     {
         foreach (['mainDocumentUrl', 'finalDisplayedUrl', 'finalUrl'] as $key) {
             $url = $report[$key] ?? null;
-            if (!is_string($url) || $url === '') {
+            if (! is_string($url) || $url === '') {
                 continue;
             }
 
             $parts = parse_url($url);
-            $scheme = strtolower((string)($parts['scheme'] ?? ''));
+            $scheme = strtolower((string) ($parts['scheme'] ?? ''));
             if ($scheme === 'chrome-error') {
                 continue;
             }
 
-            $host = strtolower(rtrim((string)($parts['host'] ?? ''), '.'));
-            if (!in_array($scheme, ['http', 'https'], true)
+            $host = strtolower(rtrim((string) ($parts['host'] ?? ''), '.'));
+            if (! in_array($scheme, ['http', 'https'], true)
                 || $host === ''
                 || filter_var(trim($host, '[]'), FILTER_VALIDATE_IP) !== false
-                || !($this->isOwnDomain)($host)
+                || ! ($this->isOwnDomain)($host)
             ) {
                 return $url;
             }

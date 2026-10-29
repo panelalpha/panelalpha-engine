@@ -58,6 +58,28 @@ class ProjectUpdateTest extends TestCase
         $this->assertNull(User::findByUsernameOrFail('alice')->getFtpAccountsLimit());
     }
 
+    public function test_a_limit_between_minus_one_and_zero_is_refused_and_not_stored(): void
+    {
+        $this->makeUser('alice', ['template' => 'wordpress', 'cpu_limit' => 2.0]);
+
+        $this->putJson('/api/projects/alice', ['cpu_limit' => -0.5])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'cpu_limit')
+            ->assertJsonPath('problems.0.code', 'cpu_limit_min')
+            ->assertJsonPath('problems.0.expected', '-1 for unlimited, or 0 or more');
+
+        $this->assertSame(2.0, User::findByUsernameOrFail('alice')->getCpuLimit());
+    }
+
+    public function test_minus_one_is_still_stored_as_unlimited(): void
+    {
+        $this->makeUser('alice', ['template' => 'wordpress', 'cpu_limit' => 2.0]);
+
+        $this->putJson('/api/projects/alice', ['cpu_limit' => -1])->assertOk();
+
+        $this->assertSame(-1.0, User::findByUsernameOrFail('alice')->getCpuLimit());
+    }
+
     /** The same name in another case is not a rename: no vhost rebuilt, nothing stored. */
     public function test_the_same_domain_in_another_case_changes_nothing(): void
     {

@@ -8,6 +8,7 @@ use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\SilentPortCheck;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The check the deploy-time probe adds when every port stayed silent and no
@@ -50,7 +51,7 @@ class SilentPortCheckTest extends TestCase
 
         $this->assertSame(SilentPortCheck::ID, $check['id']);
         $this->assertSame('error', $check['severity']);
-        $this->assertStringContainsString('app listens on 4000 on 127.0.0.1 only', $check['detail']);
+        $this->assertStringContainsString('app listens on 4000 on '.TestNetwork::LOOPBACK.' only', $check['detail']);
     }
 
     /** The deploy waits on these, and only these. */

@@ -17,9 +17,7 @@ final class NodeInstallLayer
 {
     private const MANIFESTS = ['bunfig.toml', '.npmrc', 'pnpm-workspace.yaml'];
 
-    public function __construct(private readonly BuildRecipe $recipe, private readonly string $installCommand)
-    {
-    }
+    public function __construct(private readonly BuildRecipe $recipe, private readonly string $installCommand) {}
 
     /**
      * The flag goes between `RUN` and the command, which is where the template
@@ -27,7 +25,7 @@ final class NodeInstallLayer
      */
     private function install(): string
     {
-        return PackageManagerCache::mountFor($this->recipe->packageManager) . $this->installCommand;
+        return PackageManagerCache::mountFor($this->recipe->packageManager).$this->installCommand;
     }
 
     public function render(): string
@@ -45,13 +43,13 @@ final class NodeInstallLayer
     private function runsRootLifecycleScript(): bool
     {
         $scripts = $this->recipe->package()['scripts'] ?? null;
-        if (!is_array($scripts)) {
+        if (! is_array($scripts)) {
             return false;
         }
         foreach (JsPackageManager::INSTALL_LIFECYCLE_SCRIPTS as $name) {
             $script = $scripts[$name] ?? null;
             if (is_string($script) && trim($script) !== ''
-                && !JsPackageManager::isGitHookInstallerScript($script, sourcePresent: true)
+                && ! JsPackageManager::isGitHookInstallerScript($script, sourcePresent: true)
             ) {
                 return true;
             }
@@ -112,7 +110,7 @@ final class NodeInstallLayer
         // context, and COPYing it fails the whole build.
         return array_values(array_filter(
             $manifests,
-            fn (string $name): bool => !DockerIgnore::excludes($this->recipe->projectDir, $name)
+            fn (string $name): bool => ! DockerIgnore::excludes($this->recipe->projectDir, $name)
         ));
     }
 

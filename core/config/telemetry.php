@@ -2,6 +2,7 @@
 
 use App\Lib\Deploy\Telemetry\DeployReport;
 use App\Lib\Deploy\Telemetry\InstallFingerprint;
+use App\Lib\Deploy\Telemetry\SourceBundlePolicy;
 use App\Lib\Deploy\Telemetry\Telemetry;
 
 /*
@@ -132,7 +133,7 @@ return [
     */
     'source_bundle' => [
 
-        'mode' => (string) env('TELEMETRY_SOURCE_BUNDLE', \App\Lib\Deploy\Telemetry\SourceBundlePolicy::MODE_OFF),
+        'mode' => (string) env('TELEMETRY_SOURCE_BUNDLE', SourceBundlePolicy::MODE_OFF),
 
         // Busting any of these produces no bundle at all rather than a
         // truncated one: half a repository is a misleading bug report.

@@ -21,7 +21,7 @@ final class ProcessIdentity
             return null;
         }
         $stat = @file_get_contents("/proc/{$pid}/stat");
-        if (!is_string($stat)) {
+        if (! is_string($stat)) {
             return null;
         }
         // The comm field is parenthesised and may itself contain spaces.

@@ -2,7 +2,6 @@
 
 namespace App\Lib\Ssl;
 
-
 /**
  * The certificate the engine signs itself: what every project domain has had
  * since there were project domains.

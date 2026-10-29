@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
@@ -16,7 +17,7 @@ class SettingsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->coreAppRoot = dirname(__DIR__, 5) . '/core/app';
+        $this->coreAppRoot = dirname(__DIR__, 5).'/core/app';
     }
 
     public function test_redact_keeps_prefix_and_suffix(): void
@@ -79,6 +80,21 @@ class SettingsTest extends TestCase
         $row = (new Settings($this->projectFor($user)))->get(Settings::KEY_CLOUDFLARE_API_TOKEN);
 
         $this->assertFalse($row['set']);
+    }
+
+    public function test_a_classic_project_cannot_hold_a_cloudflare_token(): void
+    {
+        $user = $this->createMock(ModelsUser::class);
+        $user->username = 'alice';
+        $user->method('hasGitProject')->willReturn(false);
+        $user->method('getTemplate')->willReturn('default');
+        $project = new Project($this->createStub(System::class), $user);
+        $user->method('project')->willReturn($project);
+        $user->expects($this->never())->method('setDetails');
+
+        $this->expectException(CloudflareException::class);
+
+        (new Settings($project))->set(Settings::KEY_CLOUDFLARE_API_TOKEN, 'cf-token-not-real');
     }
 
     public function test_registry_auth_is_a_secret_and_read_back_redacted(): void
@@ -166,14 +182,14 @@ class SettingsTest extends TestCase
 
     public function test_project_aggregate_declares_settings(): void
     {
-        $source = file_get_contents($this->coreAppRoot . '/System/Project.php');
+        $source = file_get_contents($this->coreAppRoot.'/System/Project.php');
         $this->assertStringContainsString('function settings(): Settings', $source);
         $this->assertStringContainsString('new Settings($this)', $source);
     }
 
     public function test_dind_does_not_wire_settings_collaborator(): void
     {
-        $source = file_get_contents($this->coreAppRoot . '/System/Project/Dind.php');
+        $source = file_get_contents($this->coreAppRoot.'/System/Project/Dind.php');
         $this->assertStringNotContainsString('function settings(): Settings', $source);
         $this->assertStringNotContainsString('settingsCollaborator', $source);
         $this->assertStringContainsString('implements DeployableDindProject, Runtime', $source);
@@ -181,7 +197,7 @@ class SettingsTest extends TestCase
 
     public function test_dind_implements_runtime_not_project_subclass(): void
     {
-        $source = file_get_contents($this->coreAppRoot . '/System/Project/Dind.php');
+        $source = file_get_contents($this->coreAppRoot.'/System/Project/Dind.php');
         $this->assertStringContainsString('implements DeployableDindProject, Runtime', $source);
         $this->assertStringNotContainsString('extends AbstractProject', $source);
         $this->assertStringNotContainsString('use StackImplementationCommon', $source);
@@ -189,8 +205,8 @@ class SettingsTest extends TestCase
 
     public function test_nested_project_interface_removed(): void
     {
-        $this->assertFileDoesNotExist($this->coreAppRoot . '/System/Project/Project.php');
-        $this->assertFileDoesNotExist($this->coreAppRoot . '/System/Project/AbstractProject.php');
+        $this->assertFileDoesNotExist($this->coreAppRoot.'/System/Project/Project.php');
+        $this->assertFileDoesNotExist($this->coreAppRoot.'/System/Project/AbstractProject.php');
     }
 
     private function userWithToken(?string $token): ModelsUser

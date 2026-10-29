@@ -7,6 +7,4 @@ namespace App\System\Project\PhpHosting;
  * there is no handler to restart. Distinct from a failed restart so
  * each caller decides whether that is expected.
  */
-final class PhpHandlerNotRunning extends \RuntimeException
-{
-}
+final class PhpHandlerNotRunning extends \RuntimeException {}

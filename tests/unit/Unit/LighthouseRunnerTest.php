@@ -6,6 +6,7 @@ use App\Lib\Lighthouse\LighthouseFailed;
 use App\Lib\Lighthouse\LighthouseRunner;
 use App\System;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The report is looked for, read and removed by the runner; the controller only
@@ -32,7 +33,7 @@ class LighthouseRunnerTest extends TestCase
     {
         $system = $this->system((string) json_encode(['categories' => ['performance' => ['score' => 0.9]]]));
 
-        $report = (new LighthouseRunner($system))->report('https://a.test/', true, 'MAP a.test 10.0.0.1');
+        $report = (new LighthouseRunner($system))->report('https://a.test/', true, 'MAP a.test '.TestNetwork::private(1));
 
         $this->assertSame(['categories' => ['performance' => ['score' => 0.9]]], $report);
         $this->assertCount(2, $system->commands, 'lighthouse, then removing the report');
@@ -40,7 +41,7 @@ class LighthouseRunnerTest extends TestCase
         $run = $system->commands[0];
         $this->assertContains('/data/' . basename($this->reportPath(true)), $run);
         $this->assertContains('--preset=desktop', $run);
-        $this->assertStringContainsString('--host-resolver-rules="MAP a.test 10.0.0.1"', implode(' ', $run));
+        $this->assertStringContainsString('--host-resolver-rules="MAP a.test '.TestNetwork::private(1).'"', implode(' ', $run));
     }
 
     public function test_no_report_is_report_file_not_found_and_nothing_is_removed(): void

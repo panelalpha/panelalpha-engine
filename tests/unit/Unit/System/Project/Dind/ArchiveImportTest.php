@@ -7,7 +7,9 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Source\Files;
+use App\System\Project\FileManager;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * The archive is extracted under ~/.panelalpha, which is the account's alone
@@ -48,6 +50,23 @@ class ArchiveImportTest extends TestCase
             [['sudo', 'rsync', '-a', '--delete', '--checksum', '--no-times', $extract . '/myapp/', $this->root . '/home/alice/project/']],
             $this->commandsStartingWith($system, ['sudo', 'rsync'])
         );
+    }
+
+    /** The archive is looked up as the account: the engine's PHP cannot enter ~/.panelalpha either. */
+    public function test_an_archive_only_the_account_can_see_is_imported(): void
+    {
+        $archive = $this->root . '/home/alice/.panelalpha/archives/fw.tar.gz';
+        $system = $this->system("f index.php\0");
+        $system->accountOnly = [$archive];
+
+        $this->files($system)->importProjectArchive('/.panelalpha/archives/fw.tar.gz');
+
+        $this->assertSame(
+            [['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT, 'sh', $archive]],
+            $this->commandsStartingWith($system, ['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'sh'])
+        );
+        $this->assertSame($archive, $this->commandsStartingWith($system, ['sudo', 'cp', '--no-dereference'])[0][3]);
+        $this->assertCount(1, $this->commandsStartingWith($system, ['sudo', 'rsync']));
     }
 
     public function test_a_flat_archive_is_copied_as_it_is(): void
@@ -107,8 +126,8 @@ class ArchiveImportTest extends TestCase
         $this->files($system)->importProjectArchive('/site.zip');
 
         $this->assertSame(
-            [['sudo', 'unzip', '-p', $this->stagedZip($system), 'app/CLAUDE.md']],
-            $this->commandsStartingWith($system, ['sudo', 'unzip', '-p'])
+            [['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p', $this->stagedZip($system), 'app/CLAUDE.md']],
+            $this->commandsStartingWith($system, ['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p'])
         );
         $this->assertCount(1, $this->commandsStartingWith($system, ['sudo', 'rsync']));
     }
@@ -123,7 +142,7 @@ class ArchiveImportTest extends TestCase
             $this->assertStringContainsString('symbolic link', $e->getMessage());
         }
 
-        $this->assertSame([], $this->commandsStartingWith($system, ['sudo', 'setpriv']));
+        $this->assertSame([], $this->commandsStartingWith($system, ['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'unzip']));
     }
 
     private function zipSystem(string $target): System
@@ -137,10 +156,10 @@ class ArchiveImportTest extends TestCase
 
         $system = $this->system("d app\0");
         $system->answers = [
-            'sudo unzip -Z1 ' => "app/AGENTS.md\napp/CLAUDE.md\n",
-            'sudo unzip -Z ' => "-rw-r--r--  3.0 unx    5 tx stor 26-Oct-03 10:00 app/AGENTS.md\n"
+            'sudo env LC_ALL=C.UTF-8 unzip -Z1 ' => "app/AGENTS.md\napp/CLAUDE.md\n",
+            'sudo env LC_ALL=C.UTF-8 unzip -Z ' => "-rw-r--r--  3.0 unx    5 tx stor 26-Oct-03 10:00 app/AGENTS.md\n"
                 . "lrwxrwxrwx  3.0 unx    9 bx stor 26-Oct-03 10:00 app/CLAUDE.md\n",
-            'sudo unzip -p ' => $target,
+            'sudo env LC_ALL=C.UTF-8 unzip -p ' => $target,
         ];
 
         return $system;
@@ -216,6 +235,9 @@ class ArchiveImportTest extends TestCase
             /** @var array<string, string> output by command prefix */
             public array $answers = [];
 
+            /** @var list<string> files the account sees and this process cannot */
+            public array $accountOnly = [];
+
             public function __construct(private string $root, private string $listing)
             {
             }
@@ -235,7 +257,7 @@ class ArchiveImportTest extends TestCase
                 $this->commands[] = $cmd;
                 if (is_array($cmd) && array_slice($cmd, 0, 3) === ['sudo', 'cp', '--no-dereference']) {
                     @mkdir(dirname($cmd[4]), 0777, true);
-                    copy($cmd[3], $cmd[4]);
+                    is_file($cmd[3]) ? copy($cmd[3], $cmd[4]) : file_put_contents($cmd[4], gzencode('read as root'));
                 }
                 foreach ($this->answers as $prefix => $output) {
                     if (is_array($cmd) && str_starts_with(implode(' ', $cmd), $prefix)) {
@@ -248,6 +270,20 @@ class ArchiveImportTest extends TestCase
                 }
 
                 return '';
+            }
+
+            /** An account command, run as ourselves with the sudo setpriv prefix dropped. */
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->commands[] = $cmd;
+                $argv = array_slice((array) $cmd, 7);
+                if (in_array(end($argv), $this->accountOnly, true)) {
+                    $argv = ['printf', '%s\n', end($argv)];
+                }
+                $process = new Process($argv);
+                $process->run();
+
+                return $process;
             }
         };
     }

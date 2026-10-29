@@ -6,6 +6,7 @@ use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class PanelAlphaConnectTest extends TestCase
@@ -42,16 +43,16 @@ class PanelAlphaConnectTest extends TestCase
         ]);
 
         $result = (new PanelAlphaConnect())->createSite(
-            'admin.37-27-20-6.panelalpha.direct',
-            '37.27.20.6',
+            self::directName('admin', TestNetwork::public(6)),
+            TestNetwork::public(6),
             'admin-demo.panelalpha.online'
         );
 
         Http::assertSent(function ($request) {
             return $request->url() === 'https://connect.panelalpha.com/api/without-dns/sites'
                 && $request->hasHeader('Authorization', 'Bearer TEST-KEY-123')
-                && $request['target_domain'] === 'admin.37-27-20-6.panelalpha.direct'
-                && $request['target_ip'] === '37.27.20.6'
+                && $request['target_domain'] === self::directName('admin', TestNetwork::public(6))
+                && $request['target_ip'] === TestNetwork::public(6)
                 && $request['path'] === 'admin-demo'
                 && $request['plugin'] === 'PanelAlpha'
                 && !array_key_exists('valid_until', $request->data())
@@ -79,7 +80,7 @@ class PanelAlphaConnectTest extends TestCase
             ], 200),
         ]);
 
-        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'no-key');
+        (new PanelAlphaConnect())->createSite('local.test', TestNetwork::public(10), 'no-key');
 
         Http::assertSent(function ($request) {
             return !$request->hasHeader('Authorization')
@@ -105,14 +106,14 @@ class PanelAlphaConnectTest extends TestCase
         $result = (new PanelAlphaConnect())->updateSite(
             'admin-demo.panelalpha.online',
             'local.test',
-            '203.0.113.10'
+            TestNetwork::public(10)
         );
 
         Http::assertSent(function ($request) {
             return $request->method() === 'PUT'
                 && $request->url() === 'https://connect.panelalpha.com/api/without-dns/sites/admin-demo.panelalpha.online'
                 && $request['target_domain'] === 'local.test'
-                && $request['target_ip'] === '203.0.113.10';
+                && $request['target_ip'] === TestNetwork::public(10);
         });
 
         $this->assertSame(43, $result['wdns_site_id']);
@@ -161,7 +162,7 @@ class PanelAlphaConnectTest extends TestCase
         $this->expectException(PanelAlphaException::class);
         $this->expectExceptionMessage('No PanelAlpha Connect is configured');
 
-        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'nowhere');
+        (new PanelAlphaConnect())->createSite('local.test', TestNetwork::public(10), 'nowhere');
     }
 
     public function test_create_site_surfaces_409_conflict(): void
@@ -179,7 +180,7 @@ class PanelAlphaConnectTest extends TestCase
         $this->expectException(PanelAlphaException::class);
         $this->expectExceptionMessage('Site already exists. Use PUT to update.');
 
-        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'taken');
+        (new PanelAlphaConnect())->createSite('local.test', TestNetwork::public(10), 'taken');
     }
 
     /**
@@ -208,7 +209,7 @@ class PanelAlphaConnectTest extends TestCase
     public function test_a_different_local_domain_is_not_serving_its_own_name(): void
     {
         $this->assertFalse(PanelAlphaConnect::servesItsOwnPublicName(
-            'shop.203-0-113-45.panelalpha.direct',
+            self::directName('shop', TestNetwork::public(45)),
             'shop.panelalpha.online',
             'panelalpha'
         ));
@@ -224,5 +225,10 @@ class PanelAlphaConnectTest extends TestCase
             'shop.example.com',
             'cloudflare'
         ));
+    }
+
+    private static function directName(string $label, string $address): string
+    {
+        return $label.'.'.str_replace('.', '-', $address).'.panelalpha.direct';
     }
 }

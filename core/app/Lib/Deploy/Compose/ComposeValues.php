@@ -13,12 +13,12 @@ namespace App\Lib\Deploy\Compose;
 final class ComposeValues
 {
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      * @return array<string, string> non-empty keys with scalar values, as strings
      */
     public static function stringMap($value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
@@ -33,12 +33,12 @@ final class ComposeValues
     }
 
     /**
-     * @param mixed $value
+     * @param  mixed  $value
      * @return list<string> the non-empty strings in it
      */
     public static function stringList($value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 

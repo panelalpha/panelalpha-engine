@@ -17,8 +17,8 @@ class McpTokenController extends Controller
         path: '/mcp-tokens',
         summary: 'List the root admin MCP tokens and their project scope',
         description: 'Pass `project` to keep only the tokens scoped to that project. A token created without '
-            . '`projects` is unscoped and reaches every project, so it never matches the filter. These tokens are '
-            . 'panel-facing and are not exposed as MCP tools.',
+            .'`projects` is unscoped and reaches every project, so it never matches the filter. These tokens are '
+            .'panel-facing and are not exposed as MCP tools.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -42,13 +42,13 @@ class McpTokenController extends Controller
             ->where(function ($q) use ($params) {
                 $q->whereJsonContains('abilities', TokenAbilities::MCP);
 
-                if (!empty($params['project'])) {
-                    $q->whereJsonContains('abilities', TokenAbilities::PROJECT_PREFIX . $params['project']);
+                if (! empty($params['project'])) {
+                    $q->whereJsonContains('abilities', TokenAbilities::PROJECT_PREFIX.$params['project']);
                 }
             })
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn($t) => $this->formatToken($t));
+            ->map(fn ($t) => $this->formatToken($t));
 
         return response()->json(['data' => $tokens]);
     }
@@ -57,10 +57,11 @@ class McpTokenController extends Controller
         path: '/mcp-tokens',
         summary: 'Mint an MCP token, optionally scoped to projects',
         description: 'An unscoped token reaches every project. When `projects` is present the token is '
-            . 'project-scoped and every operation outside those projects is refused with 403. A project the '
-            . 'token creates or clones (staging, clone, push) is not added to its scope: the scope is fixed at '
-            . 'mint time, so update it with PUT /mcp-tokens/{id}/projects before the token can reach the new '
-            . 'project. Panel-facing; not an MCP tool.',
+            .'project-scoped and every operation outside those projects is refused with 403. A project named '
+            .'in a request -- the target of a push, the name a clone or staging copy is created under -- must '
+            .'be on the list already: the scope is fixed at mint time, so update it with '
+            .'PUT /mcp-tokens/{id}/projects to let the token reach a project added since. Panel-facing; not an '
+            .'MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -87,18 +88,18 @@ class McpTokenController extends Controller
     {
         $params = $request->validated();
 
-        $root     = Admin::rootAccount();
+        $root = Admin::rootAccount();
         $newToken = $root->createToken(
             $params['name'],
             TokenAbilities::build(api: false, mcp: true, projects: $params['projects'] ?? null)
         );
-        $token    = $newToken->accessToken;
+        $token = $newToken->accessToken;
 
         return response()->json([
             'data' => array_merge(
                 $this->formatToken($token),
                 ['plain_text_token' => $newToken->plainTextToken]
-            )
+            ),
         ], 201);
     }
 
@@ -106,7 +107,7 @@ class McpTokenController extends Controller
         path: '/mcp-tokens/{id}/projects',
         summary: 'Replace an MCP token project scope',
         description: 'Sets the exact list of projects the token may reach. An empty list scopes it to no project; '
-            . 'the change applies to the next call. Panel-facing; not an MCP tool.',
+            .'the change applies to the next call. Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -165,25 +166,26 @@ class McpTokenController extends Controller
 
     private function findMcpToken(int $id): PersonalAccessToken
     {
-        $root  = Admin::rootAccount();
+        $root = Admin::rootAccount();
         $token = $root->tokens()
             ->where('id', $id)
             ->whereJsonContains('abilities', TokenAbilities::MCP)
             ->firstOrFail();
 
         assert($token instanceof PersonalAccessToken);
+
         return $token;
     }
 
     private function formatToken(PersonalAccessToken $token): array
     {
         return [
-            'id'           => $token->id,
-            'name'         => $token->name,
-            'projects'     => TokenAbilities::of($token)->projects(),
+            'id' => $token->id,
+            'name' => $token->name,
+            'projects' => TokenAbilities::of($token)->projects(),
             'last_used_at' => $token->last_used_at,
-            'revoked_at'   => $token->revoked_at,
-            'created_at'   => $token->created_at,
+            'revoked_at' => $token->revoked_at,
+            'created_at' => $token->created_at,
         ];
     }
 }

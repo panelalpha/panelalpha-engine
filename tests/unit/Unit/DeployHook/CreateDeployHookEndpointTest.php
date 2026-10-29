@@ -4,6 +4,7 @@ namespace Tests\Unit\DeployHook;
 
 use App\Lib\DeployHook\DeployHooks;
 use App\Models\DeployHook;
+use Tests\Support\TestNetwork;
 
 /**
  * `POST /projects/{username}/git/deploy-hook` end to end -- the route, the
@@ -30,7 +31,7 @@ class CreateDeployHookEndpointTest extends DeployHookTestCase
         $response->assertStatus(201);
         $response->assertJsonPath('data.created', true);
         $response->assertJsonPath('data.path', 'project');
-        $this->assertMatchesRegularExpression('#^https://203\.0\.113\.10/hooks/[0-9a-f]{40}$#', (string) $response->json('data.url'));
+        $this->assertMatchesRegularExpression('#^https://'.preg_quote(TestNetwork::public(10), '#').'/hooks/[0-9a-f]{40}$#', (string) $response->json('data.url'));
         $secret = (string) $response->json('data.secret');
         $this->assertNotSame('', $secret);
         $this->assertSame($secret, DeployHook::firstOrFail()->secret());

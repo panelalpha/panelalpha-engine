@@ -84,7 +84,7 @@ class RegistryLoginTest extends TestCase
         $user->method('getChownString')->willReturn('1000:1000');
 
         $fs = $this->createStub(Filesystem::class);
-        $fs->method('filePutContents')->willReturnCallback(
+        $fs->method('writeFileReplacingPath')->willReturnCallback(
             function (string $path, string $contents, ?string $chown = null, ?string $chmod = null): void {
                 $this->written[] = [$path, $contents, $chown, $chmod];
             }

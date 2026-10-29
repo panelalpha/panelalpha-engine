@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get visitor overview for a domain
 
-    Unique visitors, total hits, visits by day, and session length. start/end clip DAY-backed fields (total hits, visits.records, visits.total). unique, visits_length, and all visitor breakdowns are the overlapping calendar months, not unique-in-range. Missing AWStats data is zeros, not an error. Period aliases such as last-week stay in the client.
+    Unique visitors, total hits, visits by day, and session length. start/end clip DAY-backed fields (total hits, visits.records, visits.total) and bound session_length, the estimated average session length per day in seconds. unique, visits_length (a SESSION histogram), and all visitor breakdowns are the overlapping calendar months, not unique-in-range. Missing AWStats data is zeros, not an error. Period aliases such as last-week stay in the client.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

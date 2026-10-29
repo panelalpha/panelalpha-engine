@@ -13,7 +13,7 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:add-missing-www-domain-aliases', 'users:add-missing-www-domain-aliases'];
 
-    protected $signature = 'project:domain:add-www-alias' . ProjectOptions::SIGNATURE;
+    protected $signature = 'project:domain:add-www-alias'.ProjectOptions::SIGNATURE;
 
     protected $description = 'Add missing www. aliases to a project\'s domains';
 
@@ -29,7 +29,8 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
             $this->info("  Checking domain {$domain->domain}...");
             $skip = $this->reasonToSkip($domain);
             if ($skip !== null) {
-                $this->comment('    ' . $skip);
+                $this->comment('    '.$skip);
+
                 continue;
             }
 
@@ -37,11 +38,12 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
             $holder = $this->takenBy($domain);
             if ($holder !== null) {
                 $taken[] = "  www.{$domain->domain} is already on this engine ({$holder}), not added.";
+
                 continue;
             }
 
             $this->info('    Adding www. alias and rebuilding domain...');
-            $domain->addAlias('www.' . $domain->domain);
+            $domain->addAlias('www.'.$domain->domain);
             $domain->projectDomain()->rebuild();
             $domain->save();
             $this->info('    Domain rebuilt.');
@@ -59,7 +61,7 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
             return 'It is subdomain, skipping.';
         }
 
-        $alias = 'www.' . $domain->domain;
+        $alias = 'www.'.$domain->domain;
 
         if (in_array($alias, $domain->getAliases())) {
             return 'It already has www. alias, skipping.';
@@ -71,7 +73,7 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
     /** What already holds this domain's www. name, as the API's alias check sees it, or null when it is free. */
     private function takenBy(Domain $domain): ?string
     {
-        $alias = 'www.' . $domain->domain;
+        $alias = 'www.'.$domain->domain;
         if ($domain->isAliasAvailable($alias)) {
             return null;
         }
@@ -89,6 +91,6 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
 
     protected function afterAll(): void
     {
-        (new System())->webserver()->reload();
+        (new System)->webserver()->reload();
     }
 }

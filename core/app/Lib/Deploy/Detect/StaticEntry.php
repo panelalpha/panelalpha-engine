@@ -14,14 +14,12 @@ final class StaticEntry
     private const HTML_PATTERN = '/\.html?$/i';
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
-    public function __construct(private readonly string $projectDir, private readonly array $files)
-    {
-    }
+    public function __construct(private readonly string $projectDir, private readonly array $files) {}
 
     /**
-     * @param array<string, true> $files lowercase basename => true
+     * @param  array<string, true>  $files  lowercase basename => true
      */
     public static function find(string $projectDir, array $files): ?string
     {
@@ -37,7 +35,7 @@ final class StaticEntry
     private function projectIndex(): ?string
     {
         foreach ($this->presentIndexes() as $name) {
-            if (!PlaceholderPage::isOneOf($this->path($name))) {
+            if (! PlaceholderPage::isOneOf($this->path($name))) {
                 return $name;
             }
         }
@@ -79,11 +77,11 @@ final class StaticEntry
     {
         return preg_match(self::HTML_PATTERN, $entry) === 1
             && is_file($this->path($entry))
-            && !PlaceholderPage::isOneOf($this->path($entry));
+            && ! PlaceholderPage::isOneOf($this->path($entry));
     }
 
     private function path(string $name): string
     {
-        return $this->projectDir . '/' . $name;
+        return $this->projectDir.'/'.$name;
     }
 }

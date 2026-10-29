@@ -27,7 +27,7 @@ class SshCommandRunRequest extends FormRequest
             'cwd' => 'nullable|string|max:4096',
             // Bounded so a caller cannot pin a worker on a command that never
             // returns; the request is synchronous.
-            'timeout' => 'nullable|integer|min:1|max:' . self::MAX_TIMEOUT,
+            'timeout' => 'nullable|integer|min:1|max:'.self::MAX_TIMEOUT,
         ];
     }
 }

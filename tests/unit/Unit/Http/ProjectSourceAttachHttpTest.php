@@ -7,14 +7,17 @@ use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Http\OutboundUrl;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
 use App\Lib\Project\ProjectRebuild;
+use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -36,15 +39,17 @@ class ProjectSourceAttachHttpTest extends TestCase
 
         $this->fakeProbe();
         $this->fakeInspector();
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
     }
 
     protected function tearDown(): void
     {
+        OutboundUrl::setResolverForTests(null);
         Setting::clearRuntimeSettings();
         parent::tearDown();
     }
 
-    /** No ls-remote leaves the test. */
+    /** No ls-remote leaves the test, and no DNS question: github.com answers a fixed public address. */
     private function fakeProbe(): void
     {
         $this->app->instance(GitRemoteProbe::class, new class extends GitRemoteProbe {
@@ -129,6 +134,28 @@ class ProjectSourceAttachHttpTest extends TestCase
         );
     }
 
+    public function test_an_env_var_set_from_a_vault_reference_is_remembered_as_the_vaults(): void
+    {
+        $this->makeUser('vaultenv', ['template' => 'dind']);
+        /** @var SecretVaultEntry $entry */
+        $entry = SecretVaultEntry::create([
+            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(6))),
+            'type' => SecretVaultEntry::TYPE_ENV_VARS,
+            'scope' => SecretVaultEntry::SCOPE_PROJECT,
+            'project' => 'vaultenv',
+        ]);
+        $entry->setSecret('s3cret');
+        $entry->save();
+
+        $this->postJson('/api/projects/vaultenv/source', self::body() + [
+            'env_vars' => ['TOKEN' => $entry->reference(), 'PLAIN' => '1'],
+        ])->assertStatus(202);
+
+        $user = User::findByUsernameOrFail('vaultenv');
+        $this->assertSame(['TOKEN' => 's3cret', 'PLAIN' => '1'], $user->getEnvVars());
+        $this->assertSame(['TOKEN'], $user->getVaultEnvKeys());
+    }
+
     public function test_a_project_that_already_has_a_source_is_refused(): void
     {
         $this->makeUser('hassource', ['template' => 'dind', 'git_repo' => 'https://github.com/acme/other.git']);
@@ -204,7 +231,7 @@ class ProjectSourceAttachHttpTest extends TestCase
         $this->makeUser('privateone', ['template' => 'dind']);
 
         $response = $this->postJson('/api/projects/privateone/source', [
-            'git_repo' => 'http://10.10.0.25:18660/r7.git',
+            'git_repo' => 'http://' . TestNetwork::private(25) . ':18660/r7.git',
         ]);
 
         $response->assertStatus(422);

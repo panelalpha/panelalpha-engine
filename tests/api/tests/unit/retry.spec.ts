@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { isEngineUnreachable } from '@/helpers/retry';
+import { testNetwork } from '@/helpers/test-network';
 
 function apiCallFailed(status: number): Error {
   return new Error(
@@ -12,7 +13,9 @@ test.describe('isEngineUnreachable', () => {
     expect(isEngineUnreachable(new Error('apiRequestContext.get: socket hang up'))).toBe(true);
     expect(isEngineUnreachable(new Error('apiRequestContext.get: read ECONNRESET'))).toBe(true);
     expect(
-      isEngineUnreachable(new Error('apiRequestContext.get: connect ECONNREFUSED 10.0.0.1:2011'))
+      isEngineUnreachable(
+        new Error(`apiRequestContext.get: connect ECONNREFUSED ${testNetwork.private(1)}:2011`)
+      )
     ).toBe(true);
     expect(
       isEngineUnreachable(

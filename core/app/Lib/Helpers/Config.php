@@ -9,8 +9,9 @@ class Config
         /** @var mixed */
         $configValue = config($configName);
         if (filter_var($configValue, FILTER_VALIDATE_INT) !== false) {
-            return (int)$configValue;
+            return (int) $configValue;
         }
+
         return null;
     }
 
@@ -18,9 +19,10 @@ class Config
     {
         /** @var mixed */
         $configValue = config($configName);
-        if (!empty($configValue) && is_scalar($configValue)) {
-            return (string)$configValue;
+        if (! empty($configValue) && is_scalar($configValue)) {
+            return (string) $configValue;
         }
+
         return null;
     }
 }

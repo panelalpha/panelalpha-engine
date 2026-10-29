@@ -54,7 +54,7 @@ final class BuiltImage
 
         $upstream = RuntimeImageCatalog::upstreamRepository($parts['runtime']);
 
-        return $upstream === null ? null : $upstream . ':' . $parts['upstreamTag'];
+        return $upstream === null ? null : $upstream.':'.$parts['upstreamTag'];
     }
 
     public static function fingerprintOf(string $tag): ?string
@@ -83,6 +83,30 @@ final class BuiltImage
         $parts = self::parts($tag);
 
         return $parts !== null && $parts['variant'] === null;
+    }
+
+    /**
+     * The Dockerfile that produces this tag, or null when nothing here can.
+     *
+     * A variant tag hashes an extension set and a hash does not go backwards,
+     * so only a caller that still holds the set can rebuild one; $extensions
+     * is that set. Dispatched on the catalogue's repository table rather than
+     * assumed to be PHP, so what the engine builds is what the config says.
+     *
+     * @param  list<string>  $extensions
+     * @param  list<string>  $packages
+     */
+    public static function dockerfile(string $tag, array $extensions = [], array $packages = []): ?string
+    {
+        $source = self::sourceImage($tag);
+        if ($source === null || (! self::isRebuildableFromTag($tag) && $extensions === [] && $packages === [])) {
+            return null;
+        }
+
+        return match (self::runtimeFor($tag)) {
+            'php' => PhpBaseImage::dockerfile($source, $extensions, $packages),
+            default => null,
+        };
     }
 
     /**

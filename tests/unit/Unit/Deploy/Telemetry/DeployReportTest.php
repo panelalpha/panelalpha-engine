@@ -62,6 +62,15 @@ class DeployReportTest extends TestCase
         $this->assertSame('running', DeployReport::build($this->input())['failure']['stage']);
     }
 
+    public function test_an_unlimited_cpu_is_reported_as_no_limit_not_minus_one(): void
+    {
+        $base = $this->input();
+        $unlimited = DeployReport::build($this->input(['details' => ['cpu_limit' => -1] + $base['details']]));
+
+        $this->assertNull($unlimited['limits']['cpu']);
+        $this->assertSame(2.0, DeployReport::build($base)['limits']['cpu']);
+    }
+
     public function test_the_domain_block_says_which_rung_the_install_landed_on(): void
     {
         $report = DeployReport::build($this->input(['details' => [

@@ -41,8 +41,10 @@ final class FakeProcess extends Process
      *
      * `sudo test -f|-d PATH` is answered from the real filesystem, because
      * callers branch on its exit code and a blanket success would tell them
-     * every file exists. Everything else simply succeeds: a test asserting on
-     * what was run reads the recorded command, not the result.
+     * every file exists; `sudo realpath -e -- PATH…` too, because callers
+     * compare the paths it resolves (a path the fixture tree lacks answers as
+     * written). Everything else simply succeeds: a test asserting on what was
+     * run reads the recorded command, not the result.
      *
      * @param string|list<string> $cmd
      */
@@ -50,6 +52,9 @@ final class FakeProcess extends Process
     {
         $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
 
+        if (array_slice($argv, 0, 4) === ['sudo', 'realpath', '-e', '--']) {
+            return self::realPaths(array_slice($argv, 4));
+        }
         if (($argv[0] ?? '') !== 'sudo' || ($argv[1] ?? '') !== 'test') {
             return self::ok();
         }
@@ -62,6 +67,12 @@ final class FakeProcess extends Process
         };
 
         return $exists ? self::ok() : self::failed();
+    }
+
+    /** @param  list<string>  $paths */
+    private static function realPaths(array $paths): self
+    {
+        return self::ok(implode("\n", array_map(static fn (string $path): string => realpath($path) ?: $path, $paths))."\n");
     }
 
     public function isSuccessful(): bool

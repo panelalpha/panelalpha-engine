@@ -17,6 +17,7 @@ trait StreamsFileToOutput
         $handle = fopen($out, 'wb');
         if ($handle === false) {
             $this->error("Could not open {$out} for writing");
+
             return 1;
         }
         try {
@@ -26,6 +27,7 @@ trait StreamsFileToOutput
         }
 
         $this->info(sprintf('Saved to %s (%s bytes)', $out, number_format((int) filesize($out))));
+
         return 0;
     }
 

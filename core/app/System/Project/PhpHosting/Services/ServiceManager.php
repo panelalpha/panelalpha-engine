@@ -2,10 +2,12 @@
 
 namespace App\System\Project\PhpHosting\Services;
 
+use App\System\Project\PhpHosting;
+
 /**
  * What keeps a PHP hosting account's processes up: the PHP handlers, Apache,
  * redis and cron. Callers name a service; which init runs it is this class's
- * business, not theirs. Chosen in {@see \App\System\Project\PhpHosting::services()}.
+ * business, not theirs. Chosen in {@see PhpHosting::services()}.
  */
 interface ServiceManager
 {
@@ -16,8 +18,7 @@ interface ServiceManager
      * Init scripts (file => shell) that start, once at boot, the $services
      * this init does not run in the foreground.
      *
-     * @param list<Service> $services
-     *
+     * @param  list<Service>  $services
      * @return array<string, string>
      */
     public function bootScripts(array $services): array;
@@ -27,7 +28,7 @@ interface ServiceManager
      * before that are no longer wanted. A running account picks them up
      * through {@see sync()}.
      *
-     * @param list<Service> $services
+     * @param  list<Service>  $services
      */
     public function write(array $services): void;
 

@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Firewall;
 use App\System\Firewall\FirewallRule;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 
 /** The host side: scripts/firewall.sh and its ufw provider, and who runs them. */
 class FirewallScriptTest extends TestCase
@@ -14,7 +15,7 @@ class FirewallScriptTest extends TestCase
         return (string) file_get_contents(dirname(__DIR__, 5) . '/' . $path);
     }
 
-    /** scripts/firewall/ufw.test.sh runs ufw.sh against fake ufw, iptables, apt and systemctl. */
+    /** tests/scripts/firewall/ufw.test.sh runs ufw.sh against fake ufw, iptables, apt and systemctl. */
     public function test_the_ufw_provider_against_fakes(): void
     {
         $bash = trim((string) shell_exec('command -v bash'));
@@ -22,7 +23,7 @@ class FirewallScriptTest extends TestCase
             $this->markTestSkipped('bash is not installed');
         }
 
-        exec(escapeshellarg($bash) . ' ' . escapeshellarg(dirname(__DIR__, 5) . '/scripts/firewall/ufw.test.sh') . ' 2>&1', $out, $code);
+        exec(escapeshellarg($bash) . ' ' . escapeshellarg(dirname(__DIR__, 5) . '/tests/scripts/firewall/ufw.test.sh') . ' 2>&1', $out, $code);
 
         $this->assertSame(0, $code, implode("\n", $out));
         $this->assertContains('All passed.', $out);
@@ -40,10 +41,10 @@ class FirewallScriptTest extends TestCase
         $safe = static fn (string $comment, string $kind): string => explode("\n", (new Process(
             [$bash, '-c', 'source "$1"; safe_comment "$2" "$3"', '_', $script, $comment, $kind]
         ))->mustRun()->getOutput(), 2)[0];
-        $allow = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '192.0.2.1']);
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => TestNetwork::public3(1)]);
         $rules = [
-            'host' => [$allow, FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '192.0.2.1'])],
-            'route' => [$allow->with(['scope' => 'published']), FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.1'])],
+            'host' => [$allow, FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => TestNetwork::public3(1)])],
+            'route' => [$allow->with(['scope' => 'published']), FirewallRule::fromArray(['action' => 'deny', 'source' => TestNetwork::public3(1)])],
         ];
 
         $comments = ["Bob's office", "it's 'x'", "a\tin\tb", "x\ry", "a\x1b[31mb\x7f", "a\u{85}b", "\x01", 'in', 'out', 'log', 'log-all',

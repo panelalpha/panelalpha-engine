@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\Runtime\Ruby\RubyDockerfile;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyServer;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class RubyDockerfileTest extends TestCase
 {
@@ -347,7 +348,7 @@ class RubyDockerfileTest extends TestCase
 
         $this->assertStringContainsString('rackup', $start);
         $this->assertStringNotContainsString('rails', $start);
-        $this->assertStringContainsString('0.0.0.0', $start);
+        $this->assertStringContainsString(TestNetwork::ANY, $start);
     }
 
     /**
@@ -361,7 +362,7 @@ class RubyDockerfileTest extends TestCase
             'config.ru' => "run ->(env) {}\n",
         ]);
 
-        $this->assertStringContainsString('tcp://0.0.0.0:3000', RubyServer::command(RubyApp::at($rack), 3000));
+        $this->assertStringContainsString('tcp://' . TestNetwork::ANY . ':3000', RubyServer::command(RubyApp::at($rack), 3000));
         $this->assertStringNotContainsString('config/puma.rb', RubyServer::command(RubyApp::at($rack), 3000));
 
         $withConfig = $this->projectDir([

@@ -25,7 +25,7 @@ final class DetectionResult
     ];
 
     /**
-     * @param array<string, mixed> $extra everything the platform decided
+     * @param  array<string, mixed>  $extra  everything the platform decided
      * @return array<string, mixed>
      */
     public static function of(
@@ -48,7 +48,7 @@ final class DetectionResult
     }
 
     /**
-     * @param array<string, mixed> $decision as a platform described it
+     * @param  array<string, mixed>  $decision  as a platform described it
      * @return array<string, mixed>
      */
     public static function fromPlatform(array $decision): array

@@ -30,7 +30,7 @@ final class HostIngress
     private const FILE_PROVIDER_PATTERN = '/providers[._]file/i';
 
     /**
-     * @param array<string, mixed> $compose
+     * @param  array<string, mixed>  $compose
      * @return array{compose: array<string, mixed>, dropped: list<string>} dropped: one log line each
      */
     public static function strip(array $compose): array
@@ -45,8 +45,8 @@ final class HostIngress
         }
         $pathRouted = $proxies === [] ? [] : self::pathRoutedServices($services);
         if ($pathRouted !== []) {
-            $dropped[] = 'Traefik routed request paths between services (' . implode(', ', $pathRouted) . '); '
-                . "the engine's proxy sends the whole domain to one service, so the others are not reachable from outside";
+            $dropped[] = 'Traefik routed request paths between services ('.implode(', ', $pathRouted).'); '
+                ."the engine's proxy sends the whole domain to one service, so the others are not reachable from outside";
         }
 
         $external = self::externalNetworks($compose['networks'] ?? null);
@@ -81,7 +81,7 @@ final class HostIngress
      * Left alone when the proxy is all the file defines: there is nothing
      * else to deploy, and an empty stack fails less clearly than this one.
      *
-     * @param array<mixed> $services
+     * @param  array<mixed>  $services
      * @return array<string, string> service name => image
      */
     private static function proxyServices(array $services): array
@@ -100,13 +100,13 @@ final class HostIngress
      * A reverse proxy the engine's own routing replaces, unless it only
      * routes the stack's own paths.
      *
-     * @param array<mixed> $service
+     * @param  array<mixed>  $service
      */
     public static function isIngressProxy(array $service): bool
     {
         $image = is_string($service['image'] ?? null) ? $service['image'] : '';
 
-        return $image !== '' && self::isProxyImage($image) && !self::isStackRouter($image, $service);
+        return $image !== '' && self::isProxyImage($image) && ! self::isStackRouter($image, $service);
     }
 
     /**
@@ -115,7 +115,7 @@ final class HostIngress
      * from a file provider with no way to discover containers (not-th.re's
      * `/api` -> api, `/` -> ui). Dropping that leaves one service reachable.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function isStackRouter(string $image, array $service): bool
     {
@@ -123,7 +123,7 @@ final class HostIngress
         if (end($segments) !== 'traefik') {
             return false;
         }
-        if (!self::runsTraefik($service)) {
+        if (! self::runsTraefik($service)) {
             return true;
         }
 
@@ -142,7 +142,7 @@ final class HostIngress
      * The image's entrypoint runs Traefik unless the file replaces it, or
      * hands it a command that is not a flag or `traefik` itself.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      */
     private static function runsTraefik(array $service): bool
     {
@@ -162,7 +162,7 @@ final class HostIngress
      * Services a Traefik router rule sends a path to, which one published
      * port cannot reproduce.
      *
-     * @param array<mixed> $services
+     * @param  array<mixed>  $services
      * @return list<string>
      */
     private static function pathRoutedServices(array $services): array
@@ -200,7 +200,7 @@ final class HostIngress
             return true;
         }
         foreach (self::PROXY_REPOSITORIES as $proxy) {
-            if ($repository === $proxy || str_ends_with($repository, '/' . $proxy)) {
+            if ($repository === $proxy || str_ends_with($repository, '/'.$proxy)) {
                 return true;
             }
         }
@@ -212,7 +212,7 @@ final class HostIngress
      * The port Traefik's labels routed to, kept as `expose:` so port detection
      * still finds it once the proxy is gone. The labels themselves stay; inert.
      *
-     * @param array<string, mixed> $service
+     * @param  array<string, mixed>  $service
      * @return array<string, mixed>
      */
     private static function withRoutedPortsExposed(array $service): array
@@ -236,7 +236,7 @@ final class HostIngress
 
         $expose = is_array($service['expose'] ?? null) ? array_values($service['expose']) : [];
         foreach ($routed as $port) {
-            if (!isset($declared[$port])) {
+            if (! isset($declared[$port])) {
                 $expose[] = (string) $port;
                 $declared[$port] = true;
             }
@@ -251,12 +251,12 @@ final class HostIngress
     /**
      * `traefik.http.services.<name>.loadbalancer.server.port`, list or map form.
      *
-     * @param mixed $labels
+     * @param  mixed  $labels
      * @return list<int>
      */
     private static function routedPorts($labels): array
     {
-        if (!is_array($labels)) {
+        if (! is_array($labels)) {
             return [];
         }
 
@@ -278,12 +278,12 @@ final class HostIngress
     /**
      * `external: true`, or the older `external: {name: …}` form.
      *
-     * @param mixed $networks
+     * @param  mixed  $networks
      * @return list<string>
      */
     private static function externalNetworks($networks): array
     {
-        if (!is_array($networks)) {
+        if (! is_array($networks)) {
             return [];
         }
 
@@ -302,21 +302,21 @@ final class HostIngress
      * A service left on no network loses the key, so it joins the project's
      * default network instead of none.
      *
-     * @param array<string, mixed> $service
-     * @param list<string> $networks
+     * @param  array<string, mixed>  $service
+     * @param  list<string>  $networks
      * @return array<string, mixed>
      */
     private static function withoutNetworks(array $service, array $networks): array
     {
         $declared = $service['networks'] ?? null;
-        if ($networks === [] || !is_array($declared)) {
+        if ($networks === [] || ! is_array($declared)) {
             return $service;
         }
 
         if (array_is_list($declared)) {
             $kept = array_values(array_filter(
                 $declared,
-                static fn ($name): bool => !in_array((string) $name, $networks, true)
+                static fn ($name): bool => ! in_array((string) $name, $networks, true)
             ));
         } else {
             $kept = array_diff_key($declared, array_flip($networks));

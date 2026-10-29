@@ -27,7 +27,7 @@ class RailpackPlan
     public static function imageRefs(string $planJson): array
     {
         $plan = json_decode($planJson, true);
-        if (!is_array($plan)) {
+        if (! is_array($plan)) {
             return [];
         }
 
@@ -38,16 +38,17 @@ class RailpackPlan
     }
 
     /**
-     * @param list<string> $refs
+     * @param  list<string>  $refs
      */
     private static function collectImages(mixed $node, array &$refs): void
     {
-        if (!is_array($node)) {
+        if (! is_array($node)) {
             return;
         }
         foreach ($node as $key => $value) {
             if ($key === 'image' && is_string($value) && ImageTransfer::isSafeImageRef($value)) {
                 $refs[] = $value;
+
                 continue;
             }
             self::collectImages($value, $refs);

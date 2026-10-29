@@ -2,10 +2,11 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
-use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Probes\SvelteKitAdapter;
+use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Strategies;
 use InvalidArgumentException;
@@ -35,7 +36,7 @@ final class DeployabilityCheck
     private readonly string $strategy;
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public function __construct(private readonly array $decision, private readonly string $projectDir)
     {
@@ -43,7 +44,8 @@ final class DeployabilityCheck
     }
 
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
+     *
      * @throws InvalidArgumentException
      */
     public static function assert(array $decision, string $projectDir): void
@@ -64,8 +66,7 @@ final class DeployabilityCheck
             $this->strategy === Strategies::STATIC => $this->assertStaticEntry(),
             $this->strategy === Strategies::DOTNET => $this->assertModernDotnet(),
             Strategies::isJsFramework($this->strategy) => $this->assertRootFile('package.json', 'Framework'),
-            isset(self::REQUIRED_ROOT_FILE[$this->strategy]) && !$this->namedByItsOwnManifest()
-                => $this->assertRootFile(...self::REQUIRED_ROOT_FILE[$this->strategy]),
+            isset(self::REQUIRED_ROOT_FILE[$this->strategy]) && ! $this->namedByItsOwnManifest() => $this->assertRootFile(...self::REQUIRED_ROOT_FILE[$this->strategy]),
             default => null,
         };
 
@@ -99,18 +100,18 @@ final class DeployabilityCheck
      */
     private function assertPhpExtensionsAvailable(): void
     {
-        if (!isset(self::REQUIRED_ROOT_FILE[$this->strategy])
+        if (! isset(self::REQUIRED_ROOT_FILE[$this->strategy])
             || self::REQUIRED_ROOT_FILE[$this->strategy][1] !== 'PHP') {
             return;
         }
 
         // Under app_root when the manifest declares one -- phpBB uses phpBB/.
         $root = AppRoot::path($this->projectDir, $this->decision);
-        $json = @file_get_contents($root . '/composer.json');
+        $json = AccountHomeRead::contents($root.'/composer.json');
         if ($json === false) {
             return;
         }
-        $lock = @file_get_contents($root . '/composer.lock');
+        $lock = AccountHomeRead::contents($root.'/composer.lock');
 
         $issue = PhpExtensionAvailability::issue($json, $lock === false ? null : $lock);
         if ($issue !== null) {
@@ -133,7 +134,7 @@ final class DeployabilityCheck
 
     private function assertNotEmpty(): void
     {
-        if (!is_dir($this->projectDir) || ProjectContext::listRootFiles($this->projectDir) === []) {
+        if (! is_dir($this->projectDir) || ProjectContext::listRootFiles($this->projectDir) === []) {
             throw new InvalidArgumentException('Project directory is empty; nothing to deploy.');
         }
     }
@@ -141,7 +142,7 @@ final class DeployabilityCheck
     private function assertDockerfile(): void
     {
         $name = $this->decision['dockerfile'] ?? 'Dockerfile';
-        if (!is_file($this->path((string) $name))) {
+        if (! is_file($this->path((string) $name))) {
             throw new InvalidArgumentException('Dockerfile strategy selected but Dockerfile is missing.');
         }
     }
@@ -149,14 +150,14 @@ final class DeployabilityCheck
     private function assertCompose(): void
     {
         $path = $this->decision['compose_path'] ?? null;
-        if (!is_string($path) || !is_file($path)) {
+        if (! is_string($path) || ! is_file($path)) {
             // A file that is there but was passed over is a different fault
             // from one that is absent, and the message has to say which.
             foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $name) {
                 if (is_file($this->path($name))) {
                     throw new InvalidArgumentException(
                         "Compose strategy selected but {$name} was not accepted as a runnable compose file"
-                        . ' (a workstation, sidecars-only or engine-generated file is skipped).'
+                        .' (a workstation, sidecars-only or engine-generated file is skipped).'
                     );
                 }
             }
@@ -164,9 +165,9 @@ final class DeployabilityCheck
         }
 
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($path, $this->projectDir);
-        if ($missing !== [] && !is_file($this->path('Dockerfile'))) {
+        if ($missing !== [] && ! is_file($this->path('Dockerfile'))) {
             throw new InvalidArgumentException(
-                'Compose file builds from ' . $missing[0] . ' which does not exist.'
+                'Compose file builds from '.$missing[0].' which does not exist.'
             );
         }
     }
@@ -177,8 +178,8 @@ final class DeployabilityCheck
         $legacy = DotnetRuntime::legacyFrameworkEntry(AppRoot::path($this->projectDir, $this->decision));
         if ($legacy !== null) {
             throw new InvalidArgumentException(
-                $legacy . ' (a <TargetFrameworkVersion> project). The .NET SDK on Linux builds only'
-                . ' SDK-style projects targeting .NET 5 or newer (<TargetFramework>net8.0</TargetFramework>).'
+                $legacy.' (a <TargetFrameworkVersion> project). The .NET SDK on Linux builds only'
+                .' SDK-style projects targeting .NET 5 or newer (<TargetFramework>net8.0</TargetFramework>).'
             );
         }
     }
@@ -212,7 +213,7 @@ final class DeployabilityCheck
 
     private function assertRootFile(string $name, string $label): void
     {
-        if (!is_file($this->path($name))) {
+        if (! is_file($this->path($name))) {
             throw new InvalidArgumentException("{$label} strategy selected but {$name} is missing.");
         }
     }
@@ -222,9 +223,9 @@ final class DeployabilityCheck
     {
         $appRoot = $this->decision['app_root'] ?? '';
         $base = is_string($appRoot) && $appRoot !== ''
-            ? $this->projectDir . '/' . trim($appRoot, '/')
+            ? $this->projectDir.'/'.trim($appRoot, '/')
             : $this->projectDir;
 
-        return $base . '/' . $relative;
+        return $base.'/'.$relative;
     }
 }

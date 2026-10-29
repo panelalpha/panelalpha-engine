@@ -10,15 +10,14 @@ namespace App\Lib\Deploy\Source;
 final class GitRefs
 {
     /**
-     * @param list<string> $branches
-     * @param list<string> $tags
+     * @param  list<string>  $branches
+     * @param  list<string>  $tags
      */
     private function __construct(
         public readonly ?string $defaultBranch,
         public readonly array $branches,
         public readonly array $tags,
-    ) {
-    }
+    ) {}
 
     public static function parse(string $output): self
     {
@@ -54,7 +53,7 @@ final class GitRefs
         $branches = $this->branches;
         sort($branches, SORT_STRING);
 
-        if ($this->defaultBranch === null || !in_array($this->defaultBranch, $branches, true)) {
+        if ($this->defaultBranch === null || ! in_array($this->defaultBranch, $branches, true)) {
             return $branches;
         }
 

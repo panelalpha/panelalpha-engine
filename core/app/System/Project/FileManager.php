@@ -5,9 +5,9 @@ namespace App\System\Project;
 use App\Exceptions\NotFoundException;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Source\ArchiveSafety;
-use App\Lib\Http\OutboundUrl;
 use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\Lib\Deploy\Source\UploadedArchive;
+use App\Lib\Http\OutboundUrl;
 use App\System\Project as UserProject;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
@@ -18,8 +18,14 @@ use Symfony\Component\Process\Process;
 
 class FileManager
 {
-    /** Beside the deploy's own staging area, and just as root-owned. */
-    private const UNZIP_STAGE_DIR = '/var/lib/panelalpha/unzip-stage';
+    /**
+     * Root-owned, beside the account homes: on their filesystem, so an unpacked entry is renamed into
+     * place, and outside every home, so no account's container can reach what is being unpacked.
+     */
+    private const UNZIP_STAGE_NAME = '.panelalpha-unzip-stage';
+
+    /** Past this age a stage directory is a killed request's, not a live one's. */
+    private const UNZIP_STALE_MINUTES = 1440;
 
     /** Largest download accepted from a URL, in bytes. */
     public const MAX_FETCH_BYTES = OutboundUrl::MAX_DOWNLOAD_BYTES;
@@ -30,26 +36,72 @@ class FileManager
     /** curl's exit code for --max-filesize, hit before the transfer or part way through it. */
     private const CURL_FILE_TOO_LARGE = 63;
 
-    /** Directories confined per check: an archive may name more than one argv holds. */
-    private const CONFINE_BATCH_SIZE = 500;
-
     /** `sh -c` body for assertInsideHome(): $1 the home, then F:<path> / E:<entry>. */
     public const CONFINE_SCRIPT = 'home=$(realpath -- "$1") || exit 1; shift; for p; do case "$p" in '
-        . 'F:*) r=$(realpath -m -- "${p#F:}") ;; '
-        . '*) q=${p#E:}; q=${q%/}; r=$(realpath -m -- "$(dirname -- "$q")")/$(basename -- "$q") ;; esac; '
-        . 'case "$r" in "$home"|"$home"/*) ;; '
-        . '*) echo "Refusing ${p#?:}: it resolves outside the project home" >&2; exit 3 ;; esac; done';
+        .'F:*) r=$(realpath -m -- "${p#F:}") ;; '
+        .'*) q=${p#E:}; q=${q%/}; r=$(realpath -m -- "$(dirname -- "$q")")/$(basename -- "$q") ;; esac; '
+        .'case "$r" in "$home"|"$home"/*) ;; '
+        .'*) echo "Refusing ${p#?:}: it resolves outside the project home" >&2; exit 3 ;; esac; done';
 
     /** `sh -c` body for entryType(): $1 the path, $2 the same without its trailing slash. */
     public const ENTRY_TYPE_SCRIPT = 'if [ ! -e "$1" ]; then if [ -L "$1" ]; then echo dangling; else echo missing; fi; '
-        . 'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
-        . 'else echo file; fi';
+        .'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
+        .'else echo file; fi';
+
+    /** `sh -c` body for resolvedFile(): $1 the path. */
+    public const RESOLVED_FILE_SCRIPT = '[ -f "$1" ] && realpath -e -- "$1"';
 
     /** One find row per entry: name, type, size, mtime, mode, uid, gid, link target, target type. */
     private const ENTRY_FIELDS = '%f\0%y\0%s\0%T@\0%m\0%U\0%G\0%l\0%Y\0';
 
     /** The confinement script's exit code for a path that resolves outside the home. */
     private const CONFINE_OUTSIDE_EXIT_CODE = 3;
+
+    /**
+     * `sh -c` body for moveUnpackedInto(): $1 the unpacked directory, $2 the home, $3 the destination.
+     * The destination is entered once and checked by its real path; every rename is relative to it.
+     */
+    private const MOVE_UNPACKED_SCRIPT = 'src=$1; home=$(realpath -- "$2") || exit 1; '
+        .'mkdir -p -- "$3" && cd -- "$3" || exit 1; case $(pwd -P) in "$home"|"$home"/*) ;; '
+        .'*) echo "Refusing $3: it resolves outside the project home" >&2; exit 3 ;; esac; [ -w . ] || exit 6; '
+        .'set --; for e in "$src"/* "$src"/.[!.]* "$src"/..?*; do '
+        .'if [ -e "$e" ] || [ -L "$e" ]; then set -- "$@" "${e##*/}"; fi; done; '
+        .'taken=0; for n; do if [ -e "./$n" ] || [ -L "./$n" ]; then printf \'%s\\0\' "$n"; taken=1; fi; done; '
+        .'[ "$taken" = 0 ] || exit 4; '
+        .'for n; do mv --update=none-fail -T -- "$src/$n" "./$n" || { printf \'%s\\0\' "$n"; exit 5; }; done';
+
+    /**
+     * `sh -c` body for writeAsUser(): $1 the staged source, $2 the target. The target's folder is created when
+     * missing; unless the target is a file the account can already write, a folder it cannot write to is refused.
+     */
+    private const WRITE_AS_USER_SCRIPT = 'dir=$(dirname -- "$2"); mkdir -p -- "$dir" 2>/dev/null; '
+        .'[ -w "$2" ] || { [ -d "$dir" ] && [ -w "$dir" ]; } || exit 6; cat -- "$1" > "$2" && chmod 644 -- "$2"';
+
+    /**
+     * `sh -c` body for mkdir(): $1 the directory, then mkdir's own arguments. A missing directory is refused,
+     * that folder printed, when the nearest folder above it that exists is not one the account can write to.
+     */
+    private const MKDIR_SCRIPT = 'p=${1%/}; shift; if [ ! -e "$p" ]; then d=$(dirname -- "$p"); '
+        .'while [ ! -e "$d" ]; do d=$(dirname -- "$d"); done; [ -d "$d" ] && [ -w "$d" ] || { printf %s "$d"; exit 6; }; fi; '
+        .'exec mkdir "$@"';
+
+    /** The write and mkdir scripts' exit code for a folder the account cannot write to. */
+    private const WRITE_UNWRITABLE_EXIT_CODE = 6;
+
+    /** The move script's exit code for entries the destination already holds. */
+    private const MOVE_TAKEN_EXIT_CODE = 4;
+
+    /**
+     * The move script's exit code for a rename that failed after the destination was checked and found writable:
+     * an entry appeared there in between, and may already be gone again, so it is not looked at a second time.
+     */
+    private const MOVE_RACED_EXIT_CODE = 5;
+
+    /** The move script's exit code for a destination the account cannot write to. */
+    private const MOVE_READ_ONLY_EXIT_CODE = 6;
+
+    /** Names a refusal shows of the entries the destination already holds. */
+    private const TAKEN_NAMES_SHOWN = 10;
 
     /** Entries one listing returns when the caller does not cap it. */
     public const LIST_DEFAULT_LIMIT = 5000;
@@ -59,11 +111,10 @@ class FileManager
 
     public function __construct(
         private readonly UserProject $project,
-        private readonly string $unzipStageRoot = self::UNZIP_STAGE_DIR,
+        private readonly ?string $unzipStageRoot = null,
         private readonly int $unzipMaxBytes = ArchiveSafety::MAX_UNCOMPRESSED_BYTES,
         private readonly int $fetchMaxBytes = self::MAX_FETCH_BYTES,
-    ) {
-    }
+    ) {}
 
     public function homeDirPath(): string
     {
@@ -86,7 +137,7 @@ class FileManager
      */
     public function resolvePath(string $path): string
     {
-        if (Str::startsWith($path, '/var/www')) {
+        if (self::isAtOrBelow($path, '/var/www')) {
             $legacyHome = $this->project->model()->getHomeDir() ?? $this->homeDirPath();
             $path = Str::replaceFirst('/var/www', $legacyHome, $path);
         }
@@ -99,11 +150,17 @@ class FileManager
             ]);
         }
         $home = $this->homeDirPath();
-        if ($absolute && Str::startsWith('/' . $clean, $home)) {
-            $clean = Str::after('/' . $clean, $home);
+        if ($absolute && self::isAtOrBelow('/'.$clean, $home)) {
+            $clean = Str::after('/'.$clean, $home);
         }
 
-        return $home . '/' . ltrim($clean, '/') . ($dir ? '/' : '');
+        return $home.'/'.ltrim($clean, '/').($dir ? '/' : '');
+    }
+
+    /** By whole segments: `/home/alice2` is not below `/home/alice`. */
+    private static function isAtOrBelow(string $path, string $dir): bool
+    {
+        return $path === $dir || Str::startsWith($path, rtrim($dir, '/').'/');
     }
 
     /**
@@ -129,14 +186,19 @@ class FileManager
     {
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$path]);
-        $this->assertSucceeded($this->runOnCore($parents ? ['mkdir', '-p', '--', $path] : ['mkdir', '--', $path]));
+        $options = $parents ? ['-p', '--'] : ['--'];
+        $process = $this->runOnCore(['sh', '-c', self::MKDIR_SCRIPT, 'sh', $path, ...$options, $path]);
+        if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
+            throw $this->unwritableFolder($process->getOutput());
+        }
+        $this->assertSucceeded($process);
     }
 
     public function moveUploadedFile(string $path, UploadedFile $file): void
     {
         $path = $this->resolvePath($path);
         $targetDir = rtrim($path, '/');
-        $target = $targetDir . '/' . $file->getClientOriginalName();
+        $target = $targetDir.'/'.$file->getClientOriginalName();
 
         $this->writeAsUser($file->path(), $target);
     }
@@ -149,10 +211,20 @@ class FileManager
     {
         $this->assertInsideHome([$target]);
         @chmod($source, 0644);
-        $this->assertSucceeded($this->runOnCore([
-            'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
-            'sh', $source, $target,
-        ]));
+        $process = $this->runOnCore(['sh', '-c', self::WRITE_AS_USER_SCRIPT, 'sh', $source, $target]);
+        if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
+            throw $this->unwritableFolder(dirname($target));
+        }
+        $this->assertSucceeded($process);
+    }
+
+    private function unwritableFolder(string $dir): ProblemException
+    {
+        return ProblemException::one(
+            'path',
+            'not_writable',
+            $this->homeRelativePath($dir)." is not a folder the project's account can write to: choose a folder inside the project.",
+        );
     }
 
     /** Every link followed, the last one too: test -e answers for the target. */
@@ -179,6 +251,18 @@ class FileManager
         }
 
         return $this->runOnCore(['test', '-f', $path])->getExitCode() === 0;
+    }
+
+    /**
+     * Where the regular file at the absolute $path lands, every link followed, as the account sees
+     * it; null when there is none. Not confined: the caller judges where it lands, as UploadedArchive does.
+     */
+    public function resolvedFile(string $path): ?string
+    {
+        $process = $this->runOnCore(['sh', '-c', self::RESOLVED_FILE_SCRIPT, 'sh', $path]);
+        $target = rtrim($process->getOutput(), "\n");
+
+        return $process->getExitCode() === 0 && $target !== '' ? $target : null;
     }
 
     /**
@@ -233,7 +317,7 @@ class FileManager
         if (in_array($type, ['missing', 'dangling'], true)) {
             throw new NotFoundException("No such file or directory: {$path}");
         }
-        if (!in_array($type, ['dir', 'dir-link'], true)) {
+        if (! in_array($type, ['dir', 'dir-link'], true)) {
             throw ProblemException::one('path', 'not_a_directory', 'The path is not a directory.');
         }
     }
@@ -245,7 +329,7 @@ class FileManager
     {
         $directory = rtrim($path, '/');
         $process = $this->runOnCore([
-            'find', $directory . '/', '-mindepth', '1', '-maxdepth', '1', '-printf', self::ENTRY_FIELDS,
+            'find', $directory.'/', '-mindepth', '1', '-maxdepth', '1', '-printf', self::ENTRY_FIELDS,
         ]);
         $output = $process->getOutput();
         if ($process->getExitCode() !== 0 && $output === '') {
@@ -254,8 +338,8 @@ class FileManager
 
         $entries = [];
         foreach ($this->entryFields($output) as $fields) {
-            if ($showHidden || !Str::startsWith($fields[0], '.')) {
-                $entries[] = $this->entryFromFields($directory . '/' . $fields[0], $fields);
+            if ($showHidden || ! Str::startsWith($fields[0], '.')) {
+                $entries[] = $this->entryFromFields($directory.'/'.$fields[0], $fields);
             }
         }
 
@@ -265,7 +349,7 @@ class FileManager
     /**
      * Directories first, then names in byte order; find returns the readdir order.
      *
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      * @return list<array<string, mixed>>
      */
     private function sortEntries(array $entries): array
@@ -291,7 +375,7 @@ class FileManager
     }
 
     /**
-     * @param list<string> $fields
+     * @param  list<string>  $fields
      * @return array<string, mixed>
      */
     private function entryFromFields(string $absolutePath, array $fields): array
@@ -342,7 +426,7 @@ class FileManager
     }
 
     /**
-     * @param list<array<string, mixed>> $entries
+     * @param  list<array<string, mixed>>  $entries
      */
     private function flagSubdirectories(string $path, array &$entries): void
     {
@@ -364,7 +448,7 @@ class FileManager
     private function subdirectoryParents(string $path): array
     {
         $process = $this->runOnCore([
-            'find', rtrim($path, '/') . '/', '-mindepth', '2', '-maxdepth', '2', '-type', 'd', '-printf', '%h\0',
+            'find', rtrim($path, '/').'/', '-mindepth', '2', '-maxdepth', '2', '-type', 'd', '-printf', '%h\0',
         ]);
         $parents = [];
         foreach (explode("\0", $process->getOutput()) as $parent) {
@@ -417,7 +501,7 @@ class FileManager
         if ($skipParents) {
             $workdir = dirname($path);
             $path = basename($path);
-            if (!$this->isDirectory($workdir)) {
+            if (! $this->isDirectory($workdir)) {
                 throw new \Exception('Invalid path');
             }
         }
@@ -434,7 +518,7 @@ class FileManager
      */
     private function zipCommand(string $zipPath, string $path, ?int $compressionLevel, ?string $fromDate): array
     {
-        $recurse = $compressionLevel === null ? '-r' : '-r' . $compressionLevel;
+        $recurse = $compressionLevel === null ? '-r' : '-r'.$compressionLevel;
         $command = ['zip', $recurse];
         if (is_string($fromDate) && $fromDate !== '') {
             $command[] = '--from-date';
@@ -447,9 +531,9 @@ class FileManager
     }
 
     /**
-     * Extract a .zip, .tar.gz or .gz into $path. The size and members are checked on a root-owned
-     * read-only copy, and that copy is what gets extracted: the account can rewrite its own file
-     * between a check and an unpack. gunzip writes its target through the shell, so that is confined too.
+     * Extract a .zip, .tar.gz or .gz into $path. The archive is checked on a root-owned read-only copy and
+     * unpacked into a fresh directory no account can reach, so no link the account planted is written through;
+     * each unpacked top-level entry is then renamed into $path, which must not hold it yet.
      */
     public function unzip(string $zipPath, string $path): void
     {
@@ -457,28 +541,37 @@ class FileManager
         $path = $this->resolvePath($path);
         $filename = basename($zipPath);
         $isZip = Str::endsWith($filename, '.zip');
-        $isTar = !$isZip && Str::endsWith($filename, '.tar.gz');
-        $gunzipped = rtrim($path, '/') . '/' . Str::beforeLast($filename, '.gz');
-        $this->assertInsideHome($isZip || $isTar ? [$zipPath, $path] : [$zipPath, $path, $gunzipped]);
+        $isTar = ! $isZip && Str::endsWith($filename, '.tar.gz');
+        $this->assertInsideHome([$zipPath, $path]);
 
-        $stageDir = $this->unzipStageRoot . '/' . bin2hex(random_bytes(8));
-        $staged = $stageDir . '/' . $filename;
+        $this->sweepStaleUnzipStages();
+        $stageDir = $this->unzipStageRoot().'/'.bin2hex(random_bytes(8));
+        $staged = $stageDir.'/'.$filename;
+        $unpacked = $stageDir.'/unpacked';
         try {
             $this->stageReadOnlyCopy($zipPath, $stageDir, $staged);
-            $members = $this->assertArchiveIsSafe($zipPath, $staged, $isZip, $isTar);
-            $this->assertMembersStayInside($path, $members);
-
-            if ($isZip) {
-                $process = $this->runOnCore(['unzip', '-UU', '-o', $staged, '-d', $path]);
-            } elseif ($isTar) {
-                $process = $this->runOnCore(['tar', '-zxvf', $staged, '-C', $path]);
-            } else {
-                $process = $this->gunzip($zipPath, $staged, $path, $gunzipped);
-            }
-            $this->assertSucceeded($process);
+            $this->assertArchiveIsSafe($zipPath, $staged, $isZip, $isTar);
+            $this->makeUnpackDirectory($unpacked);
+            $this->assertSucceeded($this->unpack($staged, $unpacked, $isZip, $isTar));
+            $this->moveUnpackedInto($unpacked, $path);
+            $this->removeUnpackedGzip($zipPath, $path, $isZip || $isTar);
         } finally {
             $this->project->system()->runProcess(['sudo', 'rm', '-rf', $stageDir]);
         }
+    }
+
+    private function unzipStageRoot(): string
+    {
+        return $this->unzipStageRoot ?? $this->project->system()->homesDirPath().'/'.self::UNZIP_STAGE_NAME;
+    }
+
+    /** Best effort: a killed request skips its `finally`, and nothing else removes what it unpacked. */
+    private function sweepStaleUnzipStages(): void
+    {
+        $this->project->system()->runProcess([
+            'sudo', 'find', $this->unzipStageRoot(), '-mindepth', '1', '-maxdepth', '1',
+            '-mmin', '+'.self::UNZIP_STALE_MINUTES, '-exec', 'rm', '-rf', '--', '{}', '+',
+        ]);
     }
 
     /**
@@ -502,58 +595,93 @@ class FileManager
     /**
      * The size limit and what a deploy refuses in an archive, refused here too.
      *
-     * @return list<string> the archive's members; none for a plain .gz
      * @throws ValidationException
      */
-    private function assertArchiveIsSafe(string $zipPath, string $staged, bool $isZip, bool $isTar): array
+    private function assertArchiveIsSafe(string $zipPath, string $staged, bool $isZip, bool $isTar): void
     {
         $system = $this->project->system();
         try {
             ArchiveUnpackedSize::assertWithin($staged, $isZip, $this->unzipMaxBytes);
-
-            return $isZip || $isTar
-                ? UploadedArchive::confined($zipPath, $isZip)
-                    ->assertSafeContents($staged, fn (array $argv): string => $system->exec($argv, [], 120))
-                : [];
-        } catch (\InvalidArgumentException | \RuntimeException $e) {
+            if ($isZip || $isTar) {
+                UploadedArchive::confined($zipPath, $isZip)
+                    ->assertSafeContents($staged, fn (array $argv): string => $system->exec($argv, [], 120));
+            }
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
             throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
         }
     }
 
-    /**
-     * gunzip's own result: `x.gz` becomes `x` in the target directory, and the
-     * `.gz` is removed when it was already in that directory.
-     */
-    private function gunzip(string $zipPath, string $staged, string $path, string $gunzipped): Process
+    /** The account's own directory inside the root-owned stage: the archive is unpacked as the account. */
+    private function makeUnpackDirectory(string $unpacked): void
     {
-        $path = rtrim($path, '/');
-        $process = $this->runOnCore([
-            'sh', '-c', 'gzip -dc -- "$1" > "$2"', 'sh', $staged, $gunzipped,
-        ]);
-        if ($process->isSuccessful() && $zipPath === "{$path}/" . basename($zipPath)) {
-            $this->runOnCore(['rm', '-f', $zipPath]);
+        $system = $this->project->system();
+        $system->exec(['sudo', 'mkdir', $unpacked]);
+        $system->exec(['sudo', 'chown', implode(':', $this->accountIds()), $unpacked]);
+    }
+
+    /** A plain .gz unpacks to its own name without the `.gz`. */
+    private function unpack(string $staged, string $unpacked, bool $isZip, bool $isTar): Process
+    {
+        if ($isZip) {
+            return $this->runOnCore(UploadedArchive::unzipCommand('-o', $staged, '-d', $unpacked));
+        }
+        if ($isTar) {
+            return $this->runOnCore(['tar', '-zxvf', $staged, '-C', $unpacked]);
         }
 
-        return $process;
+        return $this->runOnCore([
+            'sh', '-c', 'gzip -dc -- "$1" > "$2"', 'sh', $staged, $unpacked.'/'.Str::beforeLast(basename($staged), '.gz'),
+        ]);
     }
 
     /**
-     * unzip and tar write through a directory that is already there, so a link the account
-     * planted in the destination (`out/x -> /tmp`) would take member `x/y` outside the home.
-     *
-     * @param list<string> $members
+     * Never over something already there: a rename would replace it, and a merge would follow
+     * any link the account planted in the destination.
      */
-    private function assertMembersStayInside(string $path, array $members): void
+    private function moveUnpackedInto(string $unpacked, string $path): void
     {
-        $parents = [];
-        foreach ($members as $member) {
-            $parent = dirname(rtrim($member, '/'));
-            if ($parent !== '.' && $parent !== '/') {
-                $parents[rtrim($path, '/') . '/' . $parent] = true;
-            }
+        $process = $this->runOnCore(['sh', '-c', self::MOVE_UNPACKED_SCRIPT, 'sh', $unpacked, $this->homeDirPath(), $path]);
+        if ($process->getExitCode() === self::MOVE_TAKEN_EXIT_CODE) {
+            throw $this->destinationTaken($path, explode("\0", rtrim($process->getOutput(), "\0")));
         }
-        foreach (array_chunk(array_keys($parents), self::CONFINE_BATCH_SIZE) as $batch) {
-            $this->assertInsideHome($batch);
+        if ($process->getExitCode() === self::MOVE_RACED_EXIT_CODE) {
+            throw $this->destinationTakenDuringMove($path, rtrim($process->getOutput(), "\0"));
+        }
+        if ($process->getExitCode() === self::MOVE_READ_ONLY_EXIT_CODE) {
+            throw ValidationException::withMessages(['path' => $this->homeRelativePath($path).' is not writable.']);
+        }
+        $this->assertSucceeded($process);
+    }
+
+    private function destinationTakenDuringMove(string $path, string $name): ProblemException
+    {
+        return ProblemException::conflict(
+            'path',
+            'destination_exists',
+            "{$name} could not be moved into ".$this->homeRelativePath($path).': an entry of that name appeared there while the archive '
+                .'was being extracted. Entries extracted before it stay in place: extract into a folder that does not hold them.',
+        );
+    }
+
+    /** @param list<string> $names */
+    private function destinationTaken(string $path, array $names): ProblemException
+    {
+        $shown = implode(', ', array_slice($names, 0, self::TAKEN_NAMES_SHOWN));
+        $more = count($names) > self::TAKEN_NAMES_SHOWN ? ', ...' : '';
+
+        return ProblemException::conflict(
+            'path',
+            'destination_exists',
+            $this->homeRelativePath($path).' already holds '.count($names).' of the entries the archive unpacks to '
+                ."({$shown}{$more}). Nothing was extracted: extract into a folder that does not hold them.",
+        );
+    }
+
+    /** gunzip's own result: the `.gz` is removed when it was already in the target directory. */
+    private function removeUnpackedGzip(string $zipPath, string $path, bool $isArchive): void
+    {
+        if (! $isArchive && $zipPath === rtrim($path, '/').'/'.basename($zipPath)) {
+            $this->runOnCore(['rm', '-f', $zipPath]);
         }
     }
 
@@ -582,7 +710,7 @@ class FileManager
         if ($type === 'missing') {
             throw new NotFoundException("No such file or directory: {$path}");
         }
-        if ($type === 'dir' && !$recursive) {
+        if ($type === 'dir' && ! $recursive) {
             throw ValidationException::withMessages([
                 'recursive' => 'The path is a directory. Set recursive to true to delete it and everything in it.',
             ]);
@@ -593,7 +721,7 @@ class FileManager
     public function diskUsage(string $directory = '/'): int
     {
         $path = $this->resolvePath($directory);
-        $process = $this->runOnCore(['du', '-shm', '--exclude=' . $this->dockerDataRoot(), $path]);
+        $process = $this->runOnCore(['du', '-shm', '--exclude='.$this->dockerDataRoot(), $path]);
         $this->assertSucceeded($process);
         $mb = Str::before($process->getOutput(), "\t");
 
@@ -607,7 +735,7 @@ class FileManager
      */
     public function containerLogBytes(): int
     {
-        $dir = $this->dockerDataRoot() . '/containers';
+        $dir = $this->dockerDataRoot().'/containers';
         $process = $this->project->system()->runProcess([
             'sudo', 'find', $dir, '-mindepth', '2', '-maxdepth', '2', '-type', 'f', '-name', '*-json.log*', '-printf', '%s\n',
         ]);
@@ -627,7 +755,7 @@ class FileManager
      */
     private function dockerDataRoot(): string
     {
-        return rtrim($this->homeDirPath(), '/') . '/docker';
+        return rtrim($this->homeDirPath(), '/').'/docker';
     }
 
     public function moveDirectoryContents(string $source, string $dest, bool $override = true): void
@@ -635,7 +763,7 @@ class FileManager
         $sourceDir = rtrim($this->resolvePath($source), '/');
         $destDir = rtrim($this->resolvePath($dest), '/');
         $this->assertInsideHome([$sourceDir, $destDir]);
-        if (!$this->isDirectory($destDir)) {
+        if (! $this->isDirectory($destDir)) {
             throw new \Exception('Destination directory does not exist');
         }
 
@@ -671,15 +799,15 @@ class FileManager
         }
 
         $dir = rtrim($this->resolvePath($destinationDir), '/');
-        $this->assertInsideHome([$dir . '/' . $filename]);
-        if (!$this->isDirectory($dir)) {
+        $this->assertInsideHome([$dir.'/'.$filename]);
+        if (! $this->isDirectory($dir)) {
             throw new \Exception('Destination directory does not exist');
         }
 
-        $partial = $dir . '/.pa-fetch-' . bin2hex(random_bytes(6)) . '.part';
+        $partial = $dir.'/.pa-fetch-'.bin2hex(random_bytes(6)).'.part';
         try {
             $this->download($url, $partial);
-            $this->assertSucceeded($this->runOnCore(['mv', '-fT', '--', $partial, $dir . '/' . $filename]));
+            $this->assertSucceeded($this->runOnCore(['mv', '-fT', '--', $partial, $dir.'/'.$filename]));
         } finally {
             $this->runOnCore(['rm', '-f', '--', $partial]);
         }
@@ -689,7 +817,7 @@ class FileManager
     private function assertFetchableScheme(string $url): void
     {
         $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        if (!in_array($scheme, ['http', 'https'], true)) {
+        if (! in_array($scheme, ['http', 'https'], true)) {
             throw new \Exception('Only http and https URLs can be fetched');
         }
     }
@@ -714,12 +842,12 @@ class FileManager
                 continue;
             }
 
-            $this->assertDownloaded($process, $current);
+            $this->assertDownloaded($process, $current, $status);
 
             return;
         }
 
-        throw new \Exception("Fetching {$url} followed more than " . OutboundUrl::MAX_REDIRECTS . ' redirects');
+        throw new \Exception("Fetching {$url} followed more than ".OutboundUrl::MAX_REDIRECTS.' redirects');
     }
 
     /**
@@ -754,12 +882,15 @@ class FileManager
         return OutboundUrl::absoluteUrl($url, $location);
     }
 
-    private function assertDownloaded(Process $process, string $url): void
+    private function assertDownloaded(Process $process, string $url, int $status): void
     {
-        if ($process->getExitCode() === self::CURL_FILE_TOO_LARGE) {
-            throw new \Exception('The file at ' . $url . ' is larger than the ' . intdiv($this->fetchMaxBytes, 1048576) . ' MB limit');
+        $code = (int) $process->getExitCode();
+        if ($code === self::CURL_FILE_TOO_LARGE) {
+            throw new \Exception('The file at '.$url.' is larger than the '.intdiv($this->fetchMaxBytes, 1048576).' MB limit');
         }
-        $this->assertSucceeded($process);
+        if ($code !== 0) {
+            throw DownloadFailure::problem($code, $url, $status);
+        }
     }
 
     /** A seam for tests that fetch from a local fixture server. */
@@ -778,7 +909,7 @@ class FileManager
      * $curl for $url, connected to the address that was checked so a second
      * lookup cannot point it elsewhere.
      *
-     * @param list<string> $curl
+     * @param  list<string>  $curl
      * @return list<string>
      */
     private function pinnedCurl(array $curl, string $url): array
@@ -807,7 +938,7 @@ class FileManager
 
     public function chmod(string $path, string $mode): void
     {
-        if (!preg_match('/\A[0-7]{3,4}\z/', $mode)) {
+        if (! preg_match('/\A[0-7]{3,4}\z/', $mode)) {
             throw new \Exception('Invalid mode');
         }
 
@@ -823,12 +954,12 @@ class FileManager
      * machine, so `sudo -u` cannot see it from this container. `setpriv`
      * drops to the ids directly, the same way archive extraction does.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      */
     private function runOnCore(array $command, ?string $workdir = null): Process
     {
         if ($workdir !== null) {
-            $command = ['env', '--chdir=' . $workdir, ...$command];
+            $command = ['env', '--chdir='.$workdir, ...$command];
         }
 
         return $this->project->system()->runProcess($this->asAccount($command));
@@ -837,7 +968,7 @@ class FileManager
     /**
      * $command run as the account, by uid and gid.
      *
-     * @param list<string> $command
+     * @param  list<string>  $command
      * @return list<string>
      */
     public function asAccount(array $command): array
@@ -870,9 +1001,9 @@ class FileManager
      * account planted (`~/x -> /tmp/x`) would take a write anywhere that uid can
      * write there. Checked as the account, so the check sees what it sees.
      *
-     * @param list<string> $paths every symlink followed, the last one too
-     * @param list<string> $entries the last component is the entry itself
-     *                              (what rm removes, what mv and cp take)
+     * @param  list<string>  $paths  every symlink followed, the last one too
+     * @param  list<string>  $entries  the last component is the entry itself
+     *                                 (what rm removes, what mv and cp take)
      */
     private function assertInsideHome(array $paths, array $entries = []): void
     {
@@ -890,14 +1021,14 @@ class FileManager
     }
 
     /**
-     * @param list<string> $paths every symlink followed, the last one too
-     * @param list<string> $entries the last component is the entry itself
+     * @param  list<string>  $paths  every symlink followed, the last one too
+     * @param  list<string>  $entries  the last component is the entry itself
      */
     private function confine(array $paths, array $entries = []): Process
     {
         $args = [
-            ...array_map(fn (string $p): string => 'F:' . $p, $paths),
-            ...array_map(fn (string $p): string => 'E:' . $p, $entries),
+            ...array_map(fn (string $p): string => 'F:'.$p, $paths),
+            ...array_map(fn (string $p): string => 'E:'.$p, $entries),
         ];
 
         return $this->runOnCore([
@@ -928,7 +1059,7 @@ class FileManager
     }
 
     /**
-     * @param list<int> $allowedExitCodes
+     * @param  list<int>  $allowedExitCodes
      */
     private function assertSucceeded(Process $process, array $allowedExitCodes = [0]): void
     {
@@ -937,7 +1068,7 @@ class FileManager
             return;
         }
 
-        $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$code})";
+        $message = ($process->getErrorOutput() ?: $process->getOutput())." (exit code {$code})";
         throw new \Exception($message);
     }
 
@@ -976,6 +1107,7 @@ class FileManager
                     return false;
                 }
                 array_pop($validParts);
+
                 continue;
             }
             $validParts[] = $part;

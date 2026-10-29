@@ -20,6 +20,8 @@ Which HTTP status codes did shop.example.com answer with yesterday?
 
 Hits and visits follow the dates you name. Unique visitors, how long a visit lasts, and every breakdown are counted by calendar month. A range that sits inside a month still reports that whole month for those. Breakdowns are pages, browsers, operating systems, referrers, countries, continents, or regions.
 
+The visitor overview also has `session_length`: the average length of a visit for each day, in seconds, within the dates you name. `average` is the average over the whole range, and `estimated` says whether the figures are estimated.
+
 The status-code breakdown is the exception: it follows the dates you name and gives requests and bytes per HTTP status, so a spike of 502s shows on the day it happened. 200 and 304 share one row, because the logs are counted that way.
 
 A date range can span at most ten years.

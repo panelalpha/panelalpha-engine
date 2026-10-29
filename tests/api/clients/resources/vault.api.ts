@@ -13,7 +13,7 @@ import { EngineApiBase } from '../engine-api-base';
 
 /**
  * Secret vault: a one-time browser handoff of a secret the API caller must not
- * relay. `create` mints a `vault:<id>` plus the URL of the form the customer
+ * relay. `create` mints a `vault:<key>` plus the URL of the form the customer
  * pastes into; every other call reports status only, never the secret.
  */
 export class VaultApi extends EngineApiBase {
@@ -55,7 +55,7 @@ export class VaultApi extends EngineApiBase {
     return query.size ? `vault/secrets?${query.toString()}` : 'vault/secrets';
   }
 
-  /** `ref` is accepted both as `vault:<id>` and as the bare `<id>`. */
+  /** `ref` is the entry's `vault:<key>`; its id is not accepted. */
   async getVaultSecret(ref: string): Promise<ApiResponse<VaultSecretEntry>> {
     const response = await this.api.get(`vault/secrets/${encodeURIComponent(ref)}`);
     await this.assertStatus(response, 200);

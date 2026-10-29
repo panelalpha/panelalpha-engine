@@ -32,7 +32,7 @@ final class LogLine
     public static function truncate(string $message): string
     {
         return strlen($message) > self::MAX_LENGTH
-            ? substr($message, 0, self::MAX_LENGTH) . '…'
+            ? substr($message, 0, self::MAX_LENGTH).'…'
             : $message;
     }
 

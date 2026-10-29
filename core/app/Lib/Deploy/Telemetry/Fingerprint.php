@@ -81,6 +81,6 @@ class Fingerprint
      */
     public static function account(string $installId, string $username): string
     {
-        return substr(hash('sha256', $installId . '|' . $username), 0, 16);
+        return substr(hash('sha256', $installId.'|'.$username), 0, 16);
     }
 }

@@ -26,7 +26,7 @@ namespace App\Lib\Deploy\Template;
 final class Template
 {
     private const BLOCK_LINE = '/^([^\S\r\n]*)\{\{([#^])\s*([A-Za-z0-9_]+)\s*\}\}[^\S\r\n]*\R(.*?)'
-        . '^[^\S\r\n]*\{\{\/\s*\3\s*\}\}[^\S\r\n]*(?:\R|\z)/ms';
+        .'^[^\S\r\n]*\{\{\/\s*\3\s*\}\}[^\S\r\n]*(?:\R|\z)/ms';
 
     private const BLOCK_INLINE = '/\{\{([#^])\s*([A-Za-z0-9_]+)\s*\}\}([^\r\n]*?)\{\{\/\s*\2\s*\}\}/';
 
@@ -36,11 +36,9 @@ final class Template
      * happens to look like a tag is a value, not a tag.
      */
     private const VARIABLE = '/^([^\S\r\n]*)\{\{\s*([A-Za-z0-9_]+)\s*\}\}[^\S\r\n]*(\R|\z)'
-        . '|\{\{\s*([A-Za-z0-9_]+)\s*\}\}/m';
+        .'|\{\{\s*([A-Za-z0-9_]+)\s*\}\}/m';
 
-    private function __construct(private readonly string $source)
-    {
-    }
+    private function __construct(private readonly string $source) {}
 
     public static function named(string $name): self
     {
@@ -53,7 +51,7 @@ final class Template
     }
 
     /**
-     * @param array<string, string|int|float|bool|list<string>|null> $values
+     * @param  array<string, string|int|float|bool|list<string>|null>  $values
      */
     public function render(array $values): string
     {
@@ -61,7 +59,7 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function expandBlocks(string $text, array $values): string
     {
@@ -75,7 +73,7 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function expandLineBlocks(string $text, array $values): string
     {
@@ -87,7 +85,7 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function expandInlineBlocks(string $text, array $values): string
     {
@@ -99,7 +97,7 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function fillVariables(string $text, array $values): string
     {
@@ -118,11 +116,11 @@ final class Template
      */
     private function lineValue(string $value, string $indent, string $newline): string
     {
-        return $value === '' ? '' : $this->indent($value, $indent) . $newline;
+        return $value === '' ? '' : $this->indent($value, $indent).$newline;
     }
 
     /**
-     * @param callable(array<int, string>): string $callback
+     * @param  callable(array<int, string>): string  $callback
      */
     private function replace(string $pattern, string $text, callable $callback): string
     {
@@ -130,13 +128,13 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function keeps(string $operator, string $name, array $values): bool
     {
         $present = $this->isPresent($this->value($name, $values));
 
-        return $operator === '#' ? $present : !$present;
+        return $operator === '#' ? $present : ! $present;
     }
 
     private function isPresent(mixed $value): bool
@@ -145,7 +143,7 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function stringify(string $name, array $values): string
     {
@@ -161,11 +159,11 @@ final class Template
     }
 
     /**
-     * @param array<string, mixed> $values
+     * @param  array<string, mixed>  $values
      */
     private function value(string $name, array $values): mixed
     {
-        if (!array_key_exists($name, $values)) {
+        if (! array_key_exists($name, $values)) {
             throw TemplateException::unknownPlaceholder($name);
         }
 
@@ -179,7 +177,7 @@ final class Template
         }
 
         return implode("\n", array_map(
-            static fn (string $line): string => $line === '' ? $line : $indent . $line,
+            static fn (string $line): string => $line === '' ? $line : $indent.$line,
             explode("\n", $value)
         ));
     }

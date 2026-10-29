@@ -8,21 +8,21 @@ use App\System\Project\Git\Exception as GitException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Psr\Log\LogLevel;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Throwable;
-use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 class Handler extends ExceptionHandler
 {
     /**
      * A list of exception types with their corresponding custom log levels.
      *
-     * @var array<class-string<\Throwable>, \Psr\Log\LogLevel::*>
+     * @var array<class-string<Throwable>, LogLevel::*>
      */
     protected $levels = [];
 
@@ -30,7 +30,7 @@ class Handler extends ExceptionHandler
      * Exception types that are not reported: each is a 409 the client is told
      * how to act on (a busy project, a deploy already queued), not a fault.
      *
-     * @var array<int, class-string<\Throwable>>
+     * @var array<int, class-string<Throwable>>
      */
     protected $dontReport = [
         ProjectBusyException::class,
@@ -47,6 +47,7 @@ class Handler extends ExceptionHandler
         'current_password',
         'password',
         'password_confirmation',
+        'secret',
     ];
 
     /**
@@ -70,10 +71,10 @@ class Handler extends ExceptionHandler
         $what = match (true) {
             $model === null => '',
             $model === User::class => 'Project ',
-            default => ucfirst(Str::snake(class_basename($model), ' ')) . ' ',
+            default => ucfirst(Str::snake(class_basename($model), ' ')).' ',
         };
 
-        return new NotFoundHttpException($what === '' ? 'Not found' : $what . 'not found', $e);
+        return new NotFoundHttpException($what === '' ? 'Not found' : $what.'not found', $e);
     }
 
     /**
@@ -95,7 +96,7 @@ class Handler extends ExceptionHandler
     }
 
     /**
-     * @param array<string, mixed> $extra
+     * @param  array<string, mixed>  $extra
      */
     private static function conflict(string $message, array $extra = []): JsonResponse
     {
@@ -108,7 +109,7 @@ class Handler extends ExceptionHandler
      */
     private static function dockerError(DockerErrorException $e): JsonResponse
     {
-        $message = Str::betweenFirst($e->getMessage(), "Error response from daemon: ", "\n")
+        $message = Str::betweenFirst($e->getMessage(), 'Error response from daemon: ', "\n")
             ?: $e->getMessage();
 
         return new JsonResponse(['message' => $message], $e->isContainerUnavailable() ? 503 : 422);
@@ -118,11 +119,11 @@ class Handler extends ExceptionHandler
      * Failures a command's user can act on print as plain lines on stderr;
      * anything else keeps artisan's own rendering.
      *
-     * @param \Symfony\Component\Console\Output\OutputInterface $output
+     * @param  OutputInterface  $output
      */
     public function renderForConsole($output, Throwable $e)
     {
-        if (!self::renderPlainForConsole($output, $e)) {
+        if (! self::renderPlainForConsole($output, $e)) {
             parent::renderForConsole($output, $e);
         }
     }
@@ -148,7 +149,7 @@ class Handler extends ExceptionHandler
 
         $stderr = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
         foreach ($lines as $line) {
-            $stderr->writeln('<error>' . OutputFormatter::escape(trim((string) $line)) . '</error>');
+            $stderr->writeln('<error>'.OutputFormatter::escape(trim((string) $line)).'</error>');
         }
 
         return true;

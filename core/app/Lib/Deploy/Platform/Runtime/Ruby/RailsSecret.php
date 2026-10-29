@@ -15,16 +15,16 @@ final class RailsSecret
     private const ENVIRONMENT_KEYS = ['RAILS_MASTER_KEY', 'SECRET_KEY_BASE'];
 
     /**
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $env
      */
     public static function mustBeGenerated(string $projectDir, array $env = []): bool
     {
-        return !self::providedByEnvironment($env)
-            && !is_file(rtrim($projectDir, '/') . '/' . self::MASTER_KEY);
+        return ! self::providedByEnvironment($env)
+            && ! is_file(rtrim($projectDir, '/').'/'.self::MASTER_KEY);
     }
 
     /**
-     * @param array<string, mixed> $env
+     * @param  array<string, mixed>  $env
      */
     private static function providedByEnvironment(array $env): bool
     {

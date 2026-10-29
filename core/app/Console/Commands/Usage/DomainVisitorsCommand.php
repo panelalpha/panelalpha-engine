@@ -21,7 +21,7 @@ class DomainVisitorsCommand extends UsageCommand
         $range = $this->validated([
             'start' => $this->option('start'),
             'end' => $this->option('end'),
-        ], (new VisitorsRangeRequest())->rules());
+        ], (new VisitorsRangeRequest)->rules());
         $domain = $this->domain($usage, $this->project());
 
         return $this->printJson($statistics->domainVisitors($domain->domain, $range['start'], $range['end']));

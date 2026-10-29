@@ -2,13 +2,12 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
+use App\Models\BackupContainer;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Validator;
-
-use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
-use App\Models\BackupContainer;
 
 class BackupContainerUpdateRequest extends FormRequest
 {
@@ -64,7 +63,7 @@ class BackupContainerUpdateRequest extends FormRequest
                 }
             }
 
-            if (!is_string($driver) || $driver === 'local' || $this->has('credentials')) {
+            if (! is_string($driver) || $driver === 'local' || $this->has('credentials')) {
                 return;
             }
 

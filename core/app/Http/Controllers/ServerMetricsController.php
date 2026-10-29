@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\MetricsRangeRequest;
+use App\Lib\Host\DataDisk;
 use App\Lib\Host\HostMemoryProbe;
 use App\Lib\Host\ProjectMemory;
+use App\Lib\Host\ServerMetricsHistory;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -14,12 +18,10 @@ use OpenApi\Attributes as OA;
 class ServerMetricsController extends Controller
 {
     /** @var list<string> */
-    private const BUCKET_METRICS = [
-        'cpu_percent', 'cpu_load_avg_1', 'cpu_load_avg_5', 'cpu_load_avg_15',
-        'ram_percent', 'swap_percent', 'disk_read_bps', 'disk_write_bps',
-        'disk_read_iops', 'disk_write_iops', 'net_in_bps', 'net_out_bps',
-        'net_in_pps', 'net_out_pps',
-    ];
+    private const BUCKET_METRICS = ServerMetricsHistory::SAMPLED_METRICS;
+
+    /** A collector sample younger than this is "now". It writes every 5s by default. */
+    private const FRESH_SAMPLE_SECONDS = 30;
 
     #[OA\Get(
         path: '/metrics/current',
@@ -34,51 +36,94 @@ class ServerMetricsController extends Controller
     )]
     public function current(): JsonResponse
     {
-        $ramData = file_get_contents("/proc/meminfo");
+        $ramData = file_get_contents('/proc/meminfo');
         preg_match("/MemTotal:\s+(\d+) kB/", $ramData, $total);
         preg_match("/MemAvailable:\s+(\d+) kB/", $ramData, $available);
 
-        $ramTotal = (int)$total[1];
-        $ramFree = (int)$available[1];
+        $ramTotal = (int) $total[1];
+        $ramFree = (int) $available[1];
         $ramUsed = $ramTotal - $ramFree;
         $ramUsagePercent = ($ramUsed / $ramTotal) * 100;
 
-        $diskTotal = disk_total_space("/");
-        $diskFree = disk_free_space("/");
-        $diskUsed = $diskTotal - $diskFree;
-        $diskUsagePercent = ($diskUsed / $diskTotal) * 100;
+        $disk = DataDisk::usage();
 
         $memory = HostMemoryProbe::current();
 
         return new JsonResponse(['data' => [
-            'cpu_usage_percent' => $this->getCpuUsage(),
+            'cpu_usage_percent' => $this->cpuUsagePercent(),
             'ram_total' => $ramTotal,
             'ram_free' => $ramFree,
             'ram_used' => $ramUsed,
             'ram_usage_percent' => $ramUsagePercent,
-            'disk_total' => $diskTotal,
-            'disk_free' => $diskFree,
-            'disk_used' => $diskUsed,
-            'disk_usage_percent' => $diskUsagePercent,
+            'disk_path' => DataDisk::PATH,
+            'disk_total' => $disk['total'] ?? null,
+            'disk_free' => $disk['free'] ?? null,
+            'disk_used' => $disk['used'] ?? null,
+            'disk_usage_percent' => $disk['percent'] ?? null,
             // How much one project may have.
             'memory_budget' => $memory->toArray()
                 + ['default_project_mb' => ProjectMemory::defaultMb($memory)],
         ]]);
     }
 
-    private function getCpuUsage(): int|float
+    /**
+     * The collector's latest sample when it is recent, otherwise two reads of
+     * /proc/stat a moment apart. One read alone is the average since boot.
+     */
+    private function cpuUsagePercent(): ?float
     {
-        $cpuData = file_get_contents('/proc/stat');
-        $lines = explode("\n", $cpuData);
-        $cpuLine = preg_split('/\s+/', $lines[0]);
-        $user = (int)$cpuLine[1];
-        $nice = (int)$cpuLine[2];
-        $system = (int)$cpuLine[3];
-        $idle = (int)$cpuLine[4];
-        $total = $user + $nice + $system + $idle;
-        $idleTime = $idle;
-        $cpuUsage = (($total - $idleTime) / $total) * 100;
-        return $cpuUsage;
+        $since = Carbon::now('UTC')->subSeconds(self::FRESH_SAMPLE_SECONDS)->format('Y-m-d H:i:s');
+        // No collector table yet is no sample yet: measure here instead.
+        try {
+            $sampled = DB::table('server_metrics')
+                ->where('timestamp', '>=', $since)
+                ->orderByDesc('timestamp')
+                ->value('cpu_percent');
+        } catch (QueryException) {
+            $sampled = null;
+        }
+        if (is_numeric($sampled)) {
+            return round((float) $sampled, 2);
+        }
+
+        $before = (string) @file_get_contents('/proc/stat');
+        usleep(250_000);
+        $after = (string) @file_get_contents('/proc/stat');
+
+        return self::cpuPercentBetween($before, $after);
+    }
+
+    /** Busy share of the ticks that passed between two /proc/stat reads. */
+    public static function cpuPercentBetween(string $before, string $after): ?float
+    {
+        $a = self::cpuTicks($before);
+        $b = self::cpuTicks($after);
+        if ($a === null || $b === null) {
+            return null;
+        }
+
+        $total = $b['total'] - $a['total'];
+        if ($total <= 0) {
+            return null;
+        }
+        $idle = $b['idle'] - $a['idle'];
+
+        return round(max(0, min(100, ($total - $idle) / $total * 100)), 2);
+    }
+
+    /**
+     * @return ?array{total: int, idle: int}
+     */
+    private static function cpuTicks(string $stat): ?array
+    {
+        // user nice system idle iowait irq softirq steal; guest is already in user
+        if (preg_match('/^cpu\s+((?:\d+\s*){4,})/m', $stat, $m) !== 1) {
+            return null;
+        }
+        $f = array_map('intval', preg_split('/\s+/', trim($m[1])) ?: []);
+        $f = array_pad(array_slice($f, 0, 8), 8, 0);
+
+        return ['total' => array_sum($f), 'idle' => $f[3] + $f[4]];
     }
 
     #[OA\Get(
@@ -125,7 +170,7 @@ class ServerMetricsController extends Controller
         tags: ['Server Metrics'],
         responses: [
             new OA\Response(response: 200, description: 'Last 5 minutes metrics', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetrics'))],
+                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetricsPeriod'))],
             )),
         ],
     )]
@@ -134,6 +179,7 @@ class ServerMetricsController extends Controller
         $bucketSeconds = 5;
         $end = $this->floorToNearestSeconds(Carbon::now('UTC')->subSeconds($bucketSeconds), $bucketSeconds);
         $start = $end->copy()->subSeconds(295);
+
         return $this->buildMetricsResponse($start, $end, $bucketSeconds);
     }
 
@@ -144,7 +190,7 @@ class ServerMetricsController extends Controller
         tags: ['Server Metrics'],
         responses: [
             new OA\Response(response: 200, description: 'Last hour metrics', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetrics'))],
+                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetricsPeriod'))],
             )),
         ],
     )]
@@ -153,6 +199,7 @@ class ServerMetricsController extends Controller
         $bucketSeconds = 60;
         $end = $this->floorToNearestSeconds(Carbon::now('UTC')->subSeconds($bucketSeconds), $bucketSeconds);
         $start = $end->copy()->subMinutes(59);
+
         return $this->buildMetricsResponse($start, $end, $bucketSeconds);
     }
 
@@ -163,7 +210,7 @@ class ServerMetricsController extends Controller
         tags: ['Server Metrics'],
         responses: [
             new OA\Response(response: 200, description: 'Last 12 hours metrics', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetrics'))],
+                properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetricsPeriod'))],
             )),
         ],
     )]
@@ -172,13 +219,47 @@ class ServerMetricsController extends Controller
         $bucketSeconds = 12 * 60;
         $end = $this->floorToNearestSeconds(Carbon::now('UTC')->subSeconds($bucketSeconds), $bucketSeconds);
         $start = $end->copy()->subSeconds(59 * $bucketSeconds);
+
         return $this->buildMetricsResponse($start, $end, $bucketSeconds);
+    }
+
+    #[OA\Get(
+        path: '/metrics/history',
+        summary: 'Get averaged server metrics over 1 hour, 24 hours, 7 days or 30 days',
+        description: 'Averaged in the database, so 30 days costs about what 1 hour does. Buckets: 1h = 1 minute, '
+            .'24h = 10 minutes, 7d = 1 hour, 30d = 6 hours. The last bucket is the last complete one. A bucket '
+            .'with no samples carries only its period. disk_percent is the disk holding /home, and is null for '
+            .'samples taken before it was recorded.',
+        security: [['bearerAuth' => []]],
+        tags: ['Server Metrics'],
+        parameters: [
+            new OA\Parameter(name: 'range', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['1h', '24h', '7d', '30d'], default: '24h')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Metrics history', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ServerMetricsPeriod')),
+                    new OA\Property(property: 'meta', type: 'object', properties: [
+                        new OA\Property(property: 'range', type: 'string', example: '24h'),
+                        new OA\Property(property: 'bucket_seconds', type: 'integer', example: 600),
+                        new OA\Property(property: 'from', type: 'string', example: '2026-09-27 12:10:00', description: 'UTC, first bucket start'),
+                        new OA\Property(property: 'to', type: 'string', example: '2026-09-28 12:00:00', description: 'UTC, last bucket start'),
+                    ]),
+                ],
+            )),
+            new OA\Response(response: 422, description: 'Unknown range', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function history(MetricsRangeRequest $request): JsonResponse
+    {
+        return new JsonResponse(ServerMetricsHistory::for($request->range()));
     }
 
     private function floorToNearestSeconds(Carbon $dt, int $seconds): Carbon
     {
-        $timestamp = (int)$dt->timestamp;
+        $timestamp = (int) $dt->timestamp;
         $floored = $timestamp - ($timestamp % $seconds);
+
         return Carbon::createFromTimestampUTC($floored);
     }
 
@@ -192,11 +273,11 @@ class ServerMetricsController extends Controller
         $sums = [];
         $counts = [];
         foreach ($rows as $row) {
-            $bucketTimestamp = (int)floor(Carbon::parse($row->timestamp, 'UTC')->timestamp / $bucketSeconds) * $bucketSeconds;
+            $bucketTimestamp = (int) floor(Carbon::parse($row->timestamp, 'UTC')->timestamp / $bucketSeconds) * $bucketSeconds;
             $bucketKey = Carbon::createFromTimestampUTC($bucketTimestamp)->format('Y-m-d H:i:s');
             $counts[$bucketKey] = ($counts[$bucketKey] ?? 0) + 1;
             foreach (self::BUCKET_METRICS as $metric) {
-                $sums[$bucketKey][$metric] = ($sums[$bucketKey][$metric] ?? 0) + (float)$row->$metric;
+                $sums[$bucketKey][$metric] = ($sums[$bucketKey][$metric] ?? 0) + (float) $row->$metric;
             }
         }
 
@@ -216,7 +297,7 @@ class ServerMetricsController extends Controller
             $key = $dt->format($format);
             $periodData = ['period' => $key];
             if (array_key_exists($key, $dataByPeriod)) {
-                foreach($dataByPeriod[$key] as $metric => $value) {
+                foreach ($dataByPeriod[$key] as $metric => $value) {
                     $periodData[$metric] = $value;
                 }
             }

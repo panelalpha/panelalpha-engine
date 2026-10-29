@@ -42,7 +42,7 @@ final class ServeCommand
     private readonly string $run;
 
     /**
-     * @param array<string, string> $overrides command id => resolved command
+     * @param  array<string, string>  $overrides  command id => resolved command
      */
     public function __construct(private readonly PlatformCommand $command, array $overrides = [])
     {
@@ -58,8 +58,8 @@ final class ServeCommand
     public function lines(): array
     {
         return [
-            'pa_step start ' . ShellQuote::of($this->command->id),
-            $this->execPrefix() . $this->run,
+            'pa_step start '.ShellQuote::of($this->command->id),
+            $this->execPrefix().$this->run,
         ];
     }
 

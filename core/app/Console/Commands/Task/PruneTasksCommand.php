@@ -40,8 +40,8 @@ class PruneTasksCommand extends Command
         }
 
         $prefix = $dryRun ? '[dry-run] ' : '';
-        $this->info($prefix . 'Deleted ' . $result['deleted_tasks'] . ' task(s), trimmed '
-            . $result['trimmed_logs'] . ' log line(s).');
+        $this->info($prefix.'Deleted '.$result['deleted_tasks'].' task(s), trimmed '
+            .$result['trimmed_logs'].' log line(s).');
 
         return 0;
     }

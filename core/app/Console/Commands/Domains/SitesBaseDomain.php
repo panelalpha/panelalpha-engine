@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Lib\Helper;
 use App\Lib\Ssl\SharedZones;
 use App\Models\Setting;
 use Illuminate\Console\Command;
@@ -10,7 +11,7 @@ use Illuminate\Console\Command;
  * The domain new projects are given a name under.
  *
  * A project created without a domain of its own becomes
- * `<name>.<this setting>` ({@see \App\Lib\Helper::generateDomainName()}). It
+ * `<name>.<this setting>` ({@see Helper::generateDomainName()}). It
  * has always defaulted to `<dashed-ip>.sslip.io`, which resolves to this host
  * with no DNS to set up — the reason a fresh install works at all, and the
  * reason those sites can never hold a real certificate: sslip.io is one
@@ -41,13 +42,13 @@ class SitesBaseDomain extends Command
         $current = (string) (Setting::get(self::SETTING) ?? '');
         $domain = $this->argument('domain');
 
-        if (!is_string($domain) || trim($domain) === '') {
+        if (! is_string($domain) || trim($domain) === '') {
             return $this->show($current);
         }
 
         $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
 
-        if (!SharedZones::isPubliclyIssuable($domain)) {
+        if (! SharedZones::isPubliclyIssuable($domain)) {
             $this->error("{$domain} is not a hostname sites can be named under.");
 
             return self::FAILURE;
@@ -86,7 +87,7 @@ class SitesBaseDomain extends Command
         $this->line("Sites are named under: {$current}");
         $this->line(SharedZones::covers($current)
             ? '  a wildcard zone the fleet shares — certificates here spend a budget'
-            . ' shared with every other engine on it'
+            .' shared with every other engine on it'
             : '  a domain of your own — certificates here have their own budget');
 
         return self::SUCCESS;

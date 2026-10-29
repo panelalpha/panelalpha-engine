@@ -8,6 +8,7 @@ use App\Lib\Deploy\Sidecar\SidecarEngine;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * The evidence ranking in SidecarEngine, layer by layer.
@@ -222,7 +223,7 @@ class SidecarEngineResolutionTest extends TestCase
         return [
             'short form' => ['5432', 'postgres'],
             'host and container' => ['15432:5432', 'postgres'],
-            'address, host, container' => ['127.0.0.1:13306:3306/tcp', 'mysql'],
+            'address, host, container' => [TestNetwork::LOOPBACK . ':13306:3306/tcp', 'mysql'],
             'long form' => [['target' => 27017, 'published' => 27017], 'mongo'],
             'host port only looks like a db' => ['5432:8080', 'thing'],
         ];

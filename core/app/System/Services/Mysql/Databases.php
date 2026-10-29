@@ -9,15 +9,15 @@ class Databases
 {
     public function __construct(
         protected PDO $pdo,
-    ) {
-    }
+    ) {}
 
     public function databaseExists(string $name): bool
     {
         $conn = new Connection($this->pdo);
-        $query = "SHOW DATABASES LIKE ?";
+        $query = 'SHOW DATABASES LIKE ?';
         $result = $conn->select($query, [$name]);
-        return !empty($result);
+
+        return ! empty($result);
     }
 
     public function createDatabase(string $name): void
@@ -43,8 +43,8 @@ class Databases
     {
         $conn = new Connection($this->pdo);
         $rows = $conn->select(
-            "SELECT table_name AS name FROM information_schema.tables "
-                . "WHERE table_schema = ? AND table_type = 'BASE TABLE' ORDER BY table_name",
+            'SELECT table_name AS name FROM information_schema.tables '
+                ."WHERE table_schema = ? AND table_type = 'BASE TABLE' ORDER BY table_name",
             [$name]
         );
 
@@ -63,17 +63,17 @@ class Databases
     /**
      * One atomic, metadata-only statement; the destination database must exist.
      *
-     * @param list<string> $tables
+     * @param  list<string>  $tables
      */
     public function renameTables(string $from, string $to, array $tables): void
     {
         $moves = [];
         foreach ($tables as $table) {
-            $moves[] = self::quoteIdentifier($from) . '.' . self::quoteIdentifier($table)
-                . ' TO ' . self::quoteIdentifier($to) . '.' . self::quoteIdentifier($table);
+            $moves[] = self::quoteIdentifier($from).'.'.self::quoteIdentifier($table)
+                .' TO '.self::quoteIdentifier($to).'.'.self::quoteIdentifier($table);
         }
 
-        $this->pdo->exec('RENAME TABLE ' . implode(', ', $moves));
+        $this->pdo->exec('RENAME TABLE '.implode(', ', $moves));
     }
 
     private function objectExists(string $table, string $schemaColumn, string $name): bool
@@ -85,13 +85,13 @@ class Databases
 
     private static function quoteIdentifier(string $identifier): string
     {
-        return '`' . str_replace('`', '``', $identifier) . '`';
+        return '`'.str_replace('`', '``', $identifier).'`';
     }
 
     public function getDatabaseSize(string $name): int
     {
         $conn = new Connection($this->pdo);
-        $query = "SELECT SUM(data_length + index_length) AS size FROM information_schema.tables WHERE table_schema = ?";
+        $query = 'SELECT SUM(data_length + index_length) AS size FROM information_schema.tables WHERE table_schema = ?';
         $result = $conn->select($query, [$name]);
         $firstKey = array_key_first($result);
         if (
@@ -99,8 +99,9 @@ class Databases
             && is_object($result[$firstKey])
             && (is_string($result[$firstKey]->size) || is_int($result[$firstKey]->size))
         ) {
-            return (int)$result[$firstKey]->size;
+            return (int) $result[$firstKey]->size;
         }
+
         return 0;
     }
 }

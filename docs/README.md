@@ -115,6 +115,6 @@ The main way to run PanelAlpha Engine is to connect an AI assistant and describe
 
 - **[Connecting your AI](04-connecting-your-ai/your-assistant.md)**: Connect an assistant after install and drive deployments, maintenance and server management from chat.
 - **[CLI commands](06-commands/pae-cli.md)**: `pae` on your VPS over SSH, and the REST API for software you build on top of the engine.
-- **[Getting Started](02-getting-started/install.md)**: Install, configure the engine, update, uninstall, how a deploy works, looking after a project, telemetry, and failed deploys.
+- **[Getting Started](02-getting-started/install.md)**: Install, configure the engine, update, uninstall, how a deploy works, looking after a project, connecting to PanelAlpha Connect, telemetry, and failed deploys.
 - **[Supported projects](07-supported-projects/project-types.md)**: Stacks the engine can run, what your repository needs, and how detection works.
 - **[Capabilities](05-capabilities/connecting-with-git.md)**: Git, projects, backups, domains, databases, files, WordPress, monitoring, visitor statistics, security and Cloudflare.

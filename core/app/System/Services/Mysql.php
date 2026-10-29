@@ -27,8 +27,7 @@ class Mysql
 
     public function __construct(
         private readonly ?EngineSystem $system = null,
-    ) {
-    }
+    ) {}
 
     public function databases(): Databases
     {
@@ -64,7 +63,7 @@ class Mysql
         try {
             $this->runInCore(
                 $this->inSitesDb($this->dumpCommand($name, $table))
-                . ' | gzip -c > ' . escapeshellarg($dest),
+                .' | gzip -c > '.escapeshellarg($dest),
                 'mysqldump failed'
             );
             $this->assertDumpCompleted($table ?? $name, $dest);
@@ -77,7 +76,7 @@ class Mysql
     private function discardDump(string $dest): void
     {
         try {
-            $this->runInCore('rm -f ' . escapeshellarg($dest), 'removing a failed dump failed');
+            $this->runInCore('rm -f '.escapeshellarg($dest), 'removing a failed dump failed');
         } catch (\Throwable $ignored) {
         }
     }
@@ -88,12 +87,12 @@ class Mysql
      */
     private function dumpCommand(string $database, ?string $table): string
     {
-        $command = 'mariadb-dump --single-transaction -uroot ' . escapeshellarg($database);
+        $command = 'mariadb-dump --single-transaction -uroot '.escapeshellarg($database);
         if ($table !== null) {
-            return $command . ' ' . escapeshellarg($table);
+            return $command.' '.escapeshellarg($table);
         }
 
-        return $command . ' --routines --triggers --events';
+        return $command.' --routines --triggers --events';
     }
 
     /**
@@ -101,8 +100,8 @@ class Mysql
      */
     private function assertDumpCompleted(string $name, string $dest): void
     {
-        $last = trim($this->runInCore('gzip -cd ' . escapeshellarg($dest) . ' | tail -n 1', 'mysqldump failed'));
-        if (!str_starts_with($last, '-- Dump completed')) {
+        $last = trim($this->runInCore('gzip -cd '.escapeshellarg($dest).' | tail -n 1', 'mysqldump failed'));
+        if (! str_starts_with($last, '-- Dump completed')) {
             throw new RuntimeException("mysqldump failed: the dump of {$name} is incomplete");
         }
     }
@@ -111,7 +110,7 @@ class Mysql
     {
         self::assertDatabaseName($name);
         $this->runInCore(
-            'gunzip -c ' . escapeshellarg($sqlGzPath) . ' | ' . $this->inSitesDb('mariadb -uroot ' . escapeshellarg($name)),
+            'gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->inSitesDb('mariadb -uroot '.escapeshellarg($name)),
             'database restore failed'
         );
     }
@@ -145,7 +144,7 @@ class Mysql
         $argv = [
             'sudo', 'docker', 'compose', '--project-directory', $this->system()->engineDirPath(),
             'exec', '-T', SitesDbCaches::SERVICE, 'bash', '-c',
-            'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; ' . $command,
+            'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; '.$command,
         ];
 
         return implode(' ', array_map('escapeshellarg', $argv));
@@ -164,10 +163,10 @@ class Mysql
     /** pipefail, so a failing dump is not hidden by gzip's success. */
     private function runInCore(string $command, string $failurePrefix): string
     {
-        $process = $this->system()->runProcess(['bash', '-c', 'set -o pipefail; ' . $command], [], self::DB_COMMAND_TIMEOUT);
-        if (!$process->isSuccessful()) {
+        $process = $this->system()->runProcess(['bash', '-c', 'set -o pipefail; '.$command], [], self::DB_COMMAND_TIMEOUT);
+        if (! $process->isSuccessful()) {
             $message = $process->getErrorOutput() ?: $process->getOutput();
-            throw new RuntimeException($failurePrefix . ': ' . trim($message));
+            throw new RuntimeException($failurePrefix.': '.trim($message));
         }
 
         return $process->getOutput();
@@ -186,7 +185,7 @@ class Mysql
 
     public static function assertDatabaseName(string $name): void
     {
-        if (!self::isValidDatabaseName($name)) {
+        if (! self::isValidDatabaseName($name)) {
             throw new RuntimeException('Invalid database name');
         }
     }
@@ -199,7 +198,7 @@ class Mysql
 
     public static function assertTableName(string $name): void
     {
-        if (!self::isValidTableName($name)) {
+        if (! self::isValidTableName($name)) {
             throw new RuntimeException('Invalid table name');
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
@@ -23,7 +24,7 @@ final class GoRuntime implements Runtime
      * Const expression, so it cannot read the catalogue; `defaultImage()`
      * honours a configured tag.
      */
-    public const IMAGE = 'golang:' . self::DEFAULT_MINOR . '-' . self::IMAGE_VARIANT;
+    public const IMAGE = 'golang:'.self::DEFAULT_MINOR.'-'.self::IMAGE_VARIANT;
 
     /**
      * The minors a project may resolve to, oldest first.
@@ -51,7 +52,7 @@ final class GoRuntime implements Runtime
     {
         $spec = RuntimeImageCatalog::spec('go', $minor);
 
-        return $spec?->from ?? 'golang:' . $minor . '-' . self::IMAGE_VARIANT;
+        return $spec?->from ?? 'golang:'.$minor.'-'.self::IMAGE_VARIANT;
     }
 
     public function id(): string
@@ -97,17 +98,17 @@ final class GoRuntime implements Runtime
         [$package, $ambiguous] = self::resolveMainPackage($projectDir, $sourceUrl);
 
         // Guessed among several entrypoints: name them so the user can pick.
-        $note = $ambiguous === [] ? '' : 'echo ' . escapeshellarg(
-            'PANELALPHA: several Go main packages (' . implode(', ', $ambiguous) . '); building '
-            . $package . '. Set the build command to choose another.'
-        ) . ' && ';
+        $note = $ambiguous === [] ? '' : 'echo '.escapeshellarg(
+            'PANELALPHA: several Go main packages ('.implode(', ', $ambiguous).'); building '
+            .$package.'. Set the build command to choose another.'
+        ).' && ';
 
         // git is only for modules fetched from VCS instead of GOPROXY, and
         // apk add needs root: a hard install fails the chain with `ERROR:
         // Unable to open log: Permission denied`. Best effort.
-        return $note . '{ apk add --no-cache git || true; }'
-            . ' && go build -o app ' . $package
-            . ' && { [ -x app ] || { echo "PANELALPHA: no runnable Go program found"; exit 1; }; }';
+        return $note.'{ apk add --no-cache git || true; }'
+            .' && go build -o app '.$package
+            .' && { [ -x app ] || { echo "PANELALPHA: no runnable Go program found"; exit 1; }; }';
     }
 
     /**
@@ -142,7 +143,7 @@ final class GoRuntime implements Runtime
 
         foreach ($entrypoints as $dir) {
             if (in_array(strtolower(basename($dir)), $names, true)) {
-                return ['./' . $dir, []];
+                return ['./'.$dir, []];
             }
         }
 
@@ -158,21 +159,21 @@ final class GoRuntime implements Runtime
             return false;
         }));
         if (count($contained) === 1) {
-            return ['./' . $contained[0], []];
+            return ['./'.$contained[0], []];
         }
         if (count($entrypoints) === 1) {
-            return ['./' . $entrypoints[0], []];
+            return ['./'.$entrypoints[0], []];
         }
 
         $seen = $entrypoints !== [] ? $entrypoints : $candidates;
 
-        return ['./' . self::conventionalPick($candidates, $names), count($seen) > 1 ? $seen : []];
+        return ['./'.self::conventionalPick($candidates, $names), count($seen) > 1 ? $seen : []];
     }
 
     /**
      * Candidates at `cmd/<name>` or `<name>`, minus helper directories; cmd/ first.
      *
-     * @param list<string> $candidates
+     * @param  list<string>  $candidates
      * @return list<string>
      */
     private static function entrypoints(array $candidates): array
@@ -182,7 +183,7 @@ final class GoRuntime implements Runtime
                 && preg_match(self::NOT_ENTRYPOINTS, $m[1]) !== 1;
         }));
         usort($found, static function (string $a, string $b): int {
-            $byCmd = (int) !str_starts_with($a, 'cmd/') <=> (int) !str_starts_with($b, 'cmd/');
+            $byCmd = (int) ! str_starts_with($a, 'cmd/') <=> (int) ! str_starts_with($b, 'cmd/');
 
             return $byCmd !== 0 ? $byCmd : strcmp($a, $b);
         });
@@ -194,8 +195,8 @@ final class GoRuntime implements Runtime
      * Last resort: prefer cmd/, then a name match, then least nested,
      * alphabetical.
      *
-     * @param list<string> $candidates
-     * @param list<string> $names
+     * @param  list<string>  $candidates
+     * @param  list<string>  $names
      */
     private static function conventionalPick(array $candidates, array $names): string
     {
@@ -208,7 +209,7 @@ final class GoRuntime implements Runtime
         // what gets served, and being shorter used to make it the pick.
         $serving = array_values(array_filter(
             $pool,
-            static fn (string $dir): bool => !self::isHelper(basename($dir))
+            static fn (string $dir): bool => ! self::isHelper(basename($dir))
         ));
         if ($serving !== []) {
             $pool = $serving;
@@ -253,7 +254,7 @@ final class GoRuntime implements Runtime
      */
     private static function mainDirectories(string $projectDir): array
     {
-        if (!is_dir($projectDir)) {
+        if (! is_dir($projectDir)) {
             return [];
         }
 
@@ -264,12 +265,12 @@ final class GoRuntime implements Runtime
                 static function (\SplFileInfo $file): bool {
                     $name = $file->getFilename();
                     if ($file->isDir()) {
-                        return !in_array($name, ['vendor', 'testdata', 'node_modules'], true)
-                            && !str_starts_with($name, '.')
-                            && !str_starts_with($name, '_');
+                        return ! in_array($name, ['vendor', 'testdata', 'node_modules'], true)
+                            && ! str_starts_with($name, '.')
+                            && ! str_starts_with($name, '_');
                     }
 
-                    return str_ends_with($name, '.go') && !str_ends_with($name, '_test.go');
+                    return str_ends_with($name, '.go') && ! str_ends_with($name, '_test.go');
                 }
             ),
             // An unreadable directory is skipped, not fatal.
@@ -279,11 +280,11 @@ final class GoRuntime implements Runtime
 
         foreach ($iterator as $file) {
             /** @var \SplFileInfo $file */
-            $contents = @file_get_contents($file->getPathname());
-            if (!is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
+            $contents = AccountHomeRead::contents($file->getPathname());
+            if (! is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
                 continue;
             }
-            if (!self::constraintsHold($contents)) {
+            if (! self::constraintsHold($contents)) {
                 continue;
             }
             $dir = substr(dirname($file->getPathname()), strlen($projectDir));
@@ -291,7 +292,7 @@ final class GoRuntime implements Runtime
             $dir = $dir === '' ? '.' : $dir;
             // An empty main is a go:generate stub (Traefik's root).
             $stub = preg_match('/^func\s+main\s*\(\s*\)\s*\{\s*\}/m', $contents) === 1;
-            $found[$dir] = ($found[$dir] ?? true) && !$stub;
+            $found[$dir] = ($found[$dir] ?? true) && ! $stub;
         }
 
         return array_keys(array_filter($found));
@@ -321,7 +322,7 @@ final class GoRuntime implements Runtime
                 }
                 $any = $any || $all;
             }
-            if (!$any) {
+            if (! $any) {
                 return false;
             }
         }
@@ -377,7 +378,7 @@ final class GoRuntime implements Runtime
         if ($token === '!') {
             $value = self::parseUnary($tokens, $pos);
 
-            return $value === null ? null : !$value;
+            return $value === null ? null : ! $value;
         }
         if ($token === '(') {
             $value = self::parseOr($tokens, $pos);
@@ -409,7 +410,7 @@ final class GoRuntime implements Runtime
     private static function programNames(string $projectDir, ?string $sourceUrl): array
     {
         $names = [];
-        $contents = @file_get_contents($projectDir . '/go.mod');
+        $contents = AccountHomeRead::contents($projectDir.'/go.mod');
         if (is_string($contents) && preg_match('/^module\s+(\S+)/m', $contents, $m) === 1) {
             $names[] = basename((string) preg_replace('#/v\d+$#', '', trim($m[1], "\"'")));
         }

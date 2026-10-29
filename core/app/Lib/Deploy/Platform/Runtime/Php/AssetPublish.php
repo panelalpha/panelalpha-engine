@@ -24,7 +24,7 @@ final class AssetPublish
      * Artisan command lines, in script order and deduplicated, e.g.
      * `vendor:publish --tag=laravel-assets --ansi --force`.
      *
-     * @param array<string, mixed>|null $composer parsed root composer.json
+     * @param  array<string, mixed>|null  $composer  parsed root composer.json
      * @return list<string>
      */
     public static function commands(?array $composer): array
@@ -36,7 +36,7 @@ final class AssetPublish
             $entries = $scripts[$name] ?? [];
             foreach (is_array($entries) ? $entries : [$entries] as $entry) {
                 $command = is_string($entry) ? self::parse($entry) : null;
-                if ($command !== null && !in_array($command, $found, true)) {
+                if ($command !== null && ! in_array($command, $found, true)) {
                     $found[] = $command;
                 }
             }
@@ -49,7 +49,7 @@ final class AssetPublish
      * The build step: each publish logged and allowed to fail on its own.
      * '' when the project registers none, which the build then skips.
      *
-     * @param array<string, mixed>|null $composer
+     * @param  array<string, mixed>|null  $composer
      */
     public static function buildCommand(?array $composer): string
     {
@@ -57,8 +57,8 @@ final class AssetPublish
         foreach (self::commands($composer) as $command) {
             $label = "'[panelalpha] build: php artisan {$command}";
             $lines[] = "echo {$label}' >&2";
-            $lines[] = 'php artisan ' . self::shellArguments($command)
-                . " || echo {$label} failed (optional, continuing)' >&2";
+            $lines[] = 'php artisan '.self::shellArguments($command)
+                ." || echo {$label} failed (optional, continuing)' >&2";
         }
 
         return implode('; ', $lines);
@@ -69,9 +69,9 @@ final class AssetPublish
         $words = preg_split('/\s+/', trim($entry)) ?: [];
         if (
             count($words) < 3
-            || !in_array($words[0], ['@php', 'php'], true)
+            || ! in_array($words[0], ['@php', 'php'], true)
             || $words[1] !== 'artisan'
-            || !in_array($words[2], self::COMMANDS, true)
+            || ! in_array($words[2], self::COMMANDS, true)
         ) {
             return null;
         }
@@ -95,7 +95,7 @@ final class AssetPublish
             static fn (string $word): string => str_contains($word, '\\') ? "'{$word}'" : $word,
             explode(' ', $command)
         );
-        if (!in_array('--no-interaction', $words, true) && !in_array('-n', $words, true)) {
+        if (! in_array('--no-interaction', $words, true) && ! in_array('-n', $words, true)) {
             $words[] = '--no-interaction';
         }
 

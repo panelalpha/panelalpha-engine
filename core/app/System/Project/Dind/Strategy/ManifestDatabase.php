@@ -5,8 +5,9 @@ namespace App\System\Project\Dind\Strategy;
 use App\Lib\Deploy\Platform\Runtime\Php\DatabaseSettings;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
-use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppDatabase;
+use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\DeployStrategy;
 
 /**
  * A manifest's `database: mysql`, for the writers that generate their own app
@@ -22,22 +23,20 @@ class ManifestDatabase
 {
     private const MYSQL = 'mysql';
 
-    public function __construct(private DindProject $dind)
-    {
-    }
+    public function __construct(private DindProject $dind) {}
 
     /**
      * What to add to the generated app service: `env` and `extra_hosts`, or
      * nothing when no database was declared or the project ships a MySQL of
      * its own (that one is already wired to the app, and stays).
      *
-     * @param array<string, mixed> $decision
-     * @param array<string, mixed> $services harvested sidecar services
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, mixed>  $services  harvested sidecar services
      * @return array{env?: array<string, string>, extra_hosts?: list<string>}
      */
     public function forService(array $decision, array $services): array
     {
-        if (!self::isDeclared($decision) || SidecarEngine::servicesProvide($services, self::MYSQL)) {
+        if (! self::isDeclared($decision) || SidecarEngine::servicesProvide($services, self::MYSQL)) {
             return [];
         }
 
@@ -59,7 +58,7 @@ class ManifestDatabase
 
     /**
      * Whether the writer the strategy dispatches to provisions the database.
-     * Mirrors {@see \App\System\Project\Dind\DeployStrategy::apply()}.
+     * Mirrors {@see DeployStrategy::apply()}.
      */
     public static function isHonouredBy(string $strategy): bool
     {
@@ -67,24 +66,24 @@ class ManifestDatabase
             return true;
         }
 
-        return !in_array($strategy, [Strategies::RAILS, Strategies::RUBY], true) && Strategies::isGenerated($strategy);
+        return ! in_array($strategy, [Strategies::RAILS, Strategies::RUBY], true) && Strategies::isGenerated($strategy);
     }
 
     /**
      * Deploy-log warning for a declared database no writer will provision:
      * the project's own compose file, Rails/Ruby, Railpack, static, fallback.
      *
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      */
     public static function inertWarning(array $decision): ?string
     {
         $strategy = is_string($decision['strategy'] ?? null) ? $decision['strategy'] : '';
-        if (!is_string($decision['database'] ?? null) || $decision['database'] === '' || self::isHonouredBy($strategy)) {
+        if (! is_string($decision['database'] ?? null) || $decision['database'] === '' || self::isHonouredBy($strategy)) {
             return null;
         }
 
         return "The recipe declares `database: {$decision['database']}`, but strategy {$strategy} does not provision one;"
-            . ' this deploy gets no database and no DB_* variables.';
+            .' this deploy gets no database and no DB_* variables.';
     }
 
     /**
@@ -92,7 +91,7 @@ class ManifestDatabase
      * Laravel-style DB_* spellings. Percent-encoded, so a password with `@`
      * or `/` cannot leak into the host or the path.
      *
-     * @param array<string, string> $db {@see AppDatabase::provision()}
+     * @param  array<string, string>  $db  {@see AppDatabase::provision()}
      * @return array<string, string>
      */
     public static function environment(array $db): array
