@@ -8,6 +8,7 @@ use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The third question a health report asks: is what answered the application,
@@ -51,7 +52,7 @@ class CheckRunnerTest extends TestCase
     private function probe(int $status, string $body): array
     {
         return CheckRunner::for(PlatformManifest::RUNTIME_NGINX)
-            ->run(new ProbedResponse($status, $body, 'http://127.0.0.1:8080/'), $this->dir);
+            ->run(new ProbedResponse($status, $body, 'http://' . TestNetwork::LOOPBACK . ':8080/'), $this->dir);
     }
 
     /**
@@ -60,7 +61,7 @@ class CheckRunnerTest extends TestCase
     private function probeTimed(int $status, string $body, float $time): array
     {
         return CheckRunner::for(PlatformManifest::RUNTIME_NGINX)
-            ->run(new ProbedResponse($status, $body, 'http://127.0.0.1:8080/', $time), $this->dir);
+            ->run(new ProbedResponse($status, $body, 'http://' . TestNetwork::LOOPBACK . ':8080/', $time), $this->dir);
     }
 
     /**
@@ -248,7 +249,7 @@ class CheckRunnerTest extends TestCase
     public function test_a_runtime_without_a_group_still_gets_the_baseline(): void
     {
         $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)
-            ->run(new ProbedResponse(200, 'hello', 'http://127.0.0.1:8000/'), $this->dir);
+            ->run(new ProbedResponse(200, 'hello', 'http://' . TestNetwork::LOOPBACK . ':8000/'), $this->dir);
 
         $ids = array_column($report['checks'], 'id');
         $this->assertContains('not-placeholder', $ids);
@@ -259,7 +260,7 @@ class CheckRunnerTest extends TestCase
     public function test_an_unknown_runtime_falls_back_to_the_baseline(): void
     {
         $report = CheckRunner::for('nothing-like-this')
-            ->run(new ProbedResponse(200, 'hello', 'http://127.0.0.1:1/'), $this->dir);
+            ->run(new ProbedResponse(200, 'hello', 'http://' . TestNetwork::LOOPBACK . ':1/'), $this->dir);
 
         $this->assertNotSame([], $report['checks']);
         $this->assertSame(CheckRunner::SERVING_OK, $report['serving']);

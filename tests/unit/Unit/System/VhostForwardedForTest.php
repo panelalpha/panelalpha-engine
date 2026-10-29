@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Models\Domain;
 use Illuminate\Support\Facades\Blade;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -69,12 +70,12 @@ class VhostForwardedForTest extends TestCase
     public function test_every_server_block_behind_the_front_takes_the_client_from_it(): void
     {
         foreach (self::TEMPLATES as $template) {
-            $vhost = $this->render($template, ['159.69.7.81', '2a01:4f8::/64']);
+            $vhost = $this->render($template, [TestNetwork::public(81), '2a01:4f8::/64']);
             $blocks = preg_split('/^\s*server \{/m', $vhost) ?: [];
             array_shift($blocks);
             $this->assertNotEmpty($blocks, $template);
             foreach ($blocks as $block) {
-                $this->assertStringContainsString('set_real_ip_from 159.69.7.81;', $block, $template);
+                $this->assertStringContainsString('set_real_ip_from ' . TestNetwork::public(81) . ';', $block, $template);
                 $this->assertStringContainsString('set_real_ip_from 2a01:4f8::/64;', $block, $template);
                 $this->assertSame(1, substr_count($block, 'real_ip_header X-Forwarded-For;'), $template);
             }
@@ -83,22 +84,28 @@ class VhostForwardedForTest extends TestCase
 
     public function test_front_addresses_keep_only_ips_and_cidrs(): void
     {
-        config(['connect.front_addresses' => '159.69.7.81, 10.0.0.0/8 2a01:4f8::1,bad;host 1.2.3.4/33 ::/129 159.69.7.81']);
+        config(['connect.front_addresses' => sprintf(
+            '%s, %s 2a01:4f8::1,bad;host %s/33 ::/129 %s',
+            TestNetwork::public(81),
+            TestNetwork::PRIVATE_10_CIDR,
+            TestNetwork::public(4),
+            TestNetwork::public(81)
+        )]);
 
-        $this->assertSame(['159.69.7.81', '10.0.0.0/8', '2a01:4f8::1'], PanelAlphaConnect::frontAddresses());
+        $this->assertSame([TestNetwork::public(81), TestNetwork::PRIVATE_10_CIDR, '2a01:4f8::1'], PanelAlphaConnect::frontAddresses());
     }
 
     public function test_only_a_domain_the_front_serves_trusts_it(): void
     {
-        config(['connect.front_addresses' => '159.69.7.81']);
+        config(['connect.front_addresses' => TestNetwork::public(81)]);
 
         $online = new Domain(['domain' => 'shop-4f2a.panelalpha.online']);
         $aliased = new Domain(['domain' => 'shop.example.com', 'details' => ['aliases' => ['Shop.PanelAlpha.Online.']]]);
         $customer = new Domain(['domain' => 'shop.example.com', 'details' => ['aliases' => ['www.shop.example.com']]]);
         $lookalike = new Domain(['domain' => 'evilpanelalpha.online']);
 
-        $this->assertSame(['159.69.7.81'], PanelAlphaConnect::trustedFrontsFor($online));
-        $this->assertSame(['159.69.7.81'], PanelAlphaConnect::trustedFrontsFor($aliased));
+        $this->assertSame([TestNetwork::public(81)], PanelAlphaConnect::trustedFrontsFor($online));
+        $this->assertSame([TestNetwork::public(81)], PanelAlphaConnect::trustedFrontsFor($aliased));
         $this->assertSame([], PanelAlphaConnect::trustedFrontsFor($customer));
         $this->assertSame([], PanelAlphaConnect::trustedFrontsFor($lookalike));
     }

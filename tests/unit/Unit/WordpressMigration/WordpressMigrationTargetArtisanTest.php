@@ -5,6 +5,7 @@ namespace Tests\Unit\WordpressMigration;
 use App\Http\Requests\WordpressMigrationStoreRequest;
 use App\Models\WordpressMigration;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 
 /**
  * wordpress:migrate takes the same target as the API, refuses it the same
@@ -20,7 +21,7 @@ class WordpressMigrationTargetArtisanTest extends ImportTargetTestCase
         putenv('WORDPRESS_MIGRATE_PASSWORD=secret');
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => ['93.184.216.34'],
+            static fn (string $host): array => [TestNetwork::routable(34)],
         );
     }
 
@@ -56,7 +57,7 @@ class WordpressMigrationTargetArtisanTest extends ImportTargetTestCase
         $this->artisan('wordpress:migrate:status', ['id' => (string) $migration->id])
             ->expectsOutput('Project: newsite (created by the import)')
             ->expectsOutput('Domain: new.example.org')
-            ->expectsOutput('DNS: A ' . self::ENGINE_IPV4)
+            ->expectsOutput('DNS: A ' . self::engineIpv4())
             ->assertSuccessful();
     }
 }

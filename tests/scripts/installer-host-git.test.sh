@@ -4,11 +4,11 @@
 # pins its host-side git with http.curloptResolve, which git before 2.37
 # ignores, so the installer warns about such a git and about nothing else.
 #
-#   bash scripts/installer-host-git.test.sh
+#   bash tests/scripts/installer-host-git.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

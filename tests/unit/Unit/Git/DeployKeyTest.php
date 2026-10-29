@@ -12,6 +12,7 @@ use App\System\Project\Git\CheckoutRedeploy;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 
@@ -31,14 +32,17 @@ class DeployKeyTest extends DeployHookTestCase
     private const GITHUB_ED25519_FP = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU';
 
     /** What the substituted resolver answers; any other name does not resolve. */
-    private const DNS = [
-        'git.example.test' => ['140.82.121.10'],
-        'nothing.example.test' => ['140.82.121.11'],
-        'github.com' => ['140.82.121.4'],
-        'localhost' => ['127.0.0.1'],
-        'internal.example.test' => ['10.0.0.5'],
-        'rebind.example.test' => ['140.82.121.12', '10.0.0.5'],
-    ];
+    private static function dns(): array
+    {
+        return [
+            'git.example.test' => [TestNetwork::routable(10)],
+            'nothing.example.test' => [TestNetwork::routable(11)],
+            'github.com' => [TestNetwork::routable(4)],
+            'localhost' => [TestNetwork::LOOPBACK],
+            'internal.example.test' => [TestNetwork::private(5)],
+            'rebind.example.test' => [TestNetwork::routable(12), TestNetwork::private(5)],
+        ];
+    }
 
     protected function setUp(): void
     {
@@ -53,10 +57,10 @@ class DeployKeyTest extends DeployHookTestCase
         $this->app->instance(CheckoutRedeploy::class, new SpyCheckoutRedeploy());
         // ssh-keyscan answers from the shim: `example.test`'s key is GitHub's, so its fingerprint is known.
         file_put_contents($this->shim . '/ssh-keyscan', "#!/bin/sh\nprintf '%s\\n' \"ssh-keyscan \$*\" >> \"\$(dirname \"\$0\")/calls.log\"\n"
-            . "case \"\$*\" in *140.82.121.11*) exit 1;; esac\n"
+            . "case \"\$*\" in *" . TestNetwork::routable(11) . "*) exit 1;; esac\n"
             . "echo '# git.example.test:2222 SSH-2.0-OpenSSH'\necho 'git.example.test " . self::GITHUB_ED25519 . "'\n");
         chmod($this->shim . '/ssh-keyscan', 0755);
-        OutboundUrl::setResolverForTests(static fn (string $host): array => self::DNS[$host] ?? []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => self::dns()[$host] ?? []);
     }
 
     protected function tearDown(): void
@@ -134,7 +138,7 @@ class DeployKeyTest extends DeployHookTestCase
             ['host' => '[git.example.test]:2222', 'pinned' => 'scanned', 'fingerprints' => [self::GITHUB_ED25519_FP]],
             $response->json('data.hosts.3'),
         );
-        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa 140.82.121.10'));
+        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa ' . TestNetwork::routable(10)));
         $this->assertTrue(DeployKey::pins($user->fresh(), '[git.example.test]:2222'));
         $this->assertStringContainsString(
             '[git.example.test]:2222 ' . self::GITHUB_ED25519,
@@ -168,9 +172,9 @@ class DeployKeyTest extends DeployHookTestCase
     public static function internalHosts(): array
     {
         return [
-            'private literal' => ['10.255.255.1'],
+            'private literal' => [TestNetwork::private(255)],
             'loopback name' => ['localhost:9'],
-            'metadata literal' => ['169.254.169.254:80'],
+            'metadata literal' => [TestNetwork::METADATA . ':80'],
             'hexadecimal loopback' => ['0x7f000001:9'],
             'decimal integer loopback' => ['2130706433'],
             'octal loopback' => ['0177.0.0.1:22'],
@@ -203,13 +207,13 @@ class DeployKeyTest extends DeployHookTestCase
         OutboundUrl::setResolverForTests(static function (string $host) use (&$lookups): array {
             $lookups++;
 
-            return $lookups === 1 ? ['140.82.121.10'] : ['127.0.0.1'];
+            return $lookups === 1 ? [TestNetwork::routable(10)] : [TestNetwork::LOOPBACK];
         });
 
         $this->postJson(self::URL . '/deploy-key', ['host' => 'git.example.test:2222'])->assertStatus(201);
 
         $this->assertSame(1, $lookups);
-        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa 140.82.121.10'));
+        $this->assertTrue($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa ' . TestNetwork::routable(10)));
         $this->assertFalse($this->called('ssh-keyscan -T 10 -p 2222 -t ed25519,ecdsa,rsa git.example.test'));
         $this->assertStringContainsString('[git.example.test]:2222 ' . self::GITHUB_ED25519, DeployKey::knownHosts($user->fresh()));
     }

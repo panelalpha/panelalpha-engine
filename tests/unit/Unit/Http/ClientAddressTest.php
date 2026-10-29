@@ -6,6 +6,7 @@ use App\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The client address Laravel works out. PmaSso used to decide on it and now
@@ -25,24 +26,24 @@ class ClientAddressTest extends TestCase
         // rightmost entry is the one that counts. TrustProxies no longer trusts
         // all of RFC-1918, so a caller inside it cannot prepend a second
         // address and have Laravel believe it.
-        $request = $this->throughTrustProxies($this->requestFrom('8.8.8.8', '10.0.0.5, 8.8.8.8'));
+        $request = $this->throughTrustProxies($this->requestFrom(TestNetwork::routable(8), TestNetwork::private(5).', '.TestNetwork::routable(8)));
 
-        $this->assertSame('8.8.8.8', $request->ip());
+        $this->assertSame(TestNetwork::routable(8), $request->ip());
     }
 
     public function test_an_internal_client_cannot_relabel_itself_either(): void
     {
-        $request = $this->throughTrustProxies($this->requestFrom('172.17.0.9', '203.0.113.7, 172.17.0.9'));
+        $request = $this->throughTrustProxies($this->requestFrom(TestNetwork::container(9), TestNetwork::public(7).', '.TestNetwork::container(9)));
 
         // Still treated as the container it really is, not as the public
         // address it named.
-        $this->assertSame('172.17.0.9', $request->ip());
+        $this->assertSame(TestNetwork::container(9), $request->ip());
     }
 
     public function test_the_loopback_hop_is_the_only_trusted_proxy(): void
     {
         $this->assertSame(
-            ['127.0.0.1', '::1'],
+            [TestNetwork::LOOPBACK, '::1'],
             (fn () => $this->proxies)->call(new TrustProxies())
         );
     }

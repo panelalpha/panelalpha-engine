@@ -10,6 +10,7 @@ use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Which checks an application is asked, and what a malformed check file does.
@@ -108,7 +109,7 @@ class CheckRegistryTest extends TestCase
         file_put_contents($this->dir . '/manage.py', '#!/usr/bin/env python');
 
         $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
-            new ProbedResponse(400, '<h1>Bad Request (400)</h1> DisallowedHost at /', 'http://127.0.0.1:8080/'),
+            new ProbedResponse(400, '<h1>Bad Request (400)</h1> DisallowedHost at /', 'http://' . TestNetwork::LOOPBACK . ':8080/'),
             $this->dir
         );
 
@@ -126,7 +127,7 @@ class CheckRegistryTest extends TestCase
             . "<body>\n  <h1>Bad Request (400)</h1><p></p>\n</body>\n</html>\n";
 
         $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
-            new ProbedResponse(400, $body, 'http://127.0.0.1:8000/'),
+            new ProbedResponse(400, $body, 'http://' . TestNetwork::LOOPBACK . ':8000/'),
             $this->dir
         );
 
@@ -139,7 +140,7 @@ class CheckRegistryTest extends TestCase
     public function test_the_borrowed_django_check_skips_a_project_without_manage_py(): void
     {
         $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
-            new ProbedResponse(400, 'DisallowedHost', 'http://127.0.0.1:8080/'),
+            new ProbedResponse(400, 'DisallowedHost', 'http://' . TestNetwork::LOOPBACK . ':8080/'),
             $this->dir
         );
 
@@ -175,7 +176,7 @@ class CheckRegistryTest extends TestCase
         ], 'test', 'test/needs-wordpress.yaml');
 
         $report = (new CheckRunner([$guarded]))
-            ->run(new ProbedResponse(200, 'anything at all', 'http://127.0.0.1:80/'), $this->dir);
+            ->run(new ProbedResponse(200, 'anything at all', 'http://' . TestNetwork::LOOPBACK . ':80/'), $this->dir);
 
         $this->assertSame(CheckResult::STATUS_SKIPPED, $report['checks'][0]['status']);
         $this->assertSame(CheckRunner::SERVING_OK, $report['serving']);
@@ -194,7 +195,7 @@ class CheckRegistryTest extends TestCase
         ], 'test', 'test/needs-wordpress.yaml');
 
         $report = (new CheckRunner([$guarded]))
-            ->run(new ProbedResponse(200, 'database error', 'http://127.0.0.1:80/'), $this->dir);
+            ->run(new ProbedResponse(200, 'database error', 'http://' . TestNetwork::LOOPBACK . ':80/'), $this->dir);
 
         unlink($this->dir . '/wp-config.php');
 

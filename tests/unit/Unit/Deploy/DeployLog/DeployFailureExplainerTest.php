@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class DeployFailureExplainerTest extends TestCase
 {
@@ -547,10 +548,11 @@ OUT;
      */
     public function test_an_uppercase_image_name_is_named_as_invalid_not_as_unreachable(): void
     {
-        $output = <<<'OUT'
+        $dns = TestNetwork::DOCKER_DNS;
+        $output = <<<OUT
  Image HaschekSolutions/pictshare:3 Pulling
- Image HaschekSolutions/pictshare:3 Error failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on 127.0.0.11:53: no such host
-Error response from daemon: failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on 127.0.0.11:53: no such host
+ Image HaschekSolutions/pictshare:3 Error failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on {$dns}:53: no such host
+Error response from daemon: failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on {$dns}:53: no such host
 OUT;
 
         $match = DeployFailureExplainer::match($output);
@@ -671,7 +673,7 @@ OUT;
         $output = "#8 12.98 (13/30) Installing musl-dev (1.2.6-r2)\n"
             . "#17 29.45 npm error gyp info find Python using Python version 3.14.7 found at \"/usr/bin/python3\"\n"
             . "#17 29.45 npm error gyp http GET https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz\n"
-            . "#17 29.45 npm error gyp ERR! stack ConnectTimeoutError: Connect Timeout Error (attempted addresses: 45.55.98.129:443, timeout: 10000ms)\n"
+            . "#17 29.45 npm error gyp ERR! stack ConnectTimeoutError: Connect Timeout Error (attempted addresses: " . TestNetwork::public(129) . ":443, timeout: 10000ms)\n"
             . '#17 ERROR: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1';
 
         $match = DeployFailureExplainer::match($output);
@@ -688,7 +690,7 @@ OUT;
         foreach ([
             'gyp ERR! stack FetchError: request to https://nodejs.org/x failed, reason: getaddrinfo EAI_AGAIN nodejs.org',
             'gyp ERR! stack Error: read ECONNRESET',
-            'gyp ERR! stack Error: connect ETIMEDOUT 104.20.22.46:443',
+            'gyp ERR! stack Error: connect ETIMEDOUT ' . TestNetwork::public(46) . ':443',
         ] as $line) {
             $this->assertSame('native-build-headers-download-failed', DeployFailureExplainer::match($line)['rule'], $line);
         }
@@ -1308,14 +1310,14 @@ OUT;
     /** A registry with basic auth, as the account's daemon reports an anonymous pull from it. */
     public function test_a_registry_asking_for_basic_auth_names_the_image(): void
     {
-        $output = 'Image 127.0.0.1:5000/test/whoami:1 Error failed to resolve reference "127.0.0.1:5000/test/whoami:1": '
+        $output = 'Image ' . TestNetwork::LOOPBACK . ':5000/test/whoami:1 Error failed to resolve reference "' . TestNetwork::LOOPBACK . ':5000/test/whoami:1": '
             . 'pull access denied, repository does not exist or may require authorization: authorization failed: '
             . 'no basic auth credentials';
 
         $match = DeployFailureExplainer::match($output);
 
         $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
-        $this->assertStringContainsString('The image 127.0.0.1:5000/test/whoami:1 could not be downloaded', $match['message']);
+        $this->assertStringContainsString('The image ' . TestNetwork::LOOPBACK . ':5000/test/whoami:1 could not be downloaded', $match['message']);
     }
 
     public function test_docker_hubs_pull_access_denied_stays_ambiguous(): void
@@ -1419,8 +1421,8 @@ OUT;
         return [
             'debian 11 security pool' => [
                 "#9 4.680 Err:16 http://deb.debian.org/debian-security bullseye-security/main amd64 mariadb-server-core-10.5 amd64 1:10.5.29-0+deb11u1\n"
-                . "#9 4.680   404  Not Found [IP: 151.101.66.132 80]\n"
-                . "#9 4.867 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/libd/libdbi-perl/libdbi-perl_1.643-3%2bdeb11u2_amd64.deb  404  Not Found [IP: 151.101.66.132 80]\n"
+                . "#9 4.680   404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
+                . "#9 4.867 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/libd/libdbi-perl/libdbi-perl_1.643-3%2bdeb11u2_amd64.deb  404  Not Found [IP: " . TestNetwork::public(132) . " 80]\n"
                 . "#9 4.867 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?\n"
                 . '#9 ERROR: process "/bin/sh -c apt-get update && apt-get install -y bison" did not complete successfully: exit code: 100',
             ],

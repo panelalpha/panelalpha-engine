@@ -8,6 +8,7 @@ use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use Tests\Support\TestNetwork;
 
 /**
  * Each vault verb is throttled on its own budget per address: an unnamed
@@ -16,10 +17,6 @@ use Illuminate\Testing\TestResponse;
  */
 class VaultThrottleTest extends VaultTestCase
 {
-    private const ADDRESS = '198.51.100.7';
-
-    private const OTHER_ADDRESS = '198.51.100.8';
-
     private const FORM_ATTEMPTS = 20;
 
     private const PASTE_ATTEMPTS = 10;
@@ -68,17 +65,17 @@ class VaultThrottleTest extends VaultTestCase
         }
 
         $this->page($ref)->assertStatus(429);
-        $this->page($ref, self::OTHER_ADDRESS)->assertOk();
+        $this->page($ref, TestNetwork::public2(8))->assertOk();
     }
 
-    private function page(string $ref, string $address = self::ADDRESS): TestResponse
+    private function page(string $ref, ?string $address = null): TestResponse
     {
-        return $this->withServerVariables(['REMOTE_ADDR' => $address])->get('/vault/' . $ref);
+        return $this->withServerVariables(['REMOTE_ADDR' => $address ?? TestNetwork::public2(7)])->get('/vault/' . $ref);
     }
 
-    private function paste(string $ref, string $secret, string $address = self::ADDRESS): TestResponse
+    private function paste(string $ref, string $secret, ?string $address = null): TestResponse
     {
-        return $this->withServerVariables(['REMOTE_ADDR' => $address])->post('/vault/' . $ref, ['secret' => $secret]);
+        return $this->withServerVariables(['REMOTE_ADDR' => $address ?? TestNetwork::public2(7)])->post('/vault/' . $ref, ['secret' => $secret]);
     }
 
     private function assertLimit(string $name, int $attempts): void
@@ -86,12 +83,12 @@ class VaultThrottleTest extends VaultTestCase
         $limiter = RateLimiter::limiter($name);
         $this->assertNotNull($limiter, "no `{$name}` rate limiter is defined");
 
-        $limit = $limiter(Request::create('/vault/a-token', 'GET', [], [], [], ['REMOTE_ADDR' => self::ADDRESS]));
+        $limit = $limiter(Request::create('/vault/a-token', 'GET', [], [], [], ['REMOTE_ADDR' => TestNetwork::public2(7)]));
 
         $this->assertInstanceOf(Limit::class, $limit);
         $this->assertSame($attempts, $limit->maxAttempts);
         $this->assertSame(self::DECAY_SECONDS, $limit->decaySeconds);
-        $this->assertSame(self::ADDRESS, $limit->key);
+        $this->assertSame(TestNetwork::public2(7), $limit->key);
     }
 
     /**

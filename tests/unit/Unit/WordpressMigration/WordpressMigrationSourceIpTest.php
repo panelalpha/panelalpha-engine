@@ -13,6 +13,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceIpPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * Every source request is pinned with CURLOPT_RESOLVE: to `source_ip` for the
@@ -24,14 +25,14 @@ class WordpressMigrationSourceIpTest extends TestCase
 {
     public function test_the_source_host_and_its_www_twin_are_pinned_to_source_ip(): void
     {
-        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', '93.184.216.34'), $this->dns(), $this->policy());
+        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', TestNetwork::routable(34)), $this->dns(), $this->policy());
 
         $this->assertSame(
-            ['-example.com:80', 'example.com:80:93.184.216.34', '-example.com:443', 'example.com:443:93.184.216.34'],
+            ['-example.com:80', 'example.com:80:'.TestNetwork::routable(34), '-example.com:443', 'example.com:443:'.TestNetwork::routable(34)],
             $client->resolveEntries('https://example.com/wp-login.php'),
         );
         $this->assertSame(
-            ['-www.example.com:80', 'www.example.com:80:93.184.216.34', '-www.example.com:443', 'www.example.com:443:93.184.216.34'],
+            ['-www.example.com:80', 'www.example.com:80:'.TestNetwork::routable(34), '-www.example.com:443', 'www.example.com:443:'.TestNetwork::routable(34)],
             $client->resolveEntries('http://www.example.com/'),
         );
     }
@@ -41,21 +42,21 @@ class WordpressMigrationSourceIpTest extends TestCase
         $client = new CurlSourceHttpClient(null, $this->dns(), $this->policy());
 
         $this->assertSame(
-            ['-example.com:80', 'example.com:80:93.184.215.20', '-example.com:443', 'example.com:443:93.184.215.20', '-example.com:8443', 'example.com:8443:93.184.215.20'],
+            ['-example.com:80', 'example.com:80:'.TestNetwork::routable(20), '-example.com:443', 'example.com:443:'.TestNetwork::routable(20), '-example.com:8443', 'example.com:8443:'.TestNetwork::routable(20)],
             $client->resolveEntries('https://example.com:8443/'),
         );
     }
 
     public function test_another_host_is_checked_and_pinned_on_its_own_dns(): void
     {
-        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', '93.184.216.34'), $this->dns(), $this->policy());
+        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', TestNetwork::routable(34)), $this->dns(), $this->policy());
 
-        $this->assertContains('cdn.example.net:443:151.101.1.69', $client->resolveEntries('https://cdn.example.net/x'));
+        $this->assertContains('cdn.example.net:443:'.TestNetwork::routable(69), $client->resolveEntries('https://cdn.example.net/x'));
     }
 
     public function test_a_host_resolving_to_loopback_is_refused_before_any_connection(): void
     {
-        $client = new CurlSourceHttpClient(null, static fn (): array => ['127.0.0.1'], $this->policy());
+        $client = new CurlSourceHttpClient(null, static fn (): array => [TestNetwork::LOOPBACK], $this->policy());
 
         $this->expectException(RuntimeException::class);
         $client->resolveEntries('https://rebind.example/');
@@ -63,9 +64,9 @@ class WordpressMigrationSourceIpTest extends TestCase
 
     public function test_a_redirect_to_a_docker_or_lan_address_is_refused_before_any_connection(): void
     {
-        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', '93.184.216.34'), $this->dns(), $this->policy());
+        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', TestNetwork::routable(34)), $this->dns(), $this->policy());
 
-        foreach (['http://sites-db:3306/', 'http://172.18.0.5:5000/', 'http://10.0.0.1:8006/', 'http://93.184.216.40/'] as $url) {
+        foreach (['http://sites-db:3306/', 'http://'.TestNetwork::container(5).':5000/', 'http://'.TestNetwork::private(1).':8006/', 'http://'.TestNetwork::routable(40).'/'] as $url) {
             try {
                 $client->resolveEntries($url);
                 $this->fail("{$url} must be refused.");
@@ -77,7 +78,7 @@ class WordpressMigrationSourceIpTest extends TestCase
 
     public function test_a_source_ip_pin_is_checked_again_before_it_is_used(): void
     {
-        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', '172.18.0.5'), $this->dns(), $this->policy());
+        $client = new CurlSourceHttpClient(new SourceIpPin('example.com', TestNetwork::container(5)), $this->dns(), $this->policy());
 
         $this->expectExceptionMessage(SourceFetchGuard::REFUSED);
         $client->resolveEntries('https://example.com/');
@@ -85,7 +86,7 @@ class WordpressMigrationSourceIpTest extends TestCase
 
     public function test_an_ip_url_needs_no_pin_and_an_ipv6_pin_is_bracketed(): void
     {
-        $this->assertSame([], (new CurlSourceHttpClient(null, $this->dns(), $this->policy()))->resolveEntries('http://93.184.216.34/'));
+        $this->assertSame([], (new CurlSourceHttpClient(null, $this->dns(), $this->policy()))->resolveEntries('http://'.TestNetwork::routable(34).'/'));
         $this->assertContains(
             'example.com:443:[2606:2800:220:1:248:1893:25c8:1946]',
             (new CurlSourceHttpClient(new SourceIpPin('example.com', '2606:2800:220:1:248:1893:25c8:1946'), null, $this->policy()))->resolveEntries('https://example.com/'),
@@ -94,7 +95,7 @@ class WordpressMigrationSourceIpTest extends TestCase
 
     public function test_access_pins_the_host_of_the_source_url(): void
     {
-        $access = new SourceAccess(url: 'https://Example.com/blog', method: WordpressMigration::METHOD_WP_ADMIN, sourceIp: '93.184.216.34');
+        $access = new SourceAccess(url: 'https://Example.com/blog', method: WordpressMigration::METHOD_WP_ADMIN, sourceIp: TestNetwork::routable(34));
 
         $this->assertSame('example.com', $access->pin()?->host);
         $this->assertNull((new SourceAccess(url: 'https://example.com'))->pin());
@@ -112,26 +113,26 @@ class WordpressMigrationSourceIpTest extends TestCase
     public static function refusedAddresses(): array
     {
         return [
-            'loopback' => ['127.0.0.1'],
-            'link-local / metadata' => ['169.254.169.254'],
-            'private' => ['10.1.2.3'],
-            'docker bridge' => ['172.17.0.1'],
-            'private lan' => ['192.168.1.10'],
-            'carrier-grade nat' => ['100.64.0.1'],
-            'unspecified' => ['0.0.0.0'],
+            'loopback' => [TestNetwork::LOOPBACK],
+            'link-local / metadata' => [TestNetwork::METADATA],
+            'private' => [TestNetwork::private(3)],
+            'docker bridge' => [TestNetwork::DOCKER_BRIDGE_GATEWAY],
+            'private lan' => [TestNetwork::private2(10)],
+            'carrier-grade nat' => [TestNetwork::CGNAT],
+            'unspecified' => [TestNetwork::ANY],
             'ipv6 loopback' => ['::1'],
             'ipv6 link-local' => ['fe80::1'],
             'ipv6 unique local' => ['fd00::1'],
-            'mapped loopback' => ['::ffff:127.0.0.1'],
-            "engine's own" => ['93.184.216.40'],
-            "engine's subnet" => ['93.184.217.9'],
+            'mapped loopback' => ['::ffff:'.TestNetwork::LOOPBACK],
+            "engine's own" => [TestNetwork::routable(40)],
+            "engine's subnet" => [TestNetwork::add(TestNetwork::routable(9), 256)],
             'not an address' => ['example.com'],
         ];
     }
 
     public function test_source_ip_accepts_a_public_address(): void
     {
-        $this->assertNull($this->policy()->refusal('93.184.216.34'));
+        $this->assertNull($this->policy()->refusal(TestNetwork::routable(34)));
         $this->assertNull($this->policy()->refusal('2606:2800:220:1:248:1893:25c8:1946'));
     }
 
@@ -139,11 +140,11 @@ class WordpressMigrationSourceIpTest extends TestCase
     {
         OutboundUrl::setPolicyForTests(true, null);
         try {
-            $this->assertNull($this->policy()->refusal('10.1.2.3'));
+            $this->assertNull($this->policy()->refusal(TestNetwork::private(3)));
             $this->assertNull($this->policy()->refusal('fd00::1'));
-            $this->assertNotNull($this->policy()->refusal('127.0.0.1'));
-            $this->assertNotNull($this->policy()->refusal('100.64.0.1'));
-            $this->assertNotNull($this->policy()->refusal('93.184.216.40'));
+            $this->assertNotNull($this->policy()->refusal(TestNetwork::LOOPBACK));
+            $this->assertNotNull($this->policy()->refusal(TestNetwork::CGNAT));
+            $this->assertNotNull($this->policy()->refusal(TestNetwork::routable(40)));
         } finally {
             OutboundUrl::setPolicyForTests(null, null);
         }
@@ -154,7 +155,7 @@ class WordpressMigrationSourceIpTest extends TestCase
         return new SourceIpPolicy(new class extends EngineAddresses {
             public function ranges(): array
             {
-                return ['93.184.216.40', '93.184.217.0/24'];
+                return [TestNetwork::routable(40), TestNetwork::prefix(TestNetwork::add(TestNetwork::routable(), 256), 24)];
             }
         });
     }
@@ -165,9 +166,9 @@ class WordpressMigrationSourceIpTest extends TestCase
     private function dns(): callable
     {
         return static fn (string $host): array => match ($host) {
-            'example.com', 'www.example.com' => ['93.184.215.20', '93.184.215.21'],
-            'cdn.example.net' => ['151.101.1.69'],
-            'sites-db' => ['172.20.0.2'],
+            'example.com', 'www.example.com' => [TestNetwork::routable(20), TestNetwork::routable(21)],
+            'cdn.example.net' => [TestNetwork::routable(69)],
+            'sites-db' => [TestNetwork::container2(2)],
             default => [],
         };
     }

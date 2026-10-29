@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordingFirewall;
 use Tests\Support\RecordingSystem;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -599,11 +600,11 @@ PEM;
         $access = $this->access();
         $access->allow($this->user('alice'), ApiAccess::SCOPE_SELF, false);
 
-        foreach (['https://1.2.3.4:2011', 'https://1.2.3.4', 'https://1.2.3.4/'] as $appUrl) {
+        foreach (['https://'.TestNetwork::public(4).':2011', 'https://'.TestNetwork::public(4), 'https://'.TestNetwork::public(4).'/'] as $appUrl) {
             config(['app.url' => $appUrl]);
 
             $this->assertSame(
-                'https://1.2.3.4:2011/api',
+                'https://'.TestNetwork::public(4).':2011/api',
                 $access->envFor($this->user('alice'))[ApiAccess::ENV_URL],
                 $appUrl
             );
@@ -615,7 +616,7 @@ PEM;
         $access = $this->access();
         $access->allow($this->user('alice'), ApiAccess::SCOPE_SELF, false);
 
-        foreach (['', 'not-a-url', '1.2.3.4:2011', 'https://1.2.3.4:2011/panel'] as $appUrl) {
+        foreach (['', 'not-a-url', TestNetwork::public(4).':2011', 'https://'.TestNetwork::public(4).':2011/panel'] as $appUrl) {
             config(['app.url' => $appUrl]);
 
             $env = $access->envFor($this->user('alice'));

@@ -9,6 +9,7 @@ use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** `…/domains/{domain}/cdn`: Cloudflare status, purge and security level over Http::fake. */
@@ -443,7 +444,7 @@ class CdnHttpTest extends TestCase
                     'id' => 'record-id',
                     'type' => 'A',
                     'name' => 'shop.example.test',
-                    'content' => '192.0.2.10',
+                    'content' => TestNetwork::public3(10),
                     'proxied' => true,
                 ]],
             ]),

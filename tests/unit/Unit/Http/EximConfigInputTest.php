@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Validator;
 use Laravel\Mcp\Request as McpRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -63,7 +64,7 @@ class EximConfigInputTest extends TestCase
             'sender domain with a pipe' => ['sender_domain', 'example.com|x'],
             'sender domain with a space' => ['sender_domain', 'example.com rm'],
             // Senders are rewritten to `<local>_at_<domain>@<sender_domain>`.
-            'sender domain that is an IPv4 address' => ['sender_domain', '192.0.2.10'],
+            'sender domain that is an IPv4 address' => ['sender_domain', TestNetwork::public3(10)],
             'sender domain that is an IPv6 address' => ['sender_domain', '2001:db8::1'],
             // passwd.client is written verbatim (engine#790); a line break there
             // would start a second `*:user:pass` entry.
@@ -127,7 +128,7 @@ class EximConfigInputTest extends TestCase
             'sender_domain' => 'mail.example.com',
         ];
         $overrides = [
-            ['smtp_host' => '192.0.2.10', 'smtp_port' => '25'],
+            ['smtp_host' => TestNetwork::public3(10), 'smtp_port' => '25'],
             ['smtp_host' => 'mail_relay', 'smtp_port' => '2525'],
             // An absolute name, accepted before: stored without its dot.
             ['smtp_host' => 'smtp.example.com.', 'amazon_ses_smtp_endpoint' => 'email-smtp.eu-west-1.amazonaws.com.', 'sender_domain' => 'mail.example.com.'],

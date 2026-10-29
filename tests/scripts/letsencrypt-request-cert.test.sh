@@ -7,7 +7,10 @@
 # Let's Encrypt failure limit.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/test-network.sh"
+ADDRESS=$(tn_host PUBLIC 7)
+DETECTED=$(tn_host PUBLIC_2 9)
 
 # Sourcing defines the functions; `main` is guarded against sourcing.
 # shellcheck source=./letsencrypt-request-cert.sh
@@ -55,37 +58,37 @@ expect_refusal() {
 # --- the derived default ------------------------------------------------------
 
 expect_domain "public address becomes the dashed .direct name" \
-    "203-0-113-7.panelalpha.direct" --ip 203.0.113.7
+    "${ADDRESS//./-}.panelalpha.direct" --ip "$ADDRESS"
 expect_domain "--base-domain changes the zone" \
-    "203-0-113-7.example.net" --ip 203.0.113.7 --base-domain example.net
-FAKE_PUBLIC_IP=198.51.100.9 \
+    "${ADDRESS//./-}.example.net" --ip "$ADDRESS" --base-domain example.net
+FAKE_PUBLIC_IP="$DETECTED" \
     expect_domain "detected address is used when --ip is absent" \
-    "198-51-100-9.panelalpha.direct"
+    "${DETECTED//./-}.panelalpha.direct"
 
 # --- precedence -----------------------------------------------------------------
 
-expect_domain "positional argument wins" "panel.example.com" panel.example.com --ip 203.0.113.7
-expect_domain "--domain wins" "panel.example.com" --domain panel.example.com --ip 203.0.113.7
-expect_domain "--domain=value form" "panel.example.com" --domain=panel.example.com --ip 203.0.113.7
+expect_domain "positional argument wins" "panel.example.com" panel.example.com --ip "$ADDRESS"
+expect_domain "--domain wins" "panel.example.com" --domain panel.example.com --ip "$ADDRESS"
+expect_domain "--domain=value form" "panel.example.com" --domain=panel.example.com --ip "$ADDRESS"
 FAKE_SETTING="admin.example.org" \
-    expect_domain "cert_domain setting beats the default" "admin.example.org" --ip 203.0.113.7
+    expect_domain "cert_domain setting beats the default" "admin.example.org" --ip "$ADDRESS"
 FAKE_SETTING="admin.example.org" \
-    expect_domain "argument beats the cert_domain setting" "panel.example.com" panel.example.com --ip 203.0.113.7
+    expect_domain "argument beats the cert_domain setting" "panel.example.com" panel.example.com --ip "$ADDRESS"
 
 # --- refusals -------------------------------------------------------------------
 
-expect_refusal "private address gets no default name" --ip 10.0.0.5
-expect_refusal "link-local address gets no default name" --ip 169.254.169.254
+expect_refusal "private address gets no default name" --ip "$TN_PRIVATE_10"
+expect_refusal "link-local address gets no default name" --ip "$TN_METADATA"
 expect_refusal "no address and no domain" --ip ""
-expect_refusal "malformed address" --ip 203.0.113.999
-expect_refusal "an address is not a domain" --domain 203.0.113.7
+expect_refusal "malformed address" --ip "${ADDRESS%.*}.999"
+expect_refusal "an address is not a domain" --domain "$ADDRESS"
 expect_refusal "a bare label is not a domain" --domain panel
 expect_refusal "two positional domains" a.example.com b.example.com
 expect_refusal "unknown option" --bogus
 
 # --- helpers --------------------------------------------------------------------
 
-if le_is_fqdn "203-0-113-7.panelalpha.direct" && ! le_is_fqdn "-bad.example.com" && ! le_is_fqdn "a..b"; then
+if le_is_fqdn "${ADDRESS//./-}.panelalpha.direct" && ! le_is_fqdn "-bad.example.com" && ! le_is_fqdn "a..b"; then
     echo "PASS: le_is_fqdn"
 else
     echo "FAIL: le_is_fqdn"

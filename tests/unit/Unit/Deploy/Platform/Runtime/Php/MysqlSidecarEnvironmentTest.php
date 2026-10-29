@@ -8,13 +8,14 @@ use App\Lib\Deploy\Platform\Runtime\Php\DatabaseSettings;
 use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * The database the sidecar provisions, reached from the app that shares its
  * network namespace.
  *
  * Firefly III is why this exists. The engine emitted a `db` sidecar with
- * `network_mode: service:app`, so the database is at 127.0.0.1:3306 and the
+ * `network_mode: service:app`, so the database is on loopback port 3306 and the
  * name `db` resolves to nothing -- but the app's environment came from the
  * repository's own `.env.example`, which is written for a workstation compose
  * with a real `db` service and says `DB_HOST=db`. The deploy then died on
@@ -32,7 +33,7 @@ class MysqlSidecarEnvironmentTest extends TestCase
     {
         return [
             'connection' => 'mysql',
-            'host' => '127.0.0.1',
+            'host' => TestNetwork::LOOPBACK,
             'port' => '3306',
             'database' => 'firefly_app',
             'username' => 'firefly_app',
@@ -44,7 +45,7 @@ class MysqlSidecarEnvironmentTest extends TestCase
     {
         $env = MysqlSidecar::connectionEnvironment(DatabaseSettings::fromArray($this->settings()));
 
-        $this->assertSame('127.0.0.1', $env['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $env['DB_HOST']);
         $this->assertSame('3306', $env['DB_PORT']);
         // The network namespace is shared, so a socket path the example might
         // carry would point at a socket this container never creates.
@@ -95,7 +96,7 @@ class MysqlSidecarEnvironmentTest extends TestCase
         $parsed = Yaml::parse(DeployCompose::framework($decision, 8000));
         $app = $parsed['services']['app'];
 
-        $this->assertSame('127.0.0.1', $app['environment']['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $app['environment']['DB_HOST']);
         $this->assertSame(['.env'], $app['env_file']);
     }
 
@@ -110,13 +111,13 @@ class MysqlSidecarEnvironmentTest extends TestCase
             array_merge($this->settings(), ['host' => 'db'])
         );
 
-        $this->assertSame('127.0.0.1', $decision['env']['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $decision['env']['DB_HOST']);
         $this->assertSame('production', $decision['env']['APP_ENV']);
         $this->assertSame('service:app', $decision['sidecars']['db']['network_mode']);
         $this->assertArrayHasKey('dbdata', $decision['volumes']);
 
         $app = Yaml::parse(DeployCompose::framework($decision + ['image' => 'php:8.3-apache'], 8000))['services']['app'];
-        $this->assertSame('127.0.0.1', $app['environment']['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $app['environment']['DB_HOST']);
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Models\User;
 use App\System;
 use App\System\Services\Webserver\NginxProxy;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -23,16 +24,16 @@ class DindVhostRuleUpstreamTest extends TestCase
         $this->bootInMemoryDatabase();
         $alice = $this->makeUser('alice');
         $this->makeUser('bob');
-        foreach ([80 => 'bob', 443 => 'alice', 8443 => '172.25.0.2', 8444 => 'core'] as $port => $upstream) {
+        foreach ([80 => 'bob', 443 => 'alice', 8443 => TestNetwork::container2(2), 8444 => 'core'] as $port => $upstream) {
             $this->rule('user', 'alice', $port, $upstream);
         }
-        $this->rule('system', null, 9443, '10.0.0.5');
+        $this->rule('system', null, 9443, TestNetwork::private(5));
 
         $vars = $this->vars($alice);
 
         $this->assertNull($vars['proxy_http']);
         $this->assertSame('alice', $vars['proxy_https']['host'] ?? null);
-        $this->assertSame([[9443, '10.0.0.5']], array_map(
+        $this->assertSame([[9443, TestNetwork::private(5)]], array_map(
             static fn (array $extra): array => [$extra['listen_port'], $extra['host']],
             $vars['proxy_extra']
         ));

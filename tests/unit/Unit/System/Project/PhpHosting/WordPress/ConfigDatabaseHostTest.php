@@ -8,6 +8,7 @@ use App\System\Project;
 use App\System\Project\PhpHosting\WordPress\Config;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -52,11 +53,11 @@ class ConfigDatabaseHostTest extends TestCase
     {
         config(['env.USERS_DB_HOST' => 'mysql-users.test']);
 
-        $this->config([])->create(['dbname' => 'alice_wp', 'dbuser' => 'alice_u', 'dbhost' => '127.0.0.1:3307']);
+        $this->config([])->create(['dbname' => 'alice_wp', 'dbuser' => 'alice_u', 'dbhost' => TestNetwork::LOOPBACK.':3307']);
         $this->config(['template' => 'dind'])->create(['dbname' => 'wordpress', 'dbuser' => 'wordpress', 'dbhost' => 'mariadb']);
 
         $this->assertCount(2, $this->runs);
-        $this->assertContains('--dbhost=127.0.0.1:3307', $this->runs[0]);
+        $this->assertContains('--dbhost='.TestNetwork::LOOPBACK.':3307', $this->runs[0]);
         $this->assertContains('--dbhost=mariadb', $this->runs[1]);
     }
 

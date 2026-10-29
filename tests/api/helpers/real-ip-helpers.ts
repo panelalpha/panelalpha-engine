@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { testNetwork } from '@/helpers/test-network';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,7 +18,7 @@ export const engineRoot = path.resolve(__dirname, '../../..');
 export const engineTemplatesRoot = path.join(engineRoot, 'templates');
 
 /** RFC5737 documentation IPv4 used as a synthetic Cloudflare client IP in probes. */
-export const CLOUDFLARE_PROBE_CLIENT_IP = '203.0.113.10';
+export const CLOUDFLARE_PROBE_CLIENT_IP = testNetwork.public(10);
 
 export const REAL_IP_PROBE_RELATIVE_PATH = 'public_html/real-ip-probe.php';
 
@@ -60,7 +61,7 @@ export function webserverMatchesAssetCheck(slug: string, webserverIncludes?: str
 export const REAL_IP_ENGINE_ASSET_CHECKS: RealIpEngineAssetCheck[] = [
   {
     relativePath: 'templates/user/default/project/apache-conf/remoteip.conf',
-    mustContain: ['RemoteIPHeader X-Real-IP', '172.16.0.0/12'],
+    mustContain: ['RemoteIPHeader X-Real-IP', testNetwork.PRIVATE_172_CIDR],
     webserverIncludes: 'nginx-proxy',
   },
   {

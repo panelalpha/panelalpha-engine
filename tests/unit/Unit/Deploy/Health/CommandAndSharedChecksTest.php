@@ -8,6 +8,7 @@ use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The `command` group, and the checks that belong to no runtime at all.
@@ -53,7 +54,7 @@ class CommandAndSharedChecksTest extends TestCase
     private function probe(string $runtime, int $status, string $body): array
     {
         return CheckRunner::for($runtime)
-            ->run(new ProbedResponse($status, $body, 'http://127.0.0.1:8000/'), $this->dir);
+            ->run(new ProbedResponse($status, $body, 'http://' . TestNetwork::LOOPBACK . ':8000/'), $this->dir);
     }
 
     /**
@@ -181,7 +182,7 @@ class CommandAndSharedChecksTest extends TestCase
         $report = $this->probe(
             PlatformManifest::RUNTIME_COMPOSE,
             200,
-            'Error: connect ECONNREFUSED 172.18.0.3:5432'
+            'Error: connect ECONNREFUSED ' . TestNetwork::container(3) . ':5432'
         );
 
         $this->assertSame('dependency_unreachable', $report['serving']);

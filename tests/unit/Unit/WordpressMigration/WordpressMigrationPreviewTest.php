@@ -12,6 +12,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\MigrationTarget;
 use App\System\Project\PhpHosting\WordPress\Migration\PreviewTunnel;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\CreateProjectStep;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * create_project builds the project on the kept domain with no tunnel, or
@@ -48,7 +49,7 @@ class WordpressMigrationPreviewTest extends ImportTargetTestCase
         $this->assertSame('wp.com', $status['target_domain']);
         $this->assertTrue($status['created_project']);
         $this->assertSame('https://wp-com.panelalpha.online', $status['preview_url']);
-        $this->assertSame(['type' => 'A', 'value' => self::ENGINE_IPV4], $status['dns']);
+        $this->assertSame(['type' => 'A', 'value' => self::engineIpv4()], $status['dns']);
     }
 
     public function test_the_preview_keeps_the_source_subdirectory(): void
@@ -110,7 +111,7 @@ class WordpressMigrationPreviewTest extends ImportTargetTestCase
 
     public function test_an_allocated_online_name_needs_no_preview_and_no_dns(): void
     {
-        $migration = $this->start(MigrationTarget::newProject(null, null), 'http://198.51.100.20/');
+        $migration = $this->start(MigrationTarget::newProject(null, null), 'http://' . TestNetwork::public2(20) . '/');
         $creator = $this->creator('wordpress-a1b2.panelalpha.online');
 
         $this->createProject($creator, $this->preview())->run($migration);

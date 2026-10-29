@@ -7,6 +7,7 @@ use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Http\OutboundUrl;
 use Illuminate\Support\Facades\Http;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -31,7 +32,7 @@ class SourceResolverTreeTest extends TestCase
         if (trim((string) shell_exec('command -v git 2>/dev/null')) === '') {
             $this->markTestSkipped('git is not on PATH');
         }
-        OutboundUrl::setResolverForTests(static fn (string $host): array => ['140.82.121.4']);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(4)]);
         $this->tmp = sys_get_temp_dir() . '/resolver-tree-' . bin2hex(random_bytes(6));
         mkdir($this->tmp . '/origin', 0700, true);
         mkdir($this->tmp . '/home', 0700, true);

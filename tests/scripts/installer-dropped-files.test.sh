@@ -4,11 +4,11 @@
 # and this one does not leaves the engine dir, while host state, files nobody
 # tracked and anything outside the dir stay byte for byte.
 #
-#   bash scripts/installer-dropped-files.test.sh
+#   bash tests/scripts/installer-dropped-files.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 

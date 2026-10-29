@@ -7,6 +7,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\Steps\InstallSourcePluginS
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 use ZipArchive;
 
 /**
@@ -195,7 +196,7 @@ class WordpressMigratorZipTest extends WordpressMigrationTestCase
     public function test_download_failure_raises_clear_error(): void
     {
         try {
-            (new WordpressMigratorZip())->downloadAndRepack('http://127.0.0.1:1/does-not-exist.zip');
+            (new WordpressMigratorZip())->downloadAndRepack('http://' . TestNetwork::LOOPBACK . ':1/does-not-exist.zip');
             $this->fail('Expected RuntimeException for failed download');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('download', strtolower($e->getMessage()));

@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Http\OutboundUrl;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
+use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 
@@ -20,7 +21,6 @@ class HostGitPinTest extends DeployHookTestCase
 
     private const URL = '/api/projects/alice/git';
     private const REPO = 'https://github.com/octocat/Hello-World.git';
-    private const PIN = 'http.curloptResolve=github.com:443:140.82.121.4';
 
     protected function setUp(): void
     {
@@ -40,6 +40,11 @@ class HostGitPinTest extends DeployHookTestCase
         DeployLogger::deleteUserLogs('alice');
 
         parent::tearDown();
+    }
+
+    private static function pin(): string
+    {
+        return 'http.curloptResolve=github.com:443:' . TestNetwork::routable(4);
     }
 
     private function resolvesTo(string $address): void
@@ -78,7 +83,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_classic_pull_is_pinned_to_the_checked_address(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->classicSiteGit();
         $this->withHostRepository();
 
@@ -86,14 +91,14 @@ class HostGitPinTest extends DeployHookTestCase
 
         $this->assertNotSame([], $this->remoteCalls());
         foreach ($this->remoteCalls() as $call) {
-            $this->assertStringContainsString(self::PIN, $call);
+            $this->assertStringContainsString(self::pin(), $call);
             $this->assertStringContainsString('http.followRedirects=false', $call);
         }
     }
 
     public function test_a_classic_branch_listing_is_pinned_to_the_checked_address(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->classicSiteGit();
         $this->withHostRepository();
 
@@ -101,13 +106,13 @@ class HostGitPinTest extends DeployHookTestCase
 
         $this->assertNotSame([], $this->remoteCalls());
         foreach ($this->remoteCalls() as $call) {
-            $this->assertStringContainsString(self::PIN, $call);
+            $this->assertStringContainsString(self::pin(), $call);
         }
     }
 
     public function test_a_classic_connect_fetches_from_the_checked_address(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->user('main', ['template' => 'wordpress', 'git_repo' => '', 'git_branch' => null]);
         $this->respond('rev-parse --is-inside-work-tree', 128, "fatal: not a git repository\n");
         $this->respond('remote get-url', 0, self::REPO . "\n");
@@ -117,13 +122,13 @@ class HostGitPinTest extends DeployHookTestCase
 
         $this->assertNotSame([], $this->remoteCalls());
         foreach ($this->remoteCalls() as $call) {
-            $this->assertStringContainsString(self::PIN, $call);
+            $this->assertStringContainsString(self::pin(), $call);
         }
     }
 
     public function test_the_address_pinned_is_the_one_git_resolves_origin_to(): void
     {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'rebind.example' ? ['127.0.0.1'] : ['140.82.121.4']);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'rebind.example' ? [TestNetwork::LOOPBACK] : [TestNetwork::routable(4)]);
         $this->classicSiteGit();
         $this->withHostRepository('https://rebind.example/x.git');
 
@@ -136,7 +141,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_classic_pull_whose_host_now_resolves_to_loopback_is_refused_before_git_connects(): void
     {
-        $this->resolvesTo('127.0.0.1');
+        $this->resolvesTo(TestNetwork::LOOPBACK);
         $this->classicSiteGit();
         $this->withHostRepository();
 
@@ -150,7 +155,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_dind_pull_runs_behind_the_account_network_unpinned(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $user = $this->siteGitUser();
         $user->putSiteGit('public_html', ['repo_url' => self::REPO, 'branch' => 'main', 'token' => null]);
         $this->withRepository();
@@ -165,7 +170,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_host_git_older_than_2_37_refuses_a_pull_it_cannot_pin(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->hostGitIs('2.34.1');
         $this->classicSiteGit();
         $this->withHostRepository();
@@ -181,7 +186,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_host_git_older_than_2_37_connects_without_fetching_and_says_why(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->hostGitIs('2.34.1');
         $this->user('main', ['template' => 'wordpress', 'git_repo' => '', 'git_branch' => null]);
         $this->respond('rev-parse --is-inside-work-tree', 128, "fatal: not a git repository\n");
@@ -196,7 +201,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_host_git_older_than_2_37_still_fetches_a_name_the_operator_allows(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         OutboundUrl::setPolicyForTests(null, ['github.com']);
         $this->hostGitIs('2.34.1');
         $this->classicSiteGit();
@@ -209,7 +214,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_a_host_git_of_2_37_or_newer_is_pinned(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->hostGitIs('2.43.0');
         $this->classicSiteGit();
         $this->withHostRepository();
@@ -218,13 +223,13 @@ class HostGitPinTest extends DeployHookTestCase
 
         $this->assertNotSame([], $this->remoteCalls());
         foreach ($this->remoteCalls() as $call) {
-            $this->assertStringContainsString(self::PIN, $call);
+            $this->assertStringContainsString(self::pin(), $call);
         }
     }
 
     public function test_the_host_git_version_is_read_once_across_requests(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->hostGitIs('2.43.0');
         $this->classicSiteGit();
         $this->withHostRepository();
@@ -238,7 +243,7 @@ class HostGitPinTest extends DeployHookTestCase
 
     public function test_an_old_host_git_does_not_refuse_a_dind_pull(): void
     {
-        $this->resolvesTo('140.82.121.4');
+        $this->resolvesTo(TestNetwork::routable(4));
         $this->hostGitIs('2.34.1');
         $user = $this->siteGitUser();
         $user->putSiteGit('public_html', ['repo_url' => self::REPO, 'branch' => 'main', 'token' => null]);

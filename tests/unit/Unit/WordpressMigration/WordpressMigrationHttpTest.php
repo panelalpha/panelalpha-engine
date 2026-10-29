@@ -8,6 +8,7 @@ use App\Jobs\MigrateWordpress;
 use App\Models\WordpressMigration;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use Tests\Support\TestNetwork;
 
 /**
  * Start, status, and resume are registered. A start whose JSON has no
@@ -30,7 +31,7 @@ class WordpressMigrationHttpTest extends WordpressMigrationTestCase
 
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => $host === 'example.com' ? ['93.184.216.34'] : [$host],
+            static fn (string $host): array => $host === 'example.com' ? [TestNetwork::routable(34)] : [$host],
         );
     }
 
@@ -69,7 +70,7 @@ class WordpressMigrationHttpTest extends WordpressMigrationTestCase
         $this->withoutMiddleware();
 
         $response = $this->postJson('/api/wordpress/migrations', [
-            'url' => 'http://127.0.0.1/latest/meta-data',
+            'url' => 'http://' . TestNetwork::LOOPBACK . '/latest/meta-data',
             'username' => 'admin',
             'password' => 'secret-must-not-persist',
         ]);

@@ -9,6 +9,7 @@ use App\System\Network;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** `POST /ip/subnets` stores a subnet only once the host routes it, as `POST /ip/assign` does for an address. */
@@ -68,9 +69,9 @@ class IpSubnetRouteVerificationTest extends TestCase
     /** `ip route add` exits 2 on a route that is already there; the host routes the subnet all the same. */
     public function test_a_route_that_was_already_there_is_accepted(): void
     {
-        $this->app->instance(System::class, $this->host(ipv6Default: false, routed: ['192.0.2.0/24'], addError: 'RTNETLINK answers: File exists'));
+        $this->app->instance(System::class, $this->host(ipv6Default: false, routed: [TestNetwork::public3(0).'/24'], addError: 'RTNETLINK answers: File exists'));
 
-        $this->postJson('/api/ip/subnets', ['ip' => '192.0.2.0', 'mask' => 24])->assertStatus(201);
+        $this->postJson('/api/ip/subnets', ['ip' => TestNetwork::public3(0), 'mask' => 24])->assertStatus(201);
 
         $this->assertSame(1, IpSubnet::query()->count());
     }
@@ -99,7 +100,7 @@ class IpSubnetRouteVerificationTest extends TestCase
                 $joined = implode(' ', $argv);
 
                 return match (true) {
-                    $joined === 'ip route show default' => FakeProcess::ok("default via 10.0.0.1 dev eth0 proto dhcp metric 100\n"),
+                    $joined === 'ip route show default' => FakeProcess::ok('default via '.TestNetwork::private(1)." dev eth0 proto dhcp metric 100\n"),
                     $joined === 'ip -6 route show default' => FakeProcess::ok($this->ipv6Default ? "default via fe80::1 dev eth0 proto ra metric 1024\n" : ''),
                     str_contains($joined, 'route add') => $this->addError === null ? FakeProcess::ok() : FakeProcess::failed($this->addError, 2),
                     str_contains($joined, 'route show') => FakeProcess::ok(in_array(end($argv), $this->routed, true) ? end($argv) . " via gw dev eth0\n" : ''),

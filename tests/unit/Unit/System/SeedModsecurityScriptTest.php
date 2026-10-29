@@ -13,7 +13,7 @@ class SeedModsecurityScriptTest extends TestCase
 {
     public function test_the_script_passes_its_own_checks(): void
     {
-        $script = dirname(__DIR__, 4) . '/scripts/seed-modsecurity.test.sh';
+        $script = dirname(__DIR__, 4) . '/tests/scripts/seed-modsecurity.test.sh';
         $process = Process::fromShellCommandline('bash ' . escapeshellarg($script));
         $process->run();
 

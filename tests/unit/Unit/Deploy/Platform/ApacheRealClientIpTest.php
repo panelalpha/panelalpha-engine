@@ -4,10 +4,11 @@ namespace Tests\Unit\Deploy\Platform;
 
 use App\Lib\Deploy\Platform\Runtime\Php\PhpApacheConfig;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
- * Behind the engine's proxy a PHP app saw REMOTE_ADDR=172.25.0.1, the Docker
- * bridge gateway, for every visitor. The proxy already sends the
+ * Behind the engine's proxy a PHP app saw the Docker bridge gateway as
+ * REMOTE_ADDR for every visitor. The proxy already sends the
  * client in X-Real-IP; Apache has to be told to believe it, and only from a
  * private source so a visitor cannot pick their own address.
  */
@@ -32,7 +33,7 @@ class ApacheRealClientIpTest extends TestCase
 
         $ranges = explode(' ', trim($m[1]));
         sort($ranges);
-        $this->assertSame(['10.0.0.0/8', '127.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'], $ranges);
+        $this->assertSame([TestNetwork::PRIVATE_10_CIDR, TestNetwork::LOOPBACK_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR], $ranges);
     }
 
     /**
@@ -48,7 +49,7 @@ class ApacheRealClientIpTest extends TestCase
 
         $conf = (string) file_get_contents("{$dir}/apache-conf/remoteip.conf");
         $this->assertMatchesRegularExpression('/^RemoteIPHeader X-Real-IP$/m', $conf);
-        $this->assertMatchesRegularExpression('/^RemoteIPTrustedProxy 172\.16\.0\.0\/12$/m', $conf);
+        $this->assertMatchesRegularExpression('/^RemoteIPTrustedProxy '.preg_quote(TestNetwork::PRIVATE_172_CIDR, '/').'$/m', $conf);
 
         foreach (['docker-compose.yml-fpm-apache.blade.php', 'docker-compose.yml.blade.php'] as $compose) {
             $this->assertStringContainsString(

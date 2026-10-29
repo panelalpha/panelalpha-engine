@@ -7,6 +7,7 @@ use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\SslCheck;
 use App\Lib\Ssl\TlsHandshake;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The verdict comes from what a handshake with the domain returned, never from
@@ -15,10 +16,6 @@ use PHPUnit\Framework\TestCase;
 class SslCheckTest extends TestCase
 {
     private const DOMAIN = 'shop.example.com';
-
-    private const HOST_IP = '203.0.113.45';
-
-    private const BIND_IP = '10.0.0.5';
 
     /** @var list<array{address: string, name: string}> */
     private array $dialled = [];
@@ -39,19 +36,19 @@ class SslCheckTest extends TestCase
     public function test_a_name_with_no_records_does_not_resolve_and_the_engine_side_is_still_checked(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN]);
-        $result = $this->check([], [self::BIND_IP => $cert['cert']], $cert['cert']);
+        $result = $this->check([], [TestNetwork::private(5) => $cert['cert']], $cert['cert']);
 
         $this->assertSame(SslCheck::NOT_RESOLVING, $result['status']);
         $this->assertNull($result['public']);
         $this->assertFalse($result['dns']['points_here']);
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['engine']['certificate']['status']);
-        $this->assertSame([['address' => self::BIND_IP, 'name' => self::DOMAIN]], $this->dialled);
+        $this->assertSame([['address' => TestNetwork::private(5), 'name' => self::DOMAIN]], $this->dialled);
     }
 
     public function test_the_status_is_what_the_resolved_address_presents(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN, 'www.'.self::DOMAIN]);
-        $result = $this->check([self::HOST_IP], [self::HOST_IP => $cert['cert'], self::BIND_IP => $cert['cert']], $cert['cert']);
+        $result = $this->check([TestNetwork::public(45)], [TestNetwork::public(45) => $cert['cert'], TestNetwork::private(5) => $cert['cert']], $cert['cert']);
 
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['status']);
         $this->assertTrue($result['dns']['points_here']);
@@ -59,14 +56,14 @@ class SslCheckTest extends TestCase
         $this->assertSame([self::DOMAIN, 'www.'.self::DOMAIN], $result['public']['certificate']['names']);
         $this->assertTrue($result['public']['certificate']['covers_domain']);
         $this->assertContains($result['public']['certificate']['days_remaining'], [29, 30]);
-        $this->assertContains(['address' => self::HOST_IP, 'name' => self::DOMAIN], $this->dialled, 'the domain goes out as SNI');
+        $this->assertContains(['address' => TestNetwork::public(45), 'name' => self::DOMAIN], $this->dialled, 'the domain goes out as SNI');
     }
 
     public function test_the_installed_certificate_on_disk_does_not_decide_the_status(): void
     {
         $served = TestCertificates::selfSigned(['other.example.com']);
         $installed = TestCertificates::selfSigned([self::DOMAIN]);
-        $result = $this->check([self::HOST_IP], [self::HOST_IP => $served['cert'], self::BIND_IP => $served['cert']], $installed['cert']);
+        $result = $this->check([TestNetwork::public(45)], [TestNetwork::public(45) => $served['cert'], TestNetwork::private(5) => $served['cert']], $installed['cert']);
 
         $this->assertSame(CertificateStatus::DOMAIN_MISMATCH, $result['status']);
         $this->assertFalse($result['engine']['serves_installed'], 'a renewal the webserver never reloaded looks like this');
@@ -75,7 +72,7 @@ class SslCheckTest extends TestCase
     public function test_the_engine_serving_the_installed_certificate_says_so(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN]);
-        $result = $this->check([self::HOST_IP], [self::HOST_IP => $cert['cert'], self::BIND_IP => $cert['cert']], $cert['cert']);
+        $result = $this->check([TestNetwork::public(45)], [TestNetwork::public(45) => $cert['cert'], TestNetwork::private(5) => $cert['cert']], $cert['cert']);
 
         $this->assertTrue($result['engine']['serves_installed']);
         $this->assertSame(
@@ -88,10 +85,10 @@ class SslCheckTest extends TestCase
     {
         $cdn = TestCertificates::signedBy([self::DOMAIN], TestCertificates::authority('Pretend CDN CA'));
         $ours = TestCertificates::selfSigned([self::DOMAIN]);
-        $result = $this->check(['104.16.0.1'], ['104.16.0.1' => $cdn, self::BIND_IP => $ours['cert']], $ours['cert']);
+        $result = $this->check([TestNetwork::routable(1)], [TestNetwork::routable(1) => $cdn, TestNetwork::private(5) => $ours['cert']], $ours['cert']);
 
         $this->assertFalse($result['dns']['points_here']);
-        $this->assertSame('104.16.0.1', $result['public']['address']);
+        $this->assertSame(TestNetwork::routable(1), $result['public']['address']);
         $this->assertSame(CertificateStatus::UNTRUSTED_ISSUER, $result['status'], 'signed, but by an authority this host does not trust');
         $this->assertSame('Pretend CDN CA', $result['public']['certificate']['issuer']);
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['engine']['certificate']['status']);
@@ -99,17 +96,17 @@ class SslCheckTest extends TestCase
 
     public function test_a_private_address_that_is_not_ours_is_never_contacted(): void
     {
-        $result = $this->check(['169.254.169.254'], [], null);
+        $result = $this->check([TestNetwork::METADATA], [], null);
 
         $this->assertSame(SslCheck::REFUSED_ADDRESS, $result['status']);
         $this->assertTrue($result['public']['refused']);
-        $this->assertNotContains('169.254.169.254', array_column($this->dialled, 'address'));
+        $this->assertNotContains(TestNetwork::METADATA, array_column($this->dialled, 'address'));
     }
 
     public function test_a_private_address_that_is_ours_is_contacted(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN]);
-        $result = $this->check(['10.10.10.25'], ['10.10.10.25' => $cert['cert']], null, ['10.10.10.25']);
+        $result = $this->check([TestNetwork::private(25)], [TestNetwork::private(25) => $cert['cert']], null, [TestNetwork::private(25)]);
 
         $this->assertSame(CertificateStatus::SELF_SIGNED, $result['status']);
         $this->assertTrue($result['dns']['points_here']);
@@ -117,7 +114,7 @@ class SslCheckTest extends TestCase
 
     public function test_nothing_answering_is_unreachable_with_the_reason(): void
     {
-        $result = $this->check([self::HOST_IP], [], null);
+        $result = $this->check([TestNetwork::public(45)], [], null);
 
         $this->assertSame(SslCheck::UNREACHABLE, $result['status']);
         $this->assertFalse($result['public']['answered']);
@@ -128,7 +125,7 @@ class SslCheckTest extends TestCase
     public function test_an_expired_certificate_is_expired(): void
     {
         $cert = TestCertificates::selfSigned([self::DOMAIN], 1);
-        $result = $this->check([self::HOST_IP], [self::HOST_IP => $cert['cert']], null, [self::HOST_IP], time() + 3 * 86400);
+        $result = $this->check([TestNetwork::public(45)], [TestNetwork::public(45) => $cert['cert']], null, [TestNetwork::public(45)], time() + 3 * 86400);
 
         $this->assertSame(CertificateStatus::EXPIRED, $result['status']);
         $this->assertLessThan(0, $result['public']['certificate']['days_remaining']);
@@ -138,9 +135,9 @@ class SslCheckTest extends TestCase
     {
         $authority = TestCertificates::authority('Pretend Issuing CA');
         $leaf = TestCertificates::signedBy([self::DOMAIN], $authority);
-        $this->resolveTo([self::HOST_IP]);
-        $result = (new SslCheck($this->handshake([self::HOST_IP => $leaf], [$authority['cert']])))
-            ->check(self::DOMAIN, [self::HOST_IP], null, null);
+        $this->resolveTo([TestNetwork::public(45)]);
+        $result = (new SslCheck($this->handshake([TestNetwork::public(45) => $leaf], [$authority['cert']])))
+            ->check(self::DOMAIN, [TestNetwork::public(45)], null, null);
 
         $certificate = $result['public']['certificate'];
         $this->assertSame('Pretend Issuing CA', $result['signer']['common_name']);
@@ -168,9 +165,9 @@ class SslCheckTest extends TestCase
     {
         $authority = TestCertificates::authority();
         $leaf = TestCertificates::signedBy([self::DOMAIN], $authority);
-        $this->resolveTo([self::HOST_IP]);
-        $handshake = $this->handshake([self::HOST_IP => $leaf], [$authority['cert']]);
-        $result = (new SslCheck($handshake))->check(self::DOMAIN, [self::HOST_IP], null, null);
+        $this->resolveTo([TestNetwork::public(45)]);
+        $handshake = $this->handshake([TestNetwork::public(45) => $leaf], [$authority['cert']]);
+        $result = (new SslCheck($handshake))->check(self::DOMAIN, [TestNetwork::public(45)], null, null);
 
         $this->assertFalse($result['public']['certificate']['chain_trusted'], 'the throwaway root is in no store');
         $this->assertFalse($result['public']['certificate']['self_signed']);
@@ -187,7 +184,7 @@ class SslCheckTest extends TestCase
         $this->resolveTo($resolved);
 
         return (new SslCheck($this->handshake($presented), $now))
-            ->check(self::DOMAIN, $expected ?? [self::HOST_IP], self::BIND_IP, $installed);
+            ->check(self::DOMAIN, $expected ?? [TestNetwork::public(45)], TestNetwork::private(5), $installed);
     }
 
     /**

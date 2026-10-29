@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { randomTestNetAddress, requireFirewall } from '@/helpers/firewall-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { trustedAddressResponseSchema, trustedAddressesResponseSchema } from '@/schemas';
 
 /**
@@ -54,10 +55,10 @@ test.describe('Firewall trusted addresses', () => {
     const invalid: Record<string, unknown>[] = [
       {},
       { address: 'example.com' },
-      { address: '192.0.2.300' },
+      { address: testNetwork.public3(0).replace(/\d+$/, '300') },
       { address: randomTestNetAddress(), comment: 'two\nlines' },
       // Wider than /8 (IPv4) or /16 (IPv6) would keep much of the internet from ever being banned.
-      { address: '10.0.0.0/7' },
+      { address: testNetwork.prefix(testNetwork.private(), 7) },
       { address: '2001:db8::/15' },
     ];
     for (const body of invalid) {

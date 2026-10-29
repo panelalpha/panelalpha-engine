@@ -4,11 +4,11 @@
 # bootstrap downloads outlives the run, and the installer's exit code is the
 # updater's.
 #
-#   bash scripts/updater.test.sh
+#   bash tests/scripts/updater.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

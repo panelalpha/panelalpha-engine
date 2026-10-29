@@ -12,6 +12,7 @@ use App\System\Project\Dind\Strategy\ManifestDatabase;
 use Illuminate\Support\Facades\Facade;
 use Symfony\Component\Yaml\Yaml;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
 
@@ -62,7 +63,7 @@ class CopiedRunFileTest extends TestCase
                         'MAIL_HOST' => 'smtp.live.example.test',
                         'DB_PREFIX' => 'chyrp_',
                     ],
-                    'extra_hosts' => ['localhost:10.9.9.9', 'other:10.1.1.1'],
+                    'extra_hosts' => ['localhost:'.TestNetwork::private(9), 'other:'.TestNetwork::private(1)],
                 ],
                 'worker' => [
                     'image' => 'acme/worker',
@@ -87,7 +88,7 @@ class CopiedRunFileTest extends TestCase
         $this->assertSame('https://stg.example.test/uploads', $app['environment']['UPLOADS']);
         $this->assertSame('smtp.live.example.test', $app['environment']['MAIL_HOST']);
         $this->assertSame('chyrp_', $app['environment']['DB_PREFIX']);
-        $this->assertSame(['localhost:127.0.0.1', 'other:10.1.1.1'], $app['extra_hosts']);
+        $this->assertSame(['localhost:'.TestNetwork::LOOPBACK, 'other:'.TestNetwork::private(1)], $app['extra_hosts']);
         $this->assertSame(
             ['DB_DATABASE=stg_app', 'SITE=https://stg.example.test', 'PLAIN'],
             $compose['services']['worker']['environment']

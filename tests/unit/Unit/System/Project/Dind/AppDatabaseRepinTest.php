@@ -3,6 +3,7 @@
 namespace Tests\Unit\System\Project\Dind;
 
 use App\System\Project\Dind\AppDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -11,43 +12,48 @@ use Tests\TestCase;
  */
 class AppDatabaseRepinTest extends TestCase
 {
-    private const COMPOSE = <<<'YAML'
+    private static function compose(): string
+    {
+        $db = TestNetwork::container2(3);
+
+        return <<<YAML
 services:
   app:
     environment:
       DB_HOST: database-users.shared-hosting.palocal
     extra_hosts:
-      - 'database-users.shared-hosting.palocal:172.25.0.3'
-      - 'other.example:172.25.0.3'
+      - 'database-users.shared-hosting.palocal:{$db}'
+      - 'other.example:{$db}'
   worker:
     extra_hosts:
-      - database-users.shared-hosting.palocal:172.25.0.3
+      - database-users.shared-hosting.palocal:{$db}
 YAML;
+    }
 
     public function test_every_pin_of_the_database_name_moves_and_nothing_else(): void
     {
         config(['env.USERS_DB_HOST' => null]);
 
-        $out = AppDatabase::repinned(self::COMPOSE, '10.200.0.2');
+        $out = AppDatabase::repinned(self::compose(), TestNetwork::container(2));
 
-        $this->assertSame(2, substr_count($out, 'database-users.shared-hosting.palocal:10.200.0.2'));
-        $this->assertStringContainsString("'other.example:172.25.0.3'", $out);
+        $this->assertSame(2, substr_count($out, 'database-users.shared-hosting.palocal:' . TestNetwork::container(2)));
+        $this->assertStringContainsString("'other.example:" . TestNetwork::container2(3) . "'", $out);
         $this->assertStringContainsString('DB_HOST: database-users.shared-hosting.palocal' . "\n", $out);
     }
 
     public function test_a_file_already_pinned_to_the_address_is_unchanged(): void
     {
         config(['env.USERS_DB_HOST' => null]);
-        $once = AppDatabase::repinned(self::COMPOSE, '10.200.0.2');
+        $once = AppDatabase::repinned(self::compose(), TestNetwork::container(2));
 
-        $this->assertSame($once, AppDatabase::repinned($once, '10.200.0.2'));
+        $this->assertSame($once, AppDatabase::repinned($once, TestNetwork::container(2)));
     }
 
     public function test_a_database_of_the_operators_own_is_left_alone(): void
     {
         config(['env.USERS_DB_HOST' => 'db.example.test']);
-        $yaml = "extra_hosts:\n  - 'db.example.test:192.0.2.10'\n";
+        $yaml = "extra_hosts:\n  - 'db.example.test:" . TestNetwork::public3(10) . "'\n";
 
-        $this->assertSame($yaml, AppDatabase::repinned($yaml, '10.200.0.2'));
+        $this->assertSame($yaml, AppDatabase::repinned($yaml, TestNetwork::container(2)));
     }
 }

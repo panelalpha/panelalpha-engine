@@ -4,6 +4,7 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { Timeouts } from '@/config/timeouts';
 import type { GitStatus } from '@/types';
 
@@ -21,8 +22,8 @@ test.describe('git API', () => {
   test('connect refuses an internal or unresolvable host', async ({ api, userFactory }) => {
     const user = await userFactory.createSimpleUser();
     for (const repoUrl of [
-      'http://127.0.0.1:9/x.git',
-      'http://169.254.169.254/x.git',
+      `http://${testNetwork.LOOPBACK}:9/x.git`,
+      `http://${testNetwork.METADATA}/x.git`,
       'http://[::1]/x.git',
       'http://0x7f000001:9/x.git',
       'https://no-such-host.invalid/o/r.git',

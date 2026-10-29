@@ -5,6 +5,7 @@ namespace Tests\Unit\WordpressMigration;
 use App\Jobs\MigrateWordpress;
 use App\Models\WordpressMigration;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 
 /**
  * wordpress:migrate with no password exits non-zero and does not create a record.
@@ -30,7 +31,7 @@ class WordpressMigrationArtisanTest extends WordpressMigrationTestCase
         putenv('WORDPRESS_MIGRATE_SOURCE_TOKEN');
 
         $this->artisan('wordpress:migrate', [
-            'url' => 'https://93.184.216.34/blog',
+            'url' => 'https://' . TestNetwork::routable(34) . '/blog',
             '--method' => 'manual_plugin',
         ])->assertFailed();
         $this->assertSame(0, WordpressMigration::query()->count());
@@ -39,7 +40,7 @@ class WordpressMigrationArtisanTest extends WordpressMigrationTestCase
         putenv('WORDPRESS_MIGRATE_SOURCE_TOKEN=' . str_repeat('c4', 32));
         try {
             $this->artisan('wordpress:migrate', [
-                'url' => 'https://93.184.216.34/blog',
+                'url' => 'https://' . TestNetwork::routable(34) . '/blog',
                 '--method' => 'manual_plugin',
             ])->assertSuccessful();
         } finally {

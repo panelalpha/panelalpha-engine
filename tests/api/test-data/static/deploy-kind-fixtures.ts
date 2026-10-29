@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * Minimal trees that make detection claim each shipped platform and app.
@@ -67,7 +68,7 @@ function nodeHttpServer(id: string, port = 3000): string {
     'http.createServer((_req, res) => {',
     "  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });",
     '  res.end(html);',
-    "}).listen(port, '0.0.0.0');",
+    `}).listen(port, '${testNetwork.ANY}');`,
     '',
   ].join('\n');
 }
@@ -80,7 +81,7 @@ function nodeHttpServerEsm(id: string, port = 3000): string {
     'http.createServer((_req, res) => {',
     "  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });",
     '  res.end(html);',
-    "}).listen(port, '0.0.0.0');",
+    `}).listen(port, '${testNetwork.ANY}');`,
     '',
   ].join('\n');
 }
@@ -117,7 +118,7 @@ function javaHttpServer(id: string): string {
     'public class App {',
     '    public static void main(String[] args) throws Exception {',
     `        byte[] body = ${JSON.stringify(HTML_PAGE(frontend(id)))}.getBytes(StandardCharsets.UTF_8);`,
-    '        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", 8080), 0);',
+    `        HttpServer server = HttpServer.create(new InetSocketAddress("${testNetwork.ANY}", 8080), 0);`,
     '        server.createContext("/", exchange -> {',
     '            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");',
     '            exchange.sendResponseHeaders(200, body.length);',
@@ -339,7 +340,7 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
         '        pass',
         '',
         "if __name__ == '__main__':",
-        "    HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()",
+        `    HTTPServer(('${testNetwork.ANY}', 8000), Handler).serve_forever()`,
         '',
       ].join('\n'),
     },
@@ -363,7 +364,7 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
         'use std::net::TcpListener;',
         '',
         'fn main() {',
-        '    let listener = TcpListener::bind("0.0.0.0:8080").unwrap();',
+        `    let listener = TcpListener::bind("${testNetwork.ANY}:8080").unwrap();`,
         `    let body = ${JSON.stringify(HTML_PAGE(frontend('rust')))};`,
         '    let header = format!(',
         '        "HTTP/1.1 200 OK\\r\\nContent-Type: text/html; charset=utf-8\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n",',
@@ -590,7 +591,7 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
         "app.get('/', (_req, res) => {",
         "  res.type('html').send('<!doctype html><title>express</title><p>pae-frontend:express</p>\\n');",
         '});',
-        "app.listen(port, '0.0.0.0');",
+        `app.listen(port, '${testNetwork.ANY}');`,
         '',
       ].join('\n'),
     },
@@ -610,7 +611,7 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
         "fastify.get('/', async (_req, reply) => {",
         `  reply.type('text/html').send(${JSON.stringify(HTML_PAGE(frontend('fastify')))});`,
         '});',
-        "fastify.listen({ port, host: '0.0.0.0' }).catch((error) => {",
+        `fastify.listen({ port, host: '${testNetwork.ANY}' }).catch((error) => {`,
         '  console.error(error);',
         '  process.exit(1);',
         '});',
@@ -684,7 +685,7 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
     files: {
       'package.json': pkg({
         dependencies: { next: '^15.0.0', react: '^19.0.0', 'react-dom': '^19.0.0' },
-        scripts: { build: 'next build', start: 'next start -H 0.0.0.0 -p 3000' },
+        scripts: { build: 'next build', start: `next start -H ${testNetwork.ANY} -p 3000` },
       }),
       'next.config.js': 'module.exports = { eslint: { ignoreDuringBuilds: true } };\n',
       ...nextAppFiles('nextjs'),

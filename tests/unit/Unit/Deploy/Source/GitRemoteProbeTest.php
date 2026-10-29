@@ -7,6 +7,7 @@ use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\IpUtils;
+use Tests\Support\TestNetwork;
 
 /**
  * The probe against real remotes. Grouped `network` so a run without egress
@@ -142,7 +143,7 @@ class GitRemoteProbeTest extends TestCase
     private function probeSilentListener(GitRemoteProbe $probe): array
     {
         $address = gethostbyname(gethostname());
-        if (! IpUtils::checkIp($address, ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'])) {
+        if (! IpUtils::checkIp($address, [TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR])) {
             $this->markTestSkipped("needs a private address of its own to listen on, has {$address}");
         }
         OutboundUrl::setPolicyForTests(true, null);
@@ -250,7 +251,7 @@ class GitRemoteProbeTest extends TestCase
             }
         };
 
-        OutboundUrl::setResolverForTests(static fn (string $host): array => ['140.82.121.4']);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(4)]);
 
         try {
             $url = 'https://example.test/o/r.git';

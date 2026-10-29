@@ -63,10 +63,10 @@ class WordpressMigrationPayloadTest extends WordpressMigrationTestCase
         $token = str_repeat('ab', 32);
         $destinationSiteUrl = SourceUrl::destinationSiteUrl('example.com', 'https://www.example.com/blog');
 
-        $payload = SourceWordpressClient::remoteSyncPayload($destinationSiteUrl, $token, destinationIp: self::ENGINE_IPV4);
+        $payload = SourceWordpressClient::remoteSyncPayload($destinationSiteUrl, $token, destinationIp: self::engineIpv4());
 
         $this->assertSame('https://example.com/blog?token=' . $token, $payload['destination_url']);
-        $this->assertSame(self::ENGINE_IPV4, $payload['ip']);
+        $this->assertSame(self::engineIpv4(), $payload['ip']);
         $this->assertTrue($payload['insecure_tls']);
     }
 

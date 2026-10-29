@@ -7,6 +7,7 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A source recipe's `check:` list and `checks/` directory never ran.
@@ -63,7 +64,7 @@ class AppHealthRecipeChecksTest extends TestCase
         );
 
         $report = $runner->runByPath(
-            ['/' => new ProbedResponse(200, self::SHELL, 'http://127.0.0.1:8080/')] + $paths,
+            ['/' => new ProbedResponse(200, self::SHELL, 'http://' . TestNetwork::LOOPBACK . ':8080/')] + $paths,
             sys_get_temp_dir()
         );
 
@@ -80,7 +81,7 @@ class AppHealthRecipeChecksTest extends TestCase
         );
 
         $report = $runner->runByPath(
-            ['/' => new ProbedResponse(200, self::SHELL, 'http://127.0.0.1:8080/')] + $paths,
+            ['/' => new ProbedResponse(200, self::SHELL, 'http://' . TestNetwork::LOOPBACK . ':8080/')] + $paths,
             sys_get_temp_dir()
         );
 
@@ -104,7 +105,7 @@ class AppHealthRecipeChecksTest extends TestCase
 
         $this->assertStringContainsString("'/api/health'", $script);
         $this->assertStringContainsString("'/a'\\''b'", $script);
-        $this->assertStringContainsString("'https://127.0.0.1:8443'", $script);
+        $this->assertStringContainsString("'https://" . TestNetwork::LOOPBACK . ":8443'", $script);
         $this->assertStringContainsString('--max-time 3', $script);
         $this->assertStringNotContainsString('Host:', $script);
     }
@@ -115,7 +116,7 @@ class AppHealthRecipeChecksTest extends TestCase
 
         $this->assertStringContainsString("-H 'Host: shop.example.com' ", $script);
         $this->assertStringContainsString("-H 'X-Forwarded-Proto: https' ", $script);
-        $this->assertStringContainsString("'http://127.0.0.1:8000'", $script);
+        $this->assertStringContainsString("'http://" . TestNetwork::LOOPBACK . ":8000'", $script);
     }
 
     public function test_a_path_that_got_no_answer_is_none_and_garbage_is_ignored(): void
@@ -128,6 +129,6 @@ class AppHealthRecipeChecksTest extends TestCase
 
         $this->assertSame(['/api/health'], array_keys($parsed));
         $this->assertFalse($parsed['/api/health']->answered());
-        $this->assertSame('http://127.0.0.1:8080/api/health', $parsed['/api/health']->url);
+        $this->assertSame('http://' . TestNetwork::LOOPBACK . ':8080/api/health', $parsed['/api/health']->url);
     }
 }

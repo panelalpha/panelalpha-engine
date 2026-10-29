@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { isProxyRulesAvailable } from '@/helpers/sss-feature-helpers';
 import { rand } from '@/helpers/random';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 
 test.describe('Proxy rules', () => {
   test.beforeEach(async ({ api }) => {
@@ -22,7 +23,7 @@ test.describe('Proxy rules', () => {
       transport: 'http',
       listen_port: listenPort,
       server_name: serverName,
-      upstream_host: '127.0.0.1',
+      upstream_host: testNetwork.LOOPBACK,
       upstream_port: 8080,
       enabled: true,
     });
@@ -31,7 +32,7 @@ test.describe('Proxy rules', () => {
       expect(created.data.transport).toBe('http');
       expect(created.data.listen_port).toBe(listenPort);
       expect(created.data.server_name).toBe(serverName);
-      expect(created.data.upstream_host).toBe('127.0.0.1');
+      expect(created.data.upstream_host).toBe(testNetwork.LOOPBACK);
 
       const fetched = await api.getProxyRule(created.data.id);
       expect(fetched.data.id).toBe(created.data.id);
@@ -56,7 +57,7 @@ test.describe('Proxy rules', () => {
       transport: 'http',
       listen_port: 443,
       server_name: `*.${rand('pr')}.example.test`,
-      upstream_host: '127.0.0.1',
+      upstream_host: testNetwork.LOOPBACK,
       upstream_port: 8080,
       enabled: false,
     });
@@ -86,7 +87,7 @@ test.describe('Proxy rules', () => {
       transport: 'http',
       listen_port: 0,
       server_name: 'bad.example.test',
-      upstream_host: '127.0.0.1',
+      upstream_host: testNetwork.LOOPBACK,
       upstream_port: 8080,
     });
     expect([400, 422]).toContain(response.status);

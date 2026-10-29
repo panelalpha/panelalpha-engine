@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime\Python;
 
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A file called wsgi.py names a callable for a server to import; it is not a
@@ -49,7 +50,7 @@ class WsgiHandoffTest extends TestCase
 
         $this->assertStringContainsString('gunicorn', $command);
         $this->assertStringContainsString('wsgi:application', $command);
-        $this->assertStringContainsString('--bind 0.0.0.0:8000', $command);
+        $this->assertStringContainsString('--bind ' . TestNetwork::ANY . ':8000', $command);
     }
 
     public function test_an_asgi_callable_is_found_the_same_way(): void
@@ -59,7 +60,7 @@ class WsgiHandoffTest extends TestCase
         $command = PythonRuntime::startCommand($this->dir, ["uvicorn\n"]);
 
         $this->assertStringContainsString('uvicorn asgi:application', $command);
-        $this->assertStringContainsString('--host 0.0.0.0', $command);
+        $this->assertStringContainsString('--host ' . TestNetwork::ANY, $command);
     }
 
     /**

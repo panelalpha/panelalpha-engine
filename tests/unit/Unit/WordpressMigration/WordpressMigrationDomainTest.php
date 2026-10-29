@@ -8,6 +8,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\Steps\CreateProjectStep;
 use App\Models\WordpressMigration;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * Adapted contract: HostingUsername::normalize of the domain (or the source
@@ -99,7 +100,7 @@ class WordpressMigrationDomainTest extends WordpressMigrationTestCase
         Queue::fake();
 
         $migration = WordpressMigration::start(
-            sourceUrl: 'https://203.0.113.50',
+            sourceUrl: 'https://' . TestNetwork::public(50),
             username: 'admin',
             password: 'secret',
         );

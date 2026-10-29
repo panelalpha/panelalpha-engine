@@ -11,6 +11,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceHttpResponse;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceProbe;
 use App\System\Project\PhpHosting\WordPress\Migration\TransferAddress;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 
 /**
  * The source sends the transfer to the engine's default IPv4, so an engine
@@ -19,8 +20,6 @@ use Illuminate\Support\Facades\Queue;
  */
 class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
 {
-    private const PRIVATE_IPV4 = '10.10.10.25';
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -30,7 +29,7 @@ class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
         putenv('WORDPRESS_MIGRATE_PASSWORD=secret');
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => ['93.184.216.34'],
+            static fn (string $host): array => [TestNetwork::routable(34)],
         );
     }
 
@@ -43,23 +42,23 @@ class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
 
     public function test_a_start_on_a_private_engine_address_is_409_naming_it_and_stores_nothing(): void
     {
-        $this->engineAddress(self::PRIVATE_IPV4);
+        $this->engineAddress(TestNetwork::private(25));
 
         $response = $this->postJson('/api/wordpress/migrations', $this->body());
 
         $response->assertStatus(409);
         $this->assertSame(TransferAddress::UNREACHABLE, $response->json('problems.0.code'));
-        $this->assertStringContainsString(self::PRIVATE_IPV4, (string) $response->json('problems.0.message'));
+        $this->assertStringContainsString(TestNetwork::private(25), (string) $response->json('problems.0.message'));
         $this->assertSame(0, WordpressMigration::query()->count());
         Queue::assertNothingPushed();
     }
 
     public function test_wordpress_migrate_on_a_private_engine_address_fails_naming_it(): void
     {
-        $this->engineAddress(self::PRIVATE_IPV4);
+        $this->engineAddress(TestNetwork::private(25));
 
         $this->artisan('wordpress:migrate', ['url' => 'https://example.com', 'username' => 'admin'])
-            ->expectsOutputToContain(self::PRIVATE_IPV4)
+            ->expectsOutputToContain(TestNetwork::private(25))
             ->assertFailed();
 
         $this->assertSame(0, WordpressMigration::query()->count());
@@ -67,7 +66,7 @@ class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
 
     public function test_the_connection_test_answers_engine_address_private(): void
     {
-        $this->engineAddress(self::PRIVATE_IPV4);
+        $this->engineAddress(TestNetwork::private(25));
         $this->app->instance(SourceProbe::class, new SourceProbe(fn () => $this->wordpress()));
 
         $this->postJson('/api/wordpress/migrations/test', $this->body())
@@ -87,24 +86,24 @@ class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
     /** Behind 1:1 NAT the default IPv4 is the local address; the source is sent the public one it maps to, as DNS is. */
     public function test_a_private_engine_address_mapped_to_a_public_one_starts_and_sends_the_public_one(): void
     {
-        $this->engineAddress(self::PRIVATE_IPV4);
-        Ipv4NatMap::upsertMap(self::PRIVATE_IPV4, '93.184.216.40');
+        $this->engineAddress(TestNetwork::private(25));
+        Ipv4NatMap::upsertMap(TestNetwork::private(25), TestNetwork::routable(40));
         $this->app->instance(SourceProbe::class, new SourceProbe(fn () => $this->wordpress()));
 
-        $this->assertSame('93.184.216.40', TransferAddress::ipv4());
+        $this->assertSame(TestNetwork::routable(40), TransferAddress::ipv4());
         $this->postJson('/api/wordpress/migrations/test', $this->body())->assertJsonPath('ok', true);
         $this->postJson('/api/wordpress/migrations', $this->body())->assertStatus(202);
     }
 
     public function test_a_private_engine_address_mapped_to_another_private_one_is_still_refused_naming_that_one(): void
     {
-        $this->engineAddress(self::PRIVATE_IPV4);
-        Ipv4NatMap::upsertMap(self::PRIVATE_IPV4, '192.168.1.10');
+        $this->engineAddress(TestNetwork::private(25));
+        Ipv4NatMap::upsertMap(TestNetwork::private(25), TestNetwork::private2(10));
 
         $response = $this->postJson('/api/wordpress/migrations', $this->body());
 
         $response->assertStatus(409);
-        $this->assertStringContainsString('192.168.1.10', (string) $response->json('problems.0.message'));
+        $this->assertStringContainsString(TestNetwork::private2(10), (string) $response->json('problems.0.message'));
     }
 
     public function test_an_engine_without_an_address_on_record_still_starts(): void
@@ -118,10 +117,10 @@ class WordpressMigrationTransferAddressTest extends ImportTargetTestCase
     {
         OutboundUrl::setPolicyForTests(true, null);
 
-        $this->engineAddress(self::PRIVATE_IPV4);
+        $this->engineAddress(TestNetwork::private(25));
         $this->postJson('/api/wordpress/migrations', $this->body())->assertStatus(202);
 
-        $this->engineAddress('127.0.0.1');
+        $this->engineAddress(TestNetwork::LOOPBACK);
         $this->postJson('/api/wordpress/migrations', $this->body(['domain' => 'other.example.org']))
             ->assertStatus(409)
             ->assertJsonPath('problems.0.code', TransferAddress::UNREACHABLE);

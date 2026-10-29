@@ -6,11 +6,12 @@ use App\System\Project\Dind\AccountTemplate;
 use App\System\Project\Dind\Services\SupervisordServiceManager;
 use App\System\Project\Dind\TenantEgressGuard;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * From inside an account, customer code reached core (:2011,
  * :80), SFTP, FTP, phpMyAdmin and other accounts on pash-default-network, the
- * host on every port, and 169.254.169.254. The guard is run for real here,
+ * host on every port, and the cloud metadata address. The guard is run for real here,
  * with iptables and getent replaced by shims that record what it does.
  */
 class TenantEgressGuardTest extends TestCase
@@ -22,11 +23,11 @@ class TenantEgressGuardTest extends TestCase
         $this->dir = sys_get_temp_dir() . '/egress-guard-' . bin2hex(random_bytes(4));
         mkdir($this->dir . '/bin', 0777, true);
 
-        // An account on 172.25.0.0/24, gateway .1 -- as read on a host.
+        // An account on a /24, gateway .1 -- as read on a host.
         file_put_contents($this->dir . '/route', implode("\n", [
             "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT",
-            "eth0\t00000000\t010019AC\t0003\t0\t0\t0\t00000000\t0\t0\t0",
-            "eth0\t000019AC\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0",
+            "eth0\t00000000\t" . self::routeHex(TestNetwork::container2(1)) . "\t0003\t0\t0\t0\t00000000\t0\t0\t0",
+            "eth0\t" . self::routeHex(TestNetwork::container2(0)) . "\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0",
             '',
         ]));
         // Chains that exist: the built-ins, plus whatever `-N` created.
@@ -40,21 +41,26 @@ esac
 [ "$1" = "-C" ] && exit 1
 exit 0
 SH);
-        file_put_contents($this->dir . '/bin/getent', str_replace('__DB_NAMES__', implode('|', TenantEgressGuard::DATABASE_NAMES), <<<'SH'
+        $dbNames = implode('|', TenantEgressGuard::DATABASE_NAMES);
+        $db = TestNetwork::container2(3);
+        $cache = TestNetwork::container2(9);
+        $proxy = TestNetwork::container2(2);
+        $docker = TestNetwork::container(1);
+        file_put_contents($this->dir . '/bin/getent', <<<SH
 #!/bin/sh
-[ -f "$SHIM_DIR/nodns" ] && exit 2
-case "$2" in
-  __DB_NAMES__) echo "172.25.0.3      STREAM $2" ;;
-  panelalpha-cache-registry) echo "172.25.0.9      STREAM $2" ;;
-  panelalpha-registry-proxy) echo "172.25.0.2      STREAM $2" ;;
-  host.docker.internal) echo "172.20.0.1      STREAM $2" ;;
+[ -f "\$SHIM_DIR/nodns" ] && exit 2
+case "\$2" in
+  {$dbNames}) echo "{$db}      STREAM \$2" ;;
+  panelalpha-cache-registry) echo "{$cache}      STREAM \$2" ;;
+  panelalpha-registry-proxy) echo "{$proxy}      STREAM \$2" ;;
+  host.docker.internal) echo "{$docker}      STREAM \$2" ;;
   *) exit 2 ;;
 esac
-SH));
+SH);
         chmod($this->dir . '/bin/iptables', 0755);
         chmod($this->dir . '/bin/getent', 0755);
         file_put_contents($this->dir . '/chains', "OUTPUT\nFORWARD\n");
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45', '172.25.0.1', 'not-an-ip']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script([TestNetwork::public(45), TestNetwork::container2(1), 'not-an-ip']));
     }
 
     protected function tearDown(): void
@@ -84,33 +90,47 @@ SH));
         return array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, '-A PA-TENANT-EGRESS')));
     }
 
+    /** $address as /proc/net/route writes it: little-endian hex. */
+    private static function routeHex(string $address): string
+    {
+        return strtoupper(bin2hex(strrev((string) inet_pton($address))));
+    }
+
     public function test_only_mysql_the_registries_and_mail_or_sites_on_the_host_get_through(): void
     {
         $rules = $this->rules($this->guardRun());
+        $db = TestNetwork::container2(3);
+        $proxy = TestNetwork::container2(2);
+        $cache = TestNetwork::container2(9);
+        $docker = TestNetwork::container(1);
+        $gateway = TestNetwork::container2(1);
+        $engine = TestNetwork::public(45);
+        $account = TestNetwork::container2(0) . '/' . TestNetwork::MASK_24;
+        $linkLocal = TestNetwork::LINK_LOCAL_CIDR;
 
         $this->assertSame([
             '-A PA-TENANT-EGRESS -o lo -j RETURN',
             '-A PA-TENANT-EGRESS -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.3 -p tcp --dport 3306 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.2 -p tcp --dport 5000 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.9 -p tcp --dport 5000 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.20.0.1 -p tcp --dport 25 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.20.0.1 -p tcp --dport 80 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.20.0.1 -p tcp --dport 443 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.20.0.1 -j DROP',
-            '-A PA-TENANT-EGRESS -d 172.25.0.1 -p tcp --dport 25 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.1 -p tcp --dport 80 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.1 -p tcp --dport 443 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 172.25.0.1 -j DROP',
-            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 25 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 80 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 443 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP',
+            "-A PA-TENANT-EGRESS -d {$db} -p tcp --dport 3306 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$proxy} -p tcp --dport 5000 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$cache} -p tcp --dport 5000 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$docker} -p tcp --dport 25 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$docker} -p tcp --dport 80 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$docker} -p tcp --dport 443 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$docker} -j DROP",
+            "-A PA-TENANT-EGRESS -d {$gateway} -p tcp --dport 25 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$gateway} -p tcp --dport 80 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$gateway} -p tcp --dport 443 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$gateway} -j DROP",
+            "-A PA-TENANT-EGRESS -d {$engine} -p tcp --dport 25 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$engine} -p tcp --dport 80 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$engine} -p tcp --dport 443 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$engine} -j DROP",
             // core, SFTP, FTP, phpMyAdmin and every other account
-            '-A PA-TENANT-EGRESS -d 172.25.0.0/255.255.255.0 -j DROP',
-            '-A PA-TENANT-EGRESS -d 169.254.0.0/16 -p udp --dport 53 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 169.254.0.0/16 -p tcp --dport 53 -j RETURN',
-            '-A PA-TENANT-EGRESS -d 169.254.0.0/16 -j DROP',
+            "-A PA-TENANT-EGRESS -d {$account} -j DROP",
+            "-A PA-TENANT-EGRESS -d {$linkLocal} -p udp --dport 53 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$linkLocal} -p tcp --dport 53 -j RETURN",
+            "-A PA-TENANT-EGRESS -d {$linkLocal} -j DROP",
         ], $rules);
     }
 
@@ -134,11 +154,11 @@ SH));
         $this->guardRun();
         file_put_contents($this->dir . '/nodns', '');
         // Something else changed, so the chain is rebuilt -- with MySQL still in it.
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.46']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script([TestNetwork::public(46)]));
 
         $rules = $this->rules($this->guardRun());
-        $this->assertContains('-A PA-TENANT-EGRESS -d 172.25.0.3 -p tcp --dport 3306 -j RETURN', $rules);
-        $this->assertContains('-A PA-TENANT-EGRESS -d 172.25.0.9 -p tcp --dport 5000 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::container2(3) . ' -p tcp --dport 3306 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::container2(9) . ' -p tcp --dport 5000 -j RETURN', $rules);
     }
 
     /**
@@ -153,12 +173,12 @@ SH));
      */
     public function test_a_changed_port_list_is_seen_and_rebuilds_the_chain(): void
     {
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45'], apiAccess: true));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script([TestNetwork::public(45)], apiAccess: true));
 
         $rules = $this->rules($this->guardRun());
 
-        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN', $rules);
-        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::public(45) . ' -p tcp --dport 2011 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::public(45) . ' -j DROP', $rules);
         $this->assertStringContainsString(
             'ports=25 80 443 2011',
             (string) file_get_contents($this->dir . '/state'),
@@ -170,17 +190,17 @@ SH));
     {
         file_put_contents(
             $this->dir . '/guard.sh',
-            TenantEgressGuard::script(['203.0.113.45'], apiAccess: true)
+            TenantEgressGuard::script([TestNetwork::public(45)], apiAccess: true)
         );
 
         $rules = $this->rules($this->guardRun());
-        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN', $rules);
-        $this->assertContains('-A PA-TENANT-EGRESS -d 203.0.113.45 -j DROP', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::public(45) . ' -p tcp --dport 2011 -j RETURN', $rules);
+        $this->assertContains('-A PA-TENANT-EGRESS -d ' . TestNetwork::public(45) . ' -j DROP', $rules);
 
-        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script(['203.0.113.45']));
+        file_put_contents($this->dir . '/guard.sh', TenantEgressGuard::script([TestNetwork::public(45)]));
 
         $this->assertNotContains(
-            '-A PA-TENANT-EGRESS -d 203.0.113.45 -p tcp --dport 2011 -j RETURN',
+            '-A PA-TENANT-EGRESS -d ' . TestNetwork::public(45) . ' -p tcp --dport 2011 -j RETURN',
             $this->rules($this->guardRun())
         );
     }

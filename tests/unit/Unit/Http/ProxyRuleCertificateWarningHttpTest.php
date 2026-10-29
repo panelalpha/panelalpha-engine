@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -40,7 +41,7 @@ class ProxyRuleCertificateWarningHttpTest extends TestCase
     private function rule(?string $serverName, int $port = 443, array $extra = []): array
     {
         return $extra + ['owner_scope' => 'system', 'transport' => 'http', 'listen_port' => $port,
-            'server_name' => $serverName, 'upstream_host' => '10.0.0.5', 'upstream_port' => 8080];
+            'server_name' => $serverName, 'upstream_host' => TestNetwork::private(5), 'upstream_port' => 8080];
     }
 
     public function test_a_wildcard_rule_on_443_is_created_with_a_warning(): void

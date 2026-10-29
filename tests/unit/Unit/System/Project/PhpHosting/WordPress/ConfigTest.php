@@ -11,6 +11,7 @@ use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Contract for named wp-config constant operations: list/get/set/delete
@@ -86,7 +87,7 @@ class ConfigTest extends TestCase
         $sequence = [];
         $config = $this->configWithFakeRunner(
             $sequence,
-            results: [['exit_code' => 0, 'stdout' => '{"host":"127.0.0.1","port":6379}', 'stderr' => '']],
+            results: [['exit_code' => 0, 'stdout' => '{"host":"'.TestNetwork::LOOPBACK.'","port":6379}', 'stderr' => '']],
         );
 
         $body = $config->get('WP_REDIS_CONFIG', 'all', json: true);
@@ -95,7 +96,7 @@ class ConfigTest extends TestCase
             ['config', 'get', 'WP_REDIS_CONFIG', '--type=all', '--format=json', '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
-        $this->assertSame(['host' => '127.0.0.1', 'port' => 6379], $body['value']);
+        $this->assertSame(['host' => TestNetwork::LOOPBACK, 'port' => 6379], $body['value']);
     }
 
     public function test_set_an_empty_variable(): void

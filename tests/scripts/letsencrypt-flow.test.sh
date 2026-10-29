@@ -13,7 +13,10 @@
 # Needs bash, openssl and coreutils; no root, no network.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
+. "$(dirname "${BASH_SOURCE[0]}")/test-network.sh"
+ADDRESS=$(tn_host PUBLIC 7)
+DIRECT_NAME="${ADDRESS//./-}.panelalpha.direct"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
@@ -26,7 +29,7 @@ export FAKE_DOCKER_LOG="$SANDBOX/docker.log"
 export FAKE_CERT_DAYS=90
 mkdir -p "$LE_ENGINE_DIR/scripts" "$LE_ENGINE_DIR/crt" "$FAKE_SETTINGS_DIR" "$SANDBOX/bin" "$(dirname "$LE_CRON_FILE")"
 touch "$LE_ENGINE_DIR/docker-compose.yml"
-echo "APP_URL=https://203.0.113.7:2011" >"$LE_ENGINE_DIR/.env-core"
+echo "APP_URL=https://$ADDRESS:2011" >"$LE_ENGINE_DIR/.env-core"
 cp "$SCRIPT_DIR"/letsencrypt-*.sh "$LE_ENGINE_DIR/scripts/"
 
 # --- the fake docker --------------------------------------------------------------
@@ -111,14 +114,14 @@ crt() { echo "$LE_ENGINE_DIR/crt/$1"; }
 
 # --- 1. the default domain certificate ------------------------------------------------
 
-run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
 check "request-cert exits 0" "[ $? = 0 ]"
 check "lineage issued for the dashed name" \
-    "grep -q -- '-d 203-0-113-7.panelalpha.direct' '$FAKE_DOCKER_LOG' && [ -f '$(live panelalpha-engine-cert)/fullchain.pem' ]"
+    "grep -q -- '-d $DIRECT_NAME' '$FAKE_DOCKER_LOG' && [ -f '$(live panelalpha-engine-cert)/fullchain.pem' ]"
 check "account registered without an email when none is known" "grep -q -- '--register-unsafely-without-email' '$FAKE_DOCKER_LOG'"
 check "served cert is the domain lineage" "same_file '$(live panelalpha-engine-cert)/fullchain.pem' '$(crt server.cert)'"
 check "served key is a real file, mode 600" "[ ! -L '$(crt server.key)' ] && [ \"\$(stat -c %a '$(crt server.key)')\" = 600 ]"
-check "cert_domain setting records the name" "[ \"\$(cat '$FAKE_SETTINGS_DIR/cert_domain')\" = 203-0-113-7.panelalpha.direct ]"
+check "cert_domain setting records the name" "[ \"\$(cat '$FAKE_SETTINGS_DIR/cert_domain')\" = $DIRECT_NAME ]"
 check "webserver stopped for the challenge and stack restored" \
     "grep -q 'down sites-http' '$FAKE_DOCKER_LOG' && grep -q 'up -d' '$FAKE_DOCKER_LOG'"
 check "certbot answers the challenge on the host network, not a published port" \
@@ -130,48 +133,48 @@ check "core is never restarted" "! grep -qE 'restart( [a-z-]+)* core( |\$)' '$FA
 check "queue workers told to reread APP_URL" "grep -q 'exec -T core php artisan queue:restart' '$FAKE_DOCKER_LOG'"
 check "renewal scheduled" "grep -q 'letsencrypt-renew.sh' '$LE_CRON_FILE'"
 check "APP_URL moved off the bare IP onto the served name" \
-    "grep -qx 'APP_URL=https://203-0-113-7.panelalpha.direct:2011' '$LE_ENGINE_DIR/.env-core'"
+    "grep -qx 'APP_URL=https://$DIRECT_NAME:2011' '$LE_ENGINE_DIR/.env-core'"
 
 # --- 2. the setting drives the next request ----------------------------------------------
 
 echo "panel.example.com" >"$FAKE_SETTINGS_DIR/cert_domain"
 echo "ops@example.com" >"$FAKE_SETTINGS_DIR/cert_email"
 : >"$FAKE_DOCKER_LOG"
-run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
 check "cert_domain setting is requested when no argument is given" "grep -q -- '-d panel.example.com' '$FAKE_DOCKER_LOG'"
 check "cert_email setting registers the account" "grep -q -- '--email ops@example.com' '$FAKE_DOCKER_LOG'"
 check "APP_URL follows a changed cert_domain" "grep -qx 'APP_URL=https://panel.example.com:2011' '$LE_ENGINE_DIR/.env-core'"
 
 echo "APP_URL=https://ops.example.net:2011" >"$LE_ENGINE_DIR/.env-core"
-run_as_root letsencrypt-request-cert.sh --domain another.example.com --ip 203.0.113.7 --skip-dns-check
+run_as_root letsencrypt-request-cert.sh --domain another.example.com --ip "$ADDRESS" --skip-dns-check
 check "an operator's own APP_URL is left alone" "grep -qx 'APP_URL=https://ops.example.net:2011' '$LE_ENGINE_DIR/.env-core'"
 
 # --- 3. the IP lineage lands beside, not over -------------------------------------------------
 
 served_before=$(md5sum <"$(crt server.cert)")
 : >"$FAKE_DOCKER_LOG"
-run_as_root letsencrypt-request-ip-cert.sh 203.0.113.7
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS"
 check "request-ip-cert exits 0" "[ $? = 0 ]"
 check "IP lineage requested under the short-lived profile" \
-    "grep -q -- '--required-profile shortlived --ip-address 203.0.113.7' '$FAKE_DOCKER_LOG'"
+    "grep -q -- '--required-profile shortlived --ip-address $ADDRESS' '$FAKE_DOCKER_LOG'"
 check "IP cert installed as crt/server-ip.*" "same_file '$(live panelalpha-engine-ip-cert)/fullchain.pem' '$(crt server-ip.cert)'"
 check "served pair untouched by the IP request" "[ \"\$(md5sum <'$(crt server.cert)')\" = '$served_before' ]"
 
 : >"$FAKE_DOCKER_LOG"
-run_as_root letsencrypt-request-ip-cert.sh 203.0.113.7 --install
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" --install
 check "--install serves the IP cert" "same_file '$(live panelalpha-engine-ip-cert)/fullchain.pem' '$(crt server.cert)'"
 
 # --- 4. a failed request leaves the served pair alone ---------------------------------------------
 
 served_before=$(md5sum <"$(crt server.cert)")
-FAKE_CERTBOT_FAIL=1 run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
+FAKE_CERTBOT_FAIL=1 run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
 check "certbot failure is reported" "[ $? != 0 ]"
 check "served pair unchanged after a failed request" "[ \"\$(md5sum <'$(crt server.cert)')\" = '$served_before' ]"
 
 # --- 5. renewal ---------------------------------------------------------------------------------
 
 # Put the domain lineage back on :2011 first.
-run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
 : >"$FAKE_DOCKER_LOG"
 run_as_root letsencrypt-renew.sh
 check "fresh lineages: renew does not stop the webserver" \
@@ -179,7 +182,7 @@ check "fresh lineages: renew does not stop the webserver" \
 check "fresh lineages: nothing reinstalled" "! grep -q 'nginx -s reload' '$FAKE_DOCKER_LOG'"
 
 # A lineage inside its window: renewal runs and the served pair follows.
-FAKE_CERT_DAYS=6 run_as_root letsencrypt-request-ip-cert.sh 203.0.113.7 --force-renewal
+FAKE_CERT_DAYS=6 run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" --force-renewal
 : >"$FAKE_DOCKER_LOG"
 served_before=$(md5sum <"$(crt server.cert)")
 # 61 days on: the 90-day domain cert has 29 left (< 30), the 6-day one is gone.
@@ -211,8 +214,8 @@ check "no domain lineage: the IP lineage is served" "same_file '$(live panelalph
 # left behind when a later domain request fails, or when an administrator goes
 # back to the address. Renewal refreshes it in place and does not quietly put
 # the domain certificate back on the port.
-run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
-run_as_root letsencrypt-request-ip-cert.sh 203.0.113.7 --install
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" --install
 check "setup: the IP cert is served while a domain lineage exists" \
     "same_file '$(live panelalpha-engine-ip-cert)/fullchain.pem' '$(crt server.cert)' && [ -f '$(live panelalpha-engine-cert)/fullchain.pem' ]"
 

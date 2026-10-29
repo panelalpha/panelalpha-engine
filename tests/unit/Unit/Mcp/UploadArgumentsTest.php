@@ -6,6 +6,7 @@ use App\Lib\Http\OutboundUrl;
 use App\Mcp\Tools\Api\UploadArguments;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A tool call is JSON, so a multipart file field has to arrive as something
@@ -21,7 +22,7 @@ class UploadArgumentsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'example.com' ? ['93.184.216.34'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'example.com' ? [TestNetwork::routable(34)] : []);
     }
 
     protected function tearDown(): void
@@ -151,12 +152,12 @@ class UploadArgumentsTest extends TestCase
     public static function internalUrls(): array
     {
         return [
-            'cloud metadata' => ['http://169.254.169.254/latest/meta-data/iam/security-credentials/', []],
-            'cache registry' => ['http://panelalpha-cache-registry:5000/v2/_catalog', ['172.18.0.5']],
-            'loopback' => ['http://127.0.0.1/admin', []],
-            'private host' => ['http://10.0.0.7/', []],
-            'host docker internal' => ['http://host.docker.internal:2011/', ['172.17.0.1']],
-            'rebinding mix' => ['http://public.example.com/x', ['93.184.216.34', '127.0.0.1']],
+            'cloud metadata' => ['http://' . TestNetwork::METADATA . '/latest/meta-data/iam/security-credentials/', []],
+            'cache registry' => ['http://panelalpha-cache-registry:5000/v2/_catalog', [TestNetwork::container(5)]],
+            'loopback' => ['http://' . TestNetwork::LOOPBACK . '/admin', []],
+            'private host' => ['http://' . TestNetwork::private(7) . '/', []],
+            'host docker internal' => ['http://host.docker.internal:2011/', [TestNetwork::DOCKER_BRIDGE_GATEWAY]],
+            'rebinding mix' => ['http://public.example.com/x', [TestNetwork::routable(34), TestNetwork::LOOPBACK]],
         ];
     }
 

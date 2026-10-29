@@ -9,6 +9,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceIpPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * A source URL must lead to a public address that is not the Engine's own,
@@ -17,8 +18,6 @@ use RuntimeException;
  */
 class WordpressMigrationFetchGuardTest extends TestCase
 {
-    private const ENGINE_ADDRESS = '93.184.216.40';
-
     protected function tearDown(): void
     {
         OutboundUrl::setPolicyForTests(null, null);
@@ -27,8 +26,8 @@ class WordpressMigrationFetchGuardTest extends TestCase
 
     public function test_https_and_public_hosts_are_allowed(): void
     {
-        $this->assertSame(['93.184.216.34'], SourceFetchGuard::assertAllowed('https://example.com/blog', $this->policy(), $this->dns()));
-        $this->assertSame(['151.101.1.69'], SourceFetchGuard::assertAllowed('http://151.101.1.69:8080/wp', $this->policy(), $this->dns()));
+        $this->assertSame([TestNetwork::routable(34)], SourceFetchGuard::assertAllowed('https://example.com/blog', $this->policy(), $this->dns()));
+        $this->assertSame([TestNetwork::routable(69)], SourceFetchGuard::assertAllowed('http://'.TestNetwork::routable(69).':8080/wp', $this->policy(), $this->dns()));
     }
 
     public function test_non_http_schemes_are_rejected(): void
@@ -56,23 +55,23 @@ class WordpressMigrationFetchGuardTest extends TestCase
     public static function refusedTargets(): array
     {
         return [
-            'loopback' => ['http://127.0.0.1/'],
-            'metadata' => ['http://169.254.169.254/latest/meta-data'],
+            'loopback' => ['http://'.TestNetwork::LOOPBACK.'/'],
+            'metadata' => ['http://'.TestNetwork::METADATA.'/latest/meta-data'],
             'ipv6 loopback' => ['http://[::1]/'],
             'ipv6 link-local' => ['http://[fe80::1]/'],
-            'mapped loopback' => ['http://[::ffff:127.0.0.1]/'],
-            'mapped metadata' => ['http://[::ffff:169.254.169.254]/'],
-            'unspecified' => ['http://0.0.0.0/'],
-            'rfc1918 10/8' => ['http://10.0.0.1:8006/'],
-            'rfc1918 192.168/16' => ['http://192.168.0.5/'],
-            'docker bridge' => ['http://172.18.0.5:5000/'],
-            'carrier-grade nat' => ['http://100.64.0.1/'],
+            'mapped loopback' => ['http://[::ffff:'.TestNetwork::LOOPBACK.']/'],
+            'mapped metadata' => ['http://[::ffff:'.TestNetwork::METADATA.']/'],
+            'unspecified' => ['http://'.TestNetwork::ANY.'/'],
+            'rfc1918 10/8' => ['http://'.TestNetwork::private(1).':8006/'],
+            'rfc1918 192.168/16' => ['http://'.TestNetwork::private2(5).'/'],
+            'docker bridge' => ['http://'.TestNetwork::container(5).':5000/'],
+            'carrier-grade nat' => ['http://'.TestNetwork::CGNAT.'/'],
             'ipv6 unique local' => ['http://[fd00::1]/'],
-            "the engine's own" => ['http://'.self::ENGINE_ADDRESS.'/'],
+            "the engine's own" => ['http://'.self::engineAddress().'/'],
             'a name for loopback' => ['https://localhost/wp-admin'],
             'a name for metadata' => ['https://metadata.example/'],
             'a docker service name' => ['http://sites-db:3306/'],
-            'a name for a lan address' => ['http://10.0.0.1.nip.io:8006/'],
+            'a name for a lan address' => ['http://'.TestNetwork::private(1).'.nip.io:8006/'],
             'a public and an internal answer' => ['https://mixed.example/'],
         ];
     }
@@ -81,19 +80,19 @@ class WordpressMigrationFetchGuardTest extends TestCase
     {
         OutboundUrl::setPolicyForTests(true, null);
 
-        $this->assertSame(['10.0.0.1'], SourceFetchGuard::assertAllowed('http://10.0.0.1.nip.io/', $this->policy(), $this->dns()));
+        $this->assertSame([TestNetwork::private(1)], SourceFetchGuard::assertAllowed('http://'.TestNetwork::private(1).'.nip.io/', $this->policy(), $this->dns()));
         $this->assertSame(['fd00::1'], SourceFetchGuard::assertAllowed('http://[fd00::1]/', $this->policy(), $this->dns()));
-        foreach (['http://127.0.0.1/', 'http://169.254.169.254/', 'http://100.64.0.1/', 'http://'.self::ENGINE_ADDRESS.'/'] as $url) {
+        foreach (['http://'.TestNetwork::LOOPBACK.'/', 'http://'.TestNetwork::METADATA.'/', 'http://'.TestNetwork::CGNAT.'/', 'http://'.self::engineAddress().'/'] as $url) {
             $this->assertRefused($url);
         }
     }
 
     public function test_an_allow_listed_name_may_lead_to_a_private_address_and_nothing_else_does(): void
     {
-        OutboundUrl::setPolicyForTests(false, ['10.0.0.1.nip.io']);
+        OutboundUrl::setPolicyForTests(false, [TestNetwork::private(1).'.nip.io']);
 
-        $this->assertSame(['10.0.0.1'], SourceFetchGuard::assertAllowed('http://10.0.0.1.nip.io/', $this->policy(), $this->dns()));
-        $this->assertRefused('http://10.0.0.1/');
+        $this->assertSame([TestNetwork::private(1)], SourceFetchGuard::assertAllowed('http://'.TestNetwork::private(1).'.nip.io/', $this->policy(), $this->dns()));
+        $this->assertRefused('http://'.TestNetwork::private(1).'/');
         $this->assertRefused('http://sites-db:3306/');
     }
 
@@ -101,10 +100,10 @@ class WordpressMigrationFetchGuardTest extends TestCase
     {
         $next = SourceFetchGuard::resolveRedirect(
             'https://example.com/wp-login.php',
-            'http://169.254.169.254/latest/meta-data',
+            'http://'.TestNetwork::METADATA.'/latest/meta-data',
         );
 
-        $this->assertSame('http://169.254.169.254/latest/meta-data', $next);
+        $this->assertSame('http://'.TestNetwork::METADATA.'/latest/meta-data', $next);
         $this->assertRefused($next);
     }
 
@@ -118,6 +117,11 @@ class WordpressMigrationFetchGuardTest extends TestCase
             'https://example.com/blog/wp-admin/',
             SourceFetchGuard::resolveRedirect('https://example.com/blog/wp-login.php', 'wp-admin/'),
         );
+    }
+
+    private static function engineAddress(): string
+    {
+        return TestNetwork::routable(40);
     }
 
     private function assertRefused(string $url): void
@@ -136,7 +140,7 @@ class WordpressMigrationFetchGuardTest extends TestCase
         {
             public function ranges(): array
             {
-                return ['93.184.216.40'];
+                return [TestNetwork::routable(40)];
             }
         });
     }
@@ -147,12 +151,12 @@ class WordpressMigrationFetchGuardTest extends TestCase
     private function dns(): callable
     {
         return static fn (string $host): array => match ($host) {
-            'example.com' => ['93.184.216.34'],
-            'localhost' => ['127.0.0.1'],
-            'metadata.example' => ['169.254.169.254'],
-            'sites-db' => ['172.20.0.2'],
-            '10.0.0.1.nip.io' => ['10.0.0.1'],
-            'mixed.example' => ['93.184.216.34', '10.0.0.1'],
+            'example.com' => [TestNetwork::routable(34)],
+            'localhost' => [TestNetwork::LOOPBACK],
+            'metadata.example' => [TestNetwork::METADATA],
+            'sites-db' => [TestNetwork::container2(2)],
+            TestNetwork::private(1).'.nip.io' => [TestNetwork::private(1)],
+            'mixed.example' => [TestNetwork::routable(34), TestNetwork::private(1)],
             default => [],
         };
     }

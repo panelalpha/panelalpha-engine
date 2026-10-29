@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 use Tests\Unit\Git\FakesGitHost;
@@ -55,7 +56,7 @@ class GitCommandsTest extends DeployHookTestCase
         config(['app.debug' => false]);
 
         $this->fakeGitHost();
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
 
         $this->redeploy = new SpyCheckoutRedeploy();
         $this->app->instance(CheckoutRedeploy::class, $this->redeploy);
@@ -721,7 +722,7 @@ class GitCommandsTest extends DeployHookTestCase
         [$exit, $output] = $this->runCommand('git:deploy-hook', ['username' => 'alice', '--raw' => true]);
 
         $this->assertSame(0, $exit);
-        $this->assertStringStartsWith('{"data":{"url":"https:\/\/203.0.113.10\/hooks\/', $output);
+        $this->assertStringStartsWith('{"data":{"url":"https:\/\/'.TestNetwork::public(10).'\/hooks\/', $output);
         $hook = DeployHook::firstOrFail();
         $this->assertSame(json_encode(['data' => [
             'url' => $hook->url(),

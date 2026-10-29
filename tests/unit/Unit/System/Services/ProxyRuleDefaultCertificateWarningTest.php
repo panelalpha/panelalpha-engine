@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Services;
 use App\Models\ProxyRule;
 use App\System\Services\Webserver\ProxyRuleServerName;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -81,7 +82,7 @@ class ProxyRuleDefaultCertificateWarningTest extends TestCase
             'listen_ip' => '*',
             'listen_port' => $port,
             'server_name' => $serverName,
-            'upstream_host' => '10.0.0.5',
+            'upstream_host' => TestNetwork::private(5),
             'upstream_port' => 8080,
         ]);
     }

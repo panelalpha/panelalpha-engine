@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-#   bash scripts/refresh-webserver-image.test.sh
+#   bash tests/scripts/refresh-webserver-image.test.sh
 #
 # The regression this guards: docker-compose.yml-webserver is copied once with
 # `cp -n`, so a bumped webserver image tag never reached an installed host.
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

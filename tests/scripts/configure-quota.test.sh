@@ -4,7 +4,7 @@
 # without touching a real filesystem. The real run, against a loopback ext4,
 # is recorded in the merge request for this fix.
 #
-#   bash scripts/configure-quota.test.sh
+#   bash tests/scripts/configure-quota.test.sh
 #
 # The regression this guards: the installer installed the `quota`
 # package and nothing ever turned quota on, so every setquota the engine ran
@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

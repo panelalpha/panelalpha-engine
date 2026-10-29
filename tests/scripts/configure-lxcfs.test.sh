@@ -2,11 +2,11 @@
 #
 # The systemd drop-ins configure-lxcfs.sh writes, checked without root.
 #
-#   bash scripts/configure-lxcfs.test.sh
+#   bash tests/scripts/configure-lxcfs.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

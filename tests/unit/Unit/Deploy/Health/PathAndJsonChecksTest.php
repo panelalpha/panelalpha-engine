@@ -9,6 +9,7 @@ use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * `expect.path` and `expect.json`: asking an API where it states its own
@@ -99,16 +100,16 @@ class PathAndJsonChecksTest extends TestCase
         ]);
 
         $healthy = $this->runner($check)->runByPath([
-            '/' => new ProbedResponse(200, '<div id="root"></div>', 'http://127.0.0.1:4000/'),
-            '/api/health' => new ProbedResponse(200, '{"status":"ok","database":"connected"}', 'http://127.0.0.1:4000/api/health'),
+            '/' => new ProbedResponse(200, '<div id="root"></div>', 'http://' . TestNetwork::LOOPBACK . ':4000/'),
+            '/api/health' => new ProbedResponse(200, '{"status":"ok","database":"connected"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
         ], $this->dir);
 
         $this->assertSame(CheckResult::STATUS_PASS, $this->find($healthy, 'database-connected')['status']);
 
         // The same check against a database that is down: the page still 200s.
         $broken = $this->runner($check)->runByPath([
-            '/' => new ProbedResponse(200, '<div id="root"></div>', 'http://127.0.0.1:4000/'),
-            '/api/health' => new ProbedResponse(200, '{"status":"error","database":"unreachable"}', 'http://127.0.0.1:4000/api/health'),
+            '/' => new ProbedResponse(200, '<div id="root"></div>', 'http://' . TestNetwork::LOOPBACK . ':4000/'),
+            '/api/health' => new ProbedResponse(200, '{"status":"error","database":"unreachable"}', 'http://' . TestNetwork::LOOPBACK . ':4000/api/health'),
         ], $this->dir);
 
         $failed = $this->find($broken, 'database-connected');
@@ -134,7 +135,7 @@ class PathAndJsonChecksTest extends TestCase
         ]);
 
         $report = $this->runner($check)->runByPath([
-            '/' => new ProbedResponse(200, 'hello', 'http://127.0.0.1:4000/'),
+            '/' => new ProbedResponse(200, 'hello', 'http://' . TestNetwork::LOOPBACK . ':4000/'),
         ], $this->dir);
 
         $failed = $this->find($report, 'unfetched');
@@ -168,7 +169,7 @@ class PathAndJsonChecksTest extends TestCase
                 'expect' => ['json' => $json],
             ]);
 
-            $report = $this->runner($check)->run(new ProbedResponse(200, $body, 'http://127.0.0.1:4000/'), $this->dir);
+            $report = $this->runner($check)->run(new ProbedResponse(200, $body, 'http://' . TestNetwork::LOOPBACK . ':4000/'), $this->dir);
             $status = $this->find($report, 'json-check')['status'];
 
             $this->assertSame(
@@ -190,7 +191,7 @@ class PathAndJsonChecksTest extends TestCase
 
         foreach (['ok', 'healthy'] as $value) {
             $report = $this->runner($check)->run(
-                new ProbedResponse(200, json_encode(['status' => $value]), 'http://127.0.0.1:4000/'),
+                new ProbedResponse(200, json_encode(['status' => $value]), 'http://' . TestNetwork::LOOPBACK . ':4000/'),
                 $this->dir
             );
             $this->assertSame(CheckResult::STATUS_PASS, $this->find($report, 'either-spelling')['status'], $value);
@@ -207,7 +208,7 @@ class PathAndJsonChecksTest extends TestCase
         ]);
 
         $report = $this->runner($check)->run(
-            new ProbedResponse(200, '<!doctype html><title>App</title>', 'http://127.0.0.1:4000/'),
+            new ProbedResponse(200, '<!doctype html><title>App</title>', 'http://' . TestNetwork::LOOPBACK . ':4000/'),
             $this->dir
         );
 

@@ -41,7 +41,7 @@ class HubContractTest extends HubTestCase
             array_keys((array) $host)
         );
         $this->assertSame('srv1.acme.com', $host['hostname']);
-        $this->assertSame(self::ENGINE_IP, $host['ipv4']);
+        $this->assertSame(self::engineIp(), $host['ipv4']);
     }
 
     public function test_a_token_scoped_to_projects_gets_no_host(): void

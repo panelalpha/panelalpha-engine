@@ -5,6 +5,7 @@ namespace Tests\Unit\WordpressMigration;
 use App\Http\Requests\WordpressMigrationStoreRequest;
 use App\Models\WordpressMigration;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 
 /**
  * POST /wordpress/migrations takes `domain`, `project` and `project_name`,
@@ -21,7 +22,7 @@ class WordpressMigrationTargetHttpTest extends ImportTargetTestCase
         Queue::fake();
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => ['93.184.216.34'],
+            static fn (string $host): array => [TestNetwork::routable(34)],
         );
     }
 
@@ -36,7 +37,7 @@ class WordpressMigrationTargetHttpTest extends ImportTargetTestCase
             'target_project' => null,
             'created_project' => true,
             'preview_url' => null,
-            'dns' => ['type' => 'A', 'value' => self::ENGINE_IPV4],
+            'dns' => ['type' => 'A', 'value' => self::engineIpv4()],
         ]);
     }
 
@@ -55,7 +56,7 @@ class WordpressMigrationTargetHttpTest extends ImportTargetTestCase
     {
         $this->withoutConnect();
 
-        $response = $this->postJson('/api/wordpress/migrations', $this->body(['url' => 'http://93.184.216.34/']));
+        $response = $this->postJson('/api/wordpress/migrations', $this->body(['url' => 'http://' . TestNetwork::routable(34) . '/']));
 
         $response->assertStatus(422);
         $this->assertSame('domain_required', $response->json('problems.0.code'));

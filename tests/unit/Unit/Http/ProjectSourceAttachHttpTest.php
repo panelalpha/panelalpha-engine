@@ -17,6 +17,7 @@ use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -38,7 +39,7 @@ class ProjectSourceAttachHttpTest extends TestCase
 
         $this->fakeProbe();
         $this->fakeInspector();
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
     }
 
     protected function tearDown(): void
@@ -230,7 +231,7 @@ class ProjectSourceAttachHttpTest extends TestCase
         $this->makeUser('privateone', ['template' => 'dind']);
 
         $response = $this->postJson('/api/projects/privateone/source', [
-            'git_repo' => 'http://10.10.0.25:18660/r7.git',
+            'git_repo' => 'http://' . TestNetwork::private(25) . ':18660/r7.git',
         ]);
 
         $response->assertStatus(422);

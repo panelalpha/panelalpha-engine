@@ -9,6 +9,7 @@ import {
   requireFirewall,
 } from '@/helpers/firewall-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import {
   knock,
   ruleAcceptingEveryPortFrom,
@@ -164,7 +165,7 @@ test.describe('Firewall rules in both directions', () => {
         action: 'deny',
         direction: 'both',
         source: randomTestNetAddress(),
-        destination: '192.0.2.1',
+        destination: testNetwork.public3(1),
       },
     ]) {
       const response = await api.createFirewallRuleRaw(body);

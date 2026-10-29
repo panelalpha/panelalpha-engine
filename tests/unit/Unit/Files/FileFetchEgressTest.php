@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -58,10 +59,10 @@ class FileFetchEgressTest extends TestCase
     public static function refusedUrls(): array
     {
         return [
-            'loopback' => ['http://127.0.0.1/'],
-            'cloud metadata' => ['http://169.254.169.254/latest/meta-data/'],
-            'private 10/8' => ['http://10.0.0.5/x'],
-            'private 192.168/16' => ['http://192.168.1.1/x'],
+            'loopback' => ['http://'.TestNetwork::LOOPBACK.'/'],
+            'cloud metadata' => ['http://'.TestNetwork::METADATA.'/latest/meta-data/'],
+            'private 10/8' => ['http://'.TestNetwork::private(5).'/x'],
+            'private 192.168/16' => ['http://'.TestNetwork::private2(1).'/x'],
             'ipv6 loopback' => ['http://[::1]/'],
         ];
     }
@@ -82,17 +83,17 @@ class FileFetchEgressTest extends TestCase
 
     public function test_a_public_url_redirecting_to_the_loopback_is_refused_at_the_redirect(): void
     {
-        $this->app->instance(System::class, $this->fakeSystem('http://127.0.0.1/'));
+        $this->app->instance(System::class, $this->fakeSystem('http://'.TestNetwork::LOOPBACK.'/'));
 
         $response = $this->postJson('/api/projects/alice/files/fetch', [
-            'url' => 'http://93.184.216.34/plugin.zip',
+            'url' => 'http://'.TestNetwork::routable(34).'/plugin.zip',
             'path' => 'project',
         ]);
 
         $response->assertStatus(422);
         $response->assertJsonPath('problems.0.field', 'url');
         $response->assertJsonPath('problems.0.code', 'host_refused');
-        $response->assertJsonPath('problems.0.message', '127.0.0.1 is an address this engine does not fetch from. '
+        $response->assertJsonPath('problems.0.message', TestNetwork::LOOPBACK.' is an address this engine does not fetch from. '
             . 'Set EGRESS_ALLOW_PRIVATE=true to allow a private address.');
     }
 
@@ -102,7 +103,7 @@ class FileFetchEgressTest extends TestCase
         $this->app->instance(System::class, $this->fakeSystem(curlExit: 7));
 
         $response = $this->postJson('/api/projects/alice/files/fetch', [
-            'url' => 'http://93.184.216.34/plugin.zip',
+            'url' => 'http://'.TestNetwork::routable(34).'/plugin.zip',
             'path' => 'project',
         ]);
 
@@ -110,7 +111,7 @@ class FileFetchEgressTest extends TestCase
         $response->assertJsonPath('problems.0.field', 'url');
         $response->assertJsonPath('problems.0.code', 'download_failed');
         $response->assertJsonPath('problems.0.reason', 'connect');
-        $response->assertJsonPath('problems.0.message', 'Could not connect to 93.184.216.34.');
+        $response->assertJsonPath('problems.0.message', 'Could not connect to '.TestNetwork::routable(34).'.');
         $this->assertStringNotContainsString('curl', (string) $response->getContent());
     }
 
@@ -159,7 +160,7 @@ class FileFetchEgressTest extends TestCase
 
                     public function getErrorOutput(): string
                     {
-                        return $this->code === 0 ? '' : "curl: ({$this->code}) Failed to connect to 93.184.216.34 port 80 after 3 ms: Could not connect to server";
+                        return $this->code === 0 ? '' : "curl: ({$this->code}) Failed to connect to ".TestNetwork::routable(34).' port 80 after 3 ms: Could not connect to server';
                     }
 
                     public function getOutput(): string

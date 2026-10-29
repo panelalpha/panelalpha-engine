@@ -14,6 +14,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use Tests\Support\TestNetwork;
 use ZipArchive;
 
 /**
@@ -35,12 +36,12 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
         $this->withoutMiddleware();
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => $host === 'example.com' ? ['93.184.216.34'] : [$host],
+            static fn (string $host): array => $host === 'example.com' ? [TestNetwork::routable(34)] : [$host],
         );
         $this->app->instance(EngineAddresses::class, new class extends EngineAddresses {
             public function ranges(): array
             {
-                return ['93.184.216.40'];
+                return [TestNetwork::routable(40)];
             }
         });
     }
@@ -95,16 +96,16 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
             'login_url' => 'https://example.com/secret-login',
             'username' => 'admin',
             'password' => 'secret',
-            'source_ip' => '93.184.216.34',
+            'source_ip' => TestNetwork::routable(34),
         ])->assertStatus(202)
             ->assertJsonPath('method', 'wp_admin')
             ->assertJsonPath('login_url', 'https://example.com/secret-login')
-            ->assertJsonPath('source_ip', '93.184.216.34');
+            ->assertJsonPath('source_ip', TestNetwork::routable(34));
     }
 
     public function test_source_ip_that_is_not_public_or_is_the_engines_own_is_refused(): void
     {
-        foreach (['127.0.0.1', '10.0.0.5', '172.17.0.2', '169.254.169.254', '::1', '93.184.216.40'] as $ip) {
+        foreach ([TestNetwork::LOOPBACK, TestNetwork::private(5), TestNetwork::container(2), TestNetwork::METADATA, '::1', TestNetwork::routable(40)] as $ip) {
             $this->postJson('/api/wordpress/migrations', [
                 'url' => 'https://example.com',
                 'username' => 'admin',
@@ -119,7 +120,7 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
     public function test_with_source_ip_the_hosts_own_dns_is_not_consulted(): void
     {
         Queue::fake();
-        $this->app->instance(WordpressMigrationStoreRequest::SOURCE_RESOLVER, static fn (): array => ['127.0.0.1']);
+        $this->app->instance(WordpressMigrationStoreRequest::SOURCE_RESOLVER, static fn (): array => [TestNetwork::LOOPBACK]);
 
         $this->postJson('/api/wordpress/migrations', [
             'url' => 'https://example.com',
@@ -130,7 +131,7 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
             'url' => 'https://example.com',
             'username' => 'admin',
             'password' => 'secret',
-            'source_ip' => '93.184.216.34',
+            'source_ip' => TestNetwork::routable(34),
         ])->assertStatus(202);
     }
 
@@ -138,10 +139,10 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
     {
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => $host === 'sites-db' ? ['172.20.0.2'] : [$host],
+            static fn (string $host): array => $host === 'sites-db' ? [TestNetwork::container2(2)] : [$host],
         );
 
-        foreach (['http://172.18.0.5:5000/', 'http://10.0.0.1:8006/', 'http://sites-db:3306/', 'https://93.184.216.40/'] as $url) {
+        foreach (['http://' . TestNetwork::container(5) . ':5000/', 'http://' . TestNetwork::private(1) . ':8006/', 'http://sites-db:3306/', 'https://' . TestNetwork::routable(40) . '/'] as $url) {
             $this->postJson('/api/wordpress/migrations/test', [
                 'url' => $url,
                 'username' => 'admin',

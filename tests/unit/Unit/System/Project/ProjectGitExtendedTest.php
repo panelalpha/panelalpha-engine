@@ -7,6 +7,7 @@ use App\System;
 use App\System\Project;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\Exception as GitException;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class ProjectGitExtendedTest extends TestCase
@@ -54,12 +55,12 @@ public function test_status_reports_dirty_tree_and_sanitized_remote_url(): void
         $runner->stdout = [
             'rev-parse --is-inside-work-tree' => "true\n",
             'status --porcelain' => '',
-            'config --get remote.origin.url' => "ssh://git@10.10.0.44:22277/home/git/r7.git\n",
+            'config --get remote.origin.url' => "ssh://git@".TestNetwork::private(44).":22277/home/git/r7.git\n",
             'branch --show-current' => "main\n",
         ];
         $git = $this->testable($model, 'public_html', $runner);
 
-        $this->assertSame('ssh://git@10.10.0.44:22277/home/git/r7.git', $git->status()['remote_url']);
+        $this->assertSame('ssh://git@'.TestNetwork::private(44).':22277/home/git/r7.git', $git->status()['remote_url']);
     }
 
     public function test_status_fetch_false_does_not_call_fetch(): void

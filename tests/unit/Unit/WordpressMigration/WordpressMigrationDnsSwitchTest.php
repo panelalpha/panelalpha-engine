@@ -15,6 +15,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\PreviewTunnel;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * Engine requests to an imported site by name go to this engine, and once
@@ -35,22 +36,22 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
 
         $options = (new DestinationProbe())->options('https://wp.com/blog/');
 
-        $this->assertSame(['wp.com:80:' . self::ENGINE_IPV4, 'wp.com:443:' . self::ENGINE_IPV4], $options['curl'][CURLOPT_RESOLVE]);
+        $this->assertSame(['wp.com:80:' . self::engineIpv4(), 'wp.com:443:' . self::engineIpv4()], $options['curl'][CURLOPT_RESOLVE]);
         $this->assertFalse($options['verify']);
         $this->assertFalse($options['allow_redirects']);
     }
 
     public function test_behind_nat_the_probe_pins_the_local_address_the_webserver_binds(): void
     {
-        Ipv4NatMap::upsertMap('10.0.0.5', self::ENGINE_IPV4);
+        Ipv4NatMap::upsertMap(TestNetwork::private(5), self::engineIpv4());
         $this->project('wpcom', 'wp.com');
 
-        $this->assertSame('10.0.0.5', DestinationProbe::engineAddress('wp.com'));
+        $this->assertSame(TestNetwork::private(5), DestinationProbe::engineAddress('wp.com'));
     }
 
     public function test_a_name_without_a_project_falls_back_to_the_engine_ipv4(): void
     {
-        $this->assertSame(self::ENGINE_IPV4, DestinationProbe::engineAddress('unknown.example.com'));
+        $this->assertSame(self::engineIpv4(), DestinationProbe::engineAddress('unknown.example.com'));
     }
 
     public function test_only_completed_imports_on_their_own_domain_wait_for_dns(): void
@@ -68,7 +69,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $migration = $this->previewedImport();
         Http::fake(['*' => Http::response('', 200)]);
 
-        $this->assertFalse($this->switch(['198.51.100.99'])->check($migration));
+        $this->assertFalse($this->switch([TestNetwork::public2(99)])->check($migration));
 
         $migration->refresh();
         $this->assertNull($migration->dns_switched_at);
@@ -81,7 +82,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $migration = $this->previewedImport();
         Http::fake(['*' => Http::failedConnection()]);
 
-        $this->assertFalse($this->switch([self::ENGINE_IPV4])->check($migration));
+        $this->assertFalse($this->switch([self::engineIpv4()])->check($migration));
         $this->assertSame([], $this->certificates);
     }
 
@@ -90,7 +91,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $migration = $this->previewedImport();
         Http::fake(['*' => Http::response('', 301)]);
 
-        $this->assertTrue($this->switch([self::ENGINE_IPV4])->check($migration));
+        $this->assertTrue($this->switch([self::engineIpv4()])->check($migration));
 
         $migration->refresh();
         $this->assertSame(['wp.com'], $this->certificates);
@@ -106,7 +107,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $migration = $this->previewedImport();
         Http::fake(['*' => Http::response('', 200)]);
         $switch = new ImportedDomainSwitch(
-            static fn (): array => [self::ENGINE_IPV4],
+            static fn (): array => [self::engineIpv4()],
             requestCertificate: static fn () => throw new RuntimeException('urn:ietf:params:acme:error:connection'),
             preview: $this->preview(),
         );
@@ -129,7 +130,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $this->completedImport('elsewhere.example.com');
         Http::fake(['*' => Http::response('', 200)]);
         $this->app->instance(ImportedDomainSwitch::class, new ImportedDomainSwitch(
-            static fn (string $host): array => $host === 'wp.com' ? [self::ENGINE_IPV4] : ['198.51.100.99'],
+            static fn (string $host): array => $host === 'wp.com' ? [self::engineIpv4()] : [TestNetwork::public2(99)],
             requestCertificate: function (Domain $domain): void {
                 $this->certificates[] = (string) $domain->domain;
             },
@@ -148,7 +149,7 @@ class WordpressMigrationDnsSwitchTest extends ImportTargetTestCase
         $this->previewedImport();
         Http::fake(['*' => Http::response('', 200)]);
         $this->app->instance(ImportedDomainSwitch::class, new ImportedDomainSwitch(
-            static fn (): array => [self::ENGINE_IPV4],
+            static fn (): array => [self::engineIpv4()],
             requestCertificate: static function (): void {
                 throw new RuntimeException('the authority refused');
             },

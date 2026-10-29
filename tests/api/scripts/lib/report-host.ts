@@ -4,9 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { isLoopbackIp } from '@/config/site-domain';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
- * Playwright's `show-report --host 0.0.0.0` still prints `http://localhost:…`
+ * Playwright's `show-report` bound to all interfaces still prints `http://localhost:…`
  * because that is how it turns a bind-all address into a clickable URL. Fine
  * on a laptop; useless when the suite ran on a VPS. The wrappers rewrite that
  * line to a host you can actually open from another machine.
@@ -35,7 +36,7 @@ export function isUnusableReportHost(host: string | undefined): boolean {
   const lower = trimmed.toLowerCase();
   if (
     lower === 'localhost' ||
-    lower === '0.0.0.0' ||
+    lower === testNetwork.ANY ||
     lower === '::' ||
     lower === '[::]' ||
     lower.endsWith('.localhost')
@@ -58,7 +59,7 @@ export function guessReportHost(candidates: (string | undefined)[]): string {
     }
   }
 
-  return '127.0.0.1';
+  return testNetwork.LOOPBACK;
 }
 
 /** IPv6 literals need brackets in a URL. */
@@ -131,13 +132,14 @@ export function resolvePublicReportHost(
 
 /**
  * Rewrites Playwright's "Serving HTML report at http://localhost:9323" (and
- * the 0.0.0.0 / 127.0.0.1 variants) to the public host, including when the
+ * the bind-all and loopback variants) to the public host, including when the
  * line is wrapped in ANSI colour codes.
  */
 export function rewriteLocalReportUrls(text: string, publicHost: string): string {
   const host = formatHttpHost(publicHost);
+  const bindAll = testNetwork.ANY.replaceAll('.', '\\.');
   return text.replace(
-    /http:\/\/(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0)(:\d+)?/gi,
+    new RegExp(`http://(?:localhost|127\\.\\d+\\.\\d+\\.\\d+|${bindAll})(:\\d+)?`, 'gi'),
     (_match, port: string | undefined) => `http://${host}${port ?? ''}`
   );
 }

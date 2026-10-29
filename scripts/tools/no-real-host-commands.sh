@@ -11,7 +11,7 @@
 #   - `sudo test -f|-d|-e` against the temporary tree a test built
 #   - `sudo docker info`, a capability probe
 #   - the `docker compose ... ps` that webserver.sh runs on being sourced by
-#     scripts/webserver-parse-args.test.sh; it degrades to "unknown" without docker
+#     tests/scripts/webserver-parse-args.test.sh; it degrades to "unknown" without docker
 #
 # Defaults to the two directories that are clean: tests/unit/Unit/System and
 # tests/unit/Unit/Deploy. Widen it as other trees are brought up to the same standard.

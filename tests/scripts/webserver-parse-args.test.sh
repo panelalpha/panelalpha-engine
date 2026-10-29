@@ -14,7 +14,7 @@
 # `--serial-no=X` as the webserver name.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
 
 # Sourcing runs the top-level `CURRENT_WEBSERVER=$(docker compose …)` probe,
 # which is read-only and degrades to "unknown" wherever docker or jq is

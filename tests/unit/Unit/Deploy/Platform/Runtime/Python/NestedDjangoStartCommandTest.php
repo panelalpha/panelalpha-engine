@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime\Python;
 
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * NetBox, and the whole family of Django projects laid out the way
@@ -108,7 +109,7 @@ PY;
         $this->assertStringContainsString('gunicorn', $command);
         $this->assertStringContainsString('netbox.wsgi:application', $command);
         $this->assertStringContainsString("--pythonpath 'netbox'", $command);
-        $this->assertStringContainsString('--bind 0.0.0.0:' . PythonRuntime::PORT, $command);
+        $this->assertStringContainsString('--bind ' . TestNetwork::ANY . ':' . PythonRuntime::PORT, $command);
     }
 
     /**
@@ -149,7 +150,7 @@ PY;
 
         $this->assertStringContainsString('svc.asgi:application', $command);
         $this->assertStringContainsString("--app-dir 'svc'", $command);
-        $this->assertStringContainsString('--host 0.0.0.0', $command);
+        $this->assertStringContainsString('--host ' . TestNetwork::ANY, $command);
     }
 
     /**

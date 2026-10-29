@@ -7,6 +7,7 @@ use App\Support\JobBudget;
 use App\System\Project\PhpHosting\WordPress\Migration\CurlSourceHttpClient;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceRequestAborted;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * curl asks the caller, before a request and about once a second while it
@@ -28,7 +29,7 @@ class WordpressMigrationSourceWaitTest extends TestCase
 
     public function test_a_request_is_never_sent_once_the_caller_stopped_waiting(): void
     {
-        $client = new CurlSourceHttpClient(null, static fn (): array => ['198.51.100.20']);
+        $client = new CurlSourceHttpClient(null, static fn (): array => [TestNetwork::public2(20)]);
         $client->whileWaiting(static fn (): bool => false);
 
         $this->expectException(SourceRequestAborted::class);

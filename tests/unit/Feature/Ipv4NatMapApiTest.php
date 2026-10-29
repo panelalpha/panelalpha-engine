@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -24,21 +25,21 @@ class Ipv4NatMapApiTest extends TestCase
     {
         $this->authenticate();
         $response = $this->putJson('/api/system/ipv4-nat-maps', [
-            'local_ip' => '10.0.0.5',
-            'public_ip' => '203.0.113.50',
+            'local_ip' => TestNetwork::private(5),
+            'public_ip' => TestNetwork::public(50),
         ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('data.local_ip', '10.0.0.5');
-        $response->assertJsonPath('data.public_ip', '203.0.113.50');
+        $response->assertJsonPath('data.local_ip', TestNetwork::private(5));
+        $response->assertJsonPath('data.public_ip', TestNetwork::public(50));
     }
 
     public function test_upsert_ipv4_nat_map_rejects_same_ip(): void
     {
         $this->authenticate();
         $response = $this->putJson('/api/system/ipv4-nat-maps', [
-            'local_ip' => '10.0.0.5',
-            'public_ip' => '10.0.0.5',
+            'local_ip' => TestNetwork::private(5),
+            'public_ip' => TestNetwork::private(5),
         ]);
 
         $response->assertStatus(422);
@@ -48,8 +49,8 @@ class Ipv4NatMapApiTest extends TestCase
     {
         $this->authenticate();
         $createResponse = $this->putJson('/api/system/ipv4-nat-maps', [
-            'local_ip' => '10.0.0.6',
-            'public_ip' => '203.0.113.51',
+            'local_ip' => TestNetwork::private(6),
+            'public_ip' => TestNetwork::public(51),
         ]);
         $createResponse->assertStatus(200);
         $id = $createResponse->json('data.id');

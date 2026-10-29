@@ -12,6 +12,7 @@ use App\Lib\Deploy\Compose\RuntimeSidecars;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * What a project's own compose file contributes to a deploy.
@@ -1405,14 +1406,14 @@ YAML, true, null, 'foodcoops/foodsoft');
         $this->assertArrayHasKey('redis', $result['services']);
     }
 
-    /** LinkAce's docker-compose.production.yml, the part the deploy keeps. */
+    /** LinkAce's docker-compose.production.yml, the part the deploy keeps; `%s` is where it publishes. */
     private const LINKACE_PRODUCTION = <<<'YAML'
     services:
       app:
         image: docker.io/linkace/linkace:latest
         depends_on: [db, meilisearch]
         ports:
-          - "0.0.0.0:80:80"
+          - "%s:80:80"
       db:
         image: docker.io/library/mariadb:12.0
         environment:
@@ -1432,7 +1433,7 @@ YAML, true, null, 'foodcoops/foodsoft');
 
     public function test_a_kept_sidecars_bare_secret_is_generated_for_it_and_the_app(): void
     {
-        $result = RuntimeSidecars::fromYaml(self::LINKACE_PRODUCTION, true, null, 'github.com/kovah/linkace', null, 'account-seed');
+        $result = RuntimeSidecars::fromYaml(sprintf(self::LINKACE_PRODUCTION, TestNetwork::ANY), true, null, 'github.com/kovah/linkace', null, 'account-seed');
 
         $redisPassword = ComposePlaceholders::requiredSecretValue('REDIS_PASSWORD', 'account-seed');
         $meiliKey = ComposePlaceholders::requiredSecretValue('MEILISEARCH_KEY', 'account-seed');
@@ -1448,7 +1449,7 @@ YAML, true, null, 'foodcoops/foodsoft');
     public function test_a_bare_secret_the_projects_env_sets_is_left_for_compose(): void
     {
         $result = RuntimeSidecars::fromYaml(
-            self::LINKACE_PRODUCTION,
+            sprintf(self::LINKACE_PRODUCTION, TestNetwork::ANY),
             true,
             null,
             'github.com/kovah/linkace',

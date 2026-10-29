@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\DetectAppPort;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Unit tests for DetectAppPort.
@@ -71,13 +72,15 @@ YAML);
 
     public function test_skips_loopback_bindings(): void
     {
+        $loopback = TestNetwork::LOOPBACK;
+        $any = TestNetwork::ANY;
         $this->writeCompose(<<<YAML
 services:
   web:
     image: nginx:alpine
     ports:
-      - "127.0.0.1:8080:80"
-      - "0.0.0.0:9090:90"
+      - "{$loopback}:8080:80"
+      - "{$any}:9090:90"
 YAML);
         $result = DetectAppPort::detectAllPorts($this->composePath);
         $this->assertSame(9090, $result['primary']);
@@ -250,12 +253,13 @@ YAML);
     public function test_keeps_app_port_alongside_postgres(): void
     {
         // The exact scenario from the bug report.
+        $any = TestNetwork::ANY;
         $this->writeCompose(<<<YAML
 services:
   app:
     build: .
     container_name: contact-monitor_app
-    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+    command: ["php", "artisan", "serve", "--host={$any}", "--port=8000"]
     ports:
       - "\${APP_PORT:-8090}:8000"
     depends_on:

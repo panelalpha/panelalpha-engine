@@ -7,6 +7,7 @@ use App\Models\IpAssigned;
 use App\Models\IpSubnet;
 use App\Models\Setting;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -21,8 +22,8 @@ class ProjectDedicatedIpAssignTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        Setting::setRuntimeSettings(['default_ipv4' => '192.0.2.1', 'default_ipv6' => '2001:db8::1']);
-        IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::public3(1), 'default_ipv6' => '2001:db8::1']);
+        IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
         IpSubnet::create(['ip' => '2001:db8::', 'mask' => 120, 'family' => 6, 'is_shared' => 0]);
     }
 
@@ -43,7 +44,7 @@ class ProjectDedicatedIpAssignTest extends TestCase
 
     public function test_a_host_without_a_default_ipv6_still_assigns_one(): void
     {
-        Setting::setRuntimeSettings(['default_ipv4' => '192.0.2.1', 'default_ipv6' => '']);
+        Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::public3(1), 'default_ipv6' => '']);
         $user = $this->makeUser('alice');
 
         $this->assertTrue((new ProjectIpAddresses($user))->assignFreeDedicatedIpv6());
@@ -57,6 +58,6 @@ class ProjectDedicatedIpAssignTest extends TestCase
 
         $this->assertTrue((new ProjectIpAddresses($user))->assignFreeDedicatedIpv4());
 
-        $this->assertSame(['192.0.2.2'], IpAssigned::query()->where('user_id', $user->id)->pluck('ip_address')->all());
+        $this->assertSame([TestNetwork::public3(2)], IpAssigned::query()->where('user_id', $user->id)->pluck('ip_address')->all());
     }
 }

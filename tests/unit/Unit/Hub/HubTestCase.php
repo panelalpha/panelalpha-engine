@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\NewAccessToken;
 use ReflectionProperty;
 use Tests\Support\Fail2banHost;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -30,7 +31,6 @@ abstract class HubTestCase extends TestCase
     public const HUB = 'https://connect.example.test';
     public const APP_ID = '5f0c2a8e-3b1d-4a8e-9c61-0d7b2f4a9e13';
     public const SECRET = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
-    public const ENGINE_IP = '93.184.216.34';
 
     protected string $certificate = '';
 
@@ -39,6 +39,11 @@ abstract class HubTestCase extends TestCase
 
     /** @var list<string> */
     private array $locks = [];
+
+    public static function engineIp(): string
+    {
+        return TestNetwork::routable(34);
+    }
 
     protected function setUp(): void
     {
@@ -58,7 +63,7 @@ abstract class HubTestCase extends TestCase
 
         Artisan::call('migrate', ['--database' => 'sqlite', '--force' => true]);
 
-        Setting::setRuntimeSettings(['default_ipv4' => self::ENGINE_IP]);
+        Setting::setRuntimeSettings(['default_ipv4' => self::engineIp()]);
         $this->fakeDockerInfo(['Name' => 'srv1.acme.com', 'OperatingSystem' => 'Ubuntu 24.04.1 LTS', 'KernelVersion' => '6.8.0-45-generic']);
         ProjectOverview::fakeRunning([]);
 
@@ -97,7 +102,7 @@ abstract class HubTestCase extends TestCase
             'account_id' => '42',
             'account_name' => 'Acme Ltd',
             'approved_by' => 'j***@acme.com',
-            'ip' => self::ENGINE_IP,
+            'ip' => self::engineIp(),
             'tls_spki' => 'sha256/old',
             'grants' => $grants,
             'token_id' => $token->accessToken->id,
@@ -128,7 +133,7 @@ abstract class HubTestCase extends TestCase
     protected function makeCertificate(): string
     {
         $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-        $csr = openssl_csr_new(['commonName' => self::ENGINE_IP], $key);
+        $csr = openssl_csr_new(['commonName' => self::engineIp()], $key);
         $cert = openssl_csr_sign($csr, null, $key, 1);
         openssl_x509_export($cert, $pem);
 

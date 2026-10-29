@@ -3,11 +3,11 @@
 # Which host AppArmor profiles configure-apparmor.sh disables, checked without
 # root against a fixture profile directory and a stub apparmor_parser.
 #
-#   bash scripts/configure-apparmor.test.sh
+#   bash tests/scripts/configure-apparmor.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

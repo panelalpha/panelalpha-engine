@@ -12,6 +12,8 @@ Three layers, cheapest first. Run them in this order and stop at the first red l
 
 How to run each suite is in its README: [`unit/README.md`](unit/README.md), [`api/README.md`](api/README.md), and the API suite's options in [`api/docs/maintainers.md`](api/docs/maintainers.md). Deploy timing, caches and onboarding an application are in the root [`AGENTS.md`](../AGENTS.md) (§1, §1a, §2 to §4, §11). This file adds what an agent must decide and must not get wrong.
 
+The shell tests of `scripts/` are in `tests/scripts/`, mirroring it: `tests/scripts/X.test.sh` tests `scripts/X.sh`. Run one with `bash tests/scripts/X.test.sh`; PHPUnit also runs several. All three suites take their IP addresses from [`test-network.env`](test-network.env), never from a literal; see [`unit/README.md`](unit/README.md).
+
 ## Before anything: data safety
 
 The canonical rules are `CODING_STANDARDS.md#remote-data` in the workspace. In short:

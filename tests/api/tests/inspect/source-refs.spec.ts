@@ -3,6 +3,7 @@ import { sourceRefsResponseSchema } from '@/schemas';
 import { Timeouts } from '@/config/timeouts';
 import { configuredGitRepo } from '@/helpers/deploy-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 
 test.describe('source refs', () => {
@@ -31,10 +32,10 @@ test.describe('source refs', () => {
 
   test('a repository on an internal address is refused', async ({ api }) => {
     for (const repository of [
-      'http://127.0.0.1/x.git',
-      'http://169.254.169.254/x.git',
+      `http://${testNetwork.LOOPBACK}/x.git`,
+      `http://${testNetwork.METADATA}/x.git`,
       'http://[::1]/x.git',
-      'http://10.0.0.5/x.git',
+      `http://${testNetwork.PRIVATE_10}/x.git`,
     ]) {
       const response = await api.refsSourceRaw({ repository });
       await expectStatus(response, 422);

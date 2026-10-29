@@ -8,6 +8,7 @@ use App\Models\ProxyRule;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -65,7 +66,7 @@ class DomainRenameFailureTest extends TestCase
         ProxyRule::create([
             'owner_scope' => 'system', 'username' => null, 'enabled' => true,
             'transport' => 'http', 'listen_ip' => '*', 'listen_port' => 8080,
-            'server_name' => 'new.test', 'upstream_host' => '10.0.0.5',
+            'server_name' => 'new.test', 'upstream_host' => TestNetwork::private(5),
             'upstream_port' => 80, 'upstream_protocol' => 'http', 'is_generated' => false,
         ]);
 

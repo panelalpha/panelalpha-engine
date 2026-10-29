@@ -4,6 +4,7 @@ namespace Tests\Unit\Domains;
 
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -25,7 +26,7 @@ class DomainSetProxyUpstreamTest extends TestCase
 
     public function test_a_domain_cannot_be_sent_anywhere_but_its_projects_app(): void
     {
-        foreach (['bob:80', 'sites-db:3306', '172.25.0.2:3306', 'core:2011', '127.0.0.1:5000'] as $proxyTo) {
+        foreach (['bob:80', 'sites-db:3306', TestNetwork::container2(2) . ':3306', 'core:2011', TestNetwork::LOOPBACK . ':5000'] as $proxyTo) {
             $this->artisan("domain:set-proxy --domain=alice.example.test --proxy-to={$proxyTo} --force")
                 ->expectsOutput("The upstream must be the project's own app, 'alice': "
                     . "a project's rule cannot reach another project, the engine's services or the host.")

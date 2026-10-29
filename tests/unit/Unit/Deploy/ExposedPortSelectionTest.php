@@ -10,8 +10,8 @@ use PHPUnit\Framework\TestCase;
  *
  * The parser read one number off one line -- `preg_match` with `EXPOSE\s+(\d+)`
  * -- so Gitea's Dockerfile, which exposes git-over-SSH and the web UI in that
- * order, resolved to 22. The engine bound `0.0.0.0:22->22/tcp`, pointed the
- * proxy at it, and the health probe answered
+ * order, resolved to 22. The engine bound `22->22/tcp` on all interfaces,
+ * pointed the proxy at it, and the health probe answered
  *
  *     Received HTTP/0.9 when not allowed
  *

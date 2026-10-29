@@ -5,6 +5,7 @@ namespace Tests\Unit\Hub;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** The one address a connection kept before becomes the first of its set, and back. */
@@ -44,24 +45,24 @@ class CallerAddressesMigrationTest extends TestCase
     public function test_the_kept_address_moves_into_the_set_and_back(): void
     {
         DB::table('hub_connections')->insert([
-            ['ip' => '203.0.113.10', 'caller_ip' => '2.28.195.31'],
-            ['ip' => '203.0.113.10', 'caller_ip' => null],
+            ['ip' => TestNetwork::public(10), 'caller_ip' => TestNetwork::public3(31)],
+            ['ip' => TestNetwork::public(10), 'caller_ip' => null],
         ]);
 
         $this->migration->up();
 
         $this->assertFalse(Schema::hasColumn('hub_connections', 'caller_ip'));
         $sets = DB::table('hub_connections')->orderBy('id')->pluck('caller_ips')->all();
-        $this->assertSame(['2.28.195.31'], array_keys(json_decode((string) $sets[0], true)));
+        $this->assertSame([TestNetwork::public3(31)], array_keys(json_decode((string) $sets[0], true)));
         $this->assertNull($sets[1]);
 
         DB::table('hub_connections')->where('id', 1)->update(['caller_ips' => json_encode([
-            '198.51.100.20' => '2026-10-26T10:00:00Z',
-            '2.28.195.31' => '2026-10-26T11:00:00Z',
+            TestNetwork::public2(20) => '2026-10-26T10:00:00Z',
+            TestNetwork::public3(31) => '2026-10-26T11:00:00Z',
         ])]);
         $this->migration->down();
 
         $this->assertFalse(Schema::hasColumn('hub_connections', 'caller_ips'));
-        $this->assertSame(['2.28.195.31', null], DB::table('hub_connections')->orderBy('id')->pluck('caller_ip')->all());
+        $this->assertSame([TestNetwork::public3(31), null], DB::table('hub_connections')->orderBy('id')->pluck('caller_ip')->all());
     }
 }

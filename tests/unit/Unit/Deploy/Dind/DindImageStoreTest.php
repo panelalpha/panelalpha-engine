@@ -32,12 +32,12 @@ class DindImageStoreTest extends TestCase
             mkdir($this->dir . '/state/' . $store, 0700, true);
         }
         file_put_contents($this->dir . '/bin/sudo', "#!/bin/sh\nexec \"\$@\"\n");
-        file_put_contents($this->dir . '/bin/docker', <<<'SH'
+        file_put_contents($this->dir . '/bin/docker', sprintf(<<<'SH'
 #!/bin/bash
 # State lives in $STATE: registry-running, remote-ok, host-remote-ok, push-fails (a count) and
 # host/, account/, cache/ holding one file per image. Every call is logged.
 echo "$*" >> "$STATE/calls"
-key() { printf '%s' "$1" | tr '/:' '__'; }
+key() { printf '%%s' "$1" | tr '/:' '__'; }
 if [ "$1" = inspect ]; then
   # inspect -f FORMAT NAME; down-NAME stops just that container.
   [ -e "$STATE/registry-running" ] && [ ! -e "$STATE/down-$4" ] && echo true || echo false; exit 0
@@ -83,10 +83,10 @@ fi
 if [ "$1" = push ]; then
   n=$(cat "$STATE/push-fails" 2>/dev/null || echo 0)
   if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$STATE/push-fails"; echo "push refused" >&2; exit 1; fi
-  ref="$3"; touch "$STATE/cache/$(key "${ref#127.0.0.1:5000/}")"; exit 0
+  ref="$3"; touch "$STATE/cache/$(key "${ref#%s/}")"; exit 0
 fi
 echo "unexpected docker call: $*" >&2; exit 99
-SH);
+SH, DindImageStore::HOST_CACHE_REGISTRY));
         chmod($this->dir . '/bin/sudo', 0755);
         chmod($this->dir . '/bin/docker', 0755);
     }
@@ -312,7 +312,7 @@ SH);
 
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::IMAGE . ' from the host through the cache registry', $out);
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/' . self::IMAGE, $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
         $this->assertStringContainsString('pull -q panelalpha-cache-registry:5000/' . self::IMAGE, $this->calls());
         $this->assertTrue($this->accountHas(self::IMAGE));
     }
@@ -437,7 +437,7 @@ SH);
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::RAILPACK_BUILDER . ' from the host through the cache registry', $out);
         $this->assertMatchesRegularExpression('/^pull -q ' . preg_quote(self::RAILPACK_BUILDER, '/') . '$/m', $this->calls(), 'the host pulls it');
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/' . self::RAILPACK_BUILDER, $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::RAILPACK_BUILDER, $this->calls());
         $this->assertStringNotContainsString('docker pull -q ' . self::RAILPACK_BUILDER, $this->calls(), 'the account never asks ghcr.io');
         $this->assertTrue($this->accountHas(self::RAILPACK_BUILDER));
     }
@@ -632,7 +632,7 @@ SH);
         [$code] = $this->sh((new DindImageStore())->hostPublishCommand('node:22-bookworm-slim'));
 
         $this->assertSame(0, $code);
-        $this->assertStringContainsString('push -q 127.0.0.1:5000/node:22-bookworm-slim', $this->calls());
+        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/node:22-bookworm-slim', $this->calls());
         $this->assertFileExists($this->dir . '/state/cache/node_22-bookworm-slim');
     }
 

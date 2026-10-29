@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationTarget;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationTargetResolver;
+use Tests\Support\TestNetwork;
 
 /**
  * The imported site keeps its own domain: the default is the source host
@@ -21,7 +22,7 @@ class WordpressMigrationTargetTest extends ImportTargetTestCase
         $this->assertSame('example.com', MigrationTargetResolver::defaultDomain('https://WWW.Example.com/blog'));
         $this->assertSame('wp.com', MigrationTargetResolver::defaultDomain('https://wp.com'));
         $this->assertSame('shop.example.com', MigrationTargetResolver::defaultDomain('http://shop.example.com/'));
-        $this->assertNull(MigrationTargetResolver::defaultDomain('http://203.0.113.50/'));
+        $this->assertNull(MigrationTargetResolver::defaultDomain('http://' . TestNetwork::public(50) . '/'));
         $this->assertNull(MigrationTargetResolver::defaultDomain('http://[2001:db8::1]/'));
     }
 
@@ -58,7 +59,7 @@ class WordpressMigrationTargetTest extends ImportTargetTestCase
 
     public function test_an_ip_source_with_connect_gets_an_allocated_name(): void
     {
-        $target = $this->resolver()->resolve('http://198.51.100.20/');
+        $target = $this->resolver()->resolve('http://' . TestNetwork::public2(20) . '/');
 
         $this->assertNull($target->domain);
         $this->assertTrue($target->createsProject);
@@ -68,14 +69,14 @@ class WordpressMigrationTargetTest extends ImportTargetTestCase
     {
         $this->withoutConnect();
 
-        $this->assertProblem('domain_required', fn () => $this->resolver()->resolve('http://198.51.100.20/'));
+        $this->assertProblem('domain_required', fn () => $this->resolver()->resolve('http://' . TestNetwork::public2(20) . '/'));
     }
 
     public function test_an_ip_source_with_a_domain_needs_no_connect(): void
     {
         $this->withoutConnect();
 
-        $this->assertSame('example.com', $this->resolver()->resolve('http://198.51.100.20/', 'example.com')->domain);
+        $this->assertSame('example.com', $this->resolver()->resolve('http://' . TestNetwork::public2(20) . '/', 'example.com')->domain);
     }
 
     public function test_an_empty_classic_project_is_imported_into_on_its_own_domain(): void

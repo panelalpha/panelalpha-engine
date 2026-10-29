@@ -4,7 +4,7 @@
 # Used interactively and by the engine API (System::runChangeWebserverScript)
 # with --background so the API process does not wait on compose down/up.
 #
-# When sourced (see webserver-parse-args.test.sh), only helpers/parse_args/main
+# When sourced (see tests/scripts/webserver-parse-args.test.sh), only helpers/parse_args/main
 # are loaded — flock and the entrypoint are skipped.
 
 ENGINE_DIR=/opt/panelalpha/shared-hosting
@@ -194,7 +194,7 @@ run_with_logging() {
 }
 
 # Only when run, not when sourced, so the argument parser can be tested
-# without switching anybody's webserver. See webserver-parse-args.test.sh.
+# without switching anybody's webserver. See tests/scripts/webserver-parse-args.test.sh.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     BACKGROUND=0
     for arg in "$@"; do

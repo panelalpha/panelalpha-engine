@@ -11,6 +11,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\Steps\ClearSecretsStep;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Throwable;
 
@@ -25,9 +26,12 @@ use Throwable;
  */
 abstract class WordpressMigrationTestCase extends TestCase
 {
-    protected const ENGINE_IPV4 = '203.0.113.7';
-
     protected const SOURCE_TOKEN = '5e7c1b2a3d4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f';
+
+    protected static function engineIpv4(): string
+    {
+        return TestNetwork::public(7);
+    }
 
     protected function setUp(): void
     {
@@ -50,8 +54,8 @@ abstract class WordpressMigrationTestCase extends TestCase
         (require base_path('database/migrations/2026_05_28_120000_create_ipv4_nat_maps_table.php'))->up();
 
         $this->forgetMigratorZips();
-        Setting::setRuntimeSettings(['default_ipv4' => self::ENGINE_IPV4]);
-        $this->app->instance(EngineAddresses::class, new class(self::ENGINE_IPV4) extends EngineAddresses {
+        Setting::setRuntimeSettings(['default_ipv4' => self::engineIpv4()]);
+        $this->app->instance(EngineAddresses::class, new class(self::engineIpv4()) extends EngineAddresses {
             public function __construct(private readonly string $ipv4) {}
 
             public function ranges(): array

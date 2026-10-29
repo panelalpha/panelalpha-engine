@@ -12,6 +12,7 @@ use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TestNetwork;
 
 /**
  * Registering a Deploy Hook as a webhook at the git provider the checkout came
@@ -24,16 +25,19 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
     private const URL = '/api/projects/alice/git/deploy-hook';
 
     /** What the provider hosts resolve to here; a host missing from the list does not resolve. */
-    private const ADDRESSES = [
-        'api.github.com' => ['140.82.112.5'],
-        'gitlab.com' => ['172.65.251.78'],
-        'api.bitbucket.org' => ['104.192.141.1'],
-        'git.example.test' => ['93.184.216.20'],
-        'ghe.example.test' => ['93.184.216.50'],
-        'other.example.test' => ['93.184.216.30'],
-        'internal.example.test' => ['10.20.30.40'],
-        'rebind.example.test' => ['93.184.216.40', '169.254.169.254'],
-    ];
+    private static function addresses(): array
+    {
+        return [
+            'api.github.com' => [TestNetwork::routable(5)],
+            'gitlab.com' => [TestNetwork::routable(78)],
+            'api.bitbucket.org' => [TestNetwork::routable(141)],
+            'git.example.test' => [TestNetwork::routable(20)],
+            'ghe.example.test' => [TestNetwork::routable(50)],
+            'other.example.test' => [TestNetwork::routable(30)],
+            'internal.example.test' => [TestNetwork::private(40)],
+            'rebind.example.test' => [TestNetwork::routable(40), TestNetwork::METADATA],
+        ];
+    }
 
     protected function setUp(): void
     {
@@ -41,7 +45,7 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
 
         $this->withoutMiddleware();
         OutboundUrl::setPolicyForTests(false, []);
-        OutboundUrl::setResolverForTests(static fn (string $host): array => self::ADDRESSES[$host] ?? []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => self::addresses()[$host] ?? []);
     }
 
     protected function tearDown(): void
@@ -612,7 +616,7 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
         $this->postJson(self::URL, ['register' => true, 'provider' => 'gitlab'])->assertStatus(201);
 
         $this->assertSame(['GET', 'POST'], array_column($sent, 0));
-        $this->assertSame(['git.example.test:443:93.184.216.20'], $sent[0][1]['curl'][CURLOPT_RESOLVE]);
+        $this->assertSame(['git.example.test:443:' . TestNetwork::routable(20)], $sent[0][1]['curl'][CURLOPT_RESOLVE]);
         $this->assertFalse($sent[0][1]['allow_redirects']);
     }
 
@@ -697,10 +701,10 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
             'a name resolving to a private address' => ['https://internal.example.test/acme/widgets.git'],
             'a name with one internal record among public ones' => ['https://rebind.example.test/acme/widgets.git'],
             'a name that does not resolve' => ['https://nowhere.example.test/acme/widgets.git'],
-            'the metadata address itself' => ['https://169.254.169.254/acme/widgets.git'],
-            'a loopback address' => ['https://127.0.0.1:8443/acme/widgets.git'],
+            'the metadata address itself' => ['https://' . TestNetwork::METADATA . '/acme/widgets.git'],
+            'a loopback address' => ['https://' . TestNetwork::LOOPBACK . ':8443/acme/widgets.git'],
             'a private address, never probed for an instance path' => ['https://internal.example.test/gitlab/acme/widgets.git'],
-            'the metadata address, never probed for an instance path' => ['https://169.254.169.254/gitlab/acme/widgets.git'],
+            'the metadata address, never probed for an instance path' => ['https://' . TestNetwork::METADATA . '/gitlab/acme/widgets.git'],
         ];
     }
 
@@ -733,7 +737,7 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
         $this->postJson(self::URL, ['register' => true, 'provider' => 'gitlab'])->assertStatus(201);
 
         $this->assertCount(1, $sent);
-        $this->assertSame(['git.example.test:443:93.184.216.20'], $sent[0]['curl'][CURLOPT_RESOLVE]);
+        $this->assertSame(['git.example.test:443:' . TestNetwork::routable(20)], $sent[0]['curl'][CURLOPT_RESOLVE]);
         $this->assertIsCallable($sent[0]['allow_redirects']['on_redirect']);
     }
 
@@ -741,7 +745,7 @@ class RegisterDeployHookProviderTest extends DeployHookTestCase
     public static function otherHostRedirects(): array
     {
         return [
-            'an internal address' => ['http://10.0.0.5:8080/api/v4/projects/acme%2Fwidgets/hooks'],
+            'an internal address' => ['http://' . TestNetwork::private(5) . ':8080/api/v4/projects/acme%2Fwidgets/hooks'],
             'another public host' => ['https://other.example.test/api/v4/projects/acme%2Fwidgets/hooks'],
             'the same host over http' => ['http://git.example.test/api/v4/projects/acme%2Fwidgets/hooks'],
             'the same host on another port' => ['https://git.example.test:8443/api/v4/projects/acme%2Fwidgets/hooks'],

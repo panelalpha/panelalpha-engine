@@ -10,7 +10,8 @@
 # `finish_installation`.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
+. "$(dirname "${BASH_SOURCE[0]}")/test-network.sh"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -238,7 +239,7 @@ expect 'reason is the first of several' \
 sample=$(printf '%s\n' \
     'Deploy log: pae project:deploy:list' \
     '' \
-    '    1:30 Health check: http://127.0.0.1:8000/ answered HTTP 404' \
+    "    1:30 Health check: http://$TN_LOOPBACK:8000/ answered HTTP 404" \
     "    1:31 Deploy failed: $php_reason")
 expect 'reason falls back to Deploy failed' "$php_reason" "$(deploy_error_reason "$sample")"
 

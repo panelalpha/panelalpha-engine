@@ -11,6 +11,7 @@ use App\System\Services\Webserver\ProxyRuleCertificate;
 use App\System\Services\Webserver\RoutingCompiler;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Ssl\TestCertificates;
 
@@ -57,7 +58,7 @@ class ProxyRuleCertificateRefreshTest extends TestCase
         ));
         ProxyRule::query()->create([
             'owner_scope' => 'system', 'transport' => 'http', 'listen_ip' => '*', 'listen_port' => 443,
-            'server_name' => '*.shop.test', 'upstream_host' => '10.0.0.5', 'upstream_port' => 3000, 'enabled' => true,
+            'server_name' => '*.shop.test', 'upstream_host' => TestNetwork::private(5), 'upstream_port' => 3000, 'enabled' => true,
         ]);
     }
 

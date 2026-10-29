@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -51,7 +52,7 @@ class ProxyRuleCreateCommandTest extends TestCase
 
     public function test_a_wildcard_rule_on_443_says_it_is_served_with_the_default_certificate(): void
     {
-        $this->create('--scope=system --transport=http --listen-port=443 --server-name=*.shop.test --upstream-host=10.0.0.5 --upstream-port=8080')
+        $this->create('--scope=system --transport=http --listen-port=443 --server-name=*.shop.test --upstream-host='.TestNetwork::private(5).' --upstream-port=8080')
             ->expectsOutputToContain('Rule created successfully')
             ->expectsOutputToContain("served with the host's default self-signed certificate")
             ->assertExitCode(0);
@@ -59,11 +60,11 @@ class ProxyRuleCreateCommandTest extends TestCase
 
     public function test_a_given_listen_ip_is_stored(): void
     {
-        $this->create('--scope=user --project=alice --transport=tcp --listen-ip=10.0.0.5 --listen-port=5432 --upstream-host=alice --upstream-port=5432')
-            ->expectsOutputToContain('Listen: 10.0.0.5:5432')
+        $this->create('--scope=user --project=alice --transport=tcp --listen-ip='.TestNetwork::private(5).' --listen-port=5432 --upstream-host=alice --upstream-port=5432')
+            ->expectsOutputToContain('Listen: '.TestNetwork::private(5).':5432')
             ->assertExitCode(0);
 
-        $this->assertSame('10.0.0.5', ProxyRule::query()->sole()->listen_ip);
+        $this->assertSame(TestNetwork::private(5), ProxyRule::query()->sole()->listen_ip);
     }
 
     public function test_a_stream_rule_has_no_server_name_or_protocol(): void
@@ -142,7 +143,7 @@ class ProxyRuleCreateCommandTest extends TestCase
 
         $this->create('--scope=user --project=bob --transport=http --listen-port=8089 --server-name=bob.test --upstream-host=bob --upstream-port=80')
             ->assertExitCode(0);
-        $this->create('--scope=system --transport=http --listen-port=8090 --server-name=shop.test --upstream-host=10.0.0.5 --upstream-port=80')
+        $this->create('--scope=system --transport=http --listen-port=8090 --server-name=shop.test --upstream-host='.TestNetwork::private(5).' --upstream-port=80')
             ->assertExitCode(0);
         $this->assertSame(2, ProxyRule::query()->count());
     }
@@ -155,11 +156,11 @@ class ProxyRuleCreateCommandTest extends TestCase
         $shop->save();
         $this->makeMainDomain($this->makeUser('carol'), 'carol.test');
 
-        $this->create('--scope=system --transport=http --listen-port=443 --server-name=www.shop.test --upstream-host=10.0.0.5 --upstream-port=8080')
+        $this->create('--scope=system --transport=http --listen-port=443 --server-name=www.shop.test --upstream-host='.TestNetwork::private(5).' --upstream-port=8080')
             ->expectsOutput('www.shop.test is an alias of shop.test, whose own site answers for it, so a rule named after it '
                 . 'would never be served. Name the rule shop.test: a rule for the domain serves its aliases too.')
             ->assertExitCode(1);
-        $this->create('--scope=system --transport=http --listen-port=80 --server-name=carol.test --upstream-host=10.0.0.5 --upstream-port=8080')
+        $this->create('--scope=system --transport=http --listen-port=80 --server-name=carol.test --upstream-host='.TestNetwork::private(5).' --upstream-port=8080')
             ->expectsOutput('carol.test belongs to the traditional PHP project carol, whose own site answers for it, '
                 . 'so a rule named after it would never be served.')
             ->assertExitCode(1);
@@ -191,7 +192,7 @@ class ProxyRuleCreateCommandTest extends TestCase
     /** A project's rule reaches its own app only; the operator's may point anywhere. */
     public function test_a_project_rule_to_anything_but_its_own_app_is_refused(): void
     {
-        foreach (['bob', 'sites-db', '172.25.0.2', 'core', '127.0.0.1', 'db.example.com'] as $upstream) {
+        foreach (['bob', 'sites-db', TestNetwork::container2(2), 'core', TestNetwork::LOOPBACK, 'db.example.com'] as $upstream) {
             $this->create("--scope=user --project=alice --transport=tcp --listen-port=17002 --upstream-host={$upstream} --upstream-port=3306")
                 ->expectsOutput("The upstream must be the project's own app, 'alice': "
                     . "a project's rule cannot reach another project, the engine's services or the host.")
@@ -200,9 +201,9 @@ class ProxyRuleCreateCommandTest extends TestCase
         $this->assertSame(0, ProxyRule::query()->count());
         $this->assertWebserverApplied(0);
 
-        $this->create('--scope=system --transport=tcp --listen-port=17002 --upstream-host=172.25.0.2 --upstream-port=3306')
+        $this->create('--scope=system --transport=tcp --listen-port=17002 --upstream-host='.TestNetwork::container2(2).' --upstream-port=3306')
             ->assertExitCode(0);
-        $this->assertSame('172.25.0.2', ProxyRule::query()->sole()->upstream_host);
+        $this->assertSame(TestNetwork::container2(2), ProxyRule::query()->sole()->upstream_host);
     }
 
     public function test_bad_input_is_refused_before_anything_is_stored(): void
@@ -232,7 +233,7 @@ class ProxyRuleCreateCommandTest extends TestCase
     /** A plain line and exit 1, before anything is stored or asked. */
     public function test_a_port_the_engine_or_the_host_already_uses_is_refused(): void
     {
-        $this->hostListens('LISTEN 0 80 127.0.0.1:3306 0.0.0.0:*');
+        $this->hostListens('LISTEN 0 80 '.TestNetwork::LOOPBACK.':3306 '.TestNetwork::ANY.':*');
         $cases = [
             ['--transport=tcp --listen-port=22', 'Port 22 is reserved by the engine.'],
             ['--transport=udp --listen-port=2011', 'Port 2011 is reserved by the engine.'],

@@ -23,7 +23,7 @@
 #   PANELALPHA_APPARMOR_NO_APPLY=1  only list what would be disabled
 #
 # The last two exist so the selection can be tested without root, and checked
-# on a host before anything changes. See configure-apparmor.test.sh.
+# on a host before anything changes. See tests/scripts/configure-apparmor.test.sh.
 
 set -uo pipefail
 

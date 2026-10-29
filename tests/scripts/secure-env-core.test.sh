@@ -3,7 +3,7 @@
 # What secure-env-core.sh leaves behind. Checks the owner only when run as
 # root, so run it both ways:
 #
-#   bash scripts/secure-env-core.test.sh
+#   bash tests/scripts/secure-env-core.test.sh
 #   docker run --rm -v "$PWD/scripts:/s:ro" debian:trixie-slim bash /s/secure-env-core.test.sh
 #
 # The regression this guards: the installer created
@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

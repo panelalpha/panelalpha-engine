@@ -9,6 +9,7 @@ use App\System\Services\Webserver\ProxyRuleCertificate;
 use App\System\Services\Webserver\ProxyRuleServerName;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Ssl\TestCertificates;
 
@@ -255,7 +256,7 @@ class NginxProxyRuleCertificateTest extends TestCase
             'listen_port' => $port,
             'server_name' => $serverName ?? '_',
             'server_names' => [],
-            'upstream_host' => '10.0.0.5',
+            'upstream_host' => TestNetwork::private(5),
             'upstream_port' => 3000,
             'upstream_protocol' => 'http',
             'is_generated' => false,

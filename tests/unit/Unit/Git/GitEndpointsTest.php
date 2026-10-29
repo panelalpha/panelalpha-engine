@@ -13,6 +13,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
 
@@ -36,7 +37,7 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->withoutMiddleware();
         config(['app.debug' => false]);
         $this->fakeGitHost();
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
         $this->redeploy = new SpyCheckoutRedeploy();
         $this->app->instance(CheckoutRedeploy::class, $this->redeploy);
     }
@@ -199,7 +200,7 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->user('main');
         $this->withoutRepository();
 
-        foreach (['http://127.0.0.1/x.git', 'http://169.254.169.254/x.git', 'http://0x7f000001:9/x.git', 'http://[::1]/x.git'] as $url) {
+        foreach (['http://' . TestNetwork::LOOPBACK . '/x.git', 'http://' . TestNetwork::METADATA . '/x.git', 'http://0x7f000001:9/x.git', 'http://[::1]/x.git'] as $url) {
             $this->postJson(self::URL . '/connect', ['repo_url' => $url, 'branch' => 'main'])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.field', 'repo_url')

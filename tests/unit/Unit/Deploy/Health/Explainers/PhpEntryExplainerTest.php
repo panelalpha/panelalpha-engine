@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\ProjectContext;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class PhpEntryExplainerTest extends TestCase
 {
@@ -35,7 +36,7 @@ class PhpEntryExplainerTest extends TestCase
     {
         return (new PhpEntryExplainer())->explain(
             ProjectContext::at($this->dir),
-            new ProbedResponse(403, '', 'http://127.0.0.1:8000/')
+            new ProbedResponse(403, '', 'http://' . TestNetwork::LOOPBACK . ':8000/')
         );
     }
 

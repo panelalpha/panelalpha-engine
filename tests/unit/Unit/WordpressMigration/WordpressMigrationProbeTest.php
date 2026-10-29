@@ -15,6 +15,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceProbeCheck;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceSite;
 use App\System\Project\PhpHosting\WordPress\Migration\TargetChoice;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The connection test answers ok with what it found, or the error_type of the
@@ -93,18 +94,18 @@ class WordpressMigrationProbeTest extends TestCase
 
     public function test_every_internal_source_gets_the_same_answer_whatever_listens_there(): void
     {
-        $dns = static fn (string $host): array => $host === 'sites-db' ? ['172.20.0.2'] : [];
+        $dns = static fn (string $host): array => $host === 'sites-db' ? [TestNetwork::container2(2)] : [];
         $policy = new SourceIpPolicy(new class extends EngineAddresses {
             public function ranges(): array
             {
-                return ['93.184.216.40'];
+                return [TestNetwork::routable(40)];
             }
         });
         $probe = new SourceProbe(static fn (SourceAccess $access) => new CurlSourceHttpClient($access->pin(), $dns, $policy), []);
 
         $answers = array_map(
             static fn (string $url): array => $probe->run(new SourceAccess(url: $url, username: 'admin', password: 'secret')),
-            ['http://172.18.0.5:5000/', 'http://10.0.0.1:8006/', 'http://sites-db:3306/', 'https://93.184.216.40/'],
+            ['http://' . TestNetwork::container(5) . ':5000/', 'http://' . TestNetwork::private(1) . ':8006/', 'http://sites-db:3306/', 'https://' . TestNetwork::routable(40) . '/'],
         );
 
         $refused = ['ok' => false, 'error_type' => SourceCheckFailed::UNREACHABLE, 'message' => SourceFetchGuard::REFUSED];

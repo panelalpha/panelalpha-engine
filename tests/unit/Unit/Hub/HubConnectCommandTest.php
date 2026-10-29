@@ -12,6 +12,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\TestNetwork;
 
 /** `pae hub:connect CODE` against a faked Hub. */
 class HubConnectCommandTest extends HubTestCase
@@ -46,7 +47,7 @@ class HubConnectCommandTest extends HubTestCase
 
     public function test_a_code_connects_with_exactly_the_granted_abilities_without_asking(): void
     {
-        \App\Models\Setting::setRuntimeSettings(['default_ipv4' => self::ENGINE_IP, 'license_key' => 'FROM-SETTING']);
+        \App\Models\Setting::setRuntimeSettings(['default_ipv4' => self::engineIp(), 'license_key' => 'FROM-SETTING']);
         $this->fakeHub([$this->approved(['admin_sso'], warnings: ['license_ip_mismatch', 'something_new'])]);
 
         $this->artisan('hub:connect', ['code' => 'wdjb mjht'])
@@ -67,7 +68,7 @@ class HubConnectCommandTest extends HubTestCase
         $this->assertSame('wdjb mjht', $create['connect_code'], 'sent as typed; the Hub normalizes');
         $this->assertSame('engine', $create['product']);
         $this->assertSame(self::APP_ID, $create['app_id']);
-        $this->assertSame(self::ENGINE_IP, $create['ip']);
+        $this->assertSame(self::engineIp(), $create['ip']);
         $this->assertSame(SpkiPin::fromFile($this->certificate), $create['tls_spki']);
         $this->assertNull($create['license_key'], 'the code names its license; the key on record would conflict');
         $this->assertSame('srv1.acme.com', $create['engine']['hostname']);
@@ -125,7 +126,7 @@ class HubConnectCommandTest extends HubTestCase
         ));
 
         $this->artisan('hub:connect', ['code' => self::CODE])
-            ->expectsOutputToContain('The Hub could not reach https://' . self::ENGINE_IP . ':2011. Allow inbound TCP 2011')
+            ->expectsOutputToContain('The Hub could not reach https://' . self::engineIp() . ':2011. Allow inbound TCP 2011')
             ->assertExitCode(1);
 
         /** @var PersonalAccessToken $token */
@@ -338,15 +339,15 @@ class HubConnectCommandTest extends HubTestCase
     public static function notPublic(): array
     {
         return [
-            'private' => ['10.0.0.5'],
-            'private 172' => ['172.20.0.1'],
-            'cgnat' => ['100.64.1.1'],
-            'loopback' => ['127.0.0.1'],
-            'link-local' => ['169.254.169.254'],
+            'private' => [TestNetwork::private(5)],
+            'private 172' => [TestNetwork::container(1)],
+            'cgnat' => [TestNetwork::CGNAT],
+            'loopback' => [TestNetwork::LOOPBACK],
+            'link-local' => [TestNetwork::METADATA],
             'v6 loopback' => ['::1'],
             'v6 link-local' => ['fe80::1'],
             'v6 ula' => ['fd00::1'],
-            'mapped private' => ['::ffff:192.168.1.1'],
+            'mapped private' => ['::ffff:'.TestNetwork::private2(1)],
         ];
     }
 
@@ -383,15 +384,15 @@ class HubConnectCommandTest extends HubTestCase
     public function test_the_address_connect_verified_from_is_exempt_from_the_api_jail_instead_of_the_replaced_one(): void
     {
         $old = $this->hubToken([], 'hc_OLD');
-        $this->connection($old, [], 'hc_OLD')->forceFill(['caller_ips' => ['198.51.100.20' => now()->toIso8601ZuluString()]])->save();
-        $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip'] = "198.51.100.20 # PanelAlpha Connect\n";
-        $this->withServerVariables(['REMOTE_ADDR' => '2.28.195.31']);
+        $this->connection($old, [], 'hc_OLD')->forceFill(['caller_ips' => [TestNetwork::public2(20) => now()->toIso8601ZuluString()]])->save();
+        $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip'] = TestNetwork::public2(20)." # PanelAlpha Connect\n";
+        $this->withServerVariables(['REMOTE_ADDR' => TestNetwork::public3(31)]);
         $this->fakeHub([$this->approved()]);
 
         $this->artisan('hub:connect', ['code' => self::CODE, '--replace' => true])->assertExitCode(0);
 
-        $this->assertSame(['2.28.195.31'], array_keys(HubConnection::active()?->caller_ips ?? []));
-        $this->assertSame("2.28.195.31 # PanelAlpha Connect\n", $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip']);
+        $this->assertSame([TestNetwork::public3(31)], array_keys(HubConnection::active()?->caller_ips ?? []));
+        $this->assertSame(TestNetwork::public3(31)." # PanelAlpha Connect\n", $this->fail2ban->files['/etc/fail2ban/panelalpha-api-ignoreip']);
         $this->assertSame(1, $this->fail2ban->reloads);
     }
 

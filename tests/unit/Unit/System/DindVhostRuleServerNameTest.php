@@ -7,6 +7,7 @@ use App\Models\User;
 use App\System;
 use App\System\Services\Webserver\NginxProxy;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -25,16 +26,16 @@ class DindVhostRuleServerNameTest extends TestCase
         $this->makeMainDomain($alice, 'alice.test');
         $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
         $this->rule('user', 'alice', 80, 'alice');
-        $this->rule('user', 'bob', 80, 'bob', '10.0.0.7');
+        $this->rule('user', 'bob', 80, 'bob', TestNetwork::private(7));
         $this->rule('user', 'bob', 443, 'bob');
         $this->rule('user', 'bob', 8089, 'bob');
-        $this->rule('system', null, 9443, '10.0.0.5');
+        $this->rule('system', null, 9443, TestNetwork::private(5));
 
         $vars = $this->vars($alice);
 
         $this->assertSame('alice', $vars['proxy_http']['host'] ?? null);
         $this->assertNull($vars['proxy_https']);
-        $this->assertSame([[9443, '10.0.0.5']], array_map(
+        $this->assertSame([[9443, TestNetwork::private(5)]], array_map(
             static fn (array $extra): array => [$extra['listen_port'], $extra['host']],
             $vars['proxy_extra']
         ));

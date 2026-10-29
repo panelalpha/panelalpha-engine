@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use Mockery;
 use RuntimeException;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -30,7 +31,7 @@ class ProjectDeleteReleasesOnlineNamesTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        Setting::setRuntimeSettings(['license_key' => 'K', 'default_ipv4' => '203.0.113.10']);
+        Setting::setRuntimeSettings(['license_key' => 'K', 'default_ipv4' => TestNetwork::public(10)]);
         config(['connect.url' => 'https://connect.panelalpha.com']);
     }
 

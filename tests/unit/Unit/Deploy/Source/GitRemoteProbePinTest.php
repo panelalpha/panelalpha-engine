@@ -6,6 +6,7 @@ use App\Lib\Deploy\Source\GitRefsUnavailableException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The probe runs git from core, so it connects to the address core's own check
@@ -13,8 +14,6 @@ use PHPUnit\Framework\TestCase;
  */
 class GitRemoteProbePinTest extends TestCase
 {
-    private const PUBLIC_ADDRESS = '140.82.121.4';
-
     private const URL = 'https://code.example.test/o/r.git';
 
     protected function tearDown(): void
@@ -25,17 +24,17 @@ class GitRemoteProbePinTest extends TestCase
 
     public function test_the_probe_connects_to_the_address_the_check_accepted(): void
     {
-        $this->resolveTo(self::PUBLIC_ADDRESS);
+        $this->resolveTo(TestNetwork::routable(4));
         $probe = $this->recordingProbe();
 
         $this->assertNull($probe->problem('git_repo', self::URL, null));
 
-        $this->assertContains('http.curloptResolve=code.example.test:443:' . self::PUBLIC_ADDRESS, $probe->commands[0]);
+        $this->assertContains('http.curloptResolve=code.example.test:443:' . TestNetwork::routable(4), $probe->commands[0]);
     }
 
     public function test_a_host_that_now_resolves_to_an_internal_address_is_refused_without_running_git(): void
     {
-        $this->resolveTo('10.0.0.5');
+        $this->resolveTo(TestNetwork::private(5));
         $probe = $this->recordingProbe();
 
         $problem = $probe->problem('git_repo', self::URL, null);
@@ -46,17 +45,17 @@ class GitRemoteProbePinTest extends TestCase
 
     public function test_the_ref_listing_connects_to_the_address_the_check_accepted(): void
     {
-        $this->resolveTo(self::PUBLIC_ADDRESS);
+        $this->resolveTo(TestNetwork::routable(4));
         $probe = $this->recordingProbe();
 
         $probe->refs(self::URL, null);
 
-        $this->assertContains('http.curloptResolve=code.example.test:443:' . self::PUBLIC_ADDRESS, $probe->commands[0]);
+        $this->assertContains('http.curloptResolve=code.example.test:443:' . TestNetwork::routable(4), $probe->commands[0]);
     }
 
     public function test_a_ref_listing_for_a_host_that_now_resolves_internal_is_unavailable_without_running_git(): void
     {
-        $this->resolveTo('169.254.169.254');
+        $this->resolveTo(TestNetwork::METADATA);
         $probe = $this->recordingProbe();
 
         try {

@@ -7,6 +7,7 @@ use App\Lib\Deploy\Source\GitUrl;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 
 class GitUrlTest extends TestCase
 {
@@ -144,11 +145,11 @@ class GitUrlTest extends TestCase
     {
         $command = GitUrl::withResolve(
             GitUrl::withoutRedirects(['git', '-C', '/p', 'fetch', 'origin']),
-            'files.example.com:443:93.184.216.34'
+            'files.example.com:443:' . TestNetwork::routable(34)
         );
 
         $this->assertSame(
-            ['git', '-c', 'http.curloptResolve=files.example.com:443:93.184.216.34', '-c', 'http.followRedirects=false',
+            ['git', '-c', 'http.curloptResolve=files.example.com:443:' . TestNetwork::routable(34), '-c', 'http.followRedirects=false',
                 '-C', '/p', 'fetch', 'origin'],
             $command
         );
@@ -166,8 +167,8 @@ class GitUrlTest extends TestCase
     public function test_sanitize_keeps_an_ssh_user_and_drops_only_its_password(): void
     {
         $this->assertSame(
-            'ssh://git@10.10.0.44:22277/home/git/r7.git',
-            GitUrl::sanitize('ssh://git@10.10.0.44:22277/home/git/r7.git')
+            'ssh://git@' . TestNetwork::private(44) . ':22277/home/git/r7.git',
+            GitUrl::sanitize('ssh://git@' . TestNetwork::private(44) . ':22277/home/git/r7.git')
         );
         $this->assertSame(
             'ssh://deploy@git.example.com/org/repo.git',

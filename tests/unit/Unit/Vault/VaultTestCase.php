@@ -8,6 +8,7 @@ use App\Models\Setting;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -66,7 +67,7 @@ abstract class VaultTestCase extends TestCase
         });
         Setting::clearRuntimeSettings();
         OutboundUrl::setResolverForTests(
-            static fn (string $host): array => in_array($host, ['github.com', 'gitlab.com'], true) ? ['140.82.121.4'] : [],
+            static fn (string $host): array => in_array($host, ['github.com', 'gitlab.com'], true) ? [TestNetwork::routable(4)] : [],
         );
     }
 

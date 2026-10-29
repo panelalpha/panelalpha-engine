@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Port;
 
 use App\Lib\Deploy\Port\PortMapping;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * One entry of a Compose `ports:` list, read as the host port it publishes.
@@ -41,7 +42,7 @@ class PortMappingTest extends TestCase
 
     public function test_a_bind_address_is_dropped(): void
     {
-        $mapping = PortMapping::parse('0.0.0.0:8080:80');
+        $mapping = PortMapping::parse(TestNetwork::ANY . ':8080:80');
 
         $this->assertSame(8080, $mapping->hostPort);
         $this->assertSame(80, $mapping->containerPort);
@@ -51,7 +52,7 @@ class PortMappingTest extends TestCase
     {
         // Reachable only from inside the container's host. Pointing the proxy
         // at it produces a connection refused on every request.
-        foreach (['127.0.0.1:8080:80', 'localhost:8080:80', '::1:8080:80', '[::1]:8080:80'] as $entry) {
+        foreach ([TestNetwork::LOOPBACK . ':8080:80', 'localhost:8080:80', '::1:8080:80', '[::1]:8080:80'] as $entry) {
             $this->assertNull(PortMapping::parse($entry), $entry);
         }
     }
@@ -91,7 +92,7 @@ class PortMappingTest extends TestCase
         $this->assertSame(3000, $mapping->hostPort);
         $this->assertSame(3000, $mapping->containerPort);
 
-        $mapping = PortMapping::parse('0.0.0.0:${WEB_PORT?unset}:8000/tcp');
+        $mapping = PortMapping::parse(TestNetwork::ANY . ':${WEB_PORT?unset}:8000/tcp');
         $this->assertSame(8000, $mapping->hostPort);
         $this->assertSame(8000, $mapping->containerPort);
 
@@ -136,9 +137,9 @@ class PortMappingTest extends TestCase
 
     public function test_a_long_syntax_loopback_binding_publishes_nothing(): void
     {
-        $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '127.0.0.1']));
+        $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => TestNetwork::LOOPBACK]));
         $this->assertNull(PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '::1']));
-        $this->assertSame(8080, PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => '0.0.0.0'])->hostPort);
+        $this->assertSame(8080, PortMapping::parse(['target' => 80, 'published' => 8080, 'host_ip' => TestNetwork::ANY])->hostPort);
     }
 
     public function test_surrounding_whitespace_is_tolerated(): void
@@ -162,6 +163,6 @@ class PortMappingTest extends TestCase
 
     public function test_a_loopback_publish_is_still_discarded(): void
     {
-        $this->assertNull(PortMapping::parse('${DOVEADM_PORT:-127.0.0.1:19991}:12345'));
+        $this->assertNull(PortMapping::parse('${DOVEADM_PORT:-' . TestNetwork::LOOPBACK . ':19991}:12345'));
     }
 }

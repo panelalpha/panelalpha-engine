@@ -10,6 +10,7 @@ use App\Models\HubAccessLog;
 use App\Models\PersonalAccessToken;
 use App\Models\TokenRotation;
 use Illuminate\Testing\TestResponse;
+use Tests\Support\TestNetwork;
 
 /**
  * The Hub reads the regular API with a token limited to a few routes, and
@@ -306,7 +307,7 @@ class HubTokenApiTest extends HubTestCase
         $this->assertSame([200, 403], $rows->take(2)->pluck('status')->all());
         $this->assertSame('shop', $rows[2]->app);
         $this->assertSame('app user 7', $rows[2]->detail);
-        $this->assertSame('127.0.0.1', $rows[0]->source_ip);
+        $this->assertSame(TestNetwork::LOOPBACK, $rows[0]->source_ip);
         $this->assertNotNull($connection->fresh()->last_hub_call_at);
     }
 

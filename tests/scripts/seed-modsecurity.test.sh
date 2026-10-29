@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#   bash scripts/seed-modsecurity.test.sh
+#   bash tests/scripts/seed-modsecurity.test.sh
 #
 # The regression this guards: config/modsecurity was seeded with `cp -Rn`, so
 # a ruleset file another build left on a host stayed there unnoticed, and a
@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

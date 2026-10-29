@@ -4,6 +4,7 @@ namespace Tests\Unit\Integrations\Statistics;
 
 use App\Integrations\GeoLocation\DbIp;
 use App\Integrations\Statistics\Awstats;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Integrations\GeoLocation\FakeGeoLocation;
 
@@ -23,8 +24,14 @@ class AwstatsVisitorsTest extends TestCase
             if (!str_starts_with($file, 'awstats')) {
                 continue;
             }
-            copy($fixtures . '/' . $file, $this->dataDir . '/' . $file);
+            file_put_contents($this->dataDir . '/' . $file, strtr((string) file_get_contents($fixtures . '/' . $file), self::visitors()));
         }
+    }
+
+    /** The visitors the fixture names by placeholder. */
+    private static function visitors(): array
+    {
+        return ['{visitor-us}' => TestNetwork::routable(8), '{visitor-au}' => TestNetwork::routable(1)];
     }
 
     protected function tearDown(): void
@@ -209,13 +216,13 @@ class AwstatsVisitorsTest extends TestCase
     public function test_geo_breakdowns_lookup_visitor_ips_offline(): void
     {
         $geo = new FakeGeoLocation([
-            '8.8.8.8' => [
+            self::visitors()['{visitor-us}'] => [
                 'country' => 'United States',
                 'country_code' => 'US',
                 'region' => 'California',
                 'region_code' => 'CA',
             ],
-            '1.1.1.1' => [
+            self::visitors()['{visitor-au}'] => [
                 'country' => 'Australia',
                 'country_code' => 'AU',
                 'region' => 'New South Wales',

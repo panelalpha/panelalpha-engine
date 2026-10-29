@@ -15,6 +15,7 @@ use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class DockerfileBuilderTest extends TestCase
 {
@@ -56,7 +57,7 @@ class DockerfileBuilderTest extends TestCase
         $this->assertStringContainsString('node -e ', $docker);
         $this->assertStringContainsString('RUN npm run build', $docker);
         $this->assertStringContainsString('EXPOSE 3000', $docker);
-        $this->assertStringContainsString('ENV HOST=0.0.0.0', $docker);
+        $this->assertStringContainsString('ENV HOST=' . TestNetwork::ANY, $docker);
         // The start command moved out of the Dockerfile into the staged
         // entrypoint; the image's job is to install it.
         $this->assertStringContainsString('ENTRYPOINT ["/panelalpha-entrypoint.sh"]', $docker);

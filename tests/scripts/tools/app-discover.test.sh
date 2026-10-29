@@ -4,11 +4,11 @@
 # replayed with --reuse-raw and --no-enrich, so no source and no GitHub page is
 # read.
 #
-#   bash scripts/tools/app-discover.test.sh
+#   bash tests/scripts/tools/app-discover.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../../scripts/tools" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

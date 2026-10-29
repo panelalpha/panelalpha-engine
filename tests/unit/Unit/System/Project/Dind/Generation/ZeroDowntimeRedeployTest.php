@@ -11,6 +11,7 @@ use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * The readings the swap acts on -- where Docker published the
@@ -21,7 +22,7 @@ class ZeroDowntimeRedeployTest extends TestCase
 {
     public function test_the_port_docker_chose_is_read_ipv4_first(): void
     {
-        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort("[::]:32772\n0.0.0.0:32771\n"));
+        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort("[::]:32772\n".TestNetwork::ANY.":32771\n"));
         $this->assertSame(32772, ZeroDowntimeRedeploy::boundPort("[::]:32772\n"));
         $this->assertNull(ZeroDowntimeRedeploy::boundPort(''));
     }

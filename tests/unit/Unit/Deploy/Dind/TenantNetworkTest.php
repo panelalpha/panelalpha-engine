@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -25,27 +26,28 @@ class TenantNetworkTest extends TestCase
 
     public function test_refuses_private_and_reserved_addresses_only(): void
     {
-        foreach (['10.10.0.25', '127.0.0.1', '169.254.169.254', '172.20.0.1', '192.168.1.10', '100.64.0.1'] as $ip) {
+        foreach ([TestNetwork::private(25), TestNetwork::LOOPBACK, TestNetwork::METADATA, TestNetwork::container(1), TestNetwork::private2(10), TestNetwork::CGNAT] as $ip) {
             $this->assertTrue(TenantNetwork::refuses($ip), $ip);
         }
-        foreach (['140.82.121.4', '8.8.8.8', '203.0.113.45', 'github.com', '::1'] as $ip) {
+        foreach ([TestNetwork::routable(4), TestNetwork::routable(8), TestNetwork::public(45), 'github.com', '::1'] as $ip) {
             $this->assertFalse(TenantNetwork::refuses($ip), $ip);
         }
     }
 
     public function test_sites_db_address_is_the_pinned_one_on_the_tenant_network(): void
     {
+        [$network] = explode('/', TestNetwork::prefix(TestNetwork::private(), 16));
         $json = json_encode([
-            'pash-tenants' => ['IPAddress' => '10.200.128.7', 'IPPrefixLen' => 16],
+            'pash-tenants' => ['IPAddress' => TestNetwork::add($network, 128 * 256 + 7), 'IPPrefixLen' => 16],
         ]);
 
-        $this->assertSame('10.200.0.2', TenantNetwork::sitesDbAddressFor((string) $json));
+        $this->assertSame(TestNetwork::add($network, 2), TenantNetwork::sitesDbAddressFor((string) $json));
     }
 
     public function test_an_account_still_on_the_old_network_gets_no_tenant_address(): void
     {
         $json = json_encode([
-            'pash-default-network' => ['IPAddress' => '172.25.0.15', 'IPPrefixLen' => 24],
+            'pash-default-network' => ['IPAddress' => TestNetwork::container2(15), 'IPPrefixLen' => 24],
         ]);
 
         $this->assertNull(TenantNetwork::sitesDbAddressFor((string) $json));
@@ -102,7 +104,7 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('-p tcp --dport 5000 -j ACCEPT', $script);
         // Account to account, and anything else on the bridge, after the allows.
         $this->assertStringContainsString('-A PA-TENANT-NET -o $BRIDGE -j DROP', $script);
-        foreach (['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16'] as $cidr) {
+        foreach ([TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR, TestNetwork::LINK_LOCAL_CIDR] as $cidr) {
             $this->assertStringContainsString($cidr, $script);
         }
         // The host: mail and the sites only.
@@ -119,7 +121,7 @@ class TenantNetworkTest extends TestCase
     /**
      * The prefix is picked where nothing on the host uses it, recorded for
      * docker-compose.yml, and a clash is refused rather than routed over.
-     * scripts/tenant-network-firewall.test.sh runs the script against fakes.
+     * tests/scripts/tenant-network-firewall.test.sh runs the script against fakes.
      */
     public function test_the_prefix_avoids_networks_the_host_already_uses(): void
     {
@@ -129,7 +131,7 @@ class TenantNetworkTest extends TestCase
         }
         $root = dirname(__DIR__, 5);
 
-        exec(escapeshellarg($bash) . ' ' . escapeshellarg($root . '/scripts/tenant-network-firewall.test.sh') . ' 2>&1', $out, $code);
+        exec(escapeshellarg($bash) . ' ' . escapeshellarg($root . '/tests/scripts/tenant-network-firewall.test.sh') . ' 2>&1', $out, $code);
 
         $this->assertSame(0, $code, implode("\n", $out));
         $this->assertContains('All passed.', $out);

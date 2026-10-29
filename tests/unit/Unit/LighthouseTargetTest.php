@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -48,7 +49,7 @@ class LighthouseTargetTest extends TestCase
             (require base_path('database/migrations/' . $migration))->up();
         }
 
-        Setting::setRuntimeSettings(['disable-lighthouse' => null, 'default_ipv4' => '203.0.113.10']);
+        Setting::setRuntimeSettings(['disable-lighthouse' => null, 'default_ipv4' => TestNetwork::public(10)]);
         Domain::create(['user_id' => 1, 'domain' => 'shop.example', 'type' => 'main', 'details' => ['aliases' => ['www.shop.example']]]);
 
         $this->journal = (object)['calls' => [], 'report' => []];
@@ -70,14 +71,14 @@ class LighthouseTargetTest extends TestCase
     public static function internalUrls(): array
     {
         return [
-            'metadata' => ['http://169.254.169.254/latest/meta-data/'],
-            'loopback' => ['http://127.0.0.1:2011/api/projects'],
-            'private' => ['http://10.0.0.5/'],
+            'metadata' => ['http://'.TestNetwork::METADATA.'/latest/meta-data/'],
+            'loopback' => ['http://'.TestNetwork::LOOPBACK.':2011/api/projects'],
+            'private' => ['http://'.TestNetwork::private(5).'/'],
             'ipv6 loopback' => ['http://[::1]/'],
             'compose service' => ['http://core:8000/'],
             'someone else' => ['https://example.com/'],
-            'userinfo' => ['http://shop.example@169.254.169.254/'],
-            'backslash' => ['http://169.254.169.254\\@shop.example/'],
+            'userinfo' => ['http://shop.example@'.TestNetwork::METADATA.'/'],
+            'backslash' => ['http://'.TestNetwork::METADATA.'\\@shop.example/'],
             'not http' => ['ftp://shop.example/'],
         ];
     }
@@ -99,8 +100,8 @@ class LighthouseTargetTest extends TestCase
         $this->postJson('/api/lighthouse/generate-report', ['url' => 'https://shop.example/'])->assertOk();
 
         $rules = $this->resolverRules();
-        $this->assertStringStartsWith('MAP shop.example 203.0.113.10, ', $rules);
-        foreach (['MAP 169.254.* ~NOTFOUND', 'MAP 127.* ~NOTFOUND', 'MAP 10.* ~NOTFOUND', 'MAP 172.31.* ~NOTFOUND', 'MAP localhost ~NOTFOUND', 'MAP 203.0.113.10 ~NOTFOUND'] as $rule) {
+        $this->assertStringStartsWith('MAP shop.example '.TestNetwork::public(10).', ', $rules);
+        foreach (['MAP 169.254.* ~NOTFOUND', 'MAP 127.* ~NOTFOUND', 'MAP 10.* ~NOTFOUND', 'MAP 172.31.* ~NOTFOUND', 'MAP localhost ~NOTFOUND', 'MAP '.TestNetwork::public(10).' ~NOTFOUND'] as $rule) {
             $this->assertStringContainsString($rule, $rules);
         }
     }
@@ -133,7 +134,7 @@ class LighthouseTargetTest extends TestCase
 
     public function test_a_hop_chrome_refused_ends_on_chrome_error_and_is_reported(): void
     {
-        // What a redirect to 169.254.169.254 looks like once the rules block it
+        // What a redirect to the metadata address looks like once the rules block it
         // (as the engine's lighthouse image reports it).
         $this->journal->report = [
             'mainDocumentUrl' => 'chrome-error://chromewebdata/',

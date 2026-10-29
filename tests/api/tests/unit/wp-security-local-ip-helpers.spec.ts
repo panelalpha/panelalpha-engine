@@ -10,6 +10,7 @@ import {
   type EngineIpResponse,
   type ProbeRun,
 } from '@/helpers/wp-security-local-ip-helpers';
+import { testNetwork } from '@/helpers/test-network';
 
 /**
  * The private-IP probe: what counts as a probe that ran, how redirects are followed,
@@ -27,9 +28,13 @@ function run(stdout: string, exit_code = 0, stderr = ''): ProbeRun {
 test.describe('parseProbeOutput', () => {
   test('reads the JSON line even behind PHP notices', () => {
     const parsed = parseProbeOutput(
-      `Notice: something\n${line({ status: 403, remote_addr: '172.18.0.2' })}\n`
+      `Notice: something\n${line({ status: 403, remote_addr: testNetwork.container(2) })}\n`
     );
-    expect(parsed).toMatchObject({ status: 403, remoteAddr: '172.18.0.2', location: '' });
+    expect(parsed).toMatchObject({
+      status: 403,
+      remoteAddr: testNetwork.container(2),
+      location: '',
+    });
   });
 
   test('returns null for an empty, bare-number or foreign output', () => {
@@ -48,13 +53,13 @@ test.describe('followProbe', () => {
       return Promise.resolve(
         url.startsWith('http://')
           ? run(line({ status: 301, location: 'https://site.test/' }))
-          : run(line({ status: 403, remote_addr: '10.0.0.5' }))
+          : run(line({ status: 403, remote_addr: testNetwork.private(5) }))
       );
     }, 'http://site.test/');
 
     expect(seen).toEqual(['http://site.test/', 'https://site.test/']);
     expect(chain.final.status).toBe(403);
-    expect(chain.remoteAddr).toBe('10.0.0.5');
+    expect(chain.remoteAddr).toBe(testNetwork.private(5));
     expect(chain.hops[0].location).toBe('https://site.test/');
   });
 
@@ -118,17 +123,24 @@ test.describe('followViaEngineIp', () => {
         return Promise.resolve(
           url.startsWith('http://')
             ? reply({ status: 301, location: 'https://site.test/shop?x=1' })
-            : reply({ status: 403, remoteAddr: '172.17.0.1', body: 'Forbidden' })
+            : reply({
+                status: 403,
+                remoteAddr: testNetwork.DOCKER_BRIDGE_GATEWAY,
+                body: 'Forbidden',
+              })
         );
       },
       'http',
-      '203.0.113.7',
+      testNetwork.public(7),
       'site.test'
     );
 
-    expect(seen).toEqual(['http://203.0.113.7/', 'https://203.0.113.7/shop?x=1']);
+    expect(seen).toEqual([
+      `http://${testNetwork.public(7)}/`,
+      `https://${testNetwork.public(7)}/shop?x=1`,
+    ]);
     expect(chain.final.status).toBe(403);
-    expect(chain.remoteAddr).toBe('172.17.0.1');
+    expect(chain.remoteAddr).toBe(testNetwork.DOCKER_BRIDGE_GATEWAY);
   });
 
   test('a canonical redirect to www asks the engine address for the www host', async () => {
@@ -138,25 +150,36 @@ test.describe('followViaEngineIp', () => {
         seen.push(`${hostHeader} ${url}`);
         return Promise.resolve(
           hostHeader === 'site.test'
-            ? reply({ status: 301, location: 'https://www.site.test/', remoteAddr: '198.51.100.9' })
-            : reply({ status: 403, remoteAddr: '172.17.0.1', body: 'Forbidden' })
+            ? reply({
+                status: 301,
+                location: 'https://www.site.test/',
+                remoteAddr: testNetwork.public2(9),
+              })
+            : reply({
+                status: 403,
+                remoteAddr: testNetwork.DOCKER_BRIDGE_GATEWAY,
+                body: 'Forbidden',
+              })
         );
       },
       'https',
-      '203.0.113.7',
+      testNetwork.public(7),
       'site.test'
     );
 
-    expect(seen).toEqual(['site.test https://203.0.113.7/', 'www.site.test https://203.0.113.7/']);
+    expect(seen).toEqual([
+      `site.test https://${testNetwork.public(7)}/`,
+      `www.site.test https://${testNetwork.public(7)}/`,
+    ]);
     expect(chain.final.status).toBe(403);
-    expect(chain.remoteAddr).toBe('172.17.0.1');
+    expect(chain.remoteAddr).toBe(testNetwork.DOCKER_BRIDGE_GATEWAY);
   });
 
   test('reports no REMOTE_ADDR when PHP never answered', async () => {
     const chain = await followViaEngineIp(
       () => Promise.resolve(reply({ status: 404 })),
       'https',
-      '203.0.113.7',
+      testNetwork.public(7),
       'site.test'
     );
     expect(chain.remoteAddr).toBeNull();

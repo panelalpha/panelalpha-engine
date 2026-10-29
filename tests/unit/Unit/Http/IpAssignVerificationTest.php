@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -43,7 +44,7 @@ class IpAssignVerificationTest extends TestCase
     public function test_a_host_step_that_does_not_take_is_refused_and_rolled_back(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
 
         // The interface never gets the address, though the command reports success.
         $this->app->instance(System::class, $this->fakeSystem(interface: [], noDefaultRoute: false));
@@ -51,18 +52,18 @@ class IpAssignVerificationTest extends TestCase
         $response = $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('does not carry 192.0.2.2/29', (string) $response->json('errors.ip_address.0'));
+        $this->assertStringContainsString('does not carry '.TestNetwork::public3(2).'/29', (string) $response->json('errors.ip_address.0'));
         $this->assertSame(0, IpAssigned::query()->count(), 'the assignment is rolled back');
     }
 
     public function test_a_host_step_that_throws_is_refused_and_rolled_back(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
 
         // No default route: the command builder itself throws, as a host with
         // no route to the subnet would.
@@ -71,7 +72,7 @@ class IpAssignVerificationTest extends TestCase
         $response = $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ]);
 
         $response->assertStatus(422);
@@ -82,53 +83,53 @@ class IpAssignVerificationTest extends TestCase
     public function test_an_address_added_before_the_read_back_throws_is_taken_off_the_interface(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
         $system = $this->fakeSystem(interface: [], noDefaultRoute: false, readBackFails: true);
         $this->app->instance(System::class, $system);
 
         $response = $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ]);
 
         $response->assertStatus(422);
         $this->assertStringContainsString('Could not read addresses of interface eth0', (string) $response->json('errors.ip_address.0'));
         $this->assertSame(0, IpAssigned::query()->count());
-        $this->assertCount(1, $this->removals($system, '192.0.2.2/29'), 'the address the add put there is taken off again');
+        $this->assertCount(1, $this->removals($system, TestNetwork::public3(2).'/29'), 'the address the add put there is taken off again');
     }
 
     public function test_an_address_whose_add_failed_is_left_on_the_interface(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
         $system = $this->fakeSystem(interface: [], noDefaultRoute: false, readBackFails: true, addFails: true);
         $this->app->instance(System::class, $system);
 
         $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ])->assertStatus(422);
 
-        $this->assertSame([], $this->removals($system, '192.0.2.2/29'), 'an address this call did not add is not its to remove');
+        $this->assertSame([], $this->removals($system, TestNetwork::public3(2).'/29'), 'an address this call did not add is not its to remove');
     }
 
     public function test_an_assignment_the_host_actually_took_is_reported(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
 
-        $this->app->instance(System::class, $this->fakeSystem(interface: ['192.0.2.2/29'], noDefaultRoute: false));
+        $this->app->instance(System::class, $this->fakeSystem(interface: [TestNetwork::public3(2).'/29'], noDefaultRoute: false));
 
         $response = $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ]);
 
         $response->assertStatus(201);
-        $response->assertJsonPath('data.ip_address', '192.0.2.2');
+        $response->assertJsonPath('data.ip_address', TestNetwork::public3(2));
         $this->assertSame(1, IpAssigned::query()->count());
     }
 
@@ -153,17 +154,17 @@ class IpAssignVerificationTest extends TestCase
     public function test_an_address_the_check_does_not_find_is_taken_off_the_interface(): void
     {
         $user = $this->user('alice');
-        $subnet = IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
+        $subnet = IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 0]);
         $system = $this->fakeSystem(interface: [], noDefaultRoute: false);
         $this->app->instance(System::class, $system);
 
         $this->postJson('/api/ip/assign', [
             'user_id' => $user->id,
             'ip_subnet_id' => $subnet->id,
-            'ip_address' => '192.0.2.2',
+            'ip_address' => TestNetwork::public3(2),
         ])->assertStatus(422);
 
-        $this->assertCount(1, $this->removals($system, '192.0.2.2/29'), 'the address is taken off the interface');
+        $this->assertCount(1, $this->removals($system, TestNetwork::public3(2).'/29'), 'the address is taken off the interface');
     }
 
     /** @return list<list<string>> */
@@ -177,7 +178,7 @@ class IpAssignVerificationTest extends TestCase
         $this->assertTrue(Network::sameAddress('2001:db8:0:0::5', '2001:db8::5'));
         $this->assertTrue(Network::sameAddress('2001:DB8::5', '2001:db8::5'));
         $this->assertFalse(Network::sameAddress('2001:db8::5', '2001:db8::6'));
-        $this->assertTrue(Network::sameAddress('192.0.2.2', '192.0.2.2'));
+        $this->assertTrue(Network::sameAddress(TestNetwork::public3(2), TestNetwork::public3(2)));
     }
 
     /** Network caches the host's default route statically; drop it between tests. */
@@ -230,7 +231,7 @@ class IpAssignVerificationTest extends TestCase
                 if (str_contains($joined, 'route show default')) {
                     return $this->noDefaultRoute
                         ? FakeProcess::failed('No default route found for IPv4')
-                        : FakeProcess::ok("default via 10.0.0.1 dev eth0\n");
+                        : FakeProcess::ok('default via '.TestNetwork::private(1)." dev eth0\n");
                 }
 
                 if (str_contains($joined, 'addr add') && $this->addFails) {
@@ -243,7 +244,7 @@ class IpAssignVerificationTest extends TestCase
 
                 if (str_contains($joined, 'addr show')) {
                     return FakeProcess::ok(
-                        "2: eth0: <UP>\n    inet 10.0.0.5/24 scope global eth0\n"
+                        "2: eth0: <UP>\n    inet ".TestNetwork::private(5)."/24 scope global eth0\n"
                         . implode('', array_map(fn (string $cidr): string => '    inet' . (str_contains($cidr, ':') ? '6' : '') . " {$cidr} scope global eth0\n", $this->interface))
                     );
                 }

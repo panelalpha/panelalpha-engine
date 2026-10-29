@@ -5,6 +5,7 @@ namespace Tests\Unit\Mcp;
 use App\Mcp\ToolRegistry;
 use App\Models\McpActivityLog;
 use Laravel\Mcp\Server\Tool;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -154,14 +155,14 @@ class ActivityLogRedactionTest extends TestCase
     {
         $answer = json_encode(['status' => 422, 'data' => ['problems' => [[
             'code' => 'provider_token_missing',
-            'hook' => ['url' => 'https://203.0.113.10/hooks/abc', 'secret' => 'one-time-"secret\\', 'created' => true],
+            'hook' => ['url' => 'https://'.TestNetwork::public(10).'/hooks/abc', 'secret' => 'one-time-"secret\\', 'created' => true],
         ]], 'git_token' => 'ghp_x']], JSON_UNESCAPED_SLASHES);
         $log = new McpActivityLog(['error_message' => $answer]);
 
         $stored = json_decode((string) $log->error_message, true);
         $this->assertSame(McpActivityLog::REDACTED, $stored['data']['problems'][0]['hook']['secret']);
         $this->assertSame(McpActivityLog::REDACTED, $stored['data']['git_token']);
-        $this->assertSame('https://203.0.113.10/hooks/abc', $stored['data']['problems'][0]['hook']['url']);
+        $this->assertSame('https://'.TestNetwork::public(10).'/hooks/abc', $stored['data']['problems'][0]['hook']['url']);
         $this->assertSame('provider_token_missing', $stored['data']['problems'][0]['code']);
         $this->assertTrue($stored['data']['problems'][0]['hook']['created']);
     }

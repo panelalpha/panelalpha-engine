@@ -7,13 +7,14 @@ use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Images;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
  * A host build ran the customer's scripts on Docker's default
  * bridge, from where it reached the engine API (bridge gateway and public
- * address), the host's private network and 169.254.169.254. Builds now run on
- * a network the firewall script limits to the internet.
+ * address), the host's private network and the metadata service. Builds now
+ * run on a network the firewall script limits to the internet.
  */
 class BuildNetworkTest extends TestCase
 {
@@ -101,7 +102,7 @@ class BuildNetworkTest extends TestCase
         $script = (string) file_get_contents($path);
         $this->assertSame(basename(BuildNetwork::FIREWALL_SCRIPT), basename($path));
 
-        foreach (['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '100.64.0.0/10', '127.0.0.0/8'] as $cidr) {
+        foreach ([TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR, TestNetwork::LINK_LOCAL_CIDR, TestNetwork::CGNAT_CIDR, TestNetwork::LOOPBACK_CIDR] as $cidr) {
             $this->assertStringContainsString($cidr, $script);
         }
         // The host itself, on any of its addresses, including the public one.

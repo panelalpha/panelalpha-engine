@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { testNetwork } from '@/helpers/test-network';
 import {
   ENGINE_API_PORT,
   defaultOptions,
@@ -15,7 +16,7 @@ const USAGE = `
 Point the API test suite at an engine.
 
   bun run env:setup                                  interactive
-  bun run env:setup -- --host 203.0.113.10           mint a token over SSH
+  bun run env:setup -- --host ${testNetwork.public(10)}           mint a token over SSH
   bun run env:setup -- --host engine.example.com --token '3|abc…'
 
 Options

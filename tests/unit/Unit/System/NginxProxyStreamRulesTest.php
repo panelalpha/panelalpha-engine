@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\System\Services\Webserver\NginxProxy;
 use Illuminate\Support\Facades\Blade;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -23,9 +24,9 @@ class NginxProxyStreamRulesTest extends TestCase
 
     public function test_a_udp_rule_says_udp(): void
     {
-        $conf = NginxProxy::streamConfig([$this->rule(8, 'udp', '10.0.0.5', 5353, 'tr12i', 53)]);
+        $conf = NginxProxy::streamConfig([$this->rule(8, 'udp', TestNetwork::private(5), 5353, 'tr12i', 53)]);
 
-        $this->assertMatchesRegularExpression('/^\s*listen 10\.0\.0\.5:5353 udp;$/m', $conf);
+        $this->assertMatchesRegularExpression('/^\s*listen ' . preg_quote(TestNetwork::private(5), '/') . ':5353 udp;$/m', $conf);
     }
 
     public function test_an_ipv6_listen_address_is_bracketed(): void
@@ -44,7 +45,7 @@ class NginxProxyStreamRulesTest extends TestCase
         $this->assertMatchesRegularExpression('/^\s*listen 5353 udp;\n\s*listen \[::\]:5353 udp;$/m', $udp);
 
         // An address is still that address alone, and an IPv4-only host never gets [::].
-        $this->assertStringNotContainsString('[::]', NginxProxy::streamConfig([$this->rule(9, 'tcp', '10.0.0.5', 25212, 'tr12i', 3000)], true));
+        $this->assertStringNotContainsString('[::]', NginxProxy::streamConfig([$this->rule(9, 'tcp', TestNetwork::private(5), 25212, 'tr12i', 3000)], true));
         $this->assertStringNotContainsString('[::]', NginxProxy::streamConfig([$this->rule(9, 'tcp', '2a01:4f8::1', 25212, 'tr12i', 3000)], true));
         $this->assertStringNotContainsString('[::]', NginxProxy::streamConfig([$this->rule(7, 'tcp', '*', 25212, 'tr12i', 3000)]));
     }
@@ -56,7 +57,7 @@ class NginxProxyStreamRulesTest extends TestCase
         $upstream = substr($conf, (int) strpos($conf, 'upstream stream_proxy_7 {'));
         $upstream = substr($upstream, 0, (int) strpos($upstream, '}'));
         $this->assertMatchesRegularExpression('/^\s*server tr12i:3000 resolve;$/m', $upstream);
-        $this->assertMatchesRegularExpression('/^\s*resolver 127\.0\.0\.54\b/m', $upstream);
+        $this->assertMatchesRegularExpression('/^\s*resolver ' . preg_quote(TestNetwork::ENGINE_DNS_PROXY, '/') . '\b/m', $upstream);
         // `resolve` needs a shared zone; the http rules' `upstreams` zone belongs to another module.
         $this->assertMatchesRegularExpression('/^\s*zone stream_upstreams \d+k;$/m', $upstream);
     }

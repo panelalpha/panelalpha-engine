@@ -1439,7 +1439,7 @@ uninstall() {
     say "ufw disabled and the engine's fail2ban jail removed"
 }
 
-# Sourced by ufw.test.sh for its functions.
+# Sourced by tests/scripts/firewall/ufw.test.sh for its functions.
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 case "${1:-}" in

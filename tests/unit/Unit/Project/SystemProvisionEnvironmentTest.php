@@ -6,6 +6,7 @@ use App\Lib\Project\SystemProvisionEnvironment;
 use App\Models\IpSubnet;
 use App\Models\Setting;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -19,7 +20,7 @@ class SystemProvisionEnvironmentTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        Setting::setRuntimeSettings(['default_ipv4' => '192.0.2.1', 'default_ipv6' => '']);
+        Setting::setRuntimeSettings(['default_ipv4' => TestNetwork::public3(1), 'default_ipv6' => '']);
     }
 
     protected function tearDown(): void
@@ -38,7 +39,7 @@ class SystemProvisionEnvironmentTest extends TestCase
 
     public function test_a_shared_subnet_does_not_count(): void
     {
-        IpSubnet::create(['ip' => '192.0.2.0', 'mask' => 29, 'family' => 4, 'is_shared' => 1]);
+        IpSubnet::create(['ip' => TestNetwork::public3(0), 'mask' => 29, 'family' => 4, 'is_shared' => 1]);
 
         $this->assertFalse((new SystemProvisionEnvironment())->freeDedicatedIpExists(4));
     }

@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * ActivityWatch is a git-submodule bundle, not an application.
@@ -128,7 +129,7 @@ class ActivityWatchSourceRecipeTest extends TestCase
         // builder stages a throwaway repository for it.
         $this->assertStringContainsString('git init', $contents);
         $this->assertStringContainsString('--host', $contents);
-        $this->assertStringContainsString('0.0.0.0', $contents);
+        $this->assertStringContainsString(TestNetwork::ANY, $contents);
     }
 
     /** A deploy records the recipe id and resolves it back on every read. */

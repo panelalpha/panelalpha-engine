@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Port;
 use App\Lib\Deploy\Port\ListeningSockets;
 use App\Lib\Deploy\Port\SilentPort;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A container that is up and does not answer on the port it publishes, and
@@ -13,11 +14,9 @@ use PHPUnit\Framework\TestCase;
 class SilentPortTest extends TestCase
 {
     /** `docker compose ps --format json`, one object per line. */
-    private const PS = <<<'JSON'
-        {"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"URL":"0.0.0.0","TargetPort":4000,"PublishedPort":4000,"Protocol":"tcp"}]}
-        {"Name":"project-db-1","Service":"db","State":"running","Publishers":[]}
-        {"Name":"project-web-1","Service":"web","State":"exited","Publishers":[{"URL":"0.0.0.0","TargetPort":80,"PublishedPort":8080,"Protocol":"tcp"}]}
-        JSON;
+    private const PS = '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"URL":"' . TestNetwork::ANY . '","TargetPort":4000,"PublishedPort":4000,"Protocol":"tcp"}]}' . "\n"
+        . '{"Name":"project-db-1","Service":"db","State":"running","Publishers":[]}' . "\n"
+        . '{"Name":"project-web-1","Service":"web","State":"exited","Publishers":[{"URL":"' . TestNetwork::ANY . '","TargetPort":80,"PublishedPort":8080,"Protocol":"tcp"}]}';
 
     /** /proc/<pid>/net/tcp header plus one LISTEN (0A) line. */
     private static function procNet(string $hexAddr, int $port): string
@@ -47,7 +46,7 @@ class SilentPortTest extends TestCase
         $sockets = ListeningSockets::fromProcNet(self::procNet('0100007F', 4000));
 
         $this->assertSame(
-            'app listens on 4000 on 127.0.0.1 only, inside its container, so connections from outside it are refused. It has to listen on 0.0.0.0.',
+            'app listens on 4000 on ' . TestNetwork::LOOPBACK . ' only, inside its container, so connections from outside it are refused. It has to listen on ' . TestNetwork::ANY . '.',
             SilentPort::diagnose('app', 4000, 4000, $sockets)
         );
     }
@@ -69,8 +68,8 @@ class SilentPortTest extends TestCase
 
     public function test_docker_dns_and_loopback_internals_are_not_named_as_the_apps_port(): void
     {
-        // Floppy while migrating: gunicorn on 127.0.0.1:8001 and Docker's DNS
-        // on 127.0.0.11, nginx not yet on 8000.
+        // Floppy while migrating: gunicorn on loopback port 8001 and Docker's DNS
+        // on its own loopback address, nginx not yet on 8000.
         $sockets = [['addr' => '0100007F', 'port' => 8001], ['addr' => '0B00007F', 'port' => 42273]];
 
         $this->assertStringContainsString('listens on no TCP port yet', SilentPort::diagnose('floppy', 8000, 8000, $sockets));
@@ -80,7 +79,7 @@ class SilentPortTest extends TestCase
     {
         $sockets = [['addr' => '0000000000000000FFFF00000100007F', 'port' => 8081], ['addr' => '0B00007F', 'port' => 42273]];
 
-        $this->assertStringContainsString('8081 on 127.0.0.1 only', SilentPort::diagnose('app', 8081, 8081, $sockets));
+        $this->assertStringContainsString('8081 on ' . TestNetwork::LOOPBACK . ' only', SilentPort::diagnose('app', 8081, 8081, $sockets));
     }
 
     public function test_nothing_listening_yet_is_said_plainly(): void

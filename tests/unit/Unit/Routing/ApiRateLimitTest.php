@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -35,10 +36,10 @@ class ApiRateLimitTest extends TestCase
 
     public function test_anyone_else_is_counted_per_address(): void
     {
-        $limit = $this->limitFor(Request::create('/api/projects', 'GET', [], [], [], ['REMOTE_ADDR' => '203.0.113.7']));
+        $limit = $this->limitFor(Request::create('/api/projects', 'GET', [], [], [], ['REMOTE_ADDR' => TestNetwork::public(7)]));
 
         $this->assertSame(120, $limit->maxAttempts);
-        $this->assertSame('ip:203.0.113.7', $limit->key);
+        $this->assertSame('ip:'.TestNetwork::public(7), $limit->key);
     }
 
     public function test_zero_turns_a_limit_off(): void
@@ -55,12 +56,12 @@ class ApiRateLimitTest extends TestCase
         // address, and the group throttle counts the attempts before it does.
         config(['auth.api_rate_limit.per_ip' => 2]);
 
-        $this->assertSame(404, $this->exchangeFrom('198.51.100.23'));
-        $this->assertSame(404, $this->exchangeFrom('198.51.100.23'));
-        $this->assertSame(429, $this->exchangeFrom('198.51.100.23'));
+        $this->assertSame(404, $this->exchangeFrom(TestNetwork::public2(23)));
+        $this->assertSame(404, $this->exchangeFrom(TestNetwork::public2(23)));
+        $this->assertSame(429, $this->exchangeFrom(TestNetwork::public2(23)));
 
         // Another address has its own bucket.
-        $this->assertSame(404, $this->exchangeFrom('198.51.100.24'));
+        $this->assertSame(404, $this->exchangeFrom(TestNetwork::public2(24)));
     }
 
     private function exchangeFrom(string $address): int
@@ -104,7 +105,7 @@ class ApiRateLimitTest extends TestCase
 
     private function requestWithToken(int $id): Request
     {
-        $request = Request::create('/api/projects', 'GET', [], [], [], ['REMOTE_ADDR' => '203.0.113.7']);
+        $request = Request::create('/api/projects', 'GET', [], [], [], ['REMOTE_ADDR' => TestNetwork::public(7)]);
         $user = new class ($id) {
             public function __construct(private int $id)
             {

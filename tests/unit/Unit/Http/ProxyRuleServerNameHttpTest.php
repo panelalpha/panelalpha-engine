@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\RecordsWebserverApply;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -49,7 +50,7 @@ class ProxyRuleServerNameHttpTest extends TestCase
                 ->assertJsonPath('errors.server_name.0', self::REFUSED);
         }
         // On 80 too, on an address the generated rule does not hold.
-        $this->postJson('/api/proxy-rules', $this->rule('bob', 'alice.test', ['listen_port' => 80, 'listen_ip' => '10.0.0.7']))
+        $this->postJson('/api/proxy-rules', $this->rule('bob', 'alice.test', ['listen_port' => 80, 'listen_ip' => TestNetwork::private(7)]))
             ->assertStatus(422);
 
         $this->assertSame(0, ProxyRule::query()->count());
@@ -59,7 +60,7 @@ class ProxyRuleServerNameHttpTest extends TestCase
     /** REST and the CLI share one grammar: `_` is a name, a bare `*` is not. */
     public function test_underscore_is_accepted_and_a_bare_star_is_refused(): void
     {
-        $this->postJson('/api/proxy-rules', $this->rule('alice', '_', ['owner_scope' => 'system', 'upstream_host' => '10.0.0.5']))
+        $this->postJson('/api/proxy-rules', $this->rule('alice', '_', ['owner_scope' => 'system', 'upstream_host' => TestNetwork::private(5)]))
             ->assertCreated();
 
         $this->postJson('/api/proxy-rules', $this->rule('alice', '*'))
@@ -105,7 +106,7 @@ class ProxyRuleServerNameHttpTest extends TestCase
         $carol->save();
 
         foreach (['carol.test', 'WWW.carol.test'] as $name) {
-            $this->postJson('/api/proxy-rules', $this->rule('carol', $name, ['owner_scope' => 'system', 'upstream_host' => '10.0.0.5']))
+            $this->postJson('/api/proxy-rules', $this->rule('carol', $name, ['owner_scope' => 'system', 'upstream_host' => TestNetwork::private(5)]))
                 ->assertStatus(422)
                 ->assertJsonPath('errors.server_name.0', "{$name} belongs to the traditional PHP project carol, whose own site "
                     . 'answers for it, so a rule named after it would never be served.');
@@ -132,7 +133,7 @@ class ProxyRuleServerNameHttpTest extends TestCase
     /** The operator's own rules may name any site. */
     public function test_a_system_rule_may_name_any_site(): void
     {
-        $this->postJson('/api/proxy-rules', $this->rule('alice', 'alice.test', ['owner_scope' => 'system', 'upstream_host' => '10.0.0.5']))
+        $this->postJson('/api/proxy-rules', $this->rule('alice', 'alice.test', ['owner_scope' => 'system', 'upstream_host' => TestNetwork::private(5)]))
             ->assertCreated();
 
         $this->assertSame('system', ProxyRule::query()->sole()->owner_scope);

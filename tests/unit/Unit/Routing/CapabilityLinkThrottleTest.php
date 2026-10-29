@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -20,11 +21,14 @@ use Tests\TestCase;
  */
 class CapabilityLinkThrottleTest extends TestCase
 {
-    private const ADDRESS = '198.51.100.31';
-
     private const ATTEMPTS_PER_MINUTE = 60;
 
     private const DECAY_SECONDS = 60;
+
+    private static function address(): string
+    {
+        return TestNetwork::public2(31);
+    }
 
     /** @return array<string, array{0: string, 1: string, 2: string}> */
     public static function routes(): array
@@ -57,7 +61,7 @@ class CapabilityLinkThrottleTest extends TestCase
             $this->assertInstanceOf(Limit::class, $limit);
             $this->assertSame(self::ATTEMPTS_PER_MINUTE, $limit->maxAttempts, $name);
             $this->assertSame(self::DECAY_SECONDS, $limit->decaySeconds, $name);
-            $this->assertSame('ip:' . self::ADDRESS, $limit->key, $name);
+            $this->assertSame('ip:' . self::address(), $limit->key, $name);
         }
     }
 
@@ -88,7 +92,7 @@ class CapabilityLinkThrottleTest extends TestCase
 
     private function guestRequest(): Request
     {
-        return Request::create('/api/anything', 'GET', [], [], [], ['REMOTE_ADDR' => self::ADDRESS]);
+        return Request::create('/api/anything', 'GET', [], [], [], ['REMOTE_ADDR' => self::address()]);
     }
 
     /** @return list<string> */

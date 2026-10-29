@@ -8,6 +8,7 @@ use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The two groups that cover most of the shipped manifests: fifteen run PHP
@@ -55,7 +56,7 @@ class PhpAndNodeChecksTest extends TestCase
     private function probe(string $runtime, int $status, string $body): array
     {
         return CheckRunner::for($runtime)
-            ->run(new ProbedResponse($status, $body, 'http://127.0.0.1:8000/'), $this->dir);
+            ->run(new ProbedResponse($status, $body, 'http://' . TestNetwork::LOOPBACK . ':8000/'), $this->dir);
     }
 
     /**

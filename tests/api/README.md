@@ -42,3 +42,4 @@ Times are measurements on one Engine (2026-10-08), not promises. Anything after 
 - Variables and their defaults: [`env/.env.example`](env/.env.example).
 - Run options, nightly opt-ins, test projects, report tunnel: [docs/maintainers.md](docs/maintainers.md).
 - Before pushing changes to the suite: `bun run check`.
+- IP addresses in the suite come from `helpers/test-network.ts` (`testNetwork.public(7)`, `testNetwork.LOOPBACK`), never from a literal. The networks are in [`../test-network.env`](../test-network.env), shared with the PHPUnit and shell tests; an environment variable of the same name overrides one. Core's `TestNetworkLiteralsTest` fails on an address written into a file here.

@@ -8,6 +8,7 @@ use App\Lib\Deploy\Source\GitRefsUnavailableException;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Http\OutboundUrl;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -35,7 +36,7 @@ class SourceRefsHttpTest extends TestCase
         $this->withoutMiddleware(Authenticate::class);
         $this->probe = $this->fakeProbe();
         $this->app->instance(GitRemoteProbe::class, $this->probe);
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
     }
 
     protected function tearDown(): void
@@ -107,7 +108,7 @@ class SourceRefsHttpTest extends TestCase
 
     public function test_a_loopback_host_is_refused_before_git_runs(): void
     {
-        $response = $this->postJson('/api/source/refs', ['repository' => 'http://127.0.0.1/x.git']);
+        $response = $this->postJson('/api/source/refs', ['repository' => 'http://' . TestNetwork::LOOPBACK . '/x.git']);
 
         $response->assertStatus(422);
         $response->assertJsonPath('problems.0.field', 'repository');

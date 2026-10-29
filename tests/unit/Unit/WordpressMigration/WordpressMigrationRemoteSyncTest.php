@@ -153,7 +153,7 @@ class WordpressMigrationRemoteSyncTest extends WordpressMigrationTestCase
 
         $body = json_decode((string) end($http->calls)['body'], true, flags: JSON_THROW_ON_ERROR);
         $this->assertSame('https://example.com/blog?token=' . $token, $body['destination_url']);
-        $this->assertSame(self::ENGINE_IPV4, $body['ip']);
+        $this->assertSame(self::engineIpv4(), $body['ip']);
         $this->assertTrue($body['insecure_tls']);
         $this->assertStringNotContainsString($token, json_encode($migration->fresh()->step_log, JSON_THROW_ON_ERROR));
     }

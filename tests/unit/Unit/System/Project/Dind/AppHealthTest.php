@@ -4,6 +4,7 @@ namespace Tests\Unit\System\Project\Dind;
 
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class AppHealthTest extends TestCase
 {
@@ -18,8 +19,8 @@ class AppHealthTest extends TestCase
         // Loopback inside the account container: never the domain, never the
         // proxy. The path is a variable now, because the probe follows a
         // relative redirect to reach the page a visitor actually lands on --
-        // but the host it dials never moves off 127.0.0.1.
-        $this->assertStringContainsString('"$scheme://127.0.0.1:$2$path"', $script);
+        // but the host it dials never moves off loopback.
+        $this->assertStringContainsString('"$scheme://' . TestNetwork::LOOPBACK . ':$2$path"', $script);
         $this->assertStringContainsString('path=/', $script);
         // The scheme stays whatever the caller passed in, even when a
         // redirect named another: the port dialled is the container's own
@@ -28,13 +29,13 @@ class AppHealthTest extends TestCase
         $this->assertStringNotContainsString('scheme=$new_scheme', $script);
         $this->assertSame(
             substr_count($script, '://'),
-            substr_count($script, '://127.0.0.1:'),
+            substr_count($script, '://' . TestNetwork::LOOPBACK . ':'),
             'every URL the probe builds is loopback'
         );
     }
 
     /**
-     * Firefly III answers `/` with `Location: https://127.0.0.1:8000/login`
+     * Firefly III answers `/` with `Location: https://<loopback>:8000/login`
      * -- absolute, and loopback. A probe that only followed `Location: /login`
      * reported 302 for that site, and the login page behind it was the 500.
      */
@@ -43,7 +44,7 @@ class AppHealthTest extends TestCase
         $script = AppHealth::probeScript([8000]);
 
         $this->assertStringContainsString('rest=${location#*//}', $script);
-        $this->assertStringContainsString('[ "$host" = 127.0.0.1 ] || [ "$host" = localhost ]', $script);
+        $this->assertStringContainsString('[ "$host" = ' . TestNetwork::LOOPBACK . ' ] || [ "$host" = localhost ]', $script);
         $this->assertStringContainsString('[ -z "$port" ] || [ "$port" = "$2" ]', $script);
         // A public name is not an address this probe may dial: following it
         // would take the check out of the container and onto the internet.
@@ -56,7 +57,7 @@ class AppHealthTest extends TestCase
         $script = AppHealth::probeScript([8000], 4, 2, 1, 'Shop.Example.com');
 
         $this->assertStringContainsString("-H 'Host: shop.example.com' ", $script);
-        $this->assertStringContainsString('"$scheme://127.0.0.1:$2$path"', $script);
+        $this->assertStringContainsString('"$scheme://' . TestNetwork::LOOPBACK . ':$2$path"', $script);
         $this->assertStringNotContainsString('Host:', AppHealth::probeScript([8000], 4, 2, 1));
         $this->assertStringNotContainsString('Host:', AppHealth::probeScript([8000], 4, 2, 1, '  '));
     }
@@ -70,8 +71,8 @@ class AppHealthTest extends TestCase
         $this->assertStringContainsString("-H 'X-Forwarded-Proto: https' ", $script);
         $this->assertStringContainsString("-H 'X-Forwarded-Host: squidex.example.com' ", $script);
         $this->assertStringContainsString("-H 'X-Forwarded-Port: 443' ", $script);
-        $this->assertStringContainsString("-H 'X-Forwarded-For: 192.0.2.1' ", $script);
-        $this->assertStringContainsString("-H 'X-Real-IP: 192.0.2.1' ", $script);
+        $this->assertStringContainsString("-H 'X-Forwarded-For: " . TestNetwork::HEALTH_PROBE_CLIENT . "' ", $script);
+        $this->assertStringContainsString("-H 'X-Real-IP: " . TestNetwork::HEALTH_PROBE_CLIENT . "' ", $script);
         $this->assertStringNotContainsString('X-Forwarded', AppHealth::probeScript([5000], 4, 2, 1));
     }
 
@@ -152,14 +153,14 @@ class AppHealthTest extends TestCase
     public function test_no_answer_keeps_the_curl_error_as_the_detail(): void
     {
         $results = AppHealth::parseProbeOutput(
-            "3000\thttp\t000 0.000123\tFailed to connect to 127.0.0.1 port 3000\n",
+            "3000\thttp\t000 0.000123\tFailed to connect to " . TestNetwork::LOOPBACK . " port 3000\n",
             [3000]
         );
 
         $this->assertSame(AppHealth::STATUS_FAIL, $results[0]['status']);
         $this->assertNull($results[0]['http_code']);
         $this->assertNull($results[0]['time']);
-        $this->assertSame('Failed to connect to 127.0.0.1 port 3000', $results[0]['detail']);
+        $this->assertSame('Failed to connect to ' . TestNetwork::LOOPBACK . ' port 3000', $results[0]['detail']);
     }
 
     public function test_no_answer_without_an_error_message_still_reports_a_reason(): void
@@ -389,11 +390,11 @@ class AppHealthTest extends TestCase
             'http_code' => 502, 'time' => 0.003, 'detail' => 'HTTP 502',
         ]);
 
-        $this->assertSame('Health check: http://127.0.0.1:8080/ answered HTTP 200 (0.031s)', $ok);
-        $this->assertSame('Health check: http://127.0.0.1:3000/ did not answer — no response', $fail);
+        $this->assertSame('Health check: http://' . TestNetwork::LOOPBACK . ':8080/ answered HTTP 200 (0.031s)', $ok);
+        $this->assertSame('Health check: http://' . TestNetwork::LOOPBACK . ':3000/ did not answer — no response', $fail);
         // A 5xx answered; it is the app that is broken, not the port.
         $this->assertSame(
-            'Health check: http://127.0.0.1:8081/ answered HTTP 502 — the application is failing',
+            'Health check: http://' . TestNetwork::LOOPBACK . ':8081/ answered HTTP 502 — the application is failing',
             $failing
         );
     }
@@ -507,12 +508,12 @@ class AppHealthTest extends TestCase
 
     public function test_the_edge_probe_carries_the_name_without_needing_dns(): void
     {
-        $script = AppHealth::edgeProbeScript('shop.example.com', '203.0.113.10', 4);
+        $script = AppHealth::edgeProbeScript('shop.example.com', TestNetwork::public(10), 4);
 
         // The Host header is the name; the address is the one the vhost binds.
         // A domain whose DNS is not pointed here yet still gets checked.
         $this->assertStringContainsString("host='shop.example.com'", $script);
-        $this->assertStringContainsString("addr='203.0.113.10'", $script);
+        $this->assertStringContainsString("addr='" . TestNetwork::public(10) . "'", $script);
         $this->assertStringContainsString('-H "Host: $host" "http://$addr/"', $script);
         $this->assertStringContainsString('-m 4', $script);
     }
@@ -577,7 +578,7 @@ class AppHealthTest extends TestCase
     }
 
     /**
-     * WordPress on every site: probed on 127.0.0.1 it redirects to the address
+     * WordPress on every site: probed on loopback it redirects to the address
      * it was installed under, and through its domain it serves the page. The
      * bodies differ, and nothing is wrong.
      */
@@ -641,7 +642,7 @@ class AppHealthTest extends TestCase
         // A fake curl answering the way OpenCloud's vhost does over plain http.
         file_put_contents($dir . '/curl', "#!/bin/sh\nprintf '308 https://cloud.panelalpha.online/'\n");
         chmod($dir . '/curl', 0o755);
-        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('cloud.panelalpha.online', '203.0.113.10'));
+        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('cloud.panelalpha.online', TestNetwork::public(10)));
         $raw = (string) shell_exec('PATH=' . escapeshellarg($dir . ':' . getenv('PATH')) . ' bash ' . escapeshellarg($dir . '/edge.sh'));
         array_map('unlink', glob($dir . '/*') ?: []);
         rmdir($dir);
@@ -812,7 +813,7 @@ class AppHealthTest extends TestCase
         $script = AppHealth::appProbeScript('http', 8080, 4, 'shop.example.com');
 
         $this->assertSame(2, substr_count($script, "-H 'Host: shop.example.com'"));
-        $this->assertStringContainsString("'http://127.0.0.1:8080/'", $script);
+        $this->assertStringContainsString("'http://" . TestNetwork::LOOPBACK . ":8080/'", $script);
     }
 
     /** Immich Kiosk stamps the current second into its page. */
@@ -870,7 +871,7 @@ class AppHealthTest extends TestCase
             case "\$*" in *https://*) printf '{$httpsAnswer} ' ;; *) printf '500 ' ;; esac
             SH);
         chmod($dir . '/curl', 0o755);
-        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('shop.example.com', '203.0.113.10', 4, $https));
+        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('shop.example.com', TestNetwork::public(10), 4, $https));
         $raw = (string) shell_exec('PATH=' . escapeshellarg($dir . ':' . getenv('PATH')) . ' bash ' . escapeshellarg($dir . '/edge.sh'));
         $calls = (string) @file_get_contents($dir . '/calls');
         array_map('unlink', glob($dir . '/*') ?: []);
@@ -887,8 +888,8 @@ class AppHealthTest extends TestCase
         $this->assertSame(200, $edge['code']);
         $this->assertSame('https', $edge['scheme']);
         // SNI and Host both carry the name; the address is still the vhost's.
-        $this->assertStringContainsString('--resolve shop.example.com:443:203.0.113.10 https://shop.example.com/', $calls);
-        $this->assertStringNotContainsString('http://203.0.113.10/', $calls);
+        $this->assertStringContainsString('--resolve shop.example.com:443:' . TestNetwork::public(10) . ' https://shop.example.com/', $calls);
+        $this->assertStringNotContainsString('http://' . TestNetwork::public(10) . '/', $calls);
 
         $verdict = AppHealth::compareFingerprints('shop.example.com', $edge, self::fingerprint(200, $edge['hash']));
         $this->assertSame('Reachable: https://shop.example.com/ answered 200 through the webserver', AppHealth::describeReach($verdict));

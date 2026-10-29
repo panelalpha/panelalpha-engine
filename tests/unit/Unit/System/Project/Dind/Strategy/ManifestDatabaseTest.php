@@ -19,6 +19,7 @@ use App\System\Project\Dind\Strategy\FrameworkStrategy;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 
 /**
  * `database: mysql` outside the PHP strategy. The dockerfile and
@@ -35,8 +36,6 @@ class ManifestDatabaseTest extends TestCase
         'username' => 'acme_app',
         'password' => 'p@ss/w:rd',
     ];
-
-    private const PIN = 'database-users.shared-hosting.palocal:172.25.0.14';
 
     private string $dir;
 
@@ -102,7 +101,7 @@ class ManifestDatabaseTest extends TestCase
         $this->assertSame(['8001:8001'], $service['ports']);
         $this->assertSame(ManifestDatabase::environment(self::CREDENTIALS)['DATABASE_URL'], $service['environment']['DATABASE_URL']);
         $this->assertSame('acme_app', $service['environment']['DB_USERNAME']);
-        $this->assertSame([self::PIN], $service['extra_hosts']);
+        $this->assertSame([self::pin()], $service['extra_hosts']);
     }
 
     /** A project that ships its own MySQL keeps it; nothing is provisioned beside it. */
@@ -153,7 +152,7 @@ class ManifestDatabaseTest extends TestCase
         $this->assertSame(1, $this->provisioned);
         $this->assertStringStartsWith('mysql://acme_app:', $service['environment']['DATABASE_URL']);
         $this->assertSame('recipe-chose-this', $service['environment']['DB_HOST']);
-        $this->assertSame([self::PIN], $service['extra_hosts']);
+        $this->assertSame([self::pin()], $service['extra_hosts']);
     }
 
     /** @return array<string, mixed> */
@@ -307,6 +306,6 @@ class ManifestDatabaseTest extends TestCase
 
     public static function pin(): string
     {
-        return self::PIN;
+        return 'database-users.shared-hosting.palocal:' . TestNetwork::container2(14);
     }
 }

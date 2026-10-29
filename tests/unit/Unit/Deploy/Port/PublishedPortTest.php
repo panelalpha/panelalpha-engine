@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Port;
 
 use App\Lib\Deploy\Port\PublishedPort;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The `ports:` entry of a generated compose file, and the one edit the engine
@@ -57,8 +58,8 @@ class PublishedPortTest extends TestCase
      */
     public function test_an_interface_binding_is_refused(): void
     {
-        // explode with a limit of 2 leaves "0.0.0.0" as the published side.
-        $this->assertNull(PublishedPort::parse('0.0.0.0:8080:3000'));
+        // explode with a limit of 2 leaves the address as the published side.
+        $this->assertNull(PublishedPort::parse(TestNetwork::ANY . ':8080:3000'));
     }
 
     public function test_an_unresolved_interpolation_is_refused(): void

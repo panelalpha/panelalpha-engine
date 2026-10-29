@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCandidates;
 use App\Lib\Deploy\Platform\ProjectContext;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The recipes that could deploy a project, and pinning one of them.
@@ -58,7 +59,7 @@ class PlatformCandidatesTest extends TestCase
     {
         $this->writeFile('composer.json', '{"require":{"laravel/framework":"^11"}}');
         $this->writeFile('artisan', '#!/usr/bin/env php');
-        $this->writeFile('Dockerfile', "FROM php:8.3\nEXPOSE 8000\nCMD [\"php\", \"-S\", \"0.0.0.0:8000\"]\n");
+        $this->writeFile('Dockerfile', "FROM php:8.3\nEXPOSE 8000\nCMD [\"php\", \"-S\", \"" . TestNetwork::ANY . ":8000\"]\n");
 
         $ids = array_column($this->candidates(), 'id');
 

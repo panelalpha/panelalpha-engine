@@ -13,6 +13,7 @@ use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Contract for named core operations: status body (installed, version and
@@ -279,7 +280,7 @@ class CoreTest extends TestCase
                     'exit_code' => 1,
                     'stdout' => '',
                     'stderr' => 'Error: Failed to get current SQL modes. Reason: ERROR 1045 (28000): '
-                        ."Access denied for user 'wp'@'172.18.0.3' (using password: YES)\n",
+                        ."Access denied for user 'wp'@'".TestNetwork::container(3)."' (using password: YES)\n",
                 ],
                 ['exit_code' => 0, 'stdout' => '7.1.3', 'stderr' => ''],
             ],

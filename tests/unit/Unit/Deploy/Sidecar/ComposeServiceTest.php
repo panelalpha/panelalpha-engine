@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Sidecar;
 
 use App\Lib\Deploy\Sidecar\ComposeService;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * One compose service, read the way the rest of the engine asks about it.
@@ -59,7 +60,7 @@ class ComposeServiceTest extends TestCase
 
     public function test_every_short_form_is_read(): void
     {
-        $service = ComposeService::of(['ports' => ['5432', '15432:5432/tcp', '127.0.0.1:6379:6379']]);
+        $service = ComposeService::of(['ports' => ['5432', '15432:5432/tcp', TestNetwork::LOOPBACK . ':6379:6379']]);
 
         $this->assertSame([5432, 6379], $service->ports());
     }

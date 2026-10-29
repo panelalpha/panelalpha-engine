@@ -7,6 +7,7 @@ use App\Lib\Hub\HubGrants;
 use App\Lib\Hub\HubSigner;
 use App\Lib\Hub\HubUrl;
 use App\Lib\Hub\SpkiPin;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /** The pieces with no database: signing, pinning, addresses, URLs, grants. */
@@ -69,10 +70,10 @@ class HubPrimitivesTest extends TestCase
 
     public function test_public_addresses_pass(): void
     {
-        foreach (['93.184.216.34', '8.8.8.8', '2a01:4f8::10', '2606:4700::1111'] as $ip) {
+        foreach ([TestNetwork::routable(34), TestNetwork::routable(8), '2a01:4f8::10', '2606:4700::1111'] as $ip) {
             $this->assertNull(EngineAddress::problem($ip), $ip);
         }
-        foreach (['example.com', '203.0.113.10', '192.0.2.1', '0.0.0.0', '224.0.0.1', '2001:db8::1', 'ff02::1'] as $ip) {
+        foreach (['example.com', TestNetwork::DOCUMENTATION_3, TestNetwork::DOCUMENTATION_1, TestNetwork::ANY, TestNetwork::MULTICAST, '2001:db8::1', 'ff02::1'] as $ip) {
             $this->assertNotNull(EngineAddress::problem($ip), $ip);
         }
     }
@@ -83,8 +84,8 @@ class HubPrimitivesTest extends TestCase
         $this->assertNotNull(HubUrl::problem('http://connect.panelalpha.com', 'production'));
         $this->assertNotNull(HubUrl::problem('http://localhost', 'production'));
         $this->assertNull(HubUrl::problem('http://localhost:8000', 'local'));
-        $this->assertNull(HubUrl::problem('http://127.0.0.1', 'local'));
-        $this->assertNotNull(HubUrl::problem('http://10.0.0.1', 'local'));
+        $this->assertNull(HubUrl::problem('http://'.TestNetwork::LOOPBACK, 'local'));
+        $this->assertNotNull(HubUrl::problem('http://'.TestNetwork::private(1), 'local'));
         $this->assertNotNull(HubUrl::problem('https://user:pw@connect.panelalpha.com', 'production'));
         $this->assertNotNull(HubUrl::problem('', 'production'));
         $this->assertSame('https://hub.panelalpha.com', config('hub.url'), 'the default Hub');

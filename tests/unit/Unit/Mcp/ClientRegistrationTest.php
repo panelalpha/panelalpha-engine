@@ -5,6 +5,7 @@ namespace Tests\Unit\Mcp;
 use App\Mcp\ClientRegistration;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The printed line is the whole point: an operator pastes it verbatim, so a
@@ -13,16 +14,15 @@ use PHPUnit\Framework\TestCase;
  */
 class ClientRegistrationTest extends TestCase
 {
-    private const URL = 'https://198.51.100.7:2011/mcp';
     private const TOKEN = '12|abcdef';
 
     public function test_every_client_gets_a_snippet_carrying_the_endpoint_and_the_token(): void
     {
-        foreach (ClientRegistration::all(self::URL, self::TOKEN) as $key => $entry) {
+        foreach (ClientRegistration::all(self::url(), self::TOKEN) as $key => $entry) {
             $snippet = implode("\n", $entry['lines']);
 
             $this->assertNotSame('', trim($entry['label']), "{$key} needs a label");
-            $this->assertStringContainsString(self::URL, $snippet, "{$key} must print the endpoint");
+            $this->assertStringContainsString(self::url(), $snippet, "{$key} must print the endpoint");
             $this->assertStringContainsString(self::TOKEN, $snippet, "{$key} must print the token");
         }
     }
@@ -54,7 +54,7 @@ class ClientRegistrationTest extends TestCase
     {
         $line = fn (string $client): string => implode(
             "\n",
-            ClientRegistration::for($client, self::URL, self::TOKEN)['lines']
+            ClientRegistration::for($client, self::url(), self::TOKEN)['lines']
         );
 
         $this->assertStringContainsString('claude plugin marketplace add ' . ClientRegistration::SKILLS_REPO, $line('claude'));
@@ -73,13 +73,13 @@ class ClientRegistrationTest extends TestCase
         $this->assertStringContainsString('--header "Authorization: Bearer ' . self::TOKEN . '"', $line('openclaw'));
         $this->assertStringContainsString('hermes plugins install ' . ClientRegistration::SKILLS_REPO . '/engine --enable', $line('hermes'));
         $this->assertStringContainsString("MCP_PANELALPHA_ENGINE_API_KEY='" . self::TOKEN . "'", $line('hermes'));
-        $this->assertStringContainsString('hermes mcp add panelalpha-engine --url ' . self::URL . ' --auth header', $line('hermes'));
+        $this->assertStringContainsString('hermes mcp add panelalpha-engine --url ' . self::url() . ' --auth header', $line('hermes'));
     }
 
     /** `&&` is a bashism; Windows PowerShell 5.1 cannot run a pasted line that uses it. */
     public function test_printed_commands_do_not_chain_with_and(): void
     {
-        foreach (ClientRegistration::all(self::URL, self::TOKEN) as $key => $entry) {
+        foreach (ClientRegistration::all(self::url(), self::TOKEN) as $key => $entry) {
             foreach ($entry['lines'] as $i => $text) {
                 $this->assertStringNotContainsString(
                     ' && ',
@@ -104,13 +104,13 @@ class ClientRegistrationTest extends TestCase
     {
         $prompt = fn (string $client): string => implode(
             "\n",
-            ClientRegistration::for($client, self::URL, self::TOKEN)['lines']
+            ClientRegistration::for($client, self::url(), self::TOKEN)['lines']
         );
 
         $claude = $prompt('claude-desktop');
         $this->assertStringContainsString('Add the GitHub marketplace ' . ClientRegistration::CLAUDE_MARKETPLACE, $claude);
         $this->assertStringContainsString('install engine@panelalpha', $claude);
-        $this->assertStringContainsString('server_url=' . self::URL, $claude);
+        $this->assertStringContainsString('server_url=' . self::url(), $claude);
         $this->assertStringContainsString('api_token=' . self::TOKEN, $claude);
         $this->assertStringContainsString('then list the projects on this engine', $claude);
 
@@ -119,7 +119,7 @@ class ClientRegistrationTest extends TestCase
         $this->assertStringContainsString('install engine@panelalpha', $chatgpt);
         $this->assertStringContainsString('PANELALPHA_MCP_TOKEN=' . self::TOKEN, $chatgpt);
         $this->assertStringContainsString(
-            'codex mcp add panelalpha-engine --url ' . self::URL . ' --bearer-token-env-var PANELALPHA_MCP_TOKEN',
+            'codex mcp add panelalpha-engine --url ' . self::url() . ' --bearer-token-env-var PANELALPHA_MCP_TOKEN',
             $chatgpt
         );
         $this->assertStringContainsString('then list the projects on this engine', $chatgpt);
@@ -132,12 +132,12 @@ class ClientRegistrationTest extends TestCase
 
     public function test_cursor_prints_an_install_link_for_one_server(): void
     {
-        $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
+        $lines = ClientRegistration::for('cursor', self::url(), self::TOKEN)['lines'];
         $links = array_values(array_filter($lines, fn (string $line): bool => str_starts_with($line, 'cursor://')));
         $this->assertCount(1, $links);
 
         $this->assertSame(
-            ['url' => self::URL, 'headers' => ['Authorization' => 'Bearer ' . self::TOKEN]],
+            ['url' => self::url(), 'headers' => ['Authorization' => 'Bearer ' . self::TOKEN]],
             $this->cursorLinkConfig($links[0])
         );
         $this->assertLessThan(array_search('{', $lines, true), array_search($links[0], $lines, true));
@@ -162,21 +162,21 @@ class ClientRegistrationTest extends TestCase
 
     public function test_cursor_chat_prompt_installs_only_the_plugin_without_credentials(): void
     {
-        $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
+        $lines = ClientRegistration::for('cursor', self::url(), self::TOKEN)['lines'];
         $prompts = array_values(array_filter($lines, fn (string $line): bool => str_starts_with($line, 'Add the GitHub marketplace')));
         $this->assertCount(1, $prompts);
         $this->assertSame(
             'Add the GitHub marketplace ' . ClientRegistration::SKILLS_REPO . ' and install engine.',
             $prompts[0]
         );
-        $this->assertStringNotContainsString(self::URL, $prompts[0]);
+        $this->assertStringNotContainsString(self::url(), $prompts[0]);
         $this->assertStringNotContainsString(self::TOKEN, $prompts[0]);
         $this->assertStringNotContainsString('mcp.json', $prompts[0]);
     }
 
     public function test_cursor_keeps_manual_json_and_plugin_installation(): void
     {
-        $lines = ClientRegistration::for('cursor', self::URL, self::TOKEN)['lines'];
+        $lines = ClientRegistration::for('cursor', self::url(), self::TOKEN)['lines'];
         $text = implode("\n", $lines);
 
         $this->assertStringContainsString('Settings -> Tools & MCP', $text);
@@ -196,7 +196,7 @@ class ClientRegistrationTest extends TestCase
             }
         }
         $config = json_decode(implode("\n", array_slice($lines, $start, $end - $start + 1)), true, 512, JSON_THROW_ON_ERROR);
-        $this->assertSame(self::URL, $config['mcpServers'][ClientRegistration::SERVER_NAME]['url']);
+        $this->assertSame(self::url(), $config['mcpServers'][ClientRegistration::SERVER_NAME]['url']);
         $this->assertSame('Bearer ' . self::TOKEN, $config['mcpServers'][ClientRegistration::SERVER_NAME]['headers']['Authorization']);
     }
 
@@ -220,6 +220,11 @@ class ClientRegistrationTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('claude');
 
-        ClientRegistration::for('not-a-client', self::URL, self::TOKEN);
+        ClientRegistration::for('not-a-client', self::url(), self::TOKEN);
+    }
+
+    private static function url(): string
+    {
+        return 'https://' . TestNetwork::public2(7) . ':2011/mcp';
     }
 }

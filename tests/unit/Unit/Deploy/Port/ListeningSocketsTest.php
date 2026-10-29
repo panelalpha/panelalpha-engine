@@ -74,24 +74,24 @@ class ListeningSocketsTest extends TestCase
 
     public function test_all_of_127_0_0_0_8_is_loopback(): void
     {
-        // Docker's embedded DNS in every compose network: 127.0.0.11.
+        // Docker's embedded DNS in every compose network, at .11 on loopback.
         $this->assertTrue(ListeningSockets::isLoopback('0B00007F'));
         $this->assertTrue(ListeningSockets::isLoopback('0100017F'));
-        $this->assertFalse(ListeningSockets::isLoopback('7F00000A'), '10.0.0.127 is not loopback');
+        $this->assertFalse(ListeningSockets::isLoopback('7F00000A'), 'a 10/8 address ending in .127 is not loopback');
     }
 
     public function test_an_ipv4_mapped_loopback_is_loopback(): void
     {
-        // A JVM's 127.0.0.1 listener, as it appears in /proc/net/tcp6.
+        // A JVM's loopback listener, as it appears in /proc/net/tcp6.
         $this->assertTrue(ListeningSockets::isLoopback('0000000000000000FFFF00000100007F'));
         $this->assertTrue(ListeningSockets::isLoopback('0000000000000000ffff00000b00007f'));
-        $this->assertFalse(ListeningSockets::isLoopback('0000000000000000FFFF00000200000A'), '::ffff:10.0.0.2');
+        $this->assertFalse(ListeningSockets::isLoopback('0000000000000000FFFF00000200000A'), 'an IPv4-mapped 10/8 address');
         $this->assertFalse(ListeningSockets::isLoopback('00000000000000000000000000000000'), '[::]');
     }
 
     public function test_an_ipv4_mapped_loopback_listener_is_not_chosen(): void
     {
-        // SignServer CE: WildFly's 127.0.0.1:8090 bound while 8081 was still booting.
+        // SignServer CE: WildFly's loopback port 8090 bound while 8081 was still booting.
         $sockets = [
             ['addr' => '0000000000000000FFFF00000100007F', 'port' => 8090],
             ['addr' => '0000000000000000FFFF00000100007F', 'port' => 9990],

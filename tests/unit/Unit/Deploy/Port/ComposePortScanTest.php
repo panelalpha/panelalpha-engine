@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Port;
 
 use App\Lib\Deploy\Port\ComposePortScan;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The port the proxy is pointed at, read out of the repository's own compose
@@ -181,13 +182,13 @@ class ComposePortScanTest extends TestCase
 
     public function test_a_loopback_binding_offers_nothing(): void
     {
-        $path = $this->compose(<<<'YAML'
+        $path = $this->compose(sprintf(<<<'YAML'
         services:
           app:
             image: acme/app
             ports:
-              - "127.0.0.1:8080:8080"
-        YAML);
+              - "%s:8080:8080"
+        YAML, TestNetwork::LOOPBACK));
 
         // A loopback binding is not a mapping at all, so there is nothing to
         // report as refused either.
@@ -602,7 +603,7 @@ class ComposePortScanTest extends TestCase
     /** The healthcheck ranks only within its own service: a front door elsewhere still wins. */
     public function test_a_healthcheck_does_not_outrank_another_services_web_port(): void
     {
-        $path = $this->compose(<<<'YAML'
+        $path = $this->compose(sprintf(<<<'YAML'
         services:
           web:
             image: nginx
@@ -611,8 +612,8 @@ class ComposePortScanTest extends TestCase
             image: acme/app
             ports: ["4000:4000"]
             healthcheck:
-              test: curl -f http://127.0.0.1:4000/
-        YAML);
+              test: curl -f http://%s:4000/
+        YAML, TestNetwork::LOOPBACK));
 
         $this->assertSame([80, 4000], ComposePortScan::of($path)['all']);
     }
@@ -660,7 +661,7 @@ class ComposePortScanTest extends TestCase
      */
     public function test_a_host_port_variable_is_read_from_the_projects_env(): void
     {
-        $path = $this->compose(<<<'YAML'
+        $path = $this->compose(sprintf(<<<'YAML'
         services:
           webserver:
             image: ghcr.io/timothepoznanski/poznote
@@ -669,8 +670,8 @@ class ComposePortScanTest extends TestCase
           mcp-server:
             image: ghcr.io/timothepoznanski/poznote-mcp
             ports:
-              - "127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045"
-        YAML);
+              - "%s:${POZNOTE_MCP_PORT:-8045}:8045"
+        YAML, TestNetwork::LOOPBACK));
 
         $this->assertSame(80, ComposePortScan::of($path)['primary']);
         $this->assertSame(

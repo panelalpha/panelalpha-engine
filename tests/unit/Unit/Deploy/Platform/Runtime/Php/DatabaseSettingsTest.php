@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime\Php;
 
 use App\Lib\Deploy\Platform\Runtime\Php\DatabaseSettings;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The database block a PHP application is configured with.
@@ -37,7 +38,7 @@ class DatabaseSettingsTest extends TestCase
     {
         $db = DatabaseSettings::fromArray(['connection' => 'mysql']);
 
-        $this->assertSame('127.0.0.1', $db->host());
+        $this->assertSame(TestNetwork::LOOPBACK, $db->host());
         $this->assertSame('3306', $db->port());
         $this->assertSame('app', $db->database());
         $this->assertSame('root', $db->username());
@@ -49,7 +50,7 @@ class DatabaseSettingsTest extends TestCase
         // nothing".
         $db = DatabaseSettings::fromArray(['connection' => 'mysql', 'host' => '  ', 'port' => '']);
 
-        $this->assertSame('127.0.0.1', $db->host());
+        $this->assertSame(TestNetwork::LOOPBACK, $db->host());
         $this->assertSame('3306', $db->port());
     }
 

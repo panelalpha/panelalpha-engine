@@ -7,6 +7,7 @@ use App\Rules\ProxyServerName;
 use App\Rules\SshPublicKey;
 use App\Rules\UpstreamHost;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Values the proxy-rule and SFTP endpoints write verbatim into nginx or sshd
@@ -16,7 +17,7 @@ class ProxyRuleGrammarTest extends TestCase
 {
     public function test_upstream_host(): void
     {
-        foreach (['127.0.0.1', '::1', 'app', 'my_app', 'db.internal', 'acme-web-1'] as $ok) {
+        foreach ([TestNetwork::LOOPBACK, '::1', 'app', 'my_app', 'db.internal', 'acme-web-1'] as $ok) {
             $this->assertTrue(UpstreamHost::isValid($ok), $ok);
         }
         foreach (["app;\n}", 'app evil', 'app}', 'a$b', '', "app\nserver x;"] as $bad) {
@@ -26,10 +27,10 @@ class ProxyRuleGrammarTest extends TestCase
 
     public function test_listen_ip(): void
     {
-        foreach (['*', '10.0.0.5', '2001:db8::1'] as $ok) {
+        foreach (['*', TestNetwork::private(5), '2001:db8::1'] as $ok) {
             $this->assertTrue(ListenIp::isValid($ok), $ok);
         }
-        foreach (['0.0.0.0:80; server {', 'localhost', "1.2.3.4\n"] as $bad) {
+        foreach ([TestNetwork::ANY.':80; server {', 'localhost', TestNetwork::public(4)."\n"] as $bad) {
             $this->assertFalse(ListenIp::isValid($bad), json_encode($bad));
         }
     }

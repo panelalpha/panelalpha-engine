@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -406,11 +407,11 @@ class SecondCopyPortTest extends TestCase
             }
             if ($this->copyIsDown()) {
                 // Nothing for a copy in restart back-off; one running again got a new port.
-                return str_starts_with((string) $this->copyDown, 'running') ? "0.0.0.0:32770\n" : '';
+                return str_starts_with((string) $this->copyDown, 'running') ? TestNetwork::ANY . ":32770\n" : '';
             }
 
             // Docker publishes whatever the copy was started with; only the second start is new.
-            return '0.0.0.0:' . ($m[1] === 'next1' ? 32768 : 32769) . "\n";
+            return TestNetwork::ANY . ':' . ($m[1] === 'next1' ? 32768 : 32769) . "\n";
         }
         if (str_contains($line, 'net/tcp')) {
             $down = $this->copyIsDown();

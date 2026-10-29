@@ -10,6 +10,7 @@ use App\Models\SecretVaultEntry;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 
 /**
  * A git_token paste is tried against the repository named at mint
@@ -180,7 +181,7 @@ class PasteCheckTest extends VaultTestCase
     public function test_an_unreachable_host_saves_the_token_unchecked(): void
     {
         $this->unreachableProbe();
-        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://93.184.216.34/o/r.git']);
+        $ref = $this->entryCheckedAgainst(['repo_url' => 'https://' . TestNetwork::routable(34) . '/o/r.git']);
 
         $response = $this->post('/vault/' . $ref, ['secret' => $this->token()]);
 

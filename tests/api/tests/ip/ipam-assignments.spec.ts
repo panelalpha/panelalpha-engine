@@ -11,6 +11,7 @@ import {
 } from '@/helpers/ipam-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 
 test.describe('IP assignments', () => {
   test.beforeEach(async ({ api }) => {
@@ -50,7 +51,7 @@ test.describe('IP assignments', () => {
     setupUser,
   }) => {
     const subnetId = await ensureSubnet(api, IPV4_SUBNET);
-    const ipAddress = '192.168.100.11';
+    const ipAddress = testNetwork.private2(11);
 
     try {
       // A leftover assignment from an earlier run would collide with this one.
@@ -135,7 +136,7 @@ test.describe('IP assignment validation', () => {
     try {
       const response = await api.assignIpRaw({
         ip_subnet_id: subnetId,
-        ip_address: '192.168.100.12',
+        ip_address: testNetwork.private2(12),
       });
 
       await expectStatus(response, 422);
@@ -154,7 +155,7 @@ test.describe('IP assignment validation', () => {
       const response = await api.assignIpRaw({
         username: 'nonexistentuser123',
         ip_subnet_id: subnetId,
-        ip_address: '192.168.100.13',
+        ip_address: testNetwork.private2(13),
       });
       await expectStatus(response, 422);
     } finally {
@@ -166,7 +167,7 @@ test.describe('IP assignment validation', () => {
     const response = await api.assignIpRaw({
       username: setupUser.username,
       ip_subnet_id: 999999,
-      ip_address: '192.168.0.1',
+      ip_address: testNetwork.private2(1),
     });
     await expectStatus(response, 422);
   });
@@ -193,7 +194,7 @@ test.describe('IP assignment validation', () => {
       const response = await api.assignIpRaw({
         username: setupUser.username,
         ip_subnet_id: subnetId,
-        ip_address: '192.168.200.1',
+        ip_address: testNetwork.private(1),
       });
 
       await expectStatus(response, 422);
@@ -205,7 +206,7 @@ test.describe('IP assignment validation', () => {
 
   test('assigning the same address twice is refused', async ({ api, setupUser }) => {
     const subnetId = await ensureSubnet(api, IPV4_SUBNET);
-    const ipAddress = '192.168.100.10';
+    const ipAddress = testNetwork.private2(10);
 
     try {
       await api.assignIpRaw({
@@ -233,7 +234,7 @@ test.describe('IP assignment validation', () => {
       (subnetId: number, username: string) => ({
         username,
         ip_subnet_id: subnetId,
-        ip_address: '192.168.100.99',
+        ip_address: testNetwork.private2(99),
       }),
     ],
     [
@@ -241,7 +242,7 @@ test.describe('IP assignment validation', () => {
       (subnetId: number) => ({
         username: 'nonexistentuser123',
         ip_subnet_id: subnetId,
-        ip_address: '192.168.100.10',
+        ip_address: testNetwork.private2(10),
       }),
     ],
   ] as const;
@@ -265,7 +266,7 @@ test.describe('IP assignment validation', () => {
     try {
       const response = await api.unassignIpRaw({
         ip_subnet_id: subnetId,
-        ip_address: '192.168.100.10',
+        ip_address: testNetwork.private2(10),
       });
 
       await expectStatus(response, 422);
@@ -281,7 +282,7 @@ test.describe('IP assignment validation', () => {
     const response = await api.unassignIpRaw({
       username: setupUser.username,
       ip_subnet_id: 99999,
-      ip_address: '192.168.100.10',
+      ip_address: testNetwork.private2(10),
     });
 
     await expectStatus(response, 422);

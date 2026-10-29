@@ -6,6 +6,7 @@ use App\Lib\Deploy\Inspect\Report\ApplicationReport;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * StackStorm's inspect answered `deployable: true, issue: null` in the same
@@ -67,7 +68,7 @@ class NoEntryPointNotDeployableTest extends TestCase
         $report = $this->report([
             'strategy' => 'python',
             'label' => 'Python',
-            'start_command' => '.venv/bin/gunicorn --bind 0.0.0.0:8000 wsgi:application',
+            'start_command' => '.venv/bin/gunicorn --bind ' . TestNetwork::ANY . ':8000 wsgi:application',
         ]);
 
         $this->assertTrue($report['deployable']);

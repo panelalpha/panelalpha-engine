@@ -100,14 +100,14 @@ class CacheRegistryTest extends TestCase
     {
         $this->assertSame(
             ['sudo', 'nsenter', '--target', '1', '--net', 'curl', '-sS', '-i', '--connect-timeout', '2', '--max-time', '30',
-                '-X', 'DELETE', 'http://127.0.0.1:5000/v2/node/manifests/sha256:abc'],
-            CacheRegistry::hostArgv('DELETE', 'http://127.0.0.1:5000/v2/node/manifests/sha256:abc', [])
+                '-X', 'DELETE', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc'],
+            CacheRegistry::hostArgv('DELETE', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc', [])
         );
 
-        $head = CacheRegistry::hostArgv('HEAD', 'http://127.0.0.1:5000/v2/node/manifests/20', ['Accept' => 'a, b']);
+        $head = CacheRegistry::hostArgv('HEAD', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20', ['Accept' => 'a, b']);
         $this->assertContains('--head', $head);
         $this->assertNotContains('-X', $head);
-        $this->assertSame(['-H', 'Accept: a, b', 'http://127.0.0.1:5000/v2/node/manifests/20'], array_slice($head, -3));
+        $this->assertSame(['-H', 'Accept: a, b', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20'], array_slice($head, -3));
     }
 
     public function test_curl_output_is_read_as_status_headers_and_body(): void

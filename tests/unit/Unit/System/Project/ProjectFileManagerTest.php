@@ -11,6 +11,7 @@ use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
 use Tests\Support\InfoZip;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class ProjectFileManagerTest extends TestCase
@@ -556,10 +557,10 @@ class ProjectFileManagerTest extends TestCase
         [$server, $port] = $this->serve($web);
 
         try {
-            $files->fetch('http://127.0.0.1:' . $port . '/plugin.zip', 'inbox');
+            $files->fetch('http://' . TestNetwork::LOOPBACK . ':' . $port . '/plugin.zip', 'inbox');
             $this->assertSame('archive-bytes', file_get_contents($this->homeDir . '/inbox/plugin.zip'));
 
-            $files->fetch('http://127.0.0.1:' . $port . '/plugin.zip', 'inbox', 'renamed.bin');
+            $files->fetch('http://' . TestNetwork::LOOPBACK . ':' . $port . '/plugin.zip', 'inbox', 'renamed.bin');
             $this->assertSame('archive-bytes', file_get_contents($this->homeDir . '/inbox/renamed.bin'));
         } finally {
             $server->stop();
@@ -573,7 +574,7 @@ class ProjectFileManagerTest extends TestCase
         $this->assertFileDoesNotExist($this->homeDir . '/inbox/stolen.txt');
 
         try {
-            $files->fetch('http://127.0.0.1/', 'inbox');
+            $files->fetch('http://' . TestNetwork::LOOPBACK . '/', 'inbox');
             $this->fail('A URL with no file name must be rejected');
         } catch (\Exception $e) {
             $this->assertStringContainsString('filename', $e->getMessage());
@@ -595,7 +596,7 @@ class ProjectFileManagerTest extends TestCase
         try {
             foreach (['big.bin', 'stream.php'] as $name) {
                 try {
-                    $files->fetch('http://127.0.0.1:' . $port . '/' . $name, 'inbox');
+                    $files->fetch('http://' . TestNetwork::LOOPBACK . ':' . $port . '/' . $name, 'inbox');
                     $this->fail("{$name} past the limit was stored");
                 } catch (\Exception $e) {
                     $this->assertStringContainsString('MB limit', $e->getMessage(), $name);
@@ -618,16 +619,16 @@ class ProjectFileManagerTest extends TestCase
         mkdir($this->homeDir . '/inbox');
         [$server, $port] = $this->serve($web);
         try {
-            $missing = $this->fetchProblem($files, 'http://127.0.0.1:' . $port . '/missing.zip');
+            $missing = $this->fetchProblem($files, 'http://' . TestNetwork::LOOPBACK . ':' . $port . '/missing.zip');
         } finally {
             $server->stop();
         }
-        $closed = $this->fetchProblem($files, 'http://127.0.0.1:' . $port . '/plugin.zip');
+        $closed = $this->fetchProblem($files, 'http://' . TestNetwork::LOOPBACK . ':' . $port . '/plugin.zip');
 
         $this->assertSame(['url', 'download_failed', 'http', 404], [$missing['field'], $missing['code'], $missing['reason'], $missing['http_status']]);
-        $this->assertSame('http://127.0.0.1:' . $port . '/missing.zip answered HTTP 404.', $missing['message']);
+        $this->assertSame('http://' . TestNetwork::LOOPBACK . ':' . $port . '/missing.zip answered HTTP 404.', $missing['message']);
         $this->assertSame(['url', 'download_failed', 'connect'], [$closed['field'], $closed['code'], $closed['reason']]);
-        $this->assertSame('Could not connect to 127.0.0.1.', $closed['message']);
+        $this->assertSame('Could not connect to ' . TestNetwork::LOOPBACK . '.', $closed['message']);
         $this->assertSame([], array_values(array_diff(scandir($this->homeDir . '/inbox'), ['.', '..'])));
     }
 
@@ -765,7 +766,7 @@ class ProjectFileManagerTest extends TestCase
             );
         }
 
-        // The fixture server binds 127.0.0.1, which the outbound guard refuses
+        // The fixture server binds loopback, which the outbound guard refuses
         // in production (engine#785). Bypass it only for tests that exercise
         // the fetch *mechanics* (destinations, names, redirects).
         return new class (
@@ -917,19 +918,19 @@ class ProjectFileManagerTest extends TestCase
      */
     private function serve(string $docroot): array
     {
-        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        $socket = stream_socket_server('tcp://' . TestNetwork::LOOPBACK . ':0');
         $this->assertIsResource($socket);
         $address = stream_socket_get_name($socket, false);
         fclose($socket);
         $port = (int) substr((string) $address, (int) strrpos((string) $address, ':') + 1);
 
-        $process = new Process([PHP_BINARY, '-S', '127.0.0.1:' . $port, '-t', $docroot]);
+        $process = new Process([PHP_BINARY, '-S', TestNetwork::LOOPBACK . ':' . $port, '-t', $docroot]);
         $process->setTimeout(null);
         $process->start();
 
         $deadline = microtime(true) + 3;
         while (microtime(true) < $deadline) {
-            $client = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.1);
+            $client = @fsockopen(TestNetwork::LOOPBACK, $port, $errno, $errstr, 0.1);
             if (is_resource($client)) {
                 fclose($client);
 

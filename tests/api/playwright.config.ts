@@ -53,7 +53,7 @@ if (baseURL) {
 
 // Resolving here, once, is what lets config/settings.ts stay synchronous —
 // which every fixture and factory depends on. An explicit DOMAIN always wins
-// unless it is an sslip.io leftover. A hostname that locally maps to 127.0.1.1
+// unless it is an sslip.io leftover. A hostname that locally maps to loopback
 // is replaced with the engine's panelalpha.direct zone so bun run test does not
 // need DOMAIN set, and API_BASE_URL is rewritten to the engine's own api_url
 // when the configured host only works on this box.

@@ -10,6 +10,7 @@ use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class DindProjectEnvironmentTest extends TestCase
@@ -299,7 +300,7 @@ class DindProjectEnvironmentTest extends TestCase
         mkdir($this->projectDir . '/server');
         file_put_contents(
             $this->projectDir . '/server/.env.example',
-            "APP_NAME=Plainpad\nAPP_KEY={KEY}\nSECRET_KEY=changeme\nDB_HOST=127.0.0.1\n"
+            "APP_NAME=Plainpad\nAPP_KEY={KEY}\nSECRET_KEY=changeme\nDB_HOST=" . TestNetwork::LOOPBACK . "\n"
         );
 
         $dind = $this->dind($this->dindModel());
@@ -316,7 +317,7 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertNotSame('changeme', $env['SECRET_KEY']);
         $this->assertNotSame('', $env['SECRET_KEY']);
         $this->assertSame('Plainpad', $env['APP_NAME']);
-        $this->assertSame('127.0.0.1', $env['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $env['DB_HOST']);
     }
 
     /** A nested file copied from a real .env (not a template) is left exactly as it is. */

@@ -5,6 +5,7 @@ namespace Tests\Unit\Ssl;
 use App\Lib\Ssl\SharedZones;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Who may spend the fleet's weekly allowance, and who is told they may not.
@@ -19,13 +20,14 @@ class SharedZoneIssuanceTest extends TestCase
 
     public function test_a_shared_zone_name_is_refused_until_the_operator_opts_in(): void
     {
-        $reason = SharedZones::ineligibleReason('shop.203-0-113-7.panelalpha.direct', false);
+        $name = 'shop.'.str_replace('.', '-', TestNetwork::public(7)).'.panelalpha.direct';
+        $reason = SharedZones::ineligibleReason($name, false);
 
         $this->assertNotNull($reason);
         $this->assertStringContainsString('panelalpha.direct', $reason);
         $this->assertStringContainsString('shared_zone_issuance', $reason);
 
-        $this->assertNull(SharedZones::ineligibleReason('shop.203-0-113-7.panelalpha.direct', true));
+        $this->assertNull(SharedZones::ineligibleReason($name, true));
     }
 
     /**
@@ -47,7 +49,7 @@ class SharedZoneIssuanceTest extends TestCase
         return [
             'reserved tld' => ['shop.local'],
             'bare hostname' => ['shop'],
-            'an address' => ['203.0.113.7'],
+            'an address' => [TestNetwork::public(7)],
         ];
     }
 
@@ -60,9 +62,9 @@ class SharedZoneIssuanceTest extends TestCase
     public static function zones(): array
     {
         return [
-            ['panelalpha.direct', 'shop.203-0-113-7.panelalpha.direct'],
-            ['nip.io', 'shop.1-2-3-4.nip.io'],
-            ['sslip.io', 'SHOP.1-2-3-4.SSLIP.IO.'],
+            ['panelalpha.direct', 'shop.'.str_replace('.', '-', TestNetwork::public(7)).'.panelalpha.direct'],
+            ['nip.io', 'shop.'.str_replace('.', '-', TestNetwork::public(4)).'.nip.io'],
+            ['sslip.io', 'SHOP.'.str_replace('.', '-', TestNetwork::public(4)).'.SSLIP.IO.'],
             ['panelalpha.online', 'shop-4f2a.panelalpha.online'],
             [null, 'shop.acme.com'],
         ];

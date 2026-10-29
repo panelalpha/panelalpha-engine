@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Port;
 
 use App\Lib\Deploy\Port\ComposePortScan;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * The port scan parsed compose files with Symfony directly while every other
@@ -42,8 +43,8 @@ class ComposePortScanAnchorTest extends TestCase
             . "  caddy:\n"
             . "    image: caddy:2.11.4\n"
             . "    ports:\n"
-            . "      - \"\${HOST_PUBLISH_IP:-0.0.0.0}:\${WEB_FRONTEND_PORT:-80}:80\"\n"
-            . "      - \"\${HOST_PUBLISH_IP:-0.0.0.0}:\${WEB_FRONTEND_SSL_PORT:-443}:443\"\n"
+            . "      - \"\${HOST_PUBLISH_IP:-" . TestNetwork::ANY . "}:\${WEB_FRONTEND_PORT:-80}:80\"\n"
+            . "      - \"\${HOST_PUBLISH_IP:-" . TestNetwork::ANY . "}:\${WEB_FRONTEND_SSL_PORT:-443}:443\"\n"
         );
 
         $this->assertSame([80, 443], ComposePortScan::of($path)['all']);

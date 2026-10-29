@@ -6,6 +6,7 @@ use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * Inspect has to see the same tree the deploy will.
@@ -188,7 +189,7 @@ class SourceResolverSubmodulesTest extends TestCase
         file_put_contents($meta . '/index.php', "<?php\n");
         file_put_contents(
             $meta . '/.gitmodules',
-            "[submodule \"web\"]\n\tpath = web\n\turl = https://127.0.0.1:1/nope.git\n"
+            "[submodule \"web\"]\n\tpath = web\n\turl = https://" . TestNetwork::LOOPBACK . ":1/nope.git\n"
         );
         $this->git($meta, 'add -A && git -c user.name=t -c user.email=t@example.com commit -qm meta');
 
@@ -281,8 +282,8 @@ class SourceResolverSubmodulesTest extends TestCase
     public function test_a_quoted_or_relative_internal_url_is_not_contacted(): void
     {
         $cases = [
-            'quoted' => ["\turl = \"ssh://git@127.0.0.1/x.git\"", 'https://example.com/owner/repo.git'],
-            'relative' => ["\turl = ../../../127.0.0.1/x.git", 'ssh://git@example.com/owner/repo.git'],
+            'quoted' => ["\turl = \"ssh://git@" . TestNetwork::LOOPBACK . "/x.git\"", 'https://example.com/owner/repo.git'],
+            'relative' => ["\turl = ../../../" . TestNetwork::LOOPBACK . "/x.git", 'ssh://git@example.com/owner/repo.git'],
         ];
         foreach ($cases as $case => [$entry, $origin]) {
             $meta = $this->metaRepository();
@@ -293,7 +294,7 @@ class SourceResolverSubmodulesTest extends TestCase
 
             $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout));
 
-            $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), "{$case}: git connected to an internal host");
+            $this->assertSame([], preg_grep('/'.preg_quote(TestNetwork::LOOPBACK, '/').'/', $contacts), "{$case}: git connected to an internal host");
             @unlink($this->tmpDir . '/ssh.log');
             $this->removeDir($this->tmpDir . '/sub');
             $this->removeDir($this->tmpDir . '/meta');
@@ -306,7 +307,7 @@ class SourceResolverSubmodulesTest extends TestCase
         $file = ['https', 'http', 'file'];
         $meta = $this->metaRepository();
         $sub = $this->tmpDir . '/sub';
-        $this->addGitlink($sub, 'evil', "\turl = ssh://git@127.0.0.1/x.git");
+        $this->addGitlink($sub, 'evil', "\turl = ssh://git@" . TestNetwork::LOOPBACK . "/x.git");
         $this->git($meta . '/web', 'pull -q origin main');
         $this->git($meta, 'add web && git -c user.name=t -c user.email=t@example.com commit -qm bump');
 
@@ -316,7 +317,7 @@ class SourceResolverSubmodulesTest extends TestCase
         $contacts = $this->sshContacts(fn () => $this->initSubmodules($checkout, $file));
 
         $this->assertFileExists($checkout . '/web/composer.json', 'the first level was not fetched');
-        $this->assertSame([], preg_grep('/127\.0\.0\.1/', $contacts), 'a nested internal submodule was contacted');
+        $this->assertSame([], preg_grep('/'.preg_quote(TestNetwork::LOOPBACK, '/').'/', $contacts), 'a nested internal submodule was contacted');
     }
 
     /**
@@ -363,20 +364,20 @@ class SourceResolverSubmodulesTest extends TestCase
     /** A rebinding answer between the check and the fetch must not steer the fetch: it is pinned to the checked address. */
     public function test_a_submodule_fetch_is_pinned_to_the_checked_address(): void
     {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => ['93.184.216.7']);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => [TestNetwork::routable(7)]);
         $meta = $this->metaWithHttpsSubmodule();
 
         $updates = $this->submoduleUpdates(fn () => $this->initSubmodules($meta));
 
         $this->assertCount(1, $updates);
-        $this->assertStringContainsString('http.curloptResolve=sub.example:443:93.184.216.7', $updates[0]);
+        $this->assertStringContainsString('http.curloptResolve=sub.example:443:' . TestNetwork::routable(7), $updates[0]);
     }
 
     public function test_a_submodule_host_that_rebinds_to_loopback_before_the_pin_is_not_fetched(): void
     {
         $answers = 0;
         OutboundUrl::setResolverForTests(static function (string $host) use (&$answers): array {
-            return ++$answers === 1 ? ['93.184.216.7'] : ['127.0.0.1'];
+            return ++$answers === 1 ? [TestNetwork::routable(7)] : [TestNetwork::LOOPBACK];
         });
         $meta = $this->metaWithHttpsSubmodule();
 

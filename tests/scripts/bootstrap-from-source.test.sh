@@ -4,7 +4,8 @@
 # install on a host that already has one.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
+. "$(dirname "${BASH_SOURCE[0]}")/test-network.sh"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -66,9 +67,10 @@ FAKE_LIST_EXIT=1
 expect_tokens "an unreadable list is not 'no tokens'" fail
 
 # The closing note follows the certificate served, not the one requested.
+PUB9=$(tn_host PUBLIC 9)
 expect_note() { # expect_note <label> <cert> <first line>
     local got
-    got=$(served_cert_note "$2" 203.0.113.9 | head -n 1)
+    got=$(served_cert_note "$2" "$PUB9" | head -n 1)
     if [ "$got" = "$3" ]; then
         echo "PASS: $1"
     else
@@ -78,17 +80,17 @@ expect_note() { # expect_note <label> <cert> <first line>
 }
 quiet() { "$@" >/dev/null 2>&1; }
 quiet openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=ca -keyout ca.key -out ca.pem
-quiet openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=203.0.113.9 \
-    -addext subjectAltName=IP:203.0.113.9 -keyout self.key -out self.pem
-for san in IP:203.0.113.9 DNS:panel.example.com; do
+quiet openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$PUB9" \
+    -addext "subjectAltName=IP:$PUB9" -keyout self.key -out self.pem
+for san in "IP:$PUB9" DNS:panel.example.com; do
     quiet openssl req -new -newkey rsa:2048 -nodes -subj /CN=leaf -keyout leaf.key -out leaf.csr
     quiet openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 1 \
         -extfile <(echo "subjectAltName=$san") -out "${san%%:*}.pem"
 done
 export SSL_CERT_FILE="$WORK_DIR/ca.pem"
 expect_note "a self-signed certificate needs --cacert" self.pem "The certificate is self-signed; clients need it explicitly:"
-expect_note "a trusted one for the address needs nothing" IP.pem "The certificate is publicly trusted for 203.0.113.9; clients need nothing extra."
-expect_note "a trusted one for a name says so" DNS.pem "The certificate is publicly trusted, but not for 203.0.113.9; connect by the name it is issued for."
+expect_note "a trusted one for the address needs nothing" IP.pem "The certificate is publicly trusted for $PUB9; clients need nothing extra."
+expect_note "a trusted one for a name says so" DNS.pem "The certificate is publicly trusted, but not for $PUB9; connect by the name it is issued for."
 unset SSL_CERT_FILE
 
 # The DNS port check runs under set -e at the top level: a holder that is gone
@@ -114,13 +116,13 @@ expect_holder() { # expect_holder <label> <expected output, lines joined by />
         failures=$((failures + 1))
     fi
 }
-DOCKER_LINE='UNCONN 0 0 127.0.0.54:53 0.0.0.0:* users:(("docker-proxy",pid=10,fd=4))'
-OTHER_LINE='UNCONN 0 0 127.0.0.54:53 0.0.0.0:* users:(("dnsmasq",pid=11,fd=4))'
-WARNING="warn: Something still holds 127.0.0.54:53 — dns-proxy may fail to start: $OTHER_LINE"
+DOCKER_LINE="UNCONN 0 0 $TN_ENGINE_DNS_PROXY:53 $TN_ANY:* users:((\"docker-proxy\",pid=10,fd=4))"
+OTHER_LINE="UNCONN 0 0 $TN_ENGINE_DNS_PROXY:53 $TN_ANY:* users:((\"dnsmasq\",pid=11,fd=4))"
+WARNING="warn: Something still holds $TN_ENGINE_DNS_PROXY:53 — dns-proxy may fail to start: $OTHER_LINE"
 FAKE_SS=('')
 expect_holder "a free port says nothing" "survived/"
-FAKE_SS=("UNCONN 0 0 127.0.0.1:53 0.0.0.0:*|$DOCKER_LINE" "$DOCKER_LINE")
-expect_holder "a dns-proxy holder is fine" "step: 127.0.0.54:53 is held by a running dns-proxy container — fine/survived/"
+FAKE_SS=("UNCONN 0 0 $TN_LOOPBACK:53 $TN_ANY:*|$DOCKER_LINE" "$DOCKER_LINE")
+expect_holder "a dns-proxy holder is fine" "step: $TN_ENGINE_DNS_PROXY:53 is held by a running dns-proxy container — fine/survived/"
 FAKE_SS=("$OTHER_LINE" "$OTHER_LINE")
 expect_holder "another holder is warned about" "$WARNING/survived/"
 FAKE_SS=("$OTHER_LINE" '')

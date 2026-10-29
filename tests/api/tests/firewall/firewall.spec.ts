@@ -14,6 +14,7 @@ import {
   restoreFirewallState,
 } from '@/helpers/firewall-helpers';
 import { expectStatus } from '@/helpers/expect-status';
+import { testNetwork } from '@/helpers/test-network';
 import { firewallRuleResponseSchema } from '@/schemas';
 import type { FirewallRule } from '@/types';
 
@@ -220,7 +221,12 @@ test.describe('Firewall rules', () => {
       ['a port list without a protocol', { action: 'allow', port: '40000,40001', source }],
       [
         'an address that is not one',
-        { action: 'allow', protocol: 'tcp', port, source: '192.0.2.300' },
+        {
+          action: 'allow',
+          protocol: 'tcp',
+          port,
+          source: testNetwork.public3(0).replace(/\d+$/, '300'),
+        },
       ],
       [
         'a hostname as an address',

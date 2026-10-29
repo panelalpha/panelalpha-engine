@@ -6,6 +6,7 @@ use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\HostImageRetention;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
+use App\Lib\Deploy\Dind\DindImageStore;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -99,7 +100,7 @@ class HostImageRetentionTest extends TestCase
     public function test_the_loopback_registry_alias_goes_with_its_image(): void
     {
         $variant = $this->plainPhpBase() . '-x0123abcd';
-        $alias = '127.0.0.1:5000/' . $variant;
+        $alias = DindImageStore::HOST_CACHE_REGISTRY . '/' . $variant;
 
         $candidates = $this->candidates([
             $this->row($variant, 5 * self::DAY),
@@ -112,7 +113,7 @@ class HostImageRetentionTest extends TestCase
 
     public function test_an_alias_of_a_prewarmed_image_is_protected_with_it(): void
     {
-        $alias = '127.0.0.1:5000/' . $this->plainPhpBase();
+        $alias = DindImageStore::HOST_CACHE_REGISTRY . '/' . $this->plainPhpBase();
 
         $this->assertSame([], $this->candidates([$this->row($alias, 30 * self::DAY)]));
     }
@@ -123,7 +124,7 @@ class HostImageRetentionTest extends TestCase
 
         $this->assertSame([], $this->candidates([
             $this->row($variant, 30 * self::DAY),
-            $this->row('127.0.0.1:5000/' . $variant, 1 * self::DAY),
+            $this->row(DindImageStore::HOST_CACHE_REGISTRY . '/' . $variant, 1 * self::DAY),
         ]));
     }
 

@@ -4,11 +4,11 @@
 # service is not running or runs without a network, and a container left
 # Created by a failed start is removed before `up`.
 #
-#   bash scripts/installer-stack.test.sh
+#   bash tests/scripts/installer-stack.test.sh
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

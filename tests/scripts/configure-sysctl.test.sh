@@ -3,7 +3,7 @@
 # What configure-sysctl.sh writes, checked without root and without touching a
 # running kernel.
 #
-#   bash scripts/configure-sysctl.test.sh
+#   bash tests/scripts/configure-sysctl.test.sh
 #
 # The regression this guards: the file it used to write was
 #
@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../scripts" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

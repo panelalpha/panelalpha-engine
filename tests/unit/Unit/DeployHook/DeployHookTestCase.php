@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Support\TaskSchema;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -22,7 +23,7 @@ abstract class DeployHookTestCase extends TestCase
 
         config([
             'app.key' => 'base64:' . base64_encode(str_repeat('k', 32)),
-            'app.url' => 'https://203.0.113.10',
+            'app.url' => 'https://' . TestNetwork::public(10),
             'database.default' => 'sqlite',
             'database.connections.sqlite.database' => ':memory:',
             'database.connections.sqlite.foreign_key_constraints' => true,

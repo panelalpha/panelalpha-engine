@@ -16,6 +16,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceSite;
 use App\System\Project\PhpHosting\WordPress\Migration\TargetChoice;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 
 /**
  * The test answers the domain an import would get from the site's real home,
@@ -31,7 +32,7 @@ class WordpressMigrationImportDomainTest extends ImportTargetTestCase
         $this->withoutMiddleware();
         $this->app->instance(
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
-            static fn (string $host): array => ['93.184.216.34'],
+            static fn (string $host): array => [TestNetwork::routable(34)],
         );
     }
 
@@ -73,8 +74,8 @@ class WordpressMigrationImportDomainTest extends ImportTargetTestCase
     public function test_an_ip_home_answers_domain_required_without_connect_and_no_domain_with_it(): void
     {
         $check = new ImportDomainCheck(new MigrationTargetResolver(static fn (): bool => true));
-        $site = new SourceSite('http://93.184.216.34', null, SourceSite::REST_WP_JSON);
-        $access = new SourceAccess(url: 'http://93.184.216.34');
+        $site = new SourceSite('http://' . TestNetwork::routable(34), null, SourceSite::REST_WP_JSON);
+        $access = new SourceAccess(url: 'http://' . TestNetwork::routable(34));
 
         $this->assertSame(['domain' => null], $check->check($access, $site, new TargetChoice()));
 
@@ -131,7 +132,7 @@ class WordpressMigrationImportDomainTest extends ImportTargetTestCase
 
     public function test_an_ip_url_of_a_named_site_takes_the_home_domain(): void
     {
-        $migration = $this->startedFrom('http://93.184.216.34', MigrationTarget::newProject(null, null));
+        $migration = $this->startedFrom('http://' . TestNetwork::routable(34), MigrationTarget::newProject(null, null));
         $migration->storeResolvedSource('https://wp.com', null, SourceSite::REST_WP_JSON);
 
         (new HomeDomainTarget())->follow($migration);

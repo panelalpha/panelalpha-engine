@@ -7,6 +7,7 @@ use App\Integrations\GeoLocation\TermsRequiredException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class DbIpTest extends TestCase
@@ -35,7 +36,7 @@ class DbIpTest extends TestCase
         $dbip = $this->driver();
 
         $this->assertNull($dbip->databasePath());
-        $this->assertNull($dbip->lookup('8.8.8.8'));
+        $this->assertNull($dbip->lookup(TestNetwork::routable(8)));
         Http::assertNothingSent();
     }
 
@@ -45,7 +46,7 @@ class DbIpTest extends TestCase
         file_put_contents($this->mmdbPath(), 'not-a-real-mmdb');
         $dbip = $this->driver();
 
-        $this->assertNull($dbip->lookup('8.8.8.8'));
+        $this->assertNull($dbip->lookup(TestNetwork::routable(8)));
         Http::assertNothingSent();
     }
 

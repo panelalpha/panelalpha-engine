@@ -24,7 +24,7 @@ class FakeDomainAllocator extends DomainAllocator
             tunnelProvider: Tunnel::PROVIDER_PANELALPHA,
             publiclyResolvable: true,
             tlsTerminatedAt: 'proxy',
-            allocation: ['path' => $username.'-9f0e', 'path_fqdn' => $fqdn, 'wdns_site_id' => 7, 'valid_until' => null, 'target_ip' => '203.0.113.5'],
+            allocation: ['path' => $username.'-9f0e', 'path_fqdn' => $fqdn, 'wdns_site_id' => 7, 'valid_until' => null, 'target_ip' => TestNetwork::public(5)],
         );
     }
 }

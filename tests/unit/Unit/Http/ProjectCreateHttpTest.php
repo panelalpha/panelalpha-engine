@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -186,11 +187,11 @@ class ProjectCreateHttpTest extends TestCase
     public function test_a_repository_on_an_address_the_project_cannot_reach(): void
     {
         foreach (self::uris() as $uri) {
-            $this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'http://10.10.0.25:18660/r7.git'])
+            $this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'http://'.TestNetwork::private(25).':18660/r7.git'])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.field', 'git_repo')
                 ->assertJsonPath('problems.0.code', 'host_refused')
-                ->assertJsonPath('problems.0.message', '10.10.0.25 is an address this engine does not fetch from.');
+                ->assertJsonPath('problems.0.message', TestNetwork::private(25).' is an address this engine does not fetch from.');
             $this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'http://localhost/acme/app.git'])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.code', 'host_refused');
@@ -284,7 +285,7 @@ class ProjectCreateHttpTest extends TestCase
      */
     public function test_the_create_probes_the_repository_through_the_container(): void
     {
-        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? ['140.82.121.4'] : []);
+        OutboundUrl::setResolverForTests(static fn (string $host): array => $host === 'github.com' ? [TestNetwork::routable(4)] : []);
         $asked = new \ArrayObject();
         $this->app->instance(GitRemoteProbe::class, new class ($asked) extends GitRemoteProbe {
             public function __construct(private readonly \ArrayObject $asked)

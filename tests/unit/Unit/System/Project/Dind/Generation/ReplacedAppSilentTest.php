@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -465,7 +466,7 @@ class ReplacedAppSilentTest extends TestCase
             return "next1\n";
         }
         if (str_contains($line, 'docker port next1 8080/tcp')) {
-            return '0.0.0.0:' . self::COPY . "\n";
+            return TestNetwork::ANY . ':' . self::COPY . "\n";
         }
         if (str_contains($line, 'net/tcp')) {
             return self::HEADER . "\n   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1000 1\n";

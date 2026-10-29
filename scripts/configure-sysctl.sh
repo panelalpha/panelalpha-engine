@@ -9,7 +9,7 @@
 #   PANELALPHA_SYSCTL_NO_APPLY  1 to write the file without running `sysctl --system`
 #
 # The two overrides exist so the file's contents can be tested without root and
-# without touching a running kernel. See configure-sysctl.test.sh.
+# without touching a running kernel. See tests/scripts/configure-sysctl.test.sh.
 
 set -euo pipefail
 

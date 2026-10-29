@@ -65,7 +65,7 @@ trait RecordsWebserverApply
         });
     }
 
-    /** Lines as `ss -Hln` prints them, e.g. `LISTEN 0 128 0.0.0.0:22 0.0.0.0:*`. */
+    /** Lines as `ss -Hln` prints them, e.g. `'LISTEN 0 128 '.TestNetwork::ANY.':22 '.TestNetwork::ANY.':*'`. */
     protected function hostListens(string $tcp, string $udp = ''): void
     {
         $this->hostSockets['-t'] = $tcp;

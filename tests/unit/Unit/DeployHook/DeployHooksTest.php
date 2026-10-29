@@ -8,6 +8,7 @@ use App\Models\HookDelivery;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Support\Facades\DB;
+use Tests\Support\TestNetwork;
 
 /**
  * Creating a hook: what it hands back, that asking again is safe, and that
@@ -31,7 +32,7 @@ class DeployHooksTest extends DeployHookTestCase
 
         $this->assertTrue($creation->created);
         $this->assertMatchesRegularExpression(
-            '#^https://203\.0\.113\.10/hooks/[0-9a-f]{40}$#',
+            '#^https://'.preg_quote(TestNetwork::public(10), '#').'/hooks/[0-9a-f]{40}$#',
             $creation->hook->url(),
         );
         $this->assertNotNull($creation->secret);

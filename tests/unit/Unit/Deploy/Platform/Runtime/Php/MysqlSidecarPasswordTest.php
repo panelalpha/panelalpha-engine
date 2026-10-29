@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /** The Laravel sidecar's user and root shared `app`, or root had none. */
 class MysqlSidecarPasswordTest extends TestCase
@@ -15,7 +16,7 @@ class MysqlSidecarPasswordTest extends TestCase
     {
         return [
             'connection' => 'mysql',
-            'host' => '127.0.0.1',
+            'host' => TestNetwork::LOOPBACK,
             'port' => '3306',
             'database' => 'laravel',
             'username' => $username,
@@ -86,7 +87,7 @@ class MysqlSidecarPasswordTest extends TestCase
             ? ($sidecar['MYSQL_ROOT_PASSWORD'] ?? '')
             : $sidecar['MYSQL_PASSWORD'];
         $this->assertSame($expected, $decision['env']['DB_PASSWORD']);
-        $this->assertSame('127.0.0.1', $decision['env']['DB_HOST']);
+        $this->assertSame(TestNetwork::LOOPBACK, $decision['env']['DB_HOST']);
     }
 
     /** @return array<string, array{SidecarPasswords, string}> */

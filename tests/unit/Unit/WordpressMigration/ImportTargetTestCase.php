@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\User;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -16,7 +17,10 @@ abstract class ImportTargetTestCase extends TestCase
 {
     use InMemoryDatabase;
 
-    protected const ENGINE_IPV4 = '203.0.113.7';
+    protected static function engineIpv4(): string
+    {
+        return TestNetwork::public(7);
+    }
 
     protected function setUp(): void
     {
@@ -28,7 +32,7 @@ abstract class ImportTargetTestCase extends TestCase
         ]);
         $this->app->forgetInstance('encrypter');
         $this->bootInMemoryDatabase();
-        Setting::setRuntimeSettings(['default_ipv4' => self::ENGINE_IPV4]);
+        Setting::setRuntimeSettings(['default_ipv4' => self::engineIpv4()]);
     }
 
     protected function tearDown(): void
