@@ -9,6 +9,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Cron;
+use App\System\Project\Dind\AccountCron;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -46,6 +47,7 @@ class CronRoundTripTest extends TestCase
             'separate error log' => ['php artisan schedule:run >> /tmp/out.log 2>> /tmp/err.log'],
             'hash in a url' => ['curl -fsS https://example.test/#frag > /dev/null'],
             'repeated spaces' => ['echo  "a  b"'],
+            'percent, which cron reads as a newline' => ['echo "$(date +%F) 100%" >> /tmp/day'],
         ];
     }
 
@@ -85,6 +87,33 @@ class CronRoundTripTest extends TestCase
         $this->assertSame([], $cron->list());
     }
 
+    public function test_a_job_in_a_service_lists_with_its_service_command_and_hash(): void
+    {
+        $cron = $this->cron();
+        $command = 'php artisan schedule:run >> /app/storage/logs/cron.log 2>&1 # 100%';
+
+        $created = $cron->create(['service' => 'app'] + $this->schedule($command));
+
+        $this->assertSame(['app', $command], [$created['service'], $created['command']]);
+        $this->assertSame([$created], $cron->list());
+        $this->assertSame(
+            '*/5 * * * * ' . AccountCron::command('app', $command) . "\n",
+            file_get_contents($this->crontab())
+        );
+
+        $updated = $cron->update($created['hash'], ['service' => 'worker'] + $this->schedule($command));
+        $this->assertSame([$updated], $cron->list());
+        $this->assertSame('worker', $updated['service']);
+        $this->assertNotSame($created['hash'], $updated['hash']);
+    }
+
+    public function test_a_job_without_a_service_lists_a_null_service(): void
+    {
+        $created = $this->cron()->create($this->schedule('echo a'));
+
+        $this->assertNull($created['service']);
+    }
+
     /**
      * An MCP tool dispatches to the router without TrimStrings, so padded
      * fields reach the request as sent. Trimmed there, the job is written as
@@ -118,6 +147,31 @@ class CronRoundTripTest extends TestCase
             'day_of_week' => '*',
         ]));
         $this->assertSame([$updated], $cron->list());
+    }
+
+    /** cron ends a command at its first unescaped `%`, so the job ran cut off while the API listed it whole. */
+    public function test_a_percent_is_written_escaped_for_cron(): void
+    {
+        $this->cron()->create($this->schedule('date +%F > /tmp/day'));
+
+        $this->assertSame("*/5 * * * * date +\\%F > /tmp/day\n", file_get_contents($this->crontab()));
+    }
+
+    public function test_an_escaped_percent_written_by_hand_lists_as_a_percent(): void
+    {
+        file_put_contents($this->crontab(), "0 1 * * * date +\\%F > /tmp/day\n");
+
+        $this->assertSame('date +%F > /tmp/day', $this->cron()->list()[0]['command']);
+    }
+
+    public function test_a_backslash_before_a_percent_is_refused_under_the_command(): void
+    {
+        try {
+            $this->validated(CronJobStoreRequest::class, $this->schedule('printf "\\%s"'));
+            $this->fail('expected the request to refuse the command');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('command', $e->errors());
+        }
     }
 
     public function test_whitespace_inside_a_field_is_refused_rather_than_written(): void

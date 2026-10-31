@@ -4,7 +4,9 @@ namespace App\System\Project;
 
 use App\Exceptions\DockerErrorException;
 use App\Exceptions\ProblemException;
+use App\System\Privileged;
 use App\System\Project as UserProject;
+use App\System\Project\Dind\AccountCron;
 use Dsc\Cron\Crontab;
 use Dsc\Cron\Job;
 use Exception;
@@ -28,17 +30,18 @@ class Cron
         $file = $this->crontabPath();
         $system = $this->project->system();
         if (! is_file($file)) {
-            $system->exec(['sudo', 'touch', $file]);
+            $system->exec(Privileged::files()->touch($file));
         }
         $chown = $chown ?? '33:33';
-        $system->exec(['sudo', 'chown', $chown, $file]);
-        $system->exec(['sudo', 'chmod', '600', $file]);
+        $system->exec(Privileged::files()->changeOwner($chown, $file));
+        $system->exec(Privileged::files()->changeMode('600', $file));
     }
 
     /**
      * @return array<array{
      *   hash: string,
      *   command: string,
+     *   service: ?string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -61,6 +64,12 @@ class Cron
         return $jobs;
     }
 
+    /** The crontab as written, empty before the deploy that creates it. */
+    public function contents(): string
+    {
+        return $this->hasCrontab() ? $this->project->system()->filesystem()->fileGetContents($this->crontabPath()) : '';
+    }
+
     public function exists(string $hash): bool
     {
         foreach ($this->list() as $job) {
@@ -75,6 +84,7 @@ class Cron
     /**
      * @param array{
      *   command: string,
+     *   service?: string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -84,6 +94,7 @@ class Cron
      * @return array{
      *   hash: string,
      *   command: string,
+     *   service: ?string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -94,10 +105,11 @@ class Cron
     public function create(array $params): array
     {
         $this->ensureWritableCrontab();
+        $this->assertServiceExists($params);
         $crontab = $this->loadCrontab();
 
         $job = new Job;
-        $job->setCommand($params['command']);
+        $job->setCommand(self::commandLine($params));
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
         $job->setDayOfMonth($params['day_of_month']);
@@ -116,6 +128,7 @@ class Cron
      * @return array{
      *   hash: string,
      *   command: string,
+     *   service: ?string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -141,6 +154,7 @@ class Cron
     /**
      * @param array{
      *   command: string,
+     *   service?: string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -150,6 +164,7 @@ class Cron
      * @return array{
      *   hash: string,
      *   command: string,
+     *   service: ?string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -163,10 +178,12 @@ class Cron
     {
         $crontab = $this->loadCrontab();
 
+        $this->assertServiceExists($params);
+
         /** @var Job $job */
         $job = $crontab->getJobByHash($hash);
 
-        $job->setCommand($params['command']);
+        $job->setCommand(self::commandLine($params));
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
         $job->setDayOfMonth($params['day_of_month']);
@@ -177,6 +194,43 @@ class Cron
         $this->persistCrontab($crontab);
 
         return $this->jobToArray($job);
+    }
+
+    /**
+     * A job in a service names it on the line with the command in base64;
+     * any other command is written as cron reads it.
+     *
+     * @param  array{command: string, service?: string}  $params
+     */
+    private static function commandLine(array $params): string
+    {
+        return isset($params['service'])
+            ? AccountCron::command($params['service'], $params['command'])
+            : self::storedCommand($params['command']);
+    }
+
+    /** cron ends a command at its first unescaped `%`, so every one is escaped on the way in. */
+    private static function storedCommand(string $command): string
+    {
+        return str_replace('%', '\\%', $command);
+    }
+
+    private static function listedCommand(string $stored): string
+    {
+        return str_replace('\\%', '%', $stored);
+    }
+
+    /**
+     * @param  array{service?: string}  $params
+     *
+     * @throws ProblemException
+     */
+    private function assertServiceExists(array $params): void
+    {
+        $runtime = $this->project->runtime();
+        if (isset($params['service']) && $runtime instanceof Dind) {
+            $runtime->assertServiceExists($params['service']);
+        }
     }
 
     /** The deploy that renders the account writes the crontab, so none before it means no jobs. */
@@ -224,15 +278,12 @@ class Cron
     }
 
     /**
-     * Five schedule fields, then the command exactly as written. Job::parse()
-     * cuts `>>`, `2>>` and `#` out of the command, so a job read back was not
-     * the job created: shorter command, different hash, and `2>&1` appended
-     * again on every write.
+     * Five schedule fields, then the command as written: Job::parse() cuts `>>`, `2>>` and `#` out, so a job read back
+     * differed (shorter, new hash, `2>&1` re-added per write); `@daily` and the like, never API-written, are left to it.
      */
     private static function parseLine(string $line): Job
     {
         $parts = preg_split('/\s+/', trim($line), 6);
-        // `@daily` and the like: never written by the API, left to the library.
         if ($parts === false || count($parts) < 6 || str_starts_with($parts[0], '@')) {
             return Job::parse($line);
         }
@@ -261,6 +312,7 @@ class Cron
      * @return array{
      *   hash: string,
      *   command: string,
+     *   service: ?string,
      *   minute: string,
      *   hour: string,
      *   day_of_month: string,
@@ -270,9 +322,12 @@ class Cron
      */
     private function jobToArray(Job $job): array
     {
+        $inService = AccountCron::parse($job->getCommand());
+
         return [
             'hash' => $job->getHash(),
-            'command' => $job->getCommand(),
+            'command' => $inService['command'] ?? self::listedCommand($job->getCommand()),
+            'service' => $inService['service'] ?? null,
             'minute' => $job->getMinute(),
             'hour' => $job->getHour(),
             'day_of_month' => $job->getDayOfMonth(),

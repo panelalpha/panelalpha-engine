@@ -4,6 +4,8 @@ export interface CronJob {
   hour: string;
   month: string;
   command: string;
+  /** The Compose service a container project's job runs in; null on PHP hosting. */
+  service?: string | null;
   /** OpenAPI response field names */
   day?: string;
   weekday?: string;
@@ -19,4 +21,6 @@ export interface CreateCronJobRequest {
   month: string;
   day_of_week: string;
   command: string;
+  /** Required on a container project, refused on PHP hosting. */
+  service?: string;
 }

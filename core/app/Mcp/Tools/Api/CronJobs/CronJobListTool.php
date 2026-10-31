@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List cron jobs of a project
 
-    PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.
+    On a container project each job names the `service` it runs in; on PHP hosting `service` is null.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
