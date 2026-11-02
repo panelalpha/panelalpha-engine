@@ -5,9 +5,11 @@ namespace Tests\Unit\Host;
 use App\Lib\Host\ProjectDisk;
 use App\Models\Admin;
 use App\Models\User;
+use App\System\Privileged;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /** Disk use per project, measured in the background and read from the database. */
@@ -31,14 +33,14 @@ class ProjectDiskTest extends TestCase
 
     public function test_the_host_script_is_valid_bash_and_quotes_every_project(): void
     {
-        $script = ProjectDisk::script(['shop' => '/home/shop', "o'brien" => '/home/o\'brien/']);
+        $script = LocalRoot::script(Privileged::host()->projectDisk(['shop' => '/home/shop', 'o_brien' => '/home/o_brien/']));
         $path = (string) tempnam(sys_get_temp_dir(), 'disk-');
         file_put_contents($path, $script);
         exec('bash -n ' . escapeshellarg($path) . ' 2>&1', $out, $code);
         @unlink($path);
 
         $this->assertSame(0, $code, implode("\n", $out));
-        $this->assertStringContainsString("set -- 'shop' '/home/shop' 'o'\\''brien' '/home/o'\\''brien' ", $script);
+        $this->assertStringContainsString("set -- 'shop' '/home/shop' 'o_brien' '/home/o_brien' ", $script);
     }
 
     /** The script itself, on real directories: files and ~/docker apart, a missing home skipped. */
@@ -55,7 +57,8 @@ class ProjectDiskTest extends TestCase
         file_put_contents($home . '/docker/volumes/db', str_repeat('b', 2_000_000));
 
         try {
-            $out = shell_exec('bash -c ' . escapeshellarg(ProjectDisk::script(['shop' => $home, 'gone' => $home . '-missing'])));
+            $script = LocalRoot::script(Privileged::host()->projectDisk(['shop' => $home, 'gone' => $home . '-missing']), ['homes' => sys_get_temp_dir()]);
+            $out = shell_exec('bash -c ' . escapeshellarg($script));
             $read = ProjectDisk::parse((string) $out);
         } finally {
             exec('rm -rf ' . escapeshellarg($home));
@@ -81,7 +84,7 @@ class ProjectDiskTest extends TestCase
     {
         $this->project('shop');
         $files = 1000;
-        $disk = new ProjectDisk(function (string $script) use (&$files): string {
+        $disk = new ProjectDisk(function (array $argv) use (&$files): string {
             return "D\tshop\t{$files}\t5000\nD\tstranger\t1\t1\n";
         });
 
@@ -102,10 +105,30 @@ class ProjectDiskTest extends TestCase
     public function test_a_failed_host_run_writes_nothing(): void
     {
         $this->project('shop');
-        $disk = new ProjectDisk(fn (string $script): string => throw new \RuntimeException('nsenter failed'));
+        $disk = new ProjectDisk(fn (array $argv): string => throw new \RuntimeException('nsenter failed'));
 
         $this->assertSame(0, $disk->sample());
         $this->assertSame(0, DB::table('project_disk_usage')->count());
+    }
+
+    public function test_a_project_whose_walk_times_out_loses_only_its_own_row(): void
+    {
+        foreach (['shop', 'slow', 'blog'] as $username) {
+            $this->project($username);
+        }
+        $disk = new ProjectDisk(function (array $argv): string {
+            $plain = LocalRoot::plain($argv);
+            $script = (string) end($plain);
+            if (str_contains($script, "'slow'")) {
+                throw new \RuntimeException('The process exceeded the timeout of 600 seconds.');
+            }
+            $username = str_contains($script, "'shop'") ? 'shop' : 'blog';
+
+            return "D\t{$username}\t100\t200\n";
+        });
+
+        $this->assertSame(2, $disk->sample());
+        $this->assertSame(['blog', 'shop'], DB::table('project_disk_usage')->orderBy('username')->pluck('username')->all());
     }
 
     public function test_every_project_carries_its_disk_use_without_running_du(): void

@@ -6,26 +6,8 @@ use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\Lib\Deploy\Dind\DindImageStore;
 
 /**
- * Which host images the daily prune may remove.
- *
- * Only images the deploy path puts on the host are in scope: the bases the
- * engine builds (`panelalpha/php:*-x…` variants, Ruby/Python bases, superseded
- * recipe dates), anything from a repository `config/core/images.yaml`
- * resolves runtimes from (golang, node, python, dotnet, …), and the Railpack
- * images a Railpack deploy fetches for its accounts. The engine's own
- * images and a repo's compose sidecars are never touched here; the sidecars are
- * account teardown's ({@see DindAccountCleanup}).
- *
- * Within scope an image is kept when any of these hold:
- * - the prewarm catalogue names it (evicting one sends the next deploy back to
- *   a compile or to Docker Hub, the reason `docker image prune -a` is wrong);
- * - a host container uses it;
- * - it was pulled, built or tagged on this host inside the window
- *   (`LastTagTime`, the time the tag was created here, so a deploy that reuses
- *   an existing tag does not move it);
- * - an account's latest deploy log, or any deploy log written inside the
- *   window, names it ({@see mentionedIn()}; the caller reads the logs);
- * - its age cannot be read. "Cannot judge" means keep.
+ * Which host images the daily prune may remove: only what the deploy path puts on the host, never
+ * the engine's own images or compose sidecars ({@see DindAccountCleanup}); "cannot judge" means keep.
  */
 final class HostImageRetention
 {
@@ -55,7 +37,7 @@ final class HostImageRetention
      */
     public static function inScope(string $ref, array $catalog): bool
     {
-        if (BuiltImage::isOurs($ref) || RailpackCache::isRailpackImage($ref)) {
+        if (BuiltImage::isOurs($ref) || self::isBuildImage($ref) || RailpackCache::isRailpackImage($ref)) {
             return true;
         }
         $repository = self::repository($ref);
@@ -66,6 +48,39 @@ final class HostImageRetention
         }
 
         return false;
+    }
+
+    /** A host build image ({@see NodeBuildImage}, {@see RustBuildToolsImage}): host only, never pushed. */
+    public static function isBuildImage(string $ref): bool
+    {
+        return in_array(self::repository($ref), [NodeBuildImage::REPOSITORY, RustBuildToolsImage::REPOSITORY], true)
+            && preg_match('/:[^:\/]+-pa[0-9a-f]+$/i', $ref) === 1;
+    }
+
+    /**
+     * What a newer build of the same kind replaces, e.g. `panelalpha/python:3.12-slim` for every
+     * package set on python:3.12-slim. Null outside the images the engine builds.
+     */
+    public static function family(string $ref): ?string
+    {
+        $parts = BuiltImage::parts($ref);
+        if ($parts !== null) {
+            return $parts['repository'].':'.$parts['upstreamTag'].($parts['variant'] === null ? '' : '-x');
+        }
+
+        return self::isBuildImage($ref) ? (string) preg_replace('/-pa[0-9a-f]+$/i', '', $ref) : null;
+    }
+
+    /**
+     * Built from a recipe older than the current one (`…-pa20260922` once the
+     * recipe is 20261007): no deploy asks for that tag again.
+     */
+    public static function isSuperseded(string $ref): bool
+    {
+        $parts = BuiltImage::parts($ref);
+        $current = $parts === null ? null : BuiltImage::currentFingerprint($parts['runtime']);
+
+        return $current !== null && strcasecmp($parts['fingerprint'], $current) !== 0;
     }
 
     /**
@@ -89,6 +104,37 @@ final class HostImageRetention
     ): array {
         $protected = array_flip(array_merge($prewarmed, array_map(self::logicalRef(...), $containerRefs)));
 
+        $groups = self::groupedByRef($images);
+        $newest = self::newestOfEachFamily($groups);
+
+        $candidates = [];
+        foreach ($groups as $ref => $group) {
+            if (isset($protected[$ref]) || ! self::inScope($ref, $catalog)) {
+                continue;
+            }
+            if (! $group['known'] || $group['since'] === null) {
+                continue;
+            }
+            if (! self::isSuperseded($ref)) {
+                $family = self::family($ref);
+                if ($group['since'] > $now - $maxAge || ($family !== null && $newest[$family][1] === $ref)) {
+                    continue;
+                }
+            }
+            $candidates[$ref] = ['tags' => $group['tags'], 'bytes' => $group['bytes'], 'since' => $group['since']];
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * The newest tag decides a group's age, and one unknown age makes the whole group unknown.
+     *
+     * @param  list<array{tag: string, bytes: ?int, since: ?int}>  $images
+     * @return array<string, array{tags: list<string>, bytes: ?int, since: ?int, known: bool}>
+     */
+    private static function groupedByRef(array $images): array
+    {
         $groups = [];
         foreach ($images as $image) {
             $tag = $image['tag'];
@@ -99,7 +145,6 @@ final class HostImageRetention
             $group = $groups[$ref] ?? ['tags' => [], 'bytes' => null, 'since' => null, 'known' => true];
             $group['tags'][] = $tag;
             $group['bytes'] = $image['bytes'] ?? $group['bytes'];
-            // The newest tag decides, and one unknown age makes the whole group unknown.
             if ($image['since'] === null) {
                 $group['known'] = false;
             } else {
@@ -108,24 +153,35 @@ final class HostImageRetention
             $groups[$ref] = $group;
         }
 
-        $candidates = [];
-        foreach ($groups as $ref => $group) {
-            if (isset($protected[$ref]) || ! self::inScope($ref, $catalog)) {
-                continue;
-            }
-            if (! $group['known'] || $group['since'] === null || $group['since'] > $now - $maxAge) {
-                continue;
-            }
-            $candidates[$ref] = ['tags' => $group['tags'], 'bytes' => $group['bytes'], 'since' => $group['since']];
-        }
-
-        return $candidates;
+        return $groups;
     }
 
     /**
-     * Which of $refs a deploy log names. Log lines are JSON with escaped
-     * slashes, so both spellings count, and a ref must end where the name
-     * ends: `…-pa20260922` is not named by a line about `…-pa20260922-x1234`.
+     * Each family's newest image, by age and then name, so a tie keeps one.
+     *
+     * @param  array<string, array{tags: list<string>, bytes: ?int, since: ?int, known: bool}>  $groups
+     * @return array<string, array{0: int, 1: string}>
+     */
+    private static function newestOfEachFamily(array $groups): array
+    {
+        $newest = [];
+        foreach ($groups as $ref => $group) {
+            $family = self::family($ref);
+            if ($family === null || ! $group['known'] || $group['since'] === null || self::isSuperseded($ref)) {
+                continue;
+            }
+            $key = [$group['since'], $ref];
+            if (! isset($newest[$family]) || $key > $newest[$family]) {
+                $newest[$family] = $key;
+            }
+        }
+
+        return $newest;
+    }
+
+    /**
+     * Which of $refs a deploy log names, in both JSON slash spellings; a ref must end where the name
+     * ends, so `…-pa20260922` is not named by `…-pa20260922-x1234`.
      *
      * @param  list<string>  $refs
      * @return list<string>

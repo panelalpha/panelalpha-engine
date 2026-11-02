@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\System;
 
+use App\Lib\Deploy\CacheManager\CacheRegistry;
 use App\Lib\Deploy\CacheManager\HostImageRetention;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
@@ -9,21 +10,29 @@ use App\Lib\Deploy\DeployLog\DeployLogArchive;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\ProjectCache;
+use App\Models\OperatorImage;
 use App\System;
+use App\System\Privileged;
+use App\System\Project\Dind\HostDiskGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Give back host disk the deploy path used and nobody is using any more:
  * base images outside the prewarm catalogue that no deploy has pulled, built or
- * named inside the window, and host build cache.
+ * named inside the window, their tags in panelalpha-cache-registry, and host
+ * build cache.
  *
  * What counts as used is {@see HostImageRetention}. No image is removed while a
  * deploy is in flight, and a deploy that starts mid-run stops the removals:
  * pulling an image out from under a deploy that is about to load it is the
  * kind of interruption this must never cause. A deferred run is retried by
  * the next hourly one (`--due-after`).
+ *
+ * `--until-free` is the disk guard's: a deploy in flight keeps only what its log
+ * names, and the window halves until enough is free ({@see pruneUntilFree()}).
  */
 class PruneHostImages extends Command
 {
@@ -31,9 +40,13 @@ class PruneHostImages extends Command
         {--older-than= : Keep images pulled, built or named by a deploy within this window, e.g. 3d ("off" skips images; default DEPLOY_HOST_IMAGE_RETENTION)}
         {--build-cache-older-than= : Drop host build cache unused this long, e.g. 24h ("off" skips it; default DEPLOY_HOST_BUILD_CACHE_RETENTION)}
         {--due-after= : Skip the image half when it last completed within this window, e.g. 20h (the schedule retries hourly)}
+        {--until-free= : Repeat the image half, halving the window down to any age, until the Docker root has this much free, e.g. 15% or 35G}
         {--dry-run : Print what would be removed and exit}';
 
     protected $description = 'Remove host base images and build cache no deploy has used recently';
+
+    /** Under this a pressure pass takes every image nothing holds, whatever its age. */
+    public const MIN_PRESSURE_WINDOW = 900;
 
     public function handle(): int
     {
@@ -65,6 +78,13 @@ class PruneHostImages extends Command
             $this->pruneBuildCache($system, $cacheWindow, $dryRun);
         }
         if ($imageWindow === null) {
+            return 0;
+        }
+
+        $untilFree = $this->option('until-free');
+        if (is_string($untilFree) && trim($untilFree) !== '') {
+            $this->pruneUntilFree($system, $imageWindow, $untilFree, $dryRun);
+
             return 0;
         }
 
@@ -138,18 +158,72 @@ class PruneHostImages extends Command
         return $seconds !== null && $seconds > 0 ? $seconds : null;
     }
 
-    /** True when it ran to the end; false when it could not list or a deploy stopped it. */
-    private function pruneImages(System $system, int $window, bool $dryRun): bool
+    /**
+     * Halves the image window, down to any age, until the Docker root has $wanted
+     * free or only what a deploy, container, prewarm or family holds is left.
+     */
+    private function pruneUntilFree(System $system, int $window, string $wanted, bool $dryRun): void
+    {
+        $guard = new HostDiskGuard($system, null);
+        for ($pass = $window; ; $pass = self::nextWindow($pass)) {
+            $this->line($pass === 0 ? 'Images nothing holds, of any age:' : 'Images unused for '.self::describe($pass).':');
+            if (! $this->pruneImages($system, $pass, $dryRun, true)) {
+                return;
+            }
+            $usage = $guard->usage(HostDiskGuard::DOCKER_ROOT);
+            $target = $usage === null ? null : GuardHostDisk::target($wanted, $usage['size']);
+            if ($usage === null || $target === null) {
+                $this->report('warning', 'Could not read free space on '.HostDiskGuard::DOCKER_ROOT.'; no further pass.');
+
+                return;
+            }
+            $state = sprintf(
+                '%s free on %s, target %s',
+                HostPrewarmPlan::formatBytes($usage['free']),
+                HostDiskGuard::DOCKER_ROOT,
+                HostPrewarmPlan::formatBytes($target)
+            );
+            if ($usage['free'] >= $target) {
+                $this->report('info', $state.'.');
+
+                return;
+            }
+            if ($pass === 0) {
+                $this->report('warning', $state.'; every image left is in use or the newest of its kind.');
+
+                return;
+            }
+            if ($dryRun) {
+                $this->line($state.'; would go on with a shorter window.');
+
+                return;
+            }
+        }
+    }
+
+    /** Half of $window, or 0 once that is under {@see MIN_PRESSURE_WINDOW}. */
+    public static function nextWindow(int $window): int
+    {
+        $half = intdiv($window, 2);
+
+        return $half < self::MIN_PRESSURE_WINDOW ? 0 : $half;
+    }
+
+    /**
+     * True when it ran to the end; false when it could not list or a deploy stopped it.
+     * Under $pressure a deploy in flight stops nothing: what its log names is kept.
+     */
+    private function pruneImages(System $system, int $window, bool $dryRun, bool $pressure = false): bool
     {
         try {
             $listed = HostImageRetention::parseImageList($system->exec(
-                ['sudo', 'docker', 'images', '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}'],
+                Privileged::docker()->imageNamesWithSizes(),
                 [],
                 60
             ));
             // What a container uses has to be known; without it nothing is safe to judge.
             $containers = DindAccountCleanup::parseImageRefLines($system->exec(
-                ['sudo', 'docker', 'ps', '-a', '--format', '{{.Image}}'],
+                Privileged::docker()->containerImages(),
                 [],
                 60
             ));
@@ -160,10 +234,16 @@ class PruneHostImages extends Command
         }
 
         $catalog = ImageCatalog::all();
-        $prewarmed = array_map(
+        $operatorRefs = OperatorImage::refs();
+        if ($operatorRefs === null) {
+            $this->report('warning', 'Could not read the operator images, keeping every host image.');
+
+            return false;
+        }
+        $prewarmed = array_merge(array_map(
             static fn (array $item): string => (string) $item['ref'],
             HostPrewarmPlan::catalog()
-        );
+        ), $operatorRefs);
 
         $inScope = array_values(array_filter(
             $listed,
@@ -181,6 +261,7 @@ class PruneHostImages extends Command
         $remove = array_diff_key($candidates, array_flip($named));
         if ($remove === []) {
             $this->report('info', 'No host base image is unused for longer than '.self::describe($window).'.');
+            $this->pruneRegistry($system, $prewarmed, $catalog, $containers, $now, $window, $dryRun, $pressure);
 
             return true;
         }
@@ -191,15 +272,18 @@ class PruneHostImages extends Command
         foreach ($remove as $ref => $image) {
             $action = $dryRun ? 'would remove' : 'removed';
             if (! $dryRun) {
-                $busy = $this->deploysInFlight();
-                if ($busy !== []) {
+                if ($pressure) {
+                    if ($this->namedByDeploysInFlight([$ref]) !== []) {
+                        continue;
+                    }
+                } elseif (($busy = $this->deploysInFlight()) !== []) {
                     $this->report('warning', 'Stopped: a deploy started for '.implode(', ', $busy));
                     $completed = false;
                     break;
                 }
                 try {
                     // No -f: the daemon still refuses an image a container holds.
-                    $system->exec(['sudo', 'docker', 'rmi', ...$image['tags']], [], 120);
+                    $system->exec(Privileged::docker()->removeImages(...$image['tags']), [], 120);
                 } catch (\Exception $e) {
                     $action = 'failed';
                     $this->warn("Could not remove {$ref}: ".trim($e->getMessage()));
@@ -218,8 +302,121 @@ class PruneHostImages extends Command
 
         $this->table(['Image', 'Last pulled or built', 'Size', ''], $table);
         $this->report('info', sprintf('%s about %s of base images', $dryRun ? 'Would free' : 'Freed', HostPrewarmPlan::formatBytes($freed)));
+        if ($completed) {
+            $this->pruneRegistry($system, $prewarmed, $catalog, $containers, $now, $window, $dryRun, $pressure);
+        }
 
         return $completed;
+    }
+
+    /**
+     * The same rule for panelalpha-cache-registry, by when a tag was last pushed. No running app loses an
+     * image: an account keeps its own copy, and a deploy that misses gets it from the host or builds it.
+     *
+     * @param  list<string>  $prewarmed
+     * @param  list<string>  $catalog
+     * @param  list<string>  $containers
+     */
+    private function pruneRegistry(
+        System $system,
+        array $prewarmed,
+        array $catalog,
+        array $containers,
+        int $now,
+        int $window,
+        bool $dryRun,
+        bool $pressure
+    ): void {
+        try {
+            $tags = CacheRegistry::parseTagListing($system->exec(CacheRegistry::tagListingArgv(), [], 120));
+        } catch (\Exception $e) {
+            $this->report('warning', 'Could not list the cache registry, keeping it as it is: '.trim($e->getMessage()));
+
+            return;
+        }
+        $rows = [];
+        foreach ($tags as $ref => $tag) {
+            if (HostImageRetention::inScope($ref, $catalog)) {
+                $rows[] = ['tag' => $ref, 'bytes' => null, 'since' => $tag['pushed']];
+            }
+        }
+        $candidates = HostImageRetention::candidates($rows, $prewarmed, $catalog, $containers, $now, $window);
+        $named = $this->namedByDeployLogs(array_keys($candidates), $now, $window);
+        $chosen = array_keys(array_diff_key($candidates, array_flip($named)));
+        $digests = array_map(static fn (array $tag): string => $tag['digest'], $tags);
+        $remove = CacheRegistry::unwanted($digests, array_values(array_diff(array_keys($tags), $chosen)));
+        if ($remove === []) {
+            return;
+        }
+        if ($dryRun) {
+            foreach ($remove as $ref) {
+                $this->line("would remove from the cache registry: {$ref}");
+            }
+
+            return;
+        }
+        if (! $pressure && ($busy = $this->deploysInFlight()) !== []) {
+            $this->report('warning', 'Cache registry left as it is: a deploy started for '.implode(', ', $busy));
+
+            return;
+        }
+
+        $this->withPushLock(function () use ($system, $remove, $digests, $pressure): void {
+            $registry = app(CacheRegistry::class);
+            $deleted = 0;
+            foreach ($remove as $ref) {
+                if ($pressure && $this->namedByDeploysInFlight([$ref]) !== []) {
+                    continue;
+                }
+                if ($registry->delete($ref, $digests[$ref])) {
+                    $deleted++;
+                    $this->line("removed from the cache registry: {$ref}");
+                } else {
+                    $this->warn("Could not remove {$ref} from the cache registry");
+                }
+            }
+            if ($deleted > 0) {
+                $system->exec(DindImageStore::garbageCollectArgv(), [], 1800);
+                $registry->removeEmptyRepositories($system);
+                $this->report('info', "Removed {$deleted} tag(s) from the cache registry and garbage-collected it");
+            }
+        });
+    }
+
+    /**
+     * Holds {@see DindImageStore::PUSH_LOCK} exclusive, as a garbage-collect deletes an unfinished upload's
+     * layers. A host that never frees it within five minutes is left alone.
+     */
+    private function withPushLock(callable $fn): void
+    {
+        $path = DindImageStore::pushLock();
+        if (! file_exists($path)) {
+            @touch($path);
+        }
+        $lock = @fopen($path, 'r');
+        $deadline = time() + 300;
+        while ($lock !== false && ! flock($lock, LOCK_EX | LOCK_NB)) {
+            if (time() >= $deadline) {
+                fclose($lock);
+                $lock = false;
+                break;
+            }
+            sleep(1);
+        }
+        if ($lock === false) {
+            $this->report('warning', "Could not lock {$path}; leaving the cache registry as it is.");
+
+            return;
+        }
+
+        try {
+            $fn();
+        } catch (\Exception $e) {
+            $this->report('warning', 'Cache registry garbage-collect failed: '.trim($e->getMessage()));
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 
     /**
@@ -235,7 +432,7 @@ class PruneHostImages extends Command
         foreach (array_chunk($tags, 50) as $batch) {
             try {
                 $out = $system->exec(
-                    ['sudo', 'docker', 'image', 'inspect', '--format', '{{json .Metadata.LastTagTime}}', '--', ...$batch],
+                    Privileged::docker()->imagesLastTagTime(...$batch),
                     [],
                     60
                 );
@@ -290,6 +487,31 @@ class PruneHostImages extends Command
     }
 
     /**
+     * Which of $refs a deploy in flight has named so far. Read again right
+     * before each removal under pressure, so one that started mid-run counts.
+     *
+     * @param  list<string>  $refs
+     * @return list<string>
+     */
+    private function namedByDeploysInFlight(array $refs): array
+    {
+        $named = [];
+        foreach ($this->deploysInFlight() as $username) {
+            foreach (DeployLogArchive::deploys($username) as $deploy) {
+                if (! $deploy['is_latest']) {
+                    continue;
+                }
+                $log = @file_get_contents((new DeployLogPaths($username))->log($deploy['id']));
+                if (is_string($log) && $log !== '') {
+                    $named = array_merge($named, HostImageRetention::mentionedIn($log, $refs));
+                }
+            }
+        }
+
+        return array_values(array_unique($named));
+    }
+
+    /**
      * @return list<string>
      */
     private function deploysInFlight(): array
@@ -318,7 +540,7 @@ class PruneHostImages extends Command
         }
         try {
             $system->exec(
-                ['sudo', 'docker', 'buildx', 'prune', '-af', '--filter', "until={$window}s"],
+                Privileged::docker()->pruneBuildCacheUnusedFor($window),
                 [],
                 300
             );

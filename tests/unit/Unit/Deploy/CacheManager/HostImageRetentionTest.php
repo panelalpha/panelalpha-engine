@@ -6,6 +6,9 @@ use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\HostImageRetention;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
+use App\Lib\Deploy\CacheManager\NodeBuildImage;
+use App\Lib\Deploy\CacheManager\PythonBaseImage;
+use App\Lib\Deploy\CacheManager\RustBuildToolsImage;
 use App\Lib\Deploy\Dind\DindImageStore;
 use PHPUnit\Framework\TestCase;
 
@@ -25,7 +28,10 @@ class HostImageRetentionTest extends TestCase
         $variant = $this->plainPhpBase() . '-x0123abcd';
         $this->assertTrue(BuiltImage::isVariant($variant));
 
-        $candidates = $this->candidates([$this->row($variant, 5 * self::DAY)]);
+        $candidates = $this->candidates([
+            $this->row($variant, 5 * self::DAY),
+            $this->row($this->plainPhpBase() . '-x89abcdef', 4 * self::DAY),
+        ]);
 
         $this->assertSame([$variant], array_keys($candidates));
         $this->assertSame(self::NOW - 5 * self::DAY, $candidates[$variant]['since']);
@@ -105,6 +111,7 @@ class HostImageRetentionTest extends TestCase
         $candidates = $this->candidates([
             $this->row($variant, 5 * self::DAY),
             $this->row($alias, 5 * self::DAY),
+            $this->row($this->plainPhpBase() . '-x89abcdef', 4 * self::DAY),
         ]);
 
         $this->assertSame([$variant], array_keys($candidates));
@@ -126,6 +133,94 @@ class HostImageRetentionTest extends TestCase
             $this->row($variant, 30 * self::DAY),
             $this->row(DindImageStore::HOST_CACHE_REGISTRY . '/' . $variant, 1 * self::DAY),
         ]));
+    }
+
+    /**
+     * The next deploy of a runtime still finds most of its layers; a lone PHP variant is the newest of its kind.
+     */
+    public function test_the_newest_of_each_family_stays_however_old(): void
+    {
+        $python = $this->pythonBase();
+        $older = (string) preg_replace('/-pa[0-9a-f]+$/', '-pa00000001', $python);
+        $newer = (string) preg_replace('/-pa[0-9a-f]+$/', '-pa00000002', $python);
+        $plain = $this->plainPhpBase();
+
+        $candidates = $this->candidates([
+            $this->row($older, 30 * self::DAY),
+            $this->row($newer, 20 * self::DAY),
+            $this->row($plain . '-x0123abcd', 10 * self::DAY),
+        ], prewarmed: []);
+
+        $this->assertSame([$older], array_keys($candidates));
+    }
+
+    public function test_a_tie_keeps_one_image_of_the_family(): void
+    {
+        $plain = $this->plainPhpBase();
+
+        $candidates = $this->candidates([
+            $this->row($plain . '-x0123abcd', 10 * self::DAY),
+            $this->row($plain . '-x89abcdef', 10 * self::DAY),
+        ]);
+
+        $this->assertSame([$plain . '-x0123abcd'], array_keys($candidates));
+    }
+
+    /** No deploy asks for an old recipe again, so it goes once nothing holds it. */
+    public function test_a_superseded_php_recipe_goes_inside_the_window_and_is_never_the_newest(): void
+    {
+        $plain = $this->plainPhpBase();
+        $old = (string) preg_replace('/-pa[0-9a-f]+$/', '-pa20200101', $plain);
+        $this->assertTrue(HostImageRetention::isSuperseded($old));
+        $this->assertTrue(HostImageRetention::isSuperseded($old . '-x0123abcd'));
+        $this->assertFalse(HostImageRetention::isSuperseded($plain));
+        $this->assertFalse(HostImageRetention::isSuperseded($this->pythonBase()));
+
+        $candidates = $this->candidates([
+            $this->row($old, 1 * self::DAY),
+            $this->row($old . '-x0123abcd', 3600),
+        ], prewarmed: []);
+
+        $this->assertSame([$old, $old . '-x0123abcd'], array_keys($candidates));
+        $this->assertSame([], $this->candidates([$this->row($old, 1 * self::DAY)], [$old], prewarmed: []), 'a container still holds it');
+    }
+
+    /** The JVM-with-Node and Rust-with-tools images a host build makes for itself. */
+    public function test_host_build_images_are_in_scope_and_keep_their_newest(): void
+    {
+        $rustOld = (string) RustBuildToolsImage::tag('rust:1-bookworm', ['protobuf-compiler']);
+        $rustNew = (string) RustBuildToolsImage::tag('rust:1-bookworm', ['cmake', 'protobuf-compiler']);
+        $nodeOld = (string) NodeBuildImage::tag('gradle:8-jdk21', 'node:20-bookworm-slim');
+        $nodeNew = (string) NodeBuildImage::tag('gradle:8-jdk21', 'node:22-bookworm-slim');
+        $this->assertTrue(HostImageRetention::isBuildImage($rustOld));
+        $this->assertFalse(HostImageRetention::isBuildImage(RustBuildToolsImage::REPOSITORY . ':local'));
+
+        $candidates = $this->candidates([
+            $this->row($rustOld, 5 * self::DAY),
+            $this->row($rustNew, 4 * self::DAY),
+            $this->row($nodeOld, 5 * self::DAY),
+            $this->row($nodeNew, 4 * self::DAY),
+            $this->row(DindImageStore::HOST_CACHE_REGISTRY . '/' . $nodeOld, 5 * self::DAY),
+        ]);
+
+        $this->assertSame([$rustOld, $nodeOld], array_keys($candidates));
+        $this->assertSame([$nodeOld, DindImageStore::HOST_CACHE_REGISTRY . '/' . $nodeOld], $candidates[$nodeOld]['tags']);
+    }
+
+    public function test_family_names(): void
+    {
+        $plain = $this->plainPhpBase();
+        $parts = BuiltImage::parts($plain);
+        $this->assertNotNull($parts);
+        $base = $parts['repository'] . ':' . $parts['upstreamTag'];
+
+        $this->assertSame($base, HostImageRetention::family($plain));
+        $this->assertSame($base . '-x', HostImageRetention::family($plain . '-x0123abcd'));
+        $this->assertSame(
+            RustBuildToolsImage::REPOSITORY . ':rust-1-bookworm',
+            HostImageRetention::family((string) RustBuildToolsImage::tag('rust:1-bookworm', ['cmake']))
+        );
+        $this->assertNull(HostImageRetention::family('golang:1.22-alpine'));
     }
 
     public function test_a_deploy_log_names_an_image_through_escaped_slashes(): void
@@ -170,13 +265,14 @@ class HostImageRetentionTest extends TestCase
     /**
      * @param list<array{tag: string, bytes: ?int, since: ?int}> $rows
      * @param list<string> $containers
+     * @param list<string>|null $prewarmed the shipped catalogue when null
      * @return array<string, array{tags: list<string>, bytes: ?int, since: int}>
      */
-    private function candidates(array $rows, array $containers = []): array
+    private function candidates(array $rows, array $containers = [], ?array $prewarmed = null): array
     {
         return HostImageRetention::candidates(
             $rows,
-            $this->prewarmed(),
+            $prewarmed ?? $this->prewarmed(),
             ImageCatalog::all(),
             $containers,
             self::NOW,
@@ -208,6 +304,16 @@ class HostImageRetentionTest extends TestCase
             }
         }
         $this->markTestSkipped('the catalogue warms no plain PHP base');
+    }
+
+    private function pythonBase(): string
+    {
+        $tag = PythonBaseImage::tag('python:3.12-slim', ['libpq-dev']);
+        if ($tag === null) {
+            $this->markTestSkipped('the catalogue builds no Python base');
+        }
+
+        return $tag;
     }
 
     private function prewarmedOfRepository(string $repository): string
