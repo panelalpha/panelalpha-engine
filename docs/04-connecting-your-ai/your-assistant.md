@@ -62,7 +62,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository and running a Lighthouse report on one of this engine's sites still work. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
 | `modify` | Create and change things, and blocks only DELETE routes. It is **not** a "no destructive actions" setting: the write tools that are not plain creations (`ssh_run`, `wp_cli_run`, `backup_restore`, `file_write`, `system_update`, `firewall_disable`, `project_rebuild`) still run. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 287 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 307 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -324,7 +324,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **225** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **231** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -339,7 +339,7 @@ pae mcp:tool:list
 | Group | Toolset | Default | Tools |
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
-| [Projects](#projects) | `projects` | On | 22 |
+| [Projects](#projects) | `projects` | On | 25 |
 | [Domains](#domains) | `domains` | On | 8 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
@@ -361,7 +361,7 @@ pae mcp:tool:list
 | [WordPress import](#wordpress-import) | `wordpressmigrations` | On | 7 |
 | [Deploy](#deploy) | `deploy` | On | 7 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
-| [System](#system) | `system` | On | 15 |
+| [System](#system) | `system` | On | 18 |
 | [Server metrics](#server-metrics) | `servermetrics` | On | 6 |
 | [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
@@ -393,8 +393,8 @@ pae mcp:tool:list
 | `env_var_list` | List the environment variables a container project holds, with the values hidden unless asked for |
 | `env_var_set` | Set or remove environment variables of a container project, and apply them without a rebuild if asked |
 | `project_clone` | Clone a project |
-| `project_create` | Create a new hosting project (async) |
-| `project_create_sync` | Create a project and wait for the deploy in the same call. Same body as `project_create` |
+| `project_create` | Create a project from a source: an empty one, a git repository (HTTPS, or SSH with a deploy key), an archive, a copy of another project, or a new WordPress; deployed in the background |
+| `project_create_sync` | Create a project and wait for the deploy in the same call. Takes the flat body (`git_repo`, `template`) |
 | `project_delete` | Delete a project and everything in it |
 | `project_deploy_archive` | Deploy an uploaded zip/tar into ~/project |
 | `project_get` | Get a project |
@@ -402,10 +402,17 @@ pae mcp:tool:list
 | `project_list_all` | List all projects (no pagination) |
 | `project_password_set` | Set a password visitors must type before they see the site |
 | `project_password_unset` | Remove that password |
+| `project_overlay_delete` | Remove a project's own overlay and show the global one on it again |
+| `project_overlay_get` | Read a project's overlay and whether the global one reaches it |
+| `project_overlay_set` | Write HTML (a banner, a script) into every page of a project |
 | `project_push` | Push project state to a paired staging or live project |
 | `project_push_diff` | Compare the database tables of a staging project with its live project, without copying anything |
 | `project_rebuild` | Redeploy a project |
-| `project_source_attach` | Attach a git repository to a project created without one, and deploy it |
+| `project_source_attach` | Attach an HTTPS git repository to a project created without one, and deploy it |
+| `project_source_set` | Set the git or archive source of a container project, and deploy it |
+| `upload_create` | Store an archive on the engine for a project not created yet |
+| `upload_get` | Get an upload |
+| `upload_delete` | Delete an upload no create has used |
 | `project_staging` | Create a linked staging mirror of a live project |
 | `project_suspend` | Suspend a project |
 | `project_unsuspend` | Unsuspend a project |
@@ -693,6 +700,9 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_exim_config_get` | Get Exim mail server configuration |
 | `system_exim_config_set` | Update Exim mail server configuration |
 | `system_info` | Get system information |
+| `system_overlay_delete` | Remove the global overlay |
+| `system_overlay_get` | Read the global overlay |
+| `system_overlay_set` | Write HTML (a banner, a script) into every page of every project |
 | `system_ssl_config_get` | How certificates for project sites are obtained |
 | `system_ssl_config_set` | Set how certificates for project sites are obtained |
 | `system_test_email_send` | Send a test email via Exim |
@@ -863,6 +873,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 | Tool | What it does |
 |---|---|
 | `vault_secret_create` | Creates a paste page so you can give the engine a secret without putting it in chat |
+| `vault_deploy_key_create` | Generates an SSH deploy key and shows its public half, for a project created from an SSH remote |
 | `vault_secret_delete` | Deletes a paste slot |
 | `vault_secret_list` | Lists paste slots. The secret itself is never included |
 | `vault_secret_status` | Whether a paste slot has a secret yet |

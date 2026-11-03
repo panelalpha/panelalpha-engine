@@ -139,6 +139,25 @@ pae project:settings:unset protected --project=<name>
 
 Your own `pae` commands on the server are not affected. Details: [CLI commands](../06-commands/pae-cli.md).
 
+## Overlays
+
+An overlay is a piece of HTML, such as a banner, a notice or a script, that the engine's webserver writes into every page a site serves. The application is not changed. There is one global overlay for every project, and each project can have its own.
+
+```text
+Put a banner reading "Maintenance tonight at 22:00" at the bottom of every site.
+Add a "Staging copy" banner to tshop only.
+Do not show the global banner on tshop.
+```
+
+- The overlay goes just before `</body>` by default, or just before `</head>` (`position: head_end`) for a stylesheet or a script.
+- On a project's pages the global overlay comes first, then the project's own. A project can hide the global one.
+- Only HTML pages (`text/html`) get it, on the project's addresses on ports 80 and 443. A page without the closing tag is left as it is. Files, JSON and other answers are left as they are, and so are extra ports, redirects and a suspended project's page.
+- The webserver asks the application for uncompressed pages, so it can find the tag. It then compresses the page for the visitor.
+- An overlay does not change how a Cloudflare tunnel reaches the site. A tunnel goes straight to the application, so its visitors do not see the overlay, unless a site password already routes the tunnel through the engine's webserver.
+- The HTML is written as you give it, up to 16 KB. The visitor's browser runs any script in it on the site's own address, so give it only HTML you trust.
+
+The pages change within seconds: the webserver reloads in the background.
+
 ## Deleting
 
 ```text
@@ -179,6 +198,8 @@ You cannot set it yourself: names starting with `PA_` belong to the engine. Thre
 
 Every project has plan limits: disk, memory, CPU, bandwidth, and how many databases, FTP accounts, subdomains and domains it may have.
 
+**The bandwidth limit is reported, not enforced.** The engine measures each project's transfer every hour and shows this month's total against the limit (`bandwidth.usage` against `bandwidth.maximum` in the project's usage). A project that goes past it keeps serving: nothing slows it down, suspends it or sends a warning. If going over should have consequences, the software that sells the plan has to read the usage and act on it.
+
 ```text
 Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 ```
@@ -187,11 +208,13 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
+**A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so.
+
 **Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and only just ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 
 To keep more for the engine, or for other things the server runs, set `DEPLOY_ENGINE_MEMORY` (in MB) in the engine's environment; that lowers the maximum for every project. `DEPLOY_PROJECT_MEMORY_DEFAULT` gives projects created without a limit a smaller default.
 
-The application gets a little less than the number you set. The project itself needs some memory to keep running, so a 2048 MB limit leaves the application with about 1792 MB. That is expected.
+The application gets a little less than the number you set. The project itself needs some memory to keep running, so a 2048 MB limit leaves the application with about 1792 MB. That is expected. A compose file that gives a service more (`mem_limit`, `mem_reservation` or `deploy.resources`) is lowered to that figure. A size set through a variable (`${APP_MEMORY:-8g}`) is lowered only when every value the variable can take from `.env`, `.env.example` or the project's environment variables is larger.
 
 Memory limits are the ones that bite. A build that runs out of memory fails with a message that looks like a code problem but is not: [Reading errors](../02-getting-started/reading-errors.md).
 
@@ -212,7 +235,13 @@ List the cron jobs on this project.
 Create one that runs /usr/bin/php /home/<user>/script.php every hour, on the hour.
 ```
 
-Cron jobs run on traditional PHP hosting. A project deployed into its own container (from a repository, an archive, or WordPress set up by the engine) does not run them, and creating one there is refused; schedule the work inside the application instead, for example as a service in its Docker Compose file.
+On a project deployed into its own container (from a repository, an archive, or WordPress set up by the engine), each cron job runs in one of the project's services, so name the service as well:
+
+```text
+Every five minutes, run php artisan schedule:run in the app service of this project.
+```
+
+The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
 
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
@@ -308,6 +337,15 @@ Then remove it.
 
 Mode: modify. Tools: `project_password_set`, `project_password_unset`. Check: while set, an anonymous request to the site is refused and the page says "This site is password protected." After the removal it opens without a prompt. The password is not repeated in the assistant's answer.
 
+**Banner on every site**
+
+```text
+Put a fixed banner reading "Maintenance tonight at 22:00" at the bottom of every site.
+Then hide it on tshop and give tshop its own "Staging copy" banner.
+```
+
+Mode: modify. Tools: `system_overlay_set`, `project_overlay_set`, `project_overlay_get`. Check: a page of another project shows the maintenance banner just before `</body>`, a page of tshop shows only its own, and `project_overlay_get` reads `show_global: false`. Remove them with `project_overlay_delete` and `system_overlay_delete` (mode: full).
+
 **Settings of a project**
 
 ```text
@@ -392,7 +430,16 @@ On the traditional PHP project tphpsite, list the cron jobs, add one that runs
 30 minutes, then delete it.
 ```
 
-Mode: full. Tools: `cron_job_list`, `cron_job_create`, `cron_job_update`, `cron_job_delete`. Check: the job is addressed by its `hash`, the schedule reads back as asked, and the same request on a container project (such as `tshop`) is refused with the reason.
+Mode: full. Tools: `cron_job_list`, `cron_job_create`, `cron_job_update`, `cron_job_delete`. Check: the job is addressed by its `hash`, and the schedule reads back as asked.
+
+**Cron jobs in a container project**
+
+```text
+On the container project tshop, add a cron job that runs date every minute in
+its app service, show me what it wrote after two minutes, then delete it.
+```
+
+Mode: full. Tools: `container_list`, `cron_job_create`, `cron_job_list`, `file_download`, `cron_job_delete`. Check: the job lists with `service: app`, `~/.panelalpha/cron/cron.log` in the project's home shows a `start` and an `exit 0` line for it, and a job without a service is refused with the reason.
 
 **Delete**
 
