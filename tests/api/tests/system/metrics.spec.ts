@@ -1,6 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import type { EngineApi } from '@/clients/engine-api';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { expectStatus } from '@/helpers/expect-status';
 import {
   currentMetricsResponseSchema,
   historicalMetricsResponseSchema,
@@ -55,7 +56,7 @@ test.describe('system metrics', () => {
 
   test('history rejects a range it does not offer', async ({ authedRequest }) => {
     const response = await authedRequest.get('metrics/history?range=12h');
-    expect(response.status()).toBe(422);
+    await expectStatus(response, 422);
   });
 
   test('current CPU is a present-moment share, not the average since boot', async ({ api }) => {

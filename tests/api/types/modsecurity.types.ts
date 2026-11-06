@@ -36,3 +36,12 @@ export interface ModSecurityAuditLogEntry {
   message?: string;
   [key: string]: unknown;
 }
+
+/** GET/PUT modsec/custom-rules. */
+export interface ModSecurityCustomRules {
+  rules: string;
+  /** True while the `custom` rule set is enabled, so the rules are loaded. */
+  enabled: boolean;
+  /** The rule ids the rules may use, inclusive. */
+  id_range: [number, number];
+}

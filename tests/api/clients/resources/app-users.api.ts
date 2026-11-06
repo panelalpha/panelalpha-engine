@@ -130,4 +130,8 @@ export class AppUsersApi extends EngineApiBase {
     const response = await this.api.get(`projects/${username}/app/health`);
     return this.rawCall(response);
   }
+
+  async getAppCredentialsRaw(username: string): Promise<{ status: number; body: any }> {
+    return this.rawCall(await this.api.get(`projects/${username}/app-credentials`));
+  }
 }

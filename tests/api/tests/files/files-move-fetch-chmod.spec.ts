@@ -5,6 +5,34 @@ import { uniqueId } from '@/helpers/random';
 import { expectStatus } from '@/helpers/expect-status';
 import { testNetwork } from '@/helpers/test-network';
 
+const INTERNAL_TARGET = `http://${testNetwork.LOOPBACK}/`;
+
+/** Public redirectors to an internal target, tried in turn: some refuse one or are unreachable. */
+const REDIRECTORS = [
+  'https://postman-echo.com/redirect-to?url=',
+  'https://httpbin.dev/redirect-to?url=',
+  'https://httpbin.org/redirect-to?url=',
+];
+
+async function redirectsInternally(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    return (
+      response.status >= 300 &&
+      response.status < 400 &&
+      response.headers.get('location') === INTERNAL_TARGET
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function internalRedirects(): Promise<string[]> {
+  const urls = REDIRECTORS.map((redirector) => redirector + encodeURIComponent(INTERNAL_TARGET));
+  const working = await Promise.all(urls.map(redirectsInternally));
+  return urls.filter((_, index) => working[index]);
+}
+
 test.describe('move contents, fetch and chmod', () => {
   test('move-contents moves children and leaves the source directory', async ({
     api,
@@ -121,17 +149,27 @@ test.describe('move contents, fetch and chmod', () => {
   });
 
   test('fetch refuses a redirect to an internal address', async ({ api, userFactory }) => {
+    const redirects = await internalRedirects();
+    test.skip(
+      redirects.length === 0,
+      'No public redirector this case knows answered with a redirect to an internal address.'
+    );
     const user = await userFactory.createSimpleUser();
     const dir = getDomainBasePath(user.domain);
 
-    const redirected = await api.fetchFileRaw(user.username, {
-      url: `https://httpbin.org/redirect-to?url=http%3A%2F%2F${testNetwork.LOOPBACK}%2F`,
-      path: dir,
-      filename: 'redirected.txt',
-    });
+    const attempts: Awaited<ReturnType<typeof api.fetchFileRaw>>[] = [];
+    for (const url of redirects) {
+      attempts.push(
+        await api.fetchFileRaw(user.username, { url, path: dir, filename: 'redirected.txt' })
+      );
+      if (attempts[attempts.length - 1].status !== 400) {
+        break;
+      }
+    }
+    const redirected = attempts[attempts.length - 1];
     test.skip(
-      redirected.status === 400 && /returned error: 5\d\d/.test(JSON.stringify(redirected.body)),
-      'The external redirector this case relies on answered a server error.'
+      redirected.status === 400,
+      'The engine could not download from any public redirector this case knows.'
     );
 
     const cleanup = new CleanupSteps();

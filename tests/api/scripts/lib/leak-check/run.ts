@@ -5,7 +5,14 @@ import { request } from '@playwright/test';
 
 import { EngineApi } from '@/clients/engine-api';
 import { createApiTransport } from '@/clients/api-transport';
-import { readSetupDindState, readSetupState, setupUsernames } from '@/fixtures/helper/setup-state';
+import {
+  activeLeaseUsernames,
+  readLeases,
+  readSetupDindState,
+  readSetupState,
+  setupUsernames,
+  type Lease,
+} from '@/fixtures/helper/setup-state';
 import { describeError, takeSnapshot } from './snapshot';
 import { buildAllowList } from './allow';
 import { compareSnapshots } from './compare';
@@ -80,9 +87,12 @@ export async function snapshotEngine(): Promise<Snapshot> {
   }
 }
 
-/** Projects the setup projects left on purpose, read from the state files. */
-export function setupUsers(): string[] {
-  const users: string[] = [];
+/**
+ * Projects the setup projects left on purpose: this checkout's state files, plus every project an
+ * active lease holds, so a concurrent run sharing `TEST_LEASE_DIR` is not reported as a leak.
+ */
+export function setupUsers(leases: readonly Lease[] = readLeases(), now = Date.now()): string[] {
+  const users: string[] = activeLeaseUsernames(leases, now);
   try {
     // A parallel run keeps one shared user per worker.
     users.push(...setupUsernames(readSetupState()));

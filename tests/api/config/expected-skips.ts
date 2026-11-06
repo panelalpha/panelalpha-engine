@@ -27,6 +27,12 @@ export const SKIP_CATEGORIES: readonly SkipCategory[] = [
 export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
   // Environment: the engine runs nginx-proxy, or lacks an optional component.
   {
+    id: 'wordpress-import-needs-public-engine',
+    match: /^This engine has no public IPv4 address, so it cannot receive a migration\./,
+    category: 'environment',
+    why: 'A source site sends the transfer to the engine, so a private engine refuses to start an import.',
+  },
+  {
     id: 'lscache-needs-litespeed',
     match: /^LiteSpeed Cache needs LiteSpeed or OpenLiteSpeed;/,
     category: 'environment',
@@ -182,6 +188,19 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
     why: 'The host has no IPv4 address on record, so the engine named the project .local.',
   },
   {
+    id: 'no-internal-redirector',
+    match:
+      /^No public redirector this case knows answered with a redirect to an internal address\./,
+    category: 'environment',
+    why: 'The redirect case needs a public site that redirects to the loopback address; httpbin.org and httpbingo.org now refuse to.',
+  },
+  {
+    id: 'internal-redirector-unreachable',
+    match: /^The engine could not download from any public redirector this case knows\./,
+    category: 'environment',
+    why: "Every redirector failed from the engine's host (unreachable, or an error answer), so no redirect reached the engine.",
+  },
+  {
     id: 'panelalpha-online-private-host',
     match:
       /^PanelAlpha Online was not offered \(panelalpha_direct: no public IPv4: the host's address is private,/,
@@ -256,6 +275,12 @@ export const EXPECTED_SKIPS: readonly ExpectedSkip[] = [
   },
 
   // Opt-in: a destructive or costly test that runs only when asked for.
+  {
+    id: 'opt-in-wordpress-import-source',
+    match: /^Set WP_MIGRATION_SOURCE_URL, _USER, _PASSWORD and _TITLE /,
+    category: 'opt-in',
+    why: 'A WordPress import needs a public source site on another server, which no fixture provides.',
+  },
   {
     id: 'opt-in-network-mutation',
     match: /^Set ALLOW_NETWORK_MUTATION=1 to /,

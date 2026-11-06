@@ -225,4 +225,17 @@ export class GitApi extends EngineApiBase {
     );
     return this.rawCall(response);
   }
+
+  async createDeployKeyRaw(
+    username: string,
+    data: { host?: string } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/git/deploy-key`, { data });
+    return this.rawCall(response);
+  }
+
+  async deleteDeployKeyRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.delete(`projects/${username}/git/deploy-key`);
+    return this.rawCall(response);
+  }
 }

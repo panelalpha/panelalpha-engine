@@ -13,6 +13,7 @@ import { LighthouseApi } from './resources/lighthouse.api';
 import { McpApi } from './resources/mcp.api';
 import { ModSecurityApi } from './resources/modsec.api';
 import { MySqlApi } from './resources/mysql.api';
+import { OverlayApi } from './resources/overlay.api';
 import { PhpApi } from './resources/php.api';
 import { ProxyRulesApi } from './resources/proxy-rules.api';
 import { SftpApi } from './resources/sftp.api';
@@ -23,6 +24,7 @@ import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
 import { CdnApi } from './resources/cdn.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
+import { ProjectSourceApi } from './resources/project-source.api';
 import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
@@ -30,6 +32,7 @@ import { SystemApi } from './resources/system.api';
 import { UsersApi } from './resources/users.api';
 import { VaultApi } from './resources/vault.api';
 import { WpCliApi } from './resources/wpcli.api';
+import { WordPressApi } from './resources/wordpress.api';
 
 /** Domain API clients composed into {@link EngineApi}. */
 export const ENGINE_API_CLIENTS = [
@@ -60,9 +63,12 @@ export const ENGINE_API_CLIENTS = [
   TunnelsApi,
   CdnApi,
   ProjectSettingsApi,
+  ProjectSourceApi,
   EnvVarsApi,
   TasksApi,
   BugReportsApi,
+  OverlayApi,
+  WordPressApi,
   VaultApi,
 ] as const;
 

@@ -17,6 +17,11 @@ export class DomainsApi extends EximApi {
     return response.json();
   }
 
+  /** Lists the project's domains without asserting the status: a deleted project answers 404. */
+  async listUserDomainsRaw(username: string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.get(`projects/${username}/domains`));
+  }
+
   async getDomain(username: string, domain: string): Promise<ApiResponse<Domain>> {
     const response = await this.api.get(`projects/${username}/domains/${domain}`);
     await this.assertStatus(response, 200);

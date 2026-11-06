@@ -73,19 +73,13 @@ export class FtpFactory {
     );
     const password = this.generatePassword();
 
-    await this.api.createSftpAccount(username, {
+    const created = await this.api.createSftpAccount(username, {
       username: sftpUser,
       auth_method: 'password',
       password,
     });
 
-    return {
-      username: sftpUser,
-      directory: '',
-      auth_type: 'password',
-      created_at: new Date().toISOString(),
-      password,
-    };
+    return { ...created.data, password };
   }
 
   async createSftpAccountWithKey(
@@ -98,19 +92,13 @@ export class FtpFactory {
     );
     const publicKey = this.getSshPublicKey();
 
-    await this.api.createSftpAccount(username, {
+    const created = await this.api.createSftpAccount(username, {
       username: sftpUser,
       auth_method: 'public_key',
       public_key: publicKey,
     });
 
-    return {
-      username: sftpUser,
-      directory: '',
-      auth_type: 'key',
-      created_at: new Date().toISOString(),
-      publicKey,
-    };
+    return { ...created.data, publicKey };
   }
 
   async deleteSftpAccount(username: string, sftpUsername: string): Promise<void> {
