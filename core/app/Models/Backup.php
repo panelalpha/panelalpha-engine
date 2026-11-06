@@ -117,6 +117,30 @@ class Backup extends Model
         ];
     }
 
+    public function saveBackupStatus(string $status, ?string $error = null): void
+    {
+        $this->setBackupStatus($status);
+        $this->saveError($error);
+    }
+
+    public function saveRestoreStatus(string $status, ?string $error = null): void
+    {
+        $this->setRestoreStatus($status);
+        $this->saveError($error);
+    }
+
+    public function saveDeleteStatus(string $status, ?string $error = null): void
+    {
+        $this->setDeleteStatus($status);
+        $this->saveError($error);
+    }
+
+    private function saveError(?string $error): void
+    {
+        $this->error = $error;
+        $this->save();
+    }
+
     public function backupStatus(): ?string
     {
         return $this->asyncStatusValue('backup');
@@ -145,6 +169,19 @@ class Backup extends Model
     public function setDeleteStatus(?string $status): void
     {
         $this->setAsyncStatusValue('delete', $status);
+    }
+
+    /**
+     * Keeps the task of each operation (backup, restore, delete) as `<operation>_task_id`, and the latest one's as
+     * `task_id`. Called before the job is dispatched, so the worker's own writes come after it.
+     */
+    public function recordTask(string $operation, Task $task): void
+    {
+        $status = $this->async_status ?? [];
+        $status[$operation.'_task_id'] = $task->id;
+        $status['task_id'] = $task->id;
+        $this->async_status = $status;
+        $this->save();
     }
 
     public function backupProgress(): ?int
