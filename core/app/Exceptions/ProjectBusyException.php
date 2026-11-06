@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use App\Jobs\ApplyEnvVars;
+use App\Jobs\CopyProject;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeleteBackup;
@@ -16,20 +17,29 @@ use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 
 /**
- * A delete refused because something is working on the project's account.
- * HTTP answers 409 with the message; the CLI prints {@see plainMessage()},
- * which says the same without naming an endpoint.
+ * A delete refused because something is working on the project's account; answered 409, with the task to follow
+ * or cancel when there is one.
  */
 class ProjectBusyException extends \RuntimeException
 {
+    public const CODE = 'project_busy';
+
+    /** Busy with a task that can be followed and cancelled. */
+    public const TASK = 'project_busy_task';
+
     private const WAIT = 'Wait for it to finish.';
 
-    private function __construct(
-        private readonly string $state,
-        string $hint,
-        private readonly string $plainHint,
-    ) {
+    private function __construct(string $state, string $hint, public readonly ?Task $task = null)
+    {
         parent::__construct("{$state} {$hint}", 409);
+    }
+
+    /**
+     * @return array{code: string, task_id?: int}
+     */
+    public function problem(): array
+    {
+        return $this->task === null ? ['code' => self::CODE] : ['code' => self::TASK, 'task_id' => $this->task->id];
     }
 
     public static function taskRunning(string $project, Task $task): self
@@ -37,14 +47,10 @@ class ProjectBusyException extends \RuntimeException
         $state = "Project '{$project}' is busy: ".self::kind($task)." task {$task->id} is ".self::progress($task).'.';
 
         if (! self::canBeCancelled($task)) {
-            return new self($state, self::WAIT, self::WAIT);
+            return new self($state, self::WAIT);
         }
 
-        return new self(
-            $state,
-            "Cancel it (POST /tasks/{$task->id}/cancel) or wait for it to finish.",
-            "Cancel task {$task->id} or wait for it to finish.",
-        );
+        return new self($state, "Cancel task {$task->id} or wait for it to finish.", $task);
     }
 
     /** Cancelled, but its job has not let go of the account yet. */
@@ -52,7 +58,6 @@ class ProjectBusyException extends \RuntimeException
     {
         return new self(
             "Project '{$project}' is busy: ".self::kind($task)." task {$task->id} was cancelled and is still stopping.",
-            self::WAIT,
             self::WAIT,
         );
     }
@@ -66,21 +71,20 @@ class ProjectBusyException extends \RuntimeException
             DeployLock::HOLDER_BACKUP, DeployLock::HOLDER_RESTORE => new self(
                 "Project '{$project}' is busy: a {$holder} is running.",
                 self::WAIT,
-                self::WAIT,
             ),
-            DeployLock::HOLDER_DELETE => new self("Project '{$project}' is being deleted.", self::WAIT, self::WAIT),
-            default => new self("Project '{$project}' is busy: a deploy is running.", self::WAIT, self::WAIT),
+            DeployLock::HOLDER_DELETE => new self("Project '{$project}' is being deleted.", self::WAIT),
+            default => new self("Project '{$project}' is busy: a deploy is running.", self::WAIT),
         };
     }
 
     public static function pushRunning(string $project): self
     {
-        return new self("Project '{$project}' is busy: a push is running.", self::WAIT, self::WAIT);
+        return new self("Project '{$project}' is busy: a push is running.", self::WAIT);
     }
 
-    public function plainMessage(): string
+    public static function stagingRunning(string $project): self
     {
-        return "{$this->state} {$this->plainHint}";
+        return new self("Project '{$project}' is busy: a staging copy is running.", self::WAIT);
     }
 
     /**
@@ -109,6 +113,7 @@ class ProjectBusyException extends \RuntimeException
                 default => 'rebuild',
             },
             CreateStaging::class => 'staging copy',
+            CopyProject::class => 'project copy',
             PushState::class => 'push',
             RenameMysqlDatabase::class => 'database rename',
             CreateBackup::class => 'backup',

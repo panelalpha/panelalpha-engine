@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Inspect\Report;
 
 use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\Detect\DeployRefusal;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\ManifestException;
@@ -12,23 +13,27 @@ use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Findings\Finding;
 use InvalidArgumentException;
 
 /**
- * What the engine would do with this directory: the platform it matched, the
- * toolchain that implies, the commands it would run, and whether it could deploy
- * the project at all.
+ * What the engine would do with this directory: the platform it matched, the toolchain that implies, the commands it
+ * would run, and whether it could deploy the project at all.
  */
 final class ApplicationReport
 {
+    public const DEPLOY_REFUSED = 'deploy_refused';
+
+    public const PYTHON_ENTRY_POINT_MISSING = 'python_entry_point_missing';
+
     private readonly string $projectDir;
 
-    private ?string $issue;
+    private ?Finding $issue;
 
     /**
      * @param  array<string, mixed>  $decision
-     * @param  ?string  $issue  a reason detection itself already rejected the
-     *                          project, which outranks anything found here
+     * @param  ?Finding  $issue  a reason detection itself already rejected the
+     *                           project, which outranks anything found here
      */
     public function __construct(
         string $projectDir,
@@ -36,7 +41,7 @@ final class ApplicationReport
         private readonly array $decision,
         private readonly ?string $appConfigOrigin,
         private readonly ?AppConfig $appConfig,
-        ?string $issue = null,
+        ?Finding $issue = null,
         private readonly ?DeployPlan $plan = null,
         private readonly ?string $recipe = null
     ) {
@@ -62,11 +67,15 @@ final class ApplicationReport
     }
 
     /**
+     * `build_args` picks a Dockerfile's variant, `database` is for an app that blocks without one, and `candidates` are
+     * the recipes that could deploy it, best first. `deployable` follows `verdict`, so a placeholder-only deploy is not.
+     *
      * @return array<string, mixed>
      */
     public function build(): array
     {
         $this->issue ??= $this->deployabilityIssue();
+        $verdict = DeployVerdict::of($this->decision, $this->context, $this->issue);
         $composePath = $this->decision['compose_path'] ?? null;
 
         return [
@@ -78,42 +87,50 @@ final class ApplicationReport
             'package_manager' => $this->packageManager(),
             'output_directory' => $this->decision['output_directory'] ?? null,
             'dockerfile' => $this->decision['dockerfile'] ?? null,
-            // Which variant of a multi-variant Dockerfile this deploy builds. Kimai selects
-            // between an FPM and an Apache base with `ARG BASE`; without it the default
-            // target is the FPM variant, whose 9000 is FastCGI and cannot be proxied.
             'build_args' => $this->buildArgs(),
-            // Whether the deploy provisions a database. Kimai's entrypoint hard-requires
-            // DATABASE_URL and blocks in a retry loop without one, so an inspection
-            // reporting `services: []` said nothing about a deploy that cannot answer.
             'database' => $this->declared('database'),
             'compose_file' => is_string($composePath) ? $this->relative($composePath) : null,
             'static_index' => $this->decision['static_index'] ?? null,
             'app_config' => $this->appConfigOrigin,
-            // Which recipe will deploy this is `platform` above; this is which recipes
-            // could, best first, so a caller choosing one has the choice in front of it.
             'candidates' => $this->candidates(),
-            'deployable' => $this->issue === null,
-            'issue' => $this->issue,
+            'verdict' => $verdict->verdict,
+            'deployable' => $verdict->deployable(),
+            'issue' => $verdict->issue?->toArray(),
             'toolchain' => $this->toolchain(),
-            'commands' => [
-                'install' => self::commandOrNull($this->decision['install_command'] ?? null),
-                'build' => self::commandOrNull($this->decision['build_command'] ?? null),
-                'start' => self::commandOrNull($this->decision['start_command'] ?? null),
-            ],
-            'stages' => StageSchedule::of(
-                $this->context,
-                $this->decision,
-                $this->appConfig,
-                $this->plan,
-                $this->recipe
-            ),
+            'commands' => $this->commands(),
+            'stages' => $this->stages(),
         ];
     }
 
     /**
-     * Every recipe that could deploy this project, best first. A broken manifest is
-     * an empty list rather than a 500: detection has already run, so whatever the
-     * report says about the deploy is still true.
+     * @return array{install: ?string, build: ?string, start: ?string}
+     */
+    private function commands(): array
+    {
+        return [
+            'install' => self::commandOrNull($this->decision['install_command'] ?? null),
+            'build' => self::commandOrNull($this->decision['build_command'] ?? null),
+            'start' => self::commandOrNull($this->decision['start_command'] ?? null),
+        ];
+    }
+
+    /**
+     * @return array<string, list<array<string, mixed>>>
+     */
+    private function stages(): array
+    {
+        return StageSchedule::of(
+            $this->context,
+            $this->decision,
+            $this->appConfig,
+            $this->plan,
+            $this->recipe
+        );
+    }
+
+    /**
+     * Every recipe that could deploy this project, best first. A broken manifest is an empty list rather than a 500:
+     * detection has already run, so whatever the report says about the deploy is still true.
      *
      * @return list<array<string, mixed>>
      */
@@ -126,32 +143,32 @@ final class ApplicationReport
         }
     }
 
-    private function deployabilityIssue(): ?string
+    /**
+     * A start command serving the "did not start" page means the runtime found nothing to run, so it is not deployable:
+     * otherwise the refusal sits in the command text and `true` in the field callers branch on.
+     */
+    private function deployabilityIssue(): ?Finding
     {
         try {
             DeployabilityCheck::assert($this->decision, $this->projectDir);
         } catch (InvalidArgumentException $e) {
-            return $e->getMessage();
+            return DeployRefusal::findingOf($e, self::DEPLOY_REFUSED);
         }
 
-        // A start command serving the "did not start" page means the runtime found nothing
-        // to run; reporting that as deployable puts the refusal in the command text and
-        // `true` in the field callers branch on.
         $start = $this->decision['start_command'] ?? null;
         if (is_string($start) && str_contains($start, PythonRuntime::PLACEHOLDER_DIR)) {
-            return 'No start command could be worked out. A wsgi.py or asgi.py needs a server '
-                .'to run it -- declare gunicorn or uvicorn. Otherwise name the entry point in a '
+            return new Finding(self::PYTHON_ENTRY_POINT_MISSING, 'No start command could be worked out. A wsgi.py or asgi.py '
+                .'needs a server to run it -- declare gunicorn or uvicorn. Otherwise name the entry point in a '
                 .'panelalpha.yaml, declare one [project.scripts] entry, or add app.py, main.py '
-                .'or server.py (or a single script with an `if __name__ == "__main__":` guard).';
+                .'or server.py (or a single script with an `if __name__ == "__main__":` guard).');
         }
 
         return null;
     }
 
     /**
-     * The toolchain the project needs, at the versions its own files ask for.
-     * `source` is what makes this worth returning: "php 8.3" is a fact nobody can
-     * check, "php 8.3 (from composer.json require.php)" is one they can read.
+     * The toolchain the project needs, at the versions its own files ask for, each with the `source` that makes it
+     * checkable: "php 8.3 (from composer.json require.php)" rather than "php 8.3".
      *
      * @return list<array<string, string>>
      */
@@ -179,9 +196,8 @@ final class ApplicationReport
     }
 
     /**
-     * The Dockerfile ARG values this deploy would pass, as a map. Empty rather than
-     * absent when the platform sets none, so a caller need not distinguish "no
-     * args" from "field missing".
+     * The Dockerfile ARG values this deploy would pass, as a map; empty rather than absent when the platform sets none,
+     * so a caller need not tell "no args" from "field missing".
      *
      * @return array<string, string>
      */

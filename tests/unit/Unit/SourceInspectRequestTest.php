@@ -178,7 +178,7 @@ class SourceInspectRequestTest extends TestCase
             $this->assertSame('source_ssh_unsupported', $problem['code']);
             $this->assertSame('https://github.com/vvolv/market-radar.git', $problem['suggestion']);
             // The sentence still reads on its own, for `message`.
-            $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $e->getMessage());
+            $this->assertStringContainsString('create its deploy key', $e->getMessage());
         }
     }
 
@@ -231,7 +231,7 @@ class SourceInspectRequestTest extends TestCase
         /** @var array<string, mixed> $body */
         $body = json_decode((string) $response->getContent(), true);
 
-        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $body['message']);
+        $this->assertStringContainsString('create its deploy key', $body['message']);
 
         $this->assertArrayHasKey('errors', $body);
         $this->assertArrayHasKey('source', $body['errors']);

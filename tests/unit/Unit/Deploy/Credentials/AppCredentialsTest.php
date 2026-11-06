@@ -227,7 +227,7 @@ class AppCredentialsTest extends TestCase
         $this->assertCount(200, $seen);
     }
 
-    public function test_the_env_file_is_single_quoted_and_names_the_api(): void
+    public function test_the_env_file_is_single_quoted_and_says_where_it_comes_from(): void
     {
         $stored = ['fields' => [
             'SONARR_ADMIN_USER' => ['kind' => 'username', 'value' => 'admin'],
@@ -235,7 +235,7 @@ class AppCredentialsTest extends TestCase
         ]];
 
         $this->assertSame(
-            "# Written by the engine on every deploy; GET /projects/{name}/app-credentials returns it.\n"
+            "# Written by the engine on every deploy; the project's app credentials list the same values.\n"
             . "SONARR_ADMIN_USER='admin'\nSONARR_ADMIN_PASSWORD='aB3-x'\n",
             AppCredentials::envFile($stored)
         );

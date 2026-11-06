@@ -1,3 +1,5 @@
+import type { Finding } from './finding.types';
+
 /** Shared resource limit fields present in both UserDetails and UserConfig. */
 export interface UserLimits {
   home_dir: string;
@@ -29,8 +31,8 @@ export interface UserDetails extends UserLimits {
   git_branch?: string | null;
   deploy_strategy?: string | null;
   deployment_status?: string | null;
-  /** Sentences that made a finished deploy `partial`. Empty when the deploy was clean. */
-  deployment_warnings?: string[] | null;
+  /** What made a finished deploy `partial`, each with its hints. Empty when the deploy was clean. */
+  deployment_warnings?: Finding[] | null;
   /** How the main domain was chosen — see DomainPlan sources. */
   domain?: {
     source?: string;

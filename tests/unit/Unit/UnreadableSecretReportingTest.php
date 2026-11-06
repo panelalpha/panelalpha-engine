@@ -145,7 +145,7 @@ class UnreadableSecretReportingTest extends TestCase
         $this->assertSame('fail', $check['status']);
         $this->assertSame('warning', $check['severity']);
         $this->assertSame(['secrets' => ['git_token']], $check['evidence']);
-        $this->assertStringContainsString('git_update_credentials', $check['fix']);
+        $this->assertStringContainsString('the Git token', $check['fix']);
         $this->assertSame('Stored secrets cannot be decoded.', $check['title']);
         $this->assertStringNotContainsString('APP_KEY', $check['detail'] . $check['fix']);
     }

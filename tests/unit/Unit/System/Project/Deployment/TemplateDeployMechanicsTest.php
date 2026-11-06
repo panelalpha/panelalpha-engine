@@ -2,11 +2,13 @@
 
 namespace Tests\Unit\System\Project\Deployment;
 
+use App\Lib\Findings\Finding;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project as SystemProject;
 use App\System\Project\Deployment\DeployMechanics;
 use App\System\Project\Deployment\TemplateDeployMechanics;
+use App\System\Project\Dind\AppHealth;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use RuntimeException;
@@ -138,10 +140,10 @@ class TemplateDeployMechanicsTest extends TestCase
         $user = $this->makeUser('alice');
         $mechanics = new TemplateDeployMechanics($this->projectFor($user));
 
-        $mechanics->persistPartialSuccess(['nothing answered on 3000']);
+        $mechanics->persistPartialSuccess([new Finding(AppHealth::CODE_NOT_ANSWERING, 'nothing answered on 3000')]);
         $stored = ModelsUser::findByUsername('alice')->getDetails();
         $this->assertSame('partial', $stored['deployment_status']);
-        $this->assertSame(['nothing answered on 3000'], $stored['deployment_warnings']);
+        $this->assertSame([['code' => AppHealth::CODE_NOT_ANSWERING, 'message' => 'nothing answered on 3000']], $stored['deployment_warnings']);
 
         $mechanics->persistSuccess();
         $this->assertSame('success', ModelsUser::findByUsername('alice')->getDetails()['deployment_status']);

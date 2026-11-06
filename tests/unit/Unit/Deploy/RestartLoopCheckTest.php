@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy;
 
+use App\Lib\Findings\Finding;
 use App\System\Project\Dind\AppHealth;
 use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\CheckRunner;
@@ -54,7 +55,7 @@ class RestartLoopCheckTest extends TestCase
 
         $this->assertStringContainsString('app', $check['detail']);
         $this->assertStringContainsString('Restarting (0) 22 seconds ago', $check['detail']);
-        $this->assertStringContainsString('container_service_logs', $check['fix']);
+        $this->assertStringContainsString('container output', $check['fix']);
     }
 
     /**
@@ -96,7 +97,7 @@ class RestartLoopCheckTest extends TestCase
             AppHealth::DETAIL_CHECKS => [],
         ];
 
-        $warnings = AppHealth::servingWarnings($details);
+        $warnings = array_map(static fn (Finding $finding): string => $finding->message, AppHealth::servingWarnings($details));
 
         $this->assertContains(AppHealth::NOT_ANSWERING_RESTARTING, $warnings);
         $this->assertNotContains(AppHealth::NOT_ANSWERING, $warnings);
@@ -113,7 +114,7 @@ class RestartLoopCheckTest extends TestCase
             AppHealth::DETAIL_CHECKS => [],
         ];
 
-        $this->assertSame([AppHealth::NOT_ANSWERING], AppHealth::servingWarnings($details));
+        $this->assertEquals([new Finding(AppHealth::CODE_NOT_ANSWERING, AppHealth::NOT_ANSWERING)], AppHealth::servingWarnings($details));
     }
 
     /** The whole point: a worker must stay silent. */

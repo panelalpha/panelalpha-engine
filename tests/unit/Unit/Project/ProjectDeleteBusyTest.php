@@ -3,6 +3,7 @@
 namespace Tests\Unit\Project;
 
 use App\Exceptions\ProjectBusyException;
+use App\Exceptions\DeployBusyException;
 use App\Jobs\ApplyEnvVars;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
@@ -46,10 +47,15 @@ class ProjectDeleteBusyTest extends TestCase
         $response = $this->deleteJson("/api/projects/{$this->name}");
 
         $response->assertStatus(409);
-        $response->assertExactJson([
-            'message' => "Project '{$this->name}' is busy: deploy task {$this->deploy->id} is running. "
-                . "Cancel it (POST /tasks/{$this->deploy->id}/cancel) or wait for it to finish.",
-        ]);
+        $response->assertJsonPath('message', "Project '{$this->name}' is busy: deploy task {$this->deploy->id} is running. "
+            . "Cancel task {$this->deploy->id} or wait for it to finish.");
+        $response->assertJsonPath('code', ProjectBusyException::TASK);
+        $response->assertJsonPath('problems.0.task_id', $this->deploy->id);
+        $this->assertSame(
+            ['follow_task', 'cancel_task'],
+            array_values(array_unique(array_column($response->json('problems.0.hints'), 'action'))),
+        );
+        $response->assertJsonPath('problems.0.hints.2.path_params', ['id' => $this->deploy->id]);
         $this->assertTrue(User::existsByUsername($this->name));
     }
 
@@ -99,10 +105,10 @@ class ProjectDeleteBusyTest extends TestCase
         }
 
         $response->assertStatus(409);
-        $response->assertExactJson([
-            'message' => "A deploy of this project is already running. Follow it with GET /projects/{$name}/deploy-log.",
-            'task_id' => null,
-        ]);
+        $response->assertJsonPath('message', 'A deploy of this project is already running; its deploy log follows it.');
+        $response->assertJsonPath('task_id', null);
+        $response->assertJsonPath('code', DeployBusyException::CODE);
+        $response->assertJsonPath('problems.0.hints.0.action', 'read_deploy_log');
         $this->assertSame(0, Task::query()->where('username', $name)->count());
     }
 

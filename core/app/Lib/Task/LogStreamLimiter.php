@@ -5,18 +5,17 @@ namespace App\Lib\Task;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Caps how many task log streams run at once.
- *
- * A stream holds a php-fpm worker for the life of its task and core's pool has
- * five, so one is always left for the API and the password gate. A slot is a
- * flock()ed file: the kernel releases it when a killed worker cannot.
+ * Caps concurrent task log streams: each holds one of core's five php-fpm workers for its task's life, so the
+ * API and the password gate keep one. A slot is a flock()ed file, which the kernel frees when a killed worker cannot.
  */
 final class LogStreamLimiter
 {
     /** One below core's five php-fpm workers. */
     public const MAX_CONCURRENT = 4;
 
-    public const MESSAGE = 'Too many task log streams are open. Close one and retry, or poll GET /tasks/{id}/logs instead.';
+    public const CODE = 'task_log_streams_busy';
+
+    public const MESSAGE = 'Too many task log streams are open. Close one and retry, or read the task\'s log a page at a time instead.';
 
     public static function directory(): string
     {

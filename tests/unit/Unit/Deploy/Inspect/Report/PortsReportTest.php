@@ -162,7 +162,7 @@ class PortsReportTest extends ReportTestCase
         $this->assertSame(9001, $report['unrouted'][0]['port']);
         $this->assertSame('secondary', $report['unrouted'][0]['reason']);
         $this->assertTrue($report['unrouted'][0]['routable']);
-        $this->assertStringContainsString('proxy_rule_create', $report['unrouted'][0]['hint']);
+        $this->assertArrayNotHasKey('hint', $report['unrouted'][0]);
         // The flat list callers already read is unchanged.
         $this->assertSame([8080, 9001], $report['compose']);
     }

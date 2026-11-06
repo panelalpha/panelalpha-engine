@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Credentials;
 
 /**
- * The values behind a {@see CredentialSpec}: generated once, kept on the
- * project (`details['app_credentials']`, encrypted), rewritten into the account
- * on every deploy, and returned by GET /projects/{username}/app-credentials.
- *
- * Stored shape: `{fields: {NAME: {kind, value}}, login_path, created_at}`.
- * No Laravel dependencies.
+ * The values behind a {@see CredentialSpec}: generated once, kept encrypted on the project, rewritten into
+ * the account on every deploy. Stored as `{fields: {NAME: {kind, value}}, login_path, created_at}`.
  */
 final class AppCredentials
 {
@@ -25,14 +21,12 @@ final class AppCredentials
     public const MIN_MASKED_LENGTH = 4;
 
     /**
-     * The stored credentials after this deploy: stored values kept, a newly
-     * declared field generated (or adopted from `adopt_from`), the project's
-     * own env_vars winning, and fields no longer declared dropped.
+     * The stored credentials after this deploy: stored values kept, new fields adopted or generated,
+     * the project's env_vars winning, undeclared fields dropped.
      *
      * @param  ?array<string, mixed>  $stored
      * @param  array<string, string>  $envVars
      * @param  \Closure(string): ?array<string, string>  $readAdopt  the dotenv at a home-relative path, or null
-     *                                                               — asked for {@see ENV_FILE} first: what the engine delivered before survives a lost record
      * @return array{stored: ?array<string, mixed>, generated: list<string>, adopted: list<string>, overridden: list<string>}
      */
     public static function reconcile(
@@ -49,37 +43,7 @@ final class AppCredentials
             return $result;
         }
 
-        $previous = is_array($stored['fields'] ?? null) ? $stored['fields'] : [];
-        $adoptable = null;
-        $fields = [];
-        foreach ($spec->fields as $name => $field) {
-            $kind = $field['kind'];
-            $kept = $previous[$name] ?? null;
-            $override = (string) ($envVars[$name] ?? '');
-            if ($override !== '' && self::deliverable($override)) {
-                $value = $override;
-                $result['overridden'][] = $name;
-            } elseif (is_array($kept) && ($kept['kind'] ?? null) === $kind
-                && is_string($kept['value'] ?? null) && self::deliverable($kept['value'])) {
-                $value = $kept['value'];
-            } else {
-                // First time this field is stored: the app may already be seeded with a
-                // value, in the file the engine wrote or in the recipe's own older one.
-                $adoptable ??= ($readAdopt(self::ENV_FILE) ?? [])
-                    + ($spec->adoptFrom === null ? [] : ($readAdopt($spec->adoptFrom) ?? []));
-                $found = (string) ($adoptable[$name] ?? '');
-                if ($found !== '' && self::deliverable($found)) {
-                    $value = $found;
-                    $result['adopted'][] = $name;
-                } else {
-                    $value = $kind === CredentialSpec::KIND_PASSWORD
-                        ? self::generatePassword($field['symbol'])
-                        : self::filled($field['value'] ?? CredentialSpec::DEFAULTS[$kind], $publicHost, $projectEmail);
-                    $result['generated'][] = $name;
-                }
-            }
-            $fields[$name] = ['kind' => $kind, 'value' => $value];
-        }
+        $fields = self::reconciledFields($spec, $stored, $envVars, $readAdopt, $publicHost, $projectEmail, $result);
 
         $result['stored'] = [
             'fields' => $fields,
@@ -90,10 +54,88 @@ final class AppCredentials
         return $result;
     }
 
-    /** A declared value with its placeholders filled; stored, so filled only once. */
+    /**
+     * @param  ?array<string, mixed>  $stored
+     * @param  array<string, string>  $envVars
+     * @param  array{stored: ?array<string, mixed>, generated: list<string>, adopted: list<string>, overridden: list<string>}  $result
+     * @return array<string, array{kind: string, value: string}>
+     */
+    private static function reconciledFields(
+        CredentialSpec $spec,
+        ?array $stored,
+        array $envVars,
+        \Closure $readAdopt,
+        ?string $publicHost,
+        ?string $projectEmail,
+        array &$result
+    ): array {
+        $previous = is_array($stored['fields'] ?? null) ? $stored['fields'] : [];
+        $adoptable = null;
+        $fields = [];
+        foreach ($spec->fields as $name => $field) {
+            $kind = $field['kind'];
+            $kept = $previous[$name] ?? null;
+            $override = (string) ($envVars[$name] ?? '');
+            if ($override !== '' && self::deliverable($override)) {
+                $value = $override;
+                $result['overridden'][] = $name;
+            } elseif (self::keeps($kept, $kind)) {
+                $value = $kept['value'];
+            } else {
+                $adoptable ??= self::adoptable($spec, $readAdopt);
+                [$value, $origin] = self::newValue($name, $field, $adoptable, $publicHost, $projectEmail);
+                $result[$origin][] = $name;
+            }
+            $fields[$name] = ['kind' => $kind, 'value' => $value];
+        }
+
+        return $fields;
+    }
+
+    private static function keeps(mixed $kept, string $kind): bool
+    {
+        return is_array($kept) && ($kept['kind'] ?? null) === $kind
+            && is_string($kept['value'] ?? null) && self::deliverable($kept['value']);
+    }
+
+    /**
+     * A first-stored field may already be seeded: in the file the engine wrote ({@see ENV_FILE}, read first,
+     * so a lost record survives) or in the recipe's own older one.
+     *
+     * @return array<string, string>
+     */
+    private static function adoptable(CredentialSpec $spec, \Closure $readAdopt): array
+    {
+        return ($readAdopt(self::ENV_FILE) ?? [])
+            + ($spec->adoptFrom === null ? [] : ($readAdopt($spec->adoptFrom) ?? []));
+    }
+
+    /**
+     * @param  array<string, mixed>  $field
+     * @param  array<string, string>  $adoptable
+     * @return array{0: string, 1: 'adopted'|'generated'}
+     */
+    private static function newValue(string $name, array $field, array $adoptable, ?string $publicHost, ?string $projectEmail): array
+    {
+        $kind = $field['kind'];
+        $found = (string) ($adoptable[$name] ?? '');
+        if ($found !== '' && self::deliverable($found)) {
+            return [$found, 'adopted'];
+        }
+
+        $value = $kind === CredentialSpec::KIND_PASSWORD
+            ? self::generatePassword($field['symbol'])
+            : self::filled($field['value'] ?? CredentialSpec::DEFAULTS[$kind], $publicHost, $projectEmail);
+
+        return [$value, 'generated'];
+    }
+
+    /**
+     * A declared value with its placeholders filled; stored, so filled only once.
+     * An address the env file cannot carry (a quote is legal in an email) falls back too.
+     */
     private static function filled(string $value, ?string $publicHost, ?string $projectEmail): string
     {
-        // An address the env file cannot carry (a quote is legal in an email) falls back too.
         $email = $projectEmail !== null && $projectEmail !== '' && self::deliverable($projectEmail)
             ? $projectEmail
             : 'admin-{random}@{host}';
@@ -137,7 +179,7 @@ final class AppCredentials
      */
     public static function envFile(array $stored): string
     {
-        $lines = ['# Written by the engine on every deploy; GET /projects/{name}/app-credentials returns it.'];
+        $lines = ['# Written by the engine on every deploy; the project\'s app credentials list the same values.'];
         foreach (self::fields($stored) as $name => $field) {
             $lines[] = $name."='".$field['value']."'";
         }

@@ -16,6 +16,7 @@ $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 use App\Http\Controllers\UserController;
 use App\Http\Requests\UserStoreRequest;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Finding;
 use Illuminate\Http\Request;
 
 [, $username, $repo] = array_pad($argv, 3, null);
@@ -54,8 +55,9 @@ $details = $user?->getDetails() ?? [];
 // A partial deploy names why. The public URL's warnings (a certificate browsers
 // refuse, a name that resolves on this network only) are about the fixture's
 // made-up domain and this host; the rest are about the application.
-$warnings = array_values((array) ($details['deployment_warnings'] ?? []));
-$urlWarnings = $user === null ? [] : PublicUrl::warnings((string) $user->domain, $details);
+$warnings = Finding::allStored($details['deployment_warnings'] ?? []);
+$isUrlWarning = static fn (Finding $warning): bool => in_array($warning->code, [PublicUrl::UNRESOLVABLE, PublicUrl::CERTIFICATE_REFUSED], true);
+$messages = static fn (array $findings): array => array_values(array_map(static fn (Finding $warning): string => $warning->message, $findings));
 
 echo json_encode([
     'username' => $username,
@@ -65,6 +67,6 @@ echo json_encode([
     'port' => $details['app_port'] ?? null,
     'status' => $details['deployment_status'] ?? ($error === null ? null : 'failed'),
     'error' => $error ?? (is_string($details['error'] ?? null) ? $details['error'] : null),
-    'url_warnings' => array_values(array_intersect($warnings, $urlWarnings)),
-    'app_warnings' => array_values(array_diff($warnings, $urlWarnings)),
+    'url_warnings' => $messages(array_filter($warnings, $isUrlWarning)),
+    'app_warnings' => $messages(array_filter($warnings, static fn (Finding $warning): bool => ! $isUrlWarning($warning))),
 ], JSON_UNESCAPED_SLASHES), "\n";

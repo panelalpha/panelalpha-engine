@@ -4,6 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
+use App\Http\Responses\Refusal;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Vault\RequestVault;
 use App\System\Project\Settings;
@@ -27,6 +28,8 @@ use OpenApi\Attributes as OA;
  */
 class ProjectSettingController extends Controller
 {
+    public const READ_ONLY = 'setting_read_only';
+
     #[OA\Get(
         path: '/projects/{username}/settings',
         summary: "List a project's settings",
@@ -204,9 +207,7 @@ class ProjectSettingController extends Controller
             return null;
         }
 
-        return new JsonResponse([
-            'message' => "The 'protected' setting is read-only over the API. An operator changes it on the "
-                ."host: pae project:settings:set protected on --project={$username}, or unset it the same way.",
-        ], 403);
+        return Refusal::json(403, 'key', self::READ_ONLY, "The 'protected' setting is read-only over the API; an operator "
+            .'sets or clears it on the host.', $username);
     }
 }

@@ -9,15 +9,33 @@ use App\Lib\Deploy\Platform\Probes\SvelteKitAdapter;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Strategies;
-use InvalidArgumentException;
 
 /**
- * Refuses a deploy the chosen strategy cannot carry out, before an account is
- * provisioned: a missing root manifest fails here as a message, later as a
- * container that restart-loops.
+ * Refuses a deploy the chosen strategy cannot carry out, before an account is provisioned: a missing root manifest
+ * fails here as a message, later as a container that restart-loops.
  */
 final class DeployabilityCheck
 {
+    public const PROJECT_EMPTY = 'project_empty';
+
+    public const DOCKERFILE_MISSING = 'dockerfile_missing';
+
+    public const COMPOSE_FILE_SKIPPED = 'compose_file_skipped';
+
+    public const COMPOSE_FILE_MISSING = 'compose_file_missing';
+
+    public const COMPOSE_BUILD_FILE_MISSING = 'compose_build_file_missing';
+
+    public const DOTNET_PROJECT_LEGACY = 'dotnet_project_legacy';
+
+    public const STATIC_INDEX_MISSING = 'static_index_missing';
+
+    public const ROOT_FILE_MISSING = 'root_file_missing';
+
+    public const SVELTEKIT_ADAPTER_UNSUPPORTED = 'sveltekit_adapter_unsupported';
+
+    public const PHP_EXTENSION_UNAVAILABLE = 'php_extension_unavailable';
+
     /**
      * Root file a strategy cannot deploy without, as [basename, label].
      *
@@ -46,7 +64,7 @@ final class DeployabilityCheck
     /**
      * @param  array<string, mixed>  $decision
      *
-     * @throws InvalidArgumentException
+     * @throws DeployRefusal
      */
     public static function assert(array $decision, string $projectDir): void
     {
@@ -54,7 +72,7 @@ final class DeployabilityCheck
     }
 
     /**
-     * @throws InvalidArgumentException
+     * @throws DeployRefusal
      */
     public function run(): void
     {
@@ -64,7 +82,7 @@ final class DeployabilityCheck
             $this->strategy === Strategies::DOCKERFILE => $this->assertDockerfile(),
             $this->strategy === Strategies::COMPOSE => $this->assertCompose(),
             $this->strategy === Strategies::STATIC => $this->assertStaticEntry(),
-            $this->strategy === Strategies::DOTNET => $this->assertModernDotnet(),
+            $this->strategy === Strategies::DOTNET, $this->strategy === Strategies::FALLBACK => $this->assertModernDotnet(),
             Strategies::isJsFramework($this->strategy) => $this->assertRootFile('package.json', 'Framework'),
             isset(self::REQUIRED_ROOT_FILE[$this->strategy]) && ! $this->namedByItsOwnManifest() => $this->assertRootFile(...self::REQUIRED_ROOT_FILE[$this->strategy]),
             default => null,
@@ -77,26 +95,25 @@ final class DeployabilityCheck
     }
 
     /**
-     * adapter-auto and the platform adapters write nothing nginx or Node can
-     * serve here: an empty build/ answered 403, a missing build/index.js
-     * restart-looped.
+     * adapter-auto and the platform adapters write nothing nginx or Node can serve here: an empty build/ answered 403,
+     * a missing build/index.js restart-looped.
      *
-     * @throws InvalidArgumentException
+     * @throws DeployRefusal
      */
     private function assertSvelteKitAdapter(): void
     {
         $adapter = SvelteKitAdapter::configured(ProjectContext::at(AppRoot::path($this->projectDir, $this->decision)));
         $refusal = $adapter === null ? null : SvelteKitAdapter::refusal($adapter);
         if ($refusal !== null) {
-            throw new InvalidArgumentException($refusal);
+            throw new DeployRefusal(self::SVELTEKIT_ADAPTER_UNSUPPORTED, $refusal, ['adapter' => $adapter]);
         }
     }
 
     /**
-     * An `ext-*` the resolved image will not have fails the dependency stage,
-     * so it is refused before the clone is built.
+     * An `ext-*` the resolved image will not have fails the dependency stage, so it is refused before the clone is built.
+     * composer.json is read under app_root when the manifest declares one (phpBB uses phpBB/).
      *
-     * @throws InvalidArgumentException
+     * @throws DeployRefusal
      */
     private function assertPhpExtensionsAvailable(): void
     {
@@ -105,7 +122,6 @@ final class DeployabilityCheck
             return;
         }
 
-        // Under app_root when the manifest declares one -- phpBB uses phpBB/.
         $root = AppRoot::path($this->projectDir, $this->decision);
         $json = AccountHomeRead::contents($root.'/composer.json');
         if ($json === false) {
@@ -115,15 +131,13 @@ final class DeployabilityCheck
 
         $issue = PhpExtensionAvailability::issue($json, $lock === false ? null : $lock);
         if ($issue !== null) {
-            throw new InvalidArgumentException($issue);
+            throw new DeployRefusal(self::PHP_EXTENSION_UNAVAILABLE, $issue);
         }
     }
 
     /**
-     * An application manifest matched, not the generic platform its strategy
-     * is named after. The root-file rules catch a guess; a manifest that
-     * matched its own detect rules has named the application, and osTicket
-     * vendors its dependencies with no composer.json at all.
+     * An application manifest matched, not the generic platform its strategy is named after: it has named the application,
+     * which the root-file rules need not second-guess (osTicket vendors its dependencies with no composer.json).
      */
     private function namedByItsOwnManifest(): bool
     {
@@ -135,7 +149,7 @@ final class DeployabilityCheck
     private function assertNotEmpty(): void
     {
         if (! is_dir($this->projectDir) || ProjectContext::listRootFiles($this->projectDir) === []) {
-            throw new InvalidArgumentException('Project directory is empty; nothing to deploy.');
+            throw new DeployRefusal(self::PROJECT_EMPTY, 'Project directory is empty; nothing to deploy.');
         }
     }
 
@@ -143,45 +157,63 @@ final class DeployabilityCheck
     {
         $name = $this->decision['dockerfile'] ?? 'Dockerfile';
         if (! is_file($this->path((string) $name))) {
-            throw new InvalidArgumentException('Dockerfile strategy selected but Dockerfile is missing.');
+            throw new DeployRefusal(self::DOCKERFILE_MISSING, 'Dockerfile strategy selected but Dockerfile is missing.', ['file' => (string) $name]);
         }
     }
 
+    /** A compose file that is there but was passed over is a different fault from one that is absent, and says which. */
     private function assertCompose(): void
     {
         $path = $this->decision['compose_path'] ?? null;
         if (! is_string($path) || ! is_file($path)) {
-            // A file that is there but was passed over is a different fault
-            // from one that is absent, and the message has to say which.
             foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $name) {
                 if (is_file($this->path($name))) {
-                    throw new InvalidArgumentException(
+                    throw new DeployRefusal(
+                        self::COMPOSE_FILE_SKIPPED,
                         "Compose strategy selected but {$name} was not accepted as a runnable compose file"
-                        .' (a workstation, sidecars-only or engine-generated file is skipped).'
+                            .' (a workstation, sidecars-only or engine-generated file is skipped).',
+                        ['file' => $name],
                     );
                 }
             }
-            throw new InvalidArgumentException('Compose strategy selected but compose file is missing.');
+            throw new DeployRefusal(self::COMPOSE_FILE_MISSING, 'Compose strategy selected but compose file is missing.');
         }
 
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($path, $this->projectDir);
         if ($missing !== [] && ! is_file($this->path('Dockerfile'))) {
-            throw new InvalidArgumentException(
-                'Compose file builds from '.$missing[0].' which does not exist.'
+            throw new DeployRefusal(
+                self::COMPOSE_BUILD_FILE_MISSING,
+                'Compose file builds from '.$missing[0].' which does not exist.',
+                ['file' => $missing[0]],
             );
         }
     }
 
-    /** Otherwise the SDK image is picked from nothing and the build fails without saying why. */
+    /**
+     * Otherwise the SDK image is picked from nothing and the build fails without saying why, or a classic ASP.NET app
+     * no recipe claims (Orchard 1.x) gets the placeholder page.
+     */
     private function assertModernDotnet(): void
     {
         $legacy = DotnetRuntime::legacyFrameworkEntry(AppRoot::path($this->projectDir, $this->decision));
         if ($legacy !== null) {
-            throw new InvalidArgumentException(
-                $legacy.' (a <TargetFrameworkVersion> project). The .NET SDK on Linux builds only'
-                .' SDK-style projects targeting .NET 5 or newer (<TargetFramework>net8.0</TargetFramework>).'
+            throw new DeployRefusal(
+                self::DOTNET_PROJECT_LEGACY,
+                self::legacyDotnetMessage($legacy),
+                ['file' => $legacy['file']],
             );
         }
+    }
+
+    /**
+     * @param  array{file: string, framework: string, sdk_style: bool}  $legacy
+     */
+    private static function legacyDotnetMessage(array $legacy): string
+    {
+        return $legacy['file'].' targets .NET Framework '.$legacy['framework']
+            .($legacy['sdk_style'] ? '.' : ' (a <TargetFrameworkVersion> project).')
+            .' The .NET SDK on Linux builds only SDK-style projects targeting .NET 5 or newer'
+            .' (<TargetFramework>net8.0</TargetFramework>).';
     }
 
     private function assertStaticEntry(): void
@@ -190,7 +222,7 @@ final class DeployabilityCheck
             return;
         }
 
-        throw new InvalidArgumentException('Static strategy selected but no HTML file is present.');
+        throw new DeployRefusal(self::STATIC_INDEX_MISSING, 'Static strategy selected but no HTML file is present.');
     }
 
     private function hasDeclaredStaticIndex(): bool
@@ -214,7 +246,7 @@ final class DeployabilityCheck
     private function assertRootFile(string $name, string $label): void
     {
         if (! is_file($this->path($name))) {
-            throw new InvalidArgumentException("{$label} strategy selected but {$name} is missing.");
+            throw new DeployRefusal(self::ROOT_FILE_MISSING, "{$label} strategy selected but {$name} is missing.", ['file' => $name, 'strategy' => $this->strategy]);
         }
     }
 

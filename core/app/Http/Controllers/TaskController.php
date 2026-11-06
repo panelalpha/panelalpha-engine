@@ -10,6 +10,7 @@ use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
 use App\Http\Resources\TaskSummaryCollection;
+use App\Http\Responses\Refusal;
 use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
@@ -71,7 +72,8 @@ class TaskController extends Controller
             .'it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the '
             .'API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is '
             .'shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, '
-            .'push, backup, restore or attach_source.',
+            .'push, backup, restore or attach_source. A deleted project\'s tasks stay listed under its name, the record '
+            .'of what was done to it, until the engine\'s operator prunes them.',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
@@ -311,7 +313,7 @@ class TaskController extends Controller
 
         $slot = LogStreamLimiter::acquire();
         if ($slot === null) {
-            return $this->tooManyStreams();
+            return $this->tooManyStreams($task);
         }
 
         $afterId = max(0, (int) $request->query('after_id', 0));
@@ -321,9 +323,9 @@ class TaskController extends Controller
     }
 
     /** A stream holds a worker for the task's whole life, so streams are capped and log followers cannot take every worker. */
-    private function tooManyStreams(): JsonResponse
+    private function tooManyStreams(Task $task): JsonResponse
     {
-        return new JsonResponse(['message' => LogStreamLimiter::MESSAGE], 503, ['Retry-After' => 5]);
+        return Refusal::json(503, 'task', LogStreamLimiter::CODE, LogStreamLimiter::MESSAGE, $task->username, ['task_id' => $task->id], ['Retry-After' => '5']);
     }
 
     /**

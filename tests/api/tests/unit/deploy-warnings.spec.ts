@@ -7,12 +7,17 @@ import {
 import { expectBackupPhaseCompleted } from '@/helpers/backup-helpers';
 import { stagingPushError } from '@/helpers/staging-helpers';
 import type { EngineApi } from '@/clients/engine-api';
-import type { BackupRecord } from '@/types';
+import type { BackupRecord, Finding } from '@/types';
 
-const UNREACHABLE =
-  'The application is deployed but not reachable from the internet: app.test resolves on this host only.';
-const CERTIFICATE =
-  'https://app.test is served a certificate browsers will refuse (self_signed). Request a real one.';
+const finding = (code: string, message: string): Finding => ({ code, message, hints: [] });
+const UNREACHABLE = finding(
+  'public_url_unresolvable',
+  'The application is deployed but not reachable from the internet: app.test resolves on this host only.'
+);
+const CERTIFICATE = finding(
+  'certificate_refused',
+  'https://app.test is served a certificate browsers will refuse (self_signed).'
+);
 
 test.describe('deployment warnings', () => {
   test('a partial deploy may carry only public-name and certificate warnings', () => {
@@ -20,10 +25,17 @@ test.describe('deployment warnings', () => {
   });
 
   test('a partial deploy with a serving warning fails', () => {
-    const notAnswering =
-      'The application started but did not answer on any port it publishes. The deploy log has the per-port result.';
+    const notAnswering = finding(
+      'app_not_answering',
+      'The application started but did not answer on any port it publishes.'
+    );
     expect(unacceptedDeploymentWarnings([UNREACHABLE, notAnswering])).toEqual([notAnswering]);
     expect(() => assertDeploymentWarnings('partial', [notAnswering])).toThrow();
+  });
+
+  test('a warning without a code is refused', () => {
+    const sentence = 'An old sentence.' as unknown as Finding;
+    expect(() => assertDeploymentWarnings('partial', [sentence])).toThrow();
   });
 
   test('a health report without a serving word is refused', () => {

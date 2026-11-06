@@ -4,21 +4,21 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\System;
+use App\System\Privileged;
 
 /**
- * Refuse a deploy up front when the engine host is nearly out of disk.
- *
- * Without it a full host surfaces as ENOSPC from whichever step hit it first,
- * explained as the account's problem, on whatever app happened to be deploying.
- * Checked on the host filesystems a deploy writes to: the host's Docker root
- * (base images, host builds) and /home (every account's inner Docker).
+ * Refuse a deploy up front when the engine host is nearly out of disk, not as ENOSPC blamed on the account deploying.
+ * Checked where a deploy writes: the host's Docker root (base images, host builds) and /home (every inner Docker).
  */
 final class HostDiskGuard
 {
     /** Roughly one real PHP deploy (a Matomo account measured 2.1G) plus margin. */
     public const DEFAULT_MINIMUM = '3G';
 
-    public const PATHS = ['/var/lib/docker', '/home'];
+    /** Where the host keeps images, build cache and the cache registry's volume. */
+    public const DOCKER_ROOT = '/var/lib/docker';
+
+    public const PATHS = [self::DOCKER_ROOT, '/home'];
 
     public function __construct(
         private readonly System $system,
@@ -26,9 +26,8 @@ final class HostDiskGuard
     ) {}
 
     /**
-     * DEPLOY_HOST_MIN_FREE as bytes, or null when the check is off. Empty means
-     * the default; an unparseable value falls back to it rather than blocking
-     * every deploy.
+     * DEPLOY_HOST_MIN_FREE as bytes, or null when the check is off. Empty means the default; an unparseable
+     * value falls back to it rather than blocking every deploy.
      */
     public static function minimumFrom(mixed $configured): ?int
     {
@@ -46,10 +45,10 @@ final class HostDiskGuard
     }
 
     /**
-     * The sentence to fail the deploy with, or null to go ahead. A free-space
+     * What to fail the deploy with, or null to go ahead. A free-space
      * reading that cannot be taken is not a reason to refuse.
      */
-    public function refusal(): ?string
+    public function refusal(): ?HostDiskLowException
     {
         if ($this->minimumBytes === null) {
             return null;
@@ -60,14 +59,14 @@ final class HostDiskGuard
             return null;
         }
 
-        return sprintf(
+        return new HostDiskLowException(sprintf(
             'Deploy refused before it started: the engine host has %s free on %s, below the %s '
             .'a deploy needs (DEPLOY_HOST_MIN_FREE). Free disk on the host and deploy again; '
-            .'`pae system:image:prune` removes base images no project has used recently.',
+            .'pruning the base images no project has used recently frees the most.',
             HostPrewarmPlan::formatBytes($lowest['free']),
             $lowest['path'],
             HostPrewarmPlan::formatBytes($this->minimumBytes)
-        );
+        ), $lowest['path']);
     }
 
     /**
@@ -89,11 +88,15 @@ final class HostDiskGuard
     }
 
     /** @return array{free: int, size: int}|null */
-    private function usage(string $path): ?array
+    public function usage(string $path): ?array
     {
         try {
-            $output = $this->system->execOnHost(['df', '-Pk', $path]);
+            $output = $this->system->execOnHost(Privileged::probes()->diskFreeInKilobytes($path));
         } catch (\Throwable $e) {
+            if (Privileged::hostNamespacesUnavailable($e->getMessage())) {
+                throw $e;
+            }
+
             return null;
         }
 

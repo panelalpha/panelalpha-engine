@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Inspect;
 
 use App\Lib\Deploy\AccountHomeRead;
+use App\Lib\Deploy\Detect\DeployRefusal;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 use App\Lib\Deploy\Inspect\Report\ApplicationReport;
@@ -14,15 +15,19 @@ use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\Metadata\MetadataRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Findings\Finding;
 use InvalidArgumentException;
 
 /**
- * What an application is: stack, ports, backing services, the variables it expects, and
- * what the engine would run — DetectProjectStrategy's own code plus the toolchain versions
- * and datastores it consumes. It only reads, returning .env keys but never values.
+ * What an application is and what the engine would run with it, by DetectProjectStrategy's own code.
+ * It only reads, returning .env keys but never values.
  */
 final class AppInspector
 {
+    public const DETECTION_FAILED = 'detection_failed';
+
+    public const MANIFEST_INVALID = 'manifest_invalid';
+
     /** Keys reported from .env files. A generated file can hold thousands. */
     public const MAX_ENV_KEYS = EnvironmentReport::MAX_KEYS;
 
@@ -50,6 +55,9 @@ final class AppInspector
     }
 
     /**
+     * The plan is applied as in the deploy, or the preview would show build commands the deploy will not run.
+     * `metadata` is which application the directory holds, independent of what the engine does with it.
+     *
      * @return array{
      *   application: array<string, mixed>,
      *   metadata: array<string, mixed>,
@@ -64,8 +72,6 @@ final class AppInspector
         $context = ProjectContext::at($projectDir, $repoUrl);
         [$appConfig, $origin] = AppConfigOrigin::find($projectDir, $repoUrl);
         [$decision, $issue] = self::decide($projectDir, $repoUrl, $recipe);
-        // Applied here as well as in the deploy, or the preview would show build commands
-        // the deploy is not going to run.
         $decision = $plan?->applyToDecision($decision) ?? $decision;
 
         return [
@@ -79,8 +85,6 @@ final class AppInspector
                 $plan,
                 $recipe
             ))->build(),
-            // Separate from `application`: that is what the engine will do with this
-            // directory, this is which application it holds, and the two are independent.
             'metadata' => MetadataRegistry::describe($context, self::runtimeOf($decision)),
             'ports' => PortsReport::of($projectDir, $decision),
             'services' => ServicesReport::of($projectDir, self::composePathOf($decision)),
@@ -92,7 +96,7 @@ final class AppInspector
     /**
      * A project the engine cannot resolve is a finding, not a server error.
      *
-     * @return array{0: array<string, mixed>, 1: ?string}
+     * @return array{0: array<string, mixed>, 1: ?Finding}
      */
     private static function decide(
         string $projectDir,
@@ -101,8 +105,10 @@ final class AppInspector
     ): array {
         try {
             return [DetectProjectStrategy::detect($projectDir, $repoUrl, $recipe), null];
-        } catch (InvalidArgumentException|ManifestException $e) {
-            return [ApplicationReport::undeployable(), $e->getMessage()];
+        } catch (ManifestException $e) {
+            return [ApplicationReport::undeployable(), DeployRefusal::findingOf($e, self::MANIFEST_INVALID)];
+        } catch (InvalidArgumentException $e) {
+            return [ApplicationReport::undeployable(), DeployRefusal::findingOf($e, self::DETECTION_FAILED)];
         }
     }
 

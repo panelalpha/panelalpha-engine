@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Lib\Task\TaskLogPage;
 use App\Models\Task;
 use App\Models\TaskLog;
@@ -69,7 +70,7 @@ class TaskResource extends JsonResource
     {
         $details = $task->details;
         if (is_array($details)) {
-            $details = Arr::except($details, ['api_token_id', Task::WORKER]);
+            $details = FindingPresenter::inDetails(Arr::except($details, ['api_token_id', Task::WORKER]), $task->username);
             if ($details === []) {
                 $details = null;
             }

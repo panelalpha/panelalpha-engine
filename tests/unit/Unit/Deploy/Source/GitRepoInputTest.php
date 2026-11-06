@@ -132,8 +132,9 @@ class GitRepoInputTest extends TestCase
         $message = GitRepoInput::problem('git_repo', 'git@github.com:acme/app.git')['message'];
 
         $this->assertStringContainsString('Create the project without a repository', $message);
-        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $message);
-        $this->assertStringContainsString('POST /projects/{name}/git/connect', $message);
+        $this->assertStringContainsString('create its deploy key', $message);
+        $this->assertStringContainsString('connect the SSH remote', $message);
+        $this->assertStringNotContainsString('POST /', $message);
         $this->assertStringNotContainsString('holds no SSH keys', $message);
     }
 

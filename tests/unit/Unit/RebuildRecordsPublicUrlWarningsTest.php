@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\PublicUrl;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Ssl\CertificateStatus;
 use App\Models\User;
@@ -66,8 +67,10 @@ class RebuildRecordsPublicUrlWarningsTest extends TestCase
         $details = $user->getDetails();
         $this->assertSame('partial', $details['deployment_status']);
         $this->assertCount(2, $details['deployment_warnings']);
-        $this->assertStringContainsString('not reachable from the internet', $details['deployment_warnings'][0]);
-        $this->assertStringContainsString('browsers will refuse', $details['deployment_warnings'][1]);
+        $this->assertSame(PublicUrl::UNRESOLVABLE, $details['deployment_warnings'][0]['code']);
+        $this->assertStringContainsString('not reachable from the internet', $details['deployment_warnings'][0]['message']);
+        $this->assertSame(PublicUrl::CERTIFICATE_REFUSED, $details['deployment_warnings'][1]['code']);
+        $this->assertStringContainsString('browsers will refuse', $details['deployment_warnings'][1]['message']);
     }
 
     public function test_a_clean_rebuild_still_clears_old_warnings(): void

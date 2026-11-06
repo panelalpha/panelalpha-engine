@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Deployment;
 
+use App\Lib\Findings\Finding;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 
@@ -10,6 +11,8 @@ use App\Models\User as ModelsUser;
  */
 interface DeployMechanics
 {
+    public const CUSTOM_ENV_SUSPECTED = 'custom_env_vars_suspected';
+
     public function user(): ModelsUser;
 
     public function requireMainDomain(): DomainModel;
@@ -20,7 +23,7 @@ interface DeployMechanics
 
     public function prepareHostingEnvironment(): void;
 
-    /** Whether a failed prepare removed the account again, leaving no project for a failed deploy to keep. */
+    /** Whether a failed prepare removed the account again or never made it, leaving no project for a failed deploy to keep. */
     public function removedTheAccount(): bool;
 
     public function ingestApplicationSource(): void;
@@ -29,6 +32,9 @@ interface DeployMechanics
 
     /** Before anything a redeploy does: note what serves, so a cancel cannot read it as a first deploy. */
     public function recordRunningVersion(): void;
+
+    /** A running account sysbox forgot refuses every exec, git's included: it is recreated before anything runs in it. */
+    public function repairAccountMapping(): void;
 
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void;
 
@@ -63,17 +69,20 @@ interface DeployMechanics
     public function settleRedeploy(bool $succeeded): void;
 
     /**
-     * @return list<string>
+     * @return list<Finding>
      */
     public function servingWarnings(): array;
 
     /**
-     * @return list<string>
+     * @return list<Finding>
      */
     public function publicUrlWarnings(DomainModel $domain): array;
 
     public function customEnvFailureHint(): ?string;
 
+    /**
+     * @param  list<Finding>  $warnings
+     */
     public function persistPartialSuccess(array $warnings): void;
 
     public function persistSuccess(): void;

@@ -6,26 +6,26 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Port\InternalPorts;
+use App\Lib\Findings\Finding;
 
 /**
- * Ports, and which source each one came from.
+ * Ports and the source of each: the primary is the one the engine proxies, the rest shown so a disagreement is
+ * visible. `routed`, `unrouted` and `refused` say which need a proxy rule and which must never get one.
  *
- * They disagree often enough that reporting one number would be a guess: a
- * repository's Dockerfile EXPOSEs 8080, its compose publishes 3000, and the
- * platform manifest says the framework listens on 3000. The primary is the
- * one the engine would proxy; the rest are shown so a disagreement is visible
- * rather than silently resolved.
- *
- * Listing them was not enough on its own. The engine routes exactly one port,
- * so every other entry needs a `POST /api/proxy-rules` (`proxy_rule_create`)
- * to be reachable -- and some of them must never get one. `routed`,
- * `unrouted` and `refused` say which is which, so a caller does not have to
- * already know how the proxy works to read the report correctly.
- *
- * @psalm-type PortNote = array{port: int, reason: string, service?: string, routable: bool, hint?: string}
+ * @psalm-type PortNote = array{port: int, reason: string, service?: string, routable: bool}
  */
 final class PortsReport
 {
+    public const SECONDARY = 'secondary';
+
+    /** The finding code a secondary port's hints are filed under. */
+    public const SECONDARY_PORT = 'secondary_port';
+
+    public const PORT_NOT_DETECTED = 'port_not_detected';
+
+    /** Where a deploy routes the domain when nothing names a port. */
+    public const GUESSED_PORT = 8080;
+
     private readonly string $projectDir;
 
     /**
@@ -38,7 +38,7 @@ final class PortsReport
 
     /**
      * @param  array<string, mixed>  $decision
-     * @return array{primary: ?int, source: ?string, routed: list<int>, unrouted: list<PortNote>, refused: list<PortNote>, compose: list<int>, dockerfile_expose: ?int}
+     * @return array{primary: ?int, source: ?string, routed: list<int>, unrouted: list<PortNote>, refused: list<PortNote>, compose: list<int>, dockerfile_expose: ?int, issue: ?array<string, mixed>}
      */
     public static function of(string $projectDir, array $decision): array
     {
@@ -46,7 +46,7 @@ final class PortsReport
     }
 
     /**
-     * @return array{primary: ?int, source: ?string, routed: list<int>, unrouted: list<PortNote>, refused: list<PortNote>, compose: list<int>, dockerfile_expose: ?int}
+     * @return array{primary: ?int, source: ?string, routed: list<int>, unrouted: list<PortNote>, refused: list<PortNote>, compose: list<int>, dockerfile_expose: ?int, issue: ?array<string, mixed>}
      */
     public function build(): array
     {
@@ -61,10 +61,18 @@ final class PortsReport
             'routed' => $primary === null ? [] : [$primary],
             'unrouted' => $this->unrouted($all, $primary),
             'refused' => $this->refused($compose),
-            // The flat list the report has always carried, unchanged.
             'compose' => $all,
             'dockerfile_expose' => $expose,
+            'issue' => $primary === null ? self::portNotDetected()->toArray() : null,
         ];
+    }
+
+    private static function portNotDetected(): Finding
+    {
+        return new Finding(self::PORT_NOT_DETECTED, 'No port the application listens on was found: no recipe names one, '
+            .'no compose service publishes one and no Dockerfile exposes one, so a deploy routes the site to '
+            .self::GUESSED_PORT.'. Name the port with `port:` in a panelalpha.yaml, or route the domain to the port '
+            .'the application listens on.', ['guessed_port' => self::GUESSED_PORT]);
     }
 
     /**
@@ -91,9 +99,8 @@ final class PortsReport
                 ]
                 : [
                     'port' => $port,
-                    'reason' => 'secondary',
+                    'reason' => self::SECONDARY,
                     'routable' => true,
-                    'hint' => 'proxy_rule_create: transport http on its own server_name, or transport tcp on a free listen_port',
                 ];
         }
 
@@ -164,14 +171,8 @@ final class PortsReport
     }
 
     /**
-     * The EXPOSE of a Dockerfile the engine would actually build.
-     *
-     * A losing answer is still worth reporting -- that is the point of this
-     * report -- but only when it is a real one. A decision naming no
-     * Dockerfile used to mean the repository had none; it can now also mean
-     * detection read one and refused it, and a port taken from a file the
-     * engine will not build is not a port anything publishes. So the name is
-     * resolved through the same finder rather than guessed back.
+     * The EXPOSE of a Dockerfile the engine would actually build, found through the same finder: a decision
+     * naming none may mean detection refused one, and a file the engine will not build publishes nothing.
      */
     private function exposedPort(): ?int
     {

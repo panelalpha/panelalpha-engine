@@ -1,3 +1,5 @@
+import type { Finding, Hint } from './finding.types';
+
 export type InspectSourceType = 'git' | 'path' | 'project';
 
 export interface InspectSourceRequest {
@@ -31,11 +33,13 @@ export interface InspectCandidate {
 
 export interface InspectApplication {
   strategy: string;
+  verdict: 'deployable' | 'no_start_command' | 'placeholder' | 'not_deployable';
   deployable: boolean;
   label?: string;
   platform?: string | null;
   runtime?: string | null;
-  issue?: string | null;
+  /** Why it cannot be deployed as it stands, with the hints that act on it; null when it can. */
+  issue?: Finding | null;
   candidates?: InspectCandidate[];
   [key: string]: unknown;
 }
@@ -50,7 +54,7 @@ export interface InspectPortNote {
   reason: string;
   routable: boolean;
   service?: string;
-  hint?: string;
+  hints?: Hint[];
 }
 
 /** PortsReport: which port is proxied, which needs a rule, which was refused. */
@@ -62,6 +66,8 @@ export interface InspectPorts {
   refused: InspectPortNote[];
   compose: number[];
   dockerfile_expose: number | null;
+  /** `port_not_detected` when nothing names a port and a deploy would guess one. */
+  issue?: Finding | null;
 }
 
 export interface InspectReport {
