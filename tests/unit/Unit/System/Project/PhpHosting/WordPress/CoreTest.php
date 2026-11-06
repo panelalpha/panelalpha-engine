@@ -130,7 +130,7 @@ class CoreTest extends TestCase
                     'exit_code' => 1,
                     'stdout' => '',
                     'stderr' => "[26-Oct-2026 18:02:15 UTC] PHP Warning:  Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n"
-                        . "Warning: Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n",
+                        ."Warning: Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n",
                 ],
                 self::DB_REACHABLE,
                 ['exit_code' => 0, 'stdout' => "7.2\n", 'stderr' => ''],
@@ -449,6 +449,7 @@ class CoreTest extends TestCase
             $sequence,
             results: [
                 ['exit_code' => 0, 'stdout' => 'Success: Updated WordPress to 6.7.1.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "6.7.1\n", 'stderr' => ''],
             ],
         );
 
@@ -459,9 +460,30 @@ class CoreTest extends TestCase
             $sequence[0]
         );
         $this->assertSame(
+            ['core', 'version', '--path=/home/alice/example.test/public_html'],
+            $sequence[1]
+        );
+        $this->assertSame(
             ['version' => '6.7.1', 'message' => 'Success: Updated WordPress to 6.7.1.'],
             $body
         );
+    }
+
+    public function test_update_reports_the_installed_version_when_nothing_was_updated(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress is up to date.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->update('6.8.2');
+
+        $this->assertSame('7.1.4', $body['version']);
+        $this->assertSame('Success: WordPress is up to date.', $body['message']);
     }
 
     public function test_check_update_lists_newer_versions(): void
@@ -639,6 +661,48 @@ class CoreTest extends TestCase
         }
     }
 
+    public function test_a_finished_download_announces_new_core_files(): void
+    {
+        $sequence = [];
+        $announced = 0;
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 0, 'stdout' => "Success: WordPress downloaded.\n", 'stderr' => '']],
+            coreFilesChanged: function () use (&$announced): void {
+                $announced++;
+            },
+        );
+
+        $core->download();
+
+        $this->assertSame(1, $announced);
+    }
+
+    public function test_a_refused_or_failed_download_announces_nothing(): void
+    {
+        $sequence = [];
+        $announced = 0;
+        $count = function () use (&$announced): void {
+            $announced++;
+        };
+        $refused = $this->coreWithFakeRunner($sequence, coreFilesPresent: true, coreFilesChanged: $count);
+        $failed = $this->coreWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: Can't find version 99.0.0"]],
+            coreFilesChanged: $count,
+        );
+
+        foreach ([$refused, $failed] as $core) {
+            try {
+                $core->download();
+                $this->fail('Expected WordPressException');
+            } catch (WordPressException) {
+            }
+        }
+
+        $this->assertSame(0, $announced);
+    }
+
     public function test_download_falls_back_to_the_request_when_wp_cli_does_not_name_the_version(): void
     {
         $sequence = [];
@@ -714,6 +778,7 @@ class CoreTest extends TestCase
         bool $coreFilesPresent = false,
         array &$checkedFiles = [],
         ?string $notFound = null,
+        ?\Closure $coreFilesChanged = null,
     ): Core {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
@@ -746,7 +811,7 @@ class CoreTest extends TestCase
         $user->shouldReceive('project')->andReturn($project);
         $user->shouldReceive('getMainDomain')->andReturn($this->domain('/example.test/public_html'));
 
-        return new Core(WpCli::for($user, $path));
+        return new Core(WpCli::for($user, $path), $coreFilesChanged);
     }
 
     private function domain(string $documentRoot): Domain

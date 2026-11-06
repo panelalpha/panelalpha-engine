@@ -136,6 +136,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('acme:challenge:prune')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('vault:purge')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('wordpress:migrate:expire-secrets')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('uploads:prune')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('model:prune', [
             '--model' => [AppSsoToken::class, MysqlSsoToken::class, TokenRotation::class],
         ])->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
@@ -205,7 +206,8 @@ class Kernel extends ConsoleKernel
      * project CPU and memory every minute (minute rows kept two days, hourly
      * averages the month), measure project disk use (`du` walks every file, so
      * a quarter-hour; the API reads the stored figure) and this month's
-     * transfer, sweep application health, and update the AWStats databases.
+     * transfer, record whether each PHP hosting project holds WordPress, sweep
+     * application health, and update the AWStats databases.
      */
     private function scheduleMonitoring(Schedule $schedule): void
     {
@@ -215,6 +217,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('metrics:projects:rollup')->hourlyAt(2)->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('metrics:projects:bandwidth')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);
+        $schedule->command('projects:app-type:sample')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
         $schedule->command('project:health:report')->everySixHours()->withoutOverlapping(self::MUTEX_SIX_HOURS);
         $schedule->command('stats:update')->daily()->withoutOverlapping(self::MUTEX_DAILY);
     }

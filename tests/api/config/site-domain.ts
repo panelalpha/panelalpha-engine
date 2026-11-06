@@ -77,7 +77,7 @@ export function isIpLiteral(host: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
 }
 
-/** `a.b.c.d` → `a-b-c-d.panelalpha.direct`, matching DomainPlan::directDomain. */
+/** `a.b.c.d` → `a-b-c-d.panelalpha.direct`, matching DomainPlan::directBase. */
 export function toPanelAlphaDirectZone(ip: string): string {
   return `${ip.replaceAll('.', '-')}.${PANELALPHA_DIRECT}`;
 }

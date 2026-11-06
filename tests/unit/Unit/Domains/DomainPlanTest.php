@@ -218,7 +218,7 @@ class DomainPlanTest extends TestCase
         // The two are not the same fact, and an operator acts on them
         // differently: one needs a port forwarded, the other needs an address.
         $this->assertStringContainsString(
-            "address is private",
+            'address is private',
             (string) DomainPlan::noPublicNameReason(['default_ipv4' => TestNetwork::private(4)])
         );
         $this->assertStringContainsString(
@@ -335,5 +335,57 @@ class DomainPlanTest extends TestCase
         ]);
 
         $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $candidates[0]['source']);
+    }
+
+    public function test_a_fresh_engine_names_projects_under_panelalpha_online_by_default(): void
+    {
+        $this->assertSame([
+            ['base' => 'panelalpha.online', 'source' => DomainPlan::SOURCE_PANELALPHA_ONLINE, 'suffixed' => true],
+            ['base' => str_replace('.', '-', TestNetwork::public(7)).'.panelalpha.direct', 'source' => DomainPlan::SOURCE_PANELALPHA_DIRECT, 'suffixed' => false],
+            ['base' => 'local', 'source' => DomainPlan::SOURCE_LOCAL, 'suffixed' => false],
+        ], DomainPlan::bases(null, self::freshEngine()));
+    }
+
+    public function test_a_configured_base_domain_is_the_default_base(): void
+    {
+        $bases = DomainPlan::bases(null, ['sites_base_domain' => 'Sites.Example.com.'] + self::freshEngine());
+
+        $this->assertSame(['base' => 'sites.example.com', 'source' => DomainPlan::SOURCE_SITES_BASE_DOMAIN, 'suffixed' => false], $bases[0]);
+    }
+
+    public function test_default_tunnel_none_leaves_the_direct_zone_as_the_default_base(): void
+    {
+        $bases = DomainPlan::bases(null, ['default_tunnel' => DomainPlan::TUNNEL_NONE, 'cert_domain' => 'engine.example.com'] + self::freshEngine());
+
+        $this->assertSame(['engine.example.com', 'local'], array_column($bases, 'base'));
+    }
+
+    /** @return iterable<string, array{array<string, ?string>, ?string}> */
+    public static function ladders(): iterable
+    {
+        $public = ['default_ipv4' => TestNetwork::public(7)];
+        $configured = $public + ['sites_base_domain' => 'sites.example.com', 'cert_domain' => 'engine.example.com'];
+
+        yield 'fresh' => [$public, null];
+        yield 'configured' => [$configured, null];
+        yield 'configured, tunnel asked for' => [$configured, DomainPlan::TUNNEL_PANELALPHA];
+        yield 'configured, tunnel none' => [$configured, DomainPlan::TUNNEL_NONE];
+        yield 'default tunnel none' => [$public + ['default_tunnel' => DomainPlan::TUNNEL_NONE], null];
+        yield 'private address' => [['default_ipv4' => TestNetwork::private(4)], null];
+        yield 'no address' => [[], null];
+    }
+
+    /** @param array<string, ?string> $settings */
+    #[DataProvider('ladders')]
+    public function test_every_candidate_is_named_under_its_base(array $settings, ?string $tunnel): void
+    {
+        $bases = DomainPlan::bases($tunnel, $settings);
+        $candidates = DomainPlan::candidates('shop', null, $tunnel, $settings);
+
+        $this->assertSame(array_column($bases, 'source'), $this->sources($candidates));
+        foreach ($bases as $i => $base) {
+            $label = $base['suffixed'] ? '/^shop-[0-9a-f]{4}\\.' : '/^shop\\.';
+            $this->assertMatchesRegularExpression($label.preg_quote($base['base'], '/').'$/', $candidates[$i]['domain']);
+        }
     }
 }

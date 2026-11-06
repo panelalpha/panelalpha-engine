@@ -2,22 +2,11 @@
 
 namespace App\System\Project\PhpHosting\WordPress;
 
+use Closure;
+
 /**
- * Named core operations for a PHP hosting WordPress install.
- *
- * Status reports version, whether core is installed, and a state that says
- * why it is not: no core files, no wp-config.php, no database connection, or
- * a reachable database without WordPress tables. On an is-installed exit 1,
- * missing core and wp-config.php are read from WP-CLI's own messages, which
- * are never translated; the database is then probed with `wp db query`,
- * since WordPress's own connection error is in the site's language. Without
- * a MySQL client to probe with, the state says so. Anything else the engine
- * cannot tell is "unknown", never a guess. Install and update are
- * thin wrappers around WP-CLI; a non-zero exit on either becomes Exception.
- * Any is-installed exit other than 0 or 1 (a fatal error loading the site) is
- * a failure, never "not installed", so a caller does not install over a
- * broken but existing site. Download is for PHP hosting only and never writes
- * over an existing core: there is no --force.
+ * Named core operations for a PHP hosting WordPress install. Any is-installed exit other than 0 or 1 is a failure,
+ * never "not installed", so a caller does not install over a broken but existing site.
  */
 final class Core
 {
@@ -63,11 +52,16 @@ final class Core
     /** PHP diagnostics WordPress may print under CLI without anything being wrong, with or without the error log's timestamp. */
     public const PHP_DIAGNOSTIC_PATTERN = '/^(?:\[[^\]]*\]\s*)?(?:PHP )?(?:Warning|Notice|Deprecated|Strict Standards):/';
 
+    /** @param  ?Closure(): void  $coreFilesChanged  told after core files were written */
     public function __construct(
         private WpCli $cli,
+        private ?Closure $coreFilesChanged = null,
     ) {}
 
     /**
+     * The state says why core is not installed, from WP-CLI's untranslated messages and a `wp db query` probe (WordPress's
+     * own connection error is in the site's language); what the engine cannot tell is "unknown", never a guess.
+     *
      * @return array{installed: bool, version: string|null, state: string}
      */
     public function status(): array
@@ -168,9 +162,8 @@ final class Core
     }
 
     /**
-     * Fetch WordPress core into the install directory with `wp core download`;
+     * `wp core download`, never with --force, into the install directory inside the home that the 409 check looked at:
      * a directory that already holds core is a 409, a container project a 422.
-     * The directory is inside the home, the one the 409 check looked at.
      *
      * @return array{version: string|null, locale: string, path: string}
      */
@@ -180,6 +173,7 @@ final class Core
         $path = $this->cli->resolvePath();
         $this->refuseExistingCore($path);
         $result = $this->cli->runOrFail(self::downloadArgs($locale, $version));
+        $this->announceCoreFilesChanged();
         $reported = self::reportedDownload($result['stdout']);
 
         return [
@@ -239,6 +233,9 @@ final class Core
     }
 
     /**
+     * The version the install has afterwards: WP-CLI answers "up to date" and updates nothing for a version it
+     * will not install, so the requested one is no answer.
+     *
      * @return array{version: string, message: string}
      */
     public function update(string $version): array
@@ -248,9 +245,16 @@ final class Core
         );
 
         return [
-            'version' => $version,
+            'version' => $this->version(true) ?? $version,
             'message' => trim($result['stdout']),
         ];
+    }
+
+    private function announceCoreFilesChanged(): void
+    {
+        if ($this->coreFilesChanged !== null) {
+            ($this->coreFilesChanged)();
+        }
     }
 
     private function refuseContainerProject(): void

@@ -45,6 +45,8 @@ export interface SystemInfo {
   /** What a project created without `tunnel` is published under (setting default_tunnel); null while unset. */
   default_tunnel?: 'panelalpha' | 'none' | null;
   sites_base_domain?: string | null;
+  /** Where a project created with neither `domain` nor `tunnel` is named, best first; the first is the default. */
+  project_domain_bases?: ProjectDomainBase[];
   url?: string | null;
   api_url?: string | null;
   /** The certificate `:2011` presents, judged against the host in `url`; null when none is readable. */
@@ -53,6 +55,14 @@ export interface SystemInfo {
   ipv4_nat_maps?: Ipv4NatMap[];
   latest_webserver_change?: SystemChangeStatus | null;
   latest_update?: SystemChangeStatus | null;
+}
+
+export interface ProjectDomainBase {
+  base: string;
+  source: 'sites_base_domain' | 'panelalpha_online' | 'panelalpha_direct' | 'local';
+  /** The project is named `<name>-<4 hex>` there, a label bought at create time. */
+  suffixed: boolean;
+  publicly_resolvable: boolean | null;
 }
 
 export interface ServedCertificate {
