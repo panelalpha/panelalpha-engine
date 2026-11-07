@@ -9,6 +9,7 @@
 # reinstalls only what changed, and keeps serving what was being served -- the
 # gaps in the old scripts were exactly here (no cron, no reinstall, no
 # nginx reload), so this is the test that would have caught them.
+# Also that sites-http is down only while certbot itself runs.
 #
 # Needs bash, openssl and coreutils; no root, no network.
 set -uo pipefail
@@ -69,10 +70,17 @@ if [ "$1" = "compose" ]; then
     exit 0
 fi
 
+case "$1" in
+image) [ "${FAKE_NO_IMAGE:-0}" = 0 ]; exit ;;   # image inspect IMAGE
+pull) [ "${FAKE_PULL_FAIL:-0}" = 0 ]; exit ;;
+rm) exit 0 ;;
+esac
+
 # docker run ... certbot/certbot ARGS
 while [ $# -gt 0 ] && [ "$1" != "certbot/certbot" ]; do shift; done
 shift
 [ "${FAKE_CERTBOT_FAIL:-0}" = 1 ] && exit 1
+[ "${FAKE_CERTBOT_HANG:-0}" = 1 ] && exec "$REAL_SLEEP" 30
 case "$1" in
 certonly)
     name=""; subject=""; dry=0
@@ -95,6 +103,26 @@ renew)
 esac
 FAKE
 chmod +x "$SANDBOX/bin/docker"
+
+# Renewal's random delay is minutes long: logged beside docker, not slept.
+cat >"$SANDBOX/bin/sleep" <<'FAKE'
+#!/bin/bash
+echo "sleep $*" >>"$FAKE_DOCKER_LOG"
+FAKE
+chmod +x "$SANDBOX/bin/sleep"
+REAL_SLEEP="$(command -v sleep)"
+export REAL_SLEEP
+
+# The bound each `timeout` was given, logged before the real one runs.
+export FAKE_TIMEOUT_LOG="$SANDBOX/timeout.log"
+cat >"$SANDBOX/bin/timeout" <<'FAKE'
+#!/bin/bash
+echo "$*" >>"$FAKE_TIMEOUT_LOG"
+exec "$REAL_TIMEOUT" "$@"
+FAKE
+chmod +x "$SANDBOX/bin/timeout"
+REAL_TIMEOUT="$(command -v timeout)"
+export REAL_TIMEOUT
 export PATH="$SANDBOX/bin:$PATH"
 
 failures=0
@@ -167,7 +195,7 @@ check "--install serves the IP cert" "same_file '$(live panelalpha-engine-ip-cer
 # --- 4. a failed request leaves the served pair alone ---------------------------------------------
 
 served_before=$(md5sum <"$(crt server.cert)")
-FAKE_CERTBOT_FAIL=1 run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
+FAKE_CERTBOT_FAIL=1 run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check --force-renewal
 check "certbot failure is reported" "[ $? != 0 ]"
 check "served pair unchanged after a failed request" "[ \"\$(md5sum <'$(crt server.cert)')\" = '$served_before' ]"
 
@@ -226,6 +254,128 @@ check "renewal keeps serving the IP lineage rather than restoring the domain one
     "same_file '$(live panelalpha-engine-ip-cert)/fullchain.pem' '$(crt server.cert)'"
 check "the renewed IP cert did reach the served pair" \
     "[ \"\$(md5sum <'$(crt server.cert)')\" != '$served_before' ]"
+
+# --- 8. the webserver is down only while certbot runs ----------------------------------------
+
+# No image pull and no random delay after the stop. Cron runs it with no terminal.
+renew() { bash "$LE_ENGINE_DIR/scripts/letsencrypt-renew.sh" --always </dev/null >"$SANDBOX/out" 2>&1; }
+at() { grep -n -m1 -- "$1" "$FAKE_DOCKER_LOG" | cut -d: -f1; }
+before() { local a b; a=$(at "$1"); b=$(at "$2"); [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; }
+next_after() { sed -n "$(($(at "$1") + 1))p" "$FAKE_DOCKER_LOG" | grep -q -- "$2"; }
+
+: >"$FAKE_DOCKER_LOG"
+FAKE_NO_IMAGE=1 renew
+check "a missing certbot image is pulled before the webserver stops" "before 'pull -q certbot/certbot' 'down sites-http'"
+check "certbot itself never pulls" "grep -q -- 'run .*--pull never .*certbot/certbot renew' '$FAKE_DOCKER_LOG'"
+check "the random delay is taken before the webserver stops" "before '^sleep [0-9]' 'down sites-http'"
+check "certbot is told not to take it again" "grep -q -- 'certbot/certbot renew --non-interactive --no-random-sleep-on-renew' '$FAKE_DOCKER_LOG'"
+check "the stack comes back as soon as certbot exits" "next_after 'certbot/certbot renew' 'up -d'"
+
+: >"$FAKE_DOCKER_LOG"
+FAKE_NO_IMAGE=1 FAKE_PULL_FAIL=1 renew
+check "no image and no pull: the webserver is not stopped" \
+    "! grep -q 'down sites-http' '$FAKE_DOCKER_LOG' && ! grep -q 'certbot/certbot renew' '$FAKE_DOCKER_LOG'"
+: >"$FAKE_DOCKER_LOG"
+FAKE_NO_IMAGE=1 FAKE_PULL_FAIL=1 run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
+check "a request without the image fails before stopping the webserver" \
+    "[ $? != 0 ] && ! grep -q 'down sites-http' '$FAKE_DOCKER_LOG'"
+
+: >"$FAKE_DOCKER_LOG"
+started=$(date +%s)
+FAKE_CERTBOT_HANG=1 LE_CERTBOT_TIMEOUT=2 renew
+check "a hanging certbot is killed after LE_CERTBOT_TIMEOUT" \
+    "[ $(($(date +%s) - started)) -lt 10 ] && next_after 'certbot/certbot renew' 'rm -f certbot-engine'"
+check "and the stack comes back" "next_after 'rm -f certbot-engine' 'up -d'"
+
+# Stopped mid-renewal (a closed SSH session, a kill): the stack still comes back.
+: >"$FAKE_DOCKER_LOG"
+# The script itself, not renew(): $! of a backgrounded function is its subshell.
+FAKE_CERTBOT_HANG=1 LE_CERTBOT_TIMEOUT=3 \
+    bash "$LE_ENGINE_DIR/scripts/letsencrypt-renew.sh" --always </dev/null >"$SANDBOX/out" 2>&1 &
+pid=$!
+for _ in $(seq 100); do
+    grep -q 'certbot/certbot renew' "$FAKE_DOCKER_LOG" && break
+    "$REAL_SLEEP" 0.1
+done
+kill -TERM "$pid"
+wait "$pid"
+status=$?
+check "a renewal stopped by a signal still restores the stack" \
+    "[ $status != 0 ] && before 'certbot/certbot renew' 'up -d'"
+
+# --- 9. a first issuance is given longer than a renewal ------------------------------------
+
+# Cron retries a renewal cut off at its bound; nothing retries a first request.
+certbot_bound() { grep -- ' docker run ' "$FAKE_TIMEOUT_LOG" | tail -1 | cut -d' ' -f3; }
+
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
+check "a domain request gives certbot 600s" "[ \"\$(certbot_bound)\" = 600 ]"
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS"
+check "an IP request gives certbot 600s" "[ \"\$(certbot_bound)\" = 600 ]"
+renew
+check "a renewal keeps its 120s" "[ \"\$(certbot_bound)\" = 120 ]"
+LE_CERTBOT_TIMEOUT=45 run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check
+check "a request keeps the bound its caller set" "[ \"\$(certbot_bound)\" = 45 ]"
+
+# --- 10. the webserver stops only for a certificate certbot will issue -------------------------
+
+# An update on a named host requests both lineages; with neither due, sites-http must not stop.
+update() {
+    run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" && run_as_root letsencrypt-request-cert.sh --ip="$ADDRESS" --skip-dns-check
+}
+days_on() { # DAYS SCRIPT [ARGS...]: run as root that many days from now
+    local days="$1" script="$2"
+    shift 2
+    (
+        id() { echo 0; }
+        date() { if [ "$1" = "+%s" ]; then echo $(($(command date +%s) + FAKE_DAYS_ON * 86400)); else command date "$@"; fi; }
+        export -f id date
+        FAKE_DAYS_ON="$days" bash "$LE_ENGINE_DIR/scripts/$script" "$@"
+    ) >"$SANDBOX/out" 2>&1
+}
+
+run_as_root letsencrypt-request-cert.sh --domain panel.example.com --ip "$ADDRESS" --skip-dns-check
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" --force-renewal
+served_before=$(md5sum <"$(crt server.cert)")
+rm -f "$LE_CRON_FILE"
+: >"$FAKE_DOCKER_LOG"
+update
+check "nothing due: the update's requests succeed" "[ $? = 0 ]"
+check "without asking certbot" "! grep -q 'certbot/certbot' '$FAKE_DOCKER_LOG'"
+check "or stopping sites-http and bringing the stack back" \
+    "! grep -q 'down sites-http' '$FAKE_DOCKER_LOG' && ! grep -q 'up -d' '$FAKE_DOCKER_LOG'"
+check "and say why" "grep -q 'The certificate for panel.example.com is not yet due for renewal' '$SANDBOX/out'"
+check "the served certificate stays the domain one" \
+    "[ \"\$(md5sum <'$(crt server.cert)')\" = '$served_before' ] && same_file '$(live panelalpha-engine-cert)/fullchain.pem' '$(crt server.cert)'"
+check "what follows certbot still runs: renewal is scheduled" "grep -q 'letsencrypt-renew.sh' '$LE_CRON_FILE'"
+
+: >"$FAKE_DOCKER_LOG"
+run_as_root letsencrypt-request-cert.sh --domain Panel.Example.com --ip "$ADDRESS" --skip-dns-check
+check "a name differing only in case is the same name" "! grep -q 'certbot/certbot' '$FAKE_DOCKER_LOG'"
+run_as_root letsencrypt-request-cert.sh --domain other.example.com --ip "$ADDRESS" --skip-dns-check
+check "another name is requested, with port 80 released for it and restored" \
+    "before 'down sites-http' 'certbot/certbot certonly .*-d other.example.com' && next_after 'certbot/certbot certonly' 'up -d'"
+
+: >"$FAKE_DOCKER_LOG"
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check --force-renewal
+check "--force-renewal asks certbot all the same" "grep -q -- 'certbot/certbot certonly .*--force-renewal' '$FAKE_DOCKER_LOG'"
+: >"$FAKE_DOCKER_LOG"
+run_as_root letsencrypt-request-ip-cert.sh "$ADDRESS" --force-renewal
+check "for the IP lineage too" "grep -q -- 'certbot/certbot certonly .*--force-renewal' '$FAKE_DOCKER_LOG'"
+: >"$FAKE_DOCKER_LOG"
+run_as_root letsencrypt-request-cert.sh --ip "$ADDRESS" --skip-dns-check --dry-run
+check "so does a dry run" "grep -q -- 'certbot/certbot certonly .*--dry-run' '$FAKE_DOCKER_LOG'"
+
+# 61 days on: the 90-day domain lineage has 29 left (< 30), the IP one has expired.
+: >"$FAKE_DOCKER_LOG"
+days_on 61 letsencrypt-request-ip-cert.sh "$ADDRESS"
+check "due: the IP lineage is requested with port 80 released, then restored" \
+    "before 'down sites-http' 'certbot/certbot certonly .*--ip-address $ADDRESS' && next_after 'certbot/certbot certonly' 'up -d'"
+: >"$FAKE_DOCKER_LOG"
+days_on 61 letsencrypt-request-cert.sh --ip="$ADDRESS" --skip-dns-check
+check "due: so is the domain lineage" \
+    "before 'down sites-http' 'certbot/certbot certonly .*-d other.example.com' && next_after 'certbot/certbot certonly' 'up -d'"
+check "and the reissued one is served" "same_file '$(live panelalpha-engine-cert)/fullchain.pem' '$(crt server.cert)'"
 
 if [ "$failures" -gt 0 ]; then
     echo "${failures} failure(s); last output:"
