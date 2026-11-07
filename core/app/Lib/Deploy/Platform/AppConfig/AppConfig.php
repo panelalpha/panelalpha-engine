@@ -7,13 +7,14 @@ use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCommand;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Project\PublicRouting\PublicRouting;
+use App\Lib\Project\PublicRouting\PublicRoutingReader;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * What one specific project says about how to host it — facts no platform manifest, which
- * describes a kind of application, can hold. `panelalpha.yaml` uses the manifest vocabulary
- * plus single-application keys; `panelalpha.md` is markdown with named fenced blocks.
+ * What one project says about how to host it, which no manifest of a kind of application can hold: `panelalpha.yaml` in the
+ * manifest vocabulary plus single-application keys, or `panelalpha.md`, markdown with named fenced blocks.
  */
 final class AppConfig
 {
@@ -50,6 +51,7 @@ final class AppConfig
     private const OWN_KEYS = [
         '$schema', 'description', 'extends', 'env',
         'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose', 'git', 'health',
+        ...PublicRoutingReader::KEYS,
     ];
 
     /** Ceiling for `health: {start_period}`, in seconds. */
@@ -57,6 +59,9 @@ final class AppConfig
 
     /** Names the shipped recipe this application is an instance of. */
     public const EXTENDS_KEY = 'extends';
+
+    /** Keys that ride along with a manifest without describing one. */
+    private const NON_MANIFEST_KEYS = ['requires', 'credentials', 'port_scheme', self::EXTENDS_KEY];
 
     /**
      * @param  list<array{path: string, contents: string}>  $files
@@ -82,6 +87,7 @@ final class AppConfig
         private readonly ?string $portScheme = null,
         private readonly ?int $startPeriod = null,
         private readonly ?array $gitSubmodules = null,
+        private readonly ?PublicRouting $publicRouting = null,
     ) {}
 
     /**
@@ -97,9 +103,8 @@ final class AppConfig
     }
 
     /**
-     * Parse by shape when the filename is not to hand: a markdown page opens with
-     * prose or a heading, a YAML document does not. Only for callers with content
-     * and no path — `load()` knows the filename and does not guess.
+     * Parse by shape when the filename is not to hand: a markdown page opens with prose or a heading, a YAML document does not.
+     * Only for callers with content and no path; `load()` knows the filename and does not guess.
      */
     public static function fromContent(string $content): ?self
     {
@@ -112,7 +117,10 @@ final class AppConfig
             : self::fromMarkdown($content);
     }
 
-    public static function fromMarkdown(string $content): ?self
+    /**
+     * @param  string  $subject  how errors name the page: the file it was read from
+     */
+    public static function fromMarkdown(string $content, string $subject = self::MARKDOWN_FILENAME): ?self
     {
         if (trim($content) === '') {
             return null;
@@ -120,11 +128,7 @@ final class AppConfig
 
         $setup = PaemdPage::setupCommands($content);
         $compose = PaemdPage::compose($content);
-
-        // A page may carry a block of the YAML format, parsed by the same code, so a
-        // page and a `panelalpha.yaml` mean the same thing by the same words.
-        $embedded = PaemdPage::config($content);
-        $config = $embedded === null ? null : self::fromYaml($embedded);
+        $config = self::embeddedConfig($content, $subject);
 
         return new self(
             PaemdPage::preCheckCommands($content),
@@ -143,13 +147,25 @@ final class AppConfig
             $config?->portScheme(),
             $config?->startPeriod(),
             $config?->gitSubmodules(),
+            $config?->publicRouting,
         );
     }
 
+    /** A page's block of the YAML format, read by the same code, so a page and a `panelalpha.yaml` mean the same by the same words. */
+    private static function embeddedConfig(string $content, string $subject): ?self
+    {
+        $embedded = PaemdPage::config($content);
+
+        return $embedded === null ? null : self::fromYaml($embedded, $subject);
+    }
+
     /**
+     * @param  string  $subject  how errors name this document: the file it was read
+     *                           from, or the recipe that ships it
+     *
      * @throws ManifestException on malformed YAML or an unknown key
      */
-    public static function fromYaml(string $content): ?self
+    public static function fromYaml(string $content, string $subject = self::YAML_FILENAME): ?self
     {
         if (trim($content) === '') {
             return null;
@@ -159,41 +175,52 @@ final class AppConfig
             $raw = Yaml::parse($content);
         } catch (ParseException $e) {
             throw new ManifestException(
-                'Invalid YAML in '.self::YAML_FILENAME.': '.$e->getMessage(),
+                'Invalid YAML in '.$subject.': '.$e->getMessage(),
                 0,
                 $e
             );
         }
         if (! is_array($raw)) {
-            throw new ManifestException(self::YAML_FILENAME.' does not contain a mapping');
+            throw new ManifestException($subject.' does not contain a mapping');
         }
 
-        self::assertNoUnknownKeys($raw);
+        return self::fromMapping($raw, $subject);
+    }
 
-        $compose = self::readComposeContent($raw);
-        $mode = self::readComposeMode($raw);
-        $setup = self::readScript($raw, 'prepare');
+    /**
+     * @param  array<string, mixed>  $raw
+     *
+     * @throws ManifestException on an unknown key or a malformed value
+     */
+    private static function fromMapping(array $raw, string $subject): self
+    {
+        self::assertNoUnknownKeys($raw, $subject);
+
+        $compose = self::readComposeContent($raw, $subject);
+        $mode = self::readComposeMode($raw, $subject);
+        $setup = self::readScript($raw, 'prepare', $subject);
 
         return new self(
-            self::readScript($raw, 'precheck'),
+            self::readScript($raw, 'precheck', $subject),
             $setup,
-            self::readScript($raw, 'entrypoint'),
+            self::readScript($raw, 'entrypoint', $subject),
             $compose,
             $mode,
-            self::readAppScript($raw),
-            self::readFiles($raw),
-            self::readCommands($raw),
-            self::readRequires($raw),
-            self::readEnv($raw),
-            self::readManifest($raw),
+            self::readAppScript($raw, $subject),
+            self::readFiles($raw, $subject),
+            self::readCommands($raw, $subject),
+            self::readRequires($raw, $subject),
+            self::readEnv($raw, $subject),
+            self::readManifest($raw, $subject),
             CredentialSpec::parse(
                 $raw['credentials'] ?? null,
-                static fn (string $m): ManifestException => new ManifestException(self::YAML_FILENAME.": {$m}")
+                static fn (string $m): ManifestException => new ManifestException($subject.": {$m}")
             ),
-            self::readGitHistory($raw) === self::GIT_HISTORY_FULL,
-            self::readPortScheme($raw),
-            self::readStartPeriod($raw),
-            self::readGitSubmodules($raw),
+            self::readGitHistory($raw, $subject) === self::GIT_HISTORY_FULL,
+            self::readPortScheme($raw, $subject),
+            self::readStartPeriod($raw, $subject),
+            self::readGitSubmodules($raw, $subject),
+            PublicRoutingReader::read($raw, $subject),
         );
     }
 
@@ -206,13 +233,14 @@ final class AppConfig
      *   entrypoint?: ?string, app?: ?string, compose?: ?string,
      *   compose_mode?: string, files?: list<array{path: string, contents: string}>
      * } $parts
+     * @param  string  $subject  how errors name the document inside the directory
      *
      * @throws ManifestException
      */
-    public static function fromDirectory(array $parts): ?self
+    public static function fromDirectory(array $parts, string $subject = self::YAML_FILENAME): ?self
     {
         $raw = $parts['config'] ?? null;
-        $config = is_string($raw) && trim($raw) !== '' ? self::fromYaml($raw) : null;
+        $config = is_string($raw) && trim($raw) !== '' ? self::fromYaml($raw, $subject) : null;
         $compose = $parts['compose'] ?? null;
 
         $appConfig = new self(
@@ -234,6 +262,7 @@ final class AppConfig
             $config?->portScheme(),
             $config?->startPeriod(),
             $config?->gitSubmodules(),
+            $config?->publicRouting,
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -276,7 +305,8 @@ final class AppConfig
             && ! $this->fullGitHistory
             && $this->portScheme === null
             && $this->startPeriod === null
-            && $this->gitSubmodules === null;
+            && $this->gitSubmodules === null
+            && $this->publicRouting === null;
     }
 
     /**
@@ -289,11 +319,8 @@ final class AppConfig
     }
 
     /**
-     * Setup to run after the clone and before the build, on the account.
-     *
-     * Distinct from the manifest's `install` stage, which runs inside the container
-     * on first boot: an app config generating a compose file must do it here, where
-     * there is not yet an image to run.
+     * Setup to run on the account after the clone, before the build; not the manifest's `install` stage, which runs in the
+     * container on first boot: an app config generating a compose file must do it here, before there is an image to run.
      */
     public function setupCommands(): ?string
     {
@@ -313,9 +340,8 @@ final class AppConfig
     }
 
     /**
-     * The compose file a deploy writes into the checkout, where detection
-     * reads it ahead of the repository's own. Null in override mode, which
-     * is layered over the run file outside the checkout.
+     * The compose file a deploy writes into the checkout, where detection reads it ahead of the repository's own. Null in
+     * override mode, which is layered over the run file outside the checkout.
      */
     public function replacingCompose(): ?string
     {
@@ -329,9 +355,8 @@ final class AppConfig
     }
 
     /**
-     * Whether the user-management script can log an admin in: its `info`
-     * command prints the capability list, and SSO is `users:sso` in it. Read
-     * from the script's text, so nothing runs.
+     * Whether the user-management script can log an admin in: `users:sso` in the capability list its `info` command prints,
+     * read from the script's text, so nothing runs.
      */
     public function supportsAdminSso(): bool
     {
@@ -358,9 +383,8 @@ final class AppConfig
     }
 
     /**
-     * The manifest this file describes, when it describes one: `extends:` naming a
-     * shipped recipe, manifest keys of its own, or both — the keys overriding the
-     * recipe they extend.
+     * The manifest this file describes, when it describes one: `extends:` naming a shipped recipe, manifest keys of its own, or
+     * both, the keys overriding the recipe they extend.
      *
      * @return ?array<string, mixed>
      */
@@ -380,9 +404,7 @@ final class AppConfig
     }
 
     /**
-     * Staged commands, in the same vocabulary a manifest uses.
-     *
-     * YAML only: markdown has one script per lifecycle point and no way to name,
+     * Staged commands, in a manifest's vocabulary. YAML only: markdown has one script per lifecycle point and no way to name,
      * guard or stage them individually.
      *
      * @return list<PlatformCommand>
@@ -400,9 +422,8 @@ final class AppConfig
     }
 
     /**
-     * The app config's own entrypoint, when it declares one: a `serve: true` command
-     * in the start stage. It replaces the platform's entrypoint, because two
-     * processes fighting for one port is not a thing anyone asked for.
+     * The app config's own entrypoint, a `serve: true` command in the start stage. It replaces the platform's, as two processes
+     * fighting for one port is not a thing anyone asked for.
      */
     public function serveCommand(): ?PlatformCommand
     {
@@ -437,9 +458,8 @@ final class AppConfig
     }
 
     /**
-     * Whether the deploy clone needs the whole history and every tag: a build
-     * that stamps its version with `git describe` fails on the default
-     * depth-1 clone.
+     * Whether the deploy clone needs the whole history and every tag: a build that stamps its version with `git describe` fails
+     * on the default depth-1 clone.
      */
     public function fullGitHistory(): bool
     {
@@ -465,9 +485,8 @@ final class AppConfig
     }
 
     /**
-     * `git: {submodules: [...]}`: the only submodules the deploy fetches, by path, each
-     * with its own submodules. Null fetches every one the repository declares; an
-     * empty list fetches none.
+     * `git: {submodules: [...]}`: the only submodules the deploy fetches, by path, each with its own submodules. Null fetches
+     * every one the repository declares; an empty list fetches none.
      *
      * @return ?list<string>
      */
@@ -476,7 +495,11 @@ final class AppConfig
         return $this->gitSubmodules;
     }
 
-    // -- YAML reading ------------------------------------------------------
+    /** `domain:` and `public_ports:`: what the application asks to be reached on besides its domain's :80/:443. */
+    public function publicRouting(): PublicRouting
+    {
+        return $this->publicRouting ?? PublicRouting::none();
+    }
 
     /**
      * Everything this file may say: its own keys, plus the manifest's.
@@ -491,14 +514,14 @@ final class AppConfig
     /**
      * @param  array<string, mixed>  $raw
      */
-    private static function assertNoUnknownKeys(array $raw): void
+    private static function assertNoUnknownKeys(array $raw, string $subject): void
     {
         $known = self::knownKeys();
         $unknown = array_diff(array_keys($raw), $known);
         if ($unknown !== []) {
             sort($known);
             throw new ManifestException(
-                self::YAML_FILENAME.': unknown key(s) '.implode(', ', $unknown)
+                $subject.': unknown key(s) '.implode(', ', $unknown)
                 .'; expected one of '.implode(', ', $known)
             );
         }
@@ -510,26 +533,26 @@ final class AppConfig
      *
      * @param  array<string, mixed>  $raw
      */
-    private static function readScript(array $raw, string $key): ?string
+    private static function readScript(array $raw, string $key, string $subject): ?string
     {
         $value = $raw[$key] ?? null;
         if ($value === null) {
             return null;
         }
         if (! is_string($value) || trim($value) === '') {
-            throw new ManifestException(self::YAML_FILENAME.": '{$key}' must be a non-empty script");
+            throw new ManifestException($subject.": '{$key}' must be a non-empty script");
         }
 
         return $value;
     }
 
     /** @param array<string, mixed> $raw */
-    private static function readPortScheme(array $raw): ?string
+    private static function readPortScheme(array $raw, string $subject): ?string
     {
         $scheme = $raw['port_scheme'] ?? null;
         if ($scheme !== null && ! in_array($scheme, PlatformManifest::PORT_SCHEMES, true)) {
             throw new ManifestException(
-                self::YAML_FILENAME.": 'port_scheme' must be one of ".implode(', ', PlatformManifest::PORT_SCHEMES)
+                $subject.": 'port_scheme' must be one of ".implode(', ', PlatformManifest::PORT_SCHEMES)
             );
         }
 
@@ -537,7 +560,7 @@ final class AppConfig
     }
 
     /** @param array<string, mixed> $raw */
-    private static function readStartPeriod(array $raw): ?int
+    private static function readStartPeriod(array $raw, string $subject): ?int
     {
         $health = $raw['health'] ?? null;
         if ($health === null) {
@@ -548,7 +571,7 @@ final class AppConfig
             || ! is_int($period) || $period < 0 || $period > self::MAX_START_PERIOD
         ) {
             throw new ManifestException(
-                self::YAML_FILENAME.": 'health' must be {start_period: <seconds, 0-".self::MAX_START_PERIOD.'>}'
+                $subject.": 'health' must be {start_period: <seconds, 0-".self::MAX_START_PERIOD.'>}'
             );
         }
 
@@ -556,7 +579,7 @@ final class AppConfig
     }
 
     /** @param array<string, mixed> $raw */
-    private static function readComposeContent(array $raw): ?string
+    private static function readComposeContent(array $raw, string $subject): ?string
     {
         $compose = $raw['compose'] ?? null;
         if ($compose === null) {
@@ -566,18 +589,18 @@ final class AppConfig
             return trim($compose) === '' ? null : $compose;
         }
         if (! is_array($compose)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'compose' must be a string or an object");
+            throw new ManifestException($subject.": 'compose' must be a string or an object");
         }
         $content = $compose['content'] ?? null;
         if (! is_string($content) || trim($content) === '') {
-            throw new ManifestException(self::YAML_FILENAME.": 'compose.content' must be a non-empty string");
+            throw new ManifestException($subject.": 'compose.content' must be a non-empty string");
         }
 
         return $content;
     }
 
     /** @param array<string, mixed> $raw */
-    private static function readGitHistory(array $raw): string
+    private static function readGitHistory(array $raw, string $subject): string
     {
         $git = $raw['git'] ?? null;
         if ($git === null) {
@@ -588,7 +611,7 @@ final class AppConfig
             || ! in_array($history, [self::GIT_HISTORY_FULL, self::GIT_HISTORY_SHALLOW], true)
         ) {
             throw new ManifestException(
-                self::YAML_FILENAME.": 'git' takes history (".self::GIT_HISTORY_FULL.' or '
+                $subject.": 'git' takes history (".self::GIT_HISTORY_FULL.' or '
                 .self::GIT_HISTORY_SHALLOW.') and submodules (a list of paths)'
             );
         }
@@ -600,7 +623,7 @@ final class AppConfig
      * @param  array<string, mixed>  $raw
      * @return ?list<string>
      */
-    private static function readGitSubmodules(array $raw): ?array
+    private static function readGitSubmodules(array $raw, string $subject): ?array
     {
         $git = $raw['git'] ?? null;
         if (! is_array($git) || ! array_key_exists('submodules', $git)) {
@@ -608,21 +631,24 @@ final class AppConfig
         }
         $paths = $git['submodules'];
         if (! is_array($paths) || ! array_is_list($paths)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'git.submodules' must be a list of submodule paths");
+            throw new ManifestException($subject.": 'git.submodules' must be a list of submodule paths");
         }
 
-        return array_values(array_unique(array_map(self::submodulePath(...), $paths)));
+        return array_values(array_unique(array_map(
+            static fn (mixed $path): string => self::submodulePath($path, $subject),
+            $paths
+        )));
     }
 
     /** A path inside the repository, as `.gitmodules` names it: relative, and not climbing out. */
-    private static function submodulePath(mixed $path): string
+    private static function submodulePath(mixed $path, string $subject): string
     {
         $clean = is_string($path) ? rtrim(trim($path), '/') : '';
         if ($clean === '' || str_starts_with($clean, '/') || str_starts_with($clean, '-')
             || in_array('..', explode('/', $clean), true)
         ) {
             throw new ManifestException(
-                self::YAML_FILENAME.": 'git.submodules' entries must be paths inside the repository, got "
+                $subject.": 'git.submodules' entries must be paths inside the repository, got "
                 .json_encode($path)
             );
         }
@@ -631,7 +657,7 @@ final class AppConfig
     }
 
     /** @param array<string, mixed> $raw */
-    private static function readComposeMode(array $raw): string
+    private static function readComposeMode(array $raw, string $subject): string
     {
         $compose = $raw['compose'] ?? null;
         if (! is_array($compose)) {
@@ -640,7 +666,7 @@ final class AppConfig
         $mode = $compose['mode'] ?? self::COMPOSE_REPLACE;
         if (! in_array($mode, [self::COMPOSE_REPLACE, self::COMPOSE_OVERRIDE], true)) {
             throw new ManifestException(
-                self::YAML_FILENAME.": 'compose.mode' must be '"
+                $subject.": 'compose.mode' must be '"
                 .self::COMPOSE_REPLACE."' or '".self::COMPOSE_OVERRIDE."'"
             );
         }
@@ -649,56 +675,36 @@ final class AppConfig
     }
 
     /**
-     * The manifest-shaped keys this file carries, or null when it carries none and is
-     * only saying what to run.
-     *
-     * `commands` and `env` are left out because this class applies both already: copying
-     * them into the manifest would run every command twice.
+     * The manifest-shaped keys this file carries, or null when it only says what to run. An explicit `id` names this manifest and
+     * wins over the inherited one: two configs that only inherit would answer to one id, which the shipped tree refuses as shadowing.
      *
      * @param  array<string, mixed>  $raw
      * @return ?array<string, mixed>
      */
-    private static function readManifest(array $raw): ?array
+    private static function readManifest(array $raw, string $subject): ?array
     {
-        // `commands` and `env` this class applies itself; `requires` rides along with a
-        // manifest but does not make one on its own.
-        $applied = ['commands', 'env', '$schema'];
-        $manifest = array_intersect_key(
-            $raw,
-            array_flip(array_diff(PlatformManifest::KNOWN_KEYS, $applied))
-        );
-        // `extends` survives into the manifest array as the name of the base recipe even
-        // when the config carries an id of its own: the source recipe layer resolves it,
-        // and the key would otherwise be dropped here as a non-manifest one.
-        if (isset($raw[self::EXTENDS_KEY])) {
-            $manifest[self::EXTENDS_KEY] = $raw[self::EXTENDS_KEY];
-        }
-        // `credentials` and `port_scheme` ride along too: a compose recipe declares them without being a manifest.
-        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', 'port_scheme', self::EXTENDS_KEY]) !== [];
+        $manifest = self::manifestKeys($raw);
+        $describing = self::describingKeys($manifest);
 
         $inherit = $raw[self::EXTENDS_KEY] ?? null;
         if ($inherit !== null) {
             if (! is_string($inherit) || trim($inherit) === '') {
                 throw new ManifestException(
-                    self::YAML_FILENAME.": '".self::EXTENDS_KEY."' must name a shipped recipe"
+                    $subject.": '".self::EXTENDS_KEY."' must name a shipped recipe"
                 );
             }
             $inherit = trim($inherit);
-            // An explicit `id` names THIS manifest and wins; `extends` stays the name of
-            // the recipe to inherit from. Forcing the id to the inherited recipe's own made
-            // two configs that only inherited answer to one id, which the shipped-tree
-            // invariant refuses as shadowing. Without an `id`, the inherited one is taken.
             if (! isset($manifest['id']) || ! is_string($manifest['id']) || trim($manifest['id']) === '') {
                 $manifest['id'] = $inherit;
             }
         }
 
-        if (! $describes && $inherit === null) {
+        if ($describing === [] && $inherit === null) {
             return null;
         }
         if ($inherit === null && ! isset($manifest['id'])) {
             throw new ManifestException(
-                self::YAML_FILENAME.": describing a platform needs an 'id', or '"
+                $subject.': declares '.implode(', ', $describing)." but has no 'id', or '"
                 .self::EXTENDS_KEY."' naming the recipe to start from"
             );
         }
@@ -706,8 +712,44 @@ final class AppConfig
         return $manifest;
     }
 
+    /**
+     * Manifest keys, without `commands` and `env`, which this class applies itself (copying them would run every command twice).
+     * `extends` is kept as the base recipe's name even beside an `id`: the source recipe layer resolves it.
+     *
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>
+     */
+    private static function manifestKeys(array $raw): array
+    {
+        $applied = ['commands', 'env', '$schema'];
+        $manifest = array_intersect_key(
+            $raw,
+            array_flip(array_diff(PlatformManifest::KNOWN_KEYS, $applied))
+        );
+        if (isset($raw[self::EXTENDS_KEY])) {
+            $manifest[self::EXTENDS_KEY] = $raw[self::EXTENDS_KEY];
+        }
+
+        return $manifest;
+    }
+
+    /**
+     * The keys that describe a platform, sorted: `requires`, `credentials` and `port_scheme` ride along with a manifest without
+     * making one, as a compose recipe declares the last two without being a manifest.
+     *
+     * @param  array<string, mixed>  $manifest
+     * @return list<string>
+     */
+    private static function describingKeys(array $manifest): array
+    {
+        $describing = array_diff(array_keys($manifest), self::NON_MANIFEST_KEYS);
+        sort($describing);
+
+        return $describing;
+    }
+
     /** @param array<string, mixed> $raw */
-    private static function readAppScript(array $raw): ?string
+    private static function readAppScript(array $raw, string $subject): ?string
     {
         $app = $raw['app'] ?? null;
         if ($app === null) {
@@ -717,11 +759,11 @@ final class AppConfig
             return trim($app) === '' ? null : $app;
         }
         if (! is_array($app)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'app' must be a script or an object");
+            throw new ManifestException($subject.": 'app' must be a script or an object");
         }
         $script = $app['script'] ?? null;
         if (! is_string($script) || trim($script) === '') {
-            throw new ManifestException(self::YAML_FILENAME.": 'app.script' must be a non-empty string");
+            throw new ManifestException($subject.": 'app.script' must be a non-empty string");
         }
 
         return $script;
@@ -731,38 +773,21 @@ final class AppConfig
      * @param  array<string, mixed>  $raw
      * @return list<array{path: string, contents: string}>
      */
-    private static function readFiles(array $raw): array
+    private static function readFiles(array $raw, string $subject): array
     {
         $files = $raw['files'] ?? [];
         if (! is_array($files)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'files' must be an object of path => contents");
+            throw new ManifestException($subject.": 'files' must be an object of path => contents");
         }
 
         $result = [];
         foreach ($files as $path => $contents) {
             if (! is_string($path) || trim($path) === '') {
-                throw new ManifestException(self::YAML_FILENAME.": 'files' keys must be paths");
+                throw new ManifestException($subject.": 'files' keys must be paths");
             }
-            // Strip a leading `./` and nothing else: `ltrim($path, './')` strips any run of
-            // those two characters, turning `../../etc/cron.d/x` into `etc/cron.d/x` —
-            // normalising away the traversal instead of refusing it.
-            $clean = trim($path);
-            if (str_starts_with($clean, './')) {
-                $clean = substr($clean, 2);
-            }
-            // A snippet is written under the project directory; a path that
-            // climbs out of it would write anywhere the account can reach.
-            if ($clean === ''
-                || str_starts_with($clean, '/')
-                || $clean === '..'
-                || str_starts_with($clean, '../')
-                || str_contains($clean, '/../')
-                || str_ends_with($clean, '/..')
-            ) {
-                throw new ManifestException(self::YAML_FILENAME.": '{$path}' is not a path inside the project");
-            }
+            $clean = self::snippetPath($path, $subject);
             if (! is_string($contents)) {
-                throw new ManifestException(self::YAML_FILENAME.": contents of '{$path}' must be a string");
+                throw new ManifestException($subject.": contents of '{$path}' must be a string");
             }
             $result[] = ['path' => $clean, 'contents' => $contents];
         }
@@ -771,26 +796,50 @@ final class AppConfig
     }
 
     /**
+     * $path without a leading `./` and nothing else (never `ltrim($path, './')`, which turns `../x` into `x`), refused
+     * when it climbs out of the project or holds a NUL: a snippet written there could land anywhere the account can reach.
+     */
+    private static function snippetPath(string $path, string $subject): string
+    {
+        $clean = trim($path);
+        if (str_starts_with($clean, './')) {
+            $clean = substr($clean, 2);
+        }
+        if ($clean === ''
+            || str_contains($clean, "\0")
+            || str_starts_with($clean, '/')
+            || $clean === '..'
+            || str_starts_with($clean, '../')
+            || str_contains($clean, '/../')
+            || str_ends_with($clean, '/..')
+        ) {
+            throw new ManifestException($subject.": '{$path}' is not a path inside the project");
+        }
+
+        return $clean;
+    }
+
+    /**
      * @param  array<string, mixed>  $raw
      * @return list<PlatformCommand>
      */
-    private static function readCommands(array $raw): array
+    private static function readCommands(array $raw, string $subject): array
     {
         $declared = $raw['commands'] ?? [];
         if (! is_array($declared)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'commands' must be a list");
+            throw new ManifestException($subject.": 'commands' must be a list");
         }
 
         $commands = [];
         $seen = [];
         foreach (array_values($declared) as $index => $entry) {
             if (! is_array($entry)) {
-                throw new ManifestException(self::YAML_FILENAME.".commands[{$index}]: must be an object");
+                throw new ManifestException($subject.".commands[{$index}]: must be an object");
             }
-            $command = PlatformCommand::fromArray($entry, self::YAML_FILENAME, $index);
+            $command = PlatformCommand::fromArray($entry, $subject, $index);
             if (isset($seen[$command->id])) {
                 throw new ManifestException(
-                    self::YAML_FILENAME.": duplicate command id '{$command->id}'"
+                    $subject.": duplicate command id '{$command->id}'"
                 );
             }
             $seen[$command->id] = true;
@@ -804,24 +853,24 @@ final class AppConfig
      * @param  array<string, mixed>  $raw
      * @return array<string, array<string, mixed>>
      */
-    private static function readRequires(array $raw): array
+    private static function readRequires(array $raw, string $subject): array
     {
         $declared = $raw['requires'] ?? [];
         if (! is_array($declared)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'requires' must be an object");
+            throw new ManifestException($subject.": 'requires' must be an object");
         }
 
         $requires = [];
         foreach ($declared as $id => $spec) {
             if (! is_string($id) || ! preg_match('/^[a-z0-9][a-z0-9-]*$/', $id)) {
-                throw new ManifestException(self::YAML_FILENAME.": '{$id}' is not a valid runtime name");
+                throw new ManifestException($subject.": '{$id}' is not a valid runtime name");
             }
             if (is_string($spec)) {
                 $spec = ['role' => $spec];
             }
             if (! is_array($spec)) {
                 throw new ManifestException(
-                    self::YAML_FILENAME.".requires.{$id}: must be a role name or an object"
+                    $subject.".requires.{$id}: must be a role name or an object"
                 );
             }
             $requires[$id] = [
@@ -837,20 +886,20 @@ final class AppConfig
      * @param  array<string, mixed>  $raw
      * @return array<string, string>
      */
-    private static function readEnv(array $raw): array
+    private static function readEnv(array $raw, string $subject): array
     {
         $declared = $raw['env'] ?? [];
         if (! is_array($declared)) {
-            throw new ManifestException(self::YAML_FILENAME.": 'env' must be an object");
+            throw new ManifestException($subject.": 'env' must be an object");
         }
 
         $env = [];
         foreach ($declared as $key => $value) {
             if (! is_string($key) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
-                throw new ManifestException(self::YAML_FILENAME.": '{$key}' is not a valid environment variable name");
+                throw new ManifestException($subject.": '{$key}' is not a valid environment variable name");
             }
             if (! is_string($value) && ! is_int($value) && ! is_bool($value)) {
-                throw new ManifestException(self::YAML_FILENAME.".env.{$key}: must be a scalar");
+                throw new ManifestException($subject.".env.{$key}: must be a scalar");
             }
             $env[$key] = is_bool($value) ? ($value ? 'true' : 'false') : (string) $value;
         }

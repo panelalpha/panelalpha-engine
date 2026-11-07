@@ -6,9 +6,8 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Source\RepoUrl;
 
 /**
- * Parser for a `panelalpha.md` (paemd) page: markdown describing how to host one upstream
- * repo, its blocks named by a backticked filename on the line before the fence. Every
- * named block that is not a special name becomes a file snippet in the project tree.
+ * Parser for a `panelalpha.md` (paemd) page: markdown describing how to host one upstream repo,
+ * its blocks named by a backticked filename on the line before the fence.
  */
 class PaemdPage
 {
@@ -21,11 +20,8 @@ class PaemdPage
     public const APP_SCRIPT = 'panelalpha-app.sh';
 
     /**
-     * A block of the YAML app config format, embedded in the page.
-     *
-     * The page's own vocabulary is scripts and files, which cannot say what platform an
-     * application is. Rather than grow a second syntax out of markdown, the page carries
-     * a block of the format that already has one, parsed by the same code.
+     * A block of the YAML app config format, embedded in the page: scripts and files cannot say
+     * what platform an application is, so the page carries the format that already can.
      */
     public const CONFIG_BLOCK = 'panelalpha.yaml';
 
@@ -81,10 +77,8 @@ class PaemdPage
     }
 
     /**
-     * Compose file shipped by the paemd page, if any.
-     *
-     * Named for the file it would be written as, so a page can ship `docker-compose.yml`
-     * under whichever conventional name it prefers.
+     * Compose file shipped by the paemd page, if any, under whichever conventional
+     * compose filename the page prefers.
      */
     public static function compose(string $content): ?string
     {
@@ -99,9 +93,8 @@ class PaemdPage
     }
 
     /**
-     * Named code blocks to write verbatim into the project tree. A block is a file
-     * snippet unless its name is one of the special names; absolute paths and
-     * traversal are rejected and a leading `./` is stripped.
+     * Named code blocks to write verbatim into the project tree, special names excluded;
+     * absolute paths and traversal are rejected and a leading `./` is stripped.
      *
      * @return list<array{path: string, contents: string}>
      */
@@ -115,17 +108,8 @@ class PaemdPage
         $special = self::specialBlockNames();
         $snippets = [];
         foreach ($matches as $match) {
-            $relativePath = $match[1];
-            if (in_array($relativePath, $special, true)) {
-                continue;
-            }
-            if (str_starts_with($relativePath, '/') || str_contains($relativePath, '..')) {
-                continue;
-            }
-            if (str_starts_with($relativePath, './')) {
-                $relativePath = ltrim($relativePath, './');
-            }
-            if ($relativePath === '') {
+            $relativePath = self::snippetPath($match[1], $special);
+            if ($relativePath === null) {
                 continue;
             }
             $snippets[] = [
@@ -135,6 +119,25 @@ class PaemdPage
         }
 
         return $snippets;
+    }
+
+    /**
+     * @param  list<string>  $special
+     */
+    private static function snippetPath(string $relativePath, array $special): ?string
+    {
+        if (in_array($relativePath, $special, true)) {
+            return null;
+        }
+        if (str_starts_with($relativePath, './')) {
+            $relativePath = substr($relativePath, 2);
+        }
+        if ($relativePath === '' || $relativePath === '.'
+            || str_starts_with($relativePath, '/') || str_contains($relativePath, '..')) {
+            return null;
+        }
+
+        return $relativePath;
     }
 
     /**

@@ -5,10 +5,8 @@ namespace App\Lib\Deploy\Credentials;
 use App\Lib\Deploy\Platform\ManifestException;
 
 /**
- * A manifest's `credentials:` block: the login an application is seeded with,
- * which the engine generates, keeps on the project and delivers to the app.
- *
- * Only the declaration. {@see AppCredentials} turns it into values.
+ * A manifest's `credentials:` block: the login an app is seeded with, which the engine generates, keeps and
+ * delivers. Only the declaration; {@see AppCredentials} turns it into values.
  */
 final class CredentialSpec
 {
@@ -30,10 +28,11 @@ final class CredentialSpec
 
     private const FIELD_KEYS = ['kind', 'value', 'symbol'];
 
-    private const ENV_NAME = '/^[A-Za-z_][A-Za-z0-9_]*$/';
+    /** `\z`, not `$`: `$` would also match before a trailing newline. */
+    private const ENV_NAME = '/^[A-Za-z_][A-Za-z0-9_]*\z/';
 
-    // Written unquoted-safe into an env file compose and sh both read.
-    private const LITERAL = '/^[A-Za-z0-9@._+\-]+$/';
+    /** Written unquoted-safe into an env file compose and sh both read; `\z` for the same reason. */
+    private const LITERAL = '/^[A-Za-z0-9@._+\-]+\z/';
 
     /**
      * Filled once, when the value is first stored: 8 random hex characters, the
@@ -114,6 +113,24 @@ final class CredentialSpec
      */
     private static function parseField(string $name, mixed $field, \Closure $fail): array
     {
+        $field = self::fieldMapping($name, $field, $fail);
+        $kind = $field['kind'] ?? null;
+        if (! is_string($kind) || ! in_array($kind, self::KINDS, true)) {
+            throw $fail("credentials.fields.{$name}.kind must be one of ".implode(', ', self::KINDS));
+        }
+
+        $value = self::fieldValue($name, $field['value'] ?? null, $kind, $fail);
+        $symbol = self::fieldSymbol($name, $field['symbol'] ?? false, $kind, $fail);
+
+        return ['kind' => $kind, 'value' => $value, 'symbol' => $symbol];
+    }
+
+    /**
+     * @param  \Closure(string): ManifestException  $fail
+     * @return array<mixed>
+     */
+    private static function fieldMapping(string $name, mixed $field, \Closure $fail): array
+    {
         if (preg_match(self::ENV_NAME, $name) !== 1) {
             throw $fail("credentials.fields: '{$name}' is not a valid environment variable name");
         }
@@ -124,12 +141,13 @@ final class CredentialSpec
         if ($unknown !== []) {
             throw $fail("credentials.fields.{$name}: unknown key(s) ".implode(', ', $unknown));
         }
-        $kind = $field['kind'] ?? null;
-        if (! is_string($kind) || ! in_array($kind, self::KINDS, true)) {
-            throw $fail("credentials.fields.{$name}.kind must be one of ".implode(', ', self::KINDS));
-        }
 
-        $value = $field['value'] ?? null;
+        return $field;
+    }
+
+    /** @param  \Closure(string): ManifestException  $fail */
+    private static function fieldValue(string $name, mixed $value, string $kind, \Closure $fail): ?string
+    {
         if ($value !== null && $kind === self::KIND_PASSWORD) {
             throw $fail("credentials.fields.{$name}: a password is generated, it cannot declare a value");
         }
@@ -141,7 +159,12 @@ final class CredentialSpec
             );
         }
 
-        $symbol = $field['symbol'] ?? false;
+        return $value;
+    }
+
+    /** @param  \Closure(string): ManifestException  $fail */
+    private static function fieldSymbol(string $name, mixed $symbol, string $kind, \Closure $fail): bool
+    {
         if (! is_bool($symbol)) {
             throw $fail("credentials.fields.{$name}.symbol must be true or false");
         }
@@ -149,7 +172,7 @@ final class CredentialSpec
             throw $fail("credentials.fields.{$name}.symbol applies to a password only");
         }
 
-        return ['kind' => $kind, 'value' => $value, 'symbol' => $symbol];
+        return $symbol;
     }
 
     /** @param \Closure(string): ManifestException $fail */

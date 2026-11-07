@@ -112,6 +112,14 @@ class EntryPointFallbackTest extends TestCase
         $this->assertSame('.venv/bin/mass', PythonRuntime::startCommand($this->dir));
     }
 
+    public function test_a_comment_after_the_table_headers_still_offers_the_console_script(): void
+    {
+        $this->write('pyproject.toml', "[project]  # app\nname = \"Music-Assistant\"\n\n"
+            . "[project.scripts]  # cli\nmass-cli = \"a:b\"\nmusic_assistant = \"a:main\"\n");
+
+        $this->assertSame('.venv/bin/music_assistant', PythonRuntime::startCommand($this->dir));
+    }
+
     public function test_of_several_scripts_the_one_named_after_the_project_is_run(): void
     {
         $this->write('pyproject.toml', "[project]\nname = \"Music-Assistant\"\n\n"

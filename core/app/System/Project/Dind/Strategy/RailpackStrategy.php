@@ -2,25 +2,23 @@
 
 namespace App\System\Project\Dind\Strategy;
 
+use App\Exceptions\BuildStalledException;
+use App\Exceptions\DiskLimitException;
+use App\Lib\Deploy\CacheManager\BuildCache;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\Strategies;
+use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\ShellOperations;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The last two things to try: build the project with Railpack, or serve a
- * page saying nothing could be built.
- *
- * Railpack works out how to build a project nobody wrote a recipe for. It
- * runs as `railpack prepare` plus `docker buildx build` against the railpack
- * frontend, which uses Docker's own BuildKit — no separate daemon container.
- * Every failure returns false rather than throwing, because the fallback
- * compose is always available and a page is a better answer than an error.
- *
- * The image is named per account. Each account has an isolated inner Docker
- * daemon (sysbox), so there is no cross-account name collision.
+ * The last resort: build with Railpack, else serve a page saying nothing could be built. Only a first deploy gets
+ * the page; a failed redeploy or a stopped build fails the deploy, so the running version keeps serving.
  */
 class RailpackStrategy
 {
@@ -28,10 +26,15 @@ class RailpackStrategy
 
     private const PREPARE_TIMEOUT_SECONDS = 900;
 
-    /** Kill inside the container this many seconds before the host gives up. */
-    private const INNER_TIMEOUT_MARGIN = 60;
-
     private const DEFAULT_PORT = 80;
+
+    private const SERVING_CHECK_TIMEOUT_SECONDS = 30;
+
+    /** The command Railpack gives an image when its plan names nothing to start. */
+    private const IDLE_SHELL = '/bin/bash';
+
+    /** Where a project that builds nothing to run keeps the pages it ships, in the order they are tried. */
+    public const STATIC_OUTPUT_DIRS = ['dist', 'public', 'build'];
 
     private DindProject $dind;
 
@@ -45,10 +48,31 @@ class RailpackStrategy
         if ($this->tryBuild($projectDir, $chown)) {
             return;
         }
+        if ($this->servesAnApp()) {
+            throw new \RuntimeException('The Railpack build failed, so the running version was kept. The build output is in the deploy log.');
+        }
 
         $this->dind->shell()->logger()?->info(
             'No compose file and automatic build unavailable, generating basic compose'
         );
+        $this->applyAsUnknown($projectDir, $chown, $sourceLabel);
+    }
+
+    /** A stack that cannot be listed counts as serving: the placeholder never replaces what may be running. */
+    private function servesAnApp(): bool
+    {
+        try {
+            return $this->dind->accountDaemon()->stackContainerIds(timeout: self::SERVING_CHECK_TIMEOUT_SECONDS) !== [];
+        } catch (\Throwable $e) {
+            Log::info('Could not list the running stack before the Railpack fallback', ['error' => $e->getMessage()]);
+
+            return true;
+        }
+    }
+
+    /** The placeholder page for a project its detected strategy could not run, recorded as the fallback. */
+    public function applyAsUnknown(string $projectDir, ?string $chown, string $sourceLabel): void
+    {
         $this->dind->freezeDeploySnapshot([
             'deploy_strategy' => Strategies::FALLBACK,
             'deploy_label' => 'Unknown',
@@ -56,33 +80,24 @@ class RailpackStrategy
         $this->applyFallback($projectDir, $chown, $sourceLabel);
     }
 
+    /** The page saying nothing could be built, a 404 on every path; an index.html the user shipped is served as a static site. */
     public function applyFallback(string $projectDir, ?string $chown, string $sourceLabel): void
     {
-        // No entry to name: the page written below is index.html, which is
-        // what nginx looks for on its own. The config is still written,
-        // because the compose file mounts it either way.
-        $this->dind->composeWriter()->writeStaticNginxConf($projectDir, null, $chown);
-        $this->dind->composeWriter()->writeGeneratedCompose($projectDir, DeployCompose::staticNginx(), $chown);
-        $this->dind->composeWriter()->writeFallbackIndexHtml($projectDir, $sourceLabel, $chown);
+        $writer = $this->dind->composeWriter();
+        $writer->writeGeneratedCompose($projectDir, DeployCompose::staticNginx(), $chown);
+
+        if ($writer->writeFallbackIndexHtml($projectDir, $sourceLabel, $chown)) {
+            $writer->writePlaceholderNginxConf($projectDir, $chown);
+        } else {
+            $writer->writeStaticNginxConf($projectDir, null, $chown);
+        }
     }
 
     /**
-     * Build the user's app with Railpack and run the resulting image.
-     *
-     * On success a compose file that references the image (no bind-mount) is
-     * written to $projectDir and true is returned. On any failure false is
-     * returned so the caller can fall back to the basic nginx compose.
+     * The account-writable ~/.panelalpha: unlike /tmp the host reaches it, unlike the root-owned home (SFTP chroot) the
+     * account can write there. Re-asserted, as an older or restored account may lack it; the home if it cannot be made.
      */
-    /**
-     * A directory in the account's home that the account can write to.
-     *
-     * Created at account setup, but re-asserted here rather than assumed: an
-     * account made before it existed, or one whose home was restored from a
-     * backup, would otherwise fail exactly the way the home itself does, and
-     * a railpack build is not the place to discover it. Falls back to the
-     * home when it cannot be made, which is no worse than the old behaviour.
-     */
-    private function accountScratchDir(?string $chown): string
+    private function accountScratchDir(): string
     {
         $home = rtrim($this->dind->homeDirPath(), '/');
         $scratch = $home.'/'.AppConfigDirectory::DIRNAME;
@@ -93,10 +108,8 @@ class RailpackStrategy
         }
 
         try {
-            $system->exec(['sudo', 'mkdir', '-p', $scratch], [], 30);
-            if (is_string($chown) && $chown !== '') {
-                $system->exec(['sudo', 'chown', $chown, $scratch], [], 30);
-            }
+            [$uid, $gid] = $this->dind->userModel()->linuxIds();
+            $system->exec(Privileged::scripts()->makeHomeEntry($scratch, '0700', $uid.':'.$gid), [], 30);
         } catch (\Throwable $e) {
             Log::info('Could not prepare the railpack scratch directory', ['error' => $e->getMessage()]);
 
@@ -106,12 +119,19 @@ class RailpackStrategy
         return $system->directoryExists($scratch) ? $scratch : $home;
     }
 
+    /**
+     * Build with Railpack and write a compose file running the image (no bind-mount); false on any failure, for the
+     * basic nginx compose. The image is named per account: each has its own inner Docker daemon (sysbox).
+     */
     private function tryBuild(string $projectDir, ?string $chown): bool
     {
         $username = $this->dind->userModel()->username;
         $imageName = "panelalpha-{$username}-app:latest";
         if (! $this->buildImage($projectDir, $chown, $imageName)) {
             return false;
+        }
+        if (! $this->imageStarts($imageName)) {
+            return $this->serveStaticOutput($projectDir, $chown);
         }
 
         $port = $this->imagePort($imageName, $username);
@@ -128,9 +148,8 @@ class RailpackStrategy
     }
 
     /**
-     * Build $projectDir into $imageName in this account. Also what a staging,
-     * clone or push uses to build the image a copied run file names from the
-     * copied tree.
+     * Build $projectDir into $imageName in this account. Also what a staging, clone or push uses to build the image
+     * a copied run file names from the copied tree.
      */
     public function buildImage(string $projectDir, ?string $chown, string $imageName): bool
     {
@@ -150,66 +169,31 @@ class RailpackStrategy
 
         $logger?->info('Building application image (railpack + buildx)');
 
-        $innerTimeout = max(60, self::BUILD_TIMEOUT_SECONDS - self::INNER_TIMEOUT_MARGIN);
-        // In the account's home rather than /tmp, because the engine rewrites
-        // the plan between `railpack prepare` and the build and only the home
-        // directory is reachable from the host side -- but in ~/.panelalpha
-        // rather than the home itself, which is root:root 755.
-        //
-        // `railpack prepare --plan-out` runs *as the account* and so could not
-        // create a file there:
-        //
-        //     ERRO open /home/strapi/railpack-plan-tmp.json: permission denied
-        //     No compose file and automatic build unavailable, generating basic compose
-        //
-        // and the deploy then fell through to the nginx placeholder, reporting
-        // "no recipe recognised it" for a project whose recipe had matched and
-        // failed. The home is root-owned for SFTP chrooting, which is not
-        // negotiable; ~/.panelalpha is created beside it at account setup,
-        // belongs to the account, and is already excluded from the build
-        // context. Nothing else about the arrangement changes -- still in the
-        // home, still reachable from the host.
-        $scratch = $this->accountScratchDir($chown);
+        return $this->buildInScratch($projectDir, $chown, $imageName, $username, $system, $shell);
+    }
+
+    /**
+     * Prepare, preload and build in the scratch dir. The finally removes the plan and the prepare script whatever
+     * happened, so neither is left in the customer's home directory.
+     */
+    private function buildInScratch(string $projectDir, ?string $chown, string $imageName, string $username, System $system, ShellOperations $shell): bool
+    {
+        $scratch = $this->accountScratchDir();
         $planPath = $scratch.'/railpack-plan-tmp.json';
         $buildScriptPath = $scratch.'/railpack-build-tmp.sh';
 
-        $prepareScript =
-            '#!/bin/bash'."\n".
-            'set -e'."\n".
-            'cd '.escapeshellarg($projectDir)."\n".
-            'railpack prepare . --plan-out '.escapeshellarg($planPath)."\n";
+        $prepareScript = self::prepareScript($projectDir, $planPath);
 
         try {
-            $system->filesystem()->writeFileReplacingPath($buildScriptPath, $prepareScript, $chown, '700');
-            $shell->execAsUser(['bash', $buildScriptPath], [], self::PREPARE_TIMEOUT_SECONDS);
-            $planJson = $this->readPlan($planPath, $username);
+            $planJson = $this->preparePlan($system, $shell, $prepareScript, $buildScriptPath, $planPath, $chown, $username);
+            $this->preloadPlanImages($planJson);
+            $build = $this->buildCommand($projectDir, $planPath, $imageName);
 
-            // The preload waits for the plan rather than running before
-            // `railpack prepare`: the builder and runtime tags follow
-            // Railpack's own release calendar and the plan is the only thing
-            // that knows which it resolved to -- a list kept beside this
-            // loaded two tags the build then pulled itself.
-            $this->dind->innerDocker()->preloadRailpackBaseImages(
-                RailpackCache::preloadImages((string) $planJson)
-            );
-            $buildScript =
-                '#!/bin/bash'."\n".
-                'set -e'."\n".
-                'cleanup() { rm -f '.escapeshellarg($planPath).'; }'."\n".
-                'trap cleanup EXIT'."\n".
-                self::dockerConfigLine($this->dind->registryLogin()->configDir()).
-                'cd '.escapeshellarg($projectDir)."\n".
-                "timeout --foreground --kill-after=30 {$innerTimeout}".
-                ' docker buildx build'.
-                ' --build-arg BUILDKIT_SYNTAX="'.RailpackCache::FRONTEND_IMAGE.'"'.
-                ' -f '.escapeshellarg($planPath).
-                ' --output '.escapeshellarg("type=docker,name={$imageName}").
-                ' . ';
-
-            $system->filesystem()->writeFileReplacingPath($buildScriptPath, $buildScript, $chown, '700');
             $this->dind->innerBuildGuard()->during(
-                fn (): string => $shell->execAsUser(['bash', $buildScriptPath], [], self::BUILD_TIMEOUT_SECONDS)
+                fn (): string => $shell->execAsUser($build, [], self::BUILD_TIMEOUT_SECONDS)
             );
+        } catch (DiskLimitException|BuildStalledException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::info(
                 "Railpack build failed for {$username} (unsupported project or build error), falling back to nginx compose.",
@@ -218,13 +202,70 @@ class RailpackStrategy
 
             return false;
         } finally {
-            // The build script's trap removes the plan on a normal run; this
-            // covers the paths that never reach it (prepare failed, rewrite
-            // threw), so no plan is left in the customer's home directory.
-            $system->exec(['sudo', 'rm', '-f', $buildScriptPath, $planPath]);
+            $this->removeScratchFiles($system, $buildScriptPath, $planPath);
         }
 
         return true;
+    }
+
+    /** As root, which staged and renamed them in; best effort, so the cleanup never replaces the build's outcome. */
+    private function removeScratchFiles(System $system, string ...$paths): void
+    {
+        try {
+            $system->exec(Privileged::files()->removeIfExists(...$paths));
+        } catch (\Throwable $e) {
+            Log::warning('Could not remove the railpack scratch files', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private static function prepareScript(string $projectDir, string $planPath): string
+    {
+        return
+            '#!/bin/bash'."\n".
+            'set -e'."\n".
+            'cd '.escapeshellarg($projectDir)."\n".
+            'railpack prepare . --plan-out '.escapeshellarg($planPath)."\n";
+    }
+
+    private function preparePlan(System $system, ShellOperations $shell, string $prepareScript, string $buildScriptPath, string $planPath, ?string $chown, string $username): ?string
+    {
+        $system->filesystem()->writeFileReplacingPath($buildScriptPath, $prepareScript, $chown, '700');
+        $shell->execAsUser(['bash', $buildScriptPath], [], self::PREPARE_TIMEOUT_SECONDS);
+
+        return $this->readPlan($planPath, $username);
+    }
+
+    /**
+     * After `railpack prepare`, not before: the builder and runtime tags follow Railpack's own release calendar,
+     * and the plan is the only thing that knows which it resolved to.
+     */
+    private function preloadPlanImages(?string $planJson): void
+    {
+        $this->dind->innerDocker()->preloadRailpackBaseImages(
+            RailpackCache::preloadImages((string) $planJson)
+        );
+    }
+
+    /**
+     * `docker buildx build` of the plan, run from the broker against the account's daemon, with the project's registry
+     * logins when it has any.
+     *
+     * @return list<string>
+     */
+    private function buildCommand(string $projectDir, string $planPath, string $imageName): array
+    {
+        $configDir = $this->dind->registryLogin()->configDir();
+        $cacheFrom = (new ProjectBuildCache($this->dind))->cacheFrom($projectDir, BuildCache::RAILPACK);
+
+        return [
+            'env', 'PWD='.$projectDir, ...($configDir === null ? [] : ['DOCKER_CONFIG='.$configDir]),
+            'docker', 'buildx', 'build',
+            '--build-arg', 'BUILDKIT_SYNTAX='.RailpackCache::FRONTEND_IMAGE,
+            ...array_merge(...array_map(static fn (string $from): array => ['--cache-from', $from], $cacheFrom)),
+            '-f', $planPath,
+            '--output', "type=docker,name={$imageName}",
+            '.',
+        ];
     }
 
     /** The plan railpack wrote, or null when it cannot be read; the build still runs, without a preload. */
@@ -244,14 +285,64 @@ class RailpackStrategy
         return is_string($planJson) && $planJson !== '' ? $planJson : null;
     }
 
+    /** An image with nothing to start runs `bash -c /bin/bash`, which exits at once and restarts forever. */
+    private function imageStarts(string $imageName): bool
+    {
+        try {
+            $config = $this->dind->accountDaemon()->image($imageName)['Config'] ?? null;
+        } catch (\Exception) {
+            return true;
+        }
+
+        return ! is_array($config) || ! in_array($config['Cmd'] ?? null, [null, [], [self::IDLE_SHELL]], true);
+    }
+
+    /**
+     * A template whose package.json only builds or lints ships its pages; served by nginx
+     * they answer, where an image with nothing to start cannot. False when there are none.
+     */
+    private function serveStaticOutput(string $projectDir, ?string $chown): bool
+    {
+        $logger = $this->dind->shell()->logger();
+        $outputDir = $this->staticOutputDir($projectDir);
+        if ($outputDir === null) {
+            $logger?->warn('Railpack found no start command, and the project has no index.html to serve instead');
+
+            return false;
+        }
+        $logger?->warn("Railpack found no start command; serving the pages in {$outputDir}/ as a static site");
+        $this->dind->freezeDeploySnapshot(['deploy_strategy' => Strategies::STATIC, 'deploy_label' => 'Static']);
+        $writer = $this->dind->composeWriter();
+        $writer->writeStaticNginxConf($projectDir, null, $chown);
+        $writer->writeGeneratedCompose(
+            $projectDir,
+            DeployCompose::framework(
+                ['runtime' => PlatformManifest::RUNTIME_NGINX, 'output_directory' => $outputDir],
+                self::DEFAULT_PORT
+            ),
+            $chown
+        );
+
+        return true;
+    }
+
+    private function staticOutputDir(string $projectDir): ?string
+    {
+        $fs = $this->dind->system()->filesystem();
+        foreach (self::STATIC_OUTPUT_DIRS as $dir) {
+            if ($fs->fileExists("{$projectDir}/{$dir}/index.html")) {
+                return $dir;
+            }
+        }
+
+        return null;
+    }
+
     private function imagePort(string $imageName, string $username): int
     {
         $port = self::DEFAULT_PORT;
         try {
-            $inspectJson = $this->dind->shell()->execAsUser(
-                ['docker', 'image', 'inspect', $imageName, '--format', '{{json .Config.ExposedPorts}}']
-            );
-            $exposedPorts = json_decode(trim($inspectJson), true);
+            $exposedPorts = $this->dind->accountDaemon()->image($imageName)['Config']['ExposedPorts'] ?? null;
             if (is_array($exposedPorts) && ! empty($exposedPorts)) {
                 $detected = (int) explode('/', (string) array_key_first($exposedPorts))[0];
                 if ($detected > 0) {
@@ -266,11 +357,5 @@ class RailpackStrategy
         }
 
         return $port;
-    }
-
-    /** The build pulls the plan's images itself; with logins held, it reads them from there. */
-    public static function dockerConfigLine(?string $configDir): string
-    {
-        return $configDir === null ? '' : 'export DOCKER_CONFIG='.escapeshellarg($configDir)."\n";
     }
 }

@@ -7,16 +7,15 @@ use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Strategies;
 
 /**
- * The event a deploy raises when no recipe claimed the project: Railpack means a
- * toolchain recognised it, fallback means nothing did. Fires at detection, so a
- * deploy that then fails or is cancelled still counts the gap.
+ * The event a deploy raises at detection when no recipe claimed the project, naming the toolchains that recognised
+ * it, so a deploy that then fails or is cancelled still counts the gap.
  */
 final class DetectionSignal
 {
-    /** No platform manifest claimed the project; Railpack was handed it. */
+    /** No platform manifest claimed the project, and the request handed it to Railpack. */
     public const RAILPACK = 'detection-railpack';
 
-    /** Nothing claimed or recognised the project at all. */
+    /** No platform manifest claimed the project. */
     public const FALLBACK = 'detection-fallback';
 
     /**
@@ -33,7 +32,7 @@ final class DetectionSignal
         if ($strategy === Strategies::RAILPACK) {
             return [
                 'signal' => self::RAILPACK,
-                'detail' => 'No recipe matched; built by Railpack'
+                'detail' => 'Built by Railpack, as the request chose'
                     .self::recognisedSuffix(self::recognisedRuntimes($projectDir)),
             ];
         }
@@ -41,7 +40,8 @@ final class DetectionSignal
         if ($strategy === Strategies::FALLBACK) {
             return [
                 'signal' => self::FALLBACK,
-                'detail' => 'No recipe matched; label: '.$label,
+                'detail' => 'No recipe matched; label: '.$label
+                    .self::recognisedSuffix(self::recognisedRuntimes($projectDir)),
             ];
         }
 

@@ -82,12 +82,22 @@ class ComposeUsableNestedProbeTest extends ProbeTestCase
         $this->assertFalse($this->evaluate());
     }
 
-    public function test_a_project_railpack_recognises_is_left_to_railpack(): void
+    public function test_a_node_app_a_recipe_claims_keeps_its_recipe(): void
     {
         $this->write('docker/docker-compose.yml', self::ZORAXY);
         $this->writeJson('package.json', ['name' => 'x', 'scripts' => ['start' => 'node index.js']]);
 
-        $this->assertFalse($this->evaluate());
+        $this->assertSame('node', DetectProjectStrategy::detect($this->dir)['strategy']);
+    }
+
+    /** Detection never hands a project to Railpack, so the stack it ships is better than the placeholder page. */
+    public function test_a_package_no_recipe_claims_runs_the_stack_it_ships(): void
+    {
+        $this->write('docker/docker-compose.yml', self::ZORAXY);
+        $this->writeJson('package.json', ['name' => 'x', 'scripts' => ['lint' => 'eslint .']]);
+
+        $this->assertSame(['compose_path' => $this->dir . '/docker/docker-compose.yml'], $this->evaluate());
+        $this->assertSame('compose', DetectProjectStrategy::detect($this->dir)['strategy']);
     }
 
     public function test_a_workstation_stack_binding_the_repository_is_skipped(): void

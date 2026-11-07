@@ -352,6 +352,39 @@ class FailureOutputTest extends TestCase
     }
 
     /**
+     * The `maven:*-eclipse-temurin-*` images print the same decoy without a path.
+     */
+    public function test_the_temurin_maven_entrypoint_decoy_does_not_lead_either(): void
+    {
+        $output = <<<'OUT'
+        Compiling application on host
+        mkdir: Permission denied
+        Can not write to /root/.m2/copy_reference_file.log. Wrong volume permissions? Carrying on ...
+        Picked up JAVA_TOOL_OPTIONS: -Xmx1433m
+        [INFO] Scanning for projects...
+        [ERROR] Failed to execute goal on project chronos: Could not collect dependencies for project org.apache.mesos:chronos:jar:3.0.3-SNAPSHOT
+        [ERROR] -> [Help 1]
+        OUT;
+
+        $selected = FailureOutput::select($output);
+
+        $this->assertStringStartsWith('[ERROR] Failed to execute goal on project chronos', $selected);
+        $this->assertStringNotContainsString('mkdir: Permission denied', $selected);
+        $this->assertStringNotContainsString('Can not write to', $selected);
+    }
+
+    public function test_a_stderr_of_only_the_entrypoint_decoy_gives_way_to_mavens_failure(): void
+    {
+        $stderr = "mkdir: Permission denied\nCan not write to /root/.m2/copy_reference_file.log. Wrong volume permissions? Carrying on ...\nPicked up JAVA_TOOL_OPTIONS: -Xmx1433m\n";
+        $stdout = "[INFO] BUILD FAILURE\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project questdb: Compilation failure\n";
+
+        $reason = FailureOutput::fromStreams($stderr, $stdout);
+
+        $this->assertStringContainsString('[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin', $reason);
+        $this->assertStringNotContainsString('mkdir: Permission denied', $reason);
+    }
+
+    /**
      * ...but a `mkdir` that names anything else is still a finding. Only the
      * maven image's own path is dropped.
      */

@@ -36,32 +36,30 @@ class DetectionSignalTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_a_railpack_project_reports_that_no_recipe_matched(): void
+    public function test_a_package_no_recipe_claims_is_the_fallback_named_by_its_toolchain(): void
     {
-        // No platform manifest claims a bare package.json; Node recognises it,
-        // so Railpack gets the project.
         $this->writeFile('package.json', '{"name":"app"}');
         $decision = DetectProjectStrategy::detect($this->tmpDir);
-        $this->assertSame(Strategies::RAILPACK, $decision['strategy']);
+        $this->assertSame(Strategies::FALLBACK, $decision['strategy']);
+
+        $event = DetectionSignal::forDecision($decision, $this->tmpDir);
+
+        $this->assertNotNull($event);
+        $this->assertSame(DetectionSignal::FALLBACK, $event['signal']);
+        $this->assertStringContainsString('recognised by node', $event['detail']);
+    }
+
+    public function test_railpack_chosen_by_the_request_names_the_toolchain_that_recognised_the_project(): void
+    {
+        $this->writeFile('package.json', '{"name":"app"}');
+        $decision = DetectProjectStrategy::detect($this->tmpDir, null, Strategies::RAILPACK);
 
         $event = DetectionSignal::forDecision($decision, $this->tmpDir);
 
         $this->assertNotNull($event);
         $this->assertSame(DetectionSignal::RAILPACK, $event['signal']);
         $this->assertStringContainsString('Railpack', $event['detail']);
-    }
-
-    public function test_the_railpack_detail_names_the_toolchain_that_recognised_the_project(): void
-    {
-        $this->writeFile('package.json', '{"name":"app"}');
-        $decision = DetectProjectStrategy::detect($this->tmpDir);
-
-        $event = DetectionSignal::forDecision($decision, $this->tmpDir);
-
-        // Which recipe to write next is the whole point of the event.
-        $this->assertNotNull($event);
-        $this->assertStringContainsString('recognised by', $event['detail']);
-        $this->assertStringContainsString('node', $event['detail']);
+        $this->assertStringContainsString('recognised by node', $event['detail']);
     }
 
     public function test_a_project_nothing_recognises_still_reports_the_fallback(): void

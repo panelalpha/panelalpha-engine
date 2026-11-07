@@ -29,9 +29,10 @@ That choice is for this deploy only. The next one without it goes back to what t
 It tries the most specific match first.
 
 1. A kind of project it already knows. A Docker Compose file is near the top, then a Dockerfile, then well-known apps and languages, then a folder of HTML pages.
-2. A general build, if none of those matched but the repository still has a language file such as `package.json` or `composer.json`.
-3. A Docker Compose file in a `docker`, `.docker`, `deploy`, `deployment`, `docker-compose` or `compose` folder, if nothing else matched. It is run from the top of the repository, with its paths adjusted to match.
-4. Unknown, if nothing matched.
+2. A Docker Compose file in a `docker`, `.docker`, `deploy`, `deployment`, `docker-compose` or `compose` folder, if nothing else matched. It is run from the top of the repository, with its paths adjusted to match.
+3. Unknown, if nothing matched. The deploy shows the "Project not configured" page, with HTTP status 404 on every address.
+
+A general build (Railpack) is never picked by itself. Ask for it, for example `Deploy https://github.com/org/app as railpack`.
 
 The first match is the one it uses. That matters most if you have a `docker-compose.yml` you only use on your own computer. The engine cannot tell that from a file meant for the live site, so it will try to use it. Rename the file if you do not want that.
 
@@ -39,7 +40,7 @@ A few ready-made apps, such as WordPress, are recognised even when they also shi
 
 ### Extra notes in the repository
 
-You can add a folder named `.panelalpha` with extra notes: extra commands, extra settings, or which known app this is. Older projects may use a file named `panelalpha.yaml` or `panelalpha.md` instead.
+You can add a folder named `.panelalpha` with extra notes: extra commands, extra settings, or which known app this is. A `panelalpha.yaml` or `panelalpha.md` at the top of the repository works too. Every key it may hold: [panelalpha.yaml](panelalpha-yaml.md).
 
 Those notes cannot tell the engine to look in a subfolder. The files that mark the project still have to sit at the top. A few known apps already have their own layout (phpBB lives in a subfolder, and the engine handles that). For anything else, move the project to the top of the repository.
 
@@ -55,3 +56,4 @@ A site that does have an `index.html` is handled as an ordinary static site. See
 
 - [Project types](project-types.md): what each kind of project looks like.
 - [What your repository needs](what-your-repo-needs.md): the files that have to sit at the top.
+- [panelalpha.yaml](panelalpha-yaml.md): what a repository can tell the engine that detection cannot work out.

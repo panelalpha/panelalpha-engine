@@ -60,6 +60,7 @@ final class GoRuntime implements Runtime
         return 'go';
     }
 
+    /** A go directive newer than every listed minor is honoured: an older toolchain fails the build outright. */
     public function resolve(ProjectContext $context): ?Requirement
     {
         $gomod = $context->contents('go.mod');
@@ -78,8 +79,6 @@ final class GoRuntime implements Runtime
             }
         }
 
-        // Newer than anything listed: honour it. An older toolchain fails the
-        // build outright.
         return new Requirement('go', $wanted, $wanted, 'go.mod go directive');
     }
 
@@ -89,33 +88,34 @@ final class GoRuntime implements Runtime
     }
 
     /**
-     * `go build -o app .` writes a non-executable library archive (mode 644)
-     * when the root is not `package main`, and the container restart-loops
-     * behind a 502. Resolve the package first, then refuse a non-runnable app.
+     * Builds the resolved package and refuses a non-runnable result: a non-main root builds a mode 644 archive.
+     * git (for modules fetched from VCS) is best effort, since `apk add` needs root.
      */
     public static function buildCommand(string $projectDir, ?string $sourceUrl = null): string
     {
         [$package, $ambiguous] = self::resolveMainPackage($projectDir, $sourceUrl);
 
-        // Guessed among several entrypoints: name them so the user can pick.
-        $note = $ambiguous === [] ? '' : 'echo '.escapeshellarg(
-            'PANELALPHA: several Go main packages ('.implode(', ', $ambiguous).'); building '
-            .$package.'. Set the build command to choose another.'
-        ).' && ';
-
-        // git is only for modules fetched from VCS instead of GOPROXY, and
-        // apk add needs root: a hard install fails the chain with `ERROR:
-        // Unable to open log: Permission denied`. Best effort.
-        return $note.'{ apk add --no-cache git || true; }'
+        return self::ambiguityNote($package, $ambiguous).'{ apk add --no-cache git || true; }'
             .' && go build -o app '.$package
             .' && { [ -x app ] || { echo "PANELALPHA: no runnable Go program found"; exit 1; }; }';
     }
 
     /**
-     * Import path of the package to build: the repo root when it is `package
-     * main`, else the entrypoint named after the module or repository, else the
-     * only one, else the first under cmd/, least nested, alphabetical. Falls
-     * back to "."; buildCommand() then fails on the executable guard.
+     * Names the entrypoints a guess was made among, so the user can pick another.
+     *
+     * @param  list<string>  $ambiguous
+     */
+    private static function ambiguityNote(string $package, array $ambiguous): string
+    {
+        return $ambiguous === [] ? '' : 'echo '.escapeshellarg(
+            'PANELALPHA: several Go main packages ('.implode(', ', $ambiguous).'); building '
+            .$package.'. Set the build command to choose another.'
+        ).' && ';
+    }
+
+    /**
+     * The package to build: a `package main` root, else the entrypoint named after the module or repository,
+     * else the only one, else the first under cmd/, least nested; "." fails buildCommand()'s executable guard.
      */
     public static function mainPackage(string $projectDir, ?string $sourceUrl = null): string
     {
@@ -147,17 +147,7 @@ final class GoRuntime implements Runtime
             }
         }
 
-        // `weed` in module `seaweedfs`: shortened name, trusted only if unique.
-        $contained = array_values(array_filter($entrypoints, static function (string $dir) use ($names): bool {
-            $base = strtolower(basename($dir));
-            foreach ($names as $name) {
-                if (strlen($base) >= 3 && str_contains($name, $base)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }));
+        $contained = self::containedEntrypoints($entrypoints, $names);
         if (count($contained) === 1) {
             return ['./'.$contained[0], []];
         }
@@ -168,6 +158,27 @@ final class GoRuntime implements Runtime
         $seen = $entrypoints !== [] ? $entrypoints : $candidates;
 
         return ['./'.self::conventionalPick($candidates, $names), count($seen) > 1 ? $seen : []];
+    }
+
+    /**
+     * Entrypoints whose name a program name contains, `weed` in module `seaweedfs`; trusted only when unique.
+     *
+     * @param  list<string>  $entrypoints
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    private static function containedEntrypoints(array $entrypoints, array $names): array
+    {
+        return array_values(array_filter($entrypoints, static function (string $dir) use ($names): bool {
+            $base = strtolower(basename($dir));
+            foreach ($names as $name) {
+                if (strlen($base) >= 3 && str_contains($name, $base)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
     }
 
     /**
@@ -205,12 +216,7 @@ final class GoRuntime implements Runtime
             static fn (string $dir): bool => preg_match('#(^|/)cmd/#', $dir) === 1
         ));
         $pool = $underCmd !== [] ? $underCmd : $candidates;
-        // `ds-dev` beside `ds-host` (Dropserver): a development helper is not
-        // what gets served, and being shorter used to make it the pick.
-        $serving = array_values(array_filter(
-            $pool,
-            static fn (string $dir): bool => ! self::isHelper(basename($dir))
-        ));
+        $serving = self::servingPrograms($pool);
         if ($serving !== []) {
             $pool = $serving;
         }
@@ -234,6 +240,20 @@ final class GoRuntime implements Runtime
         return $pool[0];
     }
 
+    /**
+     * The pool without helpers: Dropserver's `ds-dev` is not what gets served, though shorter than `ds-host`.
+     *
+     * @param  list<string>  $pool
+     * @return list<string>
+     */
+    private static function servingPrograms(array $pool): array
+    {
+        return array_values(array_filter(
+            $pool,
+            static fn (string $dir): bool => ! self::isHelper(basename($dir))
+        ));
+    }
+
     /** Words that mark a program as a helper: `ds-dev`, `api-mock`, `schema-gen`. */
     private const HELPER_WORDS = [
         'dev', 'devel', 'debug', 'mock', 'fake', 'gen', 'generate', 'generator', 'codegen',
@@ -248,7 +268,8 @@ final class GoRuntime implements Runtime
     }
 
     /**
-     * Directories holding a `package main` file, relative to the project root.
+     * Directories holding a `package main` file, relative to the project root, sorted so that the listing
+     * order of the filesystem never reaches the build command.
      *
      * @return list<string>
      */
@@ -259,7 +280,31 @@ final class GoRuntime implements Runtime
         }
 
         $found = [];
-        $iterator = new \RecursiveIteratorIterator(
+        $iterator = self::goSourceFiles($projectDir);
+
+        foreach ($iterator as $file) {
+            /** @var \SplFileInfo $file */
+            $contents = AccountHomeRead::contents($file->getPathname());
+            if (! is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
+                continue;
+            }
+            if (! self::constraintsHold($contents)) {
+                continue;
+            }
+            $dir = self::relativeDir($projectDir, $file);
+            $stub = self::isGenerateStub($contents);
+            $found[$dir] = ($found[$dir] ?? true) && ! $stub;
+        }
+        $directories = array_keys(array_filter($found));
+        sort($directories, SORT_STRING);
+
+        return $directories;
+    }
+
+    /** Non-test .go files outside vendored, hidden and `_` directories; an unreadable directory is skipped. */
+    private static function goSourceFiles(string $projectDir): \RecursiveIteratorIterator
+    {
+        return new \RecursiveIteratorIterator(
             new \RecursiveCallbackFilterIterator(
                 new \RecursiveDirectoryIterator($projectDir, \FilesystemIterator::SKIP_DOTS),
                 static function (\SplFileInfo $file): bool {
@@ -273,36 +318,28 @@ final class GoRuntime implements Runtime
                     return str_ends_with($name, '.go') && ! str_ends_with($name, '_test.go');
                 }
             ),
-            // An unreadable directory is skipped, not fatal.
             \RecursiveIteratorIterator::LEAVES_ONLY,
             \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
+    }
 
-        foreach ($iterator as $file) {
-            /** @var \SplFileInfo $file */
-            $contents = AccountHomeRead::contents($file->getPathname());
-            if (! is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
-                continue;
-            }
-            if (! self::constraintsHold($contents)) {
-                continue;
-            }
-            $dir = substr(dirname($file->getPathname()), strlen($projectDir));
-            $dir = trim($dir, '/');
-            $dir = $dir === '' ? '.' : $dir;
-            // An empty main is a go:generate stub (Traefik's root).
-            $stub = preg_match('/^func\s+main\s*\(\s*\)\s*\{\s*\}/m', $contents) === 1;
-            $found[$dir] = ($found[$dir] ?? true) && ! $stub;
-        }
+    private static function relativeDir(string $projectDir, \SplFileInfo $file): string
+    {
+        $dir = substr(dirname($file->getPathname()), strlen($projectDir));
+        $dir = trim($dir, '/');
 
-        return array_keys(array_filter($found));
+        return $dir === '' ? '.' : $dir;
+    }
+
+    /** An empty main is a go:generate stub (Traefik's root). */
+    private static function isGenerateStub(string $contents): bool
+    {
+        return preg_match('/^func\s+main\s*\(\s*\)\s*\{\s*\}/m', $contents) === 1;
     }
 
     /**
-     * Whether the build compiles this file: its `//go:build` line (or legacy
-     * `// +build` lines) evaluated for linux with cgo off, which is how the
-     * golang alpine image builds. `ignore`, `tools` and any other custom tag
-     * are off, so the tools.go idiom's `package main` is not the program.
+     * Whether a linux, cgo-off build (the golang alpine image) compiles this file per `//go:build` or `// +build`.
+     * Custom tags such as `ignore` and `tools` are off, so the tools.go idiom's `package main` is not the program.
      */
     public static function constraintsHold(string $source): bool
     {
@@ -312,22 +349,28 @@ final class GoRuntime implements Runtime
         }
         preg_match_all('#^//\s*\+build\s+(.+?)\s*$#m', $header, $lines);
         foreach ($lines[1] as $line) {
-            // Space-separated options are ORed, comma-separated terms ANDed.
-            $any = false;
-            foreach (preg_split('/\s+/', $line) ?: [] as $option) {
-                $all = true;
-                foreach (explode(',', $option) as $term) {
-                    $negated = str_starts_with($term, '!');
-                    $all = $all && (self::tagIsSet(ltrim($term, '!')) !== $negated);
-                }
-                $any = $any || $all;
-            }
-            if (! $any) {
+            if (! self::legacyLineHolds($line)) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /** One `// +build` line: space-separated options are ORed, comma-separated terms ANDed. */
+    private static function legacyLineHolds(string $line): bool
+    {
+        $any = false;
+        foreach (preg_split('/\s+/', $line) ?: [] as $option) {
+            $all = true;
+            foreach (explode(',', $option) as $term) {
+                $negated = str_starts_with($term, '!');
+                $all = $all && (self::tagIsSet(ltrim($term, '!')) !== $negated);
+            }
+            $any = $any || $all;
+        }
+
+        return $any;
     }
 
     /** Null when the expression cannot be parsed: the file is then counted, as before. */

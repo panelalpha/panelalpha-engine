@@ -7,20 +7,11 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
-use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * A usable compose file in one of {@see NestedCompose::DIRECTORIES}, for a
- * repository that has nothing else to deploy: zoraxy and WikiDocs keep theirs
- * under docker/ and used to land on the placeholder page.
- *
- * Only a project no platform and no Railpack runtime claims: its manifest sits
- * below every other one, and a runtime Railpack recognises vetoes it. So it
- * cannot take a repository that deploys some other way today.
- *
- * The same filters as the root probe, applied to the file as it reads from the
- * root. Yields `compose_path` or false.
+ * A usable compose file in one of {@see NestedCompose::DIRECTORIES} (zoraxy's docker/), for a repository nothing
+ * else claims; the root probe's filters, applied as the file reads from the root. Yields `compose_path` or false.
  */
 final class ComposeUsableNestedProbe implements PlatformProbe
 {
@@ -37,10 +28,6 @@ final class ComposeUsableNestedProbe implements PlatformProbe
 
     public function evaluate(ProjectContext $context): bool|array
     {
-        if (RuntimeRegistry::anyRecognises($context)) {
-            return false;
-        }
-
         foreach (NestedCompose::DIRECTORIES as $directory) {
             if (! $context->hasFile($directory) || ! is_dir($context->path($directory))) {
                 continue;
@@ -51,8 +38,16 @@ final class ComposeUsableNestedProbe implements PlatformProbe
             }
         }
 
-        // Any other top-level directory, when it is the only one holding a usable
-        // file (autobase keeps its stack in console/). Two make it a guess.
+        return $this->soleUsableElsewhere($context);
+    }
+
+    /**
+     * Any other top-level directory, when it is the only one holding a usable file (autobase's console/); two make it a guess.
+     *
+     * @return false|array{compose_path: string}
+     */
+    private function soleUsableElsewhere(ProjectContext $context): bool|array
+    {
         $found = [];
         foreach ($this->otherDirectories($context) as $directory) {
             $relative = $this->usableIn($directory, $context);
@@ -77,8 +72,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
     }
 
     /**
-     * Top-level directories outside the list, less the ones whose name says
-     * they hold tests, examples, docs or a dev setup (huly's `ws-tests/`).
+     * Top-level directories outside the list, less those named for tests, examples, docs or a dev setup (huly's `ws-tests/`).
      *
      * @return list<string>
      */

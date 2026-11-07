@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Platform\AppConfig;
 
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\PaemdPage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -137,6 +138,40 @@ class PaemdPageTest extends TestCase
         $paths = array_column(PaemdPage::fileSnippets($page), 'path');
 
         $this->assertSame(['safe/ok.txt'], $paths);
+    }
+
+    public function test_file_snippets_skip_a_name_that_is_only_a_leading_dot_slash(): void
+    {
+        $page = "- `./`\n```text\nempty\n```\n\n- `./conf/app.ini`\n```ini\n  key = value  \n```\n";
+
+        $this->assertSame([['path' => 'conf/app.ini', 'contents' => 'key = value']], PaemdPage::fileSnippets($page));
+    }
+
+    public function test_file_snippets_keep_the_dot_of_a_dot_slash_dotfile(): void
+    {
+        $page = "`./.htaccess`\n```apache\nRewriteEngine On\n```\n\n`./.env.example`\n```env\nA=1\n```\n\n`./.user.ini`\n```ini\nx = 1\n```\n";
+
+        $this->assertSame(['.htaccess', '.env.example', '.user.ini'], array_column(PaemdPage::fileSnippets($page), 'path'));
+        $this->assertSame('.htaccess', AppConfig::fromMarkdown($page)?->files()[0]['path']);
+    }
+
+    /** `.//.env` would land on the root `.env` and `./.` on the project directory itself. */
+    public function test_file_snippet_paths_are_checked_after_the_dot_slash_is_stripped(): void
+    {
+        $page = "`.//.env`\n```env\nA=1\n```\n\n`./.`\n```text\ndot\n```\n\n`./ok.txt`\n```text\nyes\n```\n";
+
+        $this->assertSame(['ok.txt'], array_column(PaemdPage::fileSnippets($page), 'path'));
+    }
+
+    public function test_file_snippets_keep_page_order(): void
+    {
+        $this->assertSame(
+            [
+                ['path' => 'wp-content/mu-plugins/panelalpha-app.php', 'contents' => "<?php\necho 'hello';"],
+                ['path' => 'docker-compose.override.yml', 'contents' => "services:\n  app:\n    restart: unless-stopped"],
+            ],
+            PaemdPage::fileSnippets($this->page())
+        );
     }
 
     public function test_file_snippets_on_a_page_without_blocks(): void

@@ -92,7 +92,7 @@ PY;
      * The exact layout and the exact failure: NetBox's `netbox/manage.py`
      * beside `netbox/netbox/wsgi.py`, with gunicorn in requirements.txt.
      *
-     * `--pythonpath netbox` is what makes `netbox.wsgi` importable at all --
+     * `--pythonpath=netbox` is what makes `netbox.wsgi` importable at all --
      * the outer `netbox/` carries no `__init__.py`, so from the repository root
      * the module does not resolve as `netbox.wsgi`.
      */
@@ -108,7 +108,7 @@ PY;
 
         $this->assertStringContainsString('gunicorn', $command);
         $this->assertStringContainsString('netbox.wsgi:application', $command);
-        $this->assertStringContainsString("--pythonpath 'netbox'", $command);
+        $this->assertStringContainsString('--pythonpath=netbox netbox.wsgi:application', $command);
         $this->assertStringContainsString('--bind ' . TestNetwork::ANY . ':' . PythonRuntime::PORT, $command);
     }
 
@@ -149,7 +149,7 @@ PY;
         $command = PythonRuntime::startCommand($dir, ["uvicorn\n"]);
 
         $this->assertStringContainsString('svc.asgi:application', $command);
-        $this->assertStringContainsString("--app-dir 'svc'", $command);
+        $this->assertStringContainsString('--app-dir=svc svc.asgi:application', $command);
         $this->assertStringContainsString('--host ' . TestNetwork::ANY, $command);
     }
 
@@ -207,5 +207,55 @@ PY;
         ]);
 
         $this->assertStringContainsString('python main.py', PythonRuntime::startCommand($dir, ["gunicorn\n"]));
+    }
+
+    /**
+     * A quote in the directory name is escaped as `manage.py`'s path is; quoted bare it ended the
+     * entrypoint with "unterminated quoted string".
+     */
+    public function test_a_search_path_holding_a_quote_is_escaped_for_gunicorn(): void
+    {
+        $dir = $this->project([
+            "it's/manage.py" => "#!/usr/bin/env python3\n",
+            "it's/proj/__init__.py" => '',
+            "it's/proj/wsgi.py" => self::WSGI,
+        ]);
+
+        $command = PythonRuntime::djangoStartCommand($dir, ["gunicorn\n"]);
+
+        $this->assertStringContainsString("--pythonpath='it'\\''s' proj.wsgi:application", $command);
+        $this->assertStringContainsString("'it'\\''s/manage.py' migrate", PythonRuntime::manageCommand($dir, 'migrate'));
+    }
+
+    public function test_a_search_path_holding_a_quote_is_escaped_for_uvicorn(): void
+    {
+        $dir = $this->project([
+            "it's/manage.py" => "#!/usr/bin/env python3\n",
+            "it's/proj/__init__.py" => '',
+            "it's/proj/asgi.py" => "application = get_asgi_application()\n",
+        ]);
+
+        $command = PythonRuntime::startCommand($dir, ["uvicorn\n"]);
+
+        $this->assertStringContainsString("--app-dir='it'\\''s' proj.asgi:application", $command);
+    }
+
+    /** A directory named like an option is the flag's value or a path, never an option of gunicorn, uvicorn or python. */
+    public function test_a_search_path_starting_with_a_dash_is_never_an_option(): void
+    {
+        $wsgi = $this->project([
+            '-x/manage.py' => "#!/usr/bin/env python3\n",
+            '-x/proj/__init__.py' => '',
+            '-x/proj/wsgi.py' => self::WSGI,
+        ]);
+        $asgi = $this->project([
+            '-x/manage.py' => "#!/usr/bin/env python3\n",
+            '-x/proj/__init__.py' => '',
+            '-x/proj/asgi.py' => "application = get_asgi_application()\n",
+        ]);
+
+        $this->assertStringContainsString('--pythonpath=-x proj.wsgi:application', PythonRuntime::djangoStartCommand($wsgi, ["gunicorn\n"]));
+        $this->assertStringContainsString('--app-dir=-x proj.asgi:application', PythonRuntime::startCommand($asgi, ["uvicorn\n"]));
+        $this->assertStringContainsString(' ./-x/manage.py migrate', PythonRuntime::manageCommand($wsgi, 'migrate'));
     }
 }

@@ -6,16 +6,8 @@ use App\Lib\Deploy\Platform\SourceRecipes;
 use App\Lib\Deploy\Source\RepoUrl;
 
 /**
- * Where a project's app config lives.
- *
- * Two locations — the repository, then the engine's own directory for that
- * repository — and the repository wins: an upstream that has learned to
- * describe its own hosting knows more than a page written about it from
- * outside.
- *
- * Within a location the `.panelalpha/` directory is tried first, then the
- * older single-file forms. Markdown before YAML there, as it always was: it
- * is the format the existing pages are written in.
+ * Where a project's app config lives: the repository wins over the engine's directory for it, as an upstream describing its own
+ * hosting knows more. In each, `.panelalpha/` comes first, then markdown before YAML, the format existing pages are written in.
  */
 final class AppConfigLocator
 {
@@ -29,8 +21,12 @@ final class AppConfigLocator
 
     public const ORIGIN_ENGINE = 'engine';
 
+    /** The engine's legacy host pages, in the words a deploy log names them with. */
+    public const ORIGIN_PAEMD = 'paemd';
+
     /**
      * Every place an app config could be, most specific first.
+     * The engine's pages from before the directories are still read, so one an operator wrote on a host keeps working.
      *
      * @return list<array{path: string, kind: string, origin: string}>
      */
@@ -53,8 +49,6 @@ final class AppConfigLocator
             'kind' => self::KIND_DIRECTORY,
             'origin' => self::ORIGIN_ENGINE,
         ];
-        // The pages the engine shipped before the directories existed. Still
-        // read, so a page an operator wrote on a host keeps working.
         $legacy = PaemdPage::pagesDirectory().'/'.$slug;
         $candidates[] = ['path' => $legacy.'/'.AppConfig::MARKDOWN_FILENAME, 'kind' => self::KIND_MARKDOWN, 'origin' => self::ORIGIN_ENGINE];
         $candidates[] = ['path' => $legacy.'/'.AppConfig::YAML_FILENAME, 'kind' => self::KIND_YAML, 'origin' => self::ORIGIN_ENGINE];
@@ -98,7 +92,7 @@ final class AppConfigLocator
 
     /**
      * How to name a candidate in a log line: what it is called inside the
-     * project, or the repository slug the engine filed it under.
+     * project, or the repository slug the engine filed it under (a legacy page's directory, not its file).
      *
      * @param  array{path: string, origin: string}  $candidate
      */
@@ -115,8 +109,6 @@ final class AppConfigLocator
             }
             $relative = substr($path, strlen($root) + 1);
 
-            // A directory is the slug; a legacy page is the slug plus a
-            // filename.
             return str_ends_with($relative, '.md') || str_ends_with($relative, '.yaml')
                 ? dirname($relative)
                 : $relative;
@@ -145,6 +137,57 @@ final class AppConfigLocator
     }
 
     /**
+     * How an error names the app config behind a candidate: the file inside the
+     * project, or the engine's recipe for the repository it was cloned from.
+     *
+     * @param  array{path: string, kind: string, origin: string}  $candidate
+     */
+    private static function subject(array $candidate): string
+    {
+        if ($candidate['origin'] !== self::ORIGIN_ENGINE) {
+            return $candidate['kind'] === self::KIND_DIRECTORY
+                ? AppConfigDirectory::DIRNAME.'/'.AppConfigDirectory::CONFIG
+                : basename($candidate['path']);
+        }
+
+        return self::isLegacyPage($candidate)
+            ? 'engine page '.self::describe($candidate).'/'.basename($candidate['path'])
+            : self::recipeSubject(self::describe($candidate));
+    }
+
+    /**
+     * How an error names the `panelalpha.yaml` a recipe directory ships, under the
+     * slug the engine filed the repository under.
+     */
+    public static function recipeSubject(string $name): string
+    {
+        return 'engine recipe '.$name.'/'.AppConfigDirectory::CONFIG;
+    }
+
+    /**
+     * Where a candidate came from, in the words a deploy log uses: the repository,
+     * the engine's recipe tree, or the legacy pages an operator kept on the host.
+     *
+     * @param  array{path: string, kind: string, origin: string}  $candidate
+     */
+    public static function origin(array $candidate): string
+    {
+        return self::isLegacyPage($candidate) ? self::ORIGIN_PAEMD : $candidate['origin'];
+    }
+
+    /**
+     * A page under the engine's legacy pages directory, written before the
+     * recipe directories existed.
+     *
+     * @param  array{path: string, origin: string}  $candidate
+     */
+    private static function isLegacyPage(array $candidate): bool
+    {
+        return $candidate['origin'] === self::ORIGIN_ENGINE
+            && str_starts_with($candidate['path'], PaemdPage::pagesDirectory().'/');
+    }
+
+    /**
      * @param  array{path: string, kind: string, origin: string}  $candidate
      */
     private static function read(AppConfigSource $source, array $candidate): ?AppConfig
@@ -153,7 +196,8 @@ final class AppConfigLocator
             return AppConfigDirectory::read(
                 $source,
                 $candidate['path'],
-                $candidate['origin'] === self::ORIGIN_ENGINE
+                $candidate['origin'] === self::ORIGIN_ENGINE,
+                self::subject($candidate)
             );
         }
 
@@ -166,7 +210,7 @@ final class AppConfigLocator
         }
 
         return $candidate['kind'] === self::KIND_YAML
-            ? AppConfig::fromYaml($content)
-            : AppConfig::fromMarkdown($content);
+            ? AppConfig::fromYaml($content, self::subject($candidate))
+            : AppConfig::fromMarkdown($content, self::subject($candidate));
     }
 }
