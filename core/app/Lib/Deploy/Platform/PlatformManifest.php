@@ -10,9 +10,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 
 /**
- * One platform or app, as declared by a YAML file under `resources/platforms/` or
- * `resources/apps/<id>/panelalpha.yaml`: how to recognise it, its image, its port, and the
- * ordered commands that build, install, upgrade and start it. A new stack is a new YAML file.
+ * One platform or app, declared in `resources/platforms/` or `resources/apps/<id>/panelalpha.yaml`: how to recognise it, its image,
+ * its port, and the ordered commands that build, install, upgrade and start it. A new stack is a new YAML file.
  */
 final class PlatformManifest
 {
@@ -79,9 +78,8 @@ final class PlatformManifest
         public readonly ?string $image,
         public readonly array $requires,
         /**
-         * A smaller base for the final stage, when building and running want different
-         * images: .NET's SDK compiles, its aspnet runtime runs, and shipping the SDK cost
-         * 294s of layer export against 63s of compile. `{version}` is substituted.
+         * A smaller base for the final stage, when building and running want different images (.NET's SDK compiles, its aspnet
+         * runtime runs, and shipping the SDK cost more than the compile). `{version}` is substituted.
          */
         public readonly ?string $runtimeImage,
         public readonly ?string $outputDirectory,
@@ -89,17 +87,14 @@ final class PlatformManifest
         public readonly array $commandsFrom,
         public readonly ?string $database,
         /**
-         * The application's own root inside the repository, '' when they are the same
-         * directory. phpBB ships its application in phpBB/ with only build tooling at the
-         * top level, and everything below would otherwise be invisible.
+         * The application's own root inside the repository, '' when they are the same directory: phpBB ships its application in
+         * phpBB/ with only build tooling at the top, and everything below would otherwise be invisible.
          */
         public readonly string $appRoot,
         public readonly string $docroot,
         /**
-         * `--build-arg` values a repository's own Dockerfile needs, keyed by arg name.
-         * Not `--target`: a target stops the build there, so Kimai's `apache` stage would
-         * have no `/opt/kimai` in it, while its `ARG BASE` reaches later
-         * `FROM ${BASE}-base` stages. Values are literals, never templates.
+         * `--build-arg` values a repository's own Dockerfile needs, by arg name, literals, never templates. Not `--target`, which stops
+         * the build there: Kimai's `apache` stage would lack `/opt/kimai`, while its `ARG BASE` reaches later `FROM ${BASE}-base` stages.
          *
          * @var array<string, string>
          */
@@ -112,9 +107,8 @@ final class PlatformManifest
          */
         public readonly array $systemPackages,
         /**
-         * The PHP host frontend pass: null runs package.json's `build` script when it
-         * has one, false never runs the pass, a command replaces that script and runs
-         * even when package.json declares none. `runtime: php` only.
+         * The PHP host frontend pass (`runtime: php` only): null runs package.json's `build` script when it has one, false never
+         * runs the pass, and a command replaces that script and runs even when package.json declares none.
          */
         public readonly string|false|null $frontendBuild,
         /**
@@ -124,17 +118,15 @@ final class PlatformManifest
         public readonly ?CredentialSpec $credentials,
         public readonly array $detect,
         /**
-         * Health checks this manifest adds to the ones its runtime brings, as `<group>`
-         * or `<group>/<id>` references resolved by `CheckRegistry`. Additions only: a
-         * manifest never names its own runtime's group.
+         * Health checks this manifest adds to its runtime's, as `<group>` or `<group>/<id>` references resolved by `CheckRegistry`.
+         * Additions only: a manifest never names its own runtime's group.
          *
          * @var list<string>
          */
         public readonly array $checks,
         /**
-         * Shipped checks this application answers wrongly by design, each with the
-         * reason, reported as skipped rather than run. Apaxy's product is a
-         * directory listing, which `_baseline/no-directory-listing` exists to fail.
+         * Shipped checks this application answers wrongly by design, each with the reason, reported as skipped rather than run
+         * (Apaxy's product is a directory listing, which `_baseline/no-directory-listing` exists to fail).
          *
          * @var list<array{check: string, reason: string, covered_by: ?string}>
          */
@@ -158,6 +150,9 @@ final class PlatformManifest
     }
 
     /**
+     * Errors name the manifest once its id is read, as what it calls itself is what the author looks for. Two manifests can share
+     * a strategy: Astro builds to static HTML or to a Node server, with different rules and commands but one identity downstream.
+     *
      * @param  array<string, mixed>  $raw  decoded manifest JSON
      * @param  bool  $requireDetect  false for a recipe that is looked up rather
      *                               than detected — {@see SourceRecipes}, where the path the file
@@ -176,15 +171,10 @@ final class PlatformManifest
         $reader->assertNoUnknownKeys(self::KNOWN_KEYS);
 
         $id = $reader->identifier('id');
-        // Errors from here on name the manifest rather than its file: what it calls itself
-        // is what the author looks for.
         $reader->nameErrorsAfter($id);
 
         return new self(
             $id,
-            // Two manifests can describe one strategy: an Astro project builds to static
-            // HTML or to a Node server depending on its config — different detect rules,
-            // runtimes and commands, but the same 'astro' identity downstream.
             $reader->identifier('strategy', $id),
             $reader->text('label'),
             $reader->integer('priority', 'must be an integer — higher is checked first'),
@@ -215,11 +205,8 @@ final class PlatformManifest
     }
 
     /**
-     * A manifest's `check:` list, as `<group>` or `<group>/<id>` references resolved by
-     * `CheckRegistry`; a single string is accepted for the common case of adding one.
-     *
-     * Validated at load, not at use: `AppHealth::runChecks()` swallows the throw from an
-     * unknown reference and reports `serving: unknown, checks: []`.
+     * A manifest's `check:` list (or one string), checked at load, as `AppHealth::runChecks()` swallows an unknown reference's
+     * throw. A group may begin with `_`, as `_baseline` does; the id stays a plain lowercase slug, as HealthCheck enforces.
      *
      * @return list<string>
      *
@@ -241,8 +228,6 @@ final class PlatformManifest
 
         $checks = [];
         foreach ($raw as $reference) {
-            // The group may begin with `_`: the baseline group every application is asked
-            // is `_baseline`. The id stays a plain lowercase slug, as HealthCheck enforces.
             if (! is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*(/[a-z0-9][a-z0-9-]*)?$#', $reference) !== 1) {
                 throw $reader->fail("check entries must be 'group' or 'group/id'");
             }
@@ -257,10 +242,8 @@ final class PlatformManifest
     }
 
     /**
-     * Refuse a reference no check answers to, at load rather than at health-check time.
-     *
-     * Loaded rather than resolved through `CheckRegistry::for()`, which also needs a
-     * runtime group. The registry caches, so this is what the resolution costs anyway.
+     * Refuse a reference no check answers to, at load; a recipe's own check, not in `resources/checks/`, is asked first. The cached
+     * registry is loaded, not resolved via `for()`, which needs a runtime group; one that cannot load is its own file's bug to report.
      *
      * @throws ManifestException
      */
@@ -269,8 +252,6 @@ final class PlatformManifest
         ManifestReader $reader,
         ?string $recipeChecks = null
     ): void {
-        // A recipe's own check is not in `resources/checks/`, so it is asked about first.
-        // Whether the file is well-formed is the registry's finding, reported once.
         if (CheckRegistry::recipeReferences($recipeChecks, [$reference]) !== []) {
             return;
         }
@@ -278,12 +259,21 @@ final class PlatformManifest
         try {
             $groups = CheckRegistry::all();
         } catch (\Throwable $e) {
-            // A malformed shipped check is a packaging bug in its own file,
-            // reported where it lives. Refusing every manifest that mentions a
-            // check would bury that under a tree-wide failure.
             return;
         }
 
+        self::assertShippedCheck($reference, $groups, $reader);
+    }
+
+    /**
+     * The shipped group $reference names, and the check in it when it names one.
+     *
+     * @param  array<string, list<HealthCheck>>  $groups
+     *
+     * @throws ManifestException
+     */
+    private static function assertShippedCheck(string $reference, array $groups, ManifestReader $reader): void
+    {
         [$group, $id] = str_contains($reference, '/')
             ? explode('/', $reference, 2)
             : [$reference, null];
@@ -306,13 +296,8 @@ final class PlatformManifest
     }
 
     /**
-     * `check_skip`: shipped checks this application is asked and answers wrongly
-     * by design, e.g. `{check: _baseline/no-directory-listing, reason: "..."}`.
-     *
-     * Refused here rather than ignored at health time: an unknown or unasked
-     * check, a missing reason, or an `error` check waived with no `covered_by`
-     * naming the `error` check that asks the question instead. Without that
-     * last rule a skip could hide an outage.
+     * `check_skip`: shipped checks this application is asked and answers wrongly by design. Refused here, not ignored at health
+     * time: an unknown or unasked check, no reason, or an `error` check waived without an `error` check covering it, hiding an outage.
      *
      * @param  list<string>  $checks  this manifest's own `check:` list
      * @return list<array{check: string, reason: string, covered_by: ?string}>
@@ -333,9 +318,24 @@ final class PlatformManifest
             throw $reader->fail('check_skip must be a list of {check, reason} entries');
         }
 
-        // The checks this manifest is asked, by reference, and which of them ship.
-        // A registry that cannot load is reported by its own file, as in
-        // assertCheckReference(); the runner still refuses an uncovered error skip.
+        [$asked, $shipped] = self::askedAndShippedChecks($runtime, $checks, $recipeChecks);
+        $skips = self::readSkipEntries($reader, $raw);
+        if ($asked !== null && $shipped !== null) {
+            self::assertSkipsAreAsked($reader, $skips, $asked, $shipped);
+        }
+
+        return array_values($skips);
+    }
+
+    /**
+     * The checks this manifest is asked, by reference, and which ship; nulls when the registry cannot load, which its own file
+     * reports, as in assertCheckReference(), while the runner still refuses an uncovered error skip.
+     *
+     * @param  list<string>  $checks
+     * @return array{0: ?array<string, HealthCheck>, 1: ?array<string, true>}
+     */
+    private static function askedAndShippedChecks(string $runtime, array $checks, ?string $recipeChecks): array
+    {
         try {
             $asked = [];
             foreach (CheckRegistry::for($runtime, $checks, $recipeChecks) as $check) {
@@ -352,6 +352,17 @@ final class PlatformManifest
             $shipped = null;
         }
 
+        return [$asked, $shipped];
+    }
+
+    /**
+     * @param  list<mixed>  $raw
+     * @return array<string, array{check: string, reason: string, covered_by: ?string}>
+     *
+     * @throws ManifestException
+     */
+    private static function readSkipEntries(ManifestReader $reader, array $raw): array
+    {
         $skips = [];
         foreach ($raw as $entry) {
             if (! is_array($entry) || array_is_list($entry) || array_diff(array_keys($entry), ['check', 'reason', 'covered_by']) !== []) {
@@ -375,33 +386,41 @@ final class PlatformManifest
             $skips[$reference] = ['check' => $reference, 'reason' => trim($reason), 'covered_by' => $cover];
         }
 
-        if ($asked !== null && $shipped !== null) {
-            foreach ($skips as $reference => $skip) {
-                if (! isset($shipped[$reference])) {
-                    throw $reader->fail("check_skip '{$reference}': the engine ships no such check");
-                }
-                if (! isset($asked[$reference])) {
-                    throw $reader->fail("check_skip '{$reference}': this manifest is never asked that check");
-                }
-                $cover = $skip['covered_by'];
-                if ($cover !== null) {
-                    if ($cover === $reference || isset($skips[$cover]) || ! isset($asked[$cover])) {
-                        throw $reader->fail(
-                            "check_skip '{$reference}': covered_by '{$cover}' must be another check this manifest is asked and does not skip"
-                        );
-                    }
-                }
-                if ($asked[$reference]->severity === HealthCheck::SEVERITY_ERROR
-                    && ($cover === null || $asked[$cover]->severity !== HealthCheck::SEVERITY_ERROR)) {
+        return $skips;
+    }
+
+    /**
+     * @param  array<string, array{check: string, reason: string, covered_by: ?string}>  $skips
+     * @param  array<string, HealthCheck>  $asked
+     * @param  array<string, true>  $shipped
+     *
+     * @throws ManifestException
+     */
+    private static function assertSkipsAreAsked(ManifestReader $reader, array $skips, array $asked, array $shipped): void
+    {
+        foreach ($skips as $reference => $skip) {
+            if (! isset($shipped[$reference])) {
+                throw $reader->fail("check_skip '{$reference}': the engine ships no such check");
+            }
+            if (! isset($asked[$reference])) {
+                throw $reader->fail("check_skip '{$reference}': this manifest is never asked that check");
+            }
+            $cover = $skip['covered_by'];
+            if ($cover !== null) {
+                if ($cover === $reference || isset($skips[$cover]) || ! isset($asked[$cover])) {
                     throw $reader->fail(
-                        "check_skip '{$reference}' has severity error: name the error check that asks the question "
-                        .'instead in covered_by, or a skip could hide an outage'
+                        "check_skip '{$reference}': covered_by '{$cover}' must be another check this manifest is asked and does not skip"
                     );
                 }
             }
+            if ($asked[$reference]->severity === HealthCheck::SEVERITY_ERROR
+                && ($cover === null || $asked[$cover]->severity !== HealthCheck::SEVERITY_ERROR)) {
+                throw $reader->fail(
+                    "check_skip '{$reference}' has severity error: name the error check that asks the question "
+                    .'instead in covered_by, or a skip could hide an outage'
+                );
+            }
         }
-
-        return array_values($skips);
     }
 
     /**
@@ -433,13 +452,8 @@ final class PlatformManifest
     }
 
     /**
-     * `docroot`, relative to the application root, normalised as `app_root` is and rejected
-     * if it escapes: it becomes Apache's DocumentRoot, and '../' would serve the account's
-     * home directory.
-     *
-     * An absent key is '' and the runtime probes for the root. `.` (or `/`) is a stated
-     * answer, PhpDocroot::ROOT, so the probe cannot move it to a `public/` the
-     * application does not serve from (OpenEMR).
+     * `docroot`, relative to the application root and refused if it escapes: as Apache's DocumentRoot, '../' would serve the
+     * account's home. Absent is '' (the runtime probes); `.` is PhpDocroot::ROOT, so no probe moves it to an unserved `public/`.
      *
      * @throws ManifestException
      */
@@ -466,11 +480,8 @@ final class PlatformManifest
     }
 
     /**
-     * `build_args`, a map of arg name => the literal value to pass.
-     *
-     * Values are strings on purpose: a template would have to be substituted from the
-     * project on disk, which is not available where these are validated, and a
-     * half-substituted value falls back to the Dockerfile's own default.
+     * `build_args`, arg name => the literal value: a template would need the project on disk, not available where these are
+     * validated, and a half-substituted value falls back to the Dockerfile's own default.
      *
      * @return array<string, string>
      *
@@ -494,10 +505,8 @@ final class PlatformManifest
     }
 
     /**
-     * `system_packages`, a list of allowlisted Debian package names.
-     *
-     * Refused rather than dropped when unknown or on another runtime: a video site
-     * that deploys green without ffmpeg accepts uploads it can never convert.
+     * `system_packages`, allowlisted Debian package names, refused rather than dropped when unknown or on another runtime: a
+     * video site that deploys green without ffmpeg accepts uploads it can never convert.
      *
      * @return list<string>
      *
@@ -551,9 +560,8 @@ final class PlatformManifest
     }
 
     /**
-     * Some commands are derived rather than declared: the Rust start command is the
-     * binary name out of Cargo.toml, the Python one is whichever of app.py, main.py or
-     * wsgi.py the project has. `commands_from` maps a command id to the resolver.
+     * `commands_from`, command id => the resolver deriving it, such as the Rust start command from Cargo.toml's binary name or
+     * the Python one from whichever of app.py, main.py or wsgi.py the project has.
      *
      * @return array<string, string>
      *
@@ -572,11 +580,8 @@ final class PlatformManifest
     }
 
     /**
-     * The toolchains this platform needs, and what each is for. A manifest names them and
-     * never states a version: the runtime reads the project to answer.
-     *
-     * `role: build` is load-bearing — that toolchain gets its own build stage and stays out
-     * of the runtime image.
+     * The toolchains this platform needs, never a version, as the runtime reads the project for it. `role: build` is load-bearing:
+     * that toolchain gets its own build stage and stays out of the runtime image.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -595,13 +600,7 @@ final class PlatformManifest
             if (! is_array($spec)) {
                 throw $reader->fail("requires.{$runtimeId}: must be a role name or an object");
             }
-            $role = $spec['role'] ?? Requirement::ROLE_RUNTIME;
-            if (! in_array($role, [Requirement::ROLE_RUNTIME, Requirement::ROLE_BUILD], true)) {
-                throw $reader->fail(
-                    "requires.{$runtimeId}: 'role' must be '"
-                    .Requirement::ROLE_RUNTIME."' or '".Requirement::ROLE_BUILD."'"
-                );
-            }
+            $role = self::requirementRole($reader, $runtimeId, $spec);
             $unknown = array_diff(array_keys($spec), ['role', 'optional']);
             if ($unknown !== []) {
                 throw $reader->fail("requires.{$runtimeId}: unknown key(s) ".implode(', ', $unknown));
@@ -610,6 +609,24 @@ final class PlatformManifest
         }
 
         return $requires;
+    }
+
+    /**
+     * @param  array<mixed>  $spec
+     *
+     * @throws ManifestException
+     */
+    private static function requirementRole(ManifestReader $reader, string $runtimeId, array $spec): string
+    {
+        $role = $spec['role'] ?? Requirement::ROLE_RUNTIME;
+        if (! in_array($role, [Requirement::ROLE_RUNTIME, Requirement::ROLE_BUILD], true)) {
+            throw $reader->fail(
+                "requires.{$runtimeId}: 'role' must be '"
+                .Requirement::ROLE_RUNTIME."' or '".Requirement::ROLE_BUILD."'"
+            );
+        }
+
+        return $role;
     }
 
     /**
@@ -682,8 +699,8 @@ final class PlatformManifest
     }
 
     /**
-     * This manifest in the shape the deploy pipeline reads. `install_command`,
-     * `build_command` and `start_command` are projections of the staged commands.
+     * This manifest in the shape the deploy pipeline reads; the commands are projections of the staged ones. Probe output goes
+     * first, so it supplies what the manifest could not know but not its identity; the resolvers run last, on the merged probes.
      *
      * @param  array<string, mixed>  $probeData  what the probes found while this manifest
      *                                           was matched — the workspace a Next app lives in, the Dockerfile a repo
@@ -694,15 +711,11 @@ final class PlatformManifest
     {
         $decision = array_merge(
             $this->baseDecision($context),
-            // Probe output first, so a probe can supply what the manifest could not know
-            // without overwriting the identity the manifest declared.
             $probeData,
             $this->extra,
             $this->identity()
         );
 
-        // Last, because the resolvers need the probe output merged: the Next output
-        // directory is relative to the workspace it found.
         return PlatformValues::apply($this, $context, $decision);
     }
 
@@ -753,8 +766,8 @@ final class PlatformManifest
     }
 
     /**
-     * Build-stage commands split by role: what installs dependencies, and what
-     * compiles assets.
+     * Build-stage commands split by role: what installs dependencies, and what compiles assets. `optional: true` has to survive in
+     * the joined text, or php.yaml's optional post-autoload-dump fails the whole build.
      *
      * @return array{0: list<string>, 1: list<string>}
      */
@@ -763,9 +776,6 @@ final class PlatformManifest
         $dependencies = [];
         $assets = [];
         foreach (PlatformMatcher::applicable($this->stage(PlatformStage::BUILD), $context) as $command) {
-            // `optional: true` means a failure is logged and the deploy goes on. Joining
-            // the commands loses the flag, so it has to survive as part of the text —
-            // otherwise php.yaml's optional post-autoload-dump fails the whole build.
             $run = $command->tolerantRun($command->run);
             if ($command->role === PlatformCommand::ROLE_DEPENDENCIES) {
                 $dependencies[] = $run;
@@ -789,11 +799,8 @@ final class PlatformManifest
     }
 
     /**
-     * The PHP runtime serves itself, from the manifest's `docroot:` and
-     * PhpBaseImage::SERVE_PATH. Only for `php`.
-     *
-     * A command rather than null, because EntrypointWriter writes nothing without one and a
-     * Laravel account would then get no key:generate and no migrate.
+     * The PHP runtime serves itself, from `docroot:` and PhpBaseImage::SERVE_PATH; a command rather than null, as EntrypointWriter
+     * writes nothing without one and a Laravel account would get no key:generate and no migrate.
      */
     private function defaultServeCommand(): ?PlatformCommand
     {

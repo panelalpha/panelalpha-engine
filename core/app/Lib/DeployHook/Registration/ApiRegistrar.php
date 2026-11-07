@@ -13,14 +13,8 @@ use Illuminate\Support\Facades\Http;
 use Psr\Http\Message\UriInterface;
 
 /**
- * What every provider's webhook API has in common: a bearer or header token, an
- * item URL under a collection, and JSON in and out. The differences -- the
- * collection URL, the payload, which verb updates and which field names the id
- * -- are the subclass's.
- *
- * The API host comes from the repository URL a tenant connected, so every call
- * passes the egress guard first, is pinned to the address it checked, and
- * follows a redirect only on that same host and port.
+ * A provider webhook API: token header, items under a collection, JSON both ways. The host is tenant-given, so
+ * each call passes the egress guard, is pinned to the checked address and follows redirects only on that host and port.
  */
 abstract class ApiRegistrar implements WebhookRegistrar
 {
@@ -109,9 +103,8 @@ abstract class ApiRegistrar implements WebhookRegistrar
     }
 
     /**
-     * GET $url with no credentials, through the egress guard, pinned to the address it checked
-     * and following no redirect; null when the host is refused or cannot be reached. The one
-     * call made to learn where a provider's API lives rather than to use it.
+     * GET $url with no credentials through the egress guard, pinned and following no redirect, to learn where
+     * a provider's API lives; null when the host is refused or cannot be reached.
      */
     protected function probe(string $url): ?Response
     {
@@ -188,9 +181,8 @@ abstract class ApiRegistrar implements WebhookRegistrar
     }
 
     /**
-     * 401, 403 and 404 are the three ways a provider says the token may not
-     * manage this repository's webhooks; a 404 is how GitHub hides a private
-     * repository the token cannot see.
+     * 401, 403 and 404 all mean the token may not manage this repository's webhooks; a 404 is how GitHub
+     * hides a private repository the token cannot see.
      */
     private function refused(Response $response): ProviderRegistrationRefused
     {

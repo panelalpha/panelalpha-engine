@@ -3,16 +3,12 @@
 namespace App\Lib\Deploy\Sidecar;
 
 /**
- * Which service in a compose file is the application, and which are the
- * things it depends on. Asked this way round: a curated list of known
- * datastores only describes software that already existed when it was written.
+ * Which service in a compose file is the application, and which are the things it depends on:
+ * asked this way round, since a datastore catalogue only knows software that existed when written.
  */
 final class ServiceRole
 {
-    /**
-     * Names projects give a job that runs to completion, and its setup verbs.
-     * Both must match for the rule.
-     */
+    /** Names projects give a job that runs to completion, and its setup verbs; both must match. */
     private const JOB_NAMES = [
         'migrate', 'migration', 'migrations',
         'init', 'setup', 'seed', 'seeder',
@@ -26,10 +22,8 @@ final class ServiceRole
     ];
 
     /**
-     * Whether a service is a one-shot job and not the application: a job often
-     * shares the app's image (dpaste's `migration` runs `image: app`). The name
-     * must be in JOB_NAMES and the command a setup verb; a published port,
-     * `expose`, healthcheck or `deploy` block vetoes it.
+     * Whether a service is a one-shot job sharing the app's image: a JOB_NAMES name and a setup verb,
+     * vetoed by ports, `expose`, a healthcheck or a `deploy` block.
      *
      * @param  array<string, mixed>  $service
      */
@@ -65,9 +59,7 @@ final class ServiceRole
     }
 
     /**
-     * Whether this is recognisably a datastore. Defaults to "no": it is used
-     * where a wrong yes does damage (choosing the proxy's port). isBacking()
-     * defaults to "yes", where a wrong no would drop the database.
+     * Whether this is recognisably a datastore; defaults to "no", unlike isBacking(), which defaults to "yes".
      *
      * @param  array<string, mixed>  $service
      * @param  list<int>  $observedPorts
@@ -90,8 +82,7 @@ final class ServiceRole
      *
      * @param  array<string, mixed>  $service
      * @param  list<int>  $observedPorts
-     * @param  array<string, mixed>  $siblings  every service in the file, for the
-     *                                          depends_on shape; omit when asking about a service in isolation
+     * @param  array<string, mixed>  $siblings  every service in the file; omit for a service in isolation
      */
     public static function isBacking(
         string $name,
@@ -111,10 +102,8 @@ final class ServiceRole
     }
 
     /**
-     * The application is the service that reaches for the others: it declares
-     * `depends_on: [db, redis]` and dependencies are depended upon. Settled
-     * earlier by the image being the published build of the repository, or
-     * being shared with a sibling (web, worker, scheduler: one app three ways).
+     * The application reaches for the others (`depends_on`), unless its image settles it first. A catalogued
+     * datastore never is, and a one-shot job is ruled out before the image tests.
      *
      * @param  array<string, mixed>  $service
      * @param  array<string, mixed>  $siblings
@@ -125,13 +114,9 @@ final class ServiceRole
         array $siblings,
         ?string $projectIdentity = null
     ): bool {
-        // A catalogued datastore (or redis-http gateway) is infrastructure
-        // even when it `depends_on` another sidecar.
         if (self::isKnownDatastore($name, $service)) {
             return false;
         }
-        // Checked before the image tests below, which would call a one-shot
-        // job sharing the app's image the application.
         if (self::isJobService($name, $service)) {
             return false;
         }
@@ -147,9 +132,8 @@ final class ServiceRole
     }
 
     /**
-     * Whether an image is the published build of the repository being
-     * deployed. `owner/repo` matches ghcr.io/owner/repo, docker.io/owner/repo
-     * and owner/repo alike, on any tag.
+     * Whether an image is the published build of the repository, from any registry and on any tag.
+     * A single-name image matches only when the repo name is the whole image name.
      */
     public static function imageIsBuildOf(string $image, ?string $projectIdentity): bool
     {
@@ -162,13 +146,10 @@ final class ServiceRole
         [$owner, $name] = self::ownerAndName($image);
         [$wantOwner, $wantName] = array_slice(explode('/', $identity), -2);
 
-        // owner/repo published as owner/repo, or as any registry's copy of it.
         if ($owner === $wantOwner && $name === $wantName) {
             return true;
         }
 
-        // Single-name images are common (docmost/docmost). Only when the repo
-        // name is the whole image name, so acme/db never matches repo `db`.
         return $owner === '' && $name === $wantName && $wantOwner === $wantName;
     }
 

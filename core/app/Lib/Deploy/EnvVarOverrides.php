@@ -5,26 +5,8 @@ namespace App\Lib\Deploy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
 
 /**
- * The environment overrides an account carries from one deploy to the next.
- *
- * They are stored on the project, not sent afresh with every deploy, so a
- * deploy that names one of them is saying "and this one too", not "these are
- * the only ones there have ever been". Replacing the stored map instead cost
- * a Symfony deploy its `APP_SECRET`: a rebuild sent `{"APP_ENV":"prod"}` to
- * correct one variable and the application came up on an empty secret it had
- * been given two deploys earlier.
- *
- * Removing one therefore needs a spelling of its own, and the empty string
- * already has that meaning everywhere these values are read — an empty
- * override is no override, in `.env` ({@see \App\\System\\Project\Dind\ProjectEnvironment})
- * and in the generated compose environment
- * ({@see ComposeEnvironment}) alike. So an empty value
- * drops the key rather than being stored as a variable that does nothing.
- *
- * Clearing every override at once is `env_vars: null`, which the controllers
- * handle: it is a different statement from "here are some overrides".
- *
- * No Laravel dependencies — unit-testable.
+ * The environment overrides an account carries from one deploy to the next: a deploy adds to them,
+ * and an empty value drops a key, as {@see ComposeEnvironment} already reads an empty one.
  */
 final class EnvVarOverrides
 {
@@ -49,8 +31,7 @@ final class EnvVarOverrides
     }
 
     /**
-     * The overrides to store for a deploy that sent `env_vars`, merged onto
-     * what the project already carries. An explicit null clears them all.
+     * The overrides to store for a deploy that sent `env_vars`, merged onto what the project carries; null clears all.
      *
      * @param  array<string, string>  $stored
      * @return array<string, string>
@@ -64,7 +45,11 @@ final class EnvVarOverrides
         return self::merge($stored, self::normalize($incoming));
     }
 
-    /** @return array<string, string> */
+    /**
+     * ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null, so null means "".
+     *
+     * @return array<string, string>
+     */
     private static function normalize(mixed $envVars): array
     {
         if (! is_array($envVars)) {
@@ -75,7 +60,6 @@ final class EnvVarOverrides
             if (! is_string($key) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
                 continue;
             }
-            // ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null.
             if ($value === null) {
                 $result[$key] = '';
 

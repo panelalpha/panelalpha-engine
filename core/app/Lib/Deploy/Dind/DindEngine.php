@@ -13,15 +13,12 @@ use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
 
 /**
- * Docker-in-Docker on sysbox: every account's own daemon inside its own
- * container, data-root `~/docker` on the account's quota. A host-held image is
- * still streamed in (DindImageStore) and reclaim runs inside the account.
+ * Docker-in-Docker on sysbox: every account's own daemon inside its own container, data-root `~/docker`
+ * on the account's quota.
  */
 final class DindEngine implements ContainerEngine
 {
-    /**
-     * Service name of the account's DinD container in its own compose file.
-     */
+    /** Service name of the account's DinD container in its own compose file. */
     public const SERVICE = 'dind';
 
     private ?DindImageStore $images = null;
@@ -41,9 +38,9 @@ final class DindEngine implements ContainerEngine
         return $this->images ??= new DindImageStore;
     }
 
+    /** The one place the ceiling is read from config; DindHostBuilder stays Laravel-free. */
     public function hostBuilder(): HostBuilder
     {
-        // The one place the ceiling is read from config; DindHostBuilder stays Laravel-free.
         $memory = self::buildMemory((string) config('deploy.build_memory', ''), HostMemoryProbe::current());
 
         return $this->hostBuilders[$memory->limit] ??= new DindHostBuilder(
@@ -65,8 +62,8 @@ final class DindEngine implements ContainerEngine
     public const MAX_BUILD_MEMORY_MB = 8192;
 
     /**
-     * 8 GB, or `DEPLOY_BUILD_MEMORY` when it parses; never more than
-     * {@see buildCeilingMb()}.
+     * 8 GB, or `DEPLOY_BUILD_MEMORY` when it parses; never more than {@see buildCeilingMb()}.
+     * An unreadable host leaves the builder's default.
      */
     public static function buildMemory(string $configured, HostMemory $host): BuildMemory
     {
@@ -78,7 +75,6 @@ final class DindEngine implements ContainerEngine
                 : new BuildMemory(trim($configured), BuildMemory::SETTING, $host);
         }
 
-        // An unreadable host leaves the builder's default.
         return new BuildMemory(
             $maxMb > 0 ? min(self::MAX_BUILD_MEMORY_MB, $maxMb).'m' : '',
             BuildMemory::HOST,

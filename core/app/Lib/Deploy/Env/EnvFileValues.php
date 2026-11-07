@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Env;
 
 /**
- * An env file's values changed in place. Only a line whose value changes is
- * rewritten, and on it only the value: every other byte of the file, and the
- * line's `export`, spacing, inline comment and line ending, are kept. A value
- * that spans lines is left as it is, and so are the lines it spans.
+ * An env file's values changed in place: only the value on a line whose value changes is rewritten, every
+ * other byte kept; a value that spans lines is left as it is.
  */
 final class EnvFileValues
 {

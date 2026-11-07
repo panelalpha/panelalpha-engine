@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * Submodule URLs over ssh (`git@host:org/lib.git`, `ssh://git@host/org/lib.git`) read over https
- * instead, for a project with no deploy key: ssh then has no key to offer, and git's
- * `-c` reaches the clone of every nested submodule too.
+ * Submodule URLs over ssh (`git@host:org/lib.git`, `ssh://git@host/org/lib.git`) read over https for a
+ * project with no deploy key: ssh has no key to offer, and git's `-c` reaches every nested submodule too.
  */
 final class SshSubmoduleRewrite
 {

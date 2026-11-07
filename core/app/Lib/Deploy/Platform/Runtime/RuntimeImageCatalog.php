@@ -5,17 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The `runtimes` block of `config/core/images.yaml`, parsed once per process:
- * which image a
- * runtime runs at a given version, and whether the engine builds it.
- *
- * Every accessor answers null for a missing file, a malformed one, or an entry
- * that does not describe what was asked, and every caller falls back to its own
- * constants. This is customer-editable config on a host that must keep
- * deploying: a bad edit loses the customisation, never the deploy.
- *
- * No Laravel dependencies — the path is relative to this file, so tests read
- * the shipped config without booting the app.
+ * The `runtimes` block of `config/core/images.yaml`, parsed once per process: each runtime's image per version.
+ * Anything missing or malformed answers null and callers fall back: a bad edit loses the customisation, never the deploy.
  */
 final class RuntimeImageCatalog
 {
@@ -45,9 +36,22 @@ final class RuntimeImageCatalog
             return null;
         }
 
-        // Java's versions are build tools, not numbers: `21-maven` is
-        // maven:3-eclipse-temurin-21 and `21-gradle` is gradle:8-jdk21. One
-        // template cannot express two families, so a version may name its own.
+        $from = self::fromFor($image, $version);
+        if ($from === null) {
+            return null;
+        }
+        $buildFrom = self::buildFromFor($image, $version);
+
+        return self::specFor($image, $runtime, $version, $from, $buildFrom);
+    }
+
+    /**
+     * The safe `from` for a version, which may name its own: Java's `21-maven` and `21-gradle` are two families.
+     *
+     * @param  array<string, mixed>  $image
+     */
+    private static function fromFor(array $image, string $version): ?string
+    {
         $from = self::overrideString($image, $version, 'from') ?? self::nonEmptyString($image, 'from');
         if ($from === null) {
             return null;
@@ -57,12 +61,16 @@ final class RuntimeImageCatalog
             return null;
         }
 
-        // A separate image for a host compile, when the runtime is the wrong
-        // one to build in. Validated the same way as `from`: this value is
-        // handed to `docker run`, so anything that is not a plain image
-        // reference is dropped rather than passed on. Dropping it falls back
-        // to `from` -- a compile in the runtime image, which is what the
-        // engine did before this key existed.
+        return $from;
+    }
+
+    /**
+     * A host-compile image, validated like `from` since it reaches `docker run`; null compiles in `from`.
+     *
+     * @param  array<string, mixed>  $image
+     */
+    private static function buildFromFor(array $image, string $version): ?string
+    {
         $buildFrom = self::overrideString($image, $version, 'build_from')
             ?? self::nonEmptyString($image, 'build_from');
         if ($buildFrom !== null) {
@@ -72,6 +80,16 @@ final class RuntimeImageCatalog
             }
         }
 
+        return $buildFrom;
+    }
+
+    /**
+     * The spec, built by the engine only with a safe repository and stub: a stub-less one would rebuild-loop.
+     *
+     * @param  array<string, mixed>  $image
+     */
+    private static function specFor(array $image, string $runtime, string $version, string $from, ?string $buildFrom): RuntimeImageSpec
+    {
         $build = $image['build'] ?? null;
         if (! is_array($build)) {
             return new RuntimeImageSpec($runtime, $version, $from, buildFrom: $buildFrom);
@@ -79,8 +97,6 @@ final class RuntimeImageCatalog
 
         $repository = self::nonEmptyString($build, 'repository');
         $stub = self::nonEmptyString($build, 'stub');
-        // A repository with no stub names an image nothing knows how to
-        // produce, and provisioning would rebuild-loop on it. Pull-only.
         if ($repository === null || $stub === null
             || ! self::isSafeRef($repository) || ! self::isSafeStub($stub)
         ) {
@@ -98,24 +114,21 @@ final class RuntimeImageCatalog
         );
     }
 
-    /** What a project that names no version gets. */
+    /** What a project that names no version gets; refused outside the declared set, which nothing would contradict. */
     public static function defaultVersion(string $runtime): ?string
     {
         $default = self::nonEmptyString(self::runtimes()[$runtime] ?? [], 'default');
         if ($default === null) {
             return null;
         }
-        // A default outside the declared set is what every project saying
-        // nothing would be handed, with nothing else in the file to contradict
-        // it.
         $versions = self::versions($runtime);
 
         return $versions === [] || in_array($default, $versions, true) ? $default : null;
     }
 
     /**
-     * The versions a resolver may choose between, in declared order — resolvers
-     * walk them oldest-first and take the first that satisfies the project.
+     * The versions in declared order, which resolvers walk oldest-first; deduplicated through a separate set,
+     * since a numeric-string key turns into an int (Rust's "1").
      *
      * @return list<string>
      */
@@ -129,25 +142,10 @@ final class RuntimeImageCatalog
         $versions = [];
         $seen = [];
         foreach ($declared as $entry) {
-            // An entry is `- version: "8.3"` with whatever else that version
-            // carries -- its prewarm priority, its note. A bare string is
-            // accepted too: it is the same statement with nothing attached,
-            // and it is what a config written before the files were merged
-            // says.
-            $version = is_array($entry) ? ($entry['version'] ?? null) : $entry;
-            if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
+            $version = self::versionOf($entry);
+            if ($version === null) {
                 continue;
             }
-            $version = trim((string) $version);
-            // YAML reads an unquoted `8.3` as a float, and `8.30` would come
-            // back "8.3"; versions are documented as quoted strings and
-            // anything not shaped like one is dropped rather than guessed.
-            if (preg_match('/^[0-9]+(?:\.[0-9]+){0,2}(?:-[a-z0-9._-]+)?$/i', $version) !== 1) {
-                continue;
-            }
-            // Kept in a separate set because PHP turns a numeric-string array
-            // key into an int: as a key, Rust's sole version "1" came back as
-            // int 1 and stopped matching the string callers compare against.
             if (isset($seen[$version])) {
                 continue;
             }
@@ -159,9 +157,26 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * Where the engine puts the image it builds for this runtime, or null when
-     * it builds none. Every PHP minor lands in `panelalpha/php`, so this is
-     * per-runtime and a caller need not invent a version to ask.
+     * An entry's version, from `- version: "8.3"` or a bare string; null unless shaped like one, since YAML reads
+     * an unquoted `8.30` as 8.3.
+     */
+    private static function versionOf(mixed $entry): ?string
+    {
+        $version = is_array($entry) ? ($entry['version'] ?? null) : $entry;
+        if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
+            return null;
+        }
+        $version = trim((string) $version);
+        if (preg_match('/^[0-9]+(?:\.[0-9]+){0,2}(?:-[a-z0-9._-]+)?$/i', $version) !== 1) {
+            return null;
+        }
+
+        return $version;
+    }
+
+    /**
+     * Where the engine puts the image it builds for this runtime, or null; per runtime, as every PHP minor
+     * lands in `panelalpha/php`.
      */
     public static function repository(string $runtime): ?string
     {
@@ -175,12 +190,8 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * The date stamped into the tags of the images built for this runtime, as
-     * `Ymd`. Bump it in the config when you change the recipe -- the stub, the
-     * extension list, the entrypoint -- and the next run builds a new image
-     * instead of serving what is already on the host under the same name.
-     *
-     * Null when the runtime declares none, and the compiled-in date stands.
+     * The `Ymd` date stamped into this runtime's built tags, bumped with the recipe so a new image gets built;
+     * null when none is declared and the compiled-in date stands.
      */
     public static function recipeDate(string $runtime): ?string
     {
@@ -190,12 +201,8 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * Is the built image the runtime itself, rather than an optimisation over a
-     * stock image that works without it? Decides whether a deploy waits for the
-     * build or carries on while it runs in the background.
-     *
-     * False when the catalogue does not say: carrying on is always survivable,
-     * blocking on an unasked-for build is not.
+     * Is the built image the runtime itself, so a deploy waits for its build? False when unsaid: carrying on is
+     * always survivable, blocking on an unasked-for build is not.
      */
     public static function runnable(string $runtime): bool
     {
@@ -288,8 +295,7 @@ final class RuntimeImageCatalog
     }
 
     /**
-     * A whitelist of what a registry reference looks like, not a blacklist of
-     * what a shell would mind: this value comes from an operator's file and
+     * A whitelist of what a registry reference looks like: this value comes from an operator's file and
      * reaches `docker build -t`.
      */
     private static function isSafeRef(string $ref): bool
@@ -317,6 +323,8 @@ final class RuntimeImageCatalog
     }
 
     /**
+     * A malformed file is the operator's problem to see in their editor, not a deploy's to fail on.
+     *
      * @return array<string, array<string, mixed>>
      */
     private static function load(): array
@@ -332,8 +340,6 @@ final class RuntimeImageCatalog
         try {
             $parsed = Yaml::parse($raw);
         } catch (\Exception $e) {
-            // The operator's problem to see in their editor, not a deploy's to
-            // fail on.
             return [];
         }
         if (! is_array($parsed) || ! isset($parsed['runtimes']) || ! is_array($parsed['runtimes'])) {

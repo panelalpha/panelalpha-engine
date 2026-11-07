@@ -6,9 +6,8 @@ use App\Models\Setting;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * The address the Hub reaches this engine at, `https://<ip>:2011`. A literal
- * public address only: the Hub refuses anything else, and saying so here is
- * cheaper than a round trip.
+ * The address the Hub reaches this engine at, `https://<ip>:2011`: a literal public address only,
+ * refused here rather than after a round trip.
  */
 final class EngineAddress
 {
@@ -30,14 +29,13 @@ final class EngineAddress
         return $ip === '' ? null : $ip;
     }
 
-    /** Null when the Hub can be pointed at it, else why not. */
+    /** Null when the Hub can be pointed at it, else why not; ::ffff:10.0.0.1 is 10.0.0.1. */
     public static function problem(string $ip): ?string
     {
         if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
             return "'{$ip}' is not an IP address. Pass the engine's public address with --ip.";
         }
 
-        // ::ffff:10.0.0.1 is 10.0.0.1.
         $mapped = preg_match('/\A::ffff:(\d+\.\d+\.\d+\.\d+)\z/i', $ip, $m) === 1 ? $m[1] : $ip;
 
         if (IpUtils::checkIp($mapped, self::NOT_PUBLIC)) {

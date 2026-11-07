@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 
 /**
- * The environment a Ruby container runs with.
- *
- * RAILS_* mean nothing to Sinatra or Rack, which read RACK_ENV instead —
- * and an app left at the default RACK_ENV runs in development mode. Both the
- * image and the compose service ask here, so the two cannot drift.
+ * The environment a Ruby container runs with, RACK_ENV for Sinatra and Rack, which ignore RAILS_*;
+ * both the image and the compose service ask here, so the two cannot drift.
  */
 final class RubyEnvironment
 {

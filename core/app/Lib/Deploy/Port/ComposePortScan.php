@@ -7,11 +7,8 @@ use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
- * The public ports a compose file offers, best first. Both ends of every
- * binding are inspected: a mapping whose container port is well known (5432,
- * 3306) is dropped even when the host port is something else (5434). What was
- * dropped comes back too, under `refused`, so a caller can tell a compose file
- * that offers nothing from one that offers only a database.
+ * The public ports a compose file offers, best first; a binding with a datastore's port at either end
+ * is dropped and returned under `refused`, so "offers nothing" and "offers only a database" differ.
  *
  * @psalm-type Refusal = array{port: int, reason: string, service: string}
  * @psalm-type Choice = array{reason: string, alternatives: list<int>}
@@ -34,9 +31,7 @@ final class ComposePortScan
     public const CHOSEN_SINGLE = 'single';
 
     /**
-     * @param  array<string, string>  $env  the project's `.env`, which compose
-     *                                      interpolates host ports with: `${HTTP_WEB_PORT:-80}:80` publishes
-     *                                      8040 when `.env` says HTTP_WEB_PORT=8040 (Poznote)
+     * @param  array<string, string>  $env  the project's `.env`, which compose interpolates host ports with
      * @return Scan
      */
     public static function of(string $composePath, array $env = []): array
@@ -69,6 +64,9 @@ final class ComposePortScan
     }
 
     /**
+     * A port another service publishes is not refused. When nothing survives, ports refused on a guess
+     * (env alone, or a datastore's number) are the site; an image that is a datastore by name never is.
+     *
      * @param  array<array-key, array<string, mixed>>  $services
      * @return Scan|array{all: list<int>, primary: int, choice: Choice, refused: list<Refusal>}
      */
@@ -76,20 +74,11 @@ final class ComposePortScan
     {
         $scan = self::scan($services);
         $ports = self::sorted($scan['public'], $scan['ranks'], $scan['demoted']);
-        // A port another service publishes legitimately is not refused, however
-        // the datastore next to it declared it.
         $refused = array_values(array_filter(
             $scan['refused'],
             static fn (array $entry): bool => ! in_array($entry['port'], $ports, true)
         ));
 
-        // Filtering must never leave the stack with nothing to point at. A
-        // service judged a datastore by its env alone is a guess --
-        // zabbix/zabbix-web-nginx-mysql is the frontend, and its MYSQL_* env
-        // names the database it connects to -- so when nothing else survives,
-        // its ports are the site. So is a datastore's port number
-        // on a service nothing else names a datastore (OpenCloud's 9200). An
-        // image that is a datastore by name (postgres:16) is never rescued.
         if ($ports === [] && $scan['guessed'] !== []) {
             $ports = self::sorted($scan['guessed']);
             $refused = array_values(array_filter(
@@ -108,10 +97,8 @@ final class ComposePortScan
     }
 
     /**
-     * Why $ports[0] leads: a preferred port, the port its service's own
-     * healthcheck probes, or only the lowest number among ports its service
-     * publishes on equal terms (Cabernet's 5004 stream over its 6077 web UI).
-     * `alternatives` are those equal ports, which only a probe can tell apart.
+     * Why $ports[0] leads: preferred, its service's healthcheck port, or only the lowest of equal ports,
+     * which are then the `alternatives` only a probe can tell apart.
      *
      * @param  list<int>  $ports
      * @param  array{ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}  $scan
@@ -150,6 +137,8 @@ final class ComposePortScan
     }
 
     /**
+     * Through ComposeYaml, not Symfony directly: it carries the anchor rescue.
+     *
      * @return array<array-key, array<string, mixed>>
      */
     private static function services(string $composePath): array
@@ -158,8 +147,6 @@ final class ComposePortScan
             return [];
         }
 
-        // Through ComposeYaml, not Symfony directly: it carries the anchor
-        // rescue, without which Baserow's published 80 and 443 are invisible.
         $parsed = ComposeYaml::parseFile($composePath);
         $services = is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
 
@@ -167,8 +154,7 @@ final class ComposePortScan
     }
 
     /**
-     * Port entries with the variables `.env` sets substituted; the rest are
-     * left for {@see EnvVarDefault}.
+     * Port entries with the variables `.env` sets substituted; the rest are left for {@see EnvVarDefault}.
      *
      * @param  array<array-key, array<string, mixed>>  $services
      * @param  array<string, string>  $env
@@ -217,11 +203,8 @@ final class ComposePortScan
     }
 
     /**
-     * `demoted` holds the ports that rank after every other web port: those no
-     * service publishes under `ports:`, only `expose:`s (Profilarr's parser
-     * exposes 5000 next to the app's published 6868), and those offered only
-     * by a service another publishing service depends_on (9Router publishes
-     * 20128 and depends on headroom's 8787).
+     * `demoted` holds the ports ranked after every other web port: expose-only ones, and those
+     * offered only by a service another publishing service depends_on.
      *
      * @param  array<array-key, array<string, mixed>>  $services
      * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}
@@ -229,46 +212,49 @@ final class ComposePortScan
     private static function scan(array $services): array
     {
         $fronted = self::frontedServices($services);
-        $ports = [];
-        $refused = [];
-        $guessed = [];
-        $ranks = [];
-        $checked = [];
-        $owners = [];
-        $published = [];
+        $scan = ['ports' => [], 'refused' => [], 'guessed' => [], 'ranks' => [], 'checked' => [], 'owners' => [], 'published' => []];
         foreach ($services as $name => $service) {
             if (self::isOptIn($service)) {
                 continue;
             }
             $found = self::serviceScan($service);
             $isBehind = in_array(strtolower((string) $name), $fronted, true);
-            $published[(string) $name] = $found['public'];
-            foreach ($found['checked'] as $port) {
-                $checked[$port] = true;
-            }
-            foreach ($found['public'] as $port) {
-                $ports[$port] = ($ports[$port] ?? true) && ($isBehind || in_array($port, $found['demoted'], true));
-                $ranks[$port] = min($ranks[$port] ?? PHP_INT_MAX, $found['ranks'][$port]);
-                $owners[$port][] = (string) $name;
-            }
-            foreach ($found['refused'] as $entry) {
-                $refused[$entry['port']] ??= $entry;
-            }
-            foreach ($found['guessed'] as $port) {
-                $guessed[$port] = true;
-            }
+            self::addServiceScan($scan, (string) $name, $found, $isBehind);
         }
 
         return [
-            'public' => array_keys($ports),
-            'refused' => array_values($refused),
-            'guessed' => array_keys($guessed),
-            'ranks' => $ranks,
-            'demoted' => array_keys(array_filter($ports)),
-            'checked' => array_keys($checked),
-            'owners' => $owners,
-            'published' => $published,
+            'public' => array_keys($scan['ports']),
+            'refused' => array_values($scan['refused']),
+            'guessed' => array_keys($scan['guessed']),
+            'ranks' => $scan['ranks'],
+            'demoted' => array_keys(array_filter($scan['ports'])),
+            'checked' => array_keys($scan['checked']),
+            'owners' => $scan['owners'],
+            'published' => $scan['published'],
         ];
+    }
+
+    /**
+     * @param  array{ports: array<int, bool>, refused: array<int, Refusal>, guessed: array<int, true>, ranks: array<int, int>, checked: array<int, true>, owners: array<int, list<string>>, published: array<string, list<int>>}  $scan
+     * @param  array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>}  $found
+     */
+    private static function addServiceScan(array &$scan, string $name, array $found, bool $isBehind): void
+    {
+        $scan['published'][$name] = $found['public'];
+        foreach ($found['checked'] as $port) {
+            $scan['checked'][$port] = true;
+        }
+        foreach ($found['public'] as $port) {
+            $scan['ports'][$port] = ($scan['ports'][$port] ?? true) && ($isBehind || in_array($port, $found['demoted'], true));
+            $scan['ranks'][$port] = min($scan['ranks'][$port] ?? PHP_INT_MAX, $found['ranks'][$port]);
+            $scan['owners'][$port][] = $name;
+        }
+        foreach ($found['refused'] as $entry) {
+            $scan['refused'][$entry['port']] ??= $entry;
+        }
+        foreach ($found['guessed'] as $port) {
+            $scan['guessed'][$port] = true;
+        }
     }
 
     /**
@@ -290,8 +276,7 @@ final class ComposePortScan
     }
 
     /**
-     * Behind a `profiles:` gate: `docker compose up` without `--profile` never
-     * starts it, so its ports serve nothing (Telegram Files' qBittorrent 8080).
+     * Behind a `profiles:` gate: `docker compose up` without `--profile` never starts it.
      *
      * @param  array<string, mixed>  $service
      */
@@ -303,20 +288,8 @@ final class ComposePortScan
     }
 
     /**
-     * `expose:` is lower priority than an explicit publish, so it is read
-     * second and only adds ports the mappings did not already give.
-     *
-     * A filtered binding is reported rather than dropped: "the compose file
-     * offers no port" and "it offers MySQL's, which we will never proxy" are
-     * different answers, and only one of them means the app is misconfigured.
-     *
-     * `guessed` holds the refused ports the image itself does not account for:
-     * only the service's env made it read as a datastore.
-     *
-     * A published port ranks as well as either of its ends: Stepifi's
-     * `3169:3000` is a web server on 3000. `demoted` holds the service's
-     * expose-only ports and, when its own healthcheck names one of its ports,
-     * its other ports (Stepifi's Bull Board 3001, which nothing serves).
+     * `expose:` is read second and only adds ports the mappings did not give. A filtered binding is
+     * reported, not dropped; `guessed` holds refusals only the service's env accounts for.
      *
      * @param  array<string, mixed>  $service
      * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>}
@@ -324,12 +297,7 @@ final class ComposePortScan
     private static function serviceScan(array $service): array
     {
         $checked = self::healthcheckPort($service);
-        $ranks = [];
-        $healthy = [];
-        $ports = [];
-        $exposed = [];
-        $refused = [];
-        $guessed = [];
+        $scan = ['ranks' => [], 'healthy' => [], 'ports' => [], 'exposed' => [], 'refused' => [], 'guessed' => []];
         foreach (['ports', 'expose'] as $key) {
             foreach (self::entries($service[$key] ?? null) as $entry) {
                 $mapping = PortMapping::parse($entry);
@@ -337,45 +305,64 @@ final class ComposePortScan
                     continue;
                 }
                 if (! InternalPorts::coversBinding($mapping, $service)) {
-                    if ($key === 'expose' && ! isset($ports[$mapping->hostPort])) {
-                        $exposed[] = $mapping->hostPort;
-                    }
-                    $ports[$mapping->hostPort] = true;
-                    $ranks[$mapping->hostPort] = min(
-                        $ranks[$mapping->hostPort] ?? PHP_INT_MAX,
-                        self::rankOf($mapping->hostPort),
-                        $mapping->containerPort === null ? PHP_INT_MAX : self::rankOf($mapping->containerPort)
-                    );
-                    if ($checked !== null && ($mapping->containerPort ?? $mapping->hostPort) === $checked) {
-                        $healthy[$mapping->hostPort] = true;
-                    }
+                    self::addPublicBinding($scan, $mapping, $checked, $key);
 
                     continue;
                 }
-                $refusal = self::refusal($mapping, $service);
-                $refused[$mapping->hostPort] ??= $refusal;
-                if (self::isGuess($refusal, $service, $key === 'ports')) {
-                    $guessed[$mapping->hostPort] = true;
-                }
+                self::addRefusedBinding($scan, $mapping, $service, $key);
             }
         }
 
         return [
-            'public' => array_keys($ports),
-            'refused' => array_values($refused),
-            'guessed' => array_keys($guessed),
-            'ranks' => $ranks,
+            'public' => array_keys($scan['ports']),
+            'refused' => array_values($scan['refused']),
+            'guessed' => array_keys($scan['guessed']),
+            'ranks' => $scan['ranks'],
             'demoted' => array_values(array_unique(array_merge(
-                $exposed,
-                $healthy === [] ? [] : array_diff(array_keys($ports), array_keys($healthy))
+                $scan['exposed'],
+                $scan['healthy'] === [] ? [] : array_diff(array_keys($scan['ports']), array_keys($scan['healthy']))
             ))),
-            'checked' => array_keys($healthy),
+            'checked' => array_keys($scan['healthy']),
         ];
     }
 
     /**
-     * The container port a service's healthcheck probes over HTTP
-     * (`curl -f http://localhost:3000/health`), when it names one.
+     * A published port ranks as well as either of its ends; with a healthcheck port named,
+     * the service's other ports are demoted.
+     *
+     * @param  array{ranks: array<int, int>, healthy: array<int, true>, ports: array<int, true>, exposed: list<int>, refused: array<int, Refusal>, guessed: array<int, true>}  $scan
+     */
+    private static function addPublicBinding(array &$scan, PortMapping $mapping, ?int $checked, string $key): void
+    {
+        if ($key === 'expose' && ! isset($scan['ports'][$mapping->hostPort])) {
+            $scan['exposed'][] = $mapping->hostPort;
+        }
+        $scan['ports'][$mapping->hostPort] = true;
+        $scan['ranks'][$mapping->hostPort] = min(
+            $scan['ranks'][$mapping->hostPort] ?? PHP_INT_MAX,
+            self::rankOf($mapping->hostPort),
+            $mapping->containerPort === null ? PHP_INT_MAX : self::rankOf($mapping->containerPort)
+        );
+        if ($checked !== null && ($mapping->containerPort ?? $mapping->hostPort) === $checked) {
+            $scan['healthy'][$mapping->hostPort] = true;
+        }
+    }
+
+    /**
+     * @param  array{ranks: array<int, int>, healthy: array<int, true>, ports: array<int, true>, exposed: list<int>, refused: array<int, Refusal>, guessed: array<int, true>}  $scan
+     * @param  array<string, mixed>  $service
+     */
+    private static function addRefusedBinding(array &$scan, PortMapping $mapping, array $service, string $key): void
+    {
+        $refusal = self::refusal($mapping, $service);
+        $scan['refused'][$mapping->hostPort] ??= $refusal;
+        if (self::isGuess($refusal, $service, $key === 'ports')) {
+            $scan['guessed'][$mapping->hostPort] = true;
+        }
+    }
+
+    /**
+     * The container port a service's healthcheck probes over HTTP, when it names one.
      *
      * @param  array<string, mixed>  $service
      */
@@ -394,10 +381,7 @@ final class ComposePortScan
     }
 
     /**
-     * A refusal the service itself does not bear out: its env alone made the
-     * image read as a datastore, or the port number alone is a datastore's
-     * on a published binding while neither image nor env names one (OpenCloud
-     * serves on 9200, Elasticsearch's port).
+     * A refusal the service does not bear out: its env alone made it a datastore, or only the published port's number did.
      *
      * @param  Refusal  $refusal
      * @param  array<string, mixed>  $service
@@ -430,8 +414,7 @@ final class ComposePortScan
     }
 
     /**
-     * Why {@see InternalPorts::coversBinding()} turned a binding down: the port
-     * itself is a datastore's, or the image behind it is.
+     * Why {@see InternalPorts::coversBinding()} turned a binding down: the port is a datastore's, or the image is.
      *
      * @param  array<string, mixed>  $service
      * @return Refusal
@@ -464,9 +447,7 @@ final class ComposePortScan
     }
 
     /**
-     * Preferred ports first, in listed order; everything else numerically
-     * after them. $ranks overrides a port's own rank; $demoted ports follow
-     * every other web port.
+     * Preferred ports first, then numerically; $ranks overrides a port's rank, $demoted and non-web ports go last.
      *
      * @param  list<int>  $ports
      * @param  array<int, int>  $ranks
@@ -476,7 +457,6 @@ final class ComposePortScan
     private static function sorted(array $ports, array $ranks = [], array $demoted = []): array
     {
         usort($ports, static function (int $a, int $b) use ($ranks, $demoted): int {
-            // A non-web port stays last whichever way it is offered.
             $tier = [InternalPorts::nonWebOn($a) !== null, in_array($a, $demoted, true)]
                 <=> [InternalPorts::nonWebOn($b) !== null, in_array($b, $demoted, true)];
             if ($tier !== 0) {
@@ -491,11 +471,7 @@ final class ComposePortScan
         return $ports;
     }
 
-    /**
-     * A non-web port (SMTP, SSH, epmd) sorts after every other: Haraka's
-     * `EXPOSE 25` became a site's front door. Kept rather than
-     * dropped, so a stack that offers nothing else still has a port.
-     */
+    /** A non-web port (SMTP, SSH, epmd) sorts after every other, but is kept for a stack with nothing else. */
     private static function rankOf(int $port): int
     {
         if (InternalPorts::nonWebOn($port) !== null) {

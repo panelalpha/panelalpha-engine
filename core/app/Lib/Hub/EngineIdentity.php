@@ -3,9 +3,8 @@
 namespace App\Lib\Hub;
 
 /**
- * Who this engine is to the Hub. APP_UID is the installer's random id, the one
- * every request to Connect already carries in X-Engine-App-UID. It names the
- * engine and proves nothing.
+ * Who this engine is to the Hub: APP_UID, the installer's random id that every request to Connect carries
+ * in X-Engine-App-UID. It names the engine and proves nothing.
  */
 final class EngineIdentity
 {

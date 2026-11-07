@@ -3,12 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named site-language operations for a PHP hosting WordPress install.
- *
- * Set maps to the modern WP-CLI form `wp language core install {language}
- * --activate` (installs the pack when needed and activates it). The older
- * `language core activate` is deprecated in favour of `site switch-language`;
- * install-with-activate covers both install and activate in one call.
+ * Named site-language operations. Set runs `wp language core install {language} --activate`, which installs the pack
+ * when needed and activates it in one call; the older `language core activate` is deprecated.
  */
 final class Language
 {

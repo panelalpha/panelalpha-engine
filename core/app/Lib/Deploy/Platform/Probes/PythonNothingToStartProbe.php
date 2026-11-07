@@ -8,11 +8,8 @@ use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 
 /**
- * Python files with nothing to start, beside another stack's manifest.
- *
- * Jellysweep is a Go app whose requirements.txt installs only its docs and
- * lint tooling; python outranks go, found no entry point, and served the
- * placeholder. Here python steps aside so the other stack is tried.
+ * Python files with nothing to start beside another stack's manifest (a Go app's docs tooling),
+ * so python, which outranks that stack, steps aside instead of serving the placeholder.
  */
 final class PythonNothingToStartProbe implements PlatformProbe
 {

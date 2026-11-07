@@ -5,12 +5,8 @@ namespace App\Lib\Mail;
 use Closure;
 
 /**
- * The DNS records mail sent from a domain on this host needs to be accepted,
- * and, on request, whether they are published.
- *
- * The engine does not sign mail. DKIM comes from a relay (SendGrid, Amazon
- * SES, MailChannels, an SMTP server) that signs for the domain, and the relay
- * says which selector to publish.
+ * The DNS records mail sent from a domain on this host needs, and whether they are published.
+ * The engine does not sign mail: DKIM comes from a relay, which names its selector.
  *
  * @psalm-type MailDnsRecord = array{
  *   type: string,
@@ -53,8 +49,7 @@ final class MailDnsRecords
     }
 
     /**
-     * The public addresses mail sent directly leaves from: the default IPv4,
-     * through the NAT map when it is a private one, and the default IPv6.
+     * The public addresses mail sent directly leaves from: the default IPv4 (through the NAT map) and IPv6.
      *
      * @param  array<string, string>  $localToPublic
      * @return list<string>
@@ -76,11 +71,7 @@ final class MailDnsRecords
         return $ips;
     }
 
-    /**
-     * The domain mail from $domain is sent as. A relay sender domain rewrites
-     * every sender to `<local>_at_<domain>@<sender_domain>`, so then the
-     * records belong to the sender domain, not to the site's.
-     */
+    /** The domain mail from $domain is sent as: a relay sender domain, when set, rewrites every sender to it. */
     public static function sendingDomain(string $domain, string $senderDomain): string
     {
         $senderDomain = strtolower(trim($senderDomain));
@@ -117,9 +108,7 @@ final class MailDnsRecords
     }
 
     /**
-     * {@see expected()} with each record looked up: status ok, missing, wrong
-     * or unknown (the lookup failed or the engine cannot tell), what was
-     * found, and what is wrong.
+     * {@see expected()} with each record looked up: status (ok, missing, wrong, unknown), what was found, what is wrong.
      *
      * @param  list<string>  $hostIps
      * @return list<MailDnsRecord>
@@ -209,22 +198,41 @@ final class MailDnsRecords
         }
 
         if ($relay === '') {
-            if ($hostIps === []) {
-                return self::outcome('unknown', $found, 'This host has no public address on record to check the record against.');
-            }
-            foreach ($hostIps as $ip) {
-                $result = $spf->resultFor($domain, $ip);
-                if ($result === 'temperror') {
-                    return self::outcome('unknown', $found, ucfirst($spf->reason()).'.');
-                }
-                if ($result !== 'pass') {
-                    return self::outcome('wrong', $found, "Mail from this host ({$ip}) gets SPF {$result}: {$spf->reason()}.");
-                }
-            }
-
-            return self::outcome('ok', $found, null);
+            return self::checkDirectSpf($spf, $domain, $hostIps, $found);
         }
 
+        return self::checkRelaySpf($spf, $domain, $relay, $found);
+    }
+
+    /**
+     * @param  list<string>  $hostIps
+     * @param  list<string>  $found
+     * @return array{status: string, found: list<string>, problem: ?string}
+     */
+    private static function checkDirectSpf(SpfCheck $spf, string $domain, array $hostIps, array $found): array
+    {
+        if ($hostIps === []) {
+            return self::outcome('unknown', $found, 'This host has no public address on record to check the record against.');
+        }
+        foreach ($hostIps as $ip) {
+            $result = $spf->resultFor($domain, $ip);
+            if ($result === 'temperror') {
+                return self::outcome('unknown', $found, ucfirst($spf->reason()).'.');
+            }
+            if ($result !== 'pass') {
+                return self::outcome('wrong', $found, "Mail from this host ({$ip}) gets SPF {$result}: {$spf->reason()}.");
+            }
+        }
+
+        return self::outcome('ok', $found, null);
+    }
+
+    /**
+     * @param  list<string>  $found
+     * @return array{status: string, found: list<string>, problem: ?string}
+     */
+    private static function checkRelaySpf(SpfCheck $spf, string $domain, string $relay, array $found): array
+    {
         $include = self::RELAY_SPF_INCLUDES[$relay] ?? null;
         if ($include === null) {
             return self::outcome('unknown', $found, 'The engine cannot tell which servers your SMTP relay sends from; check that its include is in this record.');
@@ -264,11 +272,13 @@ final class MailDnsRecords
         return self::outcome('wrong', $found, "{$host} has a record but no public key (p= is missing or empty, which revokes the key).");
     }
 
-    /** @return array{status: string, found: list<string>, problem: ?string} */
+    /**
+     * Receivers fall back to a parent domain's policy (DMARCbis walks the tree), so a record further up covers this one.
+     *
+     * @return array{status: string, found: list<string>, problem: ?string}
+     */
     private function checkDmarc(string $domain): array
     {
-        // Receivers fall back to a parent domain's policy (DMARCbis walks the
-        // tree), so a record further up covers this one.
         $labels = explode('.', $domain);
         for ($i = 0; $i < count($labels) - 1; $i++) {
             $name = implode('.', array_slice($labels, $i));

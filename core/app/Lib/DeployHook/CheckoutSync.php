@@ -6,11 +6,8 @@ use App\Models\User;
 use App\System\Project\Git\FastForwardRefused;
 
 /**
- * Brings a project's checkout up to what the repository now holds and, for a
- * Deploy-managed checkout, rebuilds the running app from it.
- *
- * An interface so that what a delivery does with the outcome -- which is the
- * logic worth testing -- does not need a Docker daemon to run under test.
+ * Brings a project's checkout up to what the repository holds and, if Deploy-managed, rebuilds the app
+ * from it. An interface, so what a delivery does with the outcome is testable without a Docker daemon.
  */
 interface CheckoutSync
 {

@@ -7,10 +7,8 @@ use App\Models\PersonalAccessToken;
 use Laravel\Sanctum\NewAccessToken;
 
 /**
- * The Sanctum tokens the Hub holds, on the root admin: `hub:pending` while
- * the connect ceremony runs, `hub:<connection_id>` once it completed. Any
- * token creator can pick such a name, so a Hub token is told by its `hub`
- * mark, which only minting here sets and a rotation carries over.
+ * The root admin's Sanctum tokens the Hub holds, `hub:pending` then `hub:<connection_id>`. Any creator can
+ * pick such a name, so a Hub token is told by its `hub` mark, set only here and carried over by a rotation.
  */
 final class HubTokens
 {

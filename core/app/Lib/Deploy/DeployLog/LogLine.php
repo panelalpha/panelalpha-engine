@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Turning a line of subprocess output into something safe to show a customer.
- *
- * Applications print their connection strings verbatim when a connection
- * fails, including the ones the engine generated.
+ * Turns a line of subprocess output into something safe to show a customer: apps print their connection
+ * strings, the engine's generated ones included, when a connection fails.
  */
 final class LogLine
 {

@@ -5,10 +5,8 @@ namespace App\Lib\Deploy\DeployLog;
 use App\Lib\Deploy\SafeName;
 
 /**
- *   storage/logs/deploy/{username}/{deployId}.log   JSON lines, one per entry
- *   storage/logs/deploy/{username}/latest.json      status pointer
- *   storage/logs/deploy/{username}/.deploy.lock     one deploy at a time
- *   storage/logs/deploy/{username}/.queue.lock      one request queueing or starting one
+ * Paths under storage/logs/deploy/{username}: `{deployId}.log` (JSON lines), `latest.json` (status pointer),
+ * `.deploy.lock` (one deploy at a time) and `.queue.lock` (one request queueing or starting one).
  */
 final class DeployLogPaths
 {
@@ -20,9 +18,9 @@ final class DeployLogPaths
 
     private const QUEUE_LOCK_FILE = '.queue.lock';
 
+    /** Every path here is built from the username, so it is validated once, here. */
     public function __construct(public readonly string $username)
     {
-        // Every path here is built from the username, so it is validated once, here.
         self::assertSafeName($username, 'username for deploy log');
     }
 

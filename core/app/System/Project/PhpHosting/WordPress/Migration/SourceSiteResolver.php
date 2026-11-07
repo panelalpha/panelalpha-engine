@@ -5,10 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use Throwable;
 
 /**
- * Finds the source WordPress behind what the caller gave: a login page for
- * `wp_admin`, the migrator plugin's REST namespace for `manual_plugin`. Every
- * candidate is tried in order; when none works, the failure that got furthest
- * is thrown, so a wrong password reads as `login_failed`, not `not_wordpress`.
+ * Finds the source WordPress: a login page for `wp_admin`, the plugin's REST namespace for `manual_plugin`. When no
+ * candidate works the failure that got furthest is thrown, so a wrong password reads as `login_failed`, not `not_wordpress`.
  */
 final class SourceSiteResolver
 {
@@ -139,9 +137,8 @@ final class SourceSiteResolver
     }
 
     /**
-     * With `login_url`: it, its directory's wp-login.php, wp-login.php under it,
-     * then under the site URL. Without: the site URL's wp-login.php, the URL
-     * itself (a login path or wp-admin), then its directory's wp-login.php.
+     * With `login_url`: it, its directory's wp-login.php, wp-login.php under it, then under the site URL. Without:
+     * the site URL's wp-login.php, the URL itself (a login path or wp-admin), then its directory's wp-login.php.
      *
      * @return list<string>
      */

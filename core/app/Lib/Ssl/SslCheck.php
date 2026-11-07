@@ -7,20 +7,10 @@ use App\Models\Domain;
 use App\System\Project\PhpHosting\WordPress\Migration\DestinationProbe;
 
 /**
- * The certificate a domain really serves, read by connecting to it.
+ * The certificate a domain really serves, not the file on disk: a TLS handshake with it as SNI at its DNS address (`public`,
+ * what a visitor gets) and at this project's webserver (`engine`). `status` is the visitor's verdict, or why there was none.
  *
- * The installed-certificate routes read the file on disk, which is what the
- * webserver was told to load, not what a visitor gets: a renewal the
- * webserver never reloaded, DNS pointing at another server, or a CDN in front
- * all serve something else. So this asks twice, both times over a real TLS
- * handshake with the domain as SNI:
- *
- * - `public`: at the address the domain's DNS gives, which is what a visitor gets;
- * - `engine`: at the address this project's webserver listens on, which is what
- *   this host serves whatever DNS says.
- *
- * `status` is the visitor's answer: the certificate verdict from
- * {@see CertificateStatus}, or why there was no certificate to judge.
+ * @see CertificateStatus
  */
 final class SslCheck
 {

@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
 /**
- * Puts git in the builder image.
- *
- * MDX and content pipelines (content-collections, next-sitemap, …) shell out
- * to `git log` during the build, and the slim base images ship without it.
+ * Puts git in the builder image: content pipelines (content-collections, next-sitemap, …)
+ * shell out to `git log` during the build, and the slim base images ship without it.
  */
 final class GitInstall
 {

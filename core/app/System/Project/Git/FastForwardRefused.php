@@ -3,12 +3,8 @@
 namespace App\System\Project\Git;
 
 /**
- * Git would not fast-forward, and said why: the history diverged, or an
- * incoming commit collides with something local. Nothing was changed.
- *
- * A subclass of {@see Exception} so every caller that already treats a refused
- * pull as a 422 keeps doing so; a caller that must tell "git said no" from "the
- * pull broke" (a Deploy Hook delivery) catches this one first.
+ * Git would not fast-forward (diverged history, or an incoming commit collides with something local) and changed nothing.
+ * An {@see Exception}, so a refused pull stays a 422; a caller telling "git said no" from "the pull broke" catches it first.
  */
 class FastForwardRefused extends Exception
 {

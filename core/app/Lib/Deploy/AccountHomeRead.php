@@ -5,17 +5,8 @@ namespace App\Lib\Deploy;
 use App\System\EnginePaths;
 
 /**
- * How detection and inspection read a project's files as www-data.
- *
- * A checkout is the tenant's: any file in it may be a symlink, and so may any
- * directory above it, at any moment. Followed, a link hands www-data whatever
- * it can open on the host, including another account's world-readable `.env`
- * or core's own. So the file is opened first and then located by the kernel,
- * through /proc/self/fd, and read only when it is in the account home its path
- * names, or, for a path in no home, in no home either and inside the checkout
- * being inspected that the path names. Asking where the opened file is, rather
- * than resolving the path and opening it after, leaves nothing to swap in
- * between. Nothing is read before that answer.
+ * Reads a project's files as www-data without letting a tenant's symlink hand it another account's `.env` or core's:
+ * the file is opened first and located through /proc/self/fd, so nothing can be swapped in between.
  */
 final class AccountHomeRead
 {
@@ -27,9 +18,8 @@ final class AccountHomeRead
     private static array $checkouts = [];
 
     /**
-     * file_get_contents() of $path, at most $length bytes: false, silently, when
-     * it is missing, unreadable or not a regular file, and when the file opened
-     * is outside the account home or the inspected checkout that $path names.
+     * file_get_contents() of $path, at most $length bytes; false, silently, when it is missing, unreadable or
+     * not a regular file, or the opened file is outside the account home or inspected checkout $path names.
      */
     public static function contents(string $path, ?int $length = null): string|false
     {
@@ -47,9 +37,8 @@ final class AccountHomeRead
     }
 
     /**
-     * Runs $read with every read of a path in $checkout held inside $checkout.
-     * A checkout in an account home keeps the home's rule, so inspecting a
-     * project reads what its deploy reads.
+     * Runs $read with every read of a path in $checkout held inside $checkout; a checkout in an account
+     * home keeps the home's rule, so inspecting a project reads what its deploy reads.
      *
      * @template T
      *

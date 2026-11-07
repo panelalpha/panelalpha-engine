@@ -5,13 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A Ruby checkout, and the four questions every Ruby generator asks it.
- *
- * A Gemfile alone does not make a deployable app: without a way to work out
- * the start command the engine would produce a container that builds and then
- * exits. So an app is Rails, or ships a `config.ru` (Sinatra, Rack, Hanami,
- * Roda), or declares a web process in a Procfile — and anything else is left
- * to Railpack.
+ * A Ruby checkout and the questions every Ruby generator asks it; deployable only as Rails, with a
+ * `config.ru`, or with a Procfile web process, since a Gemfile alone gives no start command.
  */
 final class RubyApp
 {

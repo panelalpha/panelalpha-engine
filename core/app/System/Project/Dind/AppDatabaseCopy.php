@@ -10,12 +10,8 @@ use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\DefinerMap;
 
 /**
- * The application database a container project's deploy provisioned
- * ({@see AppDatabase}), carried into a staging, clone or push.
- *
- * It lives on the account MySQL server rather than in a volume, so copying
- * the account's home and volumes brings none of it along: the copy needs a
- * database of its own, under its own prefix, holding the source's data.
+ * The application database a container project's deploy provisioned ({@see AppDatabase}), carried into a staging,
+ * clone or push: it lives on the account MySQL server, so copying the home and volumes brings none of it along.
  */
 final class AppDatabaseCopy
 {
@@ -48,10 +44,8 @@ final class AppDatabaseCopy
     }
 
     /**
-     * The target's application database replaced with the source's. One the
-     * target already had is dumped into $rollbackDir first and recorded in
-     * $rollbacks; one it lacked is provisioned and recorded in $provisioned,
-     * so a failed push removes it again.
+     * The target's application database replaced with the source's: an existing one is dumped into $rollbackDir
+     * and recorded in $rollbacks first; a missing one is provisioned and recorded in $provisioned for a failed push.
      *
      * @param  array<string, string>  $rollbacks  destination database => rollback dump
      */
@@ -79,9 +73,8 @@ final class AppDatabaseCopy
     }
 
     /**
-     * A target the source's run file is pushed into without its data still
-     * gets a database of its own to point that file at, recorded in
-     * $provisioned like one {@see intoTarget()} provisions.
+     * A target pushed the source's run file without its data still gets a database of its own to point it at,
+     * recorded in $provisioned like one {@see intoTarget()} provisions.
      */
     public function ensureTargetHasOne(User $to, ?ProvisionedAppDatabase &$provisioned): void
     {

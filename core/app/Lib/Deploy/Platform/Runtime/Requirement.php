@@ -3,15 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 /**
- * One toolchain a project needs, at the version it needs, and why.
- *
- * `source` is not decoration. Today a deploy log says `php:8.3-apache-bookworm`
- * and nothing about where 8.3 came from — but the constraint that decided it
- * is as often a locked dependency's `require.php` as the root manifest, and
- * that is precisely the case people cannot explain to themselves. A
- * requirement that cannot say why it exists is a support ticket.
- *
- * No Laravel dependencies — unit-testable.
+ * One toolchain a project needs, at the version it needs, and why. No Laravel dependencies:
+ * unit-testable.
  */
 final class Requirement
 {
@@ -21,6 +14,7 @@ final class Requirement
     /** Needed to build the application, never at runtime. Gets its own stage. */
     public const ROLE_BUILD = 'build';
 
+    /** `$source` names the constraint that decided the version, often a locked dependency's `require.php`. */
     public function __construct(
         public readonly string $id,
         public readonly string $version,
@@ -55,12 +49,8 @@ final class Requirement
     }
 
     /**
-     * Canonical token for a set: sorted, de-duplicated, joined.
-     *
-     * Sorted because the same set must produce the same string whatever order
-     * the manifest happened to list its requirements in — otherwise two
-     * identical stacks resolve to two different image tags and the cache
-     * never hits.
+     * Canonical token for a set: sorted, so the same set gives the same image tag whatever order
+     * the manifest listed it in, then de-duplicated and joined.
      *
      * @param  list<Requirement>  $requirements
      */

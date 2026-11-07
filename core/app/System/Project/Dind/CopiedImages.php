@@ -9,21 +9,8 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\System\Project\Dind as DindProject;
 
 /**
- * The images a run file copied from another project names, got into this
- * account before `compose create` or `up` asks for them.
- *
- * Every account has an image store of its own, so a staging, clone or push
- * target starts without the source's. Our shared bases and public images
- * arrive the way a deploy fetches them ({@see AppLauncher}); a service with a
- * `build:` is built from the copied tree by compose itself. That leaves an
- * image the source's deploy built outside compose -- Railpack's -- which is
- * built again here from the copied tree, because a tenant's image never goes
- * through the shared cache registry. It is built even when the account
- * already has that tag: a push target keeps the one an earlier push built
- * from older code, and the start does not build. A push holds that one
- * aside first ({@see HeldImage}), so a failed push can put it back. One of
- * those, or one of our own bases, that still cannot be had fails with its
- * name, not with a registry's "not found".
+ * The images a copied run file names, got into this account's own store before `compose create` or `up` as a deploy fetches
+ * them ({@see AppLauncher}); compose builds `build:` services, so only Railpack's, kept out of the shared registry, is rebuilt.
  */
 final class CopiedImages
 {
@@ -62,6 +49,7 @@ final class CopiedImages
             : null;
     }
 
+    /** Even when the account has the tag: a push target's may be from older code, and the start does not build. */
     private function buildRailpackImage(string $compose, string $projectDir): void
     {
         $image = $this->railpackImage($compose);

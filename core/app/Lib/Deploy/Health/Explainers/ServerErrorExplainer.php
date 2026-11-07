@@ -7,17 +7,8 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Whether a 5xx is the application's own fault or the engine's proxy answering
- * for a container that never came up.
- *
- * A 5xx read from `/` looks like the application failing, and often is. But an
- * unbound app port makes the engine's own proxy return a 502, and that 502 is
- * indistinguishable from an application 500 by status alone. The tell is the
- * clock: the proxy answers with no upstream in about two milliseconds, and no
- * application-generated 5xx returns that fast. This is the most common
- * dockerfile-strategy failure -- the entrypoint dies and the container
- * crash-loops -- and blaming it on the code inside sends the reader to the
- * wrong log.
+ * Whether a 5xx is the application's own or the engine's proxy answering for a container that never
+ * came up: the proxy answers with no upstream in milliseconds, which no application does.
  */
 final class ServerErrorExplainer implements Explainer
 {
@@ -32,6 +23,7 @@ final class ServerErrorExplainer implements Explainer
         return 'server-error';
     }
 
+    /** Without a response time, either case is possible. */
     public function explain(ProjectContext $context, ProbedResponse $response): array
     {
         $gateway = in_array($response->status, self::GATEWAY_STATUSES, true);
@@ -57,7 +49,6 @@ final class ServerErrorExplainer implements Explainer
             ];
         }
 
-        // No timing was measured, so either case is possible.
         return [
             'detail' => 'A '.$response->status.' here is either the application failing after it accepted the '
                 .'request, or the engine\'s proxy answering for an app port nothing is bound to.',

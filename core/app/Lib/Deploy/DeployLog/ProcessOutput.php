@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Subprocess output arriving in arbitrary chunks, turned into whole log lines.
- *
- * Symfony Process hands over whatever the pipe had, which routinely ends
- * mid-line, so each chunk's tail is carried until the rest arrives. Noise
- * (progress rewrites, repeats of the previous line) is dropped on the way.
+ * Turns subprocess output, which arrives in chunks that routinely end mid-line, into whole log lines,
+ * dropping noise (progress rewrites, repeats of the previous line) on the way.
  */
 final class ProcessOutput
 {

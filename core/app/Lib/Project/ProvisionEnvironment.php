@@ -3,9 +3,8 @@
 namespace App\Lib\Project;
 
 /**
- * What {@see ProvisionChecks} has to ask the engine about. Narrow on purpose:
- * everything else the checks need is in the request itself, so they can be
- * exercised without a database or a host.
+ * What {@see ProvisionChecks} has to ask the engine about; everything else is in the request,
+ * so the checks run without a database or a host.
  */
 interface ProvisionEnvironment
 {

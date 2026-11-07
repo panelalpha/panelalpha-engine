@@ -8,15 +8,8 @@ use App\System\Project\Dind;
 use RuntimeException;
 
 /**
- * Obtaining a certificate for one project domain, on demand.
- *
- * The steps are few but none of them is optional, and there are two callers —
- * `ssl:project-cert:request` and `POST …/request-ssl-cert`. Issuing without
- * re-rendering leaves the old certificate being served; re-rendering without
- * recording the snapshot leaves `details.ssl` saying `self_signed` about a
- * certificate that is nothing of the sort, which is the field everything
- * downstream reads. A copy of that sequence in each caller is a copy that
- * will drift.
+ * A certificate for one project domain on demand, one sequence for `ssl:project-cert:request` and `POST …/request-ssl-cert`
+ * so neither drifts: without the re-render the old one is served, without the snapshot `details.ssl` describes the old one.
  */
 final class ProjectCertificate
 {
@@ -45,10 +38,6 @@ final class ProjectCertificate
         $connection = $domain->projectDomain();
         $issuer->issue($connection);
 
-        // The vhost is re-rendered with the new certificate in place, and the
-        // project's snapshot updated: `details.ssl` is what an API caller
-        // reads, and it would otherwise describe the certificate this just
-        // replaced until the next deploy.
         $connection->rebuild();
         self::remember($domain->user);
 
@@ -87,17 +76,11 @@ final class ProjectCertificate
     }
 
     /**
-     * Staging keeps its own accounting and its own trust, so it is the way to
-     * rehearse a request without spending anything that counts. Renewal asks
-     * here too, so it follows the same shared-zone rule as the first request.
+     * Staging keeps its own accounting and trust, so a request is rehearsed there without spending anything that counts.
+     * Renewal asks here too; the shared-zone setting is read here, as the constructor's default refuses names it allows.
      */
     public static function issuer(bool $staging): AcmeIssuer
     {
-        // The shared-zone decision comes from the setting here too. Building
-        // an AcmeIssuer directly is how this path skipped it once already:
-        // the constructor's default is "not allowed", so a deliberate
-        // `ssl:project-cert:request` refused a name the operator had just
-        // enabled. One setting, asked wherever an issuer is made.
         $allowed = Issuers::sharedZoneIssuanceAllowed();
 
         return $staging

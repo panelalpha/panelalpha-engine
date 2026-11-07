@@ -5,10 +5,8 @@ namespace App\Lib\DeployHook\Registration;
 use App\Lib\DeployHook\HookProvider;
 
 /**
- * One git provider's webhook API, as the engine uses it to register, update and
- * remove a Deploy Hook. Separate from {@see HookProvider},
- * which reads what a provider sends: this one writes, and only three providers
- * have an API the engine can write to.
+ * One git provider's webhook API, which the engine writes to register, update and remove a Deploy Hook;
+ * reading what a provider sends is {@see HookProvider}'s job.
  */
 interface WebhookRegistrar
 {
@@ -24,10 +22,8 @@ interface WebhookRegistrar
     public function hosts(): array;
 
     /**
-     * The API addressing for a repository URL, or null when the URL cannot be
-     * read. Deliberately does not require a canonical host: a client that named
-     * the provider may point this at a self-managed instance, which may be asked
-     * where its API is served.
+     * The API addressing for a repository URL, or null when it cannot be read; any host is accepted, since a
+     * client that named the provider may point it at a self-managed instance.
      */
     public function address(string $repoUrl): ?WebhookTarget;
 

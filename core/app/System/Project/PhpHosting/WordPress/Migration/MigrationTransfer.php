@@ -7,16 +7,14 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Database / files / finalize loops matching the panel's
- * migrateDatabaseUsingPlugin, migrateFilesUsingPlugin, and
- * finalizeMigrationUsingPlugin predicates.
+ * Database / files / finalize loops matching the panel's migrateDatabaseUsingPlugin,
+ * migrateFilesUsingPlugin, and finalizeMigrationUsingPlugin predicates.
  */
 final class MigrationTransfer
 {
     /**
-     * Probe destination site HTTP status. Injected in tests; production asks
-     * {@see DestinationProbe}, which sends the name to this engine, not to
-     * wherever its DNS still points.
+     * Probe destination site HTTP status; production asks {@see DestinationProbe},
+     * which sends the name to this engine, not to wherever its DNS still points.
      *
      * @var callable(string): int|null
      */
@@ -67,10 +65,8 @@ final class MigrationTransfer
     }
 
     /**
-     * Early exit: status === completed OR phase === files.
-     * Batch loop ends when boolean finalized OR next_phase === files, or when
-     * the budget is spent: false then, and the next run continues.
-     * After a network error, success only if status === completed.
+     * Done at once when status === completed or phase === files; batches end on finalized, next_phase === files or a
+     * spent budget (false, the next run continues). After a network error, success only if status === completed.
      */
     public function migrateDatabase(string $migrationId, ?BatchBudget $budget = null): bool
     {
@@ -134,10 +130,8 @@ final class MigrationTransfer
     }
 
     /**
-     * Confirm transfer finished, then move .htaccess. If the destination HTTP
-     * status changes, remove the file and append a warning on the migration step log.
-     * A transfer the source still reports running goes on within the budget,
-     * as in the transfer steps: false when it has not finished, and the next run continues.
+     * Confirm the transfer finished, then move .htaccess, removing it with a step-log warning if the destination HTTP
+     * status changes. A transfer still running goes on within the budget: false until it has finished.
      */
     public function finalize(
         WordpressMigration $migration,
@@ -220,6 +214,11 @@ final class MigrationTransfer
             $remover($destinationSiteUrl);
         }
 
+        $this->logHtaccessSkipped($migration, $statusBefore, $statusAfter);
+    }
+
+    private function logHtaccessSkipped(WordpressMigration $migration, ?int $statusBefore, ?int $statusAfter): void
+    {
         $migration->appendStepLog(
             WordpressMigration::STEP_FINALIZE,
             WordpressMigration::STEP_STATUS_COMPLETED,

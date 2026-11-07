@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * Values on their way into a generated compose file.
- *
- * A decision crosses a process boundary as an array, so everything in it is
- * whatever JSON made of it. Compose is unforgiving about types — an integer
- * where it wants a string, a null in a list — and the generator should not be
- * the place that finds out.
+ * Values on their way into a generated compose file: a decision arrives as whatever JSON made of it,
+ * and Compose refuses an integer where it wants a string, or a null in a list.
  */
 final class ComposeValues
 {

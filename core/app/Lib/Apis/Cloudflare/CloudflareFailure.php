@@ -7,10 +7,8 @@ use Illuminate\Http\Client\ConnectionException;
 use RuntimeException;
 
 /**
- * A Cloudflare call the caller cannot fix by changing the request: no zone for the
- * hostname (404), Cloudflare rate-limiting the token (503), or Cloudflare failing or
- * unreachable (502). Carried out of the library with its status and code, so the HTTP
- * boundary answers `{message, code}` with that status.
+ * A Cloudflare failure the caller cannot fix by changing the request: no zone (404), a rate limit (503),
+ * or Cloudflare failing or unreachable (502). The HTTP boundary answers `{message, code}` with that status.
  */
 final class CloudflareFailure extends RuntimeException
 {
@@ -23,9 +21,8 @@ final class CloudflareFailure extends RuntimeException
     }
 
     /**
-     * What a failed call means to the project. A token Cloudflare does not accept, a token
-     * missing $permission on the $resource, or a refused request is the caller's to fix (422);
-     * a rate limit or a Cloudflare failure is worth retrying later (503, 502).
+     * A rejected token, a token missing $permission on the $resource or a refused request is the caller's
+     * to fix (422); a rate limit or a Cloudflare failure is worth retrying later (503, 502).
      */
     public static function of(
         CloudflareException|ConnectionException $e,

@@ -5,27 +5,8 @@ namespace App\Lib\Ssl;
 use App\System;
 
 /**
- * The certificate the engine already holds, and whether a project may serve it.
- *
- * The engine's own certificate — `crt/server.cert`, what `:2011` presents —
- * is issued for the admin name. That covers nothing else, so historically
- * every project domain got one the engine signed itself, and the one exception
- * was written as string equality against the `vhost-default-ip-domain`
- * setting.
- *
- * A wildcard changes that completely. `*.203-0-113-45.panelalpha.direct`
- * covers every project on the host, and an engine that kept generating
- * self-signed certificates next to it would be ignoring the answer it already
- * had. The same is true of a wildcard an operator bought and installed by
- * hand today, which is why this is worth having before any of the DNS-01 work
- * that would produce one automatically.
- *
- * So the rule is coverage, not equality: if what the engine holds is valid
- * right now and names this domain — wildcard included — the project serves it.
- * Otherwise the project gets its own.
- *
- * Deliberately not clever about *which* certificate is better. There is one
- * candidate, and it either covers the name or it does not.
+ * The certificate the engine holds, and whether a project may serve it: coverage, not equality,
+ * so a wildcard over the host serves every project it names.
  */
 final class EngineCertificate
 {
@@ -63,12 +44,41 @@ final class EngineCertificate
     }
 
     /**
-     * The engine's certificate and key when they cover the domain and are in
-     * date, else null.
+     * The engine's certificate and key when they cover the domain and are in date, else null.
+     * A certificate whose key is not its pair (a rotation can leave that) covers nothing.
      *
      * @return array{certificate: string, key: string, status: array<string, mixed>}|null
      */
     public function covering(string $domain, ?int $now = null): ?array
+    {
+        $pair = $this->heldPair();
+        if ($pair === null) {
+            return null;
+        }
+        [$certificate, $key] = $pair;
+
+        $facts = CertificateFacts::fromPem($certificate);
+        if ($facts === null) {
+            return null;
+        }
+
+        if (! KeyPair::matches($certificate, $key)) {
+            return null;
+        }
+
+        $status = CertificateStatus::of($facts, $domain, $now);
+
+        if (! self::isUsable($status)) {
+            return null;
+        }
+
+        return ['certificate' => $certificate, 'key' => $key, 'status' => $status];
+    }
+
+    /**
+     * @return array{0: string, 1: string}|null
+     */
+    private function heldPair(): ?array
     {
         $certPath = $this->certificatePath();
         $keyPath = $this->keyPath();
@@ -85,36 +95,11 @@ final class EngineCertificate
             return null;
         }
 
-        $facts = CertificateFacts::fromPem($certificate);
-        if ($facts === null) {
-            return null;
-        }
-
-        // A certificate nobody holds the key to covers nothing. Both files can
-        // be readable, valid and even in date while belonging to different
-        // pairs -- the state a rotation can leave crt/server.cert in, where
-        // nginx starts without a word and then refuses every handshake
-        // with `SSL alert number 40`. Serving that to a project would hand it
-        // a certificate no client can complete a connection with, so the
-        // project is better off signing its own.
-        if (! KeyPair::matches($certificate, $key)) {
-            return null;
-        }
-
-        $status = CertificateStatus::of($facts, $domain, $now);
-
-        if (! self::isUsable($status)) {
-            return null;
-        }
-
-        return ['certificate' => $certificate, 'key' => $key, 'status' => $status];
+        return [$certificate, $key];
     }
 
     /**
-     * Covering the name and in date. A self-signed engine certificate that
-     * covers the name still qualifies: the project's alternative is a
-     * self-signed certificate of its own, and one the whole host shares is no
-     * worse and one fewer thing to renew.
+     * Covering the name and in date; a self-signed engine certificate still beats the project's own.
      *
      * @param  array<string, mixed>  $status
      */

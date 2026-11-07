@@ -5,14 +5,8 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\AccountHomeRead;
 
 /**
- * The project under inspection: its directory, its root listing, and the
- * handful of reads that detection keeps repeating.
- *
- * package.json is parsed once per run rather than once per asker — a dozen
- * manifests, probes and runtimes putting the same question to the same file
- * was the main cost of splitting detection up in the first place.
- *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * The project under inspection: its directory, root listing and the reads detection repeats, JSON parsed
+ * once per run rather than per asker. No Laravel dependencies: unit-testable with a temp directory.
  */
 class ProjectContext
 {
@@ -26,12 +20,8 @@ class ProjectContext
 
     /**
      * @param  array<string, true>  $files  lowercase basename => true
-     * @param  ?string  $sourceUrl  the repository this checkout came from, when
-     *                              it came from one. Not a fact about the files, which is why
-     *                              nothing on this class reads it — but it is a fact about the
-     *                              project, and {@see SourceRecipes} answers "what is this?" from
-     *                              the URL alone, faster and more exactly than any file rule can.
-     *                              Null for an uploaded archive.
+     * @param  ?string  $sourceUrl  the repository this checkout came from, null for an uploaded
+     *                              archive; unread here, but {@see SourceRecipes} identifies a project by it
      */
     public function __construct(
         public readonly string $projectDir,
@@ -134,11 +124,7 @@ class ProjectContext
     }
 
     /**
-     * Parsed root composer.json, cached for the run.
-     *
-     * The same bargain package.json already had. composer.lock in particular
-     * is a file several megabytes long that three separate callers decode
-     * during one detection pass, and it does not change between them.
+     * Parsed root composer.json, cached for the run like package.json.
      *
      * @return array<string, mixed>|null
      */
@@ -148,7 +134,8 @@ class ProjectContext
     }
 
     /**
-     * Parsed root composer.lock, cached for the run.
+     * Parsed root composer.lock, cached for the run: several megabytes that three callers decode
+     * in one detection pass.
      *
      * @return array<string, mixed>|null
      */
@@ -158,12 +145,8 @@ class ProjectContext
     }
 
     /**
-     * Any JSON file under the project root, decoded once per run.
-     *
-     * Null covers missing, unreadable and malformed alike: a caller reading a
-     * project's own package-lock.json has nothing useful to do with the
-     * difference, and every one of them would otherwise write the same three
-     * guards.
+     * Any JSON file under the project root, decoded once per run; null for missing, unreadable
+     * and malformed alike, since no caller does anything different with the difference.
      *
      * @return array<string, mixed>|null
      */

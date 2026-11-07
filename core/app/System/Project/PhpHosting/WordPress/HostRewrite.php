@@ -3,12 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Moves a WordPress database from one host to another. Only addresses on the
- * host itself change: `//host` and its JSON-escaped form `\/\/host`, followed
- * by anything but a letter, digit, dot or hyphen. A longer host that starts or
- * ends with it, an e-mail address and the guid column stay as they are. Runs
- * over every table with the WordPress prefix, plugin tables included, or only
- * the tables given.
+ * Moves a WordPress database to another host: only `//host` and `\/\/host` not followed by a letter, digit, dot or hyphen
+ * change, never a longer host, an e-mail address or the guid column; over every prefixed table, or the tables given.
  */
 final class HostRewrite
 {

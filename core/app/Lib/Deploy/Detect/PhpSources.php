@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Detect;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * PHP source files in a project that carries no Composer manifest: an
- * index.php and a few includes is PHP hosting with no manifest, and php.yaml
- * asks for composer.json. Root first, then two levels down.
+ * PHP source files in a project with no Composer manifest, which php.yaml would not match:
+ * root first, then two levels down.
  */
 final class PhpSources
 {
@@ -20,6 +19,7 @@ final class PhpSources
     /** Bounds the walk on an unexpectedly large tree. */
     private const MAX_DIRECTORIES = 200;
 
+    /** Breadth first: root files answer the common case before any descent. */
     public static function present(string $projectDir): bool
     {
         $projectDir = rtrim($projectDir, '/');
@@ -27,7 +27,6 @@ final class PhpSources
             return false;
         }
 
-        // Breadth first: root files answer the common case before any descent.
         $queue = [[$projectDir, 0]];
         $scanned = 0;
 
@@ -37,27 +36,37 @@ final class PhpSources
                 return false;
             }
 
-            foreach (ProjectContext::entries($dir) as $entry) {
-                if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
-                    continue;
+            if (self::directoryHoldsPhp($dir, $depth, $queue)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param  list<array{0: string, 1: int}>  $queue */
+    private static function directoryHoldsPhp(string $dir, int $depth, array &$queue): bool
+    {
+        foreach (ProjectContext::entries($dir) as $entry) {
+            if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
+                continue;
+            }
+
+            $path = $dir.'/'.$entry;
+
+            if (is_file($path)) {
+                if (str_ends_with(strtolower($entry), '.php')) {
+                    return true;
                 }
 
-                $path = $dir.'/'.$entry;
+                continue;
+            }
 
-                if (is_file($path)) {
-                    if (str_ends_with(strtolower($entry), '.php')) {
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                if ($depth < self::MAX_DEPTH
-                    && is_dir($path)
-                    && ! in_array(strtolower($entry), self::SKIPPED, true)
-                ) {
-                    $queue[] = [$path, $depth + 1];
-                }
+            if ($depth < self::MAX_DEPTH
+                && is_dir($path)
+                && ! in_array(strtolower($entry), self::SKIPPED, true)
+            ) {
+                $queue[] = [$path, $depth + 1];
             }
         }
 

@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\Dind;
 use App\System\Project\Dind\RegistryLogin;
 
 /**
- * A project's logins to private image registries: the `registry-auth`
- * setting, one `host username token` line per registry.
- *
- * Pure: parsing, which registry an image reference addresses, and the Docker
- * client config that carries the logins. Writing that config into the account
- * for the length of a deploy is {@see RegistryLogin}.
+ * A project's private registry logins (`registry-auth`, one `host username token` line each): parsing,
+ * registry lookup and the Docker client config. {@see RegistryLogin} writes that into the account.
  */
 final class RegistryAuth
 {
@@ -88,9 +84,8 @@ final class RegistryAuth
     }
 
     /**
-     * The registry host an image reference addresses, the way Docker decides
-     * it: the first path component is a host only when it has a dot or a port
-     * or is `localhost`; everything else is Docker Hub.
+     * The registry host an image reference addresses, as Docker decides: the first path component is a host
+     * only with a dot, a port or as `localhost`; everything else is Docker Hub.
      */
     public static function registryFor(string $image): string
     {

@@ -8,13 +8,8 @@ use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 
 /**
- * One HTTP GET written to a file, refused once the body passes the byte cap.
- *
- * The cap is read from the response's Content-Length before the body arrives
- * and counted again while the body streams, so an endless or chunked answer is
- * not written to disk in full before anybody can refuse it. Redirects are left
- * to the caller, which checks every hop against OutboundUrl; only a URL from the
- * engine's own configuration may have them followed here.
+ * One HTTP GET written to a file, refused once Content-Length or the body counted while it streams passes the
+ * byte cap, so an endless or chunked answer is never written in full before it can be refused.
  */
 final class BoundedDownload
 {
@@ -23,6 +18,10 @@ final class BoundedDownload
 
     private bool $exceeded = false;
 
+    /**
+     * Redirects are left to the caller, which checks every hop against OutboundUrl: only a URL from the
+     * engine's own configuration may set `$followRedirects`.
+     */
     public function __construct(
         private readonly int $maxBytes = OutboundUrl::MAX_DOWNLOAD_BYTES,
         private readonly bool $followRedirects = false,

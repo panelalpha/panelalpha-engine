@@ -3,13 +3,7 @@
 namespace App\Lib\Ssl;
 
 /**
- * The certificate an address actually answers with.
- *
- * Not the one on disk, and not the one that was last requested: the one a
- * client gets. Those three drift apart — a renewal that certbot wrote but the
- * webserver has not reloaded is exactly the situation where the file says one
- * thing and every assistant sees another — and only the last of them is the
- * one an operator is asking about.
+ * The certificate an address actually answers with: not the one on disk, nor the one last requested.
  */
 final class ServedCertificate
 {
@@ -17,8 +11,7 @@ final class ServedCertificate
 
     /**
      * @param  string  $address  host:port, or a URL to take one from
-     * @return array{name: string, names: array<int, string>, issuer: string, expires: int, self_signed: bool}|null
-     *                                                                                                              null when nothing answered, which is itself the answer
+     * @return array{name: string, names: array<int, string>, issuer: string, expires: int, self_signed: bool}|null null when nothing answered
      */
     public static function at(string $address): ?array
     {
@@ -28,9 +21,24 @@ final class ServedCertificate
             return null;
         }
 
-        // Verification deliberately off: this reads what is being served, and
-        // an untrusted certificate is a thing to report rather than a reason
-        // to refuse to look.
+        $certificate = self::peerCertificate($target);
+
+        if ($certificate === null) {
+            return null;
+        }
+
+        $parsed = openssl_x509_parse($certificate);
+
+        if ($parsed === false) {
+            return null;
+        }
+
+        return self::described($parsed);
+    }
+
+    /** Verification is off on purpose: an untrusted certificate is a thing to report, not a reason to refuse to look. */
+    private static function peerCertificate(string $target): mixed
+    {
         $context = stream_context_create(['ssl' => [
             'capture_peer_cert' => true,
             'verify_peer' => false,
@@ -53,18 +61,17 @@ final class ServedCertificate
         $params = stream_context_get_params($stream);
         fclose($stream);
 
-        $certificate = $params['options']['ssl']['peer_certificate'] ?? null;
+        return $params['options']['ssl']['peer_certificate'] ?? null;
+    }
 
-        if ($certificate === null) {
-            return null;
-        }
-
-        $parsed = openssl_x509_parse($certificate);
-
-        if ($parsed === false) {
-            return null;
-        }
-
+    /**
+     * A self-signed certificate is the install default, not a failure.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array{name: string, names: array<int, string>, issuer: string, expires: int, self_signed: bool}
+     */
+    private static function described(array $parsed): array
+    {
         $issuer = (string) ($parsed['issuer']['O'] ?? $parsed['issuer']['CN'] ?? '');
 
         return [
@@ -72,8 +79,6 @@ final class ServedCertificate
             'names' => self::alternativeNames($parsed),
             'issuer' => $issuer,
             'expires' => (int) ($parsed['validTo_time_t'] ?? 0),
-            // A certificate that issued itself is the install default, not a
-            // failure — but it is why a browser and most assistants complain.
             'self_signed' => ($parsed['subject'] ?? []) == ($parsed['issuer'] ?? []),
         ];
     }

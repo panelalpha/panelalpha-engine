@@ -1,0 +1,5 @@
+[1 log lines] answer
+false
+
+== log
+#0 info: Starting stage: running

@@ -6,16 +6,17 @@ use App\System\Firewall\FirewallLogEntry;
 use App\System\Firewall\FirewallRule;
 
 /**
- * ufw's and fail2ban's log lines to {@see FirewallLogEntry}.
- *
- * ufw logs through the kernel: `<time> <host> kernel: [UFW BLOCK] IN=eth0 OUT=
- * ... SRC=a DST=b ... PROTO=TCP SPT=x DPT=y`, read from the journal or from
- * /var/log/ufw.log. fail2ban writes `<date> <time>,<ms> fail2ban.actions [pid]:
- * NOTICE [jail] Ban <address>` to /var/log/fail2ban.log, in local time.
+ * ufw's kernel `[UFW BLOCK] IN= OUT= SRC= DST= PROTO= DPT=` lines and fail2ban's
+ * `NOTICE [jail] Ban <address>` lines, in local time, to {@see FirewallLogEntry}.
  */
 final class UfwLogs
 {
-    /** @return list<FirewallLogEntry> */
+    /**
+     * An outbound block (OUT set, IN empty) names where it went, anything arriving where it came from;
+     * the kernel writes IPv6 in full, so the address is compressed to match what the API is asked for.
+     *
+     * @return list<FirewallLogEntry>
+     */
     public static function parseKernel(string $lines): array
     {
         $entries = [];
@@ -32,15 +33,10 @@ final class UfwLogs
             if ($time === null || ! isset($f['SRC'], $f['DST'])) {
                 continue;
             }
-            // Leaving the host (OUT set, IN empty) names where it went; anything
-            // arriving, a published port forwarded to a container included,
-            // names where it came from.
             $outbound = ($f['IN'] ?? '') === '' && ($f['OUT'] ?? '') !== '';
             $entries[] = new FirewallLogEntry(
                 time: $time,
                 type: FirewallLogEntry::BLOCKED,
-                // The kernel writes IPv6 in full (fe80:0000:...); compressed, it
-                // matches what the API is asked for.
                 address: FirewallRule::normalizeAddress($outbound ? $f['DST'] : $f['SRC']),
                 direction: $outbound ? 'out' : 'in',
                 protocol: isset($f['PROTO']) ? strtolower($f['PROTO']) : null,

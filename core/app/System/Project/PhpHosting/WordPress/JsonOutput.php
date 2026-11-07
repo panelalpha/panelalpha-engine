@@ -3,12 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Decodes WP-CLI `--format=json` output.
- *
- * A PHP warning, notice or deprecation printed to stdout ahead of the JSON
- * (display_errors on, exit code still 0) would make a strict decode fail.
- * Such lines are dropped before a second attempt; anything else that is not
- * JSON is still an error.
+ * Decodes WP-CLI `--format=json` output. A PHP warning, notice or deprecation printed ahead of the JSON (exit code
+ * still 0) is dropped before a second attempt; anything else that is not JSON is still an error.
  */
 final class JsonOutput
 {

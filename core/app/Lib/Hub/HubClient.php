@@ -10,8 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 
 /**
- * Calls from this engine to the Hub: the connect ceremony, and afterwards a few
- * signed notices. TLS verification is never turned off and redirects are never
+ * Calls to the Hub: the connect ceremony, then a few signed notices. TLS is always verified and redirects never
  * followed; a network failure is a HubException, a Hub answer is a HubResponse.
  */
 class HubClient

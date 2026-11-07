@@ -11,11 +11,8 @@ use App\Models\WordpressMigration;
 use Closure;
 
 /**
- * Decides, before anything is stored, which domain and project an import
- * lands on: the site keeps its own domain unless the caller names another,
- * an IP source gets a panelalpha.online name only with Connect, and an
- * existing project must be a classic one with nothing installed yet.
- * Refusals are 422 problems the panel can act on.
+ * Decides, before anything is stored, where an import lands: the site's own domain unless the caller names another, a
+ * panelalpha.online name for an IP source only with Connect, an existing project only if classic and empty. Refusals are 422s.
  */
 final class MigrationTargetResolver
 {

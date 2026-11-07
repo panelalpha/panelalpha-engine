@@ -32,9 +32,9 @@ final class SystemProvisionEnvironment implements ProvisionEnvironment
         return Domain::domainOrAliasExists($domain);
     }
 
+    /** The same search as ProjectIpAddresses::assignFreeDedicatedIpv4/6(), without assigning. */
     public function freeDedicatedIpExists(int $family): bool
     {
-        // The same search as ProjectIpAddresses::assignFreeDedicatedIpv4/6(), without assigning.
         $default = (string) Setting::get($family === 6 ? 'default_ipv6' : 'default_ipv4');
         $reserved = $default === '' ? [] : [$default];
         $subnets = IpSubnet::query()->where('family', $family)->where('is_shared', 0)->get();

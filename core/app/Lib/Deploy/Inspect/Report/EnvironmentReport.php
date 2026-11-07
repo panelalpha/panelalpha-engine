@@ -7,10 +7,8 @@ use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 
 /**
- * Variable *names* the project expects, and the defaults the platform sets.
- *
- * Names only. A committed .env is a mistake people make, and an inspection
- * endpoint that echoed one back would turn that mistake into a disclosure.
+ * Variable *names* the project expects, and the defaults the platform sets. Names only: echoing a
+ * committed .env back would turn that mistake into a disclosure.
  */
 final class EnvironmentReport
 {
@@ -18,19 +16,8 @@ final class EnvironmentReport
     public const MAX_KEYS = 300;
 
     /**
-     * Both orderings of the same idea.
-     *
-     * `.env.example` is the common spelling, but the words also get written
-     * the other way round, and a name this report does not know is a variable
-     * it cannot tell anyone about. Kutt ships `.example.env`, 3045 bytes of
-     * it, whose eleventh line is `JWT_SECRET=`; the report came back
-     * `files: []`, `variables: []`, and the deploy then restart-looped on
-     *
-     *     Missing environment variables:
-     *        JWT_SECRET: undefined
-     *
-     * -- the one variable that sinks the deploy, invisible in the report
-     * whose whole job is to name them.
+     * Every template spelling plus `.env`: a template the report does not know, like Kutt's `.example.env`
+     * with its `JWT_SECRET=`, hides the very variable that sinks the deploy.
      *
      * @var list<string>
      */

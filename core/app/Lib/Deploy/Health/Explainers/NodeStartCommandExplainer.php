@@ -7,12 +7,8 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Which script is running, when what is answering is a development server.
- *
- * The check can tell that a dev server is serving the page; only package.json
- * can say which line to change. "This project is being served by a
- * development server" sends someone looking; "package.json's start script is
- * `next dev`" is the edit.
+ * Which script is running when a development server answers: only package.json can say which line to
+ * change ("package.json's start script is `next dev`").
  */
 final class NodeStartCommandExplainer implements Explainer
 {

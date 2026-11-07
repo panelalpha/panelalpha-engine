@@ -6,18 +6,14 @@ use App\Lib\Deploy\Platform\PlatformStage;
 use InvalidArgumentException;
 
 /**
- * `ENV key=value`, one per entry, in the order the caller settled on.
- *
- * `PA_DEPLOY_PHASE` is excluded: it is a runtime value compose passes, and as an
- * `ENV` above the dependency install its switch to `upgrade` invalidated that
- * layer and below -- a Django rebuild of an unchanged commit re-ran `pip install`.
+ * `ENV key=value`, one per entry, in the caller's order; `PA_DEPLOY_PHASE` is left to compose,
+ * since as an `ENV` its switch to `upgrade` invalidated the dependency-install layer.
  */
 final class EnvironmentLines
 {
     /**
-     * Values written bare, exactly as before, so an existing Dockerfile and
-     * its layer cache do not change. `$` stays: a Dockerfile expands it inside
-     * double quotes too, and `PATH=/x:$PATH` relies on that.
+     * Values written bare, exactly as before, so existing layer caches hold; `$` stays because
+     * a Dockerfile expands it inside double quotes too (`PATH=/x:$PATH`).
      */
     private const BARE = '/^[A-Za-z0-9_.,:\/@%+=~${}-]*$/';
 
@@ -39,10 +35,8 @@ final class EnvironmentLines
     }
 
     /**
-     * `ARG key=value`, one per entry: a build-time default absent from the
-     * resulting image. For `NODE_OPTIONS` that matters: a heap sized for the
-     * engine's build container exceeds the account's cgroup, and V8 reaches
-     * for it and is OOM-killed. Reaches every process the build spawns.
+     * `ARG key=value`, one per entry: a build-time default absent from the image, so a
+     * `NODE_OPTIONS` heap sized for the build container does not OOM the running app.
      *
      * @param  array<string, string>  $env
      * @return list<string>
@@ -58,9 +52,8 @@ final class EnvironmentLines
     }
 
     /**
-     * `key=value`, double-quoted when the value holds anything else. Written
-     * bare, `ENV A=x y` fails the build ("can't find = in y") and a newline
-     * starts a new Dockerfile instruction.
+     * `key=value`, double-quoted when the value holds anything else: bare, `ENV A=x y` fails
+     * the build and a newline starts a new instruction.
      */
     private static function pair(string $key, string $value): string
     {

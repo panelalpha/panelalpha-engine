@@ -10,14 +10,8 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\DeployStrategy;
 
 /**
- * A manifest's `database: mysql`, for the writers that generate their own app
- * service outside the PHP strategy: a repository Dockerfile (Kimai) and the
- * generated framework builds.
- *
- * Same database as {@see PhpStrategy} provisions -- {@see AppDatabase} on the
- * account's own MySQL server -- handed over as DATABASE_URL plus DB_*, with
- * the host pinned into `extra_hosts` because the nested Docker resolves none
- * of the engine's names.
+ * A manifest's `database: mysql` for app services generated outside the PHP strategy: the same {@see AppDatabase} as
+ * {@see PhpStrategy}, as DATABASE_URL plus DB_*, its host pinned in `extra_hosts` (nested Docker resolves no engine names).
  */
 class ManifestDatabase
 {
@@ -26,9 +20,8 @@ class ManifestDatabase
     public function __construct(private DindProject $dind) {}
 
     /**
-     * What to add to the generated app service: `env` and `extra_hosts`, or
-     * nothing when no database was declared or the project ships a MySQL of
-     * its own (that one is already wired to the app, and stays).
+     * What to add to the generated app service: `env` and `extra_hosts`, or nothing when no database was
+     * declared or the project ships a MySQL of its own (already wired to the app, and it stays).
      *
      * @param  array<string, mixed>  $decision
      * @param  array<string, mixed>  $services  harvested sidecar services
@@ -87,9 +80,8 @@ class ManifestDatabase
     }
 
     /**
-     * DATABASE_URL (Doctrine, Kimai's entrypoint, Rails, Prisma) plus the
-     * Laravel-style DB_* spellings. Percent-encoded, so a password with `@`
-     * or `/` cannot leak into the host or the path.
+     * DATABASE_URL (Doctrine, Kimai, Rails, Prisma) plus the Laravel-style DB_* spellings, percent-encoded so a
+     * password with `@` or `/` cannot leak into the host or the path.
      *
      * @param  array<string, string>  $db  {@see AppDatabase::provision()}
      * @return array<string, string>

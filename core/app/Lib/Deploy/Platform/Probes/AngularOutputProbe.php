@@ -7,15 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Where an Angular build actually writes.
- *
- * Angular states its own output path inside angular.json, under a project
- * name nobody can predict, and modern versions split it into `base` plus a
- * `browser` subdirectory. Serving the wrong one serves an empty directory,
- * which looks exactly like a successful deploy.
- *
- * Contributes `output_directory`; always matches when angular.json is there,
- * so the manifest can use it as its output resolver and as part of detection.
+ * Where an Angular build writes, from angular.json's `outputPath` (`base` plus `browser` in modern versions);
+ * contributes `output_directory` and always matches, so it serves as resolver and detection both.
  */
 final class AngularOutputProbe implements PlatformProbe
 {
@@ -58,6 +51,8 @@ final class AngularOutputProbe implements PlatformProbe
     }
 
     /**
+     * `defaultProject` is moved to the front, so it wins wherever it has an output.
+     *
      * @return array<string, array<string, mixed>> angular.json's projects, `defaultProject` first
      */
     private static function projects(string $projectDir): array
@@ -74,7 +69,6 @@ final class AngularOutputProbe implements PlatformProbe
         $projects = array_filter($json['projects'], 'is_array');
         $default = $json['defaultProject'] ?? null;
         if (is_string($default) && isset($projects[$default])) {
-            // Moved to the front, so it wins wherever it has an output.
             $projects = [$default => $projects[$default]] + $projects;
         }
 
@@ -104,15 +98,17 @@ final class AngularOutputProbe implements PlatformProbe
         return $fallback;
     }
 
-    /** @param array<string, mixed> $project */
+    /**
+     * The `application` builder (Angular 17+) writes into `<outputPath>/browser` even for a string; the legacy
+     * `browser` builder writes straight into it, and an object's `browser: ''` flattens into `base`.
+     *
+     * @param  array<string, mixed>  $project
+     */
     private static function projectOutput(array $project): ?string
     {
         $build = $project['architect']['build'] ?? $project['targets']['build'] ?? null;
         $output = is_array($build) ? ($build['options']['outputPath'] ?? null) : null;
         if (is_string($output) && $output !== '') {
-            // The `application` builder (Angular 17+) writes the client bundle
-            // into `<outputPath>/browser` even for a string outputPath; the
-            // legacy `browser` builder writes straight into it.
             $builder = is_string($build['builder'] ?? null) ? $build['builder'] : '';
 
             return str_ends_with($builder, ':application') ? rtrim($output, '/').'/browser' : $output;
@@ -121,7 +117,6 @@ final class AngularOutputProbe implements PlatformProbe
             $base = is_string($output['base'] ?? null) ? $output['base'] : 'dist';
             $browser = is_string($output['browser'] ?? null) ? $output['browser'] : 'browser';
 
-            // `browser: ''` flattens the client bundle into `base`.
             return trim($browser, '/') === ''
                 ? rtrim($base, '/')
                 : rtrim($base, '/').'/'.ltrim($browser, '/');

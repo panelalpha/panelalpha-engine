@@ -15,10 +15,8 @@ use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
- * Step 2: install empty WordPress (core download, database, config, core
- * install) into the path derived from the source URL. A rerun keeps the core
- * already downloaded, reuses the database the record names and skips an
- * install that is done, so a resumed import leaves one of each.
+ * Step 2: install empty WordPress (core, database, config, install) into the path derived from the source URL.
+ * A rerun keeps the core, reuses the record's database and skips a done install, so a resume leaves one of each.
  */
 final class InstallWordpressStep implements MigrationStep
 {

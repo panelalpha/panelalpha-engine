@@ -1,0 +1,11 @@
+[2 log lines] write {dir}/app/panelalpha-entrypoint.sh chown=1001:1001 mode=755
+#!/bin/sh
+exec ./serve
+
+
+[2 log lines] answer
+true
+
+== log
+#0 info: Starting stage: running
+#1 info: Using this project's own .panelalpha/entrypoint.sh — the platform's install, upgrade and start commands are not applied

@@ -20,16 +20,7 @@ class UpstreamSpec
         }
 
         if (preg_match('/^\d+$/', $proxyTo) === 1) {
-            $port = (int) $proxyTo;
-            if ($port < 1 || $port > 65535) {
-                throw new \InvalidArgumentException('Upstream port must be 1-65535.');
-            }
-            $host = trim($defaultHost);
-            if ($host === '') {
-                throw new \InvalidArgumentException('Default upstream host is required for port-only --proxy-to.');
-            }
-
-            return [$host, $port];
+            return self::portOnly($proxyTo, $defaultHost);
         }
 
         if (preg_match('/^([^:\s]+):(\d+)$/', $proxyTo, $m) !== 1) {
@@ -44,5 +35,22 @@ class UpstreamSpec
         }
 
         return [$m[1], $port];
+    }
+
+    /**
+     * @return array{0: string, 1: int}
+     */
+    private static function portOnly(string $proxyTo, string $defaultHost): array
+    {
+        $port = (int) $proxyTo;
+        if ($port < 1 || $port > 65535) {
+            throw new \InvalidArgumentException('Upstream port must be 1-65535.');
+        }
+        $host = trim($defaultHost);
+        if ($host === '') {
+            throw new \InvalidArgumentException('Default upstream host is required for port-only --proxy-to.');
+        }
+
+        return [$host, $port];
     }
 }

@@ -3,9 +3,8 @@
 namespace App\System;
 
 /**
- * The engine's own Compose project. Compose prefixes every container and
- * volume of the stack with its name, so code that needs one of those names
- * builds it here instead of spelling the prefix out.
+ * The engine's own Compose project, whose name prefixes every container and volume of the stack:
+ * code that needs one of those names builds it here instead of spelling the prefix out.
  */
 final class ComposeProject
 {

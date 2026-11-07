@@ -8,18 +8,17 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 
 /**
- * A single-page app whose `start` is only a bundler's dev server, or which has
- * a `build` script and no `start`: what ships is the `build` output, served
- * statically. `start: webpack serve` restart-loops in production.
+ * A single-page app whose `start` is only a bundler's dev server (which restart-loops in production), or with a
+ * `build` and no `start`: what ships is the `build` output, served statically.
  */
 final class BundlerSpaProbe implements PlatformProbe
 {
-    // Anchored, so a command that also runs an entry file does not match.
+    /** Anchored, so a command that also runs an entry file does not match. */
     private const DEV_SERVER = '/^(?:npx\s+|pnpm\s+(?:exec\s+)?|yarn\s+)?'
         .'(?:webpack(?:-cli)?\s+serve|webpack-dev-server|vue-cli-service\s+serve|ng\s+serve'
         .'|parcel(?!\s+build\b)|vite(?!\s+build\b))(?:\s[^&|;]*)?$/';
 
-    // `npm install && webpack serve` is still only the dev server.
+    /** `npm install && webpack serve` is still only the dev server. */
     private const INSTALL_PREFIX = '/^(?:(?:npm\s+(?:install|i|ci)|pnpm\s+(?:install|i)|yarn(?:\s+install)?)'
         .'(?:\s+-[^&|;]*)?\s*&&\s*)+/';
 
@@ -27,7 +26,7 @@ final class BundlerSpaProbe implements PlatformProbe
 
     private const SCRIPT_CALL = '/^(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?)\s+([\w:.-]+)$/';
 
-    // Any of these means the project has a real server; leave it to Node.
+    /** Any of these means the project has a real server; leave it to Node. */
     private const SERVER_DEPS = [
         'express', 'fastify', 'koa', '@hapi/hapi', 'hapi', 'restify', 'polka', 'micro',
         '@nestjs/core', 'next', 'nuxt', 'hono', 'h3', 'sails', '@adonisjs/core',
@@ -39,6 +38,10 @@ final class BundlerSpaProbe implements PlatformProbe
         return 'bundler-spa';
     }
 
+    /**
+     * Without a start script, a bundler-build SPA (kiwiirc) has a front page and a compiled TypeScript CLI (bubo-rss)
+     * does not; `public/index.html` needs isFile(), as hasFile() reads the root listing by basename.
+     */
     public function evaluate(ProjectContext $context): bool
     {
         if ($context->script('build') === '' || $context->hasFile('server.js')) {
@@ -56,9 +59,6 @@ final class BundlerSpaProbe implements PlatformProbe
             return self::isDevServerOnly($context, $start);
         }
 
-        // No start script: a bundler-build SPA (kiwiirc) has a front page, a
-        // compiled TypeScript CLI (bubo-rss) does not. `public/index.html`
-        // needs isFile() -- hasFile() reads the root listing by basename.
         return $context->hasFile('index.html') || $context->isFile('public/index.html');
     }
 
@@ -97,9 +97,9 @@ final class BundlerSpaProbe implements PlatformProbe
         return $default;
     }
 
+    /** Read only inside `output: {...}`: `context` and `devServer.static` are paths too. */
     private static function webpackOutputPath(string $config): ?string
     {
-        // Only inside `output: {...}`: `context` and `devServer.static` are paths too.
         if (preg_match('/\boutput\s*:\s*\{/', $config, $m, PREG_OFFSET_CAPTURE) !== 1) {
             return null;
         }

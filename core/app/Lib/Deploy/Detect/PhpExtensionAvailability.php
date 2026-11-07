@@ -7,13 +7,14 @@ use App\Lib\Deploy\Platform\Runtime\Php\ComposerManifest;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpExtensions;
 
 /**
- * PHP extensions a project requires that its image will not have. There is no
- * per-project Dockerfile on the php strategy, so an absent extension fails the
- * Composer install. MAX_BAKED_EXTRAS decides what the base can bake.
+ * PHP extensions a project requires that its image will not have, which fails the Composer install:
+ * the php strategy has no per-project Dockerfile.
  */
 final class PhpExtensionAvailability
 {
     /**
+     * Beyond the shared base and the variant it would build: past MAX_BAKED_EXTRAS none is baked at all.
+     *
      * @return list<string> extension names, without the `ext-` prefix
      */
     public static function missing(?string $composerJson, ?string $composerLock = null): array
@@ -27,9 +28,6 @@ final class PhpExtensionAvailability
             return [];
         }
 
-        // Beyond the shared base and the variant it would build.
-        // bakeableExtras() returns nothing past MAX_BAKED_EXTRAS -- a project
-        // asking for five unusual extensions gets none, not four.
         $beyondBase = PhpBaseImage::missingExtensions($required);
         $wouldBake = PhpBaseImage::bakeableExtras($beyondBase);
 
@@ -39,9 +37,7 @@ final class PhpExtensionAvailability
         return $missing;
     }
 
-    /**
-     * One sentence for a report, or null when nothing is missing.
-     */
+    /** One sentence for a report, or null when nothing is missing. */
     public static function issue(?string $composerJson, ?string $composerLock = null): ?string
     {
         $missing = self::missing($composerJson, $composerLock);

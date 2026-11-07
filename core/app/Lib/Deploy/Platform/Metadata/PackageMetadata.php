@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * One ecosystem's answer to "which application is this?" — never execute the
- * project (`setup.py`, a `.gemspec` and `build.gradle` are programs), and report
- * script names, not script bodies. Null means the ecosystem is absent.
+ * One ecosystem's answer to "which application is this?", without executing the project
+ * (`setup.py` and `build.gradle` are programs) and with script names, never bodies.
  */
 interface PackageMetadata
 {

@@ -7,15 +7,8 @@ use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * The Node stage that compiles a Rails app's frontend.
- *
- * The package.json build script runs directly rather than through
- * `rails assets:precompile` or vite_ruby's `bin/vite`: both boot the full
- * application, and the application blocks on a database that does not exist
- * during an image build.
- *
- * Install with NODE_ENV unset so the build tooling in devDependencies is
- * present; production only for the build step itself.
+ * The Node stage compiling a Rails frontend by its package.json script, not `rails assets:precompile`, which boots
+ * the app against a database the image build lacks; NODE_ENV unset at install keeps the devDependencies.
  */
 final class FrontendStage
 {
@@ -55,9 +48,12 @@ final class FrontendStage
         return false;
     }
 
+    /**
+     * Runs jsbundling's `build` and cssbundling's `build:css`; app/assets/builds always exists, as the app
+     * stage copies it back whether or not a bundle was written.
+     */
     public function build(): string
     {
-        // cssbundling's own script is `build:css`, beside jsbundling's `build`.
         $scripts = array_values(array_filter(
             ['build', 'build:css'],
             fn (string $script): bool => $this->app->project->script($script) !== ''
@@ -70,7 +66,6 @@ final class FrontendStage
             $scripts
         ));
         if (self::bundlesIntoAssets($this->app)) {
-            // The app stage copies it back whether or not a bundle was written.
             $build .= ' && mkdir -p app/assets/builds';
         }
 

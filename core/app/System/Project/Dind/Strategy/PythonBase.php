@@ -8,18 +8,8 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\HostCompile;
 
 /**
- * Swaps a Python recipe's stock image for the shared base that can build its
- * dependencies.
- *
- * One class because there are two callers and they must not disagree.
- * {@see FrameworkStrategy} writes the image into the compose file;
- * {@see HostCompile} picks the image the
- * `.venv` is built in, re-running detection to get there, so it sees nothing
- * the strategy decided. Two answers to "which Python" is how a venv gets
- * compiled against headers the runtime does not have.
- *
- * Safe to call for any command runtime: a Go, Rust or Java image passes
- * straight through.
+ * Swaps a Python recipe's stock image for the shared base that can build its dependencies, one answer for
+ * {@see FrameworkStrategy} and {@see HostCompile} alike; any other command runtime's image passes through.
  */
 final class PythonBase
 {
@@ -27,25 +17,18 @@ final class PythonBase
     private const MANIFESTS = ['requirements.txt', 'pyproject.toml', 'Pipfile', 'setup.py'];
 
     /**
-     * The shared base when the host can provide one, the image the recipe
-     * resolved otherwise.
+     * The shared base when the host can provide one, else the recipe's image, which still installs every wheel.
+     * A tag that is not a plain official `python:` one is declined before touching the disk or the inner daemon.
      */
     public static function imageFor(DindProject $dind, string $projectDir, string $image): string
     {
         $image = trim($image);
-        // Decline before touching the filesystem or the inner daemon: this runs
-        // for every command runtime, and PythonBaseImage::tag() answers null
-        // for anything that is not a plain official `python:` tag.
         if ($image === '' || PythonBaseImage::tag($image, ['build-essential']) === null) {
             return $image;
         }
 
         $packages = SystemPackages::for(self::manifests($dind, $projectDir));
 
-        // Null means the base could not be provided — build failed, disk full.
-        // The stock image still installs every dependency that ships a wheel,
-        // so a pip error naming the missing header beats a deploy declined
-        // before it started.
         return $dind->innerDocker()->ensurePythonBaseImage($image, $packages) ?: $image;
     }
 

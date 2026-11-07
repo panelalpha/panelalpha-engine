@@ -7,12 +7,8 @@ use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * An image build in the account's own daemon -- a Dockerfile, compose or
- * Railpack build -- held to the server's host build ceiling, never above the
- * project's own limit, and first in line for the OOM killer while it runs
- * ({@see InnerBuildLimit}). The project's runtime limit is not touched.
- *
- * Never fails a deploy: a limit that cannot be set leaves the build as it was.
+ * An image build in the account's own daemon held to the host build ceiling (never above the project's limit) and
+ * first for the OOM killer ({@see InnerBuildLimit}); a limit that cannot be set leaves the build as it was.
  */
 final class InnerBuildGuard
 {

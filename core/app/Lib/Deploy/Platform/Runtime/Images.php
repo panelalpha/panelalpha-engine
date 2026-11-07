@@ -8,17 +8,14 @@ use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * The catalogue of base images a deploy can resolve to, and which ones a given
- * project will pull. Per-project version selection lives on the runtimes; here
- * is the fixed set and the version-to-tag mapping.
+ * The base images a deploy can resolve to, and which ones a given project will pull.
+ * Per-project version selection lives on the runtimes; here is the fixed set.
  */
 final class Images
 {
     /**
-     * What a project gets when it says nothing about Node: an older LTS.
-     * engines.node, .nvmrc or .node-version is honoured; a silent project
-     * usually has dependencies that break on newer Node (native bindings, old
-     * webpack), and older runs nearly everything newer does.
+     * What a project silent about Node gets: an older LTS, since its dependencies often break on newer Node
+     * (native bindings, old webpack), while older runs nearly everything newer does.
      */
     public const NODE_IMAGE = NodeRuntime::IMAGE;
 
@@ -35,9 +32,8 @@ final class Images
     public const PHP_EXTENSION_INSTALLER_IMAGE = 'mlocati/php-extension-installer';
 
     /**
-     * Every PHP minor a deploy can resolve to, for HostPrewarmPlan -- the full
-     * set, not phpPreloadImages()'s default-and-newer subset. Delegated so
-     * this list cannot drift from PhpRuntime::MINORS.
+     * Every PHP minor a deploy can resolve to, for HostPrewarmPlan: the full set, not phpPreloadImages()'s.
+     * Delegated so this list cannot drift from PhpRuntime::MINORS.
      *
      * @return list<string>
      */
@@ -47,8 +43,7 @@ final class Images
     }
 
     /**
-     * Catalog of recipe base images. Not pulled at DinD boot -- the strategy is
-     * unknown until clone and pulling PHP plus node:22 on a Vite/Node 20 site
+     * Recipe base images, not pulled at DinD boot: the strategy is unknown until clone, and pulling them all
      * saturates the inner daemon. preloadImagesFor() runs after detect.
      *
      * @return list<string>
@@ -63,16 +58,13 @@ final class Images
     }
 
     /**
-     * Images this deploy actually needs. Static/railpack skip the pull loop via
-     * DeployCompose::skipBuild(). With $projectDir set the Node tag follows
-     * engines.node / .nvmrc, so node:22 is not pulled for a node:20 build.
+     * Images this deploy needs, versioned from $projectDir; skipBuild() is asked without $runtime, which would
+     * call nginx nothing to build. Lenient: the prewarmer asks before any such project exists.
      *
      * @return list<string>
      */
     public static function preloadImagesFor(?string $strategy, ?string $runtime = null, string $projectDir = ''): array
     {
-        // No $runtime: skipBuild() treats an nginx runtime as nothing to build,
-        // but the nginx image is what has to be warmed.
         if ($strategy === null || DeployCompose::skipBuild($strategy)) {
             return [];
         }
@@ -82,14 +74,23 @@ final class Images
             return [];
         }
 
-        // Lenient: the prewarmer asks what a Go app needs before any Go app
-        // exists, so an unreadable project means the default.
         $requirements = RuntimeRegistry::resolveAll(
             $manifest->requires,
             ProjectContext::make($projectDir, ProjectContext::listRootFiles($projectDir)),
             true
         );
 
+        return array_values(array_unique(self::requiredImages($manifest, $requirements, $projectDir)));
+    }
+
+    /**
+     * The runtime and build images, a .NET build's Node, and nginx: a build-only toolchain leaves no server.
+     *
+     * @param  list<Requirement>  $requirements
+     * @return list<string>
+     */
+    private static function requiredImages(PlatformManifest $manifest, array $requirements, string $projectDir): array
+    {
         $images = [];
         $runtimeImage = ImageResolver::runtimeImage($requirements);
         if ($runtimeImage !== null) {
@@ -104,25 +105,20 @@ final class Images
                 $images[] = $node;
             }
         }
-        // A build-only toolchain leaves nothing behind; name the serving image
-        // separately.
         if ($manifest->runtime === PlatformManifest::RUNTIME_NGINX) {
             $images[] = self::NGINX_IMAGE;
         }
 
-        return array_values(array_unique($images));
+        return $images;
     }
 
     /**
-     * The image a generated Dockerfile builds FROM, given the tag the pipeline
-     * resolved: a project whose install compiles a dependency gets the full
-     * variant of that tag. Applied to the pipeline's tag, not computed here, so
-     * host compile and account build cannot differ in variant.
+     * The pipeline's tag, in its full variant when the install compiles a dependency, so host compile and
+     * account build agree. A tag other than an official `node:` one (bun, JDK, a pinned image) is kept.
      */
     public static function nodeBuildImage(string $runtimeImage, string $projectDir): string
     {
         $runtimeImage = trim($runtimeImage);
-        // Not an official Node tag (bun, Python, JDK, a pinned image).
         if (! str_starts_with($runtimeImage, 'node:')) {
             return $runtimeImage;
         }
@@ -161,10 +157,8 @@ final class Images
     }
 
     /**
-     * Official node tag from engines.node / .nvmrc / .node-version, delegated so
-     * it cannot drift from NodeRuntime's parser. A project whose install compiles
-     * a dependency gets the full variant of the same major, for every caller at
-     * once: the compose file and the seeded image must be one tag.
+     * The official node tag from engines.node / .nvmrc / .node-version, full when the install compiles.
+     * Delegated to NodeRuntime, so the compose file and the seeded image are one tag.
      */
     public static function nodeImage(string $projectDir, array $package = []): string
     {
@@ -172,8 +166,8 @@ final class Images
     }
 
     /**
-     * Every php tag we might need, plus composer. Catalog and last resort: a
-     * deploy resolves one tag, see preloadImagesFor().
+     * The default and newer php tags, plus composer; older minors are pulled on demand, saving disk.
+     * A deploy resolves one tag, see preloadImagesFor().
      *
      * @return list<string>
      */
@@ -182,8 +176,6 @@ final class Images
         $images = [];
         $floor = PhpRuntime::normalizePhpVersion(PhpRuntime::defaultMinor());
         foreach (PhpRuntime::minors() as $minor) {
-            // Default and newer: older minors are pulled on demand, and warming
-            // all five costs disk for versions most hosts never serve.
             if (version_compare($minor.'.0', $floor, '<')) {
                 continue;
             }

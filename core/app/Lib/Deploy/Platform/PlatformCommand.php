@@ -3,15 +3,8 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * One command from a platform manifest, with the stage(s) it belongs to.
- *
- * Commands are separate objects rather than a joined shell string so the
- * engine can reason about them one at a time: skip a stage, mark one
- * optional, apply a `when` guard, or report which step of a boot failed.
- * A `&&`-joined blob can do none of that — a failure in the middle of it is
- * indistinguishable from a failure at the end.
- *
- * No Laravel dependencies — unit-testable.
+ * One command from a platform manifest, with its stages; an object, not a joined shell string, so each can be skipped, made
+ * optional, guarded or named when it fails, which a `&&` blob cannot do. No Laravel dependencies, so unit-testable.
  */
 final class PlatformCommand
 {
@@ -44,13 +37,8 @@ final class PlatformCommand
     ) {}
 
     /**
-     * Commands in the order they run: everything marked `before` first, the
-     * rest after, each group keeping its declared order.
-     *
-     * The one thing an app config could not previously say. Its commands were
-     * appended after the platform's, which is right for an action that depends
-     * on the build having happened and wrong for a licence check or a config
-     * file the build is about to read.
+     * Commands in the order they run: those marked `before` first, each group in declared order. An app config's commands follow
+     * the platform's otherwise, which is wrong for a licence check or a config file the build is about to read.
      *
      * @param  list<self>  $commands
      * @return list<self>
@@ -85,12 +73,43 @@ final class PlatformCommand
         }
 
         $stages = self::readStages($raw, $where);
+        $id = self::readId($raw, $where);
+        $serve = self::readServe($raw, $stages, $where);
+        [$when, $timeout, $workdir, $description] = self::readSettings($raw, $where);
+        $role = self::readRole($raw, $stages, $where);
 
+        return new self(
+            is_string($id) ? trim($id) : self::deriveId($run, $index),
+            $stages,
+            trim($run),
+            (bool) ($raw['optional'] ?? false),
+            $serve,
+            is_array($when) ? $when : null,
+            $description,
+            is_int($timeout) ? $timeout : null,
+            is_string($workdir) ? trim($workdir) : null,
+            $role,
+            (bool) ($raw['before'] ?? false)
+        );
+    }
+
+    /** @param  array<string, mixed>  $raw */
+    private static function readId(array $raw, string $where): ?string
+    {
         $id = $raw['id'] ?? null;
         if ($id !== null && (! is_string($id) || trim($id) === '')) {
             throw new ManifestException("{$where}: 'id' must be a non-empty string when present");
         }
 
+        return $id;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  list<string>  $stages
+     */
+    private static function readServe(array $raw, array $stages, string $where): bool
+    {
         $serve = (bool) ($raw['serve'] ?? false);
         if ($serve && $stages !== [PlatformStage::START]) {
             throw new ManifestException(
@@ -98,6 +117,17 @@ final class PlatformCommand
             );
         }
 
+        return $serve;
+    }
+
+    /**
+     * `when`, `timeout`, `workdir` and `description`, checked in that order.
+     *
+     * @param  array<string, mixed>  $raw
+     * @return array{0: ?array<string, mixed>, 1: ?int, 2: ?string, 3: ?string}
+     */
+    private static function readSettings(array $raw, string $where): array
+    {
         $when = $raw['when'] ?? null;
         if ($when !== null && ! is_array($when)) {
             throw new ManifestException("{$where}: 'when' must be an object");
@@ -118,31 +148,12 @@ final class PlatformCommand
             throw new ManifestException("{$where}: 'description' must be a string when present");
         }
 
-        $role = self::readRole($raw, $stages, $where);
-
-        return new self(
-            is_string($id) ? trim($id) : self::deriveId($run, $index),
-            $stages,
-            trim($run),
-            (bool) ($raw['optional'] ?? false),
-            $serve,
-            is_array($when) ? $when : null,
-            $description,
-            is_int($timeout) ? $timeout : null,
-            is_string($workdir) ? trim($workdir) : null,
-            $role,
-            (bool) ($raw['before'] ?? false)
-        );
+        return [$when, $timeout, $workdir, $description];
     }
 
     /**
-     * Which build layer a build-stage command belongs to.
-     *
-     * DEPENDENCIES runs before the source is copied in, so BuildKit can reuse
-     * it across every deploy that did not touch the lockfile — the difference
-     * between a 4s redeploy and a full `composer install`. ASSETS runs after,
-     * because it needs the source. Runtime stages have no layers, so they are
-     * always NONE and may not say otherwise.
+     * Which build layer a build-stage command belongs to: DEPENDENCIES before the source is copied in, so BuildKit reuses it until
+     * the lockfile changes; ASSETS after, as it needs the source. Runtime stages have no layers, so are always NONE.
      *
      * @param  list<string>  $stages
      */

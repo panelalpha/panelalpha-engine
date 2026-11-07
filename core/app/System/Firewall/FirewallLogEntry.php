@@ -11,15 +11,17 @@ final class FirewallLogEntry
 
     public const UNBAN = 'unban';
 
+    /**
+     * @param  string  $address  the other side: where a blocked connection came from (or went to), or who was banned
+     * @param  ?string  $jail  the fail2ban jail, for a ban
+     */
     public function __construct(
         public readonly \DateTimeImmutable $time,
         public readonly string $type,
-        // The other side: where a blocked connection came from (or went to), or who was banned.
         public readonly string $address,
         public readonly ?string $direction = null,
         public readonly ?string $protocol = null,
         public readonly ?string $port = null,
-        // The fail2ban jail, for a ban.
         public readonly ?string $jail = null,
     ) {}
 

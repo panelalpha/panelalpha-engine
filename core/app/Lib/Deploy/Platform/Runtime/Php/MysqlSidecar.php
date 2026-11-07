@@ -6,11 +6,8 @@ use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 
 /**
- * The database container a MySQL app gets when the account has no MySQL of
- * its own.
- *
- * It shares the app's network namespace, so the app reaches it on 127.0.0.1
- * with the credentials it was already configured with.
+ * The database container a MySQL app gets when the account has no MySQL of its own, sharing the app's
+ * network namespace, so the app reaches it on 127.0.0.1 with the credentials it was configured with.
  */
 final class MysqlSidecar
 {
@@ -25,11 +22,8 @@ final class MysqlSidecar
     }
 
     /**
-     * The settings with a password filled in where the project left it blank,
-     * so the sidecar and the app's DB_PASSWORD agree on it.
-     *
-     * A legacy account keeps the blank: its data directory was initialised
-     * with `app` for a user, or an empty root password.
+     * The settings with a blank password filled in, so the sidecar and DB_PASSWORD agree; a legacy account
+     * keeps the blank its data directory was initialised with.
      *
      * @param  array<string, string>  $db
      * @return array<string, string>
@@ -66,10 +60,7 @@ final class MysqlSidecar
     }
 
     /**
-     * A decision with the sidecar added and the app pointed at it. The
-     * connection goes last in `env`, so it outranks the `.env.example` the
-     * decision was built from.
-     *
+     * A decision with the sidecar added and the app pointed at it, last in `env` to outrank `.env.example`.
      * `$db` is expected to have been through {@see withPassword()} already.
      *
      * @param  array<string, mixed>  $decision
@@ -88,31 +79,8 @@ final class MysqlSidecar
     }
 
     /**
-     * The connection variables for the **application**, which shares this
-     * container's network namespace.
-     *
-     * `network_mode: service:app` means the database is reached at
-     * 127.0.0.1 and the service name `db` resolves to nothing. The repository
-     * does not know that: Firefly III's `.env.example` sets `DB_HOST=db` for
-     * its own workstation compose, and that file is written to `.env` and
-     * carried into the container by `env_file:`, where the engine's generated
-     * `environment:` still outranks it -- so without this the app dies on
-     * `getaddrinfo for db failed` beside a database that is running and
-     * healthy.
-     *
-     * Returned as compose `environment:` rather than written into `.env`,
-     * because compose gives `environment:` precedence over `env_file:`: it
-     * reaches the container whatever the file says, and the file the customer
-     * opens still reads the way its author wrote it.
-     *
-     * The credentials are restated rather than assumed to survive: they are
-     * what the container was provisioned with ({@see service()}), so they are
-     * the ones that work, and a `.env.example` password is a placeholder like
-     * any other.
-     *
-     * The connection is stated as `mysql` even when the example says
-     * `mariadb`: this image is MariaDB, and Laravel's driver for both is
-     * spelled `mysql`.
+     * The app's connection as compose `environment:`, which outranks `env_file:`: 127.0.0.1 (a `.env.example`'s
+     * `db` resolves to nothing), the provisioned credentials, Laravel's `mysql` driver, and no unix socket.
      *
      * @return array<string, string>
      */
@@ -125,9 +93,6 @@ final class MysqlSidecar
             'DB_DATABASE' => $db->database(),
             'DB_USERNAME' => $db->username(),
             'DB_PASSWORD' => self::provisionedPassword($db),
-            // Empty, meaning "not a unix socket": a `.env.example` that
-            // leaves it blank is fine, one that fills it in would otherwise
-            // send the driver to a socket the sidecar does not create.
             'DB_SOCKET' => '',
         ];
     }

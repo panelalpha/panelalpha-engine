@@ -80,6 +80,19 @@ class TaskLogSinkTest extends SqliteTaskTestCase
         $this->assertSame(0, TaskLog::count());
     }
 
+    public function test_a_frame_that_cannot_be_encoded_is_dropped(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default');
+        $sink = new TaskLogSink($task);
+        $sink(['type' => 'line', 'ts' => time(), 'stage' => null, 'level' => 'info', 'msg' => "bad \xB1\x31 bytes"]);
+        $sink(['type' => 'line', 'ts' => 7, 'stage' => 'running', 'level' => 'dim', 'msg' => 'kept']);
+        $sink->flush();
+
+        $rows = TaskLog::query()->pluck('log')->all();
+        $this->assertCount(1, $rows);
+        $this->assertSame(['ts' => 7, 'stage' => 'running', 'level' => 'dim', 'msg' => 'kept'], json_decode($rows[0], true));
+    }
+
     public function test_flush_is_required_for_partial_batch(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default');

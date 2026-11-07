@@ -3,18 +3,8 @@
 namespace App\Lib\Deploy\Platform\AppConfig;
 
 /**
- * Reads descriptor files, wherever they happen to live.
- *
- * An app config is looked for in two places with different access rules: inside
- * the account's project directory, which on a real host is root-owned and
- * reached through sudo, and in the engine's own pages directory, which is
- * ordinary local filesystem. Both are "read this path" to the locator and
- * neither should be its problem, so the reading is injected.
- *
- * It is also what keeps this namespace testable without a host: a test hands
- * in {@see LocalAppConfigSource} over a temp directory.
- *
- * Listing is part of it because an app config is a directory now, not one file.
+ * Reads descriptor files from the root-owned project directory or the local pages directory,
+ * injected so the locator need not care; tests hand in {@see LocalAppConfigSource}.
  */
 interface AppConfigSource
 {

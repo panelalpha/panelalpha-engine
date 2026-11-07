@@ -3,16 +3,8 @@
 namespace App\Lib\Deploy\Sidecar;
 
 /**
- * The password a database sidecar gets when nobody chose one.
- *
- * It used to be the literal `app`, for the user and root alike. Now it is
- * derived per account and per variable, so MYSQL_PASSWORD and
- * MYSQL_ROOT_PASSWORD differ and neither is guessable from outside.
- *
- * An account whose databases were initialised under the old default keeps
- * `app` ({@see legacy()}): a data directory ignores the MYSQL_ and POSTGRES_
- * variables once it exists, so a new password would lock the app out of its
- * own database.
+ * The password a database sidecar gets when nobody chose one: derived per account and variable, so none is guessable.
+ * Accounts initialised under the old `app` keep it ({@see legacy()}): their data directory would ignore a new one.
  */
 final class SidecarPasswords
 {
@@ -38,13 +30,8 @@ final class SidecarPasswords
     }
 
     /**
-     * Which mode an account uses, and whether that is a new decision to store.
-     *
-     * Decided once and then kept: after the first derived deploy the account
-     * has volumes too, and re-deciding from that would flip it to legacy.
-     * An account that already holds volumes was deployed under `app`; one
-     * whose volumes could not be listed stays legacy without storing it, so
-     * the next deploy asks again.
+     * Which mode an account uses, and whether to store it: decided once, since a derived deploy leaves volumes too.
+     * Existing volumes mean `app`; volumes that cannot be listed stay legacy, unstored, so the next deploy asks again.
      *
      * @return array{mode: string, store: bool}
      */

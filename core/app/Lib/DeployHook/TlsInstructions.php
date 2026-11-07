@@ -3,13 +3,8 @@
 namespace App\Lib\DeployHook;
 
 /**
- * What to tell a client about getting a git host to call a self-signed
- * engine's Deploy Hook, one paragraph per provider.
- *
- * Bitbucket Cloud has no per-webhook override -- it always verifies the
- * target's certificate -- so its entry does not say "disable verification"
- * like the other three; it says what the engine already offers instead
- * (a trusted domain certificate).
+ * What to tell a client about getting a git host to call a self-signed engine's Deploy Hook, per provider;
+ * Bitbucket Cloud cannot skip verification, so its entry offers a trusted domain certificate instead.
  */
 final class TlsInstructions
 {

@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * References to services that have been dropped: Compose refuses to start a
- * stack naming a service the file does not define. `depends_on` is the obvious
- * key, `links` the older spelling Compose enforces just as strictly, and
- * `network_mode: service:x` and `volumes_from` name a service too.
+ * References to services that have been dropped, which Compose refuses to start a stack with:
+ * `depends_on`, `links`, `network_mode: service:x` and `volumes_from`.
  */
 final class ServiceDependencies
 {
@@ -18,6 +16,8 @@ final class ServiceDependencies
     private const REFERENCE_KEYS = ['depends_on', 'links'];
 
     /**
+     * Without the service whose network it shared, a service joins the stack's own.
+     *
      * @param  array<string, mixed>  $service
      * @param  array<string, true>  $dropped  lowercase service names
      * @return array<string, mixed>
@@ -31,11 +31,21 @@ final class ServiceDependencies
         foreach (self::REFERENCE_KEYS as $key) {
             $service = self::withoutDroppedIn($service, $key, $dropped);
         }
-        // Without the service whose network it shared, it joins the stack's own.
         $network = self::networkServiceOf($service);
         if ($network !== null && isset($dropped[strtolower($network)])) {
             unset($service['network_mode']);
         }
+
+        return self::withoutDroppedVolumesFrom($service, $dropped);
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @param  array<string, true>  $dropped
+     * @return array<string, mixed>
+     */
+    private static function withoutDroppedVolumesFrom(array $service, array $dropped): array
+    {
         if (is_array($service['volumes_from'] ?? null)) {
             $service['volumes_from'] = array_values(array_filter(
                 $service['volumes_from'],
@@ -52,8 +62,7 @@ final class ServiceDependencies
     }
 
     /**
-     * The services $service names through `depends_on`, `links`,
-     * `network_mode: service:x` or `volumes_from`.
+     * The services $service names through `depends_on`, `links`, `network_mode: service:x` or `volumes_from`.
      *
      * @param  array<string, mixed>  $service
      * @return list<string>
@@ -99,19 +108,7 @@ final class ServiceDependencies
             if (! is_array($refs)) {
                 continue;
             }
-            if (self::isStringList($refs)) {
-                $service[$key] = array_map(
-                    static fn ($ref) => $matches($ref) ? $to.substr($ref, strlen(self::serviceIn($ref))) : $ref,
-                    $refs
-                );
-
-                continue;
-            }
-            $renamed = [];
-            foreach ($refs as $name => $condition) {
-                $renamed[$matches((string) $name) ? $to : $name] = $condition;
-            }
-            $service[$key] = $renamed;
+            $service[$key] = self::renamedReferences($refs, $matches, $to);
         }
         $network = self::networkServiceOf($service);
         if ($network !== null && strcasecmp($network, $from) === 0) {
@@ -130,6 +127,26 @@ final class ServiceDependencies
     }
 
     /**
+     * @param  array<array-key, mixed>  $refs
+     * @return array<array-key, mixed>
+     */
+    private static function renamedReferences(array $refs, \Closure $matches, string $to): array
+    {
+        if (self::isStringList($refs)) {
+            return array_map(
+                static fn ($ref) => $matches($ref) ? $to.substr($ref, strlen(self::serviceIn($ref))) : $ref,
+                $refs
+            );
+        }
+        $renamed = [];
+        foreach ($refs as $name => $condition) {
+            $renamed[$matches((string) $name) ? $to : $name] = $condition;
+        }
+
+        return $renamed;
+    }
+
+    /**
      * @param  array<string, mixed>  $service
      */
     private static function networkServiceOf(array $service): ?string
@@ -143,8 +160,7 @@ final class ServiceDependencies
     }
 
     /**
-     * `links` entries may be `name` or `name:alias`; the alias goes with the
-     * dropped service, since nothing can reach it any more.
+     * `links` entries may be `name` or `name:alias`; the alias goes with the dropped service.
      *
      * @param  array<string, mixed>  $service
      * @param  array<string, true>  $dropped

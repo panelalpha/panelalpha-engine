@@ -3,26 +3,16 @@
 namespace App\Lib\Domains;
 
 /**
- * The name a project got, and everything a caller needs to know about it
- * without asking a second question.
- *
- * A domain string on its own does not say whether anyone can open it, what
- * certificate it will be served, or why it is not the name that was
- * preferred. Those were the questions a client had to answer out of band --
- * by reading `system_info`, knowing the zones, and inferring. They are fields
- * now: reported on the project as `details.domain`.
+ * The name a project got, with whether anyone can open it, which certificate it is served and why it
+ * is not the preferred name; reported on the project as `details.domain`.
  */
 final class AllocatedDomain
 {
     /**
      * @param  string  $source  one of DomainPlan's SOURCE_* constants
-     * @param  ?bool  $publiclyResolvable  null where it depends on DNS the
-     *                                     engine does not control, and so cannot be answered here
-     * @param  string  $tlsTerminatedAt  `proxy` for a name the WithoutDNS proxy
-     *                                   serves -- its certificate is the trusted one visitors see, and
-     *                                   the engine's own is irrelevant -- `engine` for everything else
-     * @param  ?array{path: string, path_fqdn: string, wdns_site_id: ?int, valid_until: ?string, target_ip: string}  $allocation
-     *                                                                                                                            what the proxy registered, for the tunnel row the caller writes
+     * @param  ?bool  $publiclyResolvable  null where it depends on DNS the engine does not control
+     * @param  string  $tlsTerminatedAt  `proxy` where the WithoutDNS proxy's certificate is what visitors see, else `engine`
+     * @param  ?array{path: string, path_fqdn: string, wdns_site_id: ?int, valid_until: ?string, target_ip: string}  $allocation  what the proxy registered
      */
     public function __construct(
         public readonly string $domain,

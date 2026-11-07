@@ -6,12 +6,8 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
- * The `.dockerignore` the engine writes when a project has none; a project's
- * own is left as the customer wrote it.
- *
- * `.git` must not enter the build context: two clones of one repository give an
- * identical worktree and different `.git` bytes, so `COPY . .` hashed
- * differently on every deploy and rebuilt every layer below it.
+ * The `.dockerignore` the engine writes when a project has none; it keeps `.git` out because two
+ * clones differ in `.git` bytes, so `COPY . .` would rebuild every layer below it on each deploy.
  */
 final class DockerIgnore
 {
@@ -23,14 +19,8 @@ final class DockerIgnore
     }
 
     /**
-     * Does the project's own `.dockerignore` keep $path out of the build
-     * context? A `COPY` of such a path fails the build with `"/<path>": not
-     * found` even though the file is in the checkout: zigbee2mqtt ships an
-     * `.npmrc` and lists it here.
-     *
-     * Docker's rules: one pattern per line, `#` comments, `!` re-includes,
-     * the last match wins, `*` stays within a path segment and `**` spans
-     * any number of them, and excluding a directory excludes what is in it.
+     * Does the project's own `.dockerignore` keep $path out of the build context, so a `COPY` of it
+     * fails? Docker's rules: `!` re-includes, the last match wins, `**` spans path segments.
      */
     public static function excludes(string $projectDir, string $path): bool
     {

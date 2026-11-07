@@ -7,16 +7,8 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Why PHP was served as text rather than run.
- *
- * The answer is nearly always the document root, and where the project keeps
- * its entry point says which way it is wrong. A `public/index.php` served from
- * the project root gives exactly this -- the interpreter is fine, the
- * webserver is looking one directory above the application -- and an
- * `index.php` at the root that is not being run is the opposite problem.
- *
- * Naming the file that exists is what turns "PHP is not running" into
- * something someone can act on without opening a shell.
+ * Why PHP was served as text rather than run: nearly always the document root, and whether the entry
+ * point is `public/index.php` or a root `index.php` says which way it is wrong.
  */
 final class PhpDocrootExplainer implements Explainer
 {

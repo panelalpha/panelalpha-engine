@@ -6,13 +6,8 @@ use App\Lib\Deploy\Platform\PlatformCommand;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * One phase of the entrypoint: the block that runs only when this boot is
- * that phase.
- *
- * `prepend` is for what only the engine knows — whether this account got a
- * MySQL sidecar, and therefore whether the migration has to wait for it.
- * `extra` is a project's own `setup` script: it runs once, on the first
- * deploy, and its failure is not the deploy's failure.
+ * One phase of the entrypoint, run only when this boot is that phase: `prepend` holds what only the
+ * engine knows (waiting for MySQL), `extra` a project's optional first-deploy `setup` script.
  */
 final class StageBlock
 {
@@ -34,10 +29,8 @@ final class StageBlock
     ) {}
 
     /**
-     * An overridden stage is never empty, even with nothing in it. "The
-     * request emptied this stage" and "this platform has no such stage" are
-     * different facts, and only the log can tell an operator which one
-     * explains the migration that did not run.
+     * An overridden stage is never empty, even with nothing in it, so the log tells an emptied
+     * stage from one the platform does not have.
      */
     public function isEmpty(): bool
     {

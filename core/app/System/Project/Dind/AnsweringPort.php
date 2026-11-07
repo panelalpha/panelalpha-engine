@@ -8,10 +8,8 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 
 /**
- * The port a deploy found serving the site when routing had to guess between
- * ports one service publishes on equal terms (Cabernet: its web UI on 6077
- * over a stream on 5004), and what served behind those ports then. A rebuild
- * keeps the port while that is unchanged; otherwise the guess is made again.
+ * The port a deploy found serving the site when routing guessed between ports one service publishes on equal
+ * terms (Cabernet: web UI 6077 over a stream on 5004), and what served behind them; a rebuild keeps it while unchanged.
  */
 final class AnsweringPort
 {
@@ -19,9 +17,8 @@ final class AnsweringPort
     public const DETAIL = 'app_port_proven';
 
     /**
-     * The guess routing makes: the lowest of the ports one service publishes
-     * on equal terms, and the others. Null when there is none to make: a
-     * recipe names the port, or the scan had a reason for its port.
+     * The guess routing makes: the lowest of the ports one service publishes on equal terms, and the others.
+     * Null when there is none to make: a recipe names the port, or the scan had a reason for its port.
      *
      * @param  array<string, string>  $env
      * @return ?array{primary: int, alternatives: list<int>}
@@ -59,9 +56,8 @@ final class AnsweringPort
     }
 
     /**
-     * What serves behind the guessed ports: every service publishing one of
-     * them, whole, as compose resolves it (container ports, image, command,
-     * environment). Null when compose names none of them.
+     * A hash of every service publishing one of the guessed ports, whole, as compose resolves it (container ports,
+     * image, command, environment); null when compose names none of them.
      *
      * @param  array<string, mixed>  $config  `docker compose config --format json`
      * @param  array{primary: int, alternatives: list<int>}  $choice
@@ -83,9 +79,8 @@ final class AnsweringPort
     }
 
     /**
-     * The port the last deploy found serving for this same guess, with the
-     * same services behind it; null otherwise. The record is used up either
-     * way: only a deploy whose port serves a page again writes it back.
+     * The port the last deploy found serving for this same guess, with the same services behind it; null otherwise.
+     * The record is used up either way: only a deploy whose port serves a page again writes it back.
      *
      * @param  ?array{primary: int, alternatives: list<int>}  $choice
      * @param  ?array<string, mixed>  $config
@@ -128,10 +123,8 @@ final class AnsweringPort
     }
 
     /**
-     * After a deploy's health check, with the site moved if another port
-     * served it better: the routed port when it served a page, the guess, and
-     * what served behind it, for the next rebuild. Forgotten otherwise: an
-     * answer without a page proves nothing about which port is the site.
+     * After the health check (site moved if another port served it better): keep the routed port, the guess and what
+     * served behind it when it served a page; forget it otherwise, as an answer without a page proves nothing.
      *
      * @param  array<string, mixed>  $report  {@see AppHealth::report()}
      */

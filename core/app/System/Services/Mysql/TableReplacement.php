@@ -3,10 +3,8 @@
 namespace App\System\Services\Mysql;
 
 /**
- * What a table-selection copy produced, and what a failure has to undo: the
- * rollback dump of every target table that was replaced, the tables that were
- * created because the target had none, the databases created for them, and
- * the users the grants on those databases went to.
+ * What a table-selection copy produced, and what a failure undoes: rollback dumps of replaced target tables, the
+ * tables and databases created where the target had none, and the users granted on those databases.
  */
 final class TableReplacement
 {

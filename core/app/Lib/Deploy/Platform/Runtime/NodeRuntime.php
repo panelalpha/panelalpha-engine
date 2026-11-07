@@ -6,12 +6,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Node, versioned by `engines.node`, then `.nvmrc`, then `.node-version`.
- *
- * `DEFAULT_MAJOR = 22` is the oldest maintained LTS: 20 is end-of-life and
- * current build tools (Babel 8) require 22. A project gets `bookworm` (not
- * `-slim`) when it compiles a dependency, because node-gyp needs python3,
- * make and g++.
+ * Node, versioned by `engines.node`, then `.nvmrc`, then `.node-version`; the default is the oldest maintained LTS.
+ * A project compiling a dependency gets `bookworm`, not `-slim`: node-gyp needs python3, make and g++.
  */
 final class NodeRuntime implements Runtime
 {
@@ -30,10 +26,8 @@ final class NodeRuntime implements Runtime
     public const IMAGE_VARIANT = 'bookworm-slim';
 
     /**
-     * What a JS recipe writes when it has no better answer for `start`.
-     *
-     * Matched literally so that only a recipe's own default is corrected — see
-     * {@see withEntryPointDefault()}.
+     * What a JS recipe writes when it has no better answer for `start`, matched literally so that only
+     * a recipe's own default is corrected ({@see withEntryPointDefault()}).
      */
     public const FALLBACK_START = 'node index.js';
 
@@ -44,25 +38,14 @@ final class NodeRuntime implements Runtime
     public const NODE_MODULES_BIN_PATH = 'export PATH=/app/node_modules/.bin:$PATH';
 
     /**
-     * The variant a project that has to compile a dependency gets: the same
-     * Debian release and Node, without `-slim`. `node:*-bookworm` carries
-     * python3, make and g++, all three of which `node-gyp rebuild` needs.
-     *
-     * Only the variant is swapped, never the major: the major is what
-     * `engines.node` asked for.
+     * The variant a project compiling a dependency gets: the same Debian release and major, without `-slim`,
+     * carrying the python3, make and g++ `node-gyp rebuild` needs.
      */
     public const TOOLCHAIN_VARIANT = 'bookworm';
 
     /**
-     * Packages that run `git` during the build.
-     *
-     * Each stamps a commit revision into a generated artifact — a service
-     * worker, a sitemap, a content index — by shelling out to `git rev-parse`
-     * or `git log`, and fails the build where the binary is absent. Read by
-     * {@see needsGitBinary()}.
-     *
-     * Named, not matched on `/git/i`: evidence that a package *invokes* git,
-     * not a guess from its name.
+     * Packages that run `git` during the build to stamp a revision into an artifact, and fail without it.
+     * Named, not matched on `/git/i`: evidence that a package invokes git, not a guess from its name.
      *
      * @var list<string>
      */
@@ -81,12 +64,8 @@ final class NodeRuntime implements Runtime
     ];
 
     /**
-     * Build-config stems whose *contents* might run git.
-     *
-     * Read, not matched by name: fluidd's git call is in
-     * `vite.config.inject-version.ts`, a name indistinguishable from an
-     * ordinary Vite config. A name-based rule would match every `vite.config.*`
-     * (putting the full image on every Vite project) or none.
+     * Build-config stems whose contents might run git; read, since a name says nothing (fluidd's git call
+     * is in `vite.config.inject-version.ts`).
      *
      * @var list<string>
      */
@@ -104,17 +83,8 @@ final class NodeRuntime implements Runtime
     ];
 
     /**
-     * Packages whose install compiles a C/C++ addon with `node-gyp`.
-     *
-     * Not the packages that merely *support* a native build: `node-gyp`,
-     * `node-gyp-build`, `node-pre-gyp`, `node-addon-api` and `nan` sit in half
-     * the mainstream trees and all ship prebuilt linux-x64 binaries, so
-     * reading for them would put a ~1.2GB image load on projects that install
-     * on the slim image fine.
-     *
-     * Evidence, not authority: a name in it still has to be declared by the
-     * project or recorded by npm as having an install script, and it is read
-     * by {@see hasNativeDependency()}.
+     * Packages whose install compiles a C/C++ addon (node-pty 1.x has no linux-x64 prebuild), not the helpers
+     * like `nan` that ship prebuilds; still only evidence for {@see hasNativeDependency()}.
      *
      * @var list<string>
      */
@@ -145,7 +115,6 @@ final class NodeRuntime implements Runtime
         'kerberos',
         'node-rdkafka',
         'duckdb',
-        // 1.x ships no linux-x64 prebuild, so its install always runs node-gyp.
         'node-pty',
     ];
 
@@ -171,20 +140,16 @@ final class NodeRuntime implements Runtime
         .'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--openssl-legacy-provider";; esac; }';
 
     /**
-     * Lockfiles whose text is worth scanning, in the order they are read.
-     *
-     * The npm and pnpm lockfiles spell the tree out in JSON or YAML; the Yarn
-     * file spells it in its own format. `bun.lockb` is binary and absent — a
-     * bun project needing a native build is missed, not misread.
+     * Lockfiles whose text is worth scanning, in the order they are read. `bun.lockb` is binary and absent:
+     * a bun project needing a native build is missed, not misread.
      *
      * @var list<string>
      */
     private const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock'];
 
     /**
-     * The sections of package.json {@see mentionsNodeGyp()} reads: the four
-     * dependency maps and `scripts`, which is where a project writes its own
-     * `node-gyp rebuild`.
+     * The sections of package.json {@see mentionsNodeGyp()} reads: the dependency maps, and `scripts`,
+     * where a project writes its own `node-gyp rebuild`.
      *
      * @var list<string>
      */
@@ -203,12 +168,8 @@ final class NodeRuntime implements Runtime
     public const IMAGE = 'node:'.self::DEFAULT_MAJOR.'-'.self::IMAGE_VARIANT;
 
     /**
-     * Above this a declared major is a typo or a misread constraint:
-     * `engines.node: "30"` names a tag that does not exist, so the pull 404s
-     * and the deploy falls back having wasted the round trip.
-     *
-     * No floor: an ancient `engines.node: 4` resolves to the oldest shipped
-     * major, which is closer to what it asked for than the default.
+     * Above this a declared major is a typo whose pull would 404. No floor: an ancient `engines.node: 4`
+     * resolves to the oldest shipped major, closer than the default.
      */
     public const MAX_PLAUSIBLE_MAJOR = 28;
 
@@ -245,15 +206,10 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The one entry point for "which Node does this project get".
+     * The one entry point for "which Node does this project get": a second copy once seeded one image and ran
+     * another.
      *
-     * A second copy of this answered differently for any major outside the
-     * shipped set — a project pinning `engines.node: 10` got node:18 from the
-     * recipe and node:20 from the deploy, so the account seeded one image and
-     * ran another.
-     *
-     * @param  array<string, mixed>  $package  an already-parsed package.json,
-     *                                         when the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json, when the caller has one
      */
     public static function imageFor(string $projectDir, array $package = []): string
     {
@@ -269,13 +225,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * $tag, or its full variant when this project has to compile something.
-     *
-     * Its own entry point because the tag does not always come from
-     * {@see imageFor()}: a generated Dockerfile builds FROM the image the
-     * detection decision froze, which resolves only the *major* and never saw
-     * the project. Applying the swap there too keeps the image a Dockerfile
-     * builds in and the image a host compile runs in the same tag.
+     * $tag, or its full variant when this project has to compile something; applied to a frozen decision's tag
+     * too, so a Dockerfile and a host compile use one image.
      *
      * @param  array<string, mixed>  $package  an already-parsed package.json
      */
@@ -291,44 +242,35 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does this project's *build* shell out to `git`?
+     * Does the build run `git`, which the host compile's slim image lacks? Only direct declarations count:
+     * a script, a build config, a declared package, or a dependency fetched over git.
      *
-     * `node.stub` and `static-nginx.stub` run `RUN {{ git_install }}` for every
-     * project (the slim base images ship no git), but the *host compile* path
-     * runs the same slim image with no way to add a package — so a project that
-     * needs git fails there and only there. `vite-plugin-pwa` in the tree is
-     * enough: it stamps a revision into the service worker with `git rev-parse`
-     * and the build dies on `/bin/sh: 1: git: not found` after a successful
-     * `npm install`.
-     *
-     * The signal is a *direct* declaration in the manifest, the standard
-     * `hasNativeDependency()` settled on: a transitive dependency puts the name
-     * in many trees that never invoke it.
-     *
-     * Being wrong costs less here than for the native list — the full variant
-     * is already pulled for this major by every native build, and the swap only
-     * names it, so nothing extra is fetched.
-     *
-     * @param  array<string, mixed>  $package  an already-parsed package.json, if
-     *                                         the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json, if the caller has one
      */
     public static function needsGitBinary(ProjectContext $context, array $package = []): bool
     {
         $dependencies = $package === [] ? ($context->package() ?? []) : $package;
 
-        // 1. The project drives git itself, in a script.
+        return self::scriptsInvokeGit($context)
+            || self::buildConfigInvokesGit($context)
+            || self::declaresGitAtBuildDependency($dependencies)
+            || self::installsFromGit($context, $dependencies);
+    }
+
+    private static function scriptsInvokeGit(ProjectContext $context): bool
+    {
         foreach ($context->scripts() as $script) {
             if (self::invokesGit((string) $script)) {
                 return true;
             }
         }
 
-        // 2. A build config that does -- where it usually lives; the file name
-        //    says nothing.
-        //
-        //    A context with no directory is legitimate: `ProjectContext::at('')`
-        //    is how callers with only a package.json build one, and
-        //    `firstConfigContents()` calls `scandir('')`, which throws.
+        return false;
+    }
+
+    /** Skipped without a directory (`ProjectContext::at('')`): `firstConfigContents()` would `scandir('')` and throw. */
+    private static function buildConfigInvokesGit(ProjectContext $context): bool
+    {
         if ($context->projectDir !== '') {
             foreach (self::GIT_AT_BUILD_CONFIGS as $stem) {
                 $contents = $context->configContents($stem);
@@ -338,7 +280,12 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        // 3. A package that does, declared by the project.
+        return false;
+    }
+
+    /** @param  array<string, mixed>  $dependencies */
+    private static function declaresGitAtBuildDependency(array $dependencies): bool
+    {
         foreach (self::GIT_AT_BUILD_DEPENDENCIES as $name) {
             foreach (['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as $section) {
                 if (isset(($dependencies[$section] ?? [])[$name])) {
@@ -347,33 +294,15 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        // 4. A dependency npm has to clone before anything of the project's
-        //    own runs.
-        return self::installsFromGit($context, $dependencies);
+        return false;
     }
 
     /**
-     * Does this text run git as a command?
-     *
-     * Matched on an invocation, not the bare word, so `husky install` and
-     * `digit-check.js` do not count while `git rev-parse --short HEAD` and
-     * `execSync('git log -1')` do.
-     *
-     * Only *literal* invocations: a path built at runtime is not visible here,
-     * and guessing would put the full image on projects that never call git.
+     * Does this text literally run git: the word, any global options (`-C /app`, the engine's own idiom),
+     * then a subcommand, so `husky install`, `digit-check` and `.gitignore` do not count?
      */
     private static function invokesGit(string $text): bool
     {
-        // The word git, then any global options, then a subcommand: the
-        // subcommand anchor keeps `digit-check` and `.gitignore` out.
-        //
-        // The options are not optional detail. `git -C /app submodule update`
-        // and `git -c safe.directory=/app submodule update` are the engine's
-        // own idiom -- System/Project/Git.php spells both -- so a recipe
-        // author who copies how the engine invokes git wrote exactly the form
-        // this could not see. The build then ran on node:*-slim, which has no
-        // git, and died as `npm error syscall spawn git`: a message naming
-        // neither the missing binary nor the image choice.
         return preg_match(
             '/(?:^|[\s\'"&|;(=\[`])git(?:\s+'.self::GIT_GLOBAL_OPTION.')*'
             .'\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
@@ -382,22 +311,15 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * A git option that may sit between `git` and its subcommand.
-     *
-     * `-c` takes `key=value` and `-C` a path, with or without a space between
-     * flag and value, so `\s*\S+` covers both spellings of each.
+     * A git option that may sit between `git` and its subcommand; `\s*\S+` covers `-c key=value` and `-C path`
+     * with or without a space.
      */
     private const GIT_GLOBAL_OPTION =
         '(?:-[cC]\s*\S+|--(?:git-dir|work-tree|exec-path|namespace)=\S+|--no-pager|--bare|-[pP])';
 
     /**
-     * Does any declared dependency resolve over git?
-     *
-     * A different route to the same failure, and the one tine arrived by: ten
-     * of its dependencies are `git+ssh://git@github.com/...` in
-     * npm-shrinkwrap.json, so `npm install` itself shells out to git before a
-     * single script runs. No script mentions git, so the checks above see
-     * nothing, and the install fails with `git dep preparation failed`.
+     * Does a dependency resolve over git, so `npm install` clones before any script runs? tine's
+     * `git+ssh://` dependencies failed with `git dep preparation failed`.
      */
     private static function installsFromGit(ProjectContext $context, array $dependencies): bool
     {
@@ -409,10 +331,12 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        // The specs above are what the manifest says; a lockfile is what the
-        // install will actually fetch, and a transitive git dependency only
-        // appears there. Read whole -- they are large, and this runs once per
-        // build decision.
+        return self::lockfileInstallsFromGit($context);
+    }
+
+    /** A transitive git dependency appears only in a lockfile, read whole, once per build decision. */
+    private static function lockfileInstallsFromGit(ProjectContext $context): bool
+    {
         foreach (self::LOCKFILES as $lockfile) {
             $contents = $context->contents($lockfile);
             if ($contents !== null && preg_match(self::GIT_IN_LOCKFILE, $contents) === 1) {
@@ -423,17 +347,12 @@ final class NodeRuntime implements Runtime
         return false;
     }
 
-    /**
-     * A git source as a lockfile records it: npm's `git+ssh://`, yarn's
-     * `https://github.com/o/r.git#<sha>` (grocy), pnpm's `type: git`.
-     */
+    /** A git source as a lockfile records it: npm's `git+ssh://`, yarn's `….git#<sha>` (grocy), pnpm's `type: git`. */
     private const GIT_IN_LOCKFILE = '~git\+|git://|\.git#|\btype: git\b~';
 
     /**
-     * A package.json dependency value npm or yarn fetches by cloning: an
-     * explicit git URL or host prefix, an https URL to a `.git` repository
-     * (grocy's `https://github.com/berrnd/bootstrap-combobox.git#master-fork`),
-     * or the bare `owner/repo` GitHub shorthand.
+     * A dependency value npm or yarn fetches by cloning: a git URL or host prefix, an https URL to a `.git`
+     * repository (grocy's), or the bare `owner/repo` GitHub shorthand.
      */
     private static function isGitSpec(string $spec): bool
     {
@@ -445,13 +364,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * $tag without `-slim`: the full Debian image, the one that can run
-     * `node-gyp`.
-     *
-     * Takes the resolved tag, not a major, so a host that re-pointed
-     * `node` at a custom registry keeps it. A tag not ending in the slim
-     * variant — a `panelalpha/node` derivative, a project pinning its own
-     * image — is returned untouched.
+     * $tag without `-slim`, the full image that can run `node-gyp`; from the resolved tag, so a custom registry
+     * is kept. A tag not ending in the slim variant is returned untouched.
      */
     public static function toolchainImage(string $tag): string
     {
@@ -463,26 +377,10 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does installing this project have to compile something?
+     * Does installing this project compile something the slim image cannot? `binding.gyp`, a declared native
+     * package or node-gyp, or one the lock marks `hasInstallScript`; merely resolving one fires on every tree.
      *
-     * The slim Node images have no Python, no make and no C++ compiler, so
-     * `node-gyp rebuild` fails outright.
-     *
-     * Three signals: `binding.gyp` in the project root (this *is* a native
-     * addon); `node-gyp` or a name from {@see NATIVE_DEPENDENCIES} declared in
-     * the manifest itself; or a name from that list the lockfile marks
-     * `hasInstallScript: true`, which is npm's own record that the install runs
-     * something.
-     *
-     * Not checked: whether the lockfile merely *resolves* a name from the list.
-     * On eleven real lockfiles — the six this was written for and five
-     * mainstream ones — that test fired on every one, because a transitive
-     * dependency is enough to put the name in the file, and it would have put a
-     * ~1.2GB image load on the five that were fine. The cost of the narrower
-     * answer is a rare false negative.
-     *
-     * @param  array<string, mixed>  $package  an already-parsed package.json, if
-     *                                         the caller has one
+     * @param  array<string, mixed>  $package  an already-parsed package.json, if the caller has one
      */
     public static function hasNativeDependency(ProjectContext $context, array $package = []): bool
     {
@@ -492,15 +390,12 @@ final class NodeRuntime implements Runtime
 
         $dependencies = $package === [] ? ($context->package() ?? []) : $package;
 
-        // The project says it compiles with gyp, or names one of the native
-        // packages itself: the application's own decision, not an inherited one.
         if (self::mentionsNodeGyp($dependencies)) {
             return true;
         }
         if (self::declaresNativeDependency($dependencies)) {
             return true;
         }
-        // pnpm records no install scripts in its lock; its build allowlist does.
         if (self::pnpmAllowsNativeBuild($context, $dependencies)) {
             return true;
         }
@@ -511,10 +406,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does this project build with webpack 4?
-     *
-     * A declared toolchain decides; without one, a lockfile that resolves
-     * webpack 4 and no webpack 5 does.
+     * Does this project build with webpack 4? A declared toolchain decides; without one, a lockfile that
+     * resolves webpack 4 and no webpack 5 does.
      *
      * @param  array<string, mixed>  $package
      */
@@ -603,10 +496,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does the project's pnpm build allowlist (`onlyBuiltDependencies`, or
-     * `allowBuilds: {name: true}`) name one of {@see NATIVE_DEPENDENCIES}?
-     *
-     * Read from package.json `pnpm` and from pnpm-workspace.yaml.
+     * Does the pnpm build allowlist name a native dependency? pnpm's lock records no install scripts.
+     * Read from package.json `pnpm` and pnpm-workspace.yaml; an unreadable one is no evidence either way.
      *
      * @param  array<string, mixed>  $package
      */
@@ -620,7 +511,6 @@ final class NodeRuntime implements Runtime
                     $sources[] = $workspace;
                 }
             } catch (\Throwable) {
-                // An unreadable workspace file is no evidence either way.
             }
         }
 
@@ -642,10 +532,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does the lockfile have what it takes to say "this will compile"?
-     *
-     * One thing: npm's own `hasInstallScript` flag on a package this list
-     * recognises. See {@see hasNativeDependency()}.
+     * Does the lockfile say "this will compile": npm's `hasInstallScript` on a package this list recognises?
+     * See {@see hasNativeDependency()}.
      */
     private static function lockMarksNative(string $lock): bool
     {
@@ -674,12 +562,7 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Does the map — a dependency map, or `scripts` — mention $needle in one
-     * of its keys or values?
-     *
-     * Both halves: in a dependency map the package is the key and the value is
-     * a version range, while in `scripts` the body is the value and carries a
-     * project's own `node-gyp rebuild`.
+     * Does the map mention $needle in a key (a dependency map's package) or a value (a `scripts` body)?
      */
     private static function mentions(mixed $map, string $needle): bool
     {
@@ -699,14 +582,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The first lockfile under the project root, lowercased.
-     *
-     * Lowercased because {@see ProjectContext::listRootFiles()} lowercases
-     * every name it lists, while `contents()` is case-exact.
-     *
-     * `\/` is unescaped first: JSON escapes the forward slash, so npm's package
-     * paths arrive as `node_modules\/argon2` and every path searched for here
-     * would miss. A package name cannot contain a backslash.
+     * The first lockfile under the project root, lowercased as {@see ProjectContext::listRootFiles()} lists names.
+     * JSON's `\/` is unescaped first, or `node_modules\/argon2` would miss every path searched for.
      */
     private static function lockfileText(ProjectContext $context): string
     {
@@ -724,17 +601,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The major a raw constraint resolves to: the first shipped major at or
-     * above it, or the constraint itself when it is plausible but newer than
-     * anything shipped.
-     *
-     * An open lower bound (`>=14`) is a floor, not a pin: it gets the default
-     * major when the floor allows it, and `>=16 <21` the newest shipped major
-     * in range.
-     *
-     * Null means the constraint could not be believed — unparseable, `lts/*`,
-     * or implausibly high. Null, not the default, so a project that pinned
-     * exactly the default is still credited with having said so.
+     * The first shipped major at or above a constraint (an open floor gets the default, a range its newest), or a
+     * plausible newer one; null, not the default, when unbelievable, so pinning the default is still credited.
      */
     private static function resolveMajor(string $raw): ?string
     {
@@ -773,6 +641,7 @@ final class NodeRuntime implements Runtime
         return 'node';
     }
 
+    /** Reported as the engine's when unresolved: crediting package.json for a version it did not produce misleads. */
     public function resolve(ProjectContext $context): ?Requirement
     {
         if (! $context->hasFile('package.json')) {
@@ -783,9 +652,6 @@ final class NodeRuntime implements Runtime
         if ($raw === '') {
             return new Requirement('node', self::defaultMajor(), '', 'engine default');
         }
-
-        // Reported as the engine's when unresolved: crediting package.json for
-        // a version it did not produce makes the deploy log a liar.
 
         return new Requirement(
             'node',
@@ -801,13 +667,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The declared version, raised to the oldest major the project's own
-     * toolchain runs on when that is newer.
-     *
-     * A pinned package manager always counts: pnpm 11 imports `node:sqlite`
-     * and dies on Node 20 whatever `engines.node` says. A direct dependency's
-     * `engines.node` counts only when the project declared nothing: Angular 22
-     * refuses Node 20, and the engine default was picking it.
+     * The declared version, raised to the oldest major the toolchain runs on: always a pinned pnpm 11's,
+     * a direct dependency's `engines.node` only when the project declared nothing (Angular 22).
      *
      * @param  array<string, mixed>  $package  an already-parsed package.json
      * @return array{0: string, 1: string, 2: ?string} raw constraint, source, resolved major
@@ -918,9 +779,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * `engines.node` per package in a pnpm lockfile, read line by line: the
-     * file runs to megabytes, and only `name@version:` headers under
-     * `packages:` and their `engines: {node: ...}` line matter.
+     * `engines.node` per package in a pnpm lockfile, read line by line from `packages:` headers, v9's
+     * `'@scope/name@1.2.3':` or v6's `/@scope/name@1.2.3:`.
      *
      * @return array<string, string>
      */
@@ -939,7 +799,6 @@ final class NodeRuntime implements Runtime
             if (! $inPackages) {
                 continue;
             }
-            // v9 `'@scope/name@1.2.3':`, v6 `/@scope/name@1.2.3:`.
             if (preg_match("#^  '?/?((?:@[^/\\s']+/)?[^@\\s'/]+)@\\S*:\\s*$#", $line, $m) === 1) {
                 $current = $m[1];
 
@@ -976,8 +835,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * `[floor, ceiling]` majors of a `>=N` / `>N` constraint, with an optional
-     * `<M` / `<=M` ceiling; null for anything else (`^18`, `18.x`, `a || b`).
+     * `[floor, ceiling]` majors of `>=N`/`>N` with an optional `<M`/`<=M`; null for anything else.
+     * `>14` is `>=15` but `>14.2` allows 14; `<21` and `<21.0.0` exclude 21, `<21.5` does not.
      *
      * @return array{0: int, 1: ?int}|null
      */
@@ -989,7 +848,6 @@ final class NodeRuntime implements Runtime
             return null;
         }
 
-        // `>14` is `>=15`; `>14.2` still allows 14.
         $floor = (int) $m[2];
         if (($m[1] ?? '') === '' && ($m[3] ?? '') === '') {
             $floor++;
@@ -998,7 +856,6 @@ final class NodeRuntime implements Runtime
         $ceiling = null;
         if (($m[6] ?? '') !== '') {
             $ceiling = (int) $m[6];
-            // `<21` and `<21.0.0` exclude 21; `<21.5` does not.
             $lowerParts = (int) ($m[7] ?? 0) + (int) ($m[8] ?? 0);
             if (($m[5] ?? '') === '' && $lowerParts === 0) {
                 $ceiling--;
@@ -1026,13 +883,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Adapt a manifest's declared defaults to what this particular project
-     * uses.
-     *
-     * A manifest cannot know that this repo has a pnpm lockfile, a `build-only`
-     * script that must be preferred over `build`, or a turbo filter naming the
-     * workspace — which is why a manifest writes `{{js.build:npx next build}}`
-     * instead of a literal.
+     * A manifest's defaults adapted to this project's lockfile, scripts and workspace, which the manifest
+     * cannot know; hence `{{js.build:npx next build}}` instead of a literal.
      *
      * @param  array<string, mixed>  $partial  the manifest's defaults
      * @param  array<string, true>  $files
@@ -1053,16 +905,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Point a recipe's `node index.js` default at the entry point the project
-     * actually declares.
-     *
-     * For a project with no `start` script and no `index.js` it is wrong:
-     * Node's own convention is `package.json`'s `main`, and a runner that
-     * ignores it restarts for ever on `Cannot find module '/app/index.js'`.
-     * CNCjs (`main: ./dist/cncjs/server-cli.js`) is that shape.
-     *
-     * Only a default the recipe supplied is replaced; a project's own `start`
-     * script is left alone.
+     * A recipe's `node index.js` default pointed at the declared entry point (CNCjs), but only when no index.js
+     * exists: a stale library `main` beside a real index.js got MODULE_NOT_FOUND.
      *
      * @param  array<string, mixed>  $resolved  the decision `finalizeWith` produced
      * @param  array<string, mixed>  $package  parsed package.json
@@ -1076,11 +920,6 @@ final class NodeRuntime implements Runtime
             return $resolved;
         }
 
-        // `node index.js` is only wrong when there is no index.js to run: an
-        // express or fastify app that has one and also carries a stale
-        // library-shaped `main` ("main": "lib/index.js") booted before this and
-        // got MODULE_NOT_FOUND after. A file that is really there beats a field
-        // that merely says something.
         if ($context->isFile('index.js')) {
             return $resolved;
         }
@@ -1094,18 +933,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The file Node itself would run for this package: `bin`, else `main`,
-     * else a root `server.js`, else nothing.
-     *
-     * `bin` first because it means "this package is a program you run", which
-     * is what a service recipe is doing: CNCjs's `main` exports `launchServer`
-     * and does nothing when executed, while `bin/cncjs` starts the server.
-     * Either field may name a file the *build* produces, so both are taken as
-     * declared.
-     *
-     * Only the shape is checked — empty, absolute or escaping the application
-     * is not a path `node` should be handed. `server.js` is a fallback, so that
-     * one has to be there.
+     * `bin` (a program you run; CNCjs's `main` only exports), else `main`, both possibly built later, so only
+     * their shape is checked; else a root `server.js` that exists.
      */
     private static function entryPoint(array $package, ProjectContext $context): ?string
     {
@@ -1119,13 +948,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * The path a package's `bin` declares for the package itself, in either
-     * spelling: a map of name to path, or the single-string form.
-     *
-     * The entry named after the package comes first: `{"foo-cli": "./cli.js",
-     * "foo": "./server.js"}` would otherwise start the CLI and never the
-     * server, purely because of JSON key order. Falls back to the first entry
-     * for the single-bin case (CNCjs declares only `cnc`).
+     * The `bin` path for the package itself, string or map: the entry named after the package, not the first
+     * by JSON key order, else the first (CNCjs declares only `cnc`).
      *
      * @param  array<string, mixed>  $package
      */
@@ -1164,9 +988,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Fill a recipe's partial in from the project's package manager and
-     * scripts: an author's own `build`/`start` script beats the recipe's
-     * default, which is only there for projects that ship neither.
+     * A recipe's partial filled in from the project's package manager and scripts: an author's own
+     * `build`/`start` script beats the recipe's default, there only for projects that ship neither.
      *
      * @param  array<string, mixed>  $partial
      * @param  array<string, mixed>  $scripts
@@ -1190,14 +1013,7 @@ final class NodeRuntime implements Runtime
         array $scripts
     ): array {
         $runtime = $partial['runtime'];
-        $build = '';
-        if ($runtime === 'nginx' && trim((string) ($partial['workspace_relative'] ?? ''), '/') === '') {
-            $build = self::nginxAssetBuildCommand($pm, $scripts, $partial);
-        } else {
-            // A workspace app (a Next export under apps/) builds through its own
-            // `build:<slug>` or a filtered turbo, not every package in the repo.
-            $build = JsPackageManager::resolveLifecycleCommand($pm, $scripts, 'build', $partial);
-        }
+        $build = self::buildCommandFor($runtime, $pm, $scripts, $partial);
 
         $start = '';
         if ($runtime === 'node') {
@@ -1205,17 +1021,7 @@ final class NodeRuntime implements Runtime
         }
 
         $port = (int) $partial['port_hint'];
-        $env = [
-            'HOST' => '0.0.0.0',
-            'HOSTNAME' => '0.0.0.0',
-            'PORT' => (string) $port,
-            // keep husky quiet at runtime too
-            'HUSKY' => '0',
-            'CI' => '1',
-        ];
-        if (! empty($partial['env']) && is_array($partial['env'])) {
-            $env = array_merge($env, $partial['env']);
-        }
+        $env = self::runtimeEnvironment($port, $partial);
 
         return [
             'strategy' => $partial['strategy'],
@@ -1235,9 +1041,45 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * Static HTML for nginx: skip typecheck-only prefixes (`astro check &&`,
-     * `vue-tsc &&`, `tsc &&`) and prefer `build-only` when the project has it.
-     * Later steps (`astro build && node process-html.mjs`) are kept.
+     * A workspace app (a Next export under apps/) builds through its own `build:<slug>` or a filtered turbo.
+     *
+     * @param  array<string, mixed>  $scripts
+     * @param  array<string, mixed>  $partial
+     */
+    private static function buildCommandFor(mixed $runtime, string $pm, array $scripts, array $partial): string
+    {
+        if ($runtime === 'nginx' && trim((string) ($partial['workspace_relative'] ?? ''), '/') === '') {
+            return self::nginxAssetBuildCommand($pm, $scripts, $partial);
+        }
+
+        return JsPackageManager::resolveLifecycleCommand($pm, $scripts, 'build', $partial);
+    }
+
+    /**
+     * Listening on every interface at the port hint, husky quiet at runtime too, then the manifest's own env.
+     *
+     * @param  array<string, mixed>  $partial
+     * @return array<string, string>
+     */
+    private static function runtimeEnvironment(int $port, array $partial): array
+    {
+        $env = [
+            'HOST' => '0.0.0.0',
+            'HOSTNAME' => '0.0.0.0',
+            'PORT' => (string) $port,
+            'HUSKY' => '0',
+            'CI' => '1',
+        ];
+        if (! empty($partial['env']) && is_array($partial['env'])) {
+            $env = array_merge($env, $partial['env']);
+        }
+
+        return $env;
+    }
+
+    /**
+     * Static HTML for nginx: `build-only`, else `build`, whose typecheck prefixes are dropped and the rest run with
+     * node_modules/.bin exported, since a `PATH=… cmd` prefix reaches only the first command (reveal.js).
      *
      * @param  array<string, mixed>  $scripts
      * @param  array<string, mixed>  $partial
@@ -1252,9 +1094,6 @@ final class NodeRuntime implements Runtime
             if (is_string($raw)) {
                 $stripped = self::stripTypecheckPrefix($raw);
                 if ($stripped !== '' && $stripped !== trim($raw)) {
-                    // Exported, not a `PATH=… cmd` prefix: that reaches only the
-                    // first command, and reveal.js's `vite build && vite build -c …`
-                    // died on `sh: 1: vite: not found` at the second.
                     return self::NODE_MODULES_BIN_PATH.' && '.$stripped;
                 }
             }
@@ -1287,11 +1126,8 @@ final class NodeRuntime implements Runtime
     }
 
     /**
-     * A build output directory that cannot escape the project.
-     *
-     * The value comes from the project (angular.json, a recipe default) and
-     * ends up in a bind mount and an nginx root, where `../../etc` is a path
-     * traversal out of the account.
+     * A build output directory that cannot escape the project: it comes from the project and ends up in a bind
+     * mount and an nginx root.
      */
     public static function safeOutputDir(mixed $dir, string $fallback = 'dist'): string
     {

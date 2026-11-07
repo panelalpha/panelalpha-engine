@@ -3,9 +3,8 @@
 namespace App\Lib\Limits;
 
 /**
- * The limits one `project:limit:set` invocation asks to change, already
- * normalized. An option the caller did not pass is absent, which is what
- * separates "set it to no limit" from "leave it alone".
+ * The limits one `project:limit:set` invocation asks to change, normalized. An option not passed is absent,
+ * which separates "set it to no limit" from "leave it alone".
  */
 final class LimitSelection
 {

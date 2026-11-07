@@ -11,16 +11,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Everything that has to happen on the account between the clone and the
- * build.
- *
- * An app config that generates a compose file has to run here rather than in the
- * container's install stage, because the compose file is what decides which
- * container there will be. The scripts run as the account user — they may
- * call `docker compose`, which needs the docker group membership `su` gives
- * them — and under a container-side timeout shorter than the host's, so bash
- * and its children are killed inside the container before Symfony kills the
- * exec client and leaves them orphaned.
+ * What has to happen on the account between the clone and the build, before any container exists:
+ * an app config that generates a compose file decides here which container there will be.
  */
 class PrepareStage
 {
@@ -47,8 +39,7 @@ class PrepareStage
     }
 
     /**
-     * The platform's own prepare commands. The app config's ran in bootstrap,
-     * before any of this was detected.
+     * The platform's own prepare commands. The app config's ran in bootstrap, before detection.
      *
      * @return bool whether anything ran
      */
@@ -72,20 +63,16 @@ class PrepareStage
         return true;
     }
 
+    /**
+     * Runs as the account user, since the script may call `docker compose`, under an inner timeout shorter than
+     * the host's, so bash and its children die inside the container before Symfony orphans them.
+     */
     public function execute(string $projectDir, string $commands, int $timeout = self::TIMEOUT_SECONDS): void
     {
         $setupScriptPath = "{$projectDir}/".AppConfig::SETUP_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
-        // Write script as the user (644) so execAsUser can read and execute it.
         $this->dind->system()->filesystem()->writeFileReplacingPath($setupScriptPath, $commands, $chown, '644');
-        // Use a container-side timeout slightly shorter than the PHP-side timeout.
-        // This ensures bash and all its child processes (docker compose run, etc.) are
-        // killed by SIGTERM/SIGKILL *inside* the container before Symfony sends SIGKILL
-        // to the host-side docker-compose-exec client — preventing orphaned containers
-        // and zombie exec sessions in the dind environment.
         $innerTimeout = max(60, $timeout - self::INNER_TIMEOUT_MARGIN);
-        // Run as the user: setup scripts may call `docker compose`, which requires the
-        // docker group membership that execAsUser provides via su.
         $script = 'cd '.escapeshellarg($projectDir)
             ." && timeout --foreground --kill-after=30 {$innerTimeout} bash "
             .escapeshellarg($setupScriptPath);

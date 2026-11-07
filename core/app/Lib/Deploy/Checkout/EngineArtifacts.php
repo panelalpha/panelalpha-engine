@@ -11,12 +11,8 @@ use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\StageScript;
 
 /**
- * The names the engine reserves inside a checkout for its own files — ADR-0001.
- *
- * A file under one of these names is an Engine Artifact wherever it appears in
- * a Deploy-managed checkout. Files the engine only writes when missing (`.env`,
- * `.dockerignore`, a placeholder page) are not reserved: the client may own
- * them, so whether they are artifacts is decided per checkout.
+ * The names the engine reserves inside a checkout for its own files (ADR-0001). Files it writes only when
+ * missing (`.env`, `.dockerignore`, a placeholder page) are not reserved: the client may own them.
  */
 final class EngineArtifacts
 {
@@ -54,11 +50,7 @@ final class EngineArtifacts
 
     public const RAILS_HOST_INITIALIZER = 'config/initializers/zz_panelalpha_hosts.rb';
 
-    /**
-     * Suffix the previous engine moved a shadowing compose file to, so
-     * `docker-compose.yml` was free for its own generated output. No longer
-     * written; kept only for the migration command to find and undo.
-     */
+    /** Suffix the previous engine moved a shadowing compose file to; kept only for the migration to undo. */
     public const LEGACY_STASH_SUFFIX = '.panelalpha-local';
 
     /**

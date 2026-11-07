@@ -5,19 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Rust identity, from Cargo.toml's `[package]` table.
- *
- * Well-behaved for the same reason Composer is: one declarative file, a
- * required name, a required version. The only wrinkle is the workspace root,
- * whose Cargo.toml has a `[workspace]` and no `[package]` at all — that is a
- * repository of crates rather than an application, and it reports its members
- * rather than a name it does not have.
- *
- * Versions come from the manifest, not from Cargo.lock: the lockfile is TOML
- * and reading it by pattern would mean walking an array of tables, which is
- * exactly where a pattern stops being safe.
- *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * Rust identity, from Cargo.toml's `[package]`; a workspace root has none and reports its members instead.
+ * Versions come from the manifest, not Cargo.lock, whose array of tables a pattern cannot read safely.
  */
 final class CargoMetadata implements PackageMetadata
 {
@@ -58,6 +47,11 @@ final class CargoMetadata implements PackageMetadata
             return null;
         }
 
+        return $this->package($context, $toml, $package, $workspace);
+    }
+
+    private function package(ProjectContext $context, string $toml, ?string $package, ?string $workspace): AppPackage
+    {
         $name = $package === null ? null : self::tomlString($package, 'name');
         $dependencies = self::tomlSection($toml, 'dependencies') ?? '';
 
@@ -74,27 +68,26 @@ final class CargoMetadata implements PackageMetadata
             authors: $package === null ? [] : self::tomlList($package, 'authors'),
             keywords: $package === null ? [] : self::tomlList($package, 'keywords'),
             workspaces: $workspace === null ? [] : self::tomlList($workspace, 'members'),
-            frameworks: self::matchFrameworks(
-                self::FRAMEWORKS,
-                self::dependencyConstraints($dependencies),
-                [],
-                self::FILE
-            ),
-            // `rust-version` is the MSRV, and the only platform fact the
-            // manifest states -- the edition is a language dialect, not a
-            // toolchain requirement.
-            platform: $package === null || ($msrv = self::tomlString($package, 'rust-version')) === null
-                ? []
-                : ['rust' => $msrv]
+            frameworks: self::matchFrameworks(self::FRAMEWORKS, self::dependencyConstraints($dependencies), [], self::FILE),
+            platform: self::minimumRustVersion($package)
         );
     }
 
     /**
-     * `[dependencies]` in both spellings Cargo allows.
+     * `rust-version`, the MSRV: the only platform fact the manifest states, as the edition is a dialect.
      *
-     * `axum = "0.7"` and `axum = { version = "0.7", features = [...] }` are the
-     * same dependency, and a crate pulled from a git revision has no version
-     * string at all — present with an empty constraint is still the truth.
+     * @return array<string, string>
+     */
+    private static function minimumRustVersion(?string $package): array
+    {
+        return $package === null || ($msrv = self::tomlString($package, 'rust-version')) === null
+            ? []
+            : ['rust' => $msrv];
+    }
+
+    /**
+     * `[dependencies]` in both spellings, `axum = "0.7"` and `axum = { version = "0.7" }`; a crate from a git
+     * revision has no version and is kept with `*`.
      *
      * @return array<string, string>
      */

@@ -3,9 +3,8 @@
 namespace App\System\Firewall;
 
 /**
- * The host's firewall, whatever runs it. The API, the MCP tools and the CLI
- * talk to this and never to a provider; {@see FirewallFactory} picks the one
- * `FIREWALL_PROVIDER` names. ufw is the only one that ships today.
+ * The host's firewall, whatever runs it: the API, the MCP tools and the CLI never talk to a provider.
+ * {@see FirewallFactory} picks the one `FIREWALL_PROVIDER` names; ufw is the only one that ships today.
  */
 interface Firewall
 {
@@ -49,9 +48,8 @@ interface Firewall
     public function reload(): void;
 
     /**
-     * What the firewall blocked, and the addresses banned and released, newest
-     * first. `$type` is one of FirewallLogEntry's types; `$address` keeps
-     * only entries for that address.
+     * What the firewall blocked, and the addresses banned and released, newest first.
+     * `$type` is one of FirewallLogEntry's types; `$address` keeps only entries for that address.
      *
      * @return list<FirewallLogEntry>
      */

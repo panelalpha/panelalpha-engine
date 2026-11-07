@@ -7,13 +7,8 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 
 /**
- * The app config that applies to a project, and where it came from.
- *
- * Hosting instructions for one repository — a `.panelalpha/` directory, or
- * one of the older single files — shipped by the project or written by the
- * engine for a project that ships none. The repository's own copy wins, and
- * the locator is what decides, so an inspection and a deploy cannot pick
- * different app configs.
+ * The app config that applies to a project (a `.panelalpha/` directory or an older single file) and where
+ * it came from; the repository's copy wins, and the locator decides, so inspect and deploy agree.
  */
 final class AppConfigOrigin
 {

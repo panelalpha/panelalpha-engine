@@ -38,16 +38,7 @@ final class DeployLogTail
                 return false;
             }
 
-            $now = now();
-            $rows = [self::row($task, [
-                'ts' => time(),
-                'stage' => null,
-                'level' => DeployLogger::LEVEL_INFO,
-                'msg' => 'Last '.count($lines).' lines of the deploy log (the rollback deletes it):',
-            ], $now)];
-            foreach ($lines as $line) {
-                $rows[] = self::row($task, $line, $now);
-            }
+            $rows = self::rows($task, $lines);
             foreach (array_chunk($rows, TaskLogSink::BATCH_SIZE) as $chunk) {
                 TaskLog::insert($chunk);
             }
@@ -58,6 +49,28 @@ final class DeployLogTail
 
             return false;
         }
+    }
+
+    /**
+     * The copied lines behind a heading that says where they came from.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<array{task_id: int, log: string, created_at: Carbon}>
+     */
+    private static function rows(Task $task, array $lines): array
+    {
+        $now = now();
+        $rows = [self::row($task, [
+            'ts' => time(),
+            'stage' => null,
+            'level' => DeployLogger::LEVEL_INFO,
+            'msg' => 'Last '.count($lines).' lines of the deploy log (the rollback deletes it):',
+        ], $now)];
+        foreach ($lines as $line) {
+            $rows[] = self::row($task, $line, $now);
+        }
+
+        return $rows;
     }
 
     /**

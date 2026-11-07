@@ -5,13 +5,8 @@ namespace App\Lib\DeployHook;
 use Illuminate\Http\Request;
 
 /**
- * One git host's way of telling the engine about a push.
- *
- * The three methods are the three questions a delivery has to survive, in the
- * order they are asked: is this from you, is it really from you, and what does
- * it say. They take the request rather than pieces of it because what a
- * provider looks at differs -- GitHub signs the body, GitLab sends the secret
- * in a header -- and the caller has no business knowing which.
+ * One git host's way of telling the engine about a push: is this from you, is it really from you, what
+ * does it say, asked in that order of the whole request, since providers look at different parts of it.
  */
 interface HookProvider
 {

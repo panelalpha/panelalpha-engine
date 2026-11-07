@@ -3,43 +3,13 @@
 namespace App\Lib\Deploy\Sidecar;
 
 /**
- * What kind of backing service a Compose service is.
- *
- * One question, asked in five different places before this class existed,
- * with five different answers — which is how a Postgres named "db" ended up
- * being handed to the application as a MySQL, and a memcached named "cache"
- * as a Redis. Everything that needs to know now asks here.
- *
- * Evidence is ranked, strongest first, and the first layer that answers wins:
- *
- *  1. The image family, matched exactly. This is the one unambiguous signal:
- *     postgres-backup-local is a backup job, not a database, and a substring
- *     match cannot tell the difference.
- *  2. The variables the service declares — but only the ones a server uses to
- *     initialise *itself*. A backup job and a database both carry POSTGRES_*,
- *     which is why this layer sits below the image and demands more than one
- *     init variable and no host pointing somewhere else.
- *  3. The ports the image itself declares. This is what makes an unknown
- *     vendor fork work: we may never have heard of myorg/our-postgres, but it
- *     still exposes 5432. The caller supplies these — see $observedPorts —
- *     because reading them means asking the daemon, and this class stays free
- *     of Laravel and of the shell.
- *  4. The service name. Weakest by far: half the compose files in the world
- *     call their database "db". Consulted only when nothing else answered, so
- *     a name can never overrule a recognised image.
- *
- * The catalogue itself lives in {@see SidecarDialects}, the compose-file
- * dialect in {@see ComposeService}, and which service is the application in
- * {@see ServiceRole}.
- *
- * No Laravel dependencies — unit-testable.
+ * What kind of backing service a Compose service is, from the evidence strongest first: image family,
+ * the service's own init variables, the image's ports, then its name. Catalogue: {@see SidecarDialects}.
  */
 class SidecarEngine
 {
     /**
-     * Base images an application is routinely built on top of. These say
-     * nothing about what the service does, so a service using one may still
-     * fall through to its name.
+     * Base images an application is routinely built on, which say nothing about what the service does.
      *
      * @var list<string>
      */
@@ -49,27 +19,17 @@ class SidecarEngine
     ];
 
     /**
-     * The engine a service runs, derived rather than looked up.
-     *
-     * The name is already in front of us: `postgres:16` contains the word
-     * postgres, `POSTGRES_PASSWORD` contains it too, and a service called
-     * `surrealdb` names itself. Nothing here decides whether a service is
-     * *allowed* to be an engine — an image nobody has heard of resolves to
-     * its own name and is configured under it.
+     * The engine a service runs, derived rather than looked up; an engine whose dialect we speak
+     * outranks a name we can only repeat back.
      *
      * @param  array<string, mixed>  $service  the Compose service definition
-     * @param  list<int>  $observedPorts  ports the image declares, from
-     *                                    `docker image inspect`; empty when the caller could not ask
-     * @return string|null the engine name, or null when the service offers no
-     *                     evidence at all of being one
+     * @param  list<int>  $observedPorts  ports the image declares; empty when the caller could not ask
+     * @return string|null the engine name, or null when the service offers no evidence of being one
      */
     public static function resolve(string $name, array $service, array $observedPorts = []): ?string
     {
         $candidates = self::candidates(ComposeService::of($service), $observedPorts);
 
-        // An engine whose dialect we can actually speak outranks a name we can
-        // only repeat back. internal/store:1 answering on 5432 is a Postgres,
-        // whatever its image is called.
         foreach ($candidates as $candidate) {
             if (SidecarDialects::has($candidate)) {
                 return $candidate;
@@ -230,13 +190,7 @@ class SidecarEngine
         return $informative ? SidecarDialects::canonical($family) : null;
     }
 
-    /**
-     * The engine named by the service's own initialisation variables.
-     *
-     * `POSTGRES_USER` plus `POSTGRES_PASSWORD` says postgres without anything
-     * having to know what postgres is. A `*_HOST` disqualifies the service as
-     * a client of the engine rather than the engine itself.
-     */
+    /** The engine named by the service's own initialisation variables; a `*_HOST` makes it a client instead. */
     private static function fromDeclaredEnvironment(ComposeService $service): ?string
     {
         $keys = $service->environmentKeys();
@@ -253,10 +207,7 @@ class SidecarEngine
     }
 
     /**
-     * Only the unambiguous ports identify an engine. A dialect listed for its
-     * port number alone (minio on 9000, influxdb on 8086) is reached through
-     * its image name; matching those ports the other way round would claim
-     * every application that happens to serve on 9000.
+     * Only the unambiguous ports identify an engine; the rest (minio's 9000) would claim ordinary apps.
      *
      * @param  list<int>  $ports
      */

@@ -3,13 +3,8 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * The plan the deploy currently under way was asked to follow.
- *
- * `$user->project()` builds a new object on every call, so `preCheckUserApp()`
- * and `cloneUserApp()` in one request hold two different `Dind` instances and
- * cannot carry a plan between them. It is bound as a singleton instead, which
- * is exactly the request's lifetime. Nothing is persisted: deploy again without
- * a plan and the defaults are back.
+ * The plan the deploy under way was asked to follow, bound as a request-lifetime singleton because
+ * `$user->project()` builds a new `Dind` on every call and cannot carry it; nothing is persisted.
  */
 final class DeployPlanContext
 {

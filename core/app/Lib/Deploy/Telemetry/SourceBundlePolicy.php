@@ -6,27 +6,8 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DockerfileFinder;
 
 /**
- * What may go into a source bundle, and when one may be made at all.
- *
- * A source bundle is the customer's application source, zipped and uploaded.
- * It is the single most invasive thing this engine can send, and it is the only
- * telemetry feature that is off unless an operator turns it on: a repository is
- * the customer's intellectual property, and it routinely contains .env files,
- * signing keys and database dumps that have nothing to do with why a build
- * failed.
- *
- * So two independent gates:
- *
- *  - {@see shouldCapture()} — is this failure even a candidate
- *  - {@see shouldInclude()} — may this particular file travel
- *
- * The exclusion list is not an optimisation. Dropping node_modules saves
- * bandwidth; dropping `.env` and `id_rsa` is the difference between shipping a
- * bug report and shipping the customer's production credentials. When a rule is
- * ambiguous it excludes — a bundle missing a file is a worse bug report, a
- * bundle containing a private key is an incident.
- *
- * No Laravel dependencies — unit-testable.
+ * When a source bundle (the customer's source, off unless an operator turns it on) may be made, {@see shouldCapture()},
+ * and which files may travel, {@see shouldInclude()}. An ambiguous rule excludes: a shipped private key is an incident.
  */
 class SourceBundlePolicy
 {
@@ -42,14 +23,8 @@ class SourceBundlePolicy
     public const MODES = [self::MODE_OFF, self::MODE_UNEXPLAINED, self::MODE_FAILED];
 
     /**
-     * Directory names dropped wherever they appear in the tree. Build output,
-     * dependency trees and VCS history: all reproducible from the manifests,
-     * all enormous, and `.git` additionally carries the full history and
-     * whatever credentials ended up in `.git/config`.
-     *
-     * `docker` is deliberately absent — `docker/Dockerfile` is one of
-     * {@see DockerfileFinder::NESTED_CANDIDATES}
-     * and is exactly the file a failed Dockerfile build needs.
+     * Build output, dependency trees and VCS history, dropped wherever they appear. `docker` is absent on purpose:
+     * `docker/Dockerfile` is one of {@see DockerfileFinder::NESTED_CANDIDATES}, what a failed Dockerfile build needs.
      *
      * @var list<string>
      */
@@ -91,9 +66,8 @@ class SourceBundlePolicy
     ];
 
     /**
-     * `.env` variants that carry no values and are genuinely useful: they are
-     * what the engine's own env materialisation reads, so a deploy that failed
-     * on a missing variable is unreadable without them.
+     * `.env` variants that carry no values and are what the engine's env materialisation reads, so a deploy
+     * that failed on a missing variable is unreadable without them.
      *
      * @var list<string>
      */
@@ -109,12 +83,8 @@ class SourceBundlePolicy
     }
 
     /**
-     * Is this outcome a candidate for a bundle?
-     *
-     * Only outright failures. A `partial` deploy started, and a `recovered`
-     * signal is one event in an otherwise fine deploy — neither is worth a copy
-     * of someone's source, and `recovered` would be the highest-volume outcome
-     * of the three.
+     * Is this outcome a candidate for a bundle? Only an outright failure: a `partial` deploy started, and a
+     * `recovered` signal is one event in an otherwise fine deploy.
      */
     public static function shouldCapture(string $mode, string $outcome, ?string $rule): bool
     {
@@ -172,8 +142,7 @@ class SourceBundlePolicy
             return false;
         }
 
-        // .env, .env.local, .env.production — anything not on the allow-list.
-        if ($lower === '.env' || str_starts_with($lower, '.env.')) {
+        if (self::isEnvFile($lower)) {
             return true;
         }
 
@@ -181,11 +150,8 @@ class SourceBundlePolicy
             return true;
         }
 
-        // id_rsa.pub, id_ed25519-work, …
-        foreach (['id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'] as $keyName) {
-            if (str_starts_with($lower, $keyName)) {
-                return true;
-            }
+        if (self::isKeyPairFile($lower)) {
+            return true;
         }
 
         if (str_contains($lower, 'service-account') && str_ends_with($lower, '.json')) {
@@ -195,5 +161,23 @@ class SourceBundlePolicy
         $extension = strtolower((string) pathinfo($lower, PATHINFO_EXTENSION));
 
         return $extension !== '' && in_array($extension, self::SENSITIVE_EXTENSIONS, true);
+    }
+
+    /** .env, .env.local, .env.production: any not on the allow-list, which is asked first. */
+    private static function isEnvFile(string $lower): bool
+    {
+        return $lower === '.env' || str_starts_with($lower, '.env.');
+    }
+
+    /** id_rsa.pub, id_ed25519-work and the like. */
+    private static function isKeyPairFile(string $lower): bool
+    {
+        foreach (['id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'] as $keyName) {
+            if (str_starts_with($lower, $keyName)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

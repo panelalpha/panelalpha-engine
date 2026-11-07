@@ -7,6 +7,8 @@ namespace App\System\Project\PhpHosting\WordPress;
  */
 final class Plugins
 {
+    use RunsExtensionCommands;
+
     public function __construct(
         private WpCli $cli,
     ) {}
@@ -18,16 +20,7 @@ final class Plugins
      */
     public function list(?string $fields = null, ?string $status = null): array
     {
-        $args = ['plugin', 'list', '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        if ($status !== null) {
-            $args[] = '--status='.$status;
-        }
-        $result = $this->cli->runOrFail($args);
-
-        return JsonOutput::decodeList($result['stdout']);
+        return $this->listWith(['plugin', 'list', '--format=json'], $fields, $status);
     }
 
     /**
@@ -39,11 +32,7 @@ final class Plugins
      */
     public function get(string $slug, ?string $fields = null): array
     {
-        $args = ['plugin', 'get', WpCli::positional($slug), '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        $result = $this->cli->run($args);
+        $result = $this->cli->run($this->withFields(['plugin', 'get', WpCli::positional($slug), '--format=json'], $fields));
         if (($result['exit_code'] ?? 1) !== 0) {
             if (! $this->isInstalled($slug)['installed']) {
                 throw new Exception("Plugin '{$slug}' is not installed.", 404);
@@ -56,18 +45,11 @@ final class Plugins
     }
 
     /**
-     * WP-CLI `plugin is-installed`: exit 1 is "not installed"; any other
-     * non-zero exit (a fatal error loading the site) is a failure.
-     *
      * @return array{plugin: string, installed: bool}
      */
     public function isInstalled(string $slug): array
     {
-        $result = $this->cli->run(['plugin', 'is-installed', WpCli::positional($slug)]);
-        $exitCode = $result['exit_code'] ?? 1;
-        if ($exitCode !== 0 && $exitCode !== 1) {
-            throw new Exception($this->cli->failureMessage($result));
-        }
+        $exitCode = $this->installedExitCode(['plugin', 'is-installed', WpCli::positional($slug)]);
 
         return [
             'plugin' => $slug,
@@ -84,9 +66,8 @@ final class Plugins
         if ($force) {
             $args[] = '--force';
         }
-        $result = $this->cli->runOrFail($args);
 
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, $args);
     }
 
     /**
@@ -94,9 +75,7 @@ final class Plugins
      */
     public function activate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'activate', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'activate', WpCli::positional($slug)]);
     }
 
     /**
@@ -104,9 +83,7 @@ final class Plugins
      */
     public function deactivate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'deactivate', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'deactivate', WpCli::positional($slug)]);
     }
 
     /**
@@ -114,9 +91,7 @@ final class Plugins
      */
     public function update(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'update', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'update', WpCli::positional($slug)]);
     }
 
     /**
@@ -124,9 +99,7 @@ final class Plugins
      */
     public function delete(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'delete', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'delete', WpCli::positional($slug)]);
     }
 
     /**
@@ -138,16 +111,7 @@ final class Plugins
      */
     public function search(string $term, ?string $fields = null, ?int $perPage = null): array
     {
-        $args = ['plugin', 'search', WpCli::positional($term), '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        if ($perPage !== null) {
-            $args[] = '--per-page='.$perPage;
-        }
-        $result = $this->cli->runOrFail($args);
-
-        return JsonOutput::decodeList($result['stdout']);
+        return $this->searchWith(['plugin', 'search', WpCli::positional($term), '--format=json'], $fields, $perPage);
     }
 
     /**

@@ -3,26 +3,13 @@
 namespace App\Lib\Helpers;
 
 /**
- * Whether five cron fields describe a schedule crond will accept.
- *
- * Extracted from the controller that used to hold it as a 140-line closure.
- * Nothing here is about HTTP: the same five fields arrive from the API, the
- * console and the MCP tools, and a schedule crond silently refuses is a cron
- * job that never runs and never says why.
- *
- * Deliberately conservative — it accepts the syntax crond does and nothing
- * else. Vixie extensions this does not implement (`@daily`, `~`, `H`) are
- * rejected rather than passed through hopefully.
- *
- * No Laravel dependencies — unit-testable.
+ * Whether five cron fields describe a schedule crond will accept, and nothing more: a refused schedule
+ * is a job that silently never runs, so Vixie extensions (`@daily`, `~`, `H`) are rejected.
  */
 final class CronSchedule
 {
     /**
-     * Each field's bounds and the names it accepts, in cron's own order.
-     *
-     * `day_of_week` allows 7 as well as 0: crond takes either for Sunday, and
-     * a schedule written by hand is as likely to use one as the other.
+     * Each field's bounds and the names it accepts, in cron's own order; Sunday is 0 or 7.
      *
      * @var array<string, array{min: int, max: int, names: array<string, int>}>
      */
@@ -40,11 +27,7 @@ final class CronSchedule
     ];
 
     /**
-     * Every problem with this schedule, keyed by field, empty when there is none.
-     *
-     * All fields are checked rather than stopping at the first: someone
-     * fixing a cron expression should see everything wrong with it in one
-     * round trip.
+     * Every problem with this schedule, keyed by field, all at once; empty when there is none.
      *
      * @param  array<string, mixed>  $schedule  keyed by field name
      * @return array<string, list<string>>
@@ -69,8 +52,8 @@ final class CronSchedule
     }
 
     /**
-     * One field, which is a comma-separated list of tokens. Messages do not
-     * repeat the field name: callers key them by it.
+     * One field, a comma-separated list of tokens; whitespace would end the field in the crontab.
+     * Messages do not repeat the field name: callers key them by it.
      *
      * @return list<string>
      */
@@ -84,8 +67,6 @@ final class CronSchedule
             return ['Empty value'];
         }
 
-        // Written into the crontab as is, where whitespace ends the field:
-        // `9 , 17` would be read as three fields, not a list.
         if (preg_match('/\s/', $value) === 1) {
             return ['Whitespace is not allowed inside a field'];
         }
@@ -93,7 +74,6 @@ final class CronSchedule
         $errors = [];
         foreach (explode(',', $value) as $part) {
             if ($part === '') {
-                // `1,,5` is a typo, not an empty schedule — say which.
                 $errors[] = 'Empty list element';
 
                 continue;
@@ -108,17 +88,11 @@ final class CronSchedule
     }
 
     /**
-     * One token: a star, a star with a step, `1-5`, `mon-fri`, `1-5/2`,
-     * `30`, `jan`.
+     * One token: a star, a star with a step, `1-5`, `mon-fri`, `1-5/2`, `30`, `jan`. The step is checked
+     * and stripped before the bare-star check, so a zero step on a star is refused.
      */
     private static function tokenError(string $token, string $field): ?string
     {
-        // A step narrows whatever precedes it, so it is stripped first and the
-        // base validated as though the step were not there. This runs before
-        // the bare-star check rather than after: `*` used to short-circuit on
-        // a pattern that matched any digits, so `*/0` was accepted and passed
-        // to crond, which is precisely the silently-never-runs schedule this
-        // class exists to catch.
         if (str_contains($token, '/')) {
             [$base, $step] = array_pad(explode('/', $token, 2), 2, '');
             if (! ctype_digit($step) || (int) $step <= 0) {
@@ -148,9 +122,7 @@ final class CronSchedule
         return isset($rules['names'][$token]) ? null : "Invalid token '{$token}'";
     }
 
-    /**
-     * `1-5` or `mon-fri`, with both ends in bounds and the right way round.
-     */
+    /** `1-5` or `mon-fri`, with both ends in bounds and forwards, as crond reads a range. */
     private static function rangeError(string $token, string $field): ?string
     {
         $rules = self::FIELDS[$field];
@@ -176,7 +148,6 @@ final class CronSchedule
                 ."(allowed {$rules['min']}-{$rules['max']})";
         }
 
-        // `fri-mon` is not a weekend: crond reads a range forwards only.
         return $fromValue > $toValue
             ? "Range start greater than end in '{$token}'"
             : null;

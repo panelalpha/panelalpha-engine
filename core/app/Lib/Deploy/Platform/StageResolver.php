@@ -6,27 +6,15 @@ use App\Lib\Deploy\Inspect\Report\StageSchedule;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 
 /**
- * Which commands one stage runs, from the three sources that may speak for it.
- *
- * The order is a hierarchy of how specific the speaker is. A platform manifest
- * knows what a Laravel app is. An app config knows what *this* application is. A
- * {@see DeployPlan} knows what *this deploy* is being asked to do, and being
- * the most specific it does not merge with the other two — it replaces the
- * stage.
- *
- * This exists as one function because the answer is consumed in three places —
- * the container entrypoint ({@see StageScript}), the account-side scripts
- * ({@see HostScript}) and the inspection report
- * ({@see StageSchedule}) — and the third one is
- * a *prediction of the first two*. Three copies of this logic would eventually
- * disagree, and the shape of that bug is an endpoint confidently reporting a
- * plan the deploy does not follow.
- *
- * No Laravel dependencies — unit-testable.
+ * Which commands one stage runs: manifest and app config merged, or a {@see DeployPlan} replacing both.
+ * No Laravel dependencies: unit-testable.
  */
 final class StageResolver
 {
     /**
+     * One function, so {@see StageScript}, {@see HostScript} and the {@see StageSchedule} report that
+     * predicts them cannot disagree.
+     *
      * @return list<PlatformCommand>
      */
     public static function commandsFor(
@@ -48,10 +36,8 @@ final class StageResolver
     }
 
     /**
-     * The manifest's commands, then the app config's. An app config command
-     * with a manifest command's id replaces it rather than running beside it:
-     * a recipe restating `composer-install` means "instead of", and running
-     * both paid for the dependency tree twice.
+     * The manifest's commands, then the app config's; an app config command with a manifest
+     * command's id replaces it rather than running beside it.
      *
      * @param  list<PlatformCommand>  $manifest
      * @param  list<PlatformCommand>  $own
@@ -69,11 +55,8 @@ final class StageResolver
     }
 
     /**
-     * Whether the request took this stage over, which the entrypoint announces
-     * and the inspection report labels. Silence here is how a support ticket
-     * turns into an afternoon: an account whose migration never ran looks
-     * exactly like an account whose migration failed, unless something says
-     * the stage was replaced.
+     * Whether the request took this stage over, which the entrypoint announces and the inspection
+     * report labels, so a migration that never ran does not look like one that failed.
      */
     public static function isOverridden(string $stage, ?DeployPlan $plan): bool
     {
@@ -81,13 +64,8 @@ final class StageResolver
     }
 
     /**
-     * Where one resolved command came from: `request` when the plan replaced
-     * the stage, `app_config` when the project's own descriptor contributed it,
-     * `manifest` otherwise.
-     *
-     * Compared by identity rather than by id, because a plan and a manifest
-     * may legitimately both call a command `migrate` — the question is which
-     * object survived the resolution, not which name it carries.
+     * Where one resolved command came from (`request`, `app_config` or `manifest`), compared by
+     * identity rather than id, since a plan and a manifest may both call a command `migrate`.
      *
      * @param  list<PlatformCommand>  $appConfigCommands
      */

@@ -1,0 +1,7 @@
+[3 log lines] answer
+false
+
+== log
+#0 info: Starting stage: running
+#1 warn: Platform 'no-such-platform' was detected but could not be resolved; no entrypoint was written, so its install, upgrade and start commands will not run.
+#2 info: The deploy request set install, start commands, but this project runs from its own compose file or Dockerfile — there is no generated entrypoint to put them in, so they were not applied.

@@ -6,18 +6,14 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Rust.
- *
- * Versioned by Cargo.toml's `rust-version`, which is a minimum supported
- * version, not a request for a toolchain: the deploy stays on the rolling
+ * Rust, whose Cargo.toml `rust-version` is a minimum, not a toolchain request: the deploy stays on the rolling
  * `rust:1` image and records the declared minimum in the deploy log.
  */
 final class RustRuntime implements Runtime
 {
     /**
-     * The rolling 1.x image, and the compiled-in fallback for the catalogue's
-     * `image.from`. A const cannot read the catalogue; `image()` and
-     * `defaultImage()` honour a configured one.
+     * The rolling 1.x image, fallback for the catalogue's `image.from`, which `image()` and `defaultImage()`
+     * honour.
      */
     public const IMAGE = 'rust:1-slim-bookworm';
 
@@ -65,24 +61,14 @@ final class RustRuntime implements Runtime
     }
 
     /**
-     * The full tag, not *slim*, which ships the toolchain but no `g++`, no
-     * `pkg-config` and no OpenSSL headers, so `openssl-sys` and the `-sys`
-     * crates fail. `systemPackages()` cannot recover that: a host compile runs
-     * as the account and has no root.
-     *
-     * 2.2GB against 1.23GB; the image is loaded on the host, so every account
-     * shares one transfer. `HostCompile::commandRuntimeImage()` makes the same
-     * trade for Ruby and Python.
+     * The full tag: slim lacks the `g++`, `pkg-config` and OpenSSL headers a rootless host compile cannot install.
+     * 2.2GB against 1.23GB, but loaded once on the host.
      */
     public const BUILD_IMAGE = 'rust:1-bookworm';
 
     /**
-     * The image a host compile should run in: cargo needs a toolchain the
-     * runtime image does not carry.
-     *
-     * `build_from` in `config/core/images.yaml` wins, falling back to that
-     * image; only with no config does `BUILD_IMAGE` apply. Compiling in an
-     * image the app does not run in is the failure this avoids.
+     * The image a host compile runs in, carrying cargo's toolchain: the catalogue's `build_from`, then its
+     * `from`, and `BUILD_IMAGE` only with no config.
      */
     public static function buildImageTag(string $version): string
     {
@@ -106,11 +92,8 @@ final class RustRuntime implements Runtime
     }
 
     /**
-     * `build-essential pkg-config libssl-dev` — what the common crates link
-     * against. Best effort, because a host compile runs as the account and
-     * cannot install anything: failing later in cargo, at the crate that wanted
-     * the header, beats failing first at all of them. Skipped when the image
-     * already has the tools, so apt's permission error does not reach the log.
+     * What common crates link against, best effort since a host compile cannot install anything, and skipped
+     * when the image has the tools, so apt's permission error stays out of the log.
      */
     public static function systemPackages(): string
     {
@@ -121,11 +104,8 @@ final class RustRuntime implements Runtime
     }
 
     /**
-     * `--locked` when the repo ships a lockfile, so the committed dependency
-     * versions are built. With a fallback: a committed lock is routinely a
-     * little stale and `--locked` makes that fatal on
-     * `error: cannot update the lock file … because --locked was passed` before
-     * a single crate compiles. Same bargain as `composer install`.
+     * `--locked` with a lockfile, so the committed versions are built, falling back unlocked since a slightly
+     * stale lock is fatal under `--locked`.
      */
     public static function buildCommand(string $projectDir): string
     {
@@ -137,23 +117,19 @@ final class RustRuntime implements Runtime
     }
 
     /**
-     * A missing or unexecutable binary restart-loops behind a 502 with nothing
-     * in the deploy log to explain it.
+     * Cargo's binary, else the only executable in target/release, else the built ones named so the user can
+     * pick: a missing binary would restart-loop silently. {@see RustRuntimeLibraries}
      */
     public static function startCommand(string $projectDir): string
     {
         $path = './'.self::binaryPath($projectDir);
 
-        // Cargo's name first; failing that, the only executable in
-        // target/release runs instead. Libraries the runtime image lacks were
-        // bundled by the host compile. {@see RustRuntimeLibraries}
         return RustRuntimeLibraries::startPrefix()
             .' b='.$path.';'
             .' [ -x "$b" ] || { set -- $(find ./target/release -maxdepth 1 -type f -perm -u+x'
             .' ! -name \'*.d\' ! -name \'*.so\' -printf \'%f \' 2>/dev/null);'
             .' if [ $# -eq 1 ]; then b=./target/release/$1;'
             .' else echo "PANELALPHA: no runnable Rust binary at '.$path.'";'
-            // Name the built binaries so the user can pick one as the start command.
             .' echo "PANELALPHA: built binaries: $*";'
             .' echo "PANELALPHA: set a start command naming the one to serve";'
             .' exit 1; fi; };'
@@ -161,9 +137,8 @@ final class RustRuntime implements Runtime
     }
 
     /**
-     * Path of the binary `cargo build --release` produces, relative to the
-     * project root. `binaryName()` reads `[[bin]] name`, then `[package] name`,
-     * keeping dashes; a workspace root has neither.
+     * The binary `cargo build --release` produces, relative to the project root; `app` when `binaryName()`
+     * finds no name, as for a workspace root.
      */
     public static function binaryPath(string $projectDir): string
     {
@@ -175,6 +150,7 @@ final class RustRuntime implements Runtime
         return new Requirement('rust', self::VERSION, '', 'engine default');
     }
 
+    /** An explicit `[[bin]] name` wins over `[package] name`: a crate's binary may be named differently. */
     public static function binaryName(string $projectDir): ?string
     {
         $manifest = AccountHomeRead::contents(rtrim($projectDir, '/').'/Cargo.toml');
@@ -182,8 +158,6 @@ final class RustRuntime implements Runtime
             return null;
         }
 
-        // An explicit [[bin]] name wins: a crate can ship a binary with a
-        // different name from the package.
         if (preg_match('/\[\[bin\]\][^\[]*?\bname\s*=\s*["\']([^"\']+)["\']/s', $manifest, $m) === 1) {
             return self::sanitizeCrateName($m[1]);
         }
@@ -202,11 +176,12 @@ final class RustRuntime implements Runtime
     }
 
     /**
+     * One image, unpinned: `rust:1-slim-bookworm` tracks the 1.x line.
+     *
      * @return list<string>
      */
     public function supportedVersions(): array
     {
-        // One image, unpinned: `rust:1-slim-bookworm` tracks the 1.x line.
         return [self::VERSION];
     }
 }

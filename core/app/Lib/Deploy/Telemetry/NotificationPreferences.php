@@ -125,7 +125,16 @@ final class NotificationPreferences
             return ['ok' => true, 'message' => 'Preferences unchanged, skipped'];
         }
 
-        $payload = [
+        return self::send($endpoint, self::payload($serverUrl, $prefs), $fingerprint);
+    }
+
+    /**
+     * @param  array{enabled: bool, notify_email: ?string, server_probe_url: ?string, app_probe_urls: list<string>}  $prefs
+     * @return array<string, mixed>
+     */
+    private static function payload(?string $serverUrl, array $prefs): array
+    {
+        return [
             'events' => [[
                 'type' => 'notification.preferences',
                 'occurred_at' => now()->toIso8601String(),
@@ -133,7 +142,13 @@ final class NotificationPreferences
                 'payload' => $prefs,
             ]],
         ];
+    }
 
+    /**
+     * @return array<string, string>
+     */
+    private static function headers(): array
+    {
         $headers = [
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
@@ -147,6 +162,17 @@ final class NotificationPreferences
         if ($token !== '') {
             $headers['Authorization'] = 'Bearer '.$token;
         }
+
+        return $headers;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{ok: bool, message: string}
+     */
+    private static function send(string $endpoint, array $payload, string $fingerprint): array
+    {
+        $headers = self::headers();
 
         try {
             $response = Http::withHeaders($headers)

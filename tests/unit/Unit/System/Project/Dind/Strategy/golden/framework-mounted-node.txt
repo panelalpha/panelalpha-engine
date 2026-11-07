@@ -1,0 +1,103 @@
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "express",
+        "label": "Express",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": null,
+        "runtime": "node",
+        "output_directory": "dist",
+        "package_manager": "bun",
+        "install_command": "HUSKY=0 LEFTHOOK=0 CI=1 bun install",
+        "build_command": "",
+        "start_command": "bun run start",
+        "env": {
+            "HOST": "0.0.0.0",
+            "HOSTNAME": "0.0.0.0",
+            "PORT": "3000",
+            "HUSKY": "0",
+            "CI": "1",
+            "PA_DEPLOY_PHASE": "install"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "oven/bun:1",
+        "database": null,
+        "app_root": "web",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "express",
+        "requirements": [
+            {
+                "id": "node",
+                "version": "20",
+                "constraint": "20",
+                "source": "package.json engines.node",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "node 20 (from package.json engines.node)"
+        ],
+        "build_images": [],
+        "resolved_commands": [],
+        "setup_command": null
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'oven/bun:1'
+    working_dir: /app
+    volumes:
+      - './web:/app'
+    ports:
+      - '3000:3000'
+    command:
+      - sh
+      - '-c'
+      - 'exec /app/panelalpha-entrypoint.sh'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      HUSKY: '0'
+      CI: '1'
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

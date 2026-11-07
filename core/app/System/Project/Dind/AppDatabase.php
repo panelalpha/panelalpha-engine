@@ -12,30 +12,14 @@ use App\System\Services\Mysql;
 use Illuminate\Support\Str;
 
 /**
- * The database an application gets when its platform says it needs one.
- *
- * Laravel points itself at a database through its own .env, and a project
- * shipping a compose file brings its own. Everything else -- Matomo,
- * and every PHP CMS shaped like it -- has no way to say so, and used to get
- * `DB_CONNECTION=sqlite` pointing at a file the image never created. The
- * platform manifest says `database: mysql` instead, and this answers it.
- *
- * On the account's own MySQL server, not a sidecar: the account already has
- * one, so a second costs a container and a volume to hold data the panel
- * cannot see, phpMyAdmin cannot open and the account's backup does not
- * include.
- *
- * Idempotent, because a redeploy must not hand the app different credentials
- * than the ones it wrote into its own config file on the first one. The
- * password is generated once and kept in the account's encrypted details;
- * everything else is derived.
+ * The database a platform manifest's `database: mysql` asks for, on the account's own MySQL server: a sidecar
+ * would hold data the panel, phpMyAdmin and backups miss. Idempotent: a redeploy keeps the app's credentials.
  */
 final class AppDatabase
 {
     /**
-     * Suffix for both the database and its user, after the account's own
-     * prefix -- `alice_app`. Short, because MySQL stops at 64 characters and
-     * 32 of those can already be gone on the prefix.
+     * Suffix for both the database and its user, after the account's own prefix (`alice_app`). Short, because
+     * MySQL stops at 64 characters and 32 of those can already be gone on the prefix.
      */
     public const SUFFIX = 'app';
 
@@ -48,9 +32,8 @@ final class AppDatabase
     private const FALLBACK_HOST = 'database-users.shared-hosting.palocal';
 
     /**
-     * Credentials in the shape {@see DatabaseSettings}
-     * reads, so the generated compose and the app's environment are written
-     * by the code that already does that for Laravel.
+     * Credentials in the shape {@see DatabaseSettings} reads, so the generated compose and the app's environment
+     * are written by the code that already does that for Laravel.
      *
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}
      */
@@ -68,9 +51,8 @@ final class AppDatabase
     }
 
     /**
-     * Whether the deploy gave $user its application database: the row
-     * {@see ensureDatabase()} writes is what the panel lists and the teardown
-     * walks, so it is the record of one.
+     * Whether the deploy gave $user its application database: the row {@see ensureDatabase()} writes is what
+     * the panel lists and the teardown walks, so it is the record of one.
      */
     public static function isOwnedBy(User $user): bool
     {
@@ -78,9 +60,8 @@ final class AppDatabase
     }
 
     /**
-     * The credentials {@see provision()} handed $user's application, read
-     * without touching the server: null when no password is stored or it
-     * cannot be decoded.
+     * The credentials {@see provision()} handed $user's application, read without touching the server: null
+     * when no password is stored or it cannot be decoded.
      *
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}|null
      */
@@ -107,12 +88,8 @@ final class AppDatabase
     }
 
     /**
-     * The application container resolves nothing the engine's own network
-     * resolves: it lives in the account's nested Docker, several NATs away
-     * from the compose network the database sits on. It can still route to
-     * the address, so the deploy pins the name to it and the app records a
-     * hostname in its config file rather than an address that changes the
-     * next time the database container is recreated.
+     * The app, several NATs away in nested Docker, cannot resolve the database's name but can route to its address:
+     * the name is pinned, so its config records a hostname, not an address a recreated database container changes.
      *
      * @return list<string> a compose `extra_hosts` list, empty when the name
      *                      resolves to nothing worth pinning
@@ -129,13 +106,11 @@ final class AppDatabase
     }
 
     /**
-     * $yaml with every `extra_hosts` pin of the database name moved to
-     * $address. An account changing network leaves its app
-     * pinned to an address it can no longer reach.
+     * $yaml with every `extra_hosts` pin of the database name moved to $address: after a network change the old
+     * one is unreachable. An operator's own database is not sites-db and did not move.
      */
     public static function repinned(string $yaml, string $address): string
     {
-        // A database of the operator's own is not sites-db and did not move.
         if (self::hostname() !== self::FALLBACK_HOST) {
             return $yaml;
         }
@@ -173,12 +148,8 @@ final class AppDatabase
     }
 
     /**
-     * Generated once. A redeploy that rotated it would leave the app holding
-     * the old one in its own config file -- Matomo's config.ini.php,
-     * WordPress's wp-config.php -- and the site would come back up unable to
-     * reach a database that was working a minute earlier. For the same reason
-     * a stored password that cannot be decoded is an error, never a reason
-     * to generate a new one.
+     * Generated once: a new one would lock the app out, its own config file still holding the old one. For the same
+     * reason a stored password that cannot be decoded is an error, never a reason to generate a new one.
      */
     private static function password(User $user): string
     {
@@ -202,23 +173,23 @@ final class AppDatabase
         return $password;
     }
 
+    /**
+     * The row is what the panel lists and what the account's teardown walks, so a database on the server without
+     * one is invisible and outlives the account that owns it.
+     */
     private static function ensureDatabase(Mysql $mysql, User $user, string $name): void
     {
         if (! $mysql->databases()->databaseExists($name)) {
             $mysql->databases()->createDatabase($name);
         }
-        // The row is what the panel lists and what the account's teardown
-        // walks, so a database on the server without one is invisible and
-        // outlives the account that owns it.
         if (! $user->mysqlDatabases()->getQuery()->where('database', $name)->exists()) {
             MysqlDatabase::create(['user_id' => $user->id, 'database' => $name]);
         }
     }
 
     /**
-     * An existing user gets the stored password set on it rather than being
-     * trusted to already have it: the row and the server can disagree after a
-     * restore, and the app has no way to ask which is right.
+     * An existing user gets the stored password set on it rather than being trusted to already have it: the row
+     * and the server can disagree after a restore, and the app has no way to ask which is right.
      */
     private static function ensureUser(Mysql $mysql, User $user, string $name, string $password): void
     {

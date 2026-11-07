@@ -14,13 +14,8 @@ use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 
 /**
- * The `app` service for a platform the engine builds itself.
- *
- * Three shapes, and which one applies is the same question the Dockerfile
- * generators ask: a static build is served by stock nginx from the output
- * directory, a Nitro build by stock Node from the server bundle the host
- * compiled, and everything else by the image built from the generated
- * Dockerfile.
+ * The `app` service for a platform the engine builds itself, shaped as the Dockerfile generators decide: stock nginx
+ * over a static build's output, stock Node over a host-compiled Nitro bundle, or the image the generated Dockerfile builds.
  */
 final class FrameworkService
 {
@@ -65,6 +60,9 @@ final class FrameworkService
     }
 
     /**
+     * `extra_hosts` pins names the app's nested Docker cannot resolve to the addresses the engine resolved, such as the
+     * account's MySQL server on a compose network several NATs away.
+     *
      * @return array<string, mixed>
      */
     public function build(): array
@@ -74,9 +72,6 @@ final class FrameworkService
         if ($depends !== []) {
             $service += ['depends_on' => $depends];
         }
-        // Names the app's own nested Docker cannot resolve, pinned to the
-        // addresses the engine resolved for it — the account's MySQL server
-        // lives on a compose network several NATs away.
         $extraHosts = ComposeValues::stringList($this->decision['extra_hosts'] ?? null);
 
         return $extraHosts === [] ? $service : $service + ['extra_hosts' => $extraHosts];
@@ -155,25 +150,8 @@ final class FrameworkService
     }
 
     /**
-     * Any project, the same way PHP runs: our stock image, the account's
-     * directory mounted, nothing built.
-     *
-     * Node, Python, Go, Rust and Java all arrive here. What they have in
-     * common is that their build leaves everything the app needs *in the
-     * project* — node_modules, a .venv, `./app`, `target/*.jar` — so the
-     * image only has to supply the runtime, and one shared image can serve
-     * every account on the host.
-     *
-     * The difference from {@see standaloneNode()} is what the build produced.
-     * Nitro emits a self-contained server bundle, so only `.output` and
-     * `node_modules` need mounting and they can be read-only. `next start` is
-     * not self-contained — it needs `node_modules`, the build output and
-     * `package.json` — so the whole project is mounted, exactly as PHP mounts
-     * its document root.
-     *
-     * Read-write, and that is not an oversight: Next.js writes `.next/cache`
-     * at runtime for ISR and image optimisation, and a read-only mount turns
-     * those into 500s at request time rather than at deploy time.
+     * Run like PHP: one stock image, the whole project mounted read-write (`next start`, unlike Nitro, is not self-contained; Next.js writes
+     * `.next/cache`); the staged entrypoint (install and upgrade first), else a JSON argv as PID 1, else `sh -c`; `$` doubled as in shellCommand().
      *
      * @return array<string, mixed>
      */
@@ -186,11 +164,6 @@ final class FrameworkService
             'ports' => ["{$this->port}:{$this->port}"],
         ];
 
-        // The staged entrypoint runs the platform's install and upgrade
-        // commands before the serve one, so where a project has it, it *is*
-        // the command. Running the start command directly is what left a
-        // Django project's migrations unapplied.
-        // Doubled `$` for the same reason as shellCommand().
         $provision = str_replace('$', '$$', HostRunProject::packageManagerPrefix($this->decision));
         $entrypoint = trim((string) ($this->decision['entrypoint'] ?? ''));
         if ($entrypoint !== '') {
@@ -201,11 +174,6 @@ final class FrameworkService
 
         $command = HostRunProject::startCommand($this->decision);
         if ($command !== null) {
-            // A recipe that already settled on an argv says so as JSON -- the
-            // Ruby one picks between falcon, puma, unicorn, rails server and
-            // rackup and hands back an exec form. Passing that straight
-            // through keeps the application as PID 1 without a shell in the
-            // way at all, which is strictly better than the sh -c below.
             $argv = json_decode($command, true);
             $service['command'] = is_array($argv) && array_is_list($argv) && $argv !== []
                 ? array_map('strval', $argv)
@@ -216,9 +184,8 @@ final class FrameworkService
     }
 
     /**
-     * Same reason as PHP: /app is the customer's directory, so what the
-     * application writes there has to belong to them or their SFTP cannot
-     * touch it afterwards.
+     * Same reason as PHP: /app is the customer's directory, so what the application writes there has to belong to them
+     * or their SFTP cannot touch it afterwards.
      *
      * @return array<string, string>
      */
@@ -230,21 +197,8 @@ final class FrameworkService
     }
 
     /**
-     * A recipe's start command, ready to hand to `sh -c` inside compose.
-     *
-     * Two things have to be true and neither is obvious.
-     *
-     * It runs through a shell because compose's own string form is not one:
-     * it would hand `java -jar target/*.jar` an unexpanded glob. `exec` is
-     * added so the application keeps PID 1 and its signals -- but only when
-     * the command is a single one. A recipe whose start command is a small
-     * script (Java's picks the runnable jar out of several before starting
-     * it, and ends with its own `exec`) turns into `exec jar="$(ls …)"` and
-     * the container restart-loops on `sh: exec: jar=: not found`.
-     *
-     * And `$` is doubled, because compose interpolates `$var` in a command
-     * before the shell ever sees it. Undoubled, that same script's `"$jar"`
-     * arrived empty and compose warned about a variable nobody wrote.
+     * A start command for `sh -c` in compose (compose's string form would leave a glob unexpanded), `exec`-prefixed to keep
+     * PID 1 only when it is one command, not a script; `$` doubled, since compose interpolates `$var` before the shell runs.
      */
     public static function shellCommand(string $command): string
     {
@@ -255,16 +209,8 @@ final class FrameworkService
     }
 
     /**
-     * PHP runs the shared base image with the account's own directory bind
-     * mounted, and builds nothing.
-     *
-     * The image carries what every PHP application needs and no application's
-     * own code -- Apache, the extension set, composer, the entrypoint shim --
-     * so it is pulled once per host and shared by every account, instead of
-     * ~800MB of near-identical image per project. What makes it *this*
-     * project is the mount: `~/project` is the running document root, so a
-     * file changed over SFTP is served on the next request and `vendor/`
-     * written by the host build step is live without a restart.
+     * The shared PHP base, pulled once per host, with `~/project` mounted as the live document root; nothing is built. It runs as
+     * the account, so what it writes to /app (and its stdio, for Apache's logs) stays theirs; {@see AccountUserFiles} names that uid.
      *
      * @return array<string, mixed>
      */
@@ -276,14 +222,6 @@ final class FrameworkService
             'volumes' => [$this->appRoot().':'.self::WORKDIR],
             'ports' => ["{$this->port}:{$this->port}"],
         ];
-        // The whole container is the hosting account, not root.
-        //
-        // /app is the customer's own directory, so anything the container
-        // writes there -- Laravel's .env and bootstrap/cache, an upload, a
-        // config a first-run wizard saves -- has to belong to them or their
-        // SFTP cannot touch it afterwards. Compose is the right place to say
-        // so: Docker creates the container's stdio owned by this uid too, so
-        // Apache can open its logs without ever being root.
         $identity = trim((string) ($this->decision['user'] ?? ''));
         if ($identity !== '') {
             $service['user'] = $identity;
@@ -292,7 +230,6 @@ final class FrameworkService
         if ($cache !== '') {
             $service['volumes'][] = $cache.':'.PhpBaseImage::COMPOSER_CACHE_DIR;
         }
-        // Gives that uid a name: {@see AccountUserFiles}.
         if (($this->decision['account_user_files'] ?? false) === true) {
             array_push($service['volumes'], ...AccountUserFiles::volumes());
         }
@@ -301,19 +238,8 @@ final class FrameworkService
     }
 
     /**
-     * The subtree to mount, relative to the compose file: the manifest's
-     * `app_root`, or the whole checkout when it declares none.
-     *
-     * Nothing is detected here and nothing is special-cased. A repository
-     * whose application is not at its root says so in its recipe, and the
-     * generated Dockerfile used to honour that by flattening the subtree with
-     * `COPY <app_root>/. .`; mounting the subtree is the same statement made
-     * to the mount instead, so the document root, the entrypoint and the host
-     * build all still work on /app.
-     *
-     * Validated rather than trusted: `_schema.json` already rejects an
-     * absolute path, but this value ends up as a bind-mount source, so it is
-     * worth refusing anything that could climb out of the checkout here too.
+     * The manifest's `app_root` to mount as /app, or the whole checkout; validated rather than trusted, since it becomes
+     * a bind-mount source and must not climb out of the checkout.
      */
     private function appRoot(): string
     {
@@ -339,13 +265,8 @@ final class FrameworkService
     }
 
     /**
-     * The nginx shape serves files and reads no environment at all; the other
-     * two run the application.
-     *
-     * `env_file` carries the secrets the repository already wrote
-     * (BETTER_AUTH_SECRET, …); the generated values below it override the
-     * localhost placeholders a template ships with. A `path_prefix_keys` entry
-     * is left to that file: the project reads it as a sub-path, not a URL.
+     * For the shapes that run the application: `env_file` carries the repository's own secrets, the generated values override
+     * a template's localhost placeholders, and a `path_prefix_keys` entry is left to the file, since it is a sub-path.
      *
      * @return array<string, mixed>
      */

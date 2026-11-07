@@ -6,13 +6,8 @@ use App\Models\User;
 use App\System\Services\Mysql\DatabaseCopyResult;
 
 /**
- * A classic WordPress moved by a staging, copy or push. The files and the
- * database move as they are, so without this a copy keeps using the source's
- * database and answering as the source's domain, and a push leaves the target
- * on the source's wp-config.php and addresses. Every step reads wp-config.php
- * or runs without plugins and themes, so a broken plugin cannot stop it.
- * On a multisite the main site moves with every site on its host, which in
- * a subdirectory network is every site; subsites on their own hosts stay.
+ * A classic WordPress moved by staging, copy or push, which would otherwise keep the source's database, domain and
+ * wp-config.php. Every step reads wp-config.php or runs without plugins and themes, so a broken plugin cannot stop it.
  */
 final class SiteCopy
 {
@@ -60,11 +55,8 @@ final class SiteCopy
     }
 
     /**
-     * After a pushed database: the target answers on its own addresses again.
-     * A multisite target's own wp-config.php names its host while the pushed
-     * network tables name the source's, and WordPress cannot boot until they
-     * agree, so the tables are rewritten first, before anything loads it. A
-     * push of some tables rewrites only those, as the target holds them.
+     * After a pushed database the target answers on its own addresses again. A multisite cannot boot until its own host
+     * and the pushed network tables agree, so those are rewritten first; a push of some tables rewrites only those.
      *
      * @param  list<array{database: string, name: string}>|null  $tables
      */
@@ -106,10 +98,8 @@ final class SiteCopy
     }
 
     /**
-     * The search-replace boots WordPress, which on a multisite finds its main
-     * site by DOMAIN_CURRENT_SITE in the network tables, so it runs while both
-     * still name the source's host. The network tables and DOMAIN_CURRENT_SITE
-     * follow, then the URL constants.
+     * The search-replace boots WordPress, which on a multisite finds its main site by DOMAIN_CURRENT_SITE in the network
+     * tables, so it runs while both still name the source's host; they follow, then the URL constants.
      *
      * @param  list<string>  $hosts
      */

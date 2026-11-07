@@ -6,10 +6,8 @@ use App\Models\User;
 use App\System\Services\Mysql;
 
 /**
- * An application database a push provisions on a target that had none,
- * recorded before {@see AppDatabase::provision()} runs, so a failed push takes
- * away what it added (the database, its user and grants, their rows and the
- * stored password) and keeps whatever the target already had.
+ * An application database a push provisions on a target that had none, recorded before {@see AppDatabase::provision()}
+ * so a failed push removes what it added (database, user, grants, rows, password) and keeps what the target had.
  */
 final class ProvisionedAppDatabase
 {

@@ -6,15 +6,8 @@ use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarDialects;
 
 /**
- * Secrets a project's compose file needs from `.env` and nobody supplies.
- *
- * {@see ComposePlaceholders} rewrites values inside `environment:`, which
- * cannot reach `${VAR:?}` in a `command:`, in a URL, or in an `include:`d
- * file, and cannot supply a variable a datastore reads through `env_file:`.
- * Compose interpolates all of those from the project's `.env`, so that is
- * where the values go. Seeded like the rest, so a redeploy keeps them.
- *
- * No Laravel dependencies — unit-testable.
+ * Secrets a project's compose file needs from `.env` and nobody supplies, where {@see ComposePlaceholders}
+ * cannot reach (a `command:`, an `include:`d file, an `env_file:`). Seeded, so a redeploy keeps them.
  */
 final class ComposeRequiredEnv
 {
@@ -35,6 +28,26 @@ final class ComposeRequiredEnv
      * @return array<string, string> NAME => value, for the keys `.env` must gain
      */
     public static function missing(array $files, array $env, string $seed, string|\Closure|null $publicUrl = null): array
+    {
+        [$needed, $base64, $urls] = self::neededNames($files, $env);
+
+        $out = [];
+        $publicUrl = $urls !== [] && $publicUrl instanceof \Closure ? $publicUrl() : $publicUrl;
+        if (is_string($publicUrl) && $publicUrl !== '') {
+            foreach (array_keys($urls) as $name) {
+                $out[(string) $name] = $publicUrl;
+            }
+        }
+
+        return self::withGeneratedValues($out, $needed, $base64, $env, $seed);
+    }
+
+    /**
+     * @param  list<array{dir: string, yaml: string}>  $files
+     * @param  array<string, string>  $env
+     * @return array{0: array<string, int|false>, 1: array<string, int>, 2: array<string, true>}
+     */
+    private static function neededNames(array $files, array $env): array
     {
         $needed = [];
         $base64 = [];
@@ -57,19 +70,25 @@ final class ComposeRequiredEnv
             }
         }
 
-        $out = [];
-        $publicUrl = $urls !== [] && $publicUrl instanceof \Closure ? $publicUrl() : $publicUrl;
-        if (is_string($publicUrl) && $publicUrl !== '') {
-            foreach (array_keys($urls) as $name) {
-                $out[(string) $name] = $publicUrl;
-            }
-        }
+        return [$needed, $base64, $urls];
+    }
+
+    /**
+     * A user or database name gets the engine's usual `app`, as a kept sidecar does
+     * ({@see SidecarCredentials::pinSidecarCredentials()}).
+     *
+     * @param  array<string, string>  $out
+     * @param  array<string, int|false>  $needed
+     * @param  array<string, int>  $base64
+     * @param  array<string, string>  $env
+     * @return array<string, string>
+     */
+    private static function withGeneratedValues(array $out, array $needed, array $base64, array $env, string $seed): array
+    {
         foreach ($needed as $name => $length) {
             if (trim((string) ($env[$name] ?? '')) !== '') {
                 continue;
             }
-            // A user or database name gets the engine's usual `app`, as a kept
-            // sidecar does ({@see SidecarCredentials::pinSidecarCredentials()}).
             $out[(string) $name] = $length !== false || ComposePlaceholders::isSecretKey((string) $name)
                 ? ComposePlaceholders::requiredSecretValue((string) $name, $seed, (int) $length, $base64[$name] ?? 0)
                 : 'app';
@@ -79,8 +98,7 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * `include:` paths of a compose file, relative to the project, so the
-     * caller can read them and hand them back to {@see missing()}.
+     * `include:` paths of a compose file, relative to the project, for the caller to hand to {@see missing()}.
      *
      * @return list<string>
      */
@@ -109,8 +127,7 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * Reads a compose file and whatever it includes, through a reader that
-     * answers null for anything missing or unreadable.
+     * Reads a compose file and whatever it includes, through a reader that answers null for anything unreadable.
      *
      * @param  callable(string): ?string  $read  relative path => contents
      * @return list<array{dir: string, yaml: string}>
@@ -142,8 +159,8 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * Required variables anywhere in the file that name a credential. A
-     * required hostname or port is not something to invent.
+     * Required variables anywhere in the file that name a credential; a message ComposePlaceholders
+     * cannot read whole gives no hint, as there.
      *
      * @return array<string, array{0: int, 1: int}> name => the hex length and base64 bytes its message asks for, or 0
      */
@@ -153,7 +170,6 @@ final class ComposeRequiredEnv
         $names = [];
         foreach ($m as $ref) {
             if (ComposePlaceholders::isSecretKey($ref[1])) {
-                // A message ComposePlaceholders cannot read whole gives no hint, as there.
                 $message = ($ref[3] ?? '') === '}' ? $ref[2] : '';
                 $names[$ref[1]] = [
                     max($names[$ref[1]][0] ?? 0, ComposePlaceholders::hintedLength($message)),
@@ -184,20 +200,16 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * A database whose superuser password is left blank refuses its first
-     * start (postgres: "superuser password is not specified"). The password
-     * comes from `environment:` through a variable, or from the project's
-     * `.env` through `env_file:`; whichever of the two is empty is the name
-     * to generate.
+     * A database with a blank superuser password refuses its first start; the empty one of its
+     * `environment:` variable or the project's `.env` (through `env_file:`) is the name to generate.
      *
      * @param  array<string, string>  $env
      * @return list<string>
      */
     private static function datastorePasswordNames(string $yaml, string $dir, array $env): array
     {
-        $parsed = ComposeYaml::parse($yaml);
-        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (! is_array($services)) {
+        $services = self::servicesIn($yaml);
+        if ($services === null) {
             return [];
         }
 
@@ -221,19 +233,15 @@ final class ComposeRequiredEnv
     }
 
     /**
-     * Variables a datastore's other init settings are written as, bare
-     * (Shynet: `POSTGRES_USER=${DB_USER}`, `POSTGRES_DB=${DB_NAME}`). Nothing
-     * sets them, so compose resolves them to empty strings: the database
-     * falls back to its own default while the app, reading the same names,
-     * connects as nobody.
+     * Variables a datastore's other init settings are written as, bare (`POSTGRES_USER=${DB_USER}`), which
+     * nothing sets: the database falls back to its default while the app connects as nobody.
      *
      * @return list<string>
      */
     private static function datastoreInitNames(string $yaml): array
     {
-        $parsed = ComposeYaml::parse($yaml);
-        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (! is_array($services)) {
+        $services = self::servicesIn($yaml);
+        if ($services === null) {
             return [];
         }
 
@@ -246,15 +254,28 @@ final class ComposeRequiredEnv
             if ($engine === null) {
                 continue;
             }
-            $passwords = SidecarDialects::passwordVariablesFor($engine)['passwords'] ?? [];
-            $declared = self::environmentOf($service['environment'] ?? null);
-            foreach (array_diff(SidecarDialects::initVariablesFor($engine), $passwords) as $key) {
-                // Only the bare form: a default or a `:?` is the author's own choice.
-                if (preg_match(self::WHOLE_REFERENCE, trim((string) ($declared[$key] ?? '')), $m) === 1
-                    && ($m[2] ?? '') === ''
-                ) {
-                    $names[] = $m[1];
-                }
+            array_push($names, ...self::bareInitNames($service, $engine));
+        }
+
+        return $names;
+    }
+
+    /**
+     * Only the bare form: a default or a `:?` is the author's own choice.
+     *
+     * @param  array<string, mixed>  $service
+     * @return list<string>
+     */
+    private static function bareInitNames(array $service, string $engine): array
+    {
+        $names = [];
+        $passwords = SidecarDialects::passwordVariablesFor($engine)['passwords'] ?? [];
+        $declared = self::environmentOf($service['environment'] ?? null);
+        foreach (array_diff(SidecarDialects::initVariablesFor($engine), $passwords) as $key) {
+            if (preg_match(self::WHOLE_REFERENCE, trim((string) ($declared[$key] ?? '')), $m) === 1
+                && ($m[2] ?? '') === ''
+            ) {
+                $names[] = $m[1];
             }
         }
 
@@ -262,6 +283,20 @@ final class ComposeRequiredEnv
     }
 
     /**
+     * @return array<array-key, mixed>|null
+     */
+    private static function servicesIn(string $yaml): ?array
+    {
+        $parsed = ComposeYaml::parse($yaml);
+        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
+
+        return is_array($services) ? $services : null;
+    }
+
+    /**
+     * A waiver (POSTGRES_HOST_AUTH_METHOD, a `*_FILE`) is the author's own way in; with nothing declared,
+     * only a `.env` the service reads can set it.
+     *
      * @param  array<string, mixed>  $service
      * @param  array{passwords: list<string>, waivers: list<string>}  $vocabulary
      * @param  array<string, string>  $env
@@ -272,8 +307,6 @@ final class ComposeRequiredEnv
         $fromEnvFile = self::loadsProjectEnv($service['env_file'] ?? null, $dir);
         $setInEnvFile = static fn (string $key): bool => $fromEnvFile && trim((string) ($env[$key] ?? '')) !== '';
 
-        // POSTGRES_HOST_AUTH_METHOD, MYSQL_RANDOM_ROOT_PASSWORD, a *_FILE: the
-        // author chose another way in, and that is theirs to keep.
         foreach ($vocabulary['waivers'] as $key) {
             if (array_key_exists($key, $declared) || $setInEnvFile($key)) {
                 return null;
@@ -288,21 +321,31 @@ final class ComposeRequiredEnv
 
                 continue;
             }
-            // A literal, or a value too involved to second-guess, is left as written.
-            if (preg_match(self::WHOLE_REFERENCE, trim((string) $declared[$key]), $m) !== 1) {
-                return null;
-            }
-            $operator = $m[2] ?? '';
-            $default = $operator === ':-' || $operator === '-' ? trim((string) ($m[3] ?? '')) : '';
-            if ($default !== '' || trim((string) ($env[$m[1]] ?? '')) !== '') {
-                return null;
-            }
 
-            return $m[1];
+            return self::unsetReference($declared[$key], $env);
         }
 
-        // Nothing declares it: only `.env` can, and only when the service reads it.
         return $fromEnvFile ? ($vocabulary['passwords'][0] ?? null) : null;
+    }
+
+    /**
+     * The variable a password is written as when nothing gives it a value; a literal, or a value too
+     * involved to second-guess, is left as written.
+     *
+     * @param  array<string, string>  $env
+     */
+    private static function unsetReference(string $value, array $env): ?string
+    {
+        if (preg_match(self::WHOLE_REFERENCE, trim((string) $value), $m) !== 1) {
+            return null;
+        }
+        $operator = $m[2] ?? '';
+        $default = $operator === ':-' || $operator === '-' ? trim((string) ($m[3] ?? '')) : '';
+        if ($default !== '' || trim((string) ($env[$m[1]] ?? '')) !== '') {
+            return null;
+        }
+
+        return $m[1];
     }
 
     /**

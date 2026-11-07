@@ -7,16 +7,12 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 
 /**
- * A workspace root that keeps Vite for its tooling while its `build` is
- * something else: fluxer's runs `cargo`, univer-workspace's `pnpm -r build`,
- * vendure's `lerna run build`. Read by the Vite platform's `none:` list.
- *
- * Only a root with no vite.config of its own: Vite's output is read from that
- * config, so a root without one never produced the SPA the platform serves.
+ * A workspace root without a vite.config that keeps Vite for tooling while its `build` is something
+ * else (`cargo`, `lerna run build`); read by the Vite platform's `none:` list.
  */
 final class ViteNotTheBuildProbe implements PlatformProbe
 {
-    // `npm run x`, `pnpm x`, `pnpm run x`, `yarn x`, `yarn run x` naming a root script.
+    /** `npm run x`, `pnpm [run] x` or `yarn [run] x` naming a root script. */
     private const SCRIPT_CALL = '/(?:^|&&|\|\||;)\s*(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?)\s+([\w:.-]+)/';
 
     public function id(): string

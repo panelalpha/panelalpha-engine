@@ -3,23 +3,23 @@
 namespace App\System\Project\PhpHosting\WordPress\Migration\Steps;
 
 use App\Models\Domain;
-use App\Models\User;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\BatchBudget;
 use App\System\Project\PhpHosting\WordPress\Migration\BatchedStep;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationTransfer;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceConnection;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceUrl;
-use App\System\Project\PhpHosting\WordPress\Migration\TransferProgress;
 use RuntimeException;
 
 /**
- * Step 8: confirm transfer finished, transfer .htaccess, roll it back when
- * destination HTTP status changes. A transfer still running goes on in the
- * bounded, cancellable shares of the transfer steps.
+ * Step 8: confirm the transfer finished, transfer .htaccess, roll it back when the destination HTTP status changes.
+ * A transfer still running goes on in the bounded, cancellable shares of the transfer steps.
  */
 final class FinalizeStep implements BatchedStep
 {
+    use LocatesDestinationInstall;
+    use RunsTransferBatches;
+
     public function __construct(
         private SourceConnection $source = new SourceConnection,
         private ?MigrationTransfer $transfer = null,
@@ -51,17 +51,12 @@ final class FinalizeStep implements BatchedStep
             function (string $_destinationUrl) use ($migration, $label): void {
                 $this->removeDestinationHtaccess($migration, $label);
             },
-            onProgress: fn (TransferProgress $progress) => $migration->storeTransferProgress($this->name(), $progress),
+            onProgress: $this->progressRecorder($migration),
         );
 
         if ($transfer->finalize($migration, $pluginMigrationId, $destinationUrl, $this->budget($migration))) {
             $migration->markStepCompleted($this->name());
         }
-    }
-
-    private function budget(WordpressMigration $migration): BatchBudget
-    {
-        return new BatchBudget($this->batchesPerRun, BatchBudget::SECONDS, $migration->cancelRequested(...));
     }
 
     private function removeDestinationHtaccess(WordpressMigration $migration, string $label): void
@@ -71,14 +66,8 @@ final class FinalizeStep implements BatchedStep
             throw new RuntimeException("Domain '{$label}' not found when rolling back .htaccess");
         }
 
-        $user = $domain->user;
-        if (! $user instanceof User) {
-            throw new RuntimeException("No user for domain '{$label}'");
-        }
-
-        $docRoot = $user->project()->homeDirPath().$domain->getDocumentRoot();
-        $subdir = SourceUrl::installSubdirectory($migration->source_url);
-        $path = $subdir === '' ? $docRoot : $docRoot.'/'.$subdir;
+        $user = $this->destinationUser($domain, $label);
+        $path = $this->destinationPath($migration, $user, $domain);
         $htaccessPath = $path.'/.htaccess';
 
         $files = $user->project()->fileManager();

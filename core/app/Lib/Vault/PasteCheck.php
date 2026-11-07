@@ -16,13 +16,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Checks a pasted secret before the form stores it.
- *
- * The details to check against (`verify_with`) are given when the link is
- * minted. A git_token goes through the same GitRepoInput, GitTokenInput and
- * GitRemoteProbe that project_create uses; a cloudflare_api_token through the
- * same Cloudflare client calls the tunnel setup makes. The form and the engine
- * can't disagree about a token.
+ * Checks a pasted secret against the `verify_with` details given at mint time, with the same input rules, git
+ * probe and Cloudflare calls project_create and the tunnel setup use, so the form and the engine cannot disagree.
  */
 final class PasteCheck
 {

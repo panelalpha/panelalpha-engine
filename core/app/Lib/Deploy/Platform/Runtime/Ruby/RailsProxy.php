@@ -5,14 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * What a Rails app has to be told about the reverse proxy in front of it.
- *
- * force_ssl stays off: the hosting proxy terminates TLS, usually with a
- * self-signed certificate, so the HSTS header Rails 8 sends by default pins
- * the browser to a certificate it does not trust and the next navigation
- * fails inside the app's service worker as "offline". assume_ssl stays on
- * when the public URL is https, so cookies and generated links still look
- * like HTTPS.
+ * What a Rails app has to be told about the TLS-terminating proxy: force_ssl off, since its HSTS
+ * pins browsers to an often self-signed certificate, and assume_ssl on for an https public URL.
  */
 final class RailsProxy
 {
@@ -30,10 +24,8 @@ final class RailsProxy
     }
 
     /**
-     * Adds the proxy hostname to Host Authorization, but only when the app
-     * already keeps a whitelist. An empty `config.hosts` is Rails' way of
-     * saying "accept any Host" — appending to it would flip the app from open
-     * to single-host and 403 every other name it answers to.
+     * Adds the proxy hostname to Host Authorization only when the app already keeps a whitelist:
+     * an empty `config.hosts` accepts any Host, and appending would 403 every other name.
      */
     public static function hostAuthorizationInitializer(?string $publicUrl = null): string
     {

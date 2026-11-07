@@ -117,9 +117,8 @@ final class GenerationState
     }
 
     /**
-     * Read-modify-write under a flock on a sibling file: not every writer holds the deploy lock
-     * ({@see CheckoutAside::moveAside()}), and two renames would drop each other's keys.
-     * Without a lock file it writes anyway rather than fail a deploy.
+     * Read-modify-write under a flock on a sibling file: not every writer holds the deploy lock ({@see CheckoutAside::moveAside()}),
+     * and two renames would drop each other's keys. Without a lock file it writes anyway rather than fail a deploy.
      *
      * @param  callable(): void  $change
      */

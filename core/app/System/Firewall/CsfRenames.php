@@ -5,12 +5,8 @@ namespace App\System\Firewall;
 use App\Mcp\ToolPolicy;
 
 /**
- * What the CSF API's tools and routes are called now that the firewall API
- * replaced them, for settings and tokens that still name the old ones.
- *
- * Only known names are renamed. One with no successor (csf_ui_credentials,
- * GET /csf/ui-credentials) is left as it is: it matches nothing, and dropping
- * it could empty a token's list of limits, which would mean "no limit".
+ * The firewall API's names for the CSF tools and routes, for settings and tokens that still name the old ones.
+ * One with no successor is left as it is: dropping it could empty a token's list of limits, meaning "no limit".
  */
 final class CsfRenames
 {
@@ -80,9 +76,8 @@ final class CsfRenames
     }
 
     /**
-     * MCP_DENIED_TOOLS_REGEX: csf_restart is firewall_reload, every other csf name
-     * keeps its suffix. A pattern such as `^csf_(restart|disable)$` has no literal
-     * csf_restart to replace, so firewall_reload is appended to keep it denied.
+     * MCP_DENIED_TOOLS_REGEX: csf_restart is firewall_reload, every other csf name keeps its suffix. A pattern
+     * with no literal csf_restart (`^csf_(restart|disable)$`) gets firewall_reload appended to keep it denied.
      */
     public static function regex(string $regex): string
     {

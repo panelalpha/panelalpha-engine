@@ -1,0 +1,5 @@
+[1 log lines] threw InvalidArgumentException
+Compose file builds from Dockerfile.prod which does not exist.
+
+== log
+#0 info: Starting stage: running

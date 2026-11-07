@@ -3,13 +3,17 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * Workstation-only services with no place in a deployment: mail catchers,
- * asset dev-servers, browser drivers, tunnels — matched by name or by the
- * dev-server command, since many appear under a project-specific name.
+ * Workstation-only services with no place in a deployment, matched by name or by the dev-server
+ * command, since many appear under a project-specific name.
  */
 final class DevServices
 {
-    /** @var list<string> */
+    /**
+     * Administration and observability consoles count too: never what the stack is for, and several
+     * hand out the database they point at.
+     *
+     * @var list<string>
+     */
     private const NAMES = [
         'vite',
         'webpack',
@@ -27,8 +31,6 @@ final class DevServices
         'cypress',
         'storybook',
         'ngrok',
-        // Administration and observability consoles: attached to a stack, never
-        // the thing the stack is for, and several hand out the database they point at.
         'adminer',
         'phpmyadmin',
         'pgadmin',
@@ -42,7 +44,6 @@ final class DevServices
         'prometheus',
         'kibana',
         'swagger-ui',
-        // Debug and mail-catching tools a workstation compose runs beside the app.
         'buggregator',
         'maildev',
         'smtp4dev',
@@ -53,9 +54,8 @@ final class DevServices
     ];
 
     /**
-     * Tools recognised by their image as well, since a compose file names the
-     * service whatever it likes (`mail: axllent/mailpit`, `debug:
-     * ghcr.io/buggregator/server`). Only tools no deployment ever needs.
+     * Tools recognised by their image as well, since a compose file names the service whatever it
+     * likes (`mail: axllent/mailpit`). Only tools no deployment ever needs.
      *
      * @var list<string>
      */

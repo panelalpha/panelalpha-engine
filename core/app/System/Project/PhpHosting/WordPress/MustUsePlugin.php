@@ -5,20 +5,16 @@ namespace App\System\Project\PhpHosting\WordPress;
 use App\Models\User;
 
 /**
- * Engine must-use plugin that handles one-time panelalpha_sso tokens.
- *
- * Same file DinD WordPress ships in the image. PHP hosting installs do not
- * get it from a bake, so SSO copies it into the install's mu-plugins before
- * returning a login URL. Does not install the panel connector.
+ * Engine must-use plugin for one-time panelalpha_sso tokens, the file DinD WordPress ships in its image.
+ * PHP hosting installs get no bake, so SSO copies it into the install's mu-plugins before returning a login URL.
  */
 final class MustUsePlugin implements EnsuresMustUsePlugin
 {
     public const RELATIVE_PATH = 'wp-content/mu-plugins/panelalpha-app.php';
 
     /**
-     * Runs before WordPress loads. The must-use plugin used to treat every PHP
-     * CLI run as its own script, so with it installed WP-CLI could not run at
-     * all; an old copy is mended in place before it is loaded.
+     * Runs before WordPress loads and mends, in place, a must-use plugin copy that takes every PHP CLI run for its own
+     * script, which keeps WP-CLI from running.
      */
     public const MEND_ON_LOAD = <<<'PHP'
         $f = rtrim((string) (WP_CLI::get_runner()->config['path'] ?? ''), '/') . '/wp-content/mu-plugins/panelalpha-app.php';

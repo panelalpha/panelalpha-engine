@@ -6,13 +6,8 @@ use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 
 /**
- * First-boot command taken from the project, not from a framework recipe.
- *
- * Composer and npm/yarn/pnpm/bun all use a `setup` script name. Rails-style
- * `bin/setup` is the same idea. We run it once (marker file) so demo data,
- * links, and local bootstrapping happen without hardcoding artisan/rails/django.
- *
- * No Laravel dependencies — unit-testable.
+ * First-boot command from the project itself (a Composer/npm-style `setup` script or `bin/setup`), run
+ * once behind a marker file so bootstrapping needs no framework recipe. No Laravel dependencies.
  */
 class ProjectSetup
 {
@@ -50,37 +45,8 @@ class ProjectSetup
     }
 
     /**
-     * Whether the platform has already resolved this project's dependencies,
-     * in which case the project's own `setup` script must not run.
-     *
-     * A `setup` script is a *workstation* script. laravel/laravel's runs
-     * `composer install` and `npm install --ignore-scripts`: exactly what a
-     * developer who just cloned the repository needs, and exactly what the
-     * deploy has already done. Running it again in the runtime container is
-     * wrong twice over.
-     *
-     * It resolves dependencies in the wrong place. The build belongs on the
-     * host -- a throwaway container with the account's warm package cache,
-     * {@see \App\\System\\Project\Dind\HostCompile} -- not in the
-     * container that is meant to be serving by then.
-     *
-     * And it resolves them *differently*. A bare `composer install` includes
-     * require-dev, so phpunit, mockery, faker and pint land in a production
-     * account that the host build had just excluded with `--no-dev`; measured
-     * on a Laravel skeleton that was 33 extra packages and 10.3s of the 14s
-     * between `compose up` and the first answered request. The npm half then
-     * fails outright with `npm: not found`, because the shared PHP base ships
-     * no Node -- by design, which is why the PHP manifests declare no npm
-     * commands either.
-     *
-     * Two ways a platform says it has already done this. A PHP runtime always
-     * has: `runPhpBuild()` runs for every PHP deploy, from the manifest's own
-     * commands or from {@see Platform\Runtime\Php\PhpHostBuild::DEFAULT_INSTALL}
-     * when it declares none -- which is most of the shipped PHP manifests.
-     * Every other runtime says it by declaring build-stage commands.
-     *
-     * What is left is a platform with no build stage at all, and there the
-     * project's own script is the only bootstrap there is, so it still runs.
+     * Whether the host build already resolved dependencies (always for PHP, else when build commands exist), so
+     * the project's `setup` script must not rerun in the container: it adds require-dev and runs npm with no Node.
      */
     public static function isSupersededByPlatform(?string $runtime, bool $hasBuildCommands): bool
     {

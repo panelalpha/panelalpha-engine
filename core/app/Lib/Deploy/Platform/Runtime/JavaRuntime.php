@@ -16,9 +16,8 @@ final class JavaRuntime implements Runtime
     public const GRADLE_IMAGE = 'gradle:8-jdk21';
 
     /**
-     * A Java requirement's version is a JDK release and its build tool, and
-     * each entry carries its own `from` through a per-version catalogue
-     * override.
+     * A Java version is a JDK release and its build tool; each carries its own `from` through a per-version
+     * catalogue override.
      *
      * @var list<string>
      */
@@ -32,18 +31,16 @@ final class JavaRuntime implements Runtime
     public const DEFAULT_JDK = 21;
 
     /**
-     * Gradle releases that first run on a JDK. A wrapper older than the entry
-     * cannot start on that JDK at all (scm-manager pins 7.6.4, which dies on
-     * 21 before reading a build file).
+     * Gradle releases that first run on a JDK; an older wrapper cannot start on it at all (scm-manager's 7.6.4
+     * dies on 21 before reading a build file).
      *
      * @var array<int, string>
      */
     private const GRADLE_RUNS_ON = [25 => '9.1', 21 => '8.5', 17 => '7.3'];
 
     /**
-     * Where a Gradle build declares its Java: the root script, one or two
-     * levels of subprojects (Tolgee declares it only in `backend/*`), shared
-     * scripts under gradle/, and convention plugins.
+     * Where a Gradle build declares its Java: the root script, one or two levels of subprojects (Tolgee's
+     * `backend/*`), shared scripts under gradle/, and convention plugins.
      */
     private const GRADLE_SCRIPTS = [
         '/build.gradle', '/build.gradle.kts', '/gradle/*.gradle', '/gradle/*.gradle.kts',
@@ -93,10 +90,8 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * Maven when there is a pom, Gradle otherwise; a project carrying both is
-     * Maven's. The same tie-break `java-gradle.yaml` states with `none:
-     * pom.xml`: disagreeing put the jar in target/ while the start looked in
-     * build/libs.
+     * Maven when there is a pom, Gradle otherwise; the tie-break `java-gradle.yaml` states with `none: pom.xml`.
+     * Disagreeing put the jar in target/ while the start looked in build/libs.
      */
     public function resolve(ProjectContext $context): ?Requirement
     {
@@ -110,22 +105,23 @@ final class JavaRuntime implements Runtime
         return null;
     }
 
-    /** @param array{0: int, 1: string} $jdk */
+    /**
+     * Logged as "java 25-maven (from pom.xml maven.compiler.release 25)".
+     *
+     * @param  array{0: int, 1: string}  $jdk
+     */
     private static function requirement(string $tool, string $file, array $jdk): Requirement
     {
         [$release, $said] = $jdk;
 
-        // "java 25-maven (from pom.xml maven.compiler.release 25)" in the log.
         return $said === ''
             ? new Requirement('java', self::toolchain($tool, $release), '', $file)
             : new Requirement('java', self::toolchain($tool, $release), (string) $release, $file.' '.$said);
     }
 
     /**
-     * The catalogued toolchain for a build tool and the JDK a project asked
-     * for: the lowest JDK at or above it, since javac compiles older releases
-     * (a Gradle toolchain is matched exactly before this is reached). Asking
-     * past the newest gets the newest; the build then says what is missing.
+     * The catalogued toolchain with the lowest JDK at or above the one asked for, since javac compiles older
+     * releases; past the newest gets the newest, and the build then says what is missing.
      */
     public static function toolchain(string $tool, int $jdk): string
     {
@@ -149,10 +145,8 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * The Java release a pom compiles for: `maven.compiler.release`, the
-     * compiler plugin's `<release>`, `maven.compiler.source/target` or Spring
-     * Boot's `java.version`, the highest of them. A parent pom from a
-     * repository is not read -- it is not on disk yet.
+     * The highest release a pom names in `maven.compiler.release/source/target`, `<release>` or `java.version`.
+     * A parent pom from a repository is not on disk yet, so it is not read.
      *
      * @return array{0: int, 1: string} JDK, and what said so ('' for nothing)
      */
@@ -194,16 +188,31 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * The JDK a Gradle build needs. A toolchain (`JavaLanguageVersion.of(N)`,
-     * `jvmToolchain(N)`, N possibly a gradle.properties name) is matched
-     * exactly, the way Gradle matches it; then `sourceCompatibility`; then the
-     * newest JDK the wrapper's Gradle can run on, when older than the default.
+     * The JDK a Gradle build needs: a toolchain matched exactly, as Gradle does; then `sourceCompatibility`;
+     * then the newest JDK the wrapper's Gradle runs on, when older than the default.
      *
      * @return array{0: int, 1: string} JDK, and what said so ('' for nothing)
      */
     public static function gradleJdk(string $projectDir): array
     {
         $projectDir = rtrim($projectDir, '/');
+        $scripts = self::gradleScripts($projectDir);
+
+        $toolchain = self::toolchainJdk($projectDir, $scripts);
+        if ($toolchain !== null) {
+            return $toolchain;
+        }
+
+        $compatibility = self::sourceCompatibilityJdk($scripts);
+        if ($compatibility !== null) {
+            return $compatibility;
+        }
+
+        return self::wrapperJdk($projectDir);
+    }
+
+    private static function gradleScripts(string $projectDir): string
+    {
         $scripts = '';
         if ($projectDir !== '') {
             foreach (self::GRADLE_SCRIPTS as $pattern) {
@@ -213,6 +222,16 @@ final class JavaRuntime implements Runtime
             }
         }
 
+        return $scripts;
+    }
+
+    /**
+     * `JavaLanguageVersion.of(N)` or `jvmToolchain(N)`, N possibly a gradle.properties name, when catalogued.
+     *
+     * @return array{0: int, 1: string}|null
+     */
+    private static function toolchainJdk(string $projectDir, string $scripts): ?array
+    {
         if (preg_match_all('/(?:JavaLanguageVersion\.of|jvmToolchain)\s*\(\s*([\w.]+)/', $scripts, $m) > 0) {
             $properties = self::gradleProperties($projectDir);
             $declared = [];
@@ -228,6 +247,12 @@ final class JavaRuntime implements Runtime
             }
         }
 
+        return null;
+    }
+
+    /** @return array{0: int, 1: string}|null */
+    private static function sourceCompatibilityJdk(string $scripts): ?array
+    {
         if (preg_match_all('/sourceCompatibility\s*=\s*(?:JavaVersion\.VERSION_)?[\'"]?([\d._]+)/', $scripts, $m) > 0) {
             $releases = array_filter(array_map([self::class, 'release'], str_replace('_', '.', $m[1])));
             if ($releases !== []) {
@@ -238,6 +263,12 @@ final class JavaRuntime implements Runtime
             }
         }
 
+        return null;
+    }
+
+    /** @return array{0: int, 1: string} */
+    private static function wrapperJdk(string $projectDir): array
+    {
         $wrapper = self::gradleWrapperVersion($projectDir);
         if ($wrapper !== null) {
             foreach (self::GRADLE_RUNS_ON as $jdk => $since) {
@@ -282,10 +313,8 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * The project's own wrapper when it ships one: it pins the Gradle its
-     * build scripts are written for, and the image's Gradle 8 fails both a
-     * 7.x build (`archiveName()` is gone) and a 9.x one (Solr refuses to
-     * configure). The image's `gradle` only when there is no wrapper.
+     * The project's wrapper when it ships one, made executable since the mode bit does not always survive:
+     * it pins the Gradle its scripts need, where the image's Gradle 8 fails 7.x and 9.x builds.
      */
     public static function gradleBuildCommand(string $projectDir): string
     {
@@ -294,7 +323,6 @@ final class JavaRuntime implements Runtime
             return 'gradle '.$args;
         }
 
-        // The mode bit does not survive every way a project arrives.
         return 'chmod +x ./gradlew && ./gradlew '.$args;
     }
 
@@ -339,12 +367,8 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * The largest non-`-plain`/`-sources`/`-javadoc` jar wins, resolved at start
-     * time; a multi-module reactor's is found in the shallowest directory below
-     * (four levels at most), skipping wrapper jars and copy-dependencies. Depth
-     * sorts before size. Quarkus's fast-jar launcher comes first, and a jar
-     * without a Main-Class (a frontend webjar) is passed over; with neither
-     * unzip nor jar in the image every candidate counts as runnable.
+     * Starts Quarkus's launcher, else the largest runnable jar in the output dir, else the shallowest below,
+     * skipping `-plain`/`-sources`/`-javadoc`, wrapper and copied jars and any jar without a Main-Class.
      */
     public static function startCommand(bool $gradle): string
     {
@@ -388,9 +412,8 @@ final class JavaRuntime implements Runtime
     }
 
     /**
-     * Maven wins a repository that ships both, the order resolve() applies:
-     * spring-petclinic ships pom.xml and build.gradle, and disagreeing left it
-     * building into target/ while the start command looked in build/libs.
+     * Maven wins a repository that ships both, as in resolve(): spring-petclinic disagreeing built into target/
+     * while the start command looked in build/libs.
      */
     public static function toolchainFor(string $projectDir): string
     {

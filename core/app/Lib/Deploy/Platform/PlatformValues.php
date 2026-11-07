@@ -20,20 +20,14 @@ use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 
 /**
- * Fills in the parts of a decision that depend on the project, not the
- * platform: the base image, resolved from the manifest's `requires` block
- * by `RuntimeRegistry` and assembled by `ImageResolver`; the output directory,
- * from Angular's `angular.json` or a workspace; and the JS package manager,
- * decided by the lockfile.
- *
- * The rest is named resolvers — `output_from`, `commands_from` — and
- * `{{js.*}}` placeholders.
+ * Fills in the parts of a decision that depend on the project, not the platform: base images from `requires`,
+ * the output directory, the JS package manager, and the `output_from`/`commands_from` resolvers.
  */
 final class PlatformValues
 {
     /**
-     * The context a manifest's own application sits in: the project root
-     * unless `app_root` moved it.
+     * The context a manifest's own application sits in, the project root unless `app_root` moved it: toolchains
+     * belong to the application, and phpBB's composer.json lives in phpBB/.
      */
     private static function appRootContext(PlatformManifest $manifest, ProjectContext $context): ProjectContext
     {
@@ -47,8 +41,8 @@ final class PlatformValues
     }
 
     /**
-     * The Next workspace the probe found, when the repository root has no
-     * package.json to install it from; null otherwise.
+     * The Next workspace the probe found when the repository root has no package.json to install it from
+     * (storyden's web/): that workspace is the whole JS project. Null otherwise.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -81,47 +75,88 @@ final class PlatformValues
         ProjectContext $context,
         array $decision
     ): array {
-        // Toolchains belong to the application, not the repository carrying it:
-        // phpBB's `require.php` lives in phpBB/composer.json, and resolving at
-        // the repository root finds no composer.json at all.
         $runtimeContext = self::appRootContext($manifest, $context);
-        // Next in web/ with no package.json at the repository root (storyden):
-        // that workspace is the whole JS project, so it becomes the app_root.
         $standalone = self::standaloneNextWorkspace($manifest, $context, $decision);
         if ($standalone !== null) {
-            $decision['app_root'] = $standalone;
-            $decision['workspace_relative'] = '';
-            unset($decision['workspace_package'], $decision['workspace_slug']);
+            $decision = self::withStandaloneAppRoot($decision, $standalone);
             $runtimeContext = ProjectContext::at($context->projectDir.'/'.$standalone);
         }
 
-        // A manifest naming its own `image` has answered the question, so an
-        // unreadable project manifest is not fatal (osTicket ships no
-        // composer.json): the requirement is stated at the engine default, for
-        // the deploy log.
+        $decision = self::withImages($manifest, $runtimeContext, $decision);
+        $decision = self::withRecipeNextWorkspace($manifest, $runtimeContext, $decision);
+        $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
+        $decision['runtime_image'] = self::runtimeImage($manifest, $runtimeContext);
+        $decision = self::withDotnetNodeImage($manifest, $runtimeContext, $decision);
+        $decision['resolved_commands'] = self::resolvedCommands($manifest, $context);
+
+        if (self::isJsProject($manifest, $runtimeContext)) {
+            return self::applyJs($manifest, $runtimeContext, $decision);
+        }
+
+        return self::applyResolvedCommands($manifest, $decision);
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withStandaloneAppRoot(array $decision, string $standalone): array
+    {
+        $decision['app_root'] = $standalone;
+        $decision['workspace_relative'] = '';
+        unset($decision['workspace_package'], $decision['workspace_slug']);
+
+        return $decision;
+    }
+
+    /**
+     * Images and the deploy-log toolchain lines (which version, from which file). A manifest naming its own
+     * `image` makes an unreadable project manifest non-fatal (osTicket ships no composer.json).
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withImages(PlatformManifest $manifest, ProjectContext $runtimeContext, array $decision): array
+    {
         $requirements = $manifest->requires === []
             ? []
             : RuntimeRegistry::resolveAll($manifest->requires, $runtimeContext, $manifest->image !== null);
 
         $decision['image'] = self::image($manifest, $runtimeContext);
         $decision['requirements'] = $requirements;
-        // Deploy-log text instead of a bare image tag: which toolchain, which
-        // version, and which file said so.
         $decision['toolchain'] = array_map(
             static fn (Requirement $r): string => $r->explain(),
             $requirements
         );
         $decision['build_images'] = ImageResolver::buildImages($requirements);
-        // A recipe names its platform, so no detect ran to find the Next
-        // workspace; under an app_root it is looked for there.
+
+        return $decision;
+    }
+
+    /**
+     * A recipe names its platform, so no detect ran to find the Next workspace; under an app_root it is looked for there.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withRecipeNextWorkspace(PlatformManifest $manifest, ProjectContext $runtimeContext, array $decision): array
+    {
         if ($manifest->appRoot !== '' && $manifest->outputFrom === 'next-workspace'
             && ! isset($decision['workspace_relative'])
         ) {
             $workspace = (new NextWorkspaceProbe)->evaluate($runtimeContext);
             $decision += is_array($workspace) ? $workspace : [];
         }
-        $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
-        $decision['runtime_image'] = self::runtimeImage($manifest, $runtimeContext);
+
+        return $decision;
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withDotnetNodeImage(PlatformManifest $manifest, ProjectContext $runtimeContext, array $decision): array
+    {
         if (isset($manifest->requires['dotnet'])) {
             $node = DotnetRuntime::nodeBuildImage($runtimeContext->projectDir);
             if ($node !== null) {
@@ -129,15 +164,8 @@ final class PlatformValues
                 $decision['toolchain'][] = "{$node} in the build stage (an MSBuild target runs a JS tool)";
             }
         }
-        $decision['resolved_commands'] = self::resolvedCommands($manifest, $context);
 
-        // The JS toolchain is the application's too: under an app_root the
-        // repository root may have no package.json at all.
-        if (self::isJsProject($manifest, $runtimeContext)) {
-            return self::applyJs($manifest, $runtimeContext, $decision);
-        }
-
-        return self::applyResolvedCommands($manifest, $decision);
+        return $decision;
     }
 
     /**
@@ -180,11 +208,8 @@ final class PlatformValues
     }
 
     /**
-     * `install_command` / `build_command` with an app config's own build
-     * commands folded in. The app config's commands are stripped from the
-     * manifest it describes, and the host build reads only these two strings,
-     * so a recipe's `stage: build` never ran. Unchanged when the
-     * app config declares no build command.
+     * `install_command`/`build_command` with an app config's build commands folded in, as the host build reads only
+     * those; a resolver answers for the manifest's command, never for the app config's replacement of it.
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
@@ -204,8 +229,6 @@ final class PlatformValues
         $dependencies = [];
         $assets = [];
         foreach (StageResolver::commandsFor(PlatformStage::BUILD, $manifest, $appConfig, null, $context) as $command) {
-            // A resolver answers for the manifest's command, never for the app
-            // config's replacement of it.
             $run = in_array($command, $own, true)
                 ? self::resolveJsPlaceholder($manifest, $context, $command->run, $decision)
                 : ($resolved[$command->id] ?? $command->run);
@@ -226,13 +249,10 @@ final class PlatformValues
     }
 
     /**
-     * A `{{js.install}}`, `{{js.build:…}}` or `{{js.start:…}}` an app config
-     * wrote in its own command, resolved the way the platform's are: a recipe
-     * uses the same vocabulary as the manifest it extends. Anything else is
-     * returned unchanged.
+     * A `{{js.install}}`, `{{js.build:…}}` or `{{js.start:…}}` in an app config's command, resolved as the platform's
+     * are (a start only for a Node runtime); anything else is returned unchanged.
      *
-     * @param  array<string, mixed>  $decision  the platform's, for its output
-     *                                          directory and workspace
+     * @param  array<string, mixed>  $decision  the platform's, for its output directory and workspace
      */
     public static function resolveJsPlaceholder(
         PlatformManifest $manifest,
@@ -250,10 +270,21 @@ final class PlatformValues
             return $default;
         }
 
+        $partial = self::placeholderPartial($manifest, $kind, $default, $decision);
+        $resolved = NodeRuntime::finalizeProject($partial, $context->projectDir, $context->files);
+
+        return (string) ($resolved[$kind.'_command'] ?? $default);
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function placeholderPartial(PlatformManifest $manifest, string $kind, string $default, array $decision): array
+    {
         $partial = [
             'strategy' => $manifest->strategy,
             'label' => $manifest->label,
-            // A start is only resolved for a Node runtime.
             'runtime' => $kind === 'start' ? PlatformManifest::RUNTIME_NODE : $manifest->runtime,
             'port_hint' => $manifest->port ?? 3000,
             'output_directory' => $decision['output_directory'] ?? $manifest->outputDirectory,
@@ -261,19 +292,12 @@ final class PlatformValues
             'default_start' => $kind === 'start' ? $default : '',
             'env' => $manifest->env,
         ];
-        foreach (['workspace_package', 'workspace_slug', 'workspace_relative'] as $key) {
-            if (isset($decision[$key]) && is_string($decision[$key]) && $decision[$key] !== '') {
-                $partial[$key] = $decision[$key];
-            }
-        }
-        $resolved = NodeRuntime::finalizeProject($partial, $context->projectDir, $context->files);
 
-        return (string) ($resolved[$kind.'_command'] ?? $default);
+        return self::withWorkspace($partial, $decision);
     }
 
     /**
-     * What the project declared it depends on, so the start command can prefer
-     * a WSGI or ASGI server the project already ships.
+     * What the project declared it depends on, so the start command can prefer a WSGI or ASGI server it ships.
      *
      * @return list<string>
      */
@@ -291,8 +315,8 @@ final class PlatformValues
     }
 
     /**
-     * Project the resolved commands back onto the legacy decision fields the
-     * Dockerfile generators read.
+     * Project the resolved commands onto the legacy fields the Dockerfile generators read, `optional` re-applied:
+     * without it Laravel's package-discover fails every project that lacks the script.
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
@@ -311,8 +335,6 @@ final class PlatformValues
             if (trim($run) === '') {
                 continue;
             }
-            // `optional` must be re-applied here: without it Laravel's
-            // package-discover fails every project that lacks the script.
             $run = $command->tolerantRun($run);
             if ($command->role === PlatformCommand::ROLE_DEPENDENCIES) {
                 $dependencies[] = $run;
@@ -372,6 +394,8 @@ final class PlatformValues
     }
 
     /**
+     * A Next app in a workspace builds into that workspace.
+     *
      * @param  array<string, mixed>  $decision
      */
     private static function outputDirectory(
@@ -387,7 +411,6 @@ final class PlatformValues
             'angular' => AngularOutputProbe::outputDir($context->projectDir),
             'webpack' => BundlerSpaProbe::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
             'vite' => ViteOutputDir::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
-            // A Next app in a workspace builds into that workspace.
             'next-workspace' => self::prefixWorkspace(
                 (string) ($decision['workspace_relative'] ?? ''),
                 $manifest->outputDirectory ?? '.next'
@@ -406,14 +429,11 @@ final class PlatformValues
     }
 
     /**
-     * A JS runtime with a package.json: the only case where the package
-     * manager matters. A Laravel app's Node build goes through the PHP
-     * recipe's own Node stage.
+     * A JS runtime with a package.json under the app root, the only case where the package manager matters; the
+     * static strategy serves the checkout as committed, so a package.json there is tooling.
      */
     private static function isJsProject(PlatformManifest $manifest, ProjectContext $context): bool
     {
-        // The static strategy serves the checkout as committed; a package.json
-        // beside it is tooling, and nothing a build produced would be served.
         return in_array($manifest->runtime, [PlatformManifest::RUNTIME_NODE, PlatformManifest::RUNTIME_NGINX], true)
             && $manifest->strategy !== Strategies::STATIC
             && $context->hasFile('package.json');
@@ -441,11 +461,7 @@ final class PlatformValues
             'default_start' => self::placeholderDefault($decision['start_command'] ?? ''),
             'env' => $manifest->env,
         ];
-        foreach (['workspace_package', 'workspace_slug', 'workspace_relative'] as $key) {
-            if (isset($decision[$key]) && is_string($decision[$key]) && $decision[$key] !== '') {
-                $partial[$key] = $decision[$key];
-            }
-        }
+        $partial = self::withWorkspace($partial, $decision);
 
         $resolved = NodeRuntime::finalizeProject($partial, $context->projectDir, $context->files);
 
@@ -453,6 +469,24 @@ final class PlatformValues
             'strategy' => $manifest->strategy,
             'label' => $manifest->label,
         ]);
+    }
+
+    /**
+     * The decision's non-empty workspace fields, copied into a partial for the recipe layer.
+     *
+     * @param  array<string, mixed>  $partial
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withWorkspace(array $partial, array $decision): array
+    {
+        foreach (['workspace_package', 'workspace_slug', 'workspace_relative'] as $key) {
+            if (isset($decision[$key]) && is_string($decision[$key]) && $decision[$key] !== '') {
+                $partial[$key] = $decision[$key];
+            }
+        }
+
+        return $partial;
     }
 
     /**
@@ -470,10 +504,7 @@ final class PlatformValues
             : $build;
     }
 
-    /**
-     * Strip the `{{js.build:...}}` wrapper down to the default it carries, so
-     * the rest of the pipeline sees the bare command.
-     */
+    /** Strip the `{{js.build:...}}` wrapper down to the default it carries, so the pipeline sees the bare command. */
     private static function placeholderDefault(string $command): string
     {
         if (preg_match('/^\{\{js\.[a-z]+(?::(.*))?\}\}$/s', trim($command), $matches) !== 1) {

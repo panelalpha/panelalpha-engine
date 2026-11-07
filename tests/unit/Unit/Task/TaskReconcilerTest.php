@@ -482,6 +482,34 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         $this->assertFalse(TaskReconciler::membersCarryJob([], 'job-1'));
     }
 
+    public function test_a_task_that_recorded_no_job_uuid_cannot_be_judged_by_the_queue(): void
+    {
+        $this->createJobsTable();
+        $this->pushJob();
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default', username: 'shop');
+
+        $this->assertNull(TaskReconciler::queueCheck()($task));
+        $this->assertNull(TaskReconciler::queueCheck(static fn (string $queue): array => ['{"uuid":"x"}'])($task));
+    }
+
+    public function test_the_queue_check_reads_the_payloads_it_is_given_for_the_tasks_queue(): void
+    {
+        $task = $this->runningTask(queue: 'backups');
+        $asked = [];
+        $payloads = static function (string $queue) use (&$asked, $task): \Generator {
+            $asked[] = $queue;
+            yield 'not json';
+            yield json_encode(['data' => ['uuid' => (string) $task->job_id]]);
+        };
+
+        $this->assertTrue(TaskReconciler::queueCheck($payloads)($task));
+        $this->assertFalse(TaskReconciler::queueCheck(static fn (string $queue): array => ['{"uuid":"other"}'])($task));
+        $this->assertNull(TaskReconciler::queueCheck(static function (string $queue): array {
+            throw new \RuntimeException('down');
+        })($task));
+        $this->assertSame(['backups'], $asked);
+    }
+
     public function test_an_unreadable_queue_leaves_the_task_alone(): void
     {
         // No `jobs` table: the read throws, and "cannot tell" is not death.

@@ -3,10 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named WordPress option operations for a PHP hosting WordPress install.
- *
- * List/read/update map to `wp option list|get|update`, so siteurl, home,
- * blogname, and blog_public are writable without their own routes.
+ * Named option operations (`wp option list|get|update`) for a PHP hosting WordPress install,
+ * so siteurl, home, blogname, and blog_public are writable without their own routes.
  */
 final class Options
 {

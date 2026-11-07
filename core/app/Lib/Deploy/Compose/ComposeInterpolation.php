@@ -5,27 +5,14 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\EnvFile;
 
 /**
- * Every value a compose string can take once Compose interpolates it.
- *
- * The hardener checks mount sources, and a source written as `${X:-/var/run}`
- * or `${X}` is a path only after interpolation. The file is hardened before
- * the deploy writes `.env` (and a recipe's prepare hook can add to it later),
- * so the value is not one fixed string: each variable is taken with every
- * value the project may give it, and unset unless `.env` already sets it. A
- * caller refuses the source if any of the results is forbidden.
- *
- * Compose's own rules: `$$` is a literal `$`; `$VAR`, `${VAR}`, and
- * `${VAR:-d}`, `${VAR-d}`, `${VAR:+a}`, `${VAR+a}`, `${VAR:?e}`, `${VAR?e}`,
- * with nesting in the word.
+ * Every value a compose string can take once Compose interpolates it, taking each variable with every
+ * value the project may give it, so the hardener can refuse a mount source if any result is forbidden.
  */
 final class ComposeInterpolation
 {
     private const NAME = '[A-Za-z_][A-Za-z0-9_]*';
 
-    /**
-     * Set in the account container's own environment, which outranks `.env`:
-     * the engine cannot know their value. HOME is /root there.
-     */
+    /** Set in the account container's own environment, which outranks `.env`: the engine cannot know them. */
     private const PROCESS_VARIABLES = ['HOME', 'PATH', 'HOSTNAME'];
 
     /** Past this many combinations the value is treated as unknowable. */
@@ -45,11 +32,8 @@ final class ComposeInterpolation
     }
 
     /**
-     * What a compose file's variables may be set to: the value `.env` gives
-     * them, `.env.example` when there is no `.env` yet (the deploy copies it,
-     * less the keys the compose file defaults), and the account's own
-     * env_vars, which the deploy merges in. Only a key already in `.env`
-     * cannot end up unset: the deploy and the prepare hooks only add to it.
+     * What a compose file's variables may be set to: `.env`, else `.env.example`, plus the account's env_vars.
+     * Only a key already in `.env` cannot end up unset: the deploy and the prepare hooks only add to it.
      *
      * @param  array<string, string>  $accountVars
      * @return array<string, list<?string>>
@@ -75,6 +59,8 @@ final class ComposeInterpolation
     }
 
     /**
+     * Compose's rules: `$$` is a literal `$`; `$VAR`, `${VAR}` and `${VAR<op>word}`, with nesting in the word.
+     *
      * @param  array<string, list<?string>|string>  $env
      * @return list<string>|null
      */
@@ -98,33 +84,13 @@ final class ComposeInterpolation
                 continue;
             }
 
-            if ($next === '{') {
-                $end = self::closingBrace($value, $i + 1);
-                if ($end === null
-                    || preg_match('/^('.self::NAME.')(?:(:?[-+?])(.*))?$/s', substr($value, $i + 2, $end - $i - 2), $m) !== 1
-                ) {
-                    return null;
-                }
-                $alternatives = self::variable($m[1], $m[2] ?? '', $m[3] ?? '', $env);
-                $i = $end;
-            } elseif (preg_match('/^'.self::NAME.'/', substr($value, $i + 1), $m) === 1) {
-                $alternatives = self::variable($m[0], '', '', $env);
-                $i += strlen($m[0]);
-            } else {
-                // Compose refuses a lone `$`, so nothing runs with it.
+            $reference = self::reference($value, $i, $next, $env);
+            if ($reference === null || $reference[0] === null) {
                 return null;
             }
-            if ($alternatives === null) {
-                return null;
-            }
+            [$alternatives, $i] = $reference;
 
-            $combined = [];
-            foreach ($results as $prefix) {
-                foreach ($alternatives as $alternative) {
-                    $combined[] = $prefix.$literal.$alternative;
-                }
-            }
-            $results = array_values(array_unique($combined));
+            $results = self::combined($results, $literal, $alternatives);
             $literal = '';
             if (count($results) > self::MAX_RESULTS) {
                 return null;
@@ -135,8 +101,50 @@ final class ComposeInterpolation
     }
 
     /**
-     * The values `${name<operator>word}` can take, once per state the variable
-     * may be in. An `:?` error has none — Compose stops there.
+     * The values the `$` at $i can take and the offset it ends at; null for bad syntax, a lone `$` included.
+     *
+     * @param  array<string, list<?string>|string>  $env
+     * @return array{0: list<string>|null, 1: int}|null
+     */
+    private static function reference(string $value, int $i, string $next, array $env): ?array
+    {
+        if ($next === '{') {
+            $end = self::closingBrace($value, $i + 1);
+            if ($end === null
+                || preg_match('/^('.self::NAME.')(?:(:?[-+?])(.*))?$/s', substr($value, $i + 2, $end - $i - 2), $m) !== 1
+            ) {
+                return null;
+            }
+
+            return [self::variable($m[1], $m[2] ?? '', $m[3] ?? '', $env), $end];
+        }
+        if (preg_match('/^'.self::NAME.'/', substr($value, $i + 1), $m) === 1) {
+            return [self::variable($m[0], '', '', $env), $i + strlen($m[0])];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<string>  $results
+     * @param  list<string>  $alternatives
+     * @return list<string>
+     */
+    private static function combined(array $results, string $literal, array $alternatives): array
+    {
+        $combined = [];
+        foreach ($results as $prefix) {
+            foreach ($alternatives as $alternative) {
+                $combined[] = $prefix.$literal.$alternative;
+            }
+        }
+
+        return array_values(array_unique($combined));
+    }
+
+    /**
+     * The values `${name<operator>word}` can take, once per state the variable may be in; an `:?` error
+     * has none. A value in .env that interpolates again is not followed.
      *
      * @param  array<string, list<?string>|string>  $env
      * @return list<string>|null
@@ -154,21 +162,10 @@ final class ComposeInterpolation
         $states = array_key_exists($name, $env) ? (array) $env[$name] : [null];
         $values = [];
         foreach ($states as $set) {
-            // A value in .env that interpolates again is not followed.
             if (is_string($set) && str_contains($set, '$')) {
                 return null;
             }
-            $nonEmpty = is_string($set) && $set !== '';
-            $use = match ($operator) {
-                '' => [$set ?? ''],
-                ':-' => $nonEmpty ? [$set] : $wordValues(),
-                '-' => $set !== null ? [$set] : $wordValues(),
-                ':+' => $nonEmpty ? $wordValues() : [''],
-                '+' => $set !== null ? $wordValues() : [''],
-                ':?' => $nonEmpty ? [$set] : [],
-                '?' => $set !== null ? [$set] : [],
-                default => null,
-            };
+            $use = self::operated($operator, $set, $wordValues);
             if ($use === null) {
                 return null;
             }
@@ -176,6 +173,25 @@ final class ComposeInterpolation
         }
 
         return array_values(array_unique($values));
+    }
+
+    /**
+     * @return list<?string>|null
+     */
+    private static function operated(string $operator, mixed $set, \Closure $wordValues): ?array
+    {
+        $nonEmpty = is_string($set) && $set !== '';
+
+        return match ($operator) {
+            '' => [$set ?? ''],
+            ':-' => $nonEmpty ? [$set] : $wordValues(),
+            '-' => $set !== null ? [$set] : $wordValues(),
+            ':+' => $nonEmpty ? $wordValues() : [''],
+            '+' => $set !== null ? $wordValues() : [''],
+            ':?' => $nonEmpty ? [$set] : [],
+            '?' => $set !== null ? [$set] : [],
+            default => null,
+        };
     }
 
     private static function closingBrace(string $value, int $open): ?int

@@ -7,11 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A Next.js static export (`output: "export"`, or the old `next export`),
- * read from the app's own directory: the repository root, or the workspace
- * `next-workspace` found. A monorepo keeps its next.config in the workspace,
- * and reading only the root sent every such export to `next start`.
- * Yields the same fields as `next-workspace`.
+ * A Next.js static export (`output: "export"` or `next export`), read from the workspace
+ * `next-workspace` found, since a monorepo keeps its next.config there; yields the same fields.
  */
 final class NextExportProbe implements PlatformProbe
 {

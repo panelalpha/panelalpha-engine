@@ -3,29 +3,8 @@
 namespace App\Lib\Ssl;
 
 /**
- * The wildcard DNS zones every engine shares, and why a project domain under
- * one of them does not get its own Let's Encrypt certificate.
- *
- * `sslip.io`, `nip.io` and `panelalpha.direct` resolve `<dashed-ip>.<zone>`
- * back to the address in the name, which is what makes a project reachable on
- * a fresh install with no DNS to set up. It also means every engine in the
- * fleet issues under the *same registered domain*, and Let's Encrypt counts
- * new certificates per registered domain: 50 per 7 days, refilling at one per
- * ~202 minutes. None of these zones is on the Public Suffix List and none can
- * be — the PSL guidelines reject wildcard IP-to-name zones explicitly — so
- * there is no boundary for the limit to land on.
- *
- * Fifty projects a week, fleet-wide, is not a per-project certificate
- * mechanism; it is a way to exhaust the limit for everyone including the
- * engines that need it for their own admin certificate. An operator who wants
- * real certificates for the sites points a domain they control at the host and
- * sets it as the base domain. Until then a project domain keeps the
- * certificate the engine signs itself, which costs nothing and breaks nobody.
- *
- * A custom domain a customer owns is never affected by this: it is their
- * registered domain, with their own limit.
- *
- * No Laravel dependencies — unit-testable.
+ * The wildcard zones every engine shares. None can be on the Public Suffix List, so Let's Encrypt's 50-a-week
+ * limit is fleet-wide and a project domain under one keeps the self-signed certificate. No Laravel dependencies.
  */
 final class SharedZones
 {
@@ -42,14 +21,8 @@ final class SharedZones
     ];
 
     /**
-     * Names the public DNS does not resolve and no public authority issues
-     * for: RFC 2606 and RFC 6761 special-use, `.local` for mDNS, `.internal`
-     * for private networks.
-     *
-     * Kept apart from {@see ZONES} on purpose. A shared zone is a real name
-     * with a real certificate and a shared bill; these cannot hold a
-     * certificate at all. They shared a list once, which only worked while
-     * both meant "refuse".
+     * Special-use names (RFC 2606, RFC 6761, `.local`, `.internal`) no public authority issues for. Kept apart
+     * from {@see ZONES}: a shared zone holds a certificate at a shared cost, these cannot hold one at all.
      *
      * @var list<string>
      */
@@ -110,18 +83,10 @@ final class SharedZones
     }
 
     /**
-     * The reason no authority could issue for the name, or null when one
-     * could. Not a policy check: a bare hostname, an address or a reserved
-     * TLD fails validation every time, and ordering one spends a failed
-     * authorization to learn what was already knowable.
+     * Why no authority could issue for the name, or null; ordering one anyway only spends a failed authorization.
+     * A shared zone is a cost for the operator to weigh, a reason only when $sharedZoneAllowed is false.
      *
-     * Being on a shared zone is *not* a reason. That is a cost, reported
-     * elsewhere, and the operator's to weigh.
-     */
-    /**
-     * @param  bool  $sharedZoneAllowed  whether the operator has said this engine
-     *                                   may spend the fleet's shared allowance. Passed in rather than
-     *                                   read, so this class stays a statement about names.
+     * @param  bool  $sharedZoneAllowed  whether the operator lets this engine spend the fleet's shared allowance
      */
     public static function ineligibleReason(string $domain, bool $sharedZoneAllowed = true): ?string
     {

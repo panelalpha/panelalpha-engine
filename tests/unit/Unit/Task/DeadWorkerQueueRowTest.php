@@ -123,6 +123,17 @@ class DeadWorkerQueueRowTest extends TestCase
         $this->assertSame(1, DB::table('jobs')->count(), 'its worker is still stopping it');
     }
 
+    public function test_only_the_dead_workers_own_row_is_dropped(): void
+    {
+        $this->reservedStagingJob('stgother', withTask: false);
+        $task = $this->reservedStagingJob('stgdead');
+
+        $this->assertSame(self::retired([(int) $task->id]), TaskReconciler::reconcile(false, 120));
+
+        $this->assertSame(1, DB::table('jobs')->count(), 'the other job keeps its row');
+        $this->assertSame(0, DB::table('failed_jobs')->where('uuid', '!=', $task->job_id)->count());
+    }
+
     /** A live worker keeps its row: it deletes the row itself when the job ends. */
     public function test_a_live_workers_row_is_left_alone(): void
     {

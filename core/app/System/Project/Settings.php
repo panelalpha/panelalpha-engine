@@ -20,9 +20,8 @@ class Settings
     public const string KEY_PERSIST_PATHS = 'persist-paths';
 
     /**
-     * While on, an API or MCP token may not delete, stop or redeploy the
-     * project; only the operator's own `pae` commands can. Read-only over the
-     * API, so a token cannot clear the flag that refuses it.
+     * While on, no API or MCP token may delete, stop or redeploy the project; only the operator's `pae` commands can.
+     * Read-only over the API, so a token cannot clear the flag that refuses it.
      */
     public const string KEY_PROTECTED = User::DETAIL_PROTECTED;
 

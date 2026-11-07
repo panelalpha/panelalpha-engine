@@ -11,22 +11,14 @@ use App\Lib\Deploy\Template\Template;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
- * A PanelAlpha-owned official-php derivative with the extensions almost every
- * PHP app asks for already compiled in.
- *
- * install-php-extensions builds from source whenever mlocati has no prebuilt
- * binary for the target PHP minor: on PHP 8.5 that is ~3 minutes of `make` per
- * account, for a byte-identical result every time.
- *
- * The tag carries a fingerprint of the baked set, so editing {@see EXTENSIONS}
- * builds a new image instead of serving a stale one.
+ * A PanelAlpha-owned official-php derivative with the extensions almost every PHP app asks for
+ * compiled in once, instead of ~3 minutes of `make` per account where no prebuilt binary exists.
  */
 class PhpBaseImage
 {
     /**
-     * Where the engine puts this image. Null when the catalogue describes no
-     * PHP build, so the host serves the stock php image and the account
-     * compiles its own extensions.
+     * Where the engine puts this image. Null when the catalogue describes no PHP build, so the
+     * host serves the stock php image and the account compiles its own extensions.
      */
     public static function repository(): ?string
     {
@@ -45,10 +37,7 @@ class PhpBaseImage
         return RuntimeImageCatalog::upstreamRepository('php');
     }
 
-    /**
-     * The port the baked vhost listens on. The application's own manifest
-     * declares the same number, so it is spelled once.
-     */
+    /** The port the baked vhost listens on; the application's own manifest declares the same number. */
     public const PORT = 8000;
 
     /** Where the account's composer cache is mounted, when one is. */
@@ -59,47 +48,24 @@ class PhpBaseImage
 
     public const ENTRYPOINT_ASSET = 'panelalpha-base-entrypoint.sh';
 
-    /**
-     * Turns a document root into a running server, so a manifest can declare
-     * `docroot:` instead of a shell snippet.
-     */
+    /** Turns a document root into a running server, so a manifest can declare `docroot:` instead of a script. */
     public const SERVE_PATH = '/usr/local/bin/panelalpha-serve';
 
     public const SERVE_ASSET = 'panelalpha-serve.sh';
 
     /**
-     * What a checkout with no front controller is served from. Empty, and
-     * outside /app so the account cannot put anything in it -- the previous
-     * fallback published the whole source tree with the PHP handler over it.
-     * {@see SERVE_ASSET} spells the same path; PhpServeFallbackTest pins them
-     * together.
+     * What a checkout with no front controller is served from: empty, and outside /app so the account
+     * cannot put anything in it. {@see SERVE_ASSET} spells the same path; PhpServeFallbackTest pins them.
      */
     public const EMPTY_DOCROOT = '/usr/local/lib/panelalpha/empty-docroot';
 
     /**
-     * Everything a deployed PHP application is served with. No per-project
-     * Dockerfile installs what is missing, so an extension absent here is
-     * absent from the running site — a working deploy serving a 500.
-     *
-     * mysqli, ftp, soap and xsl because the shipped manifests ask for them:
-     * WordPress, Matomo, phpMyAdmin and Adminer pick mysqli, Magento requires
-     * the other three. memcached because ownCloud requires it outright. The
-     * rest are what applications commonly *suggest*
-     * ({@see PhpExtensions::SUGGESTABLE}) plus the caches and session backends
-     * a hosting account is expected to have.
-     *
-     * Each costs host build time once and every account's disk quota after, so
-     * anything added has to be checked against a real application asking for
-     * it.
+     * Everything a deployed PHP application is served with; an extension absent here is absent from the
+     * running site. amqp because Symfony's Messenger set hard-requires it, or Composer refuses to resolve.
      *
      * @var list<string>
      */
     public const EXTENSIONS = [
-        // symfony/amqp-messenger hard-requires ext-amqp, and Symfony
-        // distributions pull it in with the Messenger transport set whether or
-        // not they ever speak to a broker -- pimcore/skeleton does. Without it
-        // Composer refuses to resolve at all, so the deploy dies in the host
-        // build naming an extension rather than anything the user can act on.
         'amqp',
         'apcu',
         'bcmath',
@@ -130,32 +96,20 @@ class PhpBaseImage
         'zip',
     ];
 
-    /**
-     * Every distinct extras set is another ~800 MB image, so beyond this many
-     * extensions there is no variant and the app compiles them in its own
-     * build.
-     */
+    /** Every distinct extras set is another ~800 MB image, so beyond this many the app compiles them itself. */
     public const MAX_BAKED_EXTRAS = 4;
 
     /**
-     * Debian packages a manifest may add with `system_packages:`, each set
-     * becoming its own `-x` variant. An allowlist, because every distinct set
-     * is another ~1.1 GB image on the host; ffmpeg alone is +371 MB, which is
-     * why it is not in the plain base.
+     * Debian packages a manifest may add with `system_packages:`, each set its own `-x` variant.
+     * An allowlist, because every distinct set is another ~1.1 GB image on the host.
      *
      * @var list<string>
      */
     public const SYSTEM_PACKAGES = ['ffmpeg', 'mediainfo'];
 
     /**
-     * Null when the image is not a plain official php tag: a custom base is
-     * nothing we can prebuild, so the caller keeps the stock path.
-     *
-     * $extras — extensions needed on top of {@see EXTENSIONS} — get their own
-     * suffix, so a variant is a distinct cacheable image.
-     *
-     * $packages — allowlisted {@see SYSTEM_PACKAGES} — go into the same
-     * suffix, so ffmpeg is a variant too and the plain base stays unchanged.
+     * Null when the image is not a plain official php tag, or when the catalogue could not recognise the
+     * tag back. $extras and $packages go into one `-x` suffix, so a variant is a distinct cacheable image.
      *
      * @param  list<string>  $extras
      * @param  list<string>  $packages
@@ -165,9 +119,6 @@ class PhpBaseImage
         $repository = self::repository();
         $upstream = self::upstreamRepository();
         $fingerprint = self::fingerprint();
-        // Nothing to build, so nothing to name. A tag the catalogue cannot
-        // recognise back would be built, not identified as ours, and taken to
-        // a registry that never published it.
         if ($repository === null || $upstream === null || $fingerprint === null
             || self::stubName() === null
         ) {
@@ -188,13 +139,8 @@ class PhpBaseImage
     }
 
     /**
-     * What a fresh build would be tagged with: the `recipe` date the catalogue
-     * declares, as `Ymd`. Null when it declares none.
-     *
-     * A date, not a hash of the recipe, so it does not maintain itself: change
-     * {@see EXTENSIONS}, the stub or the entrypoint without bumping the date
-     * and every host holding the old image keeps serving it under the new name
-     * — same tag, different contents.
+     * The catalogue's `recipe` date as `Ymd`, or null. A date, not a hash: change the recipe without
+     * bumping it and every host keeps serving the old image under the new name.
      */
     public static function fingerprint(): ?string
     {
@@ -202,8 +148,7 @@ class PhpBaseImage
     }
 
     /**
-     * Sorted and de-duplicated, so the same set resolves to the same tag
-     * whatever order a project's requires were read in.
+     * Sorted and de-duplicated, so the same set resolves to the same tag whatever the order.
      *
      * @param  list<string>  $extras
      * @return list<string>
@@ -231,8 +176,7 @@ class PhpBaseImage
     }
 
     /**
-     * The extras-only hash is kept as it was, so every `-x` image a host
-     * already holds keeps its name; packages hash in only when there are any.
+     * The extras-only hash is kept as it was, so every `-x` image a host holds keeps its name.
      *
      * @param  list<string>  $extras
      * @param  list<string>  $packages
@@ -248,8 +192,7 @@ class PhpBaseImage
     }
 
     /**
-     * Allowlisted, sorted and de-duplicated. Anything else is dropped here as a
-     * last line: the manifest refuses it at load with a message.
+     * Allowlisted, sorted and de-duplicated; the manifest already refuses anything else at load.
      *
      * @param  list<string>  $packages
      * @return list<string>
@@ -269,8 +212,7 @@ class PhpBaseImage
     }
 
     /**
-     * The subset of $extras worth baking into a host image, or an empty list
-     * when this app should just compile them itself.
+     * The subset of $extras worth baking into a host image, or none when the app compiles them itself.
      *
      * @param  list<string>  $extras
      * @return list<string>
@@ -283,9 +225,8 @@ class PhpBaseImage
     }
 
     /**
-     * The official php tag this was built from, so a host that pruned the
-     * image can rebuild it. Null for anything that is not one of ours —
-     * getting that wrong sends the tag to a registry that never published it.
+     * The official php tag this was built from, so a host that pruned the image can rebuild it.
+     * Null for anything that is not one of ours.
      */
     public static function sourceImage(string $tag): ?string
     {
@@ -295,9 +236,7 @@ class PhpBaseImage
     }
 
     /**
-     * Extensions an app needs on top of the baked set. $baked are extras
-     * already compiled into the variant base the app will build FROM, so they
-     * drop out here instead of being installed twice.
+     * Extensions an app needs on top of the baked set and the $baked extras of its variant base.
      *
      * @param  list<string>  $required
      * @param  list<string>  $baked
@@ -317,8 +256,7 @@ class PhpBaseImage
     }
 
     /**
-     * Extras get their own layer, so two apps needing different ones share
-     * every layer up to the baked set.
+     * Extras get their own layer, so two apps needing different ones share every layer up to the baked set.
      *
      * @param  list<string>  $extras
      * @param  list<string>  $packages

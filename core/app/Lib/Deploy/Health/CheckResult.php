@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Health;
 
 /**
- * One check, asked and answered.
- *
- * Passing results are kept as well as failing ones: a report saying only what
- * is wrong cannot be told apart from one where nothing was asked.
+ * One check, asked and answered. Passes are kept too: a report saying only what is wrong cannot be told
+ * apart from one where nothing was asked.
  */
 final class CheckResult
 {
@@ -30,11 +28,8 @@ final class CheckResult
     ) {}
 
     /**
-     * A check that held has nothing to say.
-     *
-     * Not the check's own `message`: those are written as the sentence for a
-     * wrong answer -- "The application is running but failing" -- and attaching
-     * one to a pass states the opposite of what happened.
+     * A check that held has nothing to say: a check's own `message` is the sentence for a wrong answer, and
+     * attached to a pass it would state the opposite.
      */
     public static function pass(HealthCheck $check): self
     {

@@ -16,11 +16,8 @@ use Closure;
 use RuntimeException;
 
 /**
- * Step 1: create the target project on the kept domain (or adopt the
- * existing one the caller named), then open a preview tunnel for that domain
- * when the engine has Connect. target_label is the project's domain. The
- * project's name is stored before it is created, so a rerun after a crash
- * adopts the project it created instead of failing on a taken name.
+ * Step 1: create (or adopt) the project on the kept domain, which target_label names, then a preview tunnel with Connect.
+ * Its name is stored before it is created, so a rerun after a crash adopts it instead of failing on a taken name.
  */
 final class CreateProjectStep implements MigrationStep
 {

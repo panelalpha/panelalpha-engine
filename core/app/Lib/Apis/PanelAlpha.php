@@ -7,19 +7,14 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Shared transport for PanelAlpha cloud services (Connect and monitoring).
- *
- * Join rules and the licensed HTTP client live here so Integrations only
- * decide *which* host and *which* path. Empty base yields '' rather than a
- * relative URL — callers must check before posting.
+ * Shared transport for PanelAlpha cloud services (Connect and monitoring), so Integrations only
+ * decide which host and which path.
  */
 class PanelAlpha
 {
     /**
-     * Join `{base}/{path}`, or '' when base is empty.
-     *
-     * Trailing slash on the base and leading slash on the path are stripped
-     * so callers can pass either form without double-slashing.
+     * Join `{base}/{path}` without a double slash, or '' (never a relative URL) when base is empty;
+     * callers must check before posting.
      */
     public static function url(string $base, string $path): string
     {
@@ -32,8 +27,8 @@ class PanelAlpha
     public const APP_UID_HEADER = 'X-Engine-App-UID';
 
     /**
-     * `[X-Engine-App-UID => uid]`, or [] when APP_UID is unset or not a
-     * header-safe token. Every request to Connect or monitoring carries it.
+     * `[X-Engine-App-UID => uid]`, or [] when APP_UID is unset or not a header-safe token.
+     * Every request to Connect or monitoring carries it.
      *
      * @return array<string, string>
      */
@@ -47,10 +42,8 @@ class PanelAlpha
     }
 
     /**
-     * JSON client with optional Bearer from the engine's license key.
-     *
-     * Used by Connect's WithoutDNS proxy. Monitoring ingest authenticates
-     * separately (telemetry.token) and does not go through this method.
+     * JSON client with an optional Bearer from the engine's license key, for Connect's WithoutDNS proxy.
+     * Monitoring ingest authenticates separately (telemetry.token).
      */
     public static function http(): PendingRequest
     {

@@ -1,0 +1,44 @@
+[3 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    build:
+      context: .
+      args: { BASE: apache, 'N': '3' }
+    ports:
+      - '8080:80'
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: dockerfile
+    env_file:
+      - .env
+    tty: true
+    stdin_open: true
+    volumes:
+      - 'data-app-storage:/app/storage'
+    environment:
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      RAILS_FORCE_SSL: 'false'
+      RAILS_ASSUME_SSL: 'true'
+      SECRET_KEY_BASE: stub-secret-key-base
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+volumes:
+  data-app-storage: null
+
+
+== log
+#0 info: Starting stage: running
+#1 info: Building the repository Dockerfile with BASE=apache, N=3
+#2 info: Running the app with tty: true and stdin_open: true, as the repository's compose file does

@@ -3,11 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress\Migration;
 
 /**
- * Where an import lands: the domain the site keeps (null when a
- * panelalpha.online name is still to be allocated), the project it goes into
- * (null when the import names a new one itself), whether the import creates
- * that project, and whether the caller fixed the domain (a `domain`, or an
- * existing project's own) rather than leaving it to the source's home.
+ * Where an import lands: the domain (null until a panelalpha.online name is allocated), the project (null when the
+ * import names a new one), whether it creates it, and whether the caller fixed the domain rather than the source's home.
  */
 final class MigrationTarget
 {

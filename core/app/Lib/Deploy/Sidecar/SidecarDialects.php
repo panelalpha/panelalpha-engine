@@ -5,13 +5,8 @@ namespace App\Lib\Deploy\Sidecar;
 use RuntimeException;
 
 /**
- * The catalogue of backing services the engine can speak to: ports, schemes,
- * drivers, the variables each image reads at first start.
- *
- * A plain data file rather than Laravel config, so everything that consults
- * it stays loadable and testable without a container. Operators add their own
- * entries in a JSON file merged over the shipped one — an in-house datastore
- * is a config change, not a release.
+ * The catalogue of backing services the engine can speak to: ports, schemes, drivers, first-start variables.
+ * Not Laravel config, so its users load without a container; an operator's JSON adds a datastore without a release.
  */
 final class SidecarDialects
 {
@@ -26,12 +21,8 @@ final class SidecarDialects
     private static ?array $aliases = null;
 
     /**
-     * A missing file used to fall back to an empty set, on the reasoning that
-     * degrading beats breaking. It does not: with no dialects nothing is
-     * recognised as a datastore, a sidecars-only compose file reads as an
-     * application, and the deploy goes green having quietly dropped the
-     * database. Moving this class one directory deeper was enough to trigger
-     * it, so the path is checked loudly instead.
+     * A missing catalogue throws rather than reading as empty: with no dialects a sidecars-only compose file
+     * reads as an application, and the deploy goes green having quietly dropped the database.
      *
      * @return array<string, array<string, mixed>>
      *

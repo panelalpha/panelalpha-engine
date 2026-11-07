@@ -11,11 +11,8 @@ use App\System\Project\PhpHosting\WordPress\Migration\TransferAddress;
 use RuntimeException;
 
 /**
- * Step 5: POST remote-sync with the destination URL on the kept domain
- * (incl. subdirectory), this migration's token, and the engine's IPv4 the
- * source pins that name to. The token never reaches step_log. A transfer
- * already holding the source's lock is taken over only when an import on this
- * engine started it; any other one fails the step.
+ * Step 5: POST remote-sync with the kept domain's URL, this migration's token (never in step_log) and the IPv4 the
+ * source pins that name to. A transfer holding the source's lock is taken over only when this engine started it.
  */
 final class RemoteSyncStep implements MigrationStep
 {
@@ -45,6 +42,15 @@ final class RemoteSyncStep implements MigrationStep
 
         $response = $this->start($this->source->transfer($migration), $destinationUrl, $token);
 
+        $migration->storePluginMigrationId(self::migrationId($response));
+        $migration->markStepCompleted($this->name());
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $response
+     */
+    private static function migrationId(array $response): string
+    {
         if (($response['success'] ?? null) !== true) {
             $message = is_string($response['message'] ?? null)
                 ? $response['message']
@@ -58,8 +64,7 @@ final class RemoteSyncStep implements MigrationStep
             throw new RuntimeException('remote-sync did not return a migration_id');
         }
 
-        $migration->storePluginMigrationId($response['migration_id']);
-        $migration->markStepCompleted($this->name());
+        return $response['migration_id'];
     }
 
     /**

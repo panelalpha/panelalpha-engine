@@ -29,18 +29,8 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Advances a WordPress migration record through its remaining sequence, one
- * bounded run at a time: a run claims the record, does one step (or a share
- * of a batched one), and says whether another run must follow. A requested
- * cancel is carried out by the next run instead of a step. Source calls keep
- * the claim alive while they wait; a run that lost its claim to another one
- * stops without touching the record. The plugin zip a run downloaded is
- * removed when the run ends, however it ends.
- *
- * Status transitions stay on the record. MigrationStarter queues the job for
- * a new record, the controller for a resume or a cancel.
- * The queue job is an adapter that constructs this module with no arguments.
- * Tests pass a substitute sequence; callers other than tests use the production sequence.
+ * Advances a migration record one bounded run at a time: a run claims it, does one step (or a share of a batched one) or
+ * a requested cancel, and says whether another must follow. The queue job builds it with no arguments; tests pass a sequence.
  */
 final class Migration
 {
@@ -70,9 +60,8 @@ final class Migration
     }
 
     /**
-     * Ordered step names stored on a new record of the method. This is the only
-     * author of that order. manual_plugin verifies the plugin the user
-     * installed where wp_admin installs it.
+     * Ordered step names stored on a new record of the method, the only author of that order.
+     * manual_plugin verifies the plugin the user installed where wp_admin installs it.
      *
      * @return list<string>
      */
@@ -125,8 +114,8 @@ final class Migration
     }
 
     /**
-     * One bounded run under the record's claim. The queue payload stays the
-     * record id; each step reads secrets itself.
+     * One bounded run under the record's claim; the plugin zip it downloaded goes however it ends.
+     * The queue payload stays the record id; each step reads secrets itself.
      */
     public function advanceOnce(WordpressMigration $migration): MigrationSlice
     {
@@ -208,9 +197,8 @@ final class Migration
     }
 
     /**
-     * A failure while a cancel is pending is left to the cancel; any other
-     * keeps the secrets for resume and is rethrown. A run that lost its claim
-     * leaves the record to the run that took it over.
+     * A failure while a cancel is pending is left to the cancel; any other keeps the secrets for resume and is rethrown.
+     * A run that lost its claim leaves the record to the run that took it over.
      */
     private function fail(WordpressMigration $migration, string $name, Throwable $e, string $runId): void
     {

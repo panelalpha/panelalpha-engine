@@ -1,0 +1,115 @@
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "python",
+        "label": "Ruby",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 3000,
+        "runtime": "command",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "bundle install --jobs 4 --retry 3",
+        "build_command": "",
+        "start_command": "bundle exec rackup -o 0.0.0.0 -p 3000",
+        "env": {
+            "BUNDLE_PATH": "/app/vendor/bundle",
+            "BUNDLE_WITHOUT": "development:test"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "ruby:3.3-slim-bookworm",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "ruby",
+        "requirements": [
+            {
+                "id": "ruby",
+                "version": "3.3",
+                "constraint": "",
+                "source": "engine default",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "ruby 3.3 (from engine default)"
+        ],
+        "build_images": [],
+        "resolved_commands": []
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] ensureRubyBaseImage
+[
+    "ruby:3.3-slim-bookworm",
+    [
+        "curl",
+        "git",
+        "libjemalloc2",
+        "build-essential",
+        "libyaml-dev",
+        "libsqlite3-dev"
+    ]
+]
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'ruby:3.3-slim-bookworm'
+    working_dir: /app
+    volumes:
+      - './:/app'
+    ports:
+      - '3000:3000'
+    command:
+      - bundle
+      - exec
+      - rackup
+      - config.ru
+      - '-o'
+      - 0.0.0.0
+      - '-p'
+      - '3000'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      RACK_ENV: production
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

@@ -5,35 +5,27 @@ namespace App\Lib\Deploy\Detect;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A site that is nothing but web documents: HTML, the stylesheets and images
- * it references, and no program of any kind. Every file must be something a
- * browser is handed verbatim -- an allowlist, not "no PHP and no package.json".
+ * A site that is nothing but web documents and the assets they reference: every file must be on an
+ * allowlist of things a browser is handed verbatim.
  */
 final class HtmlSite
 {
     /**
-     * What a browser is served without anything running first. `.js` counts:
-     * a script tag in a hand-written page is still a static site, and any
-     * manifest that reads package.json has already had its turn.
+     * What a browser is served without anything running first: documents, data, images, fonts and media.
+     * `.js` counts, since any manifest that reads package.json has already had its turn.
      *
      * @var list<string>
      */
     private const ASSET_EXTENSIONS = [
-        // Documents and the code embedded in them.
         'html', 'htm', 'xhtml', 'css', 'js', 'mjs', 'map',
-        // Data a page fetches.
         'json', 'xml', 'txt', 'md', 'csv', 'webmanifest', 'vtt',
-        // Images.
         'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'bmp', 'apng', 'cur',
-        // Fonts.
         'woff', 'woff2', 'ttf', 'otf', 'eot',
-        // Media and downloads.
         'mp4', 'webm', 'ogv', 'mp3', 'ogg', 'wav', 'm4a', 'flac', 'pdf',
     ];
 
     /**
-     * Extensionless files a repository carries for itself, not the browser.
-     * GitHub Pages' CNAME arrives with an imported site.
+     * Extensionless files a repository carries for itself, not the browser (GitHub Pages' CNAME too).
      *
      * @var list<string>
      */
@@ -52,8 +44,7 @@ final class HtmlSite
     private const MAX_DIRECTORIES = 300;
 
     /**
-     * Basenames a front page is called, in preference order. `index` first:
-     * it is the only one a webserver finds on its own.
+     * Basenames a front page is called, in preference order; `index` is the only one a webserver finds itself.
      *
      * @var list<string>
      */
@@ -64,11 +55,7 @@ final class HtmlSite
 
     private function __construct(private readonly string $projectDir) {}
 
-    /**
-     * The document this site should be served from. Null for a tree holding a
-     * program, one holding no HTML, or an account holding only the engine's
-     * placeholder.
-     */
+    /** The document this site should be served from; null for a program, no HTML, or only the engine's placeholder. */
     public static function entry(string $projectDir): ?string
     {
         return (new self(rtrim($projectDir, '/')))->locate();
@@ -83,10 +70,7 @@ final class HtmlSite
         return $this->named() ?? $this->first();
     }
 
-    /**
-     * A front page by name, in preference order, and only at the root:
-     * `docs/home.html` is a page of the site, not its entrance.
-     */
+    /** A front page by name, in preference order, and only at the root. */
     private function named(): ?string
     {
         foreach (self::ENTRY_NAMES as $name) {
@@ -107,9 +91,8 @@ final class HtmlSite
     }
 
     /**
-     * Collect the HTML and refuse on the first file that is not something a
-     * browser is handed as-is. Breadth first, so `documents` is shallowest
-     * first, ties broken by scandir's alphabetical order.
+     * Collect the HTML and refuse on the first file that is not something a browser is handed as-is.
+     * Breadth first, so `documents` is shallowest first, ties broken by scandir's alphabetical order.
      */
     private function walk(): bool
     {
@@ -122,52 +105,68 @@ final class HtmlSite
                 return false;
             }
 
-            $absolute = $relative === '' ? $this->projectDir : $this->projectDir.'/'.$relative;
-            foreach (ProjectContext::entries($absolute) as $entry) {
-                // Dotfiles are the repository's housekeeping (.gitignore,
-                // .nojekyll, .htaccess), never the reason a tree is a site.
-                if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
-                    continue;
-                }
-
-                $child = $relative === '' ? $entry : $relative.'/'.$entry;
-                $path = $this->projectDir.'/'.$child;
-
-                if (is_dir($path)) {
-                    if (in_array(strtolower($entry), self::SKIPPED_DIRECTORIES, true)) {
-                        continue;
-                    }
-                    if ($depth < self::MAX_DEPTH) {
-                        $queue[] = [$child, $depth + 1];
-                    }
-
-                    continue;
-                }
-
-                // A page of the site, unless the engine wrote it: the welcome
-                // and not-configured placeholders are never the front page.
-                if (self::isDocument($entry)) {
-                    if (! PlaceholderPage::isOneOf($path)) {
-                        $this->documents[] = $child;
-                    }
-
-                    continue;
-                }
-
-                // The engine's own compose file, entrypoint and nginx config
-                // live in ~/project too; reading them as evidence would
-                // disqualify a project uploaded a file at a time.
-                if ($depth === 0 && PlaceholderPage::isScaffolding($absolute, $entry)) {
-                    continue;
-                }
-
-                if (! self::isAsset($entry)) {
-                    return false;
-                }
+            if (! $this->walkDirectory($relative, $depth, $queue)) {
+                return false;
             }
         }
 
         return $this->documents !== [];
+    }
+
+    /**
+     * Dotfiles are the repository's housekeeping, never the reason a tree is a site.
+     *
+     * @param  list<array{0: string, 1: int}>  $queue
+     */
+    private function walkDirectory(string $relative, int $depth, array &$queue): bool
+    {
+        $absolute = $relative === '' ? $this->projectDir : $this->projectDir.'/'.$relative;
+        foreach (ProjectContext::entries($absolute) as $entry) {
+            if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
+                continue;
+            }
+
+            $child = $relative === '' ? $entry : $relative.'/'.$entry;
+            $path = $this->projectDir.'/'.$child;
+
+            if (is_dir($path)) {
+                if (in_array(strtolower($entry), self::SKIPPED_DIRECTORIES, true)) {
+                    continue;
+                }
+                if ($depth < self::MAX_DEPTH) {
+                    $queue[] = [$child, $depth + 1];
+                }
+
+                continue;
+            }
+
+            if (! $this->acceptsFile($entry, $path, $child, $absolute, $depth)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * An engine placeholder page is never the front page, and the engine's own scaffolding at the root
+     * is not evidence either way.
+     */
+    private function acceptsFile(string $entry, string $path, string $child, string $absolute, int $depth): bool
+    {
+        if (self::isDocument($entry)) {
+            if (! PlaceholderPage::isOneOf($path)) {
+                $this->documents[] = $child;
+            }
+
+            return true;
+        }
+
+        if ($depth === 0 && PlaceholderPage::isScaffolding($absolute, $entry)) {
+            return true;
+        }
+
+        return self::isAsset($entry);
     }
 
     private static function isAsset(string $entry): bool

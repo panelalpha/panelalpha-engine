@@ -5,14 +5,8 @@ namespace App\Lib\Net;
 use App\Lib\Http\OutboundUrl;
 
 /**
- * The engine's single answer to "may core fetch this URL?".
- *
- * Generalised from the address check behind file downloads and git clones
- * ({@see OutboundUrl}), it refuses a URL whose host resolves to loopback,
- * link-local (the cloud metadata service), the Docker and tenant networks, or
- * a private range unless the operator allows it
- * ({@see config('egress.allow_private')}, {@see config('egress.allow_hosts')}).
- * The checked address is returned so the caller pins the connection to it.
+ * "May core fetch this URL?": refuses loopback, link-local (the cloud metadata service), Docker, tenant and, unless
+ * egress.allow_private or egress.allow_hosts allows it, private addresses via {@see OutboundUrl}; returns the address to pin to.
  */
 final class EgressGuard
 {
@@ -57,10 +51,8 @@ final class EgressGuard
     }
 
     /**
-     * The problem a refused URL should be reported under, or null when it may
-     * be fetched. The code is stable so a client can act on it. A host that
-     * does not resolve here cannot be checked, so it is refused too: git and
-     * curl still read numeric forms such as `0x7f000001` as an address.
+     * The problem (with a stable code) a refused URL is reported under, or null. A host that does not resolve
+     * is refused too, since git and curl still read numeric forms such as `0x7f000001` as an address.
      *
      * @param  list<string>  $schemes
      * @return ?array{field: string, code: string, message: string}

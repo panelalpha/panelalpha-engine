@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\Port\PortMapping;
 
 /**
- * What a compose file borrows from the host it was written for: an existing
- * reverse proxy and the external network it listens on.
- *
- * Neither exists inside an account. `docker compose up` refuses a network
- * declared external that is not there, and a bundled Traefik would only sit
- * in front of the app where the engine's own proxy already is.
+ * What a compose file borrows from the host it was written for, and which no account has: an existing
+ * reverse proxy, and the external network it listens on.
  */
 final class HostIngress
 {
@@ -35,19 +31,10 @@ final class HostIngress
      */
     public static function strip(array $compose): array
     {
-        $dropped = [];
         $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
 
         $proxies = self::proxyServices($services);
-        foreach ($proxies as $name => $image) {
-            unset($services[$name]);
-            $dropped[] = "Dropped service {$name} ({$image}): the engine's proxy routes traffic to this app";
-        }
-        $pathRouted = $proxies === [] ? [] : self::pathRoutedServices($services);
-        if ($pathRouted !== []) {
-            $dropped[] = 'Traefik routed request paths between services ('.implode(', ', $pathRouted).'); '
-                ."the engine's proxy sends the whole domain to one service, so the others are not reachable from outside";
-        }
+        [$services, $dropped] = self::withoutProxies($services, $proxies);
 
         $external = self::externalNetworks($compose['networks'] ?? null);
         foreach ($external as $network) {
@@ -62,6 +49,40 @@ final class HostIngress
             return ['compose' => $compose, 'dropped' => []];
         }
 
+        $compose['services'] = self::rewired($services, $proxies, $external);
+
+        return ['compose' => $compose, 'dropped' => $dropped];
+    }
+
+    /**
+     * @param  array<mixed>  $services
+     * @param  array<string, string>  $proxies
+     * @return array{0: array<mixed>, 1: list<string>}
+     */
+    private static function withoutProxies(array $services, array $proxies): array
+    {
+        $dropped = [];
+        foreach ($proxies as $name => $image) {
+            unset($services[$name]);
+            $dropped[] = "Dropped service {$name} ({$image}): the engine's proxy routes traffic to this app";
+        }
+        $pathRouted = $proxies === [] ? [] : self::pathRoutedServices($services);
+        if ($pathRouted !== []) {
+            $dropped[] = 'Traefik routed request paths between services ('.implode(', ', $pathRouted).'); '
+                ."the engine's proxy sends the whole domain to one service, so the others are not reachable from outside";
+        }
+
+        return [$services, $dropped];
+    }
+
+    /**
+     * @param  array<mixed>  $services
+     * @param  array<string, string>  $proxies
+     * @param  list<string>  $external
+     * @return array<mixed>
+     */
+    private static function rewired(array $services, array $proxies, array $external): array
+    {
         $droppedNames = array_fill_keys(array_map('strtolower', array_map('strval', array_keys($proxies))), true);
         foreach ($services as $name => $service) {
             if (is_array($service)) {
@@ -72,14 +93,12 @@ final class HostIngress
                 $services[$name] = self::withoutNetworks($service, $external);
             }
         }
-        $compose['services'] = $services;
 
-        return ['compose' => $compose, 'dropped' => $dropped];
+        return $services;
     }
 
     /**
-     * Left alone when the proxy is all the file defines: there is nothing
-     * else to deploy, and an empty stack fails less clearly than this one.
+     * Left alone when the proxy is all the file defines: an empty stack fails less clearly than this one.
      *
      * @param  array<mixed>  $services
      * @return array<string, string> service name => image
@@ -97,8 +116,7 @@ final class HostIngress
     }
 
     /**
-     * A reverse proxy the engine's own routing replaces, unless it only
-     * routes the stack's own paths.
+     * A reverse proxy the engine's own routing replaces, unless it only routes the stack's own paths.
      *
      * @param  array<mixed>  $service
      */
@@ -110,10 +128,8 @@ final class HostIngress
     }
 
     /**
-     * A Traefik that is not a host's ingress: it runs something other than
-     * Traefik on the image (a one-shot gate), or routes the stack's own paths
-     * from a file provider with no way to discover containers (not-th.re's
-     * `/api` -> api, `/` -> ui). Dropping that leaves one service reachable.
+     * A Traefik that is not a host's ingress: it runs something else on the image, or routes the stack's
+     * own paths from a file provider with no way to discover containers.
      *
      * @param  array<string, mixed>  $service
      */
@@ -139,8 +155,7 @@ final class HostIngress
     }
 
     /**
-     * The image's entrypoint runs Traefik unless the file replaces it, or
-     * hands it a command that is not a flag or `traefik` itself.
+     * The image's entrypoint runs Traefik unless the file replaces it, or hands it another command.
      *
      * @param  array<string, mixed>  $service
      */
@@ -159,8 +174,7 @@ final class HostIngress
     }
 
     /**
-     * Services a Traefik router rule sends a path to, which one published
-     * port cannot reproduce.
+     * Services a Traefik router rule sends a path to, which one published port cannot reproduce.
      *
      * @param  array<mixed>  $services
      * @return list<string>
@@ -185,9 +199,9 @@ final class HostIngress
         return $names;
     }
 
+    /** Digest and tag off: `docker.io/library/traefik:v3.1@sha256:…` -> `docker.io/library/traefik`. */
     private static function repositoryOf(string $image): string
     {
-        // Digest and tag off: `docker.io/library/traefik:v3.1@sha256:…` -> `docker.io/library/traefik`.
         return strtolower((string) preg_replace(['/@.*$/', '#:[^/]*$#'], '', trim($image)));
     }
 
@@ -209,8 +223,8 @@ final class HostIngress
     }
 
     /**
-     * The port Traefik's labels routed to, kept as `expose:` so port detection
-     * still finds it once the proxy is gone. The labels themselves stay; inert.
+     * The port Traefik's labels routed to, kept as `expose:` so port detection still finds it once the
+     * proxy is gone. The labels themselves stay, inert.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -222,17 +236,7 @@ final class HostIngress
             return $service;
         }
 
-        $declared = [];
-        foreach (['ports', 'expose'] as $key) {
-            $entries = $service[$key] ?? [];
-            foreach (is_array($entries) ? $entries : [$entries] as $entry) {
-                $mapping = PortMapping::parse($entry);
-                if ($mapping !== null) {
-                    $declared[$mapping->hostPort] = true;
-                    $declared[$mapping->containerPort ?? $mapping->hostPort] = true;
-                }
-            }
-        }
+        $declared = self::declaredPorts($service);
 
         $expose = is_array($service['expose'] ?? null) ? array_values($service['expose']) : [];
         foreach ($routed as $port) {
@@ -246,6 +250,27 @@ final class HostIngress
         }
 
         return $service;
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @return array<int, true>
+     */
+    private static function declaredPorts(array $service): array
+    {
+        $declared = [];
+        foreach (['ports', 'expose'] as $key) {
+            $entries = $service[$key] ?? [];
+            foreach (is_array($entries) ? $entries : [$entries] as $entry) {
+                $mapping = PortMapping::parse($entry);
+                if ($mapping !== null) {
+                    $declared[$mapping->hostPort] = true;
+                    $declared[$mapping->containerPort ?? $mapping->hostPort] = true;
+                }
+            }
+        }
+
+        return $declared;
     }
 
     /**
@@ -299,8 +324,7 @@ final class HostIngress
     }
 
     /**
-     * A service left on no network loses the key, so it joins the project's
-     * default network instead of none.
+     * A service left on no network loses the key, so it joins the project's default network instead of none.
      *
      * @param  array<string, mixed>  $service
      * @param  list<string>  $networks

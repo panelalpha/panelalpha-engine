@@ -3,9 +3,8 @@
 namespace App\System\Firewall;
 
 /**
- * An address the login protection never bans, whatever it gets wrong: an
- * office, a monitoring host, the panel that drives this engine. It is not an
- * allow rule; the firewall's rules still apply to it.
+ * An address the login protection never bans, whatever it gets wrong: an office, a monitoring host, the panel.
+ * It is not an allow rule; the firewall's rules still apply to it.
  */
 final class TrustedAddress
 {

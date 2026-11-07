@@ -24,9 +24,8 @@ final class NodeBaseImage
     }
 
     /**
-     * The tag the recipe carries, when it is one of ours, in the variant this
-     * project needs -- the full one for a project whose install has to compile
-     * a dependency. A recipe without a `node:` tag is resolved from the project.
+     * The recipe's `node:` tag in the variant this project needs (full when its install compiles
+     * a dependency); without one, the image is resolved from the project.
      */
     private static function node(BuildRecipe $recipe): string
     {

@@ -3,19 +3,14 @@
 namespace App\Lib\Deploy\CacheManager;
 
 /**
- * The images an account needs before a Railpack build runs in it.
- *
- * Read out of the plan railpack just wrote, not listed anywhere: those tags
- * follow Railpack's own release calendar, and a hand-kept list goes stale
- * silently — the account loads the tags it names and the build pulls the ones
- * it wants through the nested NAT.
+ * The images an account needs before a Railpack build, read from the plan railpack just wrote: its tags
+ * follow Railpack's own release calendar, so a hand-kept list would go stale.
  */
 class RailpackCache
 {
     /**
-     * The BuildKit frontend that reads a railpack plan. The one image the
-     * engine names itself: it goes in as a `BUILDKIT_SYNTAX` build-arg, so the
-     * plan never mentions it and it cannot be derived like the rest.
+     * The BuildKit frontend that reads a railpack plan, the one image the engine names itself: it goes in as
+     * `BUILDKIT_SYNTAX`, so no plan mentions it.
      */
     public const FRONTEND_IMAGE = 'ghcr.io/railwayapp/railpack-frontend:latest';
 
@@ -23,9 +18,7 @@ class RailpackCache
     private const REPOSITORY_PREFIX = 'ghcr.io/railwayapp/railpack-';
 
     /**
-     * Whether $ref is one of Railpack's own images. A deploy fetches those
-     * onto the host under whatever tag its plan names, which no catalogue can
-     * list ahead of time.
+     * Whether $ref is one of Railpack's own images, fetched under whatever tag a plan names, which no list holds.
      */
     public static function isRailpackImage(string $ref): bool
     {

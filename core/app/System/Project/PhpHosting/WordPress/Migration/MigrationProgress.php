@@ -5,9 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use App\Models\WordpressMigration;
 
 /**
- * The run's progress as the status answers it: the current step and its
- * place in the sequence, and one percent over the whole run, weighted
- * setup 0-10, database 10-40, files 40-95 and finish 95-100.
+ * The run's progress as the status answers it: the current step and its place in the sequence, and one percent
+ * over the whole run, weighted setup 0-10, database 10-40, files 40-95 and finish 95-100.
  */
 final class MigrationProgress
 {

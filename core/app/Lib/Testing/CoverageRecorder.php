@@ -7,9 +7,8 @@ use SebastianBergmann\CodeCoverage\Data\RawCodeCoverageData;
 use Throwable;
 
 /**
- * Shared Xdebug coverage session used by HTTP CoverageMiddleware and job
- * RecordCoverage middleware. Dumps land in
- * {config testing.coverage_dir}/{tokenId}/dumps/ (the engine's tests/coverage).
+ * Shared Xdebug coverage session for the HTTP CoverageMiddleware and the job RecordCoverage middleware.
+ * Dumps land in {config testing.coverage_dir}/{tokenId}/dumps/ (the engine's tests/coverage).
  */
 final class CoverageRecorder
 {
@@ -65,6 +64,26 @@ final class CoverageRecorder
         self::$depth++;
         \xdebug_start_code_coverage(XDEBUG_CC_UNUSED | XDEBUG_CC_DEAD_CODE);
 
+        [$result, $error] = self::runCatching($work);
+
+        $data = \xdebug_get_code_coverage();
+        \xdebug_stop_code_coverage();
+        self::$depth--;
+
+        self::writeDump($tokenId, $data, $dumpPrefix);
+
+        if ($error !== null) {
+            throw $error;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{0: mixed, 1: ?Throwable}
+     */
+    private static function runCatching(callable $work): array
+    {
         $result = null;
         $error = null;
         try {
@@ -73,10 +92,14 @@ final class CoverageRecorder
             $error = $e;
         }
 
-        $data = \xdebug_get_code_coverage();
-        \xdebug_stop_code_coverage();
-        self::$depth--;
+        return [$result, $error];
+    }
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private static function writeDump(int $tokenId, array $data, string $dumpPrefix): void
+    {
         /** @psalm-suppress InternalClass, InternalMethod */
         $rawData = RawCodeCoverageData::fromXdebugWithoutPathCoverage($data);
         $dir = self::dumpsDir($tokenId);
@@ -85,11 +108,5 @@ final class CoverageRecorder
         }
         $file = $dir.'/'.uniqid($dumpPrefix.'-', true).'.rawcov';
         file_put_contents($file, serialize($rawData));
-
-        if ($error !== null) {
-            throw $error;
-        }
-
-        return $result;
     }
 }

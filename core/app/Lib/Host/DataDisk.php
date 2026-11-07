@@ -3,9 +3,8 @@
 namespace App\Lib\Host;
 
 /**
- * The host disk projects live on. Every account keeps its files and its whole
- * inner Docker store under /home/<user>, and core mounts the host's /home, so
- * this is the disk that fills up -- not core's own root, which is an overlay.
+ * The host disk projects live on: every account keeps its files and inner Docker store under /home/<user>,
+ * which core mounts from the host, so this disk fills up rather than core's overlay root.
  */
 final class DataDisk
 {

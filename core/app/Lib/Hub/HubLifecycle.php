@@ -8,10 +8,7 @@ use App\Models\PersonalAccessToken;
 /** Forgetting a Hub connection, and keeping it in step with its token: what the API and the CLI both need. */
 final class HubLifecycle
 {
-    /**
-     * Revoke every Hub token and delete every stored connection. Takes effect
-     * at once and needs nothing from the Hub.
-     */
+    /** Revoke every Hub token and delete every stored connection, at once and without the Hub. */
     public static function forget(string $actor): int
     {
         $revoked = HubTokens::revokeAll();
@@ -43,10 +40,8 @@ final class HubLifecycle
     }
 
     /**
-     * The Hub revoked its own token. Only a connection that token still holds
-     * is dropped: on `hub:connect --replace` the Hub revokes the old token while
-     * the new connection is being completed, and a token superseded by a
-     * rotation no longer holds its connection.
+     * The Hub revoked its own token: only a connection it still holds is dropped, since `hub:connect --replace`
+     * revokes the old token mid-ceremony and a rotated-out token holds no connection.
      */
     public static function tokenRevoked(PersonalAccessToken $token): void
     {

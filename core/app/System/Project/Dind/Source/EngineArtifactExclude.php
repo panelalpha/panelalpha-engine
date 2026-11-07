@@ -13,12 +13,8 @@ use Closure;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Keeps the engine's block in a git checkout's local exclude file — ADR-0001.
- *
- * The block lists every reserved Engine Artifact name, plus the files a deploy
- * writes only when missing that exist now and that the repository does not
- * track. With them excluded, `git status` shows only the client's changes and
- * a forced pull's `clean -fd` leaves the generated `.env` in place.
+ * Keeps the engine's block (reserved Engine Artifacts, and untracked files a deploy writes when missing) in a checkout's
+ * local exclude file, so `git status` shows only the client's changes and `clean -fd` keeps `.env` (ADR-0001).
  */
 final class EngineArtifactExclude
 {
@@ -43,9 +39,8 @@ final class EngineArtifactExclude
     }
 
     /**
-     * Rewrite the block. Does nothing outside a git checkout, and never fails a
-     * deploy: a checkout without the block only shows engine files as
-     * untracked, which is how it was before.
+     * Rewrite the block; nothing outside a git checkout, and never fails a deploy, since a checkout without the
+     * block only shows engine files as untracked.
      */
     public function write(): void
     {

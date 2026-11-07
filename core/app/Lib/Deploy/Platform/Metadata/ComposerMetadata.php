@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * PHP identity, from composer.json and composer.lock. `version` is normally absent and
- * that is correct — Composer asks projects not to declare it, as the tag is the version.
- * Framework versions come from the lock: `11.31.0` is what got installed.
+ * PHP identity, from composer.json and composer.lock: `version` is normally absent, as the tag is the version,
+ * and framework versions come from the lock.
  */
 final class ComposerMetadata implements PackageMetadata
 {
@@ -18,11 +17,7 @@ final class ComposerMetadata implements PackageMetadata
     public const LOCK = 'composer.lock';
 
     /**
-     * PHP frameworks worth naming, most specific first.
-     *
-     * A hand-kept list, because nothing derives it: Laravel is detected by its
-     * `artisan` file and never mentions `laravel/framework`. Absence from this
-     * list costs a project nothing beyond a nicer answer to "what is this".
+     * PHP frameworks worth naming, most specific first; hand-kept, as detection never reads `laravel/framework`.
      *
      * @var array<string, string>
      */
@@ -74,33 +69,58 @@ final class ComposerMetadata implements PackageMetadata
             repository: self::text($composer['support']['source'] ?? null),
             authors: self::stringList($composer['authors'] ?? null),
             keywords: self::stringList($composer['keywords'] ?? null),
-            // Composer has no `private` flag; `type: project` is how it says this is an
-            // application rather than something meant to be required by others.
-            private: self::text($composer['type'] ?? null) === 'project',
+            private: self::isApplication($composer),
             scripts: self::keys($composer['scripts'] ?? null),
             entrypoints: self::stringList($composer['bin'] ?? null),
-            frameworks: self::matchFrameworks(
-                self::FRAMEWORKS,
-                self::constraints($require, $requireDev),
-                $this->lockedVersions($context),
-                self::FILE,
-                self::LOCK
-            ),
-            dependencyCounts: [
-                // Neither `php` nor an `ext-*` is a package anyone installed; counting them
-                // would inflate every project by the width of its extension list.
-                'require' => count(self::packagesOnly($require)),
-                'require-dev' => count(self::packagesOnly($requireDev)),
-            ],
-            // The same entries the counts above exclude: what Composer calls the platform.
-            // `require-dev` is not consulted — a dev-only `ext-xdebug` is not something the
-            // built image has to satisfy.
+            frameworks: $this->frameworks($context, $require, $requireDev),
+            dependencyCounts: self::dependencyCounts($require, $requireDev),
             platform: self::platformOnly($require)
         );
     }
 
     /**
-     * Installed versions from composer.lock, keyed by package.
+     * Composer has no `private` flag; `type: project` is how it says this is an application, not a library.
+     *
+     * @param  array<string, mixed>  $composer
+     */
+    private static function isApplication(array $composer): bool
+    {
+        return self::text($composer['type'] ?? null) === 'project';
+    }
+
+    /**
+     * @param  array<string, mixed>  $require
+     * @param  array<string, mixed>  $requireDev
+     * @return list<Framework>
+     */
+    private function frameworks(ProjectContext $context, array $require, array $requireDev): array
+    {
+        return self::matchFrameworks(
+            self::FRAMEWORKS,
+            self::constraints($require, $requireDev),
+            $this->lockedVersions($context),
+            self::FILE,
+            self::LOCK
+        );
+    }
+
+    /**
+     * Neither `php` nor an `ext-*` is a package anyone installed; counting them would inflate every project.
+     *
+     * @param  array<string, mixed>  $require
+     * @param  array<string, mixed>  $requireDev
+     * @return array<string, int>
+     */
+    private static function dependencyCounts(array $require, array $requireDev): array
+    {
+        return [
+            'require' => count(self::packagesOnly($require)),
+            'require-dev' => count(self::packagesOnly($requireDev)),
+        ];
+    }
+
+    /**
+     * Installed versions from composer.lock, keyed by package, with the `v` a tag may carry dropped.
      *
      * @return array<string, string>
      */
@@ -119,8 +139,6 @@ final class ComposerMetadata implements PackageMetadata
                 if ($name === null || $version === null) {
                     continue;
                 }
-                // Composer writes tags as it found them, so the same release
-                // is `v11.31.0` here and `11.31.0` in the next project.
                 $versions[$name] = ltrim($version, 'vV');
             }
         }
@@ -142,7 +160,8 @@ final class ComposerMetadata implements PackageMetadata
     }
 
     /**
-     * The platform half of `require`, constraints kept as declared.
+     * The platform half of `require`, constraints kept as declared; `require-dev` is not consulted, as a dev-only
+     * `ext-xdebug` is nothing the built image has to satisfy.
      *
      * @param  array<string, mixed>  $require
      * @return array<string, string>
@@ -162,11 +181,8 @@ final class ComposerMetadata implements PackageMetadata
     }
 
     /**
-     * Copied from `Composer\Repository\PlatformRepository::PLATFORM_PACKAGE_REGEX`.
-     *
-     * Anchored and exhaustive on purpose: a prefix test reads `php-di/php-di` as the
-     * runtime (matomo/matomo declares it) and misses `composer-runtime-api`, a platform
-     * requirement no one installs.
+     * Copied from `Composer\Repository\PlatformRepository::PLATFORM_PACKAGE_REGEX`; anchored, as a prefix test
+     * reads `php-di/php-di` as the runtime and misses `composer-runtime-api`.
      */
     private const PLATFORM_PACKAGE_REGEX =
         '{^(?:php(?:-64bit|-ipv6|-zts|-debug)?|hhvm|(?:ext|lib)-[a-z0-9](?:[_.-]?[a-z0-9]+)*'

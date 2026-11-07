@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 /**
- * Turns resolved requirements into the image the application runs in. A
- * ROLE_BUILD requirement gets its own build stage; ROLE_RUNTIME must be in the
- * final image, and two of those need a composite named by compositeTag().
+ * Turns resolved requirements into the image the application runs in: a ROLE_BUILD one gets its
+ * own build stage, and two ROLE_RUNTIME ones need a composite named by compositeTag().
  */
 final class ImageResolver
 {
@@ -51,10 +50,8 @@ final class ImageResolver
     }
 
     /**
-     * A deterministic name for a multi-runtime image,
-     * `panelalpha/stack:node-20_php-8.3-pa<fingerprint>`: readable half, plus a
-     * fingerprint so a changed assembly produces a new tag instead of serving a
-     * stale image.
+     * A deterministic name for a multi-runtime image, `panelalpha/stack:node-20_php-8.3-pa<fingerprint>`,
+     * the fingerprint giving a changed assembly a new tag instead of a stale image.
      *
      * @param  list<Requirement>  $requirements
      */
@@ -87,9 +84,9 @@ final class ImageResolver
         return count(self::runtimeRoleRequirements($requirements)) > 1;
     }
 
+    /** Versions the assembly recipe, not just the inputs. */
     private static function fingerprint(string $token): string
     {
-        // Version the assembly recipe, not just the inputs.
         return substr(sha1('v1 '.$token), 0, 8);
     }
 }

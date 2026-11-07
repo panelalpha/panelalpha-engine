@@ -7,10 +7,8 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Loads the manifests in `resources/platforms/` and
- * `resources/apps/<id>/panelalpha.yaml`, highest `priority` first, ties by id.
- * An app config's `extends` overrides the recipe it names; a manifest's
- * `runtime` picks the generator. A malformed file throws on load.
+ * Loads the manifests in `resources/platforms/` and `resources/apps/<id>/panelalpha.yaml`, highest `priority`
+ * first, ties by id; a malformed file throws on load.
  */
 final class PlatformRegistry
 {
@@ -21,10 +19,8 @@ final class PlatformRegistry
     private static array $cache = [];
 
     /**
-     * Where the shipped manifests live: `core/resources/platforms/`.
-     *
-     * `realpath()`d when it exists so the cache key and any "not found" message
-     * are a path someone can paste; otherwise returned unresolved.
+     * Where the shipped manifests live: `core/resources/platforms/`, `realpath()`d when it exists so the cache key
+     * and a "not found" message are a path someone can paste.
      */
     public static function defaultDirectory(): string
     {
@@ -55,7 +51,8 @@ final class PlatformRegistry
     }
 
     /**
-     * Every manifest, highest priority first.
+     * Every manifest, highest priority first; only the first (platforms) root must exist, as an engine with no
+     * apps still deploys.
      *
      * @return list<PlatformManifest>
      *
@@ -71,12 +68,21 @@ final class PlatformRegistry
             return self::$cache[$key];
         }
 
-        // Only the first (platforms) root must exist: an engine with no apps
-        // still deploys, one with no platforms cannot.
         if (! is_dir($directories[0])) {
             throw new ManifestException("Platform manifest directory not found: {$directories[0]}");
         }
 
+        return self::$cache[$key] = self::byPriority(self::loadAll($directories));
+    }
+
+    /**
+     * @param  list<string>  $directories
+     * @return list<PlatformManifest>
+     *
+     * @throws ManifestException
+     */
+    private static function loadAll(array $directories): array
+    {
         $manifests = [];
         $seen = [];
         foreach (self::manifestFiles($directories) as $path) {
@@ -90,13 +96,22 @@ final class PlatformRegistry
             $manifests[] = $manifest;
         }
 
+        return $manifests;
+    }
+
+    /**
+     * @param  list<PlatformManifest>  $manifests
+     * @return list<PlatformManifest>
+     */
+    private static function byPriority(array $manifests): array
+    {
         usort(
             $manifests,
             static fn (PlatformManifest $a, PlatformManifest $b): int => $b->priority <=> $a->priority
                 ?: strcmp($a->id, $b->id)
         );
 
-        return self::$cache[$key] = $manifests;
+        return $manifests;
     }
 
     /**
@@ -127,8 +142,8 @@ final class PlatformRegistry
     }
 
     /**
-     * How a manifest names itself in an error message: its path below
-     * `resources/`, because thirty of them are called `panelalpha.yaml`.
+     * How a manifest names itself in an error message: its path below `resources/` (thirty are `panelalpha.yaml`),
+     * else, for a fixture or an operator's directory, its last two path segments.
      */
     private static function sourceName(string $path): string
     {
@@ -139,17 +154,14 @@ final class PlatformRegistry
             return substr($normalised, $at + strlen($marker));
         }
 
-        // Outside `resources/` (a fixture, an operator's directory), the last
-        // two path segments.
         $parts = explode('/', $normalised);
 
         return implode('/', array_slice($parts, -2));
     }
 
     /**
-     * The manifest producing a strategy id. Several share one strategy
-     * (astro static vs Node), so `$runtime` disambiguates; without it the
-     * highest-priority match wins.
+     * The manifest producing a strategy id: `$runtime` picks among those sharing one (astro static vs Node),
+     * else the highest-priority match wins.
      */
     public static function findByStrategy(
         string $strategy,
@@ -171,9 +183,8 @@ final class PlatformRegistry
     }
 
     /**
-     * The manifest with this id. The source recipes are consulted last, and
-     * only when `$directory` is null: their ids reach persisted decisions,
-     * and everything downstream resolves through here.
+     * The manifest with this id; the source recipes are consulted last, and only without `$directory`, as their
+     * ids reach persisted decisions.
      */
     public static function find(string $id, ?string $directory = null): ?PlatformManifest
     {
@@ -187,8 +198,7 @@ final class PlatformRegistry
     }
 
     /**
-     * The manifest a persisted detect decision came from, or null — Railpack
-     * and the fallback decisions name no manifest.
+     * The manifest a persisted detect decision came from, or null: Railpack and the fallbacks name none.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -200,10 +210,8 @@ final class PlatformRegistry
     }
 
     /**
-     * forDecision(), else the manifest the project's own app config describes
-     * when detection chose it: a repository's `.panelalpha/panelalpha.yaml`
-     * with an `id:` of its own is registered nowhere, so the id alone finds
-     * nothing and its install, upgrade and start commands were dropped.
+     * forDecision(), else the manifest the project's own app config describes when detection chose it: a
+     * repository's `.panelalpha/panelalpha.yaml` with its own `id:` is registered nowhere.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -230,11 +238,8 @@ final class PlatformRegistry
     }
 
     /**
-     * Every manifest under the given roots: the YAML files directly in one,
-     * and `<subdir>/panelalpha.yaml` one level down. One level, not recursive.
-     *
-     * `_`- and `.`-prefixed entries are supporting material — the JSON Schema
-     * the editor modeline points at, shared fragments — not platforms.
+     * The YAML files directly in each root and `<subdir>/panelalpha.yaml` one level down; `_`- and `.`-prefixed
+     * entries are supporting material (the JSON Schema, shared fragments), not platforms.
      *
      * @param  list<string>  $directories
      * @return list<string>

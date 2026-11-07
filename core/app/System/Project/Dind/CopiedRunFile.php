@@ -7,21 +7,13 @@ use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Env\EnvFileValues;
 use App\Models\User;
+use App\System\Filesystem;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
 
 /**
- * A run file a staging, clone or push brought over from another project.
- *
- * The deploy wrote that project's application database credentials, its
- * public address, the account uid:gid its containers run as and bind sources
- * under its home into the file as literal values, so the copy would run on
- * the other project's database, answer as its domain, own none of its files
- * and mount directories its container does not have. Every value the
- * deploy derived from the source is replaced with the one it derives for this
- * project, through the same code; a value the project set for itself is left
- * as it is, because it never equals one the engine derived. The env files
- * beside the run file came over with it and are repointed the same way.
+ * A run file a staging, clone or push copied, with the source's database, address, uid:gid and home in it as literals:
+ * each becomes this project's, here and in the env files beside it; a value the project set never equals one, and stays.
  */
 final class CopiedRunFile
 {
@@ -48,6 +40,18 @@ final class CopiedRunFile
         if ($database === [] && $address === [] && $identity === [] && $home === []) {
             return false;
         }
+
+        return $this->repointRunFile($path, $database, $address, $identity, $home);
+    }
+
+    /**
+     * @param  array<string, list<array{0: string, 1: string}>>  $database
+     * @param  array<string, string>  $address
+     * @param  array<string, string>  $identity
+     * @param  array<string, string>  $home
+     */
+    private function repointRunFile(string $path, array $database, array $address, array $identity, array $home): bool
+    {
         $fs = $this->project->system()->filesystem();
         if (! $fs->fileExists($path)) {
             return false;
@@ -64,14 +68,19 @@ final class CopiedRunFile
             return false;
         }
         $compose['services'] = $repointed;
+        $this->writeRunFile($fs, $path, ComposeYaml::dump($compose, $raw, 6, 2));
+
+        return true;
+    }
+
+    private function writeRunFile(Filesystem $fs, string $path, string $contents): void
+    {
         $fs->writeFileReplacingPath(
             $path,
-            ComposeYaml::dump($compose, $raw, 6, 2),
+            $contents,
             $this->project->userModel()->getChownString(),
             EngineArtifacts::RUN_COMPOSE_MODE
         );
-
-        return true;
     }
 
     /**
@@ -197,9 +206,8 @@ final class CopiedRunFile
     }
 
     /**
-     * The source account's home against this project's: where a generated
-     * service bind-mounts the account's own directories from, such as its
-     * Composer cache.
+     * The source account's home against this project's: where a generated service bind-mounts
+     * the account's own directories from, such as its Composer cache.
      *
      * @return array<string, string>
      */
@@ -229,24 +237,38 @@ final class CopiedRunFile
             if (! is_array($service)) {
                 continue;
             }
-            if (is_array($service['environment'] ?? null)) {
-                $service['environment'] = self::repointedEnvironment($service['environment'], $database, $address);
-            }
-            if ($pin !== null && is_array($service['extra_hosts'] ?? null)) {
-                $service['extra_hosts'] = self::repinnedHosts($service['extra_hosts'], $pin);
-            }
-            if ((is_string($service['user'] ?? null) || is_int($service['user'] ?? null))
-                && array_key_exists((string) $service['user'], $identity)
-            ) {
-                $service['user'] = $identity[(string) $service['user']];
-            }
-            if ($home !== [] && is_array($service['volumes'] ?? null)) {
-                $service['volumes'] = self::rehomedVolumes($service['volumes'], $home);
-            }
-            $services[$name] = $service;
+            $services[$name] = self::repointedService($service, $database, $address, $identity, $home, $pin);
         }
 
         return $services;
+    }
+
+    /**
+     * @param  array<mixed>  $service
+     * @param  array<string, list<array{0: string, 1: string}>>  $database
+     * @param  array<string, string>  $address
+     * @param  array<string, string>  $identity
+     * @param  array<string, string>  $home
+     * @return array<mixed>
+     */
+    private static function repointedService(array $service, array $database, array $address, array $identity, array $home, ?string $pin): array
+    {
+        if (is_array($service['environment'] ?? null)) {
+            $service['environment'] = self::repointedEnvironment($service['environment'], $database, $address);
+        }
+        if ($pin !== null && is_array($service['extra_hosts'] ?? null)) {
+            $service['extra_hosts'] = self::repinnedHosts($service['extra_hosts'], $pin);
+        }
+        if ((is_string($service['user'] ?? null) || is_int($service['user'] ?? null))
+            && array_key_exists((string) $service['user'], $identity)
+        ) {
+            $service['user'] = $identity[(string) $service['user']];
+        }
+        if ($home !== [] && is_array($service['volumes'] ?? null)) {
+            $service['volumes'] = self::rehomedVolumes($service['volumes'], $home);
+        }
+
+        return $service;
     }
 
     /**

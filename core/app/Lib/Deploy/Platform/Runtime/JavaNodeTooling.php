@@ -5,11 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use App\Lib\Deploy\AccountHomeRead;
 
 /**
- * Whether a Java build runs a JS tool, and which Node it gets when it does.
- *
- * Tolgee's `gradle/utils.gradle` runs `which npm` while Gradle configures and
- * throws when it is missing, so no task can be skipped around it. Only a build
- * that names a JS tool gets Node; every other Java build is left alone.
+ * Whether a Java build runs a JS tool (Tolgee's Gradle runs `which npm` while configuring), and
+ * which Node it gets; every other Java build is left alone.
  */
 final class JavaNodeTooling
 {
@@ -33,10 +30,8 @@ final class JavaNodeTooling
     private const MAX_BYTES = 1048576;
 
     /**
-     * The Node image the build needs, or null when it runs no JS tool.
-     *
-     * The Node version is the repository root's (`engines.node`, `.nvmrc`),
-     * else the engine's default.
+     * The Node image the build needs, at the root's `engines.node` / `.nvmrc` version, or null
+     * when it runs no JS tool.
      */
     public static function nodeImageFor(string $projectDir): ?string
     {

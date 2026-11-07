@@ -7,14 +7,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 
 /**
- * Where `vite build` writes, read from the project without running it: the
- * build script's `--outDir`, else `build.outDir` in vite.config, resolved
- * against `root` the way Vite does. The default when it is not a literal.
- *
- * Sunshine builds into `build/assets/web` (`outDir: resolve(assetsDstPath)`,
- * a `let` holding a literal) and kresus into `build/client` (`root:
- * './client'`, `outDir: '../build/client'`); serving `dist` for either ends
- * the deploy on `dist/index.html is missing` after a successful build.
+ * Where `vite build` writes, without running it: the build script's `--outDir`, else vite.config's `build.outDir`,
+ * resolved against `root` as Vite does (kresus: `build/client`); the default when it is not a literal.
  */
 final class ViteOutputDir
 {
@@ -49,10 +43,7 @@ final class ViteOutputDir
         return $dir === null ? $default : NodeRuntime::safeOutputDir($dir, $default);
     }
 
-    /**
-     * The output directory relative to the project, or null when the config
-     * does not say so in literals.
-     */
+    /** The output directory relative to the project, or null when the config does not say so in literals. */
     public static function resolve(string $config, ?string $cliOutDir = null): ?string
     {
         $outDir = null;
@@ -100,9 +91,8 @@ final class ViteOutputDir
     }
 
     /**
-     * A config expression as `[path, anchored]`: anchored paths are relative
-     * to the project directory, the rest to Vite's `root`. Null when it is
-     * not built from literals.
+     * A config expression as `[path, anchored]`: a literal, `fileURLToPath(new URL('./x', import.meta.url))`, or
+     * `(path.)resolve/join(...)`; anchored paths are relative to the project, the rest to Vite's `root`.
      *
      * @return array{0: string, 1: bool}|null
      */
@@ -114,12 +104,20 @@ final class ViteOutputDir
             return [$literal, false];
         }
 
-        // fileURLToPath(new URL('./x', import.meta.url))
         if (preg_match('/^fileURLToPath\(\s*new\s+URL\(\s*([\'"`])([^\'"`$]+)\1\s*,\s*import\.meta\.url\s*\)\s*\)$/', $expr, $m) === 1) {
             return [$m[2], true];
         }
 
-        // resolve(...), path.resolve(...), join(...), path.join(...)
+        return self::pathCall($expr, $config);
+    }
+
+    /**
+     * `resolve(...)`, `path.resolve(...)`, `join(...)` or `path.join(...)` of literals, optionally from `__dirname`.
+     *
+     * @return array{0: string, 1: bool}|null
+     */
+    private static function pathCall(string $expr, string $config): ?array
+    {
         if (preg_match('/^(?:path\.)?(resolve|join)\(\s*(.*?)\s*\)$/s', $expr, $m) !== 1) {
             return null;
         }

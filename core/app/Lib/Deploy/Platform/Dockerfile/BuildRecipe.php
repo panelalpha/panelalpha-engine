@@ -7,10 +7,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 
 /**
- * A detection decision, read once and typed.
- *
- * The decision travels the pipeline as an array because it crosses a process
- * boundary; this types it once for the writers.
+ * A detection decision, read once and typed for the writers; it travels the pipeline as an
+ * array because it crosses a process boundary.
  */
 final class BuildRecipe
 {
@@ -35,11 +33,8 @@ final class BuildRecipe
     public readonly array $env;
 
     /**
-     * The V8 heap a build step may use, in MB, or null when none was resolved.
-     *
-     * A host build is told this through `--memory`; a build inside the
-     * generated Dockerfile has no such flag, so the same number (70% of
-     * `deploy.build_memory`) is handed to it here. Null leaves the image as it was.
+     * The V8 heap in MB (70% of `deploy.build_memory`) for a build inside the generated Dockerfile,
+     * which has no `--memory` flag; null when none was resolved.
      */
     public readonly ?int $nodeHeapMb;
 
@@ -76,9 +71,8 @@ final class BuildRecipe
     }
 
     /**
-     * Set as an `ARG`, not a shell prefix and not an `ENV`: a build script
-     * forks its own Node (turbo, tsup, prisma), and an `ENV` would reach the
-     * running application with a number sized for the engine's build container.
+     * An `ARG`, not a shell prefix or `ENV`: build scripts fork their own Node, and an `ENV` would
+     * reach the running application with a heap sized for the build container.
      */
     public function nodeHeapBuildArg(): array
     {

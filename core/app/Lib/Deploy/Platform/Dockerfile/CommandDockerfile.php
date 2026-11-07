@@ -6,9 +6,8 @@ use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * The generic recipe: an official language image, the source, whatever the
- * manifest said to install and build, and the staged entrypoint. Go, Rust,
- * Java and Python differ only in their manifest.
+ * The generic recipe: an official language image, the source, the manifest's install and build, and the
+ * staged entrypoint. Go, Rust, Java and Python differ only in their manifest.
  */
 final class CommandDockerfile implements DockerfileWriter
 {
@@ -21,6 +20,7 @@ final class CommandDockerfile implements DockerfileWriter
         $this->port = $recipe->port(self::DEFAULT_PORT);
     }
 
+    /** A multi-stage build copies node, npm, corepack and yarn 1 from `build_node_image`: apt in the SDK image is a guess. */
     public function render(): string
     {
         $values = [
@@ -39,18 +39,13 @@ final class CommandDockerfile implements DockerfileWriter
         return Template::named('dockerfile/command-multistage')->render($values + [
             'runtime_image' => $this->recipe->runtimeImage,
             'output_directory' => trim($this->recipe->outputDirectory, '/'),
-            // node, npm/npx, corepack and yarn 1, copied rather than installed:
-            // the build stage is the SDK image, and apt there is a guess.
             'build_node_image' => $this->recipe->buildNodeImage ?: null,
         ]);
     }
 
     /**
-     * Both halves are required: a runtime image with nothing to copy into it
-     * ships an empty application, and an output directory alone is just where
-     * the build wrote. .NET: the SDK compiles, the aspnet runtime runs, and the
-     * single-stage image was the SDK plus the source tree -- 294s of layer
-     * export against 63s of compile on Jellyfin.
+     * Both halves are required: a runtime image with nothing to copy ships an empty application. A single-stage SDK
+     * image takes far longer to export than to compile.
      */
     private function isMultiStage(): bool
     {
@@ -59,11 +54,8 @@ final class CommandDockerfile implements DockerfileWriter
     }
 
     /**
-     * Recognised by the command, not a manifest field: this writer serves Go,
-     * Rust, Java and Python alike and only pip has a cache worth mounting.
-     *
-     * `pip install --no-cache-dir` is left as written -- the flag disables the
-     * cache, so the mount would cover a directory nothing writes to.
+     * Only pip, recognised by the command, has a cache worth mounting; `pip install --no-cache-dir` is left as
+     * written, since nothing would write to the mount.
      */
     private function installCommand(): string
     {

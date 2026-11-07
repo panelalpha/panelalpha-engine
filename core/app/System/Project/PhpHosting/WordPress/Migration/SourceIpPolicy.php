@@ -6,12 +6,8 @@ use App\Lib\Http\OutboundUrl;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * Which addresses the Engine may reach a source site at: `source_ip`, and
- * every address the source URL and each redirect resolve to. A public address
- * only: loopback, link-local, private and reserved ranges are refused (Docker
- * networks live in the private ones), and so is every address of the Engine
- * itself. The private ranges are allowed only when the operator allows them,
- * with EGRESS_ALLOW_PRIVATE or, for a named host, EGRESS_ALLOW_HOSTS.
+ * Where the Engine may reach a source (`source_ip`, every address the URL and each redirect resolve to): public only, never
+ * its own; private ranges, Docker networks among them, only with EGRESS_ALLOW_PRIVATE or, per host, EGRESS_ALLOW_HOSTS.
  */
 class SourceIpPolicy
 {

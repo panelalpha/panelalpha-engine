@@ -5,26 +5,8 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 
 /**
- * Evaluates a manifest's `detect` block against a project directory, and a
- * command's `when` guard with it. Every key of the node must hold.
- *
- * Conditions:
- *   all      list of nodes, all must match
- *   any      list of nodes, at least one must match
- *   none     list of nodes, none may match
- *   not      single node that must not match
- *   file     root-level basename, case-insensitive
- *   path     file at a path relative to the project root
- *   dir      directory at a path relative to the project root
- *   glob     root file whose name starts "<stem>." (next.config.js|mjs|ts)
- *   dep      dependency or devDependency in the root package.json
- *   composer key under require or require-dev in composer.json
- *   script   named entry under package.json scripts
- *   contains {path|glob, pattern, regex?} — read a file, test its contents
- *   probe    named probe, see `PlatformProbe`
- *
- * A scalar condition accepts a list, meaning "any of these":
- * `{"file": ["pom.xml", "build.gradle"]}`.
+ * Evaluates a manifest's `detect` block, and a command's `when` guard, against a project: every key of a node
+ * must hold, and a scalar condition's list means any of these.
  */
 final class PlatformMatcher
 {
@@ -79,13 +61,13 @@ final class PlatformMatcher
     }
 
     /**
+     * An empty node matches nothing: matching everything would let a typo'd key claim every project on the host.
+     *
      * @param  array<string, mixed>  $node
      */
     private function evaluate(array $node, ProjectContext $context): bool
     {
         if ($node === []) {
-            // Empty matches nothing: matching everything would turn a typo'd
-            // key into a platform that claims every project on the host.
             return false;
         }
 
@@ -98,6 +80,7 @@ final class PlatformMatcher
         return true;
     }
 
+    /** An unknown key throws: ignoring it would widen the predicate. */
     private function condition(string $key, mixed $value, ProjectContext $context): bool
     {
         return match ($key) {
@@ -114,7 +97,6 @@ final class PlatformMatcher
             'composer' => $this->anyScalar($value, fn (string $p): bool => self::composerRequires($context, $p)),
             'contains' => is_array($value) && $this->contains($value, $context),
             'probe' => $this->anyScalar($value, fn (string $p): bool => $this->probe($p, $context)),
-            // Ignoring an unknown key would widen the predicate.
             default => throw new ManifestException("Unknown detect condition '{$key}'"),
         };
     }
@@ -165,6 +147,8 @@ final class PlatformMatcher
     }
 
     /**
+     * A regex runs under `@`, so a bad pattern reads as a failed match rather than a PHP warning.
+     *
      * @param  array<string, mixed>  $spec
      */
     private function contains(array $spec, ProjectContext $context): bool
@@ -174,6 +158,22 @@ final class PlatformMatcher
             throw new ManifestException("'contains' needs a non-empty 'pattern'");
         }
 
+        $haystack = self::haystack($spec, $context);
+
+        if (! is_string($haystack) || $haystack === '') {
+            return false;
+        }
+
+        if (($spec['regex'] ?? false) === true) {
+            return @preg_match('/'.str_replace('/', '\\/', $pattern).'/', $haystack) === 1;
+        }
+
+        return str_contains($haystack, $pattern);
+    }
+
+    /** @param  array<string, mixed>  $spec */
+    private static function haystack(array $spec, ProjectContext $context): ?string
+    {
         $haystack = null;
         if (isset($spec['path']) && is_string($spec['path'])) {
             $haystack = $context->contents($spec['path']);
@@ -183,16 +183,7 @@ final class PlatformMatcher
             throw new ManifestException("'contains' needs a 'path' or a 'glob'");
         }
 
-        if (! is_string($haystack) || $haystack === '') {
-            return false;
-        }
-
-        if (($spec['regex'] ?? false) === true) {
-            // `@` so a bad pattern reads as a failed match, not a PHP warning.
-            return @preg_match('/'.str_replace('/', '\\/', $pattern).'/', $haystack) === 1;
-        }
-
-        return str_contains($haystack, $pattern);
+        return $haystack;
     }
 
     private function probe(string $id, ProjectContext $context): bool

@@ -5,18 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use App\Lib\Deploy\AccountHomeRead;
 
 /**
- * Build tools a Rust project's build scripts call that `rust:1-bookworm` lacks.
- *
- * A host compile runs as the account and cannot apt-get, so these have to be
- * in the image before cargo starts. Read from what the project commits:
- *
- *   Cargo.lock  prost-build / tonic-build  -> protoc (+ the well-known .proto files)
- *               cmake (aws-lc-sys, ...)    -> cmake
- *               bindgen / clang-sys        -> libclang
- *   .cargo/config[.toml]  -fuse-ld=mold|lld, linker = "clang" -> that linker
- *
- * A lockfile names every platform's dependencies, so this can over-install;
- * a package too many costs image size once per host, one too few fails the build.
+ * Build tools a Rust project's build scripts call that `rust:1-bookworm` lacks, read from Cargo.lock
+ * and .cargo/config; a host compile cannot apt-get, and a package too many beats a failed build.
  */
 final class RustBuildTools
 {
@@ -45,12 +35,8 @@ final class RustBuildTools
         $packages = [];
 
         $lock = AccountHomeRead::contents($dir.'/Cargo.lock');
-        if (is_string($lock) && preg_match_all('/^name\s*=\s*"([A-Za-z0-9_-]+)"/m', $lock, $m) > 0) {
-            foreach (array_unique($m[1]) as $crate) {
-                foreach (self::CRATES[$crate] ?? [] as $package) {
-                    $packages[$package] = true;
-                }
-            }
+        if (is_string($lock)) {
+            $packages = self::withCratePackages($packages, $lock);
         }
 
         foreach (['/.cargo/config.toml', '/.cargo/config'] as $file) {
@@ -58,20 +44,48 @@ final class RustBuildTools
             if (! is_string($config)) {
                 continue;
             }
-            if (preg_match_all('/-fuse-ld=([a-z]+)/', $config, $m) > 0) {
-                foreach ($m[1] as $linker) {
-                    if (isset(self::LINKERS[$linker])) {
-                        $packages[self::LINKERS[$linker]] = true;
-                    }
-                }
-            }
-            if (preg_match('/^\s*linker\s*=\s*"(?:[^"]*\/)?clang(?:\+\+)?"/m', $config) === 1) {
-                $packages['clang'] = true;
-            }
+            $packages = self::withLinkerPackages($packages, $config);
         }
 
         $packages = array_keys($packages);
         sort($packages);
+
+        return $packages;
+    }
+
+    /**
+     * @param  array<string, true>  $packages
+     * @return array<string, true>
+     */
+    private static function withCratePackages(array $packages, string $lock): array
+    {
+        if (preg_match_all('/^name\s*=\s*"([A-Za-z0-9_-]+)"/m', $lock, $m) > 0) {
+            foreach (array_unique($m[1]) as $crate) {
+                foreach (self::CRATES[$crate] ?? [] as $package) {
+                    $packages[$package] = true;
+                }
+            }
+        }
+
+        return $packages;
+    }
+
+    /**
+     * @param  array<string, true>  $packages
+     * @return array<string, true>
+     */
+    private static function withLinkerPackages(array $packages, string $config): array
+    {
+        if (preg_match_all('/-fuse-ld=([a-z]+)/', $config, $m) > 0) {
+            foreach ($m[1] as $linker) {
+                if (isset(self::LINKERS[$linker])) {
+                    $packages[self::LINKERS[$linker]] = true;
+                }
+            }
+        }
+        if (preg_match('/^\s*linker\s*=\s*"(?:[^"]*\/)?clang(?:\+\+)?"/m', $config) === 1) {
+            $packages['clang'] = true;
+        }
 
         return $packages;
     }

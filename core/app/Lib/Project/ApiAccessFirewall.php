@@ -9,18 +9,8 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\TenantEgressGuard;
 
 /**
- * The tenant firewall's list of projects allowed to call the Engine API.
- *
- * The script reads the file instead of being handed the names, so the rule
- * outlives the process that granted it: every apply of the firewall on this
- * host, at boot included, agrees on who may reach :2011. A tenant must not be
- * able to write it, and a half-written one would drop a rule that is in force,
- * so it is root-owned and replaced atomically.
- *
- * An account that has been allowed also carries an egress guard of its own
- * ({@see TenantEgressGuard}), which knows nothing of that
- * host port until it is rewritten here: the account's service re-applies it
- * within seconds, and nobody has to enter the account.
+ * The tenant firewall's file of projects that may call the Engine API: a file so the rule outlives the process that
+ * granted it, root-owned so no tenant can write it, replaced atomically as a half-written one would drop a rule in force.
  */
 class ApiAccessFirewall
 {
@@ -29,10 +19,10 @@ class ApiAccessFirewall
     public function __construct(private ?System $system = null) {}
 
     /**
+     * Each touched account's own {@see TenantEgressGuard} is rewritten to follow its allowance.
+     *
      * @param  list<string>  $projects  the accounts that may reach the API
-     * @param  list<string>  $touched  the accounts whose allowance just changed, whose
-     *                                 own egress guard has to follow it -- an account that lost its
-     *                                 allowance is not in $projects any more
+     * @param  list<string>  $touched  the accounts whose allowance just changed; one that lost it is not in $projects any more
      */
     public function apply(array $projects, array $touched = []): void
     {
@@ -51,9 +41,8 @@ class ApiAccessFirewall
     }
 
     /**
-     * The account's own egress guard, rendered from its allowance as it now
-     * stands. An account without a directory yet is skipped: the create renders the
-     * same file from the same allowance.
+     * The account's own egress guard, rendered from its current allowance. An account without
+     * a directory yet is skipped: the create renders the same file from the same allowance.
      */
     private function rewriteGuard(System $system, string $project): void
     {

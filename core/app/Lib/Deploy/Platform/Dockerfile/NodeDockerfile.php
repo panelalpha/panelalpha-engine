@@ -5,9 +5,7 @@ namespace App\Lib\Deploy\Platform\Dockerfile;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
-/**
- * A JS server: install, build, then hand the process to the entrypoint.
- */
+/** A JS server: install, build, then hand the process to the entrypoint. */
 final class NodeDockerfile implements DockerfileWriter
 {
     private const DEFAULT_PORT = 3000;
@@ -24,12 +22,11 @@ final class NodeDockerfile implements DockerfileWriter
         $this->port = $recipe->port(self::DEFAULT_PORT);
     }
 
+    /** The heap size is a build arg: the install can exhaust the default heap, but it must not reach the runtime image. */
     public function render(): string
     {
         return Template::named('dockerfile/node')->render([
             'image' => $this->image,
-            // A build arg: the install is a Node process too and can exhaust the
-            // default heap, but the number must not survive into the runtime image.
             'heap_env' => EnvironmentLines::buildArgs($this->recipe->nodeHeapBuildArg()),
             'git_install' => GitInstall::command($this->image),
             'install_layer' => $this->installLayer(),

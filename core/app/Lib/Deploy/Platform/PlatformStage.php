@@ -3,21 +3,8 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * Where each deploy stage runs:
- *
- * - `precheck` account shell, before the clone. App config commands only —
- *              nothing has been detected yet, since detection reads the source.
- * - `prepare`  account shell, after the clone, before the build.
- * - `build`    image build. Cacheable by BuildKit, so its cost is per source
- *              change, not per boot.
- * - `install`  first successful deploy of an account, once ever.
- * - `upgrade`  redeploys over an account that already holds data; migrations
- *              belong here.
- * - `start`    every container boot, including restarts and crash loops.
- *
- * INSTALL and UPGRADE are mutually exclusive for a given boot, decided from the
- * account's deploy history and passed in as `PA_DEPLOY_PHASE`. START always
- * runs, after whichever of the two applied.
+ * Where each stage runs: precheck (app config only, as detection reads the source) and prepare in the account shell around the clone;
+ * build in the image, cached per source change; per boot, install (once ever) or upgrade (migrations, over data), then always start.
  */
 final class PlatformStage
 {
@@ -36,9 +23,8 @@ final class PlatformStage
     public const START = 'start';
 
     /**
-     * Env var the generated entrypoint reads to learn which of INSTALL or
-     * UPGRADE applies to this boot. Written into the compose file by the
-     * engine, which knows whether this account has deployed successfully.
+     * Env var telling the generated entrypoint whether INSTALL or UPGRADE applies to this boot, written into the compose file by
+     * the engine, which knows whether this account has deployed successfully.
      */
     public const PHASE_ENV = 'PA_DEPLOY_PHASE';
 
@@ -90,11 +76,8 @@ final class PlatformStage
     }
 
     /**
-     * The phase an account is in, given whether it has ever deployed.
-     *
-     * A partial deploy still created the schema and counts as deployed: INSTALL
-     * again would seed a database that already has rows. So does an account
-     * whose later redeploy failed ($deployedBefore).
+     * The phase an account is in, given whether it has ever deployed. A partial deploy created the schema and counts, as INSTALL
+     * again would seed a database that has rows; so does an account whose later redeploy failed ($deployedBefore).
      */
     public static function phaseFor(?string $deploymentStatus, bool $deployedBefore = false): string
     {

@@ -5,15 +5,8 @@ namespace App\Lib\Deploy\Platform;
 use App\Support\JobBudget;
 
 /**
- * The commands one deploy was told to run, per stage: the request's `stages`
- * field. A stage named here replaces that stage outright, in the order given;
- * `[]` runs nothing in it. An absent stage keeps the platform's defaults, so
- * `{"upgrade": []}` and omitting `upgrade` mean opposite things. Nothing is
- * stored — a deploy that sends no plan gets the defaults.
- *
- * Two things the request cannot remove, because only the engine knows them:
- * the commands it prepends to a stage (waiting for the account's MySQL sidecar
- * before a migration), and whether this boot is `install` or `upgrade`.
+ * The request's `stages`: a named stage is replaced outright (`[]` runs nothing), an absent one keeps
+ * the defaults. The engine's prepended commands and the install/upgrade choice cannot be removed.
  */
 final class DeployPlan
 {
@@ -50,18 +43,26 @@ final class DeployPlan
 
         $stages = [];
         foreach ($raw as $stage => $commands) {
-            $stage = is_string($stage) ? strtolower(trim($stage)) : '';
-            if (! PlatformStage::isValid($stage)) {
-                throw new ManifestException(
-                    "stages: '{$stage}' is not a stage; expected one of "
-                    .implode(', ', PlatformStage::ALL)
-                );
-            }
+            $stage = self::stageName($stage);
 
             $stages[$stage] = self::readStage($stage, $commands);
         }
 
         return $stages === [] ? null : new self($stages);
+    }
+
+    /** @throws ManifestException */
+    private static function stageName(int|string $stage): string
+    {
+        $stage = is_string($stage) ? strtolower(trim($stage)) : '';
+        if (! PlatformStage::isValid($stage)) {
+            throw new ManifestException(
+                "stages: '{$stage}' is not a stage; expected one of "
+                .implode(', ', PlatformStage::ALL)
+            );
+        }
+
+        return $stage;
     }
 
     /**
@@ -171,9 +172,8 @@ final class DeployPlan
     }
 
     /**
-     * Did the request speak for this stage at all? Not
-     * `commandsFor($stage) !== []`: a stage the request emptied and one it
-     * never mentioned return the same list and mean opposite things.
+     * Did the request speak for this stage at all? Not `commandsFor($stage) !== []`: an emptied
+     * stage and an unmentioned one return the same list and mean opposite things.
      */
     public function definesStage(string $stage): bool
     {
@@ -202,11 +202,8 @@ final class DeployPlan
     }
 
     /**
-     * Rewrite the decision's `install_command` / `build_command` for a build
-     * stage that runs as `RUN` layers, not from the entrypoint.
-     *
-     * `role` decides which string a command lands in — `dependencies` above the
-     * source copy so BuildKit can cache it, `assets` below.
+     * Rewrite the decision's `install_command` / `build_command` for a build stage run as `RUN` layers:
+     * `dependencies` commands go above the source copy so BuildKit caches them, `assets` below.
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>

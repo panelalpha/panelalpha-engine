@@ -7,11 +7,8 @@ use Closure;
 use RuntimeException;
 
 /**
- * The source site for one job run, shared by every step of that run. The site
- * is found once and stored on the record; a wp-admin session is opened at most
- * once per run, and only where wp-admin is needed. Transfer calls carry the
- * plugin's token ({@see transfer}). While a run is bound ({@see keepAlive}),
- * every source call it makes keeps the run's claim alive.
+ * The source site for one job run, shared by its steps: found once and stored, with one wp-admin session at most, where needed.
+ * While a run is bound ({@see keepAlive}), every source call it makes keeps the run's claim alive.
  */
 final class SourceConnection
 {

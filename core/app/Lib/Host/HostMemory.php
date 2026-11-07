@@ -3,9 +3,8 @@
 namespace App\Lib\Host;
 
 /**
- * The host's memory as the project rules see it, in MB: its RAM and what is
- * kept back for the engine. What is left is the most one project may have,
- * and what a project gets when it is created without a limit.
+ * The host's RAM and what is kept back for the engine, in MB. What is left is the most one project may
+ * have, and what a project created without a limit gets.
  */
 final class HostMemory
 {

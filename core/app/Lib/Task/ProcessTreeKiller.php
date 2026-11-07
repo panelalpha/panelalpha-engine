@@ -16,6 +16,21 @@ class ProcessTreeKiller
         $list = implode(' ', $pids);
         $this->system->runProcess("kill -TERM {$list} 2>/dev/null; true");
 
+        $alive = $this->survivorsOfTerm($pids);
+
+        if (! empty($alive)) {
+            $this->system->runProcess('kill -KILL '.implode(' ', $alive).' 2>/dev/null; true');
+        }
+    }
+
+    /**
+     * The pids still alive once they have had five seconds to exit.
+     *
+     * @param  array<int>  $pids
+     * @return array<int>
+     */
+    private function survivorsOfTerm(array $pids): array
+    {
         $deadline = microtime(true) + 5;
         $alive = $pids;
         while (! empty($alive) && microtime(true) < $deadline) {
@@ -31,9 +46,7 @@ class ProcessTreeKiller
             }
         }
 
-        if (! empty($alive)) {
-            $this->system->runProcess('kill -KILL '.implode(' ', $alive).' 2>/dev/null; true');
-        }
+        return $alive;
     }
 
     /**

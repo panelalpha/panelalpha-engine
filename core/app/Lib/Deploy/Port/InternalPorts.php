@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Port;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
- * Ports that belong to a datastore and must never be proxied as the
- * application's own. Overlapping ranges (7000/7001 Cassandra, 8086 InfluxDB)
- * go to the image check instead.
+ * Ports that belong to a datastore and must never be proxied as the app's own. Overlapping ranges
+ * (7000/7001 Cassandra, 8086 InfluxDB) go to the image check instead.
  */
 final class InternalPorts
 {
@@ -36,9 +35,8 @@ final class InternalPorts
     ];
 
     /**
-     * Ports that are neither a datastore nor a web server, and so can never be
-     * the front door of a site: Gitea's `EXPOSE 22 3000` publishes SSH as the
-     * website, and the probe answers `Received HTTP/0.9 when not allowed`.
+     * Ports that can never be a site's front door: SSH, mail, DNS, epmd (bound before the app's own), BitTorrent.
+     * 9000 is left out: php-fpm's FastCGI, but also MinIO's, Portainer's and SonarQube's real HTTP port.
      *
      * @var array<int, string>
      */
@@ -52,34 +50,14 @@ final class InternalPorts
         110 => 'POP3',
         995 => 'POP3S',
         53 => 'DNS',
-        // Unprivileged mail ports a dev or test mail server binds. Mailpit's
-        // `EXPOSE 1025/tcp 1110/tcp 8025/tcp` (SMTP, POP3, web UI) otherwise
-        // makes its mail listener the first non-datastore port.
         1025 => 'SMTP (unprivileged)',
         2525 => 'SMTP (unprivileged)',
         1110 => 'POP3 (unprivileged)',
         1143 => 'IMAP (unprivileged)',
-        // Every Erlang/Elixir release starts epmd, and epmd binds 4369 the
-        // instant the VM comes up -- before the app has migrated, and so
-        // before it has bound its own port. TeslaMate's deploy was realigned
-        // onto it and answered `Empty reply from server` permanently, because
-        // epmd speaks the Erlang port-mapper protocol and nothing else. It is
-        // never a front door under any configuration.
         4369 => 'Erlang port mapper (epmd)',
-        // The conventional unprivileged SSH port, and the same mistake as 22
-        // above one digit further out: an image that publishes it alongside
-        // its web port offers the proxy a shell instead of a site.
         2222 => 'SSH (unprivileged)',
-        // A torrent client's peer port: rapidbay's `EXPOSE 6881` came before
-        // its web UI's 5000.
         6881 => 'BitTorrent',
     ];
-
-    // Deliberately absent: 9000. It is php-fpm's FastCGI socket, which is how
-    // a PHP stack's front door gets mistaken for the app -- but it is equally
-    // MinIO's, Portainer's and SonarQube's *real* HTTP port. Listing it would
-    // cost more sites than it saves, which is the same trade the 7000/8086
-    // overlap is left out for.
 
     public static function isKnown(int $port): bool
     {
@@ -87,10 +65,8 @@ final class InternalPorts
     }
 
     /**
-     * What listens on a port, for a report that has to say why a port was
-     * turned down rather than just leave it out. The two lists are kept apart
-     * because they mean different things: a datastore port is filtered out of
-     * detection, a non-web one is only ever unfit to be a front door.
+     * What listens on a datastore port, for a report that must say why a port was turned down; a datastore
+     * port is filtered out of detection, while a non-web one is only unfit as a front door.
      */
     public static function datastoreOn(int $port): ?string
     {
@@ -112,9 +88,8 @@ final class InternalPorts
     }
 
     /**
-     * Whether a binding on this service should be filtered out: the host or
-     * container port is known, or the image is a datastore whose port was
-     * remapped.
+     * Whether a binding on this service is filtered out: its host or container port is known, or the image
+     * is a datastore whose port was remapped.
      *
      * @param  array<string, mixed>  $service
      */
@@ -126,9 +101,8 @@ final class InternalPorts
     }
 
     /**
-     * Delegates to SidecarEngine::isKnownDatastore(), the single place that
-     * knows what a datastore looks like. Only a recognised datastore counts:
-     * filtering the application's own port would leave the site unreachable.
+     * Whether SidecarEngine::isKnownDatastore() recognises the service; only a recognised datastore counts,
+     * since filtering the app's own port would leave the site unreachable.
      *
      * @param  array<string, mixed>  $service
      */

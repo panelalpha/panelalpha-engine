@@ -8,10 +8,8 @@ use App\Lib\Deploy\Platform\Dockerfile\GitHistoryUse;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Writes `<Dockerfile>.dockerignore` for every image the engine builds from
- * the checkout, so the engine's files and `.git` stay out of the context.
- * {@see BuildContextIgnore}. For a repository Dockerfile it runs after the
- * environment is applied ({@see DockerfileStrategy::keepEngineFilesOutOfContext()}).
+ * Writes `<Dockerfile>.dockerignore` ({@see BuildContextIgnore}) for every image built from the checkout, so the
+ * engine's files and `.git` stay out of the context; after the environment for a repository Dockerfile.
  */
 class BuildContextIgnoreWriter
 {
@@ -63,15 +61,13 @@ class BuildContextIgnoreWriter
     }
 
     /**
-     * A repository Dockerfile only: its ignore file is written once the
-     * environment is applied, so `.env` holds what the build will see.
-     * {@see BuildContextIgnore::excludesEnv()}.
+     * {@see BuildContextIgnore::excludesEnv()} for a repository Dockerfile, once `.env` holds what the build sees.
+     * The file is checked for first because readIn() reads an empty file as null, the same as a missing one.
      */
     private function emptyEnvIsUnread(string $projectDir, string $dockerfile): bool
     {
         $tree = $this->dind->projectTree();
         $envPath = rtrim($projectDir, '/').'/.env';
-        // readIn() reads an empty file as null, the same as a missing one.
         $env = $this->dind->system()->filesystem()->fileExists($envPath) ? ($tree->read($envPath) ?? '') : null;
 
         return BuildContextIgnore::excludesEnv($env, $tree->readIn($projectDir, $dockerfile));

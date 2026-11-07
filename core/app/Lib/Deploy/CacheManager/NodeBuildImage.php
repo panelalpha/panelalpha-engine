@@ -3,39 +3,32 @@
 namespace App\Lib\Deploy\CacheManager;
 
 /**
- * A host build image with Node copied in: the recipe's own toolchain image
- * (gradle, maven) plus node, npm, npx, corepack, yarn 1 and pnpm from a Node image.
- *
- * For a JVM build that shells out to npm. It runs in a single `docker run` of
- * the toolchain image on the host, which has no Dockerfile to add Node to, so
- * the host builds this once and every such build borrows it. Only the build
- * uses it; the container still runs the stock image.
- *
- * The tag carries a fingerprint of the Dockerfile, so a different toolchain
- * or Node image never gets served an image built from another pair.
+ * A toolchain image (gradle, maven) with node, npm, corepack, yarn 1 and pnpm copied in, for a host build that
+ * shells out to npm: its single `docker run` has no Dockerfile to add Node to. The app still runs the stock image.
  */
 final class NodeBuildImage
 {
+    use FingerprintedTag;
+
     public const REPOSITORY = 'panelalpha/build-node';
 
-    /** Null when either reference is not one we would put in a Dockerfile. */
+    /**
+     * Null when either reference is not one we would put in a Dockerfile; the Dockerfile fingerprint in the tag
+     * keeps another toolchain and Node pair's image from being served.
+     */
     public static function tag(string $image, string $nodeImage): ?string
     {
         $dockerfile = self::dockerfile($image, $nodeImage);
         if ($dockerfile === null) {
             return null;
         }
-        $slug = trim((string) preg_replace('/[^a-z0-9._-]+/', '-', strtolower(trim($image))), '-.');
 
-        return self::REPOSITORY.':'.substr($slug, 0, 80).'-pa'.substr(sha1($dockerfile), 0, 8);
+        return self::fingerprintedTag($image, $dockerfile);
     }
 
     /**
-     * The official Node images keep node and its tools in these three
-     * directories. The RUN fails this image, not the deploy's build, when the
-     * copied node cannot start on the toolchain image's libc. pnpm ships only
-     * as a corepack shim, which the node-gradle plugin's PnpmTask needs on
-     * PATH (halo); a Node without corepack (25+) just goes without it.
+     * Copies the three directories the official Node images keep node in; the RUN fails this image, not the build,
+     * when node cannot start on the toolchain's libc. corepack (not in 25+) puts pnpm on PATH for node-gradle.
      */
     public static function dockerfile(string $image, string $nodeImage): ?string
     {

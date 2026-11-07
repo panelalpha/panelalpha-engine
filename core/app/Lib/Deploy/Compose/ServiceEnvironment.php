@@ -36,15 +36,13 @@ final class ServiceEnvironment
     }
 
     /**
-     * Compose's list form has integer keys and its map form string keys;
-     * sniffing a value for an `=` misreads both a map whose value contains one
-     * and a list entry like `- POSTGRES_PASSWORD`.
+     * By key type, since an `=` in a value proves nothing (`- POSTGRES_PASSWORD`). Empty is neither:
+     * callers merge defaults into it as a map.
      *
      * @param  array<mixed>  $environment
      */
     public static function isList(array $environment): bool
     {
-        // Empty is neither; callers merge defaults as a map.
         return $environment !== [] && array_is_list($environment);
     }
 

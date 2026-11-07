@@ -105,6 +105,35 @@ class SidecarCredentialsTest extends TestCase
         ], $env);
     }
 
+    public function test_env_for_sidecar_is_empty_when_no_prefix_can_be_named(): void
+    {
+        $this->assertSame([], SidecarCredentials::envForSidecar('9', ['image' => 'ghcr.io/acme/2:1']));
+    }
+
+    public function test_env_for_sidecar_carries_a_literal_requirepass_into_the_url(): void
+    {
+        $env = SidecarCredentials::envForSidecar('cache', [
+            'image' => 'redis:7-alpine',
+            'command' => ['redis-server', '--requirepass', '"s3cret"'],
+        ]);
+
+        $this->assertSame('redis://:s3cret@cache:6379/0', $env['REDIS_URL']);
+    }
+
+    public function test_env_for_sidecar_names_the_prefix_most_variables_share(): void
+    {
+        $env = SidecarCredentials::envForSidecar('search', [
+            'image' => 'ghcr.io/acme/search:1',
+            'environment' => ['MEILI_ENV' => 'production', 'MEILI_NO_ANALYTICS' => '${NO_ANALYTICS:-true}', 'TZ' => 'UTC'],
+        ]);
+
+        $this->assertSame([
+            'MEILI_HOST' => 'search',
+            'MEILI_ENV' => 'production',
+            'MEILI_NO_ANALYTICS' => 'true',
+        ], $env);
+    }
+
     public function test_pin_sidecar_credentials_resolves_unset_compose_defaults_for_init_variables(): void
     {
         $service = [

@@ -8,11 +8,8 @@ use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 
 /**
- * The engine's IPv4 a source site sends an import's transfer to, whatever the
- * destination name's DNS says: the public address the NAT map gives the default
- * IPv4, as DNS gets it. A source on the internet cannot reach a private one, so
- * such an import is refused before anything is installed on the source; with
- * EGRESS_ALLOW_PRIVATE the source may share the engine's private network.
+ * The engine's IPv4 a source sends the transfer to whatever DNS says: the public address the NAT map gives the default IPv4.
+ * A source on the internet cannot reach a private one, so that is refused up front unless EGRESS_ALLOW_PRIVATE allows it.
  */
 final class TransferAddress
 {

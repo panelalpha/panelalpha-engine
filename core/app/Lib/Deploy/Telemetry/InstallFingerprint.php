@@ -3,26 +3,8 @@
 namespace App\Lib\Deploy\Telemetry;
 
 /**
- * A stable, non-reversible identity for one engine installation.
- *
- * There is no account to log in to and no key to carry: the id is derived from
- * facts about the machine the engine runs on — the Docker daemon's own id, the
- * CPU, the amount of RAM, the host name and the public IP. None of those facts
- * ever leave the box; only the hash does, and a hash of a handful of host facts
- * cannot be turned back into them.
- *
- * Once derived, the id is *pinned* to a file under /opt/panelalpha, and the
- * pinned value always wins. That matters more than it looks: a machine that
- * gets a new IP, more RAM or a rebuilt Docker daemon is still the same
- * installation, and an id that changed underneath it would split that
- * installation's failure history in two and quietly double-count every
- * recurring problem. Derivation is how the id is *born*, not how it is kept.
- *
- * The pin file is deliberately outside the core container's own storage: it
- * sits on the host bind mount, so it survives an image rebuild, an engine
- * update, and `docker compose down -v`.
- *
- * The derivation itself is pure — {@see derive()} is unit-testable.
+ * A stable, non-reversible id for one installation, hashed from host facts that never leave the box. Pinned on the
+ * host bind mount once derived, and the pin always wins: a new IP or more RAM is still the same installation.
  */
 class InstallFingerprint
 {
@@ -50,7 +32,8 @@ class InstallFingerprint
     ];
 
     /**
-     * Hash the machine facts into an id.
+     * Hash the machine facts into an id; '' when every one is missing, as every install that fails to probe
+     * would otherwise share one hash and merge into one phantom installation.
      *
      * @param  array<string, mixed>  $facts
      */
@@ -62,9 +45,6 @@ class InstallFingerprint
             $material[] = is_scalar($value) ? trim((string) $value) : '';
         }
 
-        // Refuse to mint an id out of nothing: if every anchor is missing we
-        // would hand the same hash to every install that ever fails to probe,
-        // and they would all merge into one phantom installation.
         if (trim(implode('', $material)) === '') {
             return '';
         }

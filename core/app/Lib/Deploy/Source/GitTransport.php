@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * The transports a git command the engine runs may use.
- *
- * One policy, so the clone, the probe and every submodule fetch cannot drift:
- * `GIT_ALLOW_PROTOCOL` is git's own form of `protocol.allow`, read by the
- * process and inherited by the child git a submodule clone starts.
+ * The transports a git command the engine runs may use, as one `GIT_ALLOW_PROTOCOL` policy that the clone,
+ * the probe and every child git a submodule clone starts all inherit.
  */
 final class GitTransport
 {

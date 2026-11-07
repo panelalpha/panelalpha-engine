@@ -8,15 +8,8 @@ use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * Production Dockerfile for a Ruby app that ships none of its own.
- *
- * A Dockerfile the author wrote stays authoritative, exactly as it does over
- * railpack, so this is what a bare `rails new` gets rather than a replacement
- * for one somebody maintains. Gems are bundled in the Ruby stage and the
- * frontend in a Node one, so nothing boots Rails until the container starts.
- *
- * Named panelalpha.Dockerfile so the next detect pass still sees Rails, not a
- * user-owned Dockerfile.
+ * Production Dockerfile for a Ruby app that ships none of its own, gems bundled in a Ruby stage and
+ * the frontend in a Node one; named panelalpha.Dockerfile so the next detect pass still sees Rails.
  */
 final class RubyDockerfile
 {
@@ -46,6 +39,10 @@ final class RubyDockerfile
         return (new self(RubyApp::at($projectDir, $files), $port, $baseImage))->render();
     }
 
+    /**
+     * With `js_bundling` the precompile skips the Node stage's jsbundling/cssbundling output, through
+     * SKIP_*_BUILD and, for older gems that lack that switch, no-op yarn/npm/pnpm/bun shims.
+     */
     public function render(): string
     {
         return Template::named('dockerfile/ruby')->render([
@@ -63,16 +60,8 @@ final class RubyDockerfile
     }
 
     /**
-     * Production Rails serves only precompiled Sprockets/Propshaft assets, so
-     * without this every asset tag raises AssetNotFound. SECRET_KEY_BASE_DUMMY
-     * (Rails 7.1+) or a throwaway SECRET_KEY_BASE (older) boots the app
-     * without the real key; a failure does not fail the build,
-     * since some apps cannot boot without their database.
-     *
-     * jsbundling/cssbundling hook `javascript:build`/`css:build` into the
-     * precompile, and the app stage has no Node: their output comes from the
-     * Node stage, so the precompile skips them (SKIP_*_BUILD, and no-op
-     * package manager shims for gem versions older than that switch).
+     * Production Rails serves only precompiled assets, else every asset tag raises AssetNotFound; a failed
+     * precompile does not fail the build, as some apps cannot boot without their database.
      */
     private function precompilesAssets(): bool
     {
@@ -88,8 +77,8 @@ final class RubyDockerfile
     }
 
     /**
-     * A host-built base already carries the apt packages, so the account's
-     * build starts at `bundle install`.
+     * A host-built base already carries the apt packages, so the account's build starts at
+     * `bundle install`.
      */
     private function baseImage(): string
     {

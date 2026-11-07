@@ -8,11 +8,8 @@ use App\Models\TaskLog;
 use Illuminate\Support\Carbon;
 
 /**
- * Batched tee from DeployLogger frames into task_logs.
- *
- * Invokable so it plugs into {@see DeployLogger::streamTo()}.
- * Only `type === line` frames are persisted — stage changes already produce a
- * separate "Starting stage: …" line frame.
+ * Batched tee from DeployLogger frames into task_logs, invokable for {@see DeployLogger::streamTo()}.
+ * Only `line` frames are kept: a stage change already produces its own "Starting stage: …" line.
  */
 final class TaskLogSink
 {
@@ -35,12 +32,7 @@ final class TaskLogSink
             return;
         }
 
-        $payload = json_encode([
-            'ts' => (int) ($frame['ts'] ?? time()),
-            'stage' => $frame['stage'] ?? null,
-            'level' => (string) ($frame['level'] ?? 'info'),
-            'msg' => (string) ($frame['msg'] ?? ''),
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $payload = self::payload($frame);
 
         if ($payload === false || $payload === '') {
             return;
@@ -55,6 +47,19 @@ final class TaskLogSink
         if (count($this->buffer) >= self::BATCH_SIZE) {
             $this->flush();
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $frame
+     */
+    private static function payload(array $frame): string|false
+    {
+        return json_encode([
+            'ts' => (int) ($frame['ts'] ?? time()),
+            'stage' => $frame['stage'] ?? null,
+            'level' => (string) ($frame['level'] ?? 'info'),
+            'msg' => (string) ($frame['msg'] ?? ''),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     public function flush(): void

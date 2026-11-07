@@ -6,23 +6,14 @@ use App\System;
 use RuntimeException;
 
 /**
- * The key the engine signs its ACME requests with, and the one thing in this
- * feature that must survive everything else.
- *
- * The account key *is* the ACME account: rate limits, issued certificates and
- * pending authorizations all hang off it. Generating a new one on each request
- * would register a new account each time and re-spend the "new account" and
- * "new order" allowances from zero, so it is created once and kept — beside
- * the engine's own certificate material, not in the database, at 0600.
- *
- * EC P-384 rather than RSA: smaller, faster to sign with, and accepted by
- * every ACME v2 authority. Nothing reads this key but the ACME client.
+ * The key the engine signs ACME requests with, made once and kept at 0600 beside its certificates, not in the database:
+ * it is the account, so a new one per request would re-spend the "new account" and "new order" limits from zero.
  */
 final class AcmeAccountKey
 {
     /**
-     * openssl's own short name, not the NIST one: `openssl_pkey_new()` reads
-     * this straight from `openssl_get_curve_names()` and rejects "P-384".
+     * EC P-384, smaller and faster than RSA and accepted by every ACME v2 authority, by openssl's short name:
+     * `openssl_pkey_new()` reads it from `openssl_get_curve_names()` and rejects "P-384".
      */
     private const CURVE = 'secp384r1';
 

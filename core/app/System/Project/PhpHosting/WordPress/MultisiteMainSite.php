@@ -3,16 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * The main site of a classic WordPress multisite (MULTISITE in wp-config.php)
- * moved to another host. WordPress finds the network and its main site by the
- * request's host in {prefix}site and {prefix}blogs, and network URLs come from
- * the siteurl row of {prefix}sitemeta, so a copy that keeps the source's host
- * there redirects to the source or answers "site not found". Every network
- * and site on the main site's host moves with it, which in a subdirectory
- * network is every site; subsites on hosts of their own keep them. The
- * tables change through `wp db query`, which reads
- * wp-config.php without loading WordPress, so it runs whatever host WordPress
- * would boot on.
+ * Moves a classic multisite's main site and every network and site on its host in the tables WordPress finds them by, or
+ * a copy redirects to the source or answers "site not found". `wp db query` edits them without booting WordPress on any host.
  */
 final class MultisiteMainSite
 {
@@ -52,9 +44,8 @@ final class MultisiteMainSite
     }
 
     /**
-     * The network tables first, then DOMAIN_CURRENT_SITE (a bare host, no
-     * scheme), so the next WP-CLI run boots on the new host with tables that
-     * agree with it.
+     * The network tables first, then DOMAIN_CURRENT_SITE (a bare host, no scheme),
+     * so the next WP-CLI run boots on the new host with tables that agree with it.
      */
     public function pointAt(WordPress $wordPress, string $host): void
     {

@@ -5,12 +5,8 @@ namespace App\Lib\Net;
 use InvalidArgumentException;
 
 /**
- * A URL the engine must not fetch: a scheme it does not speak, or a host that
- * resolves to an address outside the egress policy.
- *
- * Extends InvalidArgumentException so the guard's existing callers and tests
- * keep catching it, and carries the field a validation boundary should report
- * the problem under.
+ * A URL the engine must not fetch (a scheme it does not speak, or an address outside the egress policy), with
+ * the field to report it under. An InvalidArgumentException so the guard's existing callers keep catching it.
  */
 final class EgressRefusedException extends InvalidArgumentException
 {

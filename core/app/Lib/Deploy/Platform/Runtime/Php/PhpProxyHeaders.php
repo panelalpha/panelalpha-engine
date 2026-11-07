@@ -5,22 +5,16 @@ namespace App\Lib\Deploy\Platform\Runtime\Php;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
- * What Apache cannot work out for itself: that the request arrived over https.
- *
- * TLS terminates at the engine's proxy, so the app container sees plain HTTP.
- * Prepended to every request, this restores the scheme from the forwarded
- * headers, or from the container environment when a request carries none.
- * Installed through auto_prepend_file: Apache resolves paths itself.
+ * Restores the https scheme, which TLS termination at the proxy hides from Apache, from the
+ * forwarded headers or the container environment; prepended to every request.
  */
 final class PhpProxyHeaders
 {
     public const FILENAME = 'panelalpha-proxy.php';
 
     /**
-     * Where the script lives in the shared base image.
-     *
-     * Not /app: that is the customer's own bind-mounted directory, which they
-     * can delete over SFTP and a redeploy wipes.
+     * Where the script lives in the shared base image; not /app, the customer's bind-mounted
+     * directory, which they can delete over SFTP and a redeploy wipes.
      */
     public const IMAGE_DIR = '/usr/local/lib/panelalpha';
 

@@ -3,21 +3,18 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 /**
- * Applications served the way PHP already is: our stock image, the account's
- * directory built on the host and bind-mounted at /app, nothing in an image.
- * The mount is read-write because Next.js writes `.next/cache` at runtime.
+ * Applications served like PHP: our stock image with the host-built account directory bind-mounted
+ * read-write at /app (Next.js writes `.next/cache` at runtime), nothing in an image.
  */
 final class HostRunProject
 {
     /**
-     * The build leaves its output in the project and the start command runs from
-     * the mounted directory. `nuxt`/`tanstack-start` stay on StandaloneNodeServe,
-     * nginx recipes host-compile to static files, own-Dockerfile repos build.
+     * Build output stays in the mounted project; go, rust and java only need the resolved image, which
+     * AppLauncher and ImageSeeding provide. Ruby stays off: the Rack fixture pins 3.1.3 against 3.2-3.4.
      *
      * @var list<string>
      */
     public const STRATEGIES = [
-        // Node: output stays in the project; start is the package.json script.
         'nextjs',
         'nestjs',
         'astro',
@@ -25,46 +22,35 @@ final class HostRunProject
         'fastify',
         'remix',
         'sveltekit',
-        // Python: the recipe builds a .venv in the project and starts through
-        // it, since pip targets the image's site-packages.
         'python',
         'django',
-        // Go, Rust and Java compile into the project (./app,
-        // ./target/release/app, target/*.jar) and only need the resolved image
-        // provided, which AppLauncher and ImageSeeding do.
         'go',
         'java',
         'java-gradle',
-        // Rust: `cargo build --release` writes into the project too.
         'rust',
-        // Ruby is wired (BUNDLE_PATH puts gems in ~/project/vendor/bundle) but
-        // unmeasured: the Rack fixture pins ruby "3.1.3" against a supported
-        // set of 3.2-3.4. Adding 'ruby' here turns it on.
     ];
 
     /** Strategies whose interpreter is chosen from a lockfile. */
     private const NODE_STRATEGIES = ['nextjs', 'nestjs', 'astro', 'express', 'fastify', 'remix', 'sveltekit'];
 
     /**
-     * The host compile picks its container image from the lockfile for these
-     * (a tree installed by bun and imported by node fails) and from the
-     * recipe's own `image` for everything else.
+     * The host compile picks its image from the lockfile for these, since a tree installed by bun
+     * and imported by node fails, and from the recipe's own `image` otherwise.
      */
     public static function isNode(?string $strategy): bool
     {
         return $strategy !== null && in_array($strategy, self::NODE_STRATEGIES, true);
     }
 
+    /** nuxt and tanstack-start are left out: they stay on {@see StandaloneNodeServe}. */
     public static function isStrategy(?string $strategy): bool
     {
         return $strategy !== null && in_array($strategy, self::STRATEGIES, true);
     }
 
     /**
-     * Shell prefix that gives the run container the package manager the host
-     * build provisioned. pnpm and Yarn 2+ exist there only through corepack,
-     * and the run image is plain Node, so `pnpm start` exited 127. Empty for
-     * npm, Yarn 1 (shipped in the image) and every non-Node strategy.
+     * Shell prefix giving the plain-Node run container the corepack pnpm or Yarn 2+ the host build
+     * provisioned; empty for npm, Yarn 1 and every non-Node strategy.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -87,9 +73,8 @@ final class HostRunProject
     }
 
     /**
-     * The recipe's start command: the manifest resolves `{{js.start:…}}`
-     * against the project's `package.json` scripts, else the framework's own
-     * default.
+     * The recipe's start command, `{{js.start:…}}` resolved against the project's `package.json`
+     * scripts, else the framework's own default.
      *
      * @param  array<string, mixed>  $decision
      */

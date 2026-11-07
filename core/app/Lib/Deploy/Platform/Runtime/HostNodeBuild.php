@@ -6,8 +6,7 @@ use App\Lib\Deploy\ProjectCache;
 use App\Lib\Deploy\SafeName;
 
 /**
- * Compiling an account's JS project on the host: which interpreter, which
- * install and build lines, and how node_modules is reused between deploys.
+ * Compiling an account's JS project on the host: interpreter, install and build lines, node_modules reuse.
  * Engine-neutral; the container belongs to HostBuilder::nodeBuildArgv().
  */
 class HostNodeBuild
@@ -35,16 +34,15 @@ class HostNodeBuild
         return $command;
     }
 
+    /** Never frozen: lockfiles from older Bun fail on oven/bun:1. */
     public static function bunInstallCommand(string $original): string
     {
-        // Frozen lockfiles from older Bun fail on oven/bun:1.
         return JsPackageManager::withCiInstallEnv('bun install');
     }
 
     /**
-     * Interpreter an on-host compile runs under: the lockfile's own. A tree
-     * installed by one interpreter and imported by another fails on packages
-     * only the first can resolve, and bun's git-hook strip step hangs.
+     * The lockfile's own interpreter for an on-host compile: a tree another one installed fails on packages
+     * only the first resolves, and bun's git-hook strip step hangs.
      */
     public static function compilerImage(string $install, string $nodeImage, string $packageManager = ''): string
     {
@@ -56,9 +54,8 @@ class HostNodeBuild
     }
 
     /**
-     * Interpreter the standalone Node runtime must use. A stock Node process
-     * importing a bun-installed tree fails on bun-only packages
-     * (`drizzle-orm/bun-sql` → `bun`).
+     * Interpreter the standalone Node runtime must use: stock Node importing a bun-installed tree fails on
+     * bun-only packages (`drizzle-orm/bun-sql` → `bun`).
      */
     public static function runtimeImage(string $packageManager, string $nodeImage): string
     {
@@ -66,9 +63,8 @@ class HostNodeBuild
     }
 
     /**
-     * Rewrite a recipe build command so it runs under bun: the bun image has no
-     * npm, npx, pnpm, yarn or corepack, so a `pnpm run build` left alone cannot
-     * resolve. Commands calling a binary directly (`PATH=… astro build`) stay.
+     * A recipe build command rewritten for bun, whose image has no npm, npx, pnpm, yarn or corepack.
+     * Commands calling a binary directly (`PATH=… astro build`) stay.
      */
     public static function bunBuildCommand(string $build): string
     {
@@ -81,9 +77,8 @@ class HostNodeBuild
     }
 
     /**
-     * Install command for the Node retry after a Bun compile failed: `bun
-     * install` cannot run in the Node image (`sh: 1: bun: not found`), and
-     * bun.lock is not an npm lockfile, so `npm install`, not ci.
+     * The install for the Node retry after a Bun compile failed: the Node image has no bun, and bun.lock
+     * is not an npm lockfile, so `npm install`, not ci.
      */
     public static function nodeInstallCommand(string $original): string
     {
@@ -115,9 +110,9 @@ class HostNodeBuild
         return preg_match('/^bunx?\s/', $command) === 1;
     }
 
+    /** Keeps a leading `FOO=bar ` prefix; a bare `bun build` is a script name with no run keyword. */
     private static function nodeSegment(string $segment): string
     {
-        // Keep the leading `FOO=bar ` prefix; only the command changes.
         $trimmed = trim($segment);
         $body = self::stripLeadingEnvAssignments($trimmed);
         $prefix = substr($trimmed, 0, strlen($trimmed) - strlen($body));
@@ -125,7 +120,6 @@ class HostNodeBuild
         $patterns = [
             '/^bun\s+run\s+/' => 'npm run ',
             '/^bunx\s+/' => 'npx ',
-            // `bun build`: script name with no run keyword.
             '/^bun\s+(?!add\b|install\b|run\b|x\b)/' => 'npm run ',
         ];
         foreach ($patterns as $pattern => $replacement) {
@@ -139,12 +133,12 @@ class HostNodeBuild
         return $segment;
     }
 
+    /** `yarn build` and `npm start` are script names with no run keyword. */
     private static function bunSegment(string $segment): string
     {
         $patterns = [
             '/^(?:npm|pnpm|yarn)\s+run\s+/' => 'bun run ',
             '/^(?:npx|pnpm\s+dlx|yarn\s+dlx)\s+/' => 'bunx ',
-            // `yarn build` / `npm start`: script name with no run keyword.
             '/^(?:npm|pnpm|yarn)\s+(?!add\b|ci\b|dlx\b|exec\b|install\b)/' => 'bun run ',
         ];
         foreach ($patterns as $pattern => $replacement) {
@@ -159,10 +153,8 @@ class HostNodeBuild
     }
 
     /**
-     * Split an install command into the provisioning part (`corepack enable`,
-     * `npm install -g bun`) and the install itself: provisioning must run even
-     * on a node_modules cache hit, or the package manager is off PATH on later
-     * deploys. The leading `HUSKY=0 …` env belongs to the install, not to it.
+     * An install split into provisioning (`corepack enable`), which must run even on a cache hit, and the
+     * install itself, which keeps the leading `HUSKY=0 …` env.
      *
      * @return array{0: string, 1: string} provisioning, install
      */
@@ -191,9 +183,8 @@ class HostNodeBuild
     public const PROVISIONED_PATH = '/tmp/corepack-bin:/tmp/corepack-npm/bin';
 
     /**
-     * An install command's provisioning part (corepack, a pinned pnpm),
-     * rewritten to run as the account: it cannot write npm's global prefix or
-     * /usr/local/bin, so both go under /tmp, on PROVISIONED_PATH.
+     * An install's provisioning part rewritten to run as the account, which cannot write npm's global prefix
+     * or /usr/local/bin: both go under /tmp, on PROVISIONED_PATH.
      */
     public static function provisioning(string $install): string
     {
@@ -210,9 +201,8 @@ class HostNodeBuild
     }
 
     /**
-     * The script for a non-JavaScript host compile: the recipe's own install
-     * and build, nothing else. innerScript()'s corepack, git-hook and lockfile
-     * copying fails here on `cp: can't stat '/app/package-lock.json'`.
+     * A non-JavaScript host compile: the recipe's install and build only, since innerScript()'s lockfile
+     * copying fails there on `cp: can't stat '/app/package-lock.json'`.
      */
     public static function plainScript(string $install, string $build): string
     {
@@ -222,8 +212,7 @@ class HostNodeBuild
     }
 
     /**
-     * @param  string  $dir  where the application sits in the build container:
-     *                       /app, or /app/<app_root> for an application in a subtree
+     * @param  string  $dir  the application in the build container: /app, or /app/<app_root>
      */
     public static function innerScript(string $install, string $build, string $dir = '/app'): string
     {
@@ -239,32 +228,42 @@ class HostNodeBuild
             $parts[] = $prepare;
         }
         if ($install !== '') {
-            // /app is a bind mount of the repo, so only the git-hook tools are
-            // stripped -- they cannot run without a .git.
-            $strip = str_contains($install, 'bun ')
-                ? JsPackageManager::dockerfileStripGitHookScriptsCommand('bun', sourcePresent: true)
-                : JsPackageManager::dockerfileStripGitHookScriptsCommand('npm', sourcePresent: true);
-            $parts[] = 'if [ -f '.$dir.'/package.json ]; then '.$strip.'; fi';
-            $parts[] = 'if [ -f '.$dir.'/node_modules/.pa-lock ] && { '
-                .'cmp -s '.$dir.'/package-lock.json '.$dir.'/node_modules/.pa-lock '
-                .'|| cmp -s '.$dir.'/pnpm-lock.yaml '.$dir.'/node_modules/.pa-lock '
-                .'|| cmp -s '.$dir.'/yarn.lock '.$dir.'/node_modules/.pa-lock '
-                .'|| cmp -s '.$dir.'/bun.lock '.$dir.'/node_modules/.pa-lock; '
-                .'}; then echo "node_modules cache hit"; '
-                // Only a lockfile that exists is copied: a `cp` chain printed
-                // `cp: cannot stat '/app/package-lock.json'` on every pnpm
-                // build, and a failed build's last lines are what gets
-                // reported as its cause (dub, Teable).
-                .'else '.$install.' && { '
-                .'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
-                .'if [ -f "'.$dir.'/$f" ]; then cp "'.$dir.'/$f" '.$dir.'/node_modules/.pa-lock; break; fi; '
-                .'done; true; }; fi';
+            $parts[] = self::stripGitHooksStep($install, $dir);
+            $parts[] = self::cachedInstallStep($install, $dir);
         }
         if ($build !== '') {
             $parts[] = $build;
         }
 
         return implode(' && ', $parts);
+    }
+
+    /** /app is a bind mount of the repo, so only the git-hook tools are stripped: they cannot run without a .git. */
+    private static function stripGitHooksStep(string $install, string $dir): string
+    {
+        $strip = str_contains($install, 'bun ')
+            ? JsPackageManager::dockerfileStripGitHookScriptsCommand('bun', sourcePresent: true)
+            : JsPackageManager::dockerfileStripGitHookScriptsCommand('npm', sourcePresent: true);
+
+        return 'if [ -f '.$dir.'/package.json ]; then '.$strip.'; fi';
+    }
+
+    /**
+     * The install, skipped while node_modules/.pa-lock matches a lockfile. Only an existing lockfile is copied:
+     * a failing `cp` printed `cannot stat` last on every pnpm build, which reads as the cause of a failure.
+     */
+    private static function cachedInstallStep(string $install, string $dir): string
+    {
+        return 'if [ -f '.$dir.'/node_modules/.pa-lock ] && { '
+            .'cmp -s '.$dir.'/package-lock.json '.$dir.'/node_modules/.pa-lock '
+            .'|| cmp -s '.$dir.'/pnpm-lock.yaml '.$dir.'/node_modules/.pa-lock '
+            .'|| cmp -s '.$dir.'/yarn.lock '.$dir.'/node_modules/.pa-lock '
+            .'|| cmp -s '.$dir.'/bun.lock '.$dir.'/node_modules/.pa-lock; '
+            .'}; then echo "node_modules cache hit"; '
+            .'else '.$install.' && { '
+            .'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
+            .'if [ -f "'.$dir.'/$f" ]; then cp "'.$dir.'/$f" '.$dir.'/node_modules/.pa-lock; break; fi; '
+            .'done; true; }; fi';
     }
 
     public static function isSafeProjectDir(string $dir): bool

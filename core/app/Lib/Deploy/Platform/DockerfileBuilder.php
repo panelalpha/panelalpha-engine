@@ -9,15 +9,12 @@ use App\Lib\Deploy\Platform\Dockerfile\NodeDockerfile;
 use App\Lib\Deploy\Platform\Dockerfile\StaticSiteDockerfile;
 
 /**
- * Picks the writer for a manifest's `runtime` and lets it fill in its stub.
- *
- * Named panelalpha.Dockerfile so the next detect pass still sees the platform
- * rather than mistaking this for a Dockerfile the customer wrote.
- *
- * No Laravel dependencies — unit-testable.
+ * Picks the writer for a manifest's `runtime` and lets it fill in its stub. No Laravel dependencies:
+ * unit-testable.
  */
 final class DockerfileBuilder
 {
+    /** Not `Dockerfile`, so the next detect pass does not take it for one the customer wrote. */
     public const FILENAME = 'panelalpha.Dockerfile';
 
     /** @var array<string, class-string<DockerfileWriter>> */

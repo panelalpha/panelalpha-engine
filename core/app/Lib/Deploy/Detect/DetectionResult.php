@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Detect;
 
 /**
- * The shape every detection answer has.
- *
- * The pipeline reads these keys by name across a process boundary, so a
- * platform that says nothing about `output_directory` still has to produce
- * the key — a missing one and a null one are the same answer, and only one
- * of them survives a `json_encode`.
+ * The shape every detection answer has. Every key is present, null included: the pipeline reads them by
+ * name across a process boundary, and a missing key does not survive `json_encode` as a null one does.
  */
 final class DetectionResult
 {

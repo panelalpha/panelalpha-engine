@@ -5,15 +5,8 @@ namespace App\System;
 use App\System;
 
 /**
- * Every path the engine derives from its two roots.
- *
- * Pulled out of {@see System} because it is the half of that class with no
- * I/O in it at all, and because it is the half 44 test files were subclassing
- * System to get at.
- *
- * System still owns the two roots and stays the overridable seam: it builds one
- * of these from its own accessors, so a subclass that redefines a root still
- * changes every path derived from it.
+ * Every path the engine derives from its two roots, with no I/O. {@see System} owns the roots and builds one of
+ * these from its own accessors, so a subclass that redefines a root still changes every path derived from it.
  */
 final class EnginePaths
 {

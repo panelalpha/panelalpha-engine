@@ -8,10 +8,8 @@ use App\System\Project\PhpHosting\WordPress\Migration\MigrationStep;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceConnection;
 
 /**
- * First step: find the source WordPress (wp_admin logs in, manual_plugin finds
- * the plugin and checks its token) and store its home, login URL and REST
- * mode, before anything is created on the destination. A domain left to the
- * source then follows that home.
+ * First step: find the source WordPress and store its home, login URL and REST mode before anything is created on the
+ * destination. A domain left to the source then follows that home.
  */
 final class ResolveSourceStep implements MigrationStep
 {

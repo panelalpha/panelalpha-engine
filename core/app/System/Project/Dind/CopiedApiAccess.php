@@ -8,13 +8,8 @@ use App\Lib\Project\ApiAccess;
 use App\System\Project\Dind as DindProject;
 
 /**
- * The Engine API address, token and certificate a staging, clone or push
- * brought over from another project, in the run file and in
- * `.env.panelalpha` beside it.
- *
- * They are the other project's, so the copy would hold that project's token.
- * Both files get the values this project's own allowance gives it instead,
- * which are none for a project that is not allowed.
+ * The Engine API address, token and certificate a staging, clone or push copied in the run file and `.env.panelalpha`:
+ * both get this project's own values instead of the source's token, or none when the project is not allowed.
  */
 final class CopiedApiAccess
 {
