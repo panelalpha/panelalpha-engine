@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\LowercasesInput;
+use App\Lib\Domains\HttpsPortsChange;
 use App\Rules\RedirectUrl;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -29,6 +30,10 @@ class DomainUpdateRequest extends FormRequest
             'force_https_redirect' => 'sometimes|boolean',
             'aliases' => 'array|nullable',
             'aliases.*' => 'string|nullable',
+            'main' => 'sometimes|accepted',
+            'https_ports' => 'sometimes|array|list|min:1|max:'.HttpsPortsChange::MAX_PORTS,
+            'https_ports.*' => 'integer|between:1,65535|distinct',
+            'https_port' => 'sometimes|integer|between:1,65535',
         ];
     }
 

@@ -2,17 +2,15 @@
 
 namespace App\System\Services\Webserver;
 
+use App\Lib\Domains\HttpsPorts;
 use App\Models\ProxyRule;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Whether a proxy rule may listen on its port.
- *
- * sites-http runs on the host's network, so a rule's port is a host port. One
- * that something else already binds makes a reload keep the old config
- * (`still could not bind()`), and the next sites-http restart exit at bind,
- * taking every site on the host down with it.
+ * Whether a proxy rule may listen on its port: sites-http runs on the host's network, so a port something else
+ * binds keeps the old config on reload and stops the next sites-http restart, and every site, at bind.
  */
 final class ProxyListenPort
 {
@@ -24,7 +22,10 @@ final class ProxyListenPort
 
     public function __construct(private System $system) {}
 
-    /** Why a rule may not listen there, or null when it may. */
+    /**
+     * Why a rule may not listen there, or null when it may. http {} and stream {} cannot share a socket;
+     * rules of one kind share nginx's listener.
+     */
     public function refusal(string $transport, string $listenIp, int $port): ?string
     {
         if (in_array($port, self::WEBSERVER, true)) {
@@ -32,6 +33,10 @@ final class ProxyListenPort
         }
         if (in_array($port, self::RESERVED, true)) {
             return "Port {$port} is reserved by the engine.";
+        }
+        $httpsNames = $transport === 'udp' ? [] : HttpsPorts::namesOn($port);
+        if ($httpsNames !== []) {
+            return "Port {$port} carries HTTPS for {$httpsNames[0]}.";
         }
 
         $protocol = $transport === 'udp' ? 'udp' : 'tcp';
@@ -44,7 +49,6 @@ final class ProxyListenPort
             ->get()
             ->all();
         foreach ($rules as $rule) {
-            // http {} and stream {} cannot share a socket; rules of one kind share nginx's listener.
             if (($rule->transport === 'http') !== ($transport === 'http')) {
                 return "Port {$port} is already used by proxy rule {$rule->id} ({$rule->transport}).";
             }
@@ -59,9 +63,8 @@ final class ProxyListenPort
     }
 
     /**
-     * Why a stored, disabled rule may not be switched on: it takes its port again,
-     * an http rule its name on that port and a tcp/udp rule its address, where
-     * nginx serves one rule.
+     * Why a stored, disabled rule may not be switched on: it takes its port again, an http rule its name on that
+     * port and a tcp/udp rule its address, where nginx serves one rule.
      */
     public function switchOnRefusal(ProxyRule $rule): ?string
     {
@@ -73,10 +76,10 @@ final class ProxyListenPort
     }
 
     /** A check that cannot run never refuses a rule. */
-    private function boundOnHost(string $protocol, string $listenIp, int $port): bool
+    public function boundOnHost(string $protocol, string $listenIp, int $port): bool
     {
         try {
-            $listing = $this->system->execOnHost(['ss', '-Hln', $protocol === 'udp' ? '-u' : '-t']);
+            $listing = $this->system->execOnHost(Privileged::network()->listeningSockets($protocol === 'udp' ? 'udp' : 'tcp'));
         } catch (\Throwable $e) {
             Log::warning('Could not list the host\'s listening sockets for a proxy rule: '.$e->getMessage());
 
@@ -93,7 +96,7 @@ final class ProxyListenPort
     }
 
     /**
-     * Local address and port of each socket in `ss -Hln -t|-u` output.
+     * Local address and port of each socket in `ss -Hln -t|-u` output: State Recv-Q Send-Q Local:Port Peer:Port.
      *
      * @return list<array{string, int}>
      */
@@ -101,7 +104,6 @@ final class ProxyListenPort
     {
         $sockets = [];
         foreach (preg_split('/\R/', $listing) ?: [] as $line) {
-            // State Recv-Q Send-Q Local:Port Peer:Port
             $fields = preg_split('/\s+/', trim($line)) ?: [];
             if (count($fields) < 4 || ! preg_match('/^(.*):(\d+)$/', $fields[3], $m)) {
                 continue;

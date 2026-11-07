@@ -1,0 +1,2083 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Argument of an invalid type Illuminate\\Routing\\RouteCollectionInterface supplied for foreach, only iterables are supported\.$#'
+			identifier: foreach.nonIterable
+			count: 1
+			path: app/Auth/ApiSurface.php
+
+		-
+			message: '#^Call to function method_exists\(\) with App\\Models\\Admin\|App\\Models\\User and ''currentAccessToken'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Auth/RequestToken.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Auth/TokenAbilities.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Auth/TokenAbilities.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Http\\Request\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Auth/TokenAbilities.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:createToken\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Auth/TokenRotation.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>expires_at" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Auth/TokenRotation.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Api/ApiTokensCreateCommand.php
+
+		-
+			message: '#^Call to function is_scalar\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Api/ApiTokensDeleteCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Console/Commands/Api/McpTokensCreateCommand.php
+
+		-
+			message: '#^Result of && is always false\.$#'
+			identifier: booleanAnd.alwaysFalse
+			count: 1
+			path: app/Console/Commands/Api/McpTokensCreateCommand.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:map\(\) expects callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: array\{id\: int\<0, max\>, name\: string, kind\: string, commands\: string, last_used_at\: ''never''\|Carbon\\Carbon, expires_at\: ''never''\|Carbon\\Carbon, revoked_at\: ''\-''\|Carbon\\Carbon, created_at\: Carbon\\Carbon\|null\}, Closure\(App\\Models\\PersonalAccessToken\)\: array\{id\: int\<0, max\>, name\: string, kind\: string, commands\: string, last_used_at\: ''never''\|Carbon\\Carbon, expires_at\: ''never''\|Carbon\\Carbon, revoked_at\: ''\-''\|Carbon\\Carbon, created_at\: Carbon\\Carbon\|null\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Commands/Api/McpTokensListCommand.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Support\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:filter\(\) expects \(callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: bool\)\|null, Closure\(App\\Models\\PersonalAccessToken\)\: bool given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Commands/Api/McpTokensListCommand.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 3
+			path: app/Console/Commands/Backup/Container/DeleteCommand.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$user\.$#'
+			identifier: property.notFound
+			count: 1
+			path: app/Console/Commands/Backup/Container/DeleteCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Backup/Container/DeleteCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Backup/Container/ShowCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Backup/Container/TestCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Backup/Container/UpdateCommand.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: app/Console/Commands/Backup/Project/ListCommand.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Console/Commands/Backup/Project/ListCommand.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>keep_last" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Console/Commands/Backup/Project/ScheduleCommand.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 2
+			path: app/Console/Commands/Backup/Project/ShowCommand.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: app/Console/Commands/Backup/Project/ShowCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-empty\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Console/Commands/Concerns/MintsTokens.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between non\-empty\-string and false will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Console/Commands/Concerns/MintsTokens.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<int, string\|null\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Domains/DomainsCreate.php
+
+		-
+			message: '#^Match expression does not handle remaining value\: string$#'
+			identifier: match.unhandled
+			count: 1
+			path: app/Console/Commands/Domains/DomainsCreate.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>domain" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Console/Commands/Domains/DomainsDeleteTunnel.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,Illuminate\\Database\\Eloquent\\Model\>\:\:map\(\) expects callable\(Illuminate\\Database\\Eloquent\\Model, int\)\: non\-falsy\-string, Closure\(App\\Models\\Tunnel\)\: non\-falsy\-string given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Commands/Domains/DomainsList.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<int, string\|null\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Domains/DomainsSetProxy.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>username" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Console/Commands/Domains/DomainsShow.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<int, string\|null\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Domains/DomainsUnsetProxy.php
+
+		-
+			message: '#^Call to function assert\(\) with true will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: app/Console/Commands/Domains/WpCli.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<int, string\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Domains/WpCli.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Console/Commands/Domains/WpCli.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitBranchesCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitChangeBranchCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitCommitsCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitConnectCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitDeployHookCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitDeployKeyCommand.php
+
+		-
+			message: '#^Command "git\:deploy\-key" does not have option "path"\.$#'
+			identifier: larastan.console.undefinedOption
+			count: 1
+			path: app/Console/Commands/Git/GitDeployKeyCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitDisconnectCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitPullCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitPushCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitRevertCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitStatusCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Foundation\\Http\\FormRequest\:\:rules\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Console/Commands/Git/GitUpdateCredentialsCommand.php
+
+		-
+			message: '#^Called ''Model\:\:make\(\)'' which performs unnecessary work, use ''new Model\(\)''\.$#'
+			identifier: larastan.noModelMake
+			count: 1
+			path: app/Console/Commands/Projects/ProjectStagingCommand.php
+
+		-
+			message: '#^Offset ''self_signed'' on array\{status\: string, self_signed\: bool, days_remaining\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Console/Commands/Ssl/ProjectCertRenew.php
+
+		-
+			message: '#^Command "system\:image\:refresh" does not have option "build\-arg"\.$#'
+			identifier: larastan.console.undefinedOption
+			count: 1
+			path: app/Console/Commands/System/ImageRefreshCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/System/PrewarmImages.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$runtimes$#'
+			identifier: parameter.notFound
+			count: 1
+			path: app/Console/Commands/System/PrewarmImages.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/System/ProxyRuleDeleteCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: app/Console/Commands/System/ProxyRuleUpdateCommand.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/System/ProxyRuleUpdateCommand.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 1
+			path: app/Console/Commands/System/PruneHttpAcmeChallenges.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 2
+			path: app/Console/Commands/System/PruneMetrics.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Testing/Coverage.php
+
+		-
+			message: '#^Empty array passed to foreach\.$#'
+			identifier: foreach.emptyArray
+			count: 1
+			path: app/Console/Commands/Testing/Coverage.php
+
+		-
+			message: '#^Parameter \#1 \$report of method SebastianBergmann\\CodeCoverage\\Report\\Html\\Facade\:\:process\(\) expects SebastianBergmann\\CodeCoverage\\Node\\Directory, SebastianBergmann\\CodeCoverage\\CodeCoverage given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Commands/Testing/Coverage.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between mixed and \*NEVER\* will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Console/Commands/Testing/Coverage.php
+
+		-
+			message: '#^Command "project\:bandwidth" does not have argument "domain"\.$#'
+			identifier: larastan.console.undefinedArgument
+			count: 1
+			path: app/Console/Commands/Usage/UsageCommand.php
+
+		-
+			message: '#^Command "project\:usage" does not have argument "domain"\.$#'
+			identifier: larastan.console.undefinedArgument
+			count: 1
+			path: app/Console/Commands/Usage/UsageCommand.php
+
+		-
+			message: '#^Call to function assert\(\) with true will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Users/Attach.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Console/Commands/Users/Attach.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: app/Console/Commands/Vault/VaultSecretListCommand.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Console/Commands/Vault/VaultSecretListCommand.php
+
+		-
+			message: '#^Method App\\Console\\Wizard\\Sections\\ApiAccessSection\:\:askScope\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Console/Wizard/Sections/ApiAccessSection.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:map\(\) expects callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: int\<0, max\>, Closure\(App\\Models\\PersonalAccessToken\)\: int\<0, max\> given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Wizard/Sections/McpTokensSection.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Support\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:filter\(\) expects \(callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: bool\)\|null, Closure\(App\\Models\\PersonalAccessToken\)\: bool given\.$#'
+			identifier: argument.type
+			count: 2
+			path: app/Console/Wizard/Sections/McpTokensSection.php
+
+		-
+			message: '#^Method App\\Console\\Wizard\\TokenManager\:\:tokens\(\) should return array\<int, App\\Models\\PersonalAccessToken\> but returns array\<int, Laravel\\Sanctum\\PersonalAccessToken\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Console/Wizard/TokenManager.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Support\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:filter\(\) expects \(callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: bool\)\|null, Closure\(App\\Models\\PersonalAccessToken\)\: bool given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Console/Wizard/TokenManager.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between class\-string\<Illuminate\\Database\\Eloquent\\Model\> and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Exceptions/Handler.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between non\-falsy\-string and '''' will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Exceptions/Handler.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<array\{field\: string, code\: string, message\: string, \.\.\.\}\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Exceptions/ProblemException.php
+
+		-
+			message: '#^Parameter \#1 \$token of method App\\Http\\Controllers\\McpTokenController\:\:formatToken\(\) expects App\\Models\\PersonalAccessToken, Laravel\\Sanctum\\PersonalAccessToken given\.$#'
+			identifier: argument.type
+			count: 2
+			path: app/Http/Controllers/McpTokenController.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Http/Controllers/SecretVaultController.php
+
+		-
+			message: '#^Call to function array_key_exists\(\) with ''shared_zone_issuance'' and array\{issuer\?\: string\|null, sites_base_domain\?\: string\|null, acme_directory_url\?\: string\|null, acme_email\?\: string\|null\} will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 1
+			path: app/Http/Controllers/SystemController.php
+
+		-
+			message: '#^Method App\\Http\\Controllers\\TaskController\:\:since\(\) never returns int so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Http/Controllers/TaskController.php
+
+		-
+			message: '#^Call to function method_exists\(\) with App\\Models\\Admin\|App\\Models\\User and ''currentAccessToken'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Http/Controllers/TokenController.php
+
+		-
+			message: '#^Match expression does not handle remaining value\: string$#'
+			identifier: match.unhandled
+			count: 1
+			path: app/Http/Controllers/User/DomainController.php
+
+		-
+			message: '#^Dead catch \- App\\System\\Project\\Git\\Exception is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: app/Http/Controllers/User/GitController.php
+
+		-
+			message: '#^Offset ''enabled'' on array\{transport\: string, listen_ip\?\: string\|null, listen_port\: int, server_name\?\: string\|null, upstream_host\: string, upstream_port\: int, upstream_protocol\?\: string\|null, enabled\: bool, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Http/Controllers/User/ProxyRuleController.php
+
+		-
+			message: '#^Offset ''owner_scope'' on array\{transport\: string, listen_ip\?\: string\|null, listen_port\: int, server_name\?\: string\|null, upstream_host\: string, upstream_port\: int, upstream_protocol\?\: string\|null, enabled\: bool, \.\.\.\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Http/Controllers/User/ProxyRuleController.php
+
+		-
+			message: '#^Offset ''username'' on array\{transport\: string, listen_ip\?\: string\|null, listen_port\: int, server_name\?\: string\|null, upstream_host\: string, upstream_port\: int, upstream_protocol\?\: string\|null, enabled\: bool, \.\.\.\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Http/Controllers/User/ProxyRuleController.php
+
+		-
+			message: '#^Called ''Model\:\:make\(\)'' which performs unnecessary work, use ''new Model\(\)''\.$#'
+			identifier: larastan.noModelMake
+			count: 1
+			path: app/Http/Controllers/User/StagingController.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Http/Controllers/User/Wp/WpCliController.php
+
+		-
+			message: '#^Parameter \#1 \$details of method App\\Models\\User\:\:setDetails\(\) expects array\{mysql_prefix\?\: string, \.\.\.\}, non\-empty\-array\<string, float\|int\|null\> given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Http/Controllers/UserController.php
+
+		-
+			message: '#^Instanceof between Laravel\\Sanctum\\PersonalAccessToken and Laravel\\Sanctum\\PersonalAccessToken will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: app/Http/Middleware/CoverageMiddleware.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 1
+			path: app/Http/Middleware/EnsureSwaggerEnabled.php
+
+		-
+			message: '#^Call to function method_exists\(\) with App\\Models\\Admin\|App\\Models\\User and ''currentAccessToken'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Http/Middleware/LogHubCalls.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<int, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Http/Middleware/McpActivityLogMiddleware.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Http/Middleware/PmaSso.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Http/Requests/BackupRestoreRequest.php
+
+		-
+			message: '#^Method App\\Http\\Requests\\BandwidthSeriesRequest\:\:rules\(\) should return array\<string, string\> but returns array\<string, list\<App\\Rules\\DateRangeSpan\|string\>\|string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Http/Requests/BandwidthSeriesRequest.php
+
+		-
+			message: '#^Call to function method_exists\(\) with App\\Models\\Admin\|App\\Models\\User and ''currentAccessToken'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Http/Requests/McpActivityLogStoreRequest.php
+
+		-
+			message: '#^Method App\\Http\\Requests\\VisitorsBreakdownRequest\:\:rules\(\) should return array\<string, string\> but returns array\<string, list\<App\\Rules\\DateRangeSpan\|string\>\|string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Http/Requests/VisitorsBreakdownRequest.php
+
+		-
+			message: '#^Method App\\Http\\Requests\\VisitorsRangeRequest\:\:rules\(\) should return array\<string, string\> but returns array\<string, list\<App\\Rules\\DateRangeSpan\|string\>\|string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Http/Requests/VisitorsRangeRequest.php
+
+		-
+			message: '#^Cannot cast array\{url\: string, method\?\: string, login_url\?\: string\|null, username\?\: string\|null, password\?\: string\|null, source_token\?\: string\|null, source_ip\?\: string\|null, domain\?\: string\|null, \.\.\.\} to string\.$#'
+			identifier: cast.string
+			count: 1
+			path: app/Http/Requests/WordpressMigrationStoreRequest.php
+
+		-
+			message: '#^PHPDoc tag @var with type App\\Models\\FtpAccount is not subtype of native type \$this\(App\\Http\\Resources\\FtpAccountResource\)\.$#'
+			identifier: varTag.nativeType
+			count: 1
+			path: app/Http/Resources/FtpAccountResource.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: app/Http/Resources/TunnelResource.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Integrations/GeoLocation/DbIp.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{stdout\: string, stderr\: string, exit_code\: int\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Jobs/ApplyEnvVars.php
+
+		-
+			message: '#^Call to function method_exists\(\) with Illuminate\\Contracts\\Queue\\Job and ''uuid'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Jobs/Concerns/AttachTask.php
+
+		-
+			message: '#^Right side of && is always true\.$#'
+			identifier: booleanAnd.rightAlwaysTrue
+			count: 1
+			path: app/Jobs/Concerns/AttachTask.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>warnings" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Jobs/CreateStaging.php
+
+		-
+			message: '#^Parameter \#1 \$backup of method App\\Jobs\\DeleteBackupContainer\:\:deleteBackup\(\) expects App\\Models\\Backup, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Jobs/DeleteBackupContainer.php
+
+		-
+			message: '#^Parameter \#2 \$row of method App\\System\\Services\\Mysql\\DatabaseRenamer\:\:rename\(\) expects App\\Models\\MysqlDatabase, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Jobs/RenameMysqlDatabase.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Offset ''content'' on array\{id\: string, type\: string, name\: string, content\: string, proxied\: bool\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Offset ''name'' on array\{id\: string, type\: string, name\: string, content\: string, proxied\: true\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Offset ''type'' on array\{id\: string, type\: string, name\: string, content\: string, proxied\: bool\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between mixed and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 2
+			path: app/Lib/Apis/Cloudflare.php
+
+		-
+			message: '#^Offset ''body'' on array\{status\: 200, headers\: array\<string, string\>, body\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Lib/Deploy/CacheManager/CacheRegistry.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Lib/Deploy/CacheManager/HostPrewarmPlan.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: app/Lib/Deploy/CacheManager/PhpBaseImage.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/CacheManager/RuntimeBaseImage.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Compose/ComposeInterpolation.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Compose/DeployCompose.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Lib/Deploy/Compose/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''volumes'' on array\{services\: array\<string, mixed\>, volumes\: array\<string, mixed\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Compose/RuntimeSidecars.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Deploy/Compose/RuntimeSidecars.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Compose/ServiceHardener.php
+
+		-
+			message: '#^PHPDoc tag @var for constant App\\Lib\\Deploy\\Compose\\ServiceLimits\:\:UNIT_TO_MB with type array\<string, float\> is not subtype of value array\{k\: 0\.0009765625, m\: 1, g\: 1024, t\: 1048576\}\.$#'
+			identifier: classConstant.phpDocType
+			count: 1
+			path: app/Lib/Deploy/Compose/ServiceLimits.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/DeployLog/DeployLogger.php
+
+		-
+			message: '#^Offset ''msg'' on array\{ts\: int, level\?\: string, msg\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/DeployLog/DeployTimings.php
+
+		-
+			message: '#^Offset ''msg'' on array\{ts\: int, msg\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Lib/Deploy/DeployLog/DeployTimings.php
+
+		-
+			message: '#^Offset ''ts'' on array\{ts\: int, level\?\: string, msg\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/DeployLog/DeployTimings.php
+
+		-
+			message: '#^Offset ''ts'' on array\{ts\: int, msg\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Lib/Deploy/DeployLog/DeployTimings.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between mixed and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 2
+			path: app/Lib/Deploy/DeployLog/DeployTimings.php
+
+		-
+			message: '#^Offset ''message'' on array\{type\: int, message\: string, file\: string, line\: int\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/DeployLog/LogStorage.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: app/Lib/Deploy/Dind/DindAccountCleanup.php
+
+		-
+			message: '#^Offset ''ref'' on array\{id\: string, ref\: string, kind\: string, runtime\: string, prewarm\: int\|null, why\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Dind/DindAccountCleanup.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Dind/DindBuildStorage.php
+
+		-
+			message: '#^Offset 3\|4 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Dind/DindBuildStorage.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Dind/DindImageStore.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/Lib/Deploy/EnvFile.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between string\|false and true will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/EnvFile.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<mixed, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Health/Explainers/NodeStartCommandExplainer.php
+
+		-
+			message: '#^Dead catch \- InvalidArgumentException is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: app/Lib/Deploy/Inspect/AppInspector.php
+
+		-
+			message: '#^Offset ''type'' on array\{path\: string, type\: string, mode\?\: string, size\?\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Inspect/DetectionFiles.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Inspect/Report/ServicesReport.php
+
+		-
+			message: '#^Parameter \#1 \$array \(array\{0\?\: int\<min, \-1\>\|int\<1, max\>\}\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Deploy/Inspect/Report/ServicesReport.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<int\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Deploy/Inspect/Report/ServicesReport.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between non\-empty\-array\<string, list\<App\\Lib\\Deploy\\Platform\\PlatformCommand\>\> and array\{\} will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/Platform/DeployPlan.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>source" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/HostScript.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/ComposerMetadata.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<non\-falsy\-string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/GoMetadata.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/GoMetadata.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/NpmMetadata.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<non\-empty\-string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/PythonMetadata.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/PythonMetadata.php
+
+		-
+			message: '#^Offset 2 on array\{list\<string\>, list\<''"''\|''\\''''\>, list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Metadata/ReadsPackageFiles.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 4
+			path: app/Lib/Deploy/Platform/PlatformManifest.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>run" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/PlatformManifest.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\PlatformMatcher\:\:lastProbeData\(\) should return array\<string, mixed\> but returns list\<string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Lib/Deploy/Platform/PlatformMatcher.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\Probes\\AngularOutputProbe\:\:evaluate\(\) never returns bool so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Probes/AngularOutputProbe.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\Probes\\AstroSsrProbe\:\:evaluate\(\) never returns array\<string, mixed\> so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Probes/AstroSsrProbe.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\Probes\\DotnetProjectProbe\:\:evaluate\(\) never returns array\<string, mixed\> so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Probes/DotnetProjectProbe.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\Probes\\NotAWebAppProbe\:\:evaluate\(\) never returns array\<string, mixed\> so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Probes/NotAWebAppProbe.php
+
+		-
+			message: '#^Method App\\Lib\\Deploy\\Platform\\Probes\\PhpSourcesProbe\:\:evaluate\(\) never returns array\<string, mixed\> so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Probes/PhpSourcesProbe.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/DotnetRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/GoRuntime.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between numeric\-string and '''' will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/JsPackageManager.php
+
+		-
+			message: '#^Offset 1 on list\{0\: non\-falsy\-string, 1\: string, 2\: numeric\-string, 3\?\: string, 4\?\: string, 5\?\: string, 6\?\: ''''\|numeric\-string, 7\?\: ''''\|numeric\-string, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/NodeRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/NodeRuntime.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/Php/PhpExtensions.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/PhpRuntime.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Lib/Deploy/Platform/Runtime/PhpRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/PhpRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/PythonRuntime.php
+
+		-
+			message: '#^Offset 2 on \*NEVER\* on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/Ruby/Gemfile.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between non\-falsy\-string and '''' will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 2
+			path: app/Lib/Deploy/Platform/Runtime/Ruby/Gemfile.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/RubyRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>buildFrom" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Deploy/Platform/Runtime/RustRuntime.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>from" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: app/Lib/Deploy/Platform/Runtime/RustRuntime.php
+
+		-
+			message: '#^Offset ''default_database'' on array\{engine\: string, port\: int\<1, max\>, scheme\: string, driver\: string\|null\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Sidecar/SidecarConnectionEnv.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Sidecar/SidecarDialects.php
+
+		-
+			message: '#^Call to function is_int\(\) with int will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Telemetry/AppFacts.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: app/Lib/Deploy/Telemetry/AppFacts.php
+
+		-
+			message: '#^Instanceof between App\\Lib\\Deploy\\Platform\\Metadata\\AppPackage and App\\Lib\\Deploy\\Platform\\Metadata\\AppPackage will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: app/Lib/Deploy/Telemetry/AppFacts.php
+
+		-
+			message: '#^Result of \|\| is always false\.$#'
+			identifier: booleanOr.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/Telemetry/AppFacts.php
+
+		-
+			message: '#^Offset ''source_bundle'' on array\{id\: string, occurred_at\: int, outcome\: string, tier\: int, install_id\: string, username\: string, latest\: array\<string, mixed\>, details\: array\<string, mixed\>, \.\.\.\} in isset\(\) does not exist\.$#'
+			identifier: isset.offset
+			count: 1
+			path: app/Lib/Deploy/Telemetry/DeployReport.php
+
+		-
+			message: '#^Result of && is always false\.$#'
+			identifier: booleanAnd.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/Telemetry/DeployReport.php
+
+		-
+			message: '#^Offset ''app_probe_urls'' on array\{enabled\: bool, notify_email\: string\|null, server_probe_url\: string\|null, app_probe_urls\: list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Telemetry/NotificationPreferences.php
+
+		-
+			message: '#^Offset ''enabled'' on array\{enabled\: bool, notify_email\: string\|null, server_probe_url\: string\|null, app_probe_urls\: list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Telemetry/NotificationPreferences.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Deploy/Telemetry/NotificationPreferences.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between string and false will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Lib/Deploy/Telemetry/SourceBundle.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Deploy/Telemetry/Spool.php
+
+		-
+			message: '#^Offset ''project'' on array\{title\: string, description\: string, severity\?\: string\|null, area\?\: string\|null, contact\?\: string\|null, project\: string, via\?\: string\|null, attach_log\?\: bool, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Deploy/Telemetry/Telemetry.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Deploy/Telemetry/TelemetryFields.php
+
+		-
+			message: '#^Parameter \#1 \$content of method Illuminate\\Http\\Client\\PendingRequest\<false\>\:\:withBody\(\) expects Psr\\Http\\Message\\StreamInterface\|string, resource given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Lib/Deploy/Telemetry/TelemetryShipper.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$user\.$#'
+			identifier: property.notFound
+			count: 1
+			path: app/Lib/DeployHook/DeliveryRunner.php
+
+		-
+			message: '#^Parameter \#1 \$hook of static method App\\Lib\\DeployHook\\InterruptedDeliveries\:\:settle\(\) expects App\\Models\\DeployHook, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Lib/DeployHook/DeliveryRunner.php
+
+		-
+			message: '#^Parameter \#2 \$hook of method App\\Lib\\DeployHook\\DeliveryRunner\:\:synced\(\) expects App\\Models\\DeployHook, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Lib/DeployHook/DeliveryRunner.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,Illuminate\\Database\\Eloquent\\Model\>\:\:map\(\) expects callable\(Illuminate\\Database\\Eloquent\\Model, int\)\: array\{provider\: string, event\: string\|null, branch\: string\|null, commit\: string\|null, outcome\: string, reason\: string\|null, result\: string\|null, detail\: string\|null, deploy_id\: string\|null, created_at\: string\}, Closure\(App\\Models\\HookDelivery\)\: array\{provider\: string, event\: string\|null, branch\: string\|null, commit\: string\|null, outcome\: string, reason\: string\|null, result\: string\|null, detail\: string\|null, deploy_id\: string\|null, created_at\: string\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Lib/DeployHook/DeployHookActions.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 3
+			path: app/Lib/DeployHook/DeployHookActions.php
+
+		-
+			message: '#^Parameter \#1 \$array \(non\-empty\-list\<App\\Lib\\DeployHook\\RefChange\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/DeployHook/HookEvent.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>deleted" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/DeployHook/HookEvent.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>tag" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/DeployHook/HookEvent.php
+
+		-
+			message: '#^Parameter \#2 \$domain of static method App\\Integrations\\Tunnels\\PanelAlphaConnect\:\:recordPanelAlphaTunnel\(\) expects App\\Models\\Domain, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Lib/Domains/CopyDomain.php
+
+		-
+			message: '#^Called ''Model\:\:make\(\)'' which performs unnecessary work, use ''new Model\(\)''\.$#'
+			identifier: larastan.noModelMake
+			count: 1
+			path: app/Lib/Domains/MainDomainRename.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>domain" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Domains/MainDomainRename.php
+
+		-
+			message: '#^Method App\\Lib\\Domains\\ProjectHostnames\:\:named\(\) should return Illuminate\\Support\\Collection\<int, string\> but returns Illuminate\\Support\\Collection\<int, lowercase\-string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Lib/Domains/ProjectHostnames.php
+
+		-
+			message: '#^Match expression does not handle remaining value\: string$#'
+			identifier: match.unhandled
+			count: 3
+			path: app/Lib/Git/GitActions.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: app/Lib/Helpers/FileStreamWrapper.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 1
+			path: app/Lib/Host/ProjectDisk.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Host/ProjectDisk.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 2
+			path: app/Lib/Host/ProjectStats.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Lib/Host/ProjectStats.php
+
+		-
+			message: '#^If condition is always false\.$#'
+			identifier: if.alwaysFalse
+			count: 1
+			path: app/Lib/Http/BoundedDownload.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Hub/HubCallerAddress.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Mail/SpfCheck.php
+
+		-
+			message: '#^Method App\\Lib\\Project\\AccountFile\:\:ownedRegular\(\) should return array\<string, int\>\|null but returns array\<int\|string, int\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Lib/Project/AccountFile.php
+
+		-
+			message: '#^Offset ''nlink'' on array\{0\: int, 1\: int, 2\: int, 3\: int, 4\: int, 5\: int, 6\: int, 7\: int, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Project/AccountFile.php
+
+		-
+			message: '#^Offset ''uid'' on array\{0\: int, 1\: int, 2\: int, 3\: int, 4\: int, 5\: int, 6\: int, 7\: int, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Project/AccountFile.php
+
+		-
+			message: '#^Method App\\Lib\\Project\\ApiAccess\:\:queueApply\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Lib/Project/ApiAccess.php
+
+		-
+			message: '#^Offset ''covers_domain'' on array\{status\: string, issuer\: string, self_signed\: false, chain_trusted\: bool\|null, covers_domain\: bool, valid_from\: string\|null, expires_at\: string\|null, days_remaining\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Project/ApiAccess.php
+
+		-
+			message: '#^Offset ''self_signed'' on array\{status\: string, issuer\: string, self_signed\: bool, chain_trusted\: bool\|null, covers_domain\: bool, valid_from\: string\|null, expires_at\: string\|null, days_remaining\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Project/ApiAccess.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<array\<string, mixed\>\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 2
+			path: app/Lib/Project/ApiAccess.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Project/ApiAccess.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Project/ApiAccessFirewall.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between Illuminate\\Support\\Carbon and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: app/Lib/Project/BackupRetention.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Project/ClassicAppType.php
+
+		-
+			message: '#^Called ''Model\:\:make\(\)'' which performs unnecessary work, use ''new Model\(\)''\.$#'
+			identifier: larastan.noModelMake
+			count: 2
+			path: app/Lib/Project/ProjectCreator.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Project/ProjectOverview.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Ssl/SslCheck.php
+
+		-
+			message: '#^Offset 0 on array\{list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Lib/Ssl/TrustStore.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Lib/Ssl/TrustStore.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Lib/Task/TaskJobQueue.php
+
+		-
+			message: '#^Using nullsafe property access on non\-nullable type Illuminate\\Http\\Request\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Lib/Task/TaskTrigger.php
+
+		-
+			message: '#^Call to an undefined static method SebastianBergmann\\CodeCoverage\\Data\\RawCodeCoverageData\:\:fromXdebugWithoutPathCoverage\(\)\.$#'
+			identifier: staticMethod.notFound
+			count: 1
+			path: app/Lib/Testing/CoverageRecorder.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Support\\Collection\<int,Illuminate\\Database\\Eloquent\\Model\>\:\:filter\(\) expects \(callable\(Illuminate\\Database\\Eloquent\\Model, int\)\: bool\)\|null, Closure\(App\\Models\\Tunnel\)\: bool given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Models/Domain.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\FtpAccount\:\:\$created_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/FtpAccount.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\FtpAccount\:\:\$updated_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/FtpAccount.php
+
+		-
+			message: '#^PHPDoc tag @method for method App\\Models\\IpAssigned\:\:get\(\) return type contains unknown class App\\Models\\Collection\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/IpAssigned.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\IpAssigned\:\:\$created_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/IpAssigned.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\IpAssigned\:\:\$updated_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/IpAssigned.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Builder\:\:forTokenIds\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Models/McpActivityLog.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Builder\:\:tokenNameContains\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Models/McpActivityLog.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Models/OperatorImage.php
+
+		-
+			message: '#^PHPDoc tag @var above assignment does not specify variable name\.$#'
+			identifier: varTag.noVariable
+			count: 2
+			path: app/Models/Setting.php
+
+		-
+			message: '#^Static property App\\Models\\Setting\:\:\$allSettings \(Illuminate\\Database\\Eloquent\\Collection\<int, static\(App\\Models\\Setting\)\>\|null\) does not accept Illuminate\\Database\\Eloquent\\Collection\<int, App\\Models\\Setting\>\.$#'
+			identifier: assign.propertyType
+			count: 1
+			path: app/Models/Setting.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\SftpAccount\:\:\$created_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/SftpAccount.php
+
+		-
+			message: '#^PHPDoc tag @property for property App\\Models\\SftpAccount\:\:\$updated_at contains unknown class App\\Models\\Carbon\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Models/SftpAccount.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Models/Task.php
+
+		-
+			message: '#^Method App\\Models\\Task\:\:logsPage\(\) should return Illuminate\\Database\\Eloquent\\Collection\<int, App\\Models\\TaskLog\> but returns Illuminate\\Database\\Eloquent\\Collection\<int, Illuminate\\Database\\Eloquent\\Model\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Models/Task.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Http\\Request\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/Models/Task.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:getDocumentRoot\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Called ''Model\:\:make\(\)'' which performs unnecessary work, use ''new Model\(\)''\.$#'
+			identifier: larastan.noModelMake
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Method App\\Models\\User\:\:delete\(\) should return bool\|null but return statement is missing\.$#'
+			identifier: return.missing
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Method App\\Models\\User\:\:mostSpecificDomain\(\) should return App\\Models\\Domain\|null but returns Illuminate\\Database\\Eloquent\\Model\|null\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Parameter \#1 \$details of method App\\Models\\User\:\:setDetails\(\) expects array\{mysql_prefix\?\: string, \.\.\.\}, non\-empty\-array\<string, float\|int\|null\> given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Models/User.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model\:\:expireSecrets\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: app/Models/WordpressMigration.php
+
+		-
+			message: '#^Offset ''code'' on array\{code\: string, message\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Models/WordpressMigration.php
+
+		-
+			message: '#^Offset ''name'' on array\{name\: string, status\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Models/WordpressMigration.php
+
+		-
+			message: '#^Offset ''status'' on array\{name\: string, status\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/Models/WordpressMigration.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between Illuminate\\Support\\Carbon and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Models/WordpressMigration.php
+
+		-
+			message: '#^Call to function is_scalar\(\) with \(int\|string\) will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Rules/EnvVarKeys.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<mixed\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Rules/RuleExpectation.php
+
+		-
+			message: '#^PHPDoc tag @return with type mixed is not subtype of native type array\.$#'
+			identifier: return.phpDocType
+			count: 1
+			path: app/System/Filesystem.php
+
+		-
+			message: '#^PHPDoc tag @var for property App\\System\\Filesystem\:\:\$homeFilesystemInfo with type mixed is not subtype of native type array\|null\.$#'
+			identifier: property.phpDocType
+			count: 1
+			path: app/System/Filesystem.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/System/HostProcess.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: app/System/Project.php
+
+		-
+			message: '#^Parameter \#1 \$record of method App\\System\\Project\:\:backup\(\) expects App\\Models\\Backup, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/System/Project.php
+
+		-
+			message: '#^Offset ''release_failed'' on array\{exit_code\: int\<min, \-1\>\|int\<1, max\>, stdout\: string, stderr\: string\} in empty\(\) does not exist\.$#'
+			identifier: empty.offset
+			count: 1
+			path: app/System/Project/Deployment/DeploymentWorkflow.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type App\\Lib\\Deploy\\DeployLog\\DeployLogger\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 4
+			path: app/System/Project/Deployment/DeploymentWorkflow.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/AppCredentialDelivery.php
+
+		-
+			message: '#^Method App\\System\\Project\\Dind\\AppDatabaseCopy\:\:provisionRecorded\(\) never assigns null to &\$provisioned so it can be removed from the by\-ref type\.$#'
+			identifier: parameterByRef.unusedType
+			count: 1
+			path: app/System/Project/Dind/AppDatabaseCopy.php
+
+		-
+			message: '#^Call to function is_array\(\) with null will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 2
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Offset ''domain'' on array\{healthy\: bool\|null, ports\: list\<array\<string, mixed\>\>, error\?\: string\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Offset ''http_code'' on \*NEVER\* on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Offset ''serving'' on array\{healthy\: bool\|null, ports\: list\<array\<string, mixed\>\>, error\?\: string\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<int\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>checkSkips" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>checks" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/System/Project/Dind/AppHealth.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/AppLauncher.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/AppLauncher.php
+
+		-
+			message: '#^Call to function array_is_list\(\) with list\<string\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/AppManager.php
+
+		-
+			message: '#^Dead catch \- Exception is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: app/System/Project/Dind/AppPortAlignment.php
+
+		-
+			message: '#^Offset ''location'' on array\{code\: int\<300, 399\>, hash\: string, default404\: bool\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppReachability.php
+
+		-
+			message: '#^Offset ''scheme'' on array\{code\: int, hash\: string, default404\: bool\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppReachability.php
+
+		-
+			message: '#^Offset ''scheme'' on array\{verdict\: string, domain\: string\|null, http_code\: int\|null, detail\: string\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppReachability.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/AppReachability.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between '''' and ''https'' will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/System/Project/Dind/AppReachability.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/System/Project/Dind/Generation/CheckoutAside.php
+
+		-
+			message: '#^If condition is always false\.$#'
+			identifier: if.alwaysFalse
+			count: 1
+			path: app/System/Project/Dind/HostCompile.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 5
+			path: app/System/Project/Dind/Inner/ImageSeeding.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<non\-falsy\-string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/ProjectEnvironment.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/ProjectFiles.php
+
+		-
+			message: '#^Call to function is_string\(\) with null will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Method App\\System\\Project\\Dind\\RuntimeSidecars\:\:accountMemoryMb\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''app_aliases'' on array\{services\: array\<string, array\<string, mixed\>\>, volumes\: array\<string, mixed\>, env\: array\<string, string\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''app_env'' on array\{services\: array\{\}, volumes\: array\<string, mixed\>, env\: array\<string, string\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''app_mounts'' on array\{services\: array\<string, array\<string, mixed\>\>, volumes\: array\<string, mixed\>, env\: array\<string, string\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''build_image'' on array\{services\: array\<string, array\<string, mixed\>\>, volumes\: array\<string, mixed\>, env\: array\<string, string\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Offset ''published_secrets'' on array\{services\: non\-empty\-array\<string, array\<string, mixed\>\>, volumes\: array\<string, mixed\>, env\: array\<string, string\>, app_env\: array\<string, string\>\} on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between array\{\} and array\{\} will always evaluate to false\.$#'
+			identifier: notIdentical.alwaysFalse
+			count: 3
+			path: app/System/Project/Dind/RuntimeSidecars.php
+
+		-
+			message: '#^Dead catch \- App\\Exceptions\\DeployCancelledException is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: app/System/Project/Dind/Source/GitRepository.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/Strategy/EntrypointWriter.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Dind/Strategy/RailpackStrategy.php
+
+		-
+			message: '#^Ternary operator condition is always false\.$#'
+			identifier: ternary.alwaysFalse
+			count: 1
+			path: app/System/Project/Dind/Strategy/RailpackStrategy.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: app/System/Project/FileManager.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<array\<string, mixed\>\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/System/Project/FileManager.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/Git/WorkTree.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/System/Project/Php.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/System/Project/PhpHosting/WordPress/AutoUpdate.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/System/Project/PhpHosting/WordPress/Cache.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/ContainerSiteCopy.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 4
+			path: app/System/Project/PhpHosting/WordPress/Core.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Maintenance.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/ApiMigrationProjectCreator.php
+
+		-
+			message: '#^Right side of && is always true\.$#'
+			identifier: booleanAnd.rightAlwaysTrue
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/CurlSourceHttpClient.php
+
+		-
+			message: '#^Offset ''step'' on array\{step\: string, phase_percent\: float\|null, item\: string\|null, message\: string\|null, updated_at\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/MigrationProgress.php
+
+		-
+			message: '#^Method App\\System\\Project\\PhpHosting\\WordPress\\Migration\\MigrationTargetResolver\:\:onlineNameForAnIpSource\(\) never returns string so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/MigrationTargetResolver.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
+
+		-
+			message: '#^Negated boolean expression is always false\.$#'
+			identifier: booleanNot.alwaysFalse
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
+
+		-
+			message: '#^Right side of && is always true\.$#'
+			identifier: booleanAnd.rightAlwaysTrue
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/SourceFetchGuard.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>domain" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Migration/Steps/CreateProjectStep.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Plugins.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/Themes.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/WpCli.php
+
+		-
+			message: '#^Offset ''exit_code'' on array\{exit_code\: int, stdout\: string, stderr\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Project/PhpHosting/WordPress/WpCli.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/System/Project/Settings.php
+
+		-
+			message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+			identifier: larastan.noEnvCallsOutsideOfConfig
+			count: 1
+			path: app/System/Project/SitePasswordProtection.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\{database\: string, name\: string\} will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/System/Projects.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: app/System/Projects.php
+
+		-
+			message: '#^Method App\\System\\Projects\:\:copyDomain\(\) should return App\\Models\\Domain but returns Illuminate\\Database\\Eloquent\\Model\.$#'
+			identifier: return.type
+			count: 1
+			path: app/System/Projects.php
+
+		-
+			message: '#^Offset ''database'' on array\{database\: string, name\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Projects.php
+
+		-
+			message: '#^Offset ''name'' on array\{database\: string, name\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Projects.php
+
+		-
+			message: '#^Offset ''stderr'' on array\{stdout\: string, stderr\: string, exit_code\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/System/Projects.php
+
+		-
+			message: '#^Offset ''stdout'' on array\{stdout\: string, stderr\: string, exit_code\: int\|null\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: app/System/Projects.php
+
+		-
+			message: '#^Result of \|\| is always false\.$#'
+			identifier: booleanOr.alwaysFalse
+			count: 1
+			path: app/System/Projects.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type App\\System\\Project\\Dind\\HeldImage\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 3
+			path: app/System/Projects.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/System/Services/Sftp.php
+
+		-
+			message: '#^Method App\\System\\Services\\Webserver\\Litespeed\:\:importedNode\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/System/Services/Webserver/Litespeed.php
+
+		-
+			message: '#^Offset ''ipv4'' on array\{ipv4\: list\<string\>, ipv6\: list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Services/Webserver/NginxProxy.php
+
+		-
+			message: '#^Offset ''ipv6'' on array\{ipv4\: list\<string\>, ipv6\: list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Services/Webserver/NginxProxy.php
+
+		-
+			message: '#^Offset ''upstream_protocol'' on array\{id\: int, listen_ip\: string, listen_port\: int, server_names\: array\<string\>, upstream_protocol\: string, upstream_host\: string, upstream_port\: int, ssl_enabled\: bool, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Services/Webserver/NginxProxy.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 2
+			path: app/System/Services/Webserver/NginxProxy.php
+
+		-
+			message: '#^Offset ''server_names'' on array\{id\: int, transport\: string, listen_ip\: string, listen_port\: int, server_name\: string, server_names\: array\<string\>, upstream_host\: string, upstream_port\: int, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/System/Services/Webserver/RoutingCompiler.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>domain" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: app/System/Services/Webserver/RoutingCompiler.php
