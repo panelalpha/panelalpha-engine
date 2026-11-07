@@ -7,6 +7,12 @@
     DocumentRoot /home/{{ $user }}{{ $relative_document_root }}
     ErrorLog /opt/panelalpha/shared-hosting/webserver-logs/apache/{{ $domain }}/error.log
     CustomLog /opt/panelalpha/shared-hosting/webserver-logs/apache/{{ $domain }}/access.log combined
+@if (!empty($cookie_isolation_request))
+    {!! $cookie_isolation_request !!}
+@endif
+@if (!empty($cookie_isolation_response))
+    {!! $cookie_isolation_response !!}
+@endif
     RewriteEngine On
 @if (!empty($http_acme_challenges_enabled))
     Alias /.well-known/acme-challenge {{ $http_acme_challenges_dir }}
@@ -40,6 +46,7 @@
     ErrorDocument 502 /{{ $user }}-error-pages/502.html
     ErrorDocument 503 /{{ $user }}-error-pages/503.html
     <FilesMatch "\.php$">
+        CGIPassAuth On
         SetHandler "proxy:fcgi://{{ $user }}:{{ $php_port }}"
     </FilesMatch>
 @if(!empty($suspended))
@@ -72,6 +79,12 @@
     SSLCertificateFile {{ $ssl_cert_file }}
     SSLCertificateKeyFile {{ $ssl_cert_key_file }}
     SSLCertificateChainFile {{ $ssl_cert_ca_file }}
+@if (!empty($cookie_isolation_request))
+    {!! $cookie_isolation_request !!}
+@endif
+@if (!empty($cookie_isolation_response))
+    {!! $cookie_isolation_response !!}
+@endif
     RewriteEngine On
     SetEnvIfExpr "%{QUERY_STRING} =~ /pmassotoken=/" pmapass=1
     SetEnvIfExpr "%{HTTP_COOKIE} =~ /PMASignonSession/" pmapass=1
@@ -96,6 +109,7 @@
     ErrorDocument 502 /{{ $user }}-error-pages/502.html
     ErrorDocument 503 /{{ $user }}-error-pages/503.html
     <FilesMatch "\.php$">
+        CGIPassAuth On
         SetHandler "proxy:fcgi://{{ $user }}:{{ $php_port }}"
     </FilesMatch>
 @if(!empty($suspended))

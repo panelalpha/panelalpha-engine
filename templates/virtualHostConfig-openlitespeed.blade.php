@@ -124,6 +124,9 @@ rewrite  {
   autoLoadHtaccess        1
   logLevel                0
   RewriteEngine On
+@if (!empty($cookie_isolation_rewrite))
+{!! $cookie_isolation_rewrite !!}
+@endif
   RewriteCond %{QUERY_STRING} pmassotoken=
   RewriteRule .* - [E=pmapass:1]
   RewriteCond %{HTTP_COOKIE} PMASignonSession
@@ -132,6 +135,9 @@ rewrite  {
   RewriteRule ^ /phpmyadmin/ [R=301,L]
   RewriteCond %{REQUEST_URI} ^/phpmyadmin/
   RewriteCond %{ENV:pmapass} =1
+@if (!empty($cookie_isolation_proxy_gate))
+{!! $cookie_isolation_proxy_gate !!}
+@endif
   RewriteRule ^/phpmyadmin/(.*)$ http://{{ $user }}-phpmyadmin/$1 [P,L]
 }
 

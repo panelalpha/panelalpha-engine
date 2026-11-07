@@ -1,3 +1,6 @@
+@if (!empty($overlay_http))
+{!! $overlay_http !!}
+@endif
 server {
 @forelse ($ips_v4 as $ip)
     listen {{ $ip }}:80;
@@ -30,6 +33,9 @@ server {
     if ($http_upgrade) {
         set $pa_connection_upgrade upgrade;
     }
+@if (!empty($cookie_isolation_server))
+    {!! $cookie_isolation_server !!}
+@endif
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -44,6 +50,12 @@ server {
         @else
 @if (!empty($site_password_enabled))
             {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+            {!! $overlay_location !!}
+@endif
+@if (!empty($cookie_isolation_location))
+            {!! $cookie_isolation_location !!}
 @endif
             resolver 127.0.0.54 valid=30s;
             proxy_http_version 1.1;
@@ -81,6 +93,9 @@ server {
         return 503;
 @else
         proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_phpmyadmin))
+        {!! $cookie_isolation_phpmyadmin !!}
+@endif
         set $pmapass 0;
         if ($arg_pmassotoken) {
             set $pmapass 1;
@@ -141,6 +156,9 @@ server {
         if ($http_upgrade) {
             set $pa_connection_upgrade upgrade;
         }
+@if (!empty($cookie_isolation_server))
+        {!! $cookie_isolation_server !!}
+@endif
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -153,6 +171,12 @@ server {
             @else
 @if (!empty($site_password_enabled))
                 {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+                {!! $overlay_location !!}
+@endif
+@if (!empty($cookie_isolation_location))
+                {!! $cookie_isolation_location !!}
 @endif
                 resolver 127.0.0.54 valid=30s;
                 proxy_http_version 1.1;
@@ -195,6 +219,9 @@ server {
             return 503;
 @else
             proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_phpmyadmin))
+            {!! $cookie_isolation_phpmyadmin !!}
+@endif
             set $pmapass 0;
             if ($arg_pmassotoken) {
                 set $pmapass 1;

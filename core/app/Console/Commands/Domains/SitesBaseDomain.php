@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Domains;
 
+use App\Lib\Domains\NamingBaseSetting;
 use App\Lib\Helper;
 use App\Lib\Ssl\SharedZones;
 use App\Models\Setting;
@@ -56,7 +57,7 @@ class SitesBaseDomain extends Command
 
         $shared = SharedZones::covers($domain);
 
-        Setting::set(self::SETTING, $domain);
+        NamingBaseSetting::save(self::SETTING, $domain);
         $this->info("New project sites will be named under {$domain}");
 
         if ($shared) {

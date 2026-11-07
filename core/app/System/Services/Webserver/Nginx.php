@@ -4,10 +4,13 @@ namespace App\System\Services\Webserver;
 
 use App\Models\Domain;
 use App\Models\Setting;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Blade;
 
 class Nginx extends AbstractWebserver implements WebserverInterface
 {
+    private const COOKIE_ISOLATION_IMPORT = 'js_import pa_cookie_isolation';
+
     public function getDetails(): array
     {
         return [
@@ -47,7 +50,16 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             ...$this->getSslCertVars(),
         ];
         $conf = Blade::render($confTemplate, $templateVars);
+        $this->writeCookieIsolationScript();
         $this->system->filesystem()->filePutContents($confPath, $conf);
+    }
+
+    private function writeCookieIsolationScript(): void
+    {
+        $source = $this->system->templatesDirPath().'/webserver-config/nginx/njs/cookie-isolation.js';
+        $target = $this->system->engineDirPath().'/webserver-config/nginx/njs/cookie-isolation.js';
+
+        $this->system->filesystem()->filePutContents($target, $this->system->filesystem()->fileGetContents($source));
     }
 
     private function rebuildAppProxyConfig(): void
@@ -55,12 +67,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
         $confPath = $this->system->engineDirPath().'/webserver-config/nginx/vhosts/app-lite.conf';
         $appLiteProxyEnabled = (bool) config('env.APP_LITE_PROXY_ENABLED');
         if (! $appLiteProxyEnabled) {
-            $this->system->runProcess([
-                'sudo',
-                'rm',
-                '-f',
-                $confPath,
-            ]);
+            $this->system->runProcess(Privileged::files()->removeIfExists($confPath));
 
             return;
         }
@@ -77,12 +84,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
         $virtualHost = Blade::render($confTemplate, $templateVars);
         $this->system->filesystem()->filePutContents($confPath, $virtualHost);
 
-        $this->system->exec([
-            'sudo',
-            'mkdir',
-            '-p',
-            $this->system->engineDirPath().'/webserver-logs/nginx/app-lite',
-        ]);
+        $this->system->exec(Privileged::files()->makeDirectories($this->system->engineDirPath().'/webserver-logs/nginx/app-lite'));
     }
 
     /**
@@ -101,16 +103,15 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             || (bool) preg_match('/^\s*listen\s+443\s+ssl(\s+default_server)?\s*;/m', $contents);
     }
 
+    /** A rebind restarts the container from the host: `/etc/init.d/nginx restart` inside it exits PID 1 and loops. */
     public function reload(bool $rebindIpListeners = false): void
     {
         if ($rebindIpListeners) {
-            // Never `/etc/init.d/nginx restart` inside the container: that exits
-            // PID 1 and loops the webserver (see Modsec::restartWebserver).
             $this->system->webserver()->restartWebserverContainerFromHost();
 
             return;
         }
-        $this->exec('/etc/init.d/nginx reload');
+        $this->reloadNginx();
     }
 
     public function restart(): void
@@ -122,6 +123,55 @@ class Nginx extends AbstractWebserver implements WebserverInterface
     {
         $virtualHostTemplate = file_get_contents($this->system->templatesDirPath().'/virtualHost-nginx.blade.php');
 
+        $templateVars = array_merge($this->domainTemplateVars($domain), $this->cookieIsolationTemplateVars($domain));
+        $this->ensureCookieIsolationMainConfig($templateVars);
+        $virtualHost = Blade::render($virtualHostTemplate, $templateVars);
+        $virtualHostPath = $this->system->engineDirPath().'/webserver-config/nginx/vhosts/'.$domain->domain.'.conf';
+        $this->system->filesystem()->filePutContents($virtualHostPath, $virtualHost);
+
+        $this->system->exec(Privileged::files()->makeDirectories($this->system->engineDirPath().'/webserver-logs/nginx/'.$domain->domain));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cookieIsolationTemplateVars(Domain $domain): array
+    {
+        $scope = CookieScope::forDomain($domain, $domain->getUser(), false);
+
+        return [...CookieIsolation::directives($scope), ...NginxCookieIsolation::templateVars($scope)];
+    }
+
+    /**
+     * Renders the main config first, so a vhost never names directives the config it loads does not.
+     *
+     * @param  array<string, mixed>  $templateVars
+     */
+    private function ensureCookieIsolationMainConfig(array $templateVars): void
+    {
+        if (! empty($templateVars['cookie_isolation_shared_parents']) && ! $this->mainConfigImportsCookieIsolation()) {
+            $this->rebuildMainConfig();
+        }
+    }
+
+    private function mainConfigImportsCookieIsolation(): bool
+    {
+        try {
+            $conf = $this->system->filesystem()->fileGetContents($this->system->engineDirPath().'/webserver-config/nginx/nginx.conf');
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return str_contains($conf, self::COOKIE_ISOLATION_IMPORT);
+    }
+
+    /**
+     * TLS only with the .pem and .key nginx loads; a .crt alone is not enough.
+     *
+     * @return array<string, mixed>
+     */
+    private function domainTemplateVars(Domain $domain): array
+    {
         $user = $domain->getUser();
         $ips = $user->getBindIpAddresses();
 
@@ -139,26 +189,26 @@ class Nginx extends AbstractWebserver implements WebserverInterface
             'php_port' => $this->phpPortForVersion($domain->getPhpVersion()),
         ];
         $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
-
-        // The .pem and .key are what nginx loads; a .crt alone passed this before.
         if ($connection->hasServableCertificate()) {
-            $certDir = $project->projectDirPath().'/ssl-certs';
-            $keyFile = "{$certDir}/{$domain->domain}.key";
-            $pemFile = "{$certDir}/{$domain->domain}.pem";
-            $templateVars['ssl_enabled'] = true;
-            $templateVars['ssl_cert_pem_file'] = $pemFile;
-            $templateVars['ssl_cert_key_file'] = $keyFile;
+            $templateVars = $this->withServableCertificate($templateVars, $project->projectDirPath().'/ssl-certs', $domain->domain);
         }
-        $virtualHost = Blade::render($virtualHostTemplate, $templateVars);
-        $virtualHostPath = $this->system->engineDirPath().'/webserver-config/nginx/vhosts/'.$domain->domain.'.conf';
-        $this->system->filesystem()->filePutContents($virtualHostPath, $virtualHost);
 
-        $this->system->exec([
-            'sudo',
-            'mkdir',
-            '-p',
-            $this->system->engineDirPath().'/webserver-logs/nginx/'.$domain->domain,
-        ]);
+        return $templateVars;
+    }
+
+    /**
+     * @param  array<string, mixed>  $templateVars
+     * @return array<string, mixed>
+     */
+    private function withServableCertificate(array $templateVars, string $certDir, string $domainName): array
+    {
+        $keyFile = "{$certDir}/{$domainName}.key";
+        $pemFile = "{$certDir}/{$domainName}.pem";
+        $templateVars['ssl_enabled'] = true;
+        $templateVars['ssl_cert_pem_file'] = $pemFile;
+        $templateVars['ssl_cert_key_file'] = $keyFile;
+
+        return $templateVars;
     }
 
     public function rebuildDomainConfig(Domain $domain): void
@@ -170,7 +220,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
     {
         $dir = $this->system->engineDirPath().'/webserver-config/nginx/vhosts';
         $configFile = $dir.'/'.$domainName.'.conf';
-        $this->system->exec(['sudo', 'rm', '-f', $configFile]);
+        $this->system->exec(Privileged::files()->removeIfExists($configFile));
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
@@ -178,7 +228,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
         $dir = $this->system->engineDirPath().'/webserver-config/nginx/vhosts';
         foreach ($domainNames as $domainName) {
             $configFile = $dir.'/'.$domainName.'.conf';
-            $this->system->exec(['sudo', 'rm', '-f', $configFile]);
+            $this->system->exec(Privileged::files()->removeIfExists($configFile));
         }
     }
 
