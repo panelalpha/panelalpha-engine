@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\CacheManager\BuildCache;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
@@ -89,6 +90,8 @@ class DeployCompose
      * the Dockerfile, and $decision carries them in the shape framework() uses.
      *
      * @param array{
+     *   build_args?: array<string, string>,
+     *   build_cache_from?: list<string>,
      *   env?: array<string, string|int>,
      *   sidecars?: array<string, array<string, mixed>>,
      *   volumes?: array<string, mixed>,
@@ -98,7 +101,11 @@ class DeployCompose
     public static function dockerfile(string $dockerfile, int $port, array $decision = []): string
     {
         $service = [
-            'build' => self::buildContext($dockerfile, ComposeValues::stringMap($decision['build_args'] ?? null)),
+            'build' => self::buildContext(
+                $dockerfile,
+                ComposeValues::stringMap($decision['build_args'] ?? null),
+                ComposeValues::stringList($decision['build_cache_from'] ?? null)
+            ),
             'ports' => [self::hostPortFor($port).':'.$port],
             'restart' => 'unless-stopped',
             'labels' => [GeneratedCompose::LABEL => 'dockerfile'],
@@ -109,10 +116,7 @@ class DeployCompose
         $service = self::withTerminal($service, $decision);
         [$service, $decision] = self::withDeclaredVolumes($service, $decision);
 
-        return GeneratedCompose::render(
-            $service + self::optional($decision),
-            self::withoutEmptyVolumes($decision)
-        );
+        return GeneratedCompose::render($service + self::optional($decision), $decision);
     }
 
     /**
@@ -341,6 +345,25 @@ class DeployCompose
     }
 
     /**
+     * The `build:` of every service `compose up` would build.
+     *
+     * @param  list<string>|null  $activeProfiles  null: every service counts
+     * @return list<array<string, mixed>|string>
+     */
+    public static function buildSpecs(string $composeYaml, ?array $activeProfiles = null): array
+    {
+        $specs = [];
+        foreach (self::servicesIn($composeYaml) as $service) {
+            $build = $service['build'] ?? null;
+            if ((is_array($build) || is_string($build)) && self::isActive($service, $activeProfiles)) {
+                $specs[] = $build;
+            }
+        }
+
+        return $specs;
+    }
+
+    /**
      * @param  array<string, mixed>  $service
      * @param  list<string>|null  $activeProfiles  null: every service counts
      */
@@ -447,15 +470,15 @@ class DeployCompose
     }
 
     /**
-     * The `build:` value: a bare context path when neither the file name nor a
-     * build arg forces the mapping form. `args` appears only when there are some.
+     * The `build:` value: a bare context path unless the file name, a build arg or a build cache needs the mapping form.
      *
      * @param  array<string, string>  $args
+     * @param  list<string>  $cacheFrom  {@see BuildCache::cacheFrom()}
      * @return array<string, mixed>|string `.` when the file is the default one
      */
-    private static function buildContext(string $dockerfile, array $args = []): array|string
+    private static function buildContext(string $dockerfile, array $args = [], array $cacheFrom = []): array|string
     {
-        if ($dockerfile === 'Dockerfile' && $args === []) {
+        if ($dockerfile === 'Dockerfile' && $args === [] && $cacheFrom === []) {
             return '.';
         }
 
@@ -465,6 +488,9 @@ class DeployCompose
         }
         if ($args !== []) {
             $build['args'] = $args;
+        }
+        if ($cacheFrom !== []) {
+            $build['cache_from'] = $cacheFrom;
         }
 
         return $build;
@@ -555,16 +581,6 @@ class DeployCompose
         }
 
         return $taken;
-    }
-
-    private static function withoutEmptyVolumes(array $decision): array
-    {
-        $volumes = $decision['volumes'] ?? null;
-        if ($volumes === null || $volumes === []) {
-            unset($decision['volumes']);
-        }
-
-        return $decision;
     }
 
     /**

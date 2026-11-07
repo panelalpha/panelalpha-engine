@@ -75,9 +75,20 @@ class RegistryImageConfigTest extends TestCase
     public function test_another_registry_is_never_proxied(): void
     {
         $asked = [];
+        $this->config([], $asked)->exposedPorts('quay.io/keycloak/keycloak:26');
+
+        $this->assertSame([self::CACHE . '/v2/quay.io/keycloak/keycloak/manifests/26'], $asked);
+    }
+
+    public function test_a_ghcr_image_is_read_through_its_pull_through_cache_after_the_cache_registry(): void
+    {
+        $asked = [];
         $this->config([], $asked)->exposedPorts('ghcr.io/kanbn/kan:1');
 
-        $this->assertSame([self::CACHE . '/v2/ghcr.io/kanbn/kan/manifests/1'], $asked);
+        $this->assertSame([
+            self::CACHE . '/v2/ghcr.io/kanbn/kan/manifests/1',
+            'http://panelalpha-ghcr-proxy:5000/v2/kanbn/kan/manifests/1',
+        ], $asked);
     }
 
     public function test_an_explicit_docker_io_prefix_is_still_hub(): void

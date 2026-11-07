@@ -17,6 +17,23 @@ class DeployComposeDockerfileTest extends TestCase
         $this->assertSame(['3000:3000'], $service['ports']);
     }
 
+    public function test_a_build_cache_turns_the_context_into_a_mapping_with_cache_from(): void
+    {
+        $from = ['type=registry,ref=panelalpha-cache-registry:5000/buildcache/github.com/acme/app:main'];
+
+        $build = Yaml::parse(DeployCompose::dockerfile('Dockerfile', 3000, ['build_cache_from' => $from]))['services']['app']['build'];
+
+        $this->assertSame(['context' => '.', 'cache_from' => $from], $build);
+    }
+
+    public function test_no_build_cache_keeps_the_bare_context(): void
+    {
+        $service = Yaml::parse(DeployCompose::dockerfile('Dockerfile', 3000, ['build_cache_from' => []]))['services']['app'];
+
+        $this->assertSame('.', $service['build']);
+        $this->assertArrayNotHasKey('build_cache_from', $service);
+    }
+
     /**
      * we-promise/sure ships its own Dockerfile, so the Rails recipe never
      * runs — and config/master.key is gitignored, so the clone has no

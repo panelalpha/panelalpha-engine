@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Strategy;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeBuilds;
 use App\Lib\Deploy\Compose\ComposeExtends;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeHarden;
@@ -12,12 +13,17 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Lib\Deploy\Compose\NestedCompose;
+use App\Lib\Deploy\Compose\PrimaryPortBinding;
 use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Port\ComposePortScan;
 use App\Lib\Deploy\Port\UnpublishedAppPort;
+use App\Lib\Project\PublicRouting\ProjectPublicRouting;
+use App\System;
+use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\LxcfsProc;
 use App\System\Project\Dind\Networking;
@@ -25,13 +31,8 @@ use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\Source\GitRepository;
 
 /**
- * The project's own compose file, made fit to host.
- *
- * Reads the customer's file and changes as little as it can: point a build
- * at the Dockerfile that actually exists, apply the hosting hardening, and
- * fill in the blanks the author left for whoever would run it. The result is
- * written to the run file (ADR-0001) — the customer's own file is never
- * touched, so it stays byte-identical to their repository.
+ * The project's own compose file, made fit to host with as few changes as it can and written to the run file
+ * (ADR-0001), so the customer's own file stays byte-identical to their repository.
  */
 class UserComposeStrategy
 {
@@ -51,9 +52,8 @@ class UserComposeStrategy
     }
 
     /**
-     * Called before the app config writes files or runs its prepare hook, so
-     * a deploy with no git history (an archive) can still tell the
-     * repository's override from one the recipe wrote.
+     * Called before the app config writes files or runs its prepare hook, so a deploy with no git history
+     * (an archive) can still tell the repository's override from one the recipe wrote.
      */
     public function noteRepositoryOverride(string $projectDir): void
     {
@@ -64,6 +64,8 @@ class UserComposeStrategy
     }
 
     /**
+     * The platform's prepare runs only while there is no `.env` yet, since one means an earlier deploy ran it.
+     *
      * @param  array{compose_path: ?string, ...}  $decision
      */
     public function apply(
@@ -73,21 +75,18 @@ class UserComposeStrategy
         ?string $chown,
         string $sourceLabel
     ): void {
-        // Whatever the app config wrote is already on disk and already detected,
-        // so there is one compose file here and no question of whose it is.
         $composePath = is_string($decision['compose_path'] ?? null) && $decision['compose_path'] !== ''
             ? $decision['compose_path']
             : $this->dind->userAppExistingComposeFilePath();
 
         if ($composePath === null) {
-            $this->dind->strategy()->railpack()->applyRailpackOrFallback($projectDir, $chown, $sourceLabel);
+            $this->dind->shell()->logger()?->warn('No compose file to run, so the placeholder page is served');
+            $this->dind->strategy()->railpack()->applyAsUnknown($projectDir, $chown, $sourceLabel);
 
             return;
         }
 
         $this->normalize($composePath, $projectDir, $chown);
-        // A pre-existing .env means the platform's prepare already ran on an
-        // earlier deploy.
         if (! $this->dind->system()->filesystem()->fileExists("{$projectDir}/.env")) {
             $prepare = $this->dind->strategy()->prepare();
             $prepare->run($projectDir, $prepare->manifestFor($decision, $appConfig), $appConfig);
@@ -95,11 +94,8 @@ class UserComposeStrategy
     }
 
     /**
-     * Re-run {@see normalize()} on whatever compose file the project
-     * currently ships, so an edit made after the first deploy is picked up
-     * the next time the container starts (ticket 05: container actions
-     * regenerate the run file before `up`/`pull`). A no-op when the project
-     * has no compose file of its own to read.
+     * Re-runs {@see normalize()} on the project's current compose file, so container actions pick up an edit
+     * before `up`/`pull`; a no-op without one.
      */
     public function refreshRunFile(string $projectDir, ?string $chown): void
     {
@@ -112,73 +108,22 @@ class UserComposeStrategy
     }
 
     /**
-     * Point missing compose dockerfile paths at the root Dockerfile, then
-     * apply hosting harden (skip git hooks, skip demo seeds, restart).
-     *
-     * Reads $composePath, the project's own file, and writes the result to
-     * the run file (ADR-0001) — the source is never touched.
+     * Points missing compose Dockerfiles at the root one, applies the hosting hardening and writes the result
+     * to the run file (ADR-0001); the project's own file is only read.
      */
     private function normalize(string $composePath, string $projectDir, ?string $chown): void
     {
         $logger = $this->dind->shell()->logger();
         $system = $this->dind->system();
         $runPath = $this->dind->userAppComposeFilePath();
-        // Mount sources may be written as `${VAR}`; the hardener checks what they interpolate to.
         $env = $this->dind->environment()->forInterpolation();
         $replaced = basename($composePath) === EngineArtifacts::APP_CONFIG_COMPOSE;
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
-        // Through ComposeYaml, not Yaml::parse: this was the one unguarded
-        // parse in the deploy path, and a construct Symfony rejects but Docker
-        // accepts took the whole account with it -- the exception reached the
-        // API verbatim and the rollback deleted the log before it could be
-        // read. {@see ComposeYaml} rescues that shape and answers null for a
-        // file that is genuinely unreadable.
-        $parsed = ComposeYaml::parse($raw);
-        if ($parsed === null) {
-            throw new \InvalidArgumentException(
-                'The compose file in this project could not be read as YAML.'
-            );
-        }
-        // The run file sits at the root, so a file kept under docker/ has its
-        // relative paths rewritten to mean the same from there.
-        $nested = NestedCompose::relativeDir($composePath, $projectDir);
-        if ($nested !== null) {
-            $parsed = NestedCompose::rebase($parsed, $nested);
-            $logger?->info("Running {$nested}/".basename($composePath).' from the project root, its relative paths rewritten to match');
-        }
-        // Included services are hardened and scanned like the file's own;
-        // left as `include:` they ran exactly as written.
-        $included = [];
-        if (array_key_exists('include', $parsed)) {
-            $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/').'/'.$relative);
-            ['compose' => $parsed, 'sources' => $included] = ComposeInclude::flatten($parsed, $read);
-            $logger?->info('Merged the files this compose file includes into the run file');
-        }
-        // A service's `extends:` is merged into it before hardening; left as
-        // written, the extended service's escapes were merged back in by
-        // Compose at run time, past the hardener.
-        if (isset($parsed['services']) && is_array($parsed['services'])) {
-            $fs = $system->filesystem();
-            $read = function (string $relative) use ($fs, $projectDir): ?string {
-                $path = rtrim($projectDir, '/').'/'.$relative;
-
-                return $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
-            };
-            $parsed = ComposeExtends::resolve($parsed, $read);
-        }
+        [$parsed, $included] = $this->readCompose($raw, $composePath, $projectDir, $system, $logger);
         if (! isset($parsed['services']) || ! is_array($parsed['services'])) {
-            if ($missing !== []) {
-                throw new \InvalidArgumentException(
-                    'Compose file builds from '.$missing[0].' which does not exist.'
-                );
-            }
-
+            $this->assertNoMissingDockerfile($missing);
             $this->writeClientOverride($projectDir, $chown, $logger, $replaced, $env, []);
-            // Nothing to harden, but the run file still has to exist for
-            // whatever runs `compose up` against it — copy the source through
-            // verbatim rather than leaving composeFileToRun() pointing at
-            // nothing.
             $system->filesystem()->writeFileReplacingPath(
                 $runPath,
                 $included === [] ? $raw : ComposeYaml::dump($parsed, $raw, 6, 2, ...$included),
@@ -189,57 +134,232 @@ class UserComposeStrategy
             return;
         }
 
+        $parsed = $this->withFallbackDockerfiles($parsed, $projectDir, $logger);
+        $parsed = $this->withBuildCaches($parsed, $projectDir);
+        $parsed = $this->hostingReady($parsed, $composePath, $projectDir, $chown, $logger, $replaced, $env);
+        $parsed = $this->withAppEnvFile($parsed);
+        $parsed = $this->withEnvOverrides($parsed, $system, $projectDir);
+        $system->filesystem()->writeFileReplacingPath($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
+        $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
+        $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
+    }
+
+    /**
+     * The file through ComposeYaml, rebased to the root, with its includes flattened and `extends:` merged.
+     *
+     * @return array{0: array<string, mixed>, 1: list<mixed>}
+     */
+    private function readCompose(string $raw, string $composePath, string $projectDir, System $system, ?DeployLogger $logger): array
+    {
+        $parsed = $this->parse($raw);
+        $parsed = $this->rebasedToRoot($parsed, $composePath, $projectDir, $logger);
+        $included = [];
+        if (array_key_exists('include', $parsed)) {
+            ['compose' => $parsed, 'sources' => $included] = $this->flattenIncludes($parsed, $projectDir, $logger);
+        }
+
+        return [$this->withExtendsResolved($parsed, $system, $projectDir), $included];
+    }
+
+    /**
+     * Through ComposeYaml, not Yaml::parse, so a construct Symfony rejects but Docker accepts is rescued
+     * rather than failing the account; null is a file that is genuinely unreadable.
+     *
+     * @return array<string, mixed>
+     */
+    private function parse(string $raw): array
+    {
+        $parsed = ComposeYaml::parse($raw);
+        if ($parsed === null) {
+            throw new \InvalidArgumentException(
+                'The compose file in this project could not be read as YAML.'
+            );
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * The run file sits at the root, so a file kept under docker/ has its relative paths rewritten.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function rebasedToRoot(array $parsed, string $composePath, string $projectDir, ?DeployLogger $logger): array
+    {
+        $nested = NestedCompose::relativeDir($composePath, $projectDir);
+        if ($nested !== null) {
+            $parsed = NestedCompose::rebase($parsed, $nested);
+            $logger?->info("Running {$nested}/".basename($composePath).' from the project root, its relative paths rewritten to match');
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * Included services are hardened and scanned like the file's own; left as `include:` they ran as written.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function flattenIncludes(array $parsed, string $projectDir, ?DeployLogger $logger): array
+    {
+        $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/').'/'.$relative);
+        $flattened = ComposeInclude::flatten($parsed, $read);
+        $logger?->info('Merged the files this compose file includes into the run file');
+
+        return $flattened;
+    }
+
+    /**
+     * `extends:` is merged in before hardening; left as written, Compose merged the extended service's escapes
+     * back in at run time, past the hardener.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withExtendsResolved(array $parsed, System $system, string $projectDir): array
+    {
+        if (isset($parsed['services']) && is_array($parsed['services'])) {
+            $fs = $system->filesystem();
+            $read = function (string $relative) use ($fs, $projectDir): ?string {
+                $path = rtrim($projectDir, '/').'/'.$relative;
+
+                return $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
+            };
+            $parsed = ComposeExtends::resolve($parsed, $read);
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * @param  list<string>  $missing
+     */
+    private function assertNoMissingDockerfile(array $missing): void
+    {
+        if ($missing !== []) {
+            throw new \InvalidArgumentException(
+                'Compose file builds from '.$missing[0].' which does not exist.'
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withFallbackDockerfiles(array $parsed, string $projectDir, ?DeployLogger $logger): array
+    {
         $fallbackDockerfile = is_file($projectDir.'/Dockerfile');
         foreach ($parsed['services'] as &$service) {
-            if (! is_array($service) || ! isset($service['build'])) {
+            $dockerfile = $this->missingDockerfile($service, $projectDir, $fallbackDockerfile);
+            if ($dockerfile === null) {
                 continue;
-            }
-            $build = $service['build'];
-            if (! is_string($build) && ! is_array($build)) {
-                continue;
-            }
-            $abs = ComposeFileInspector::composeBuildDockerfileAbsolute($projectDir, $build);
-            if ($abs === null || is_file($abs)) {
-                continue;
-            }
-            $dockerfile = is_array($build)
-                ? (string) ($build['dockerfile'] ?? 'Dockerfile')
-                : 'Dockerfile';
-            $canFallback = $fallbackDockerfile
-                && is_array($build)
-                && ComposeFileInspector::composeBuildContextIsProjectRoot($build);
-            if (! $canFallback) {
-                throw new \InvalidArgumentException(
-                    'Compose file builds from '.$dockerfile.' which does not exist.'
-                );
             }
             $service['build']['dockerfile'] = 'Dockerfile';
             $logger?->info("Compose dockerfile {$dockerfile} is missing; using Dockerfile");
         }
         unset($service);
 
-        // Before port detection reads the file, so a bundled Traefik's :80 is
-        // never taken for the app's port.
+        return $parsed;
+    }
+
+    /**
+     * The missing Dockerfile a root-context build falls back from to the root one; null when nothing is missing.
+     */
+    private function missingDockerfile(mixed $service, string $projectDir, bool $fallbackDockerfile): ?string
+    {
+        if (! is_array($service) || ! isset($service['build'])) {
+            return null;
+        }
+        $build = $service['build'];
+        if (! is_string($build) && ! is_array($build)) {
+            return null;
+        }
+        $abs = ComposeFileInspector::composeBuildDockerfileAbsolute($projectDir, $build);
+        if ($abs === null || is_file($abs)) {
+            return null;
+        }
+        $dockerfile = is_array($build)
+            ? (string) ($build['dockerfile'] ?? 'Dockerfile')
+            : 'Dockerfile';
+        $canFallback = $fallbackDockerfile
+            && is_array($build)
+            && ComposeFileInspector::composeBuildContextIsProjectRoot($build);
+        if (! $canFallback) {
+            throw new \InvalidArgumentException(
+                'Compose file builds from '.$dockerfile.' which does not exist.'
+            );
+        }
+
+        return $dockerfile;
+    }
+
+    /**
+     * The host ingress dropped, the client override layered, the ports published, the volumes named,
+     * the hardening applied and the placeholders filled.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @param  array<string, list<?string>>  $env
+     * @return array<string, mixed>
+     */
+    private function hostingReady(
+        array $parsed,
+        string $composePath,
+        string $projectDir,
+        ?string $chown,
+        ?DeployLogger $logger,
+        bool $replaced,
+        array $env
+    ): array {
         $services = $parsed['services'];
+        $parsed = $this->withoutHostIngress($parsed, $logger);
+        $this->writeClientOverride($projectDir, $chown, $logger, $replaced, $env, $this->droppedServices($services, $parsed));
+        $parsed = $this->withPublishedPorts($parsed, $composePath, $projectDir, $logger);
+        $this->reportServiceAdjustments($parsed, $logger);
+        $parsed = $this->withNamedVolumesForUnsetSources($parsed, $env, $logger);
+
+        return $this->fillPlaceholders($this->hardened($parsed, $env, $logger), $logger);
+    }
+
+    /**
+     * Before port detection reads the file, so a bundled Traefik's :80 is never taken for the app's port.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withoutHostIngress(array $parsed, ?DeployLogger $logger): array
+    {
         $ingress = ComposeHarden::withoutHostIngress($parsed);
         $parsed = $ingress['compose'];
         foreach ($ingress['dropped'] as $line) {
             $logger?->info($line);
         }
-        // After the drops: an override naming a dropped service would bring it
-        // back as a fragment with no image.
-        $this->writeClientOverride(
-            $projectDir,
-            $chown,
-            $logger,
-            $replaced,
-            $env,
-            array_values(array_diff(array_map('strval', array_keys($services ?? [])), array_map('strval', array_keys($parsed['services']))))
-        );
 
-        // The DinD proxy routes the domain to the account container on the
-        // detected primary port; a service that only expose:s it binds nothing
-        // there, so publish it explicitly or the domain 502s.
+        return $parsed;
+    }
+
+    /**
+     * The services the drops removed, which an override naming them would bring back as fragments with no image.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return list<string>
+     */
+    private function droppedServices(mixed $services, array $parsed): array
+    {
+        return array_values(array_diff(array_map('strval', array_keys($services ?? [])), array_map('strval', array_keys($parsed['services']))));
+    }
+
+    /**
+     * The DinD proxy routes the domain to the detected primary port, and a service that only expose:s it binds
+     * nothing there, so it is published explicitly.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withPublishedPorts(array $parsed, string $composePath, string $projectDir, ?DeployLogger $logger): array
+    {
         $parsed = $this->withUnpublishedAppPort($parsed, $composePath, $projectDir, $logger);
         $binding = ComposeHarden::withPublishedPrimaryPort($parsed);
         $parsed = $binding['compose'];
@@ -247,6 +367,14 @@ class UserComposeStrategy
             $logger?->info("Published detected primary port {$binding['published']} so the domain reaches this app");
         }
 
+        return ProjectPublicRouting::publishDeclaredPorts($this->dind->userModel(), $parsed, $logger);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     */
+    private function reportServiceAdjustments(array $parsed, ?DeployLogger $logger): void
+    {
         foreach (ComposeHarden::oneShotServices($parsed) as $name) {
             $logger?->info("Service {$name} runs once and exits; not restarting it");
         }
@@ -259,15 +387,32 @@ class UserComposeStrategy
                 $logger?->info("Gave {$name}'s healthcheck a 60s start period: its CPU is capped and the check allows no slow start");
             }
         }
+    }
 
+    /**
+     * @param  array<string, mixed>  $parsed
+     * @param  array<string, list<?string>>  $env
+     * @return array<string, mixed>
+     */
+    private function withNamedVolumesForUnsetSources(array $parsed, array $env, ?DeployLogger $logger): array
+    {
         ['compose' => $parsed, 'replaced' => $unset] = NamedVolumes::forUnsetSources($parsed, $env);
         foreach ($unset as $what) {
             $logger?->info("A mount source variable is not set, so it is a named volume: {$what}");
         }
 
-        // The account's own ceiling, so a project the operator has given more
-        // memory actually gets it. Null when none is set, which keeps the
-        // built-in defaults.
+        return $parsed;
+    }
+
+    /**
+     * Under the account's own memory ceiling, so a project given more memory gets it; none keeps the defaults.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @param  array<string, list<?string>>  $env
+     * @return array<string, mixed>
+     */
+    private function hardened(array $parsed, array $env, ?DeployLogger $logger): array
+    {
         $imageEnv = [];
         $hardened = ComposeHarden::applyReporting(
             $parsed,
@@ -285,22 +430,42 @@ class UserComposeStrategy
         foreach ($hardened['removed'] as $what) {
             $logger?->warn(ComposeHarden::REMOVED_SOURCE.": {$what}");
         }
-        $parsed = $this->fillPlaceholders($parsed, $logger);
-        // A tracked .env's overrides (ADR-0001 D3). ProjectEnvironment decides
-        // on every deploy whether the file should exist; this only keeps it
-        // attached when the run file is regenerated without a deploy (`up`).
-        if ($system->filesystem()->fileExists($projectDir.'/'.EngineArtifacts::ENV_OVERRIDES)) {
-            [$parsed] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
-        }
-        $system->filesystem()->writeFileReplacingPath($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
-        $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
-        $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
+
+        return $parsed;
     }
 
     /**
-     * A compose file that publishes no port was routed to 8080 whatever the
-     * app listens on; the port it names some other way is exposed instead
-     * ({@see UnpublishedAppPort}), and a remaining guess is said to be one.
+     * The account's environment reaches a compose file the engine did not generate through `.env`, which a
+     * service reads only when its `env_file:` names it: the service that publishes the app's port loads it.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withAppEnvFile(array $parsed): array
+    {
+        [$parsed] = ComposeEnvFiles::appendTo($parsed, PrimaryPortBinding::appServices($parsed), '.env');
+
+        return $parsed;
+    }
+
+    /**
+     * A tracked .env's overrides (ADR-0001 D3), kept attached when the run file is regenerated without a deploy.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withEnvOverrides(array $parsed, System $system, string $projectDir): array
+    {
+        if ($system->filesystem()->fileExists($projectDir.'/'.EngineArtifacts::ENV_OVERRIDES)) {
+            [$parsed] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * A compose file publishing no port has the port it names some other way exposed ({@see UnpublishedAppPort})
+     * rather than being routed to 8080, and a remaining guess is said to be one.
      *
      * @param  array<string, mixed>  $parsed
      * @return array<string, mixed>
@@ -310,13 +475,47 @@ class UserComposeStrategy
         if (isset(ComposePortScan::ofParsed($parsed)['primary'])) {
             return $parsed;
         }
-        // A host-network service's PORT is published by the hardener later on.
+        if ($this->hardenerPublishesWebPort($parsed)) {
+            return $parsed;
+        }
+
+        $others = $this->otherComposeFiles($composePath, $projectDir);
+        $found = UnpublishedAppPort::apply(
+            $parsed,
+            fn (string $image): array => $this->dind->innerDocker()->declaredImagePorts($image),
+            $others
+        );
+        if ($found === null) {
+            $this->warnAboutGuessedPort($logger);
+
+            return $parsed;
+        }
+        $logger?->info("No service publishes a port; {$found['service']} listens on {$found['port']}, from {$found['source']}");
+
+        return $found['compose'];
+    }
+
+    /**
+     * A host-network service's PORT is published by the hardener later on.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    private function hardenerPublishesWebPort(array $parsed): bool
+    {
         foreach ($parsed['services'] ?? [] as $service) {
             if (is_array($service) && ServiceHardener::publishesWebPort($service)) {
-                return $parsed;
+                return true;
             }
         }
 
+        return false;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function otherComposeFiles(string $composePath, string $projectDir): array
+    {
         $others = [];
         foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
             foreach (glob(rtrim($projectDir, '/').'/'.$pattern) ?: [] as $path) {
@@ -330,29 +529,20 @@ class UserComposeStrategy
             }
         }
 
-        $found = UnpublishedAppPort::apply(
-            $parsed,
-            fn (string $image): array => $this->dind->innerDocker()->declaredImagePorts($image),
-            $others
-        );
-        if ($found === null) {
-            // The recipe's `port:` routes the domain then, so nothing is guessed.
-            if (Networking::recipeComposePort($this->dind->userModel()) === null) {
-                $logger?->warn('No service publishes a port and none names one, so the domain is routed to 8080, which is a guess. Publish the port the application listens on in the compose file.');
-            }
+        return $others;
+    }
 
-            return $parsed;
+    /** With a recipe `port:` the domain is routed there, so nothing is guessed. */
+    private function warnAboutGuessedPort(?DeployLogger $logger): void
+    {
+        if (Networking::recipeComposePort($this->dind->userModel()) === null) {
+            $logger?->warn('No service publishes a port and none names one, so the domain is routed to 8080, which is a guess. Publish the port the application listens on in the compose file.');
         }
-        $logger?->info("No service publishes a port; {$found['service']} listens on {$found['port']}, from {$found['source']}");
-
-        return $found['compose'];
     }
 
     /**
-     * The same `<Dockerfile>.dockerignore` a repository Dockerfile gets, for
-     * every `build:` in the run file: without it `.git` and the engine's files
-     * went into the image, and a Dockerfile copying its context into a docroot
-     * served them.
+     * The `<Dockerfile>.dockerignore` a repository Dockerfile gets, for every `build:` in the run file,
+     * so `.git` and the engine's files stay out of an image that may serve its context.
      */
     public function keepEngineFilesOutOfContext(string $projectDir, ?string $chown): void
     {
@@ -386,11 +576,28 @@ class UserComposeStrategy
     }
 
     /**
-     * The repository's own `docker-compose.override.yml`, which compose layers
-     * over the run file, copied with its escapes removed to a name the engine
-     * owns ({@see Paths::composeFiles()} layers the copy). It used to be
-     * layered as written, bringing back `privileged:` and host mounts the run
-     * file had just been cleared of.
+     * Each service that builds from the checkout imports the host-built
+     * cache of that build when the cache registry has one ({@see ComposeBuilds}).
+     *
+     * @param  array<string, mixed>  $parsed
+     * @return array<string, mixed>
+     */
+    private function withBuildCaches(array $parsed, string $projectDir): array
+    {
+        $cache = new ProjectBuildCache($this->dind);
+        foreach (ComposeBuilds::of($parsed) as $name => $build) {
+            $from = $cache->cacheFrom($projectDir, ComposeBuilds::identity($build['context'], $build['dockerfile'], $build['target']));
+            if ($from !== []) {
+                $parsed['services'][$name]['build'] = ComposeBuilds::withCacheFrom($parsed['services'][$name]['build'], $from);
+            }
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * The repository's `docker-compose.override.yml`, copied with its escapes removed to a name the engine owns
+     * ({@see Paths::composeFiles()} layers the copy); a workstation override is refused like a workstation run file.
      *
      * @param  array<string, list<?string>>  $env
      * @param  list<string>  $droppedServices  services the run file no longer has
@@ -401,37 +608,70 @@ class UserComposeStrategy
         $source = rtrim($projectDir, '/').'/'.Paths::CLIENT_OVERRIDE_FILENAME;
         $copy = rtrim($projectDir, '/').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE;
         $contents = $fs->fileExists($source) ? $fs->fileGetContents($source) : null;
-        // The repository's override belongs to the compose file an app config
-        // replaced; one a recipe wrote (prepare hook, files/) is still layered.
-        $committed = $contents !== null && $replaced
-            ? $this->committedVersion($projectDir, Paths::CLIENT_OVERRIDE_FILENAME)
-                ?? ($this->repositoryOverrideNoted ? $this->repositoryOverride : null)
-            : null;
-        $stale = $committed !== null && rtrim($committed) === rtrim((string) $contents);
-        // A workstation override (a development build binding the checkout) is
-        // refused for the same reason a workstation run file is.
+        $stale = $this->isStaleOverride($projectDir, $contents, $replaced);
         $workstation = $contents === null || $stale ? null : ComposeFileInspector::localDevComposeReasonYaml($contents);
         if ($workstation !== null) {
-            $logger?->info('Not layering '.Paths::CLIENT_OVERRIDE_FILENAME.": {$workstation}, which is a development setup");
-            // An empty copy, not none: without one Paths::composeFiles() layers the raw file.
-            $fs->writeFileReplacingPath($copy, self::NOT_LAYERED_OVERRIDE, $chown, '644');
+            $this->writeNotLayeredOverride($fs, $copy, $chown, $logger, $workstation);
 
             return;
         }
         if ($contents === null || $stale) {
-            if ($fs->fileExists($copy)) {
-                $this->dind->system()->exec(['sudo', 'rm', '-f', $copy]);
-            }
-            if ($stale) {
-                $logger?->info(
-                    'Not layering the repository\'s '.Paths::CLIENT_OVERRIDE_FILENAME
-                    .': it was written for the compose file the app config replaces'
-                );
-            }
+            $this->removeOverrideCopy($fs, $copy, $stale, $logger);
 
             return;
         }
 
+        $this->writeHardenedOverride($fs, $projectDir, $copy, $contents, $chown, $logger, $env, $droppedServices);
+    }
+
+    /**
+     * The repository's override belongs to the compose file an app config replaced; one a recipe wrote
+     * (prepare hook, files/) is still layered.
+     */
+    private function isStaleOverride(string $projectDir, ?string $contents, bool $replaced): bool
+    {
+        $committed = $contents !== null && $replaced
+            ? $this->committedVersion($projectDir, Paths::CLIENT_OVERRIDE_FILENAME)
+                ?? ($this->repositoryOverrideNoted ? $this->repositoryOverride : null)
+            : null;
+
+        return $committed !== null && rtrim($committed) === rtrim((string) $contents);
+    }
+
+    /** An empty copy, not none: without one Paths::composeFiles() layers the raw file. */
+    private function writeNotLayeredOverride(Filesystem $fs, string $copy, ?string $chown, ?DeployLogger $logger, string $workstation): void
+    {
+        $logger?->info('Not layering '.Paths::CLIENT_OVERRIDE_FILENAME.": {$workstation}, which is a development setup");
+        $fs->writeFileReplacingPath($copy, self::NOT_LAYERED_OVERRIDE, $chown, '644');
+    }
+
+    private function removeOverrideCopy(Filesystem $fs, string $copy, bool $stale, ?DeployLogger $logger): void
+    {
+        if ($fs->fileExists($copy)) {
+            $this->dind->system()->exec(Privileged::accountFiles(...$this->dind->userModel()->linuxIds())->removeIfExists($copy));
+        }
+        if ($stale) {
+            $logger?->info(
+                'Not layering the repository\'s '.Paths::CLIENT_OVERRIDE_FILENAME
+                .': it was written for the compose file the app config replaces'
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, list<?string>>  $env
+     * @param  list<string>  $droppedServices
+     */
+    private function writeHardenedOverride(
+        Filesystem $fs,
+        string $projectDir,
+        string $copy,
+        string $contents,
+        ?string $chown,
+        ?DeployLogger $logger,
+        array $env,
+        array $droppedServices
+    ): void {
         $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/').'/'.$relative);
         ['yaml' => $contents, 'dropped' => $gone] = ComposeOverride::withoutServices($contents, $droppedServices);
         $hardened = ComposeOverride::harden($contents, $read, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
@@ -450,8 +690,7 @@ class UserComposeStrategy
     }
 
     /**
-     * $relative as the checked-out commit has it, or null when git has no
-     * such file (or there is no repository, as for an uploaded archive).
+     * $relative as the checked-out commit has it, or null when git has no such file or there is no repository.
      */
     protected function committedVersion(string $projectDir, string $relative): ?string
     {
@@ -465,12 +704,8 @@ class UserComposeStrategy
     }
 
     /**
-     * A project's own compose file is written for someone who will edit it
-     * before running it: APP_SECRET: REPLACE_WITH_LONG_SECRET, POSTGRES_
-     * PASSWORD: STRONG_DB_PASSWORD. Nobody edits it here, so those blanks are
-     * filled in with per-account values before the stack starts — otherwise
-     * the app either refuses to boot or runs on a password published in its
-     * own repository.
+     * The blanks a compose file leaves for whoever runs it (APP_SECRET: REPLACE_WITH_LONG_SECRET), filled with
+     * per-account values, or the app refuses to boot or runs on a password published in its repository.
      *
      * @param  array<string, mixed>  $compose
      * @return array<string, mixed>
