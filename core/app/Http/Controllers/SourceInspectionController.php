@@ -15,6 +15,7 @@ use App\Lib\Deploy\Inspect\RecipeFileOverlay;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Lib\Vault\RequestVault;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
@@ -42,17 +43,24 @@ class SourceInspectionController extends Controller
         path: '/source/inspect',
         summary: 'Inspect an application source and report its stack, ports and services',
         description: 'Detects what an application is without deploying it. The source may be a Git '
-            .'repository URL or the username of an existing project (its files under the '
-            .'account home directory); a directory on this server is refused. A public github.com '
-            .'repository is read from its file list and only the files detection reads are '
-            .'fetched; any other Git source, or one that cannot be read that way, is cloned '
-            .'shallow into a temporary directory and removed again. `source.method` says which '
-            .'(`tree` or `clone`). Values from .env files are '
-            .'never returned - only the variable names. A project username returns the same '
-            .'report as GET /projects/{username}/inspect, including the `deployment` snapshot '
-            .'its last deploy froze and the `drift` between that and the files on disk - so a '
-            .'caller that already has a username does not need the other endpoint. A token limited '
-            .'to some projects may name only those as a project source.',
+            .'repository URL or the username of an existing project (its files under the account '
+            .'home directory); a directory on this server is refused. A Git source is cloned '
+            .'shallow without file contents, and only the files detection reads are fetched; a '
+            .'public github.com repository that git refuses is read from its file list instead, '
+            .'and one that cannot be read either way (submodules, a manifest over 1 MB) is cloned '
+            .'shallow in full. Each goes into a temporary directory that is removed again, and '
+            .'`source.method` says which (`partial`, `tree` or `clone`). `application.verdict` is '
+            .'what a deploy would serve: `deployable`; `no_start_command`, which deploys but whose '
+            .'package.json says nothing about starting a server; `placeholder`, only the "Project '
+            .'not configured" page; or `not_deployable`. `application.deployable` is false for the '
+            .'last two, with the reason in `application.issue`; a port nothing names is `ports.issue`. '
+            .'Each is a finding (`code`, `message`, its facts) with the `hints` that act on it. '
+            .'Values from .env files are never returned - only the variable names. A project '
+            .'username returns the same report as '
+            .'GET /projects/{username}/inspect, including the `deployment` snapshot its last '
+            .'deploy froze and the `drift` between that and the files on disk - so a caller that '
+            .'already has a username does not need the other endpoint. A token limited to some '
+            .'projects may name only those as a project source.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['source'],
@@ -310,6 +318,8 @@ class SourceInspectionController extends Controller
         if ($user !== null) {
             $data += $this->deploymentAndDrift($user, $resolved, $report);
         }
+        $report['ports'] = FindingPresenter::ports($report['ports'], $user?->username);
+        $report['application']['issue'] = FindingPresenter::presentOne($report['application']['issue'], $user?->username, ['source' => $resolved->reference]);
 
         return new JsonResponse(['data' => array_merge($data, $report)]);
     }
@@ -345,13 +355,25 @@ class SourceInspectionController extends Controller
         $commit = $resolved->meta['commit'] ?? null;
 
         return [
-            'deployment' => DeploymentSnapshot::describe($details),
+            'deployment' => self::deployment($details, (string) $user->username),
             'drift' => DeploymentSnapshot::drift(
                 $details,
                 $report,
                 is_string($commit) ? $commit : null
             ),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     * @return array<string, mixed>
+     */
+    private static function deployment(array $details, string $username): array
+    {
+        $deployment = DeploymentSnapshot::describe($details);
+        $deployment['warnings'] = FindingPresenter::present($deployment['warnings'], $username);
+
+        return $deployment;
     }
 
     private function resolver(): SourceResolver
@@ -382,7 +404,7 @@ class SourceInspectionController extends Controller
 
     /**
      * A clone has no `path`: it stops existing before the response is written. `method` is
-     * `tree` or `clone` for a git source, null for a directory that was simply read.
+     * `tree`, `partial` or `clone` for a git source, null for a directory that was simply read.
      *
      * @return array<string, mixed>
      */

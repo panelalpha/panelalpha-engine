@@ -212,6 +212,69 @@ class DetectionFilesTest extends TestCase
         $this->assertSame(['services/api/Dockerfile', 'services/api/package.json'], $picked['decisive']);
     }
 
+    public function test_the_projects_a_root_solution_lists_below_the_search_depth_are_read_in_a_second_round(): void
+    {
+        $solution = "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Web\", \"src\\blazor\\admin\\Web\\Web.csproj\", \"{1}\"\n"
+            . "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Api\", \"src\\Api\\Api.csproj\", \"{2}\"\n"
+            . "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Gone\", \"src\\a\\b\\Gone\\Gone.csproj\", \"{3}\"\n"
+            . "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Out\", \"..\\..\\x\\y\\z\\Out.csproj\", \"{4}\"\n"
+            . "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Link\", \"src\\a\\b\\Link\\Link.csproj\", \"{5}\"\n";
+        $entries = [
+            ...self::tree(['App.sln', 'src/Api/Api.csproj', 'src/blazor/admin/Web/Web.csproj', 'src/blazor/admin/Web/Program.cs']),
+            ...self::tree(['src/a/b/Link/Link.csproj'], DetectionFiles::SYMLINK_MODE),
+        ];
+        $files = DetectionFiles::select($entries);
+
+        $this->assertSame(['App.sln', 'src/Api/Api.csproj'], $files['decisive']);
+        $this->assertSame(
+            ['src/blazor/admin/Web/Web.csproj'],
+            DetectionFiles::solutionListed($entries, $files, null, static fn (string $path): ?string => $path === 'App.sln' ? $solution : null)
+        );
+    }
+
+    public function test_the_directory_build_props_a_listed_project_inherits_from_are_read_with_it(): void
+    {
+        $slnx = '<Solution><Project Path="src/blazor/admin/Web/Web.csproj" /><Project Path="src/Gone/a/b/Gone.csproj" /></Solution>';
+        $entries = self::tree([
+            'App.slnx',
+            'Directory.Build.props',
+            'src/Directory.Build.props',
+            'src/blazor/admin/Directory.Build.props',
+            'src/blazor/admin/Web/Directory.Build.props',
+            'src/blazor/admin/Web/Web.csproj',
+            'src/blazor/admin/Other/Directory.Build.props',
+            'src/Gone/a/b/Directory.Build.props',
+        ]);
+        $files = DetectionFiles::select($entries);
+
+        $this->assertSame(
+            ['src/blazor/admin/Web/Directory.Build.props', 'src/blazor/admin/Web/Web.csproj'],
+            DetectionFiles::solutionListed($entries, $files, null, static fn (string $path): ?string => $slnx)
+        );
+    }
+
+    public function test_only_a_solution_at_the_inspected_root_is_read_for_its_projects(): void
+    {
+        $slnx = '<Solution><Project Path="a/b/c/Web/Web.csproj" /></Solution>';
+        $entries = self::tree([
+            'Root.slnx',
+            'services/api/Api.slnx',
+            'services/api/a/b/c/Web/Web.csproj',
+            'services/api/tools/Nested.slnx',
+            'a/b/c/Web/Web.csproj',
+        ]);
+        $read = static fn (string $path): ?string => $slnx;
+
+        $this->assertSame(
+            ['services/api/a/b/c/Web/Web.csproj'],
+            DetectionFiles::solutionListed($entries, DetectionFiles::select($entries, 'services/api'), 'services/api', $read)
+        );
+        $this->assertSame(
+            ['a/b/c/Web/Web.csproj'],
+            DetectionFiles::solutionListed($entries, DetectionFiles::select($entries), null, $read)
+        );
+    }
+
     public function test_shallow_files_come_first(): void
     {
         $picked = DetectionFiles::select(self::tree(['docker/Dockerfile', 'Dockerfile', 'a/b/Dockerfile']))['decisive'];

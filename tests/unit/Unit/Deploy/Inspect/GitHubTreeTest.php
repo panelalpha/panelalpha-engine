@@ -232,6 +232,85 @@ class GitHubTreeTest extends TestCase
         }
     }
 
+    public function test_the_projects_a_fetched_root_solution_lists_deeper_down_are_fetched_next(): void
+    {
+        $slnx = '<Solution><Project Path="src/blazor/admin/Web/Web.csproj" /></Solution>';
+        $project = '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>';
+        Http::fake([
+            self::TREE_URL => Http::response(self::treeBody([
+                self::blob('App.slnx', strlen($slnx)),
+                self::blob('src/blazor/admin/Web/Web.csproj', strlen($project)),
+                self::blob('src/blazor/admin/Web/Program.cs', 300),
+            ])),
+            self::RAW . 'App.slnx' => Http::response($slnx),
+            self::RAW . 'src/blazor/admin/Web/Web.csproj' => Http::response($project),
+        ]);
+
+        self::tree()->writeTo($this->dir, 'https://github.com/owner/repo');
+
+        $this->assertSame($project, file_get_contents($this->dir . '/src/blazor/admin/Web/Web.csproj'));
+        $this->assertSame('', file_get_contents($this->dir . '/src/blazor/admin/Web/Program.cs'));
+        Http::assertSentCount(3);
+    }
+
+    public function test_the_directory_build_props_above_a_listed_project_are_fetched_with_it(): void
+    {
+        $slnx = '<Solution><Project Path="src/blazor/admin/Web/Web.csproj" /></Solution>';
+        $project = '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>';
+        $props = '<Project><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>';
+        Http::fake([
+            self::TREE_URL => Http::response(self::treeBody([
+                self::blob('App.slnx', strlen($slnx)),
+                self::blob('src/blazor/admin/Web/Web.csproj', strlen($project)),
+                self::blob('src/blazor/admin/Web/Directory.Build.props', strlen($props)),
+            ])),
+            self::RAW . 'App.slnx' => Http::response($slnx),
+            self::RAW . 'src/blazor/admin/Web/Web.csproj' => Http::response($project),
+            self::RAW . 'src/blazor/admin/Web/Directory.Build.props' => Http::response($props),
+        ]);
+
+        self::tree()->writeTo($this->dir, 'https://github.com/owner/repo');
+
+        $this->assertSame($props, file_get_contents($this->dir . '/src/blazor/admin/Web/Directory.Build.props'));
+        Http::assertSentCount(4);
+    }
+
+    public function test_listed_projects_whose_props_do_not_fit_the_budget_send_the_inspection_to_a_clone(): void
+    {
+        $count = intdiv(DetectionFiles::MAX_FILES, 2);
+        $paths = array_map(static fn (int $i): string => "a/b/c/P{$i}/P{$i}.csproj", range(1, $count));
+        $slnx = '<Solution>' . implode('', array_map(static fn (string $p): string => "<Project Path=\"{$p}\" />", $paths)) . '</Solution>';
+        Http::fake([
+            self::TREE_URL => Http::response(self::treeBody([
+                self::blob('App.slnx', strlen($slnx)),
+                ...array_map(static fn (string $p): array => self::blob($p, 2), $paths),
+                ...array_map(static fn (string $p): array => self::blob(dirname($p) . '/Directory.Build.props', 2), $paths),
+            ])),
+            self::RAW . 'App.slnx' => Http::response($slnx),
+            self::RAW . '*' => Http::response('<>'),
+        ]);
+
+        $this->expectException(TreeUnavailable::class);
+        self::tree()->writeTo($this->dir, 'https://github.com/owner/repo');
+    }
+
+    public function test_more_listed_projects_than_the_budget_leaves_sends_the_inspection_to_a_clone(): void
+    {
+        $paths = array_map(static fn (int $i): string => "a/b/c/P{$i}/P{$i}.csproj", range(1, DetectionFiles::MAX_FILES));
+        $slnx = '<Solution>' . implode('', array_map(static fn (string $p): string => "<Project Path=\"{$p}\" />", $paths)) . '</Solution>';
+        Http::fake([
+            self::TREE_URL => Http::response(self::treeBody([
+                self::blob('App.slnx', strlen($slnx)),
+                ...array_map(static fn (string $p): array => self::blob($p, 2), $paths),
+            ])),
+            self::RAW . 'App.slnx' => Http::response($slnx),
+            self::RAW . '*' => Http::response('<>'),
+        ]);
+
+        $this->expectException(TreeUnavailable::class);
+        self::tree()->writeTo($this->dir, 'https://github.com/owner/repo');
+    }
+
     public function test_go_sources_are_fetched_with_what_is_left_and_a_failure_there_is_not_fatal(): void
     {
         Http::fake([

@@ -3,22 +3,28 @@
 namespace App\Lib\Project;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Findings\Finding;
 
 /**
- * What the inspection a create runs before cloning found: a verdict on the
- * repository, or why it was not inspected. It never refuses a create; it is
- * reported in the create response and at the top of the deploy log.
+ * What the inspection a create runs before cloning found: a verdict, or why it was not inspected.
+ * It never refuses a create; it is reported in the create response and the deploy log.
  */
 final class CreateInspection
 {
-    public const DEPLOYABLE = 'deployable';
+    public const DEPLOYABLE = DeployVerdict::DEPLOYABLE;
 
-    public const NOT_DEPLOYABLE = 'not_deployable';
+    public const NOT_DEPLOYABLE = DeployVerdict::NOT_DEPLOYABLE;
 
-    public const PLACEHOLDER = 'placeholder';
+    public const PLACEHOLDER = DeployVerdict::PLACEHOLDER;
 
-    public const NO_START_COMMAND = 'no_start_command';
+    public const NO_START_COMMAND = DeployVerdict::NO_START_COMMAND;
+
+    public const REPOSITORY_NOT_DEPLOYABLE = 'repository_not_deployable';
+
+    private const START_SCRIPT_SUGGESTION = 'Add a start script that runs the server to package.json, or a '
+        .'panelalpha.yaml that names the start command.';
 
     private function __construct(
         public readonly ?string $verdict,
@@ -27,6 +33,7 @@ final class CreateInspection
         public readonly ?string $reason = null,
         public readonly ?string $suggestion = null,
         public readonly ?string $skipped = null,
+        public readonly ?string $code = null,
     ) {}
 
     /** Not inspected, and why: said once in the deploy log, nowhere else. */
@@ -36,7 +43,7 @@ final class CreateInspection
     }
 
     /**
-     * The verdict on an AppInspector report.
+     * The verdict an AppInspector report carries, with what to do about it.
      *
      * @param  array<string, mixed>  $report
      */
@@ -45,70 +52,49 @@ final class CreateInspection
         $application = is_array($report['application'] ?? null) ? $report['application'] : [];
         $strategy = (string) ($application['strategy'] ?? Strategies::FALLBACK);
         $label = (string) ($application['label'] ?? $strategy);
-        $issue = $application['issue'] ?? null;
+        $issue = is_array($application['issue'] ?? null) ? Finding::fromStored($application['issue']) : null;
 
-        if (($application['deployable'] ?? true) === false || (is_string($issue) && $issue !== '')) {
-            return new self(
-                self::NOT_DEPLOYABLE,
-                $strategy,
-                $label,
-                is_string($issue) && $issue !== '' ? $issue : 'Detection could not work out how to deploy it.',
-                'Run source_inspect (POST /source/inspect) on the repository to see what detection found, '
-                    .'then choose a recipe from application.candidates or add a panelalpha.yaml that says '
-                    .'how to build and start it.'
-            );
-        }
-
-        if ($strategy === Strategies::FALLBACK) {
-            return new self(
-                self::PLACEHOLDER,
-                $strategy,
-                $label,
-                'No recipe and no runtime recognises it, so the deploy would serve the '
-                    .'"Project not configured" placeholder page instead of an application.',
-                'Add a Dockerfile, a compose file or a panelalpha.yaml that says how to build and start it.'
-            );
-        }
-
-        if ($strategy === Strategies::RAILPACK && self::nodePackageWithoutStart($report)) {
-            return new self(
-                self::NO_START_COMMAND,
-                $strategy,
-                $label,
-                'package.json has no start script, so nothing says how to run it as a server; '
-                    .'a package without one is usually a library, which builds but serves nothing.',
-                'Add a start script that runs the server to package.json, or a panelalpha.yaml that '
-                    .'names the start command.'
-            );
-        }
-
-        return new self(self::DEPLOYABLE, $strategy, $label);
+        return match ($application['verdict'] ?? null) {
+            self::NOT_DEPLOYABLE => self::notDeployable($strategy, $label, $issue),
+            self::PLACEHOLDER => self::placeholder($strategy, $label, $issue),
+            self::NO_START_COMMAND => self::noStartCommand($strategy, $label),
+            default => new self(self::DEPLOYABLE, $strategy, $label),
+        };
     }
 
-    /**
-     * Railpack starts a Node project with its start script; a root package.json
-     * without one is the shape of a library (lodash, express).
-     *
-     * @param  array<string, mixed>  $report
-     */
-    private static function nodePackageWithoutStart(array $report): bool
+    private static function notDeployable(string $strategy, string $label, ?Finding $issue): self
     {
-        $packages = $report['metadata']['packages'] ?? null;
-        if (! is_array($packages)) {
-            return false;
-        }
-        foreach ($packages as $package) {
-            if (is_array($package)
-                && ($package['ecosystem'] ?? null) === 'node'
-                && ($package['file'] ?? null) === 'package.json'
-            ) {
-                $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
+        return new self(
+            self::NOT_DEPLOYABLE,
+            $strategy,
+            $label,
+            $issue->message ?? 'Detection could not work out how to deploy it.',
+            'Inspect the repository to see what detection found, then deploy it with a recipe from '
+                .'application.candidates or add a panelalpha.yaml that says how to build and start it.',
+            code: $issue->code ?? self::REPOSITORY_NOT_DEPLOYABLE,
+        );
+    }
 
-                return ! in_array('start', $scripts, true);
-            }
-        }
+    private static function placeholder(string $strategy, string $label, ?Finding $issue): self
+    {
+        return new self(
+            self::PLACEHOLDER,
+            $strategy,
+            $label,
+            $issue->message ?? DeployVerdict::UNRECOGNISED,
+            $strategy === Strategies::RAILPACK
+                ? self::START_SCRIPT_SUGGESTION
+                : 'Add a Dockerfile, a compose file or a panelalpha.yaml that says how to build and start it.',
+            code: $issue->code ?? DeployVerdict::CODE_UNRECOGNISED,
+        );
+    }
 
-        return false;
+    private static function noStartCommand(string $strategy, string $label): self
+    {
+        return new self(
+            self::NO_START_COMMAND, $strategy, $label, DeployVerdict::NO_START_SCRIPT, self::START_SCRIPT_SUGGESTION,
+            code: DeployVerdict::CODE_NO_START_SCRIPT,
+        );
     }
 
     public function warns(): bool
@@ -117,9 +103,7 @@ final class CreateInspection
     }
 
     /**
-     * The `inspection` field of a create response: the strategy alone when it
-     * deploys, the verdict with its reason and suggestion when it may not,
-     * null when nothing was inspected.
+     * The `inspection` field of a create response: the strategy when it deploys, reason and suggestion when not.
      *
      * @return ?array<string, string|null>
      */
@@ -135,9 +119,18 @@ final class CreateInspection
         return [
             'verdict' => $this->verdict,
             'strategy' => $this->strategy,
+            'code' => $this->code,
             'reason' => $this->reason,
             'suggestion' => $this->suggestion,
         ];
+    }
+
+    /** What may stop it deploying, as a finding; null when nothing may. */
+    public function finding(): ?Finding
+    {
+        return $this->warns() && $this->code !== null
+            ? new Finding($this->code, trim("{$this->reason} {$this->suggestion}"), ['strategy' => $this->strategy])
+            : null;
     }
 
     /** The one line the CLI prints when the repository may not deploy. */
@@ -180,6 +173,7 @@ final class CreateInspection
             'reason' => $this->reason,
             'suggestion' => $this->suggestion,
             'skipped' => $this->skipped,
+            'code' => $this->code,
         ];
     }
 
@@ -200,6 +194,7 @@ final class CreateInspection
             $string('reason'),
             $string('suggestion'),
             $string('skipped') ?? ($string('verdict') === null ? 'no verdict was recorded.' : null),
+            $string('code'),
         );
     }
 }

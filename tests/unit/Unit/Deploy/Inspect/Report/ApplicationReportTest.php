@@ -2,22 +2,27 @@
 
 namespace Tests\Unit\Deploy\Inspect\Report;
 
+use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\Report\ApplicationReport;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Findings\Finding;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * What the engine would do with a directory, as the report says it.
  *
  * The section is a promise to a caller who cannot see the host: every path is
  * relative to the project, every command is one that will really run, and
- * `deployable` is answered by the same check the deploy runs rather than by
- * an opinion formed here.
+ * `deployable` is answered by the same check the deploy runs, and by what the
+ * deploy would end up serving.
  */
 class ApplicationReportTest extends ReportTestCase
 {
     /**
-     * @param array<string, mixed> $decision
+     * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
     private function report(array $decision, ?string $issue = null, ?string $appConfigOrigin = null): array
@@ -28,7 +33,7 @@ class ApplicationReportTest extends ReportTestCase
             $decision + ['strategy' => Strategies::FALLBACK, 'label' => 'Unknown'],
             $appConfigOrigin,
             null,
-            $issue
+            $issue === null ? null : new Finding(AppInspector::DETECTION_FAILED, $issue)
         ))->build();
     }
 
@@ -50,7 +55,7 @@ class ApplicationReportTest extends ReportTestCase
     {
         $this->write('docker-compose.yml', "services: {}\n");
 
-        $report = $this->report(['compose_path' => $this->tmpDir . '/docker-compose.yml']);
+        $report = $this->report(['compose_path' => $this->tmpDir.'/docker-compose.yml']);
 
         $this->assertSame('docker-compose.yml', $report['compose_file']);
     }
@@ -80,7 +85,7 @@ class ApplicationReportTest extends ReportTestCase
             'Repository could not be cloned.'
         );
 
-        $this->assertSame('Repository could not be cloned.', $report['issue']);
+        $this->assertSame(['code' => AppInspector::DETECTION_FAILED, 'message' => 'Repository could not be cloned.'], $report['issue']);
         $this->assertFalse($report['deployable']);
     }
 
@@ -92,7 +97,9 @@ class ApplicationReportTest extends ReportTestCase
 
         $this->assertFalse($report['deployable']);
         $this->assertNotNull($report['issue']);
-        $this->assertStringContainsString('composer.json', (string) $report['issue']);
+        $this->assertSame(DeployabilityCheck::ROOT_FILE_MISSING, $report['issue']['code']);
+        $this->assertSame('composer.json', $report['issue']['file']);
+        $this->assertStringContainsString('composer.json', $report['issue']['message']);
     }
 
     public function test_an_empty_directory_is_reported_as_undeployable(): void
@@ -100,7 +107,8 @@ class ApplicationReportTest extends ReportTestCase
         $report = $this->report([]);
 
         $this->assertFalse($report['deployable']);
-        $this->assertStringContainsString('empty', (string) $report['issue']);
+        $this->assertSame(DeployabilityCheck::PROJECT_EMPTY, $report['issue']['code']);
+        $this->assertStringContainsString('empty', $report['issue']['message']);
     }
 
     public function test_a_project_the_check_accepts_is_deployable_with_no_issue(): void
@@ -109,8 +117,167 @@ class ApplicationReportTest extends ReportTestCase
 
         $report = $this->report(['strategy' => Strategies::LARAVEL]);
 
+        $this->assertSame(DeployVerdict::DEPLOYABLE, $report['verdict']);
         $this->assertTrue($report['deployable']);
         $this->assertNull($report['issue']);
+    }
+
+    public function test_a_refusal_is_not_deployable(): void
+    {
+        $report = $this->report([]);
+
+        $this->assertSame(DeployVerdict::NOT_DEPLOYABLE, $report['verdict']);
+    }
+
+    /** The fallback serves "Project not configured", which is no deploy of the application. */
+    public function test_a_project_nothing_recognises_is_the_placeholder_page_and_not_deployable(): void
+    {
+        $this->write('Makefile', "all:\n");
+        $this->write('README', 'Linux kernel');
+
+        $report = $this->report(['strategy' => Strategies::FALLBACK]);
+
+        $this->assertSame(DeployVerdict::PLACEHOLDER, $report['verdict']);
+        $this->assertFalse($report['deployable']);
+        $this->assertSame(['code' => DeployVerdict::CODE_UNRECOGNISED, 'message' => DeployVerdict::UNRECOGNISED], $report['issue']);
+    }
+
+    /**
+     * @return array<string, array{0: array<string, string>}>
+     */
+    public static function dotnetRepositoriesServingNothing(): array
+    {
+        $sln = "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"App\", \"App\\App.csproj\", \"{11111111-2222-3333-4444-555555555555}\"\nEndProject\n";
+
+        return [
+            'a WinForms app (Fictiverse/Redream)' => [['Redream.sln' => $sln, 'App/App.csproj' => '<Project Sdk="Microsoft.NET.Sdk">'
+                . '<PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net6.0-windows</TargetFramework>'
+                . '<UseWindowsForms>true</UseWindowsForms></PropertyGroup></Project>']],
+            'a library (sqlkata/querybuilder)' => [['SqlKata.sln' => $sln, 'App/App.csproj' => '<Project Sdk="Microsoft.NET.Sdk">'
+                . '<PropertyGroup><TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks></PropertyGroup></Project>']],
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $files
+     */
+    #[DataProvider('dotnetRepositoriesServingNothing')]
+    public function test_a_dotnet_repository_serving_nothing_is_one_no_strategy_can_run(array $files): void
+    {
+        foreach ($files as $file => $contents) {
+            $this->write($file, $contents);
+        }
+
+        $report = $this->report(['strategy' => Strategies::FALLBACK]);
+
+        $this->assertSame(DeployVerdict::PLACEHOLDER, $report['verdict']);
+        $this->assertStringNotContainsString('may build', $report['issue']['message']);
+        $this->assertSame([
+            'code' => DeployVerdict::CODE_UNRECOGNISED,
+            'message' => DeployVerdict::UNRECOGNISED . DeployVerdict::DOTNET_SERVES_NOTHING,
+        ], $report['issue']);
+        $this->assertSame([], $report['candidates']);
+    }
+
+    /** dotnet/maui: its sample servers are passed over for their framework, so "none serves HTTP" would not be true. */
+    public function test_a_dotnet_server_passed_over_for_its_framework_is_named_as_the_reason(): void
+    {
+        $sample = 'src/Essentials/samples/Sample.Server.WebAuthenticator/Essentials.Sample.Server.WebAuthenticator.csproj';
+        $this->write('Microsoft.Maui.sln', "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Sample\", \""
+            . str_replace('/', '\\', $sample) . "\", \"{1}\"\nEndProject\n");
+        $this->write($sample, '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>$(_MauiDotNetTfm)</TargetFramework></PropertyGroup></Project>');
+
+        $report = $this->report(['strategy' => Strategies::FALLBACK]);
+
+        $this->assertSame(DeployVerdict::PLACEHOLDER, $report['verdict']);
+        $this->assertSame(
+            DeployVerdict::UNRECOGNISED . sprintf(DeployVerdict::DOTNET_FRAMEWORK_UNRESOLVED, $sample, '$(_MauiDotNetTfm)'),
+            $report['issue']['message']
+        );
+        $this->assertStringNotContainsString('none serves HTTP', $report['issue']['message']);
+        $this->assertSame([], $report['candidates']);
+    }
+
+    /** An inspection fetches no project file four folders down, so BootstrapAdmin's web project reads as empty. */
+    public function test_a_dotnet_project_the_inspection_did_not_read_leaves_the_verdict_open(): void
+    {
+        $this->write('BootstrapAdmin.slnx', '<Solution><Project Path="src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj" />'
+            . '<Project Path="test/UnitTest/UnitTest.csproj" /></Solution>');
+        $this->write('src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj', '');
+        $this->write('test/UnitTest/UnitTest.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFramework>net7.0</TargetFramework></PropertyGroup></Project>');
+
+        $report = $this->report(['strategy' => Strategies::FALLBACK]);
+
+        $this->assertSame(DeployVerdict::UNRECOGNISED . DeployVerdict::RAILPACK_MAY_BUILD, $report['issue']['message']);
+        $this->assertSame(['railpack'], array_column($report['candidates'], 'id'));
+    }
+
+    /** moeru-ai/airi: a Godot C# engine beside a Node workspace, which Railpack may still build. */
+    public function test_a_dotnet_project_serving_nothing_beside_another_toolchain_may_still_be_railpacks(): void
+    {
+        $this->write('package.json', '{"name":"airi","scripts":{"build":"vite build"}}');
+        $this->write('engines/godot/Airi.csproj', '<Project Sdk="Godot.NET.Sdk/4.4.0"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+
+        $report = $this->report(['strategy' => Strategies::FALLBACK]);
+
+        $this->assertSame(DeployVerdict::UNRECOGNISED . DeployVerdict::RAILPACK_MAY_BUILD, $report['issue']['message']);
+    }
+
+    public function test_a_package_railpack_starts_nothing_from_is_the_placeholder_page(): void
+    {
+        $this->write('package.json', '{"name":"lint-config","scripts":{"lint":"eslint ."},"devDependencies":{"eslint":"^9"}}');
+
+        $report = $this->report(['strategy' => Strategies::RAILPACK, 'label' => 'Railpack']);
+
+        $this->assertSame(DeployVerdict::PLACEHOLDER, $report['verdict']);
+        $this->assertFalse($report['deployable']);
+        $this->assertSame(['code' => DeployVerdict::CODE_NOTHING_TO_START, 'message' => DeployVerdict::NOTHING_TO_START], $report['issue']);
+    }
+
+    /**
+     * @return array<string, array{0: array<string, string>}>
+     */
+    public static function packagesRailpackMayStart(): array
+    {
+        $lint = '{"name":"pkg","scripts":{"lint":"eslint ."}}';
+
+        return [
+            'main names the entry' => [['package.json' => '{"name":"lib","main":"lib.js"}', 'lib.js' => '']],
+            'a root index.ts' => [['package.json' => $lint, 'index.ts' => '']],
+            'a build that may write pages' => [['package.json' => '{"name":"site","scripts":{"build":"gulp"}}']],
+            'pages committed under dist/' => [['package.json' => $lint, 'dist/index.html' => '<title>x</title>']],
+            'an Nx workspace' => [['package.json' => $lint, 'nx.json' => '{}']],
+            'another runtime Railpack builds first' => [['package.json' => $lint, 'deno.json' => '{}', 'main.ts' => '']],
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $files
+     */
+    #[DataProvider('packagesRailpackMayStart')]
+    public function test_a_package_without_a_start_script_that_may_still_start_deploys_with_a_warning(array $files): void
+    {
+        foreach ($files as $file => $contents) {
+            $this->write($file, $contents);
+        }
+
+        $report = $this->report(['strategy' => Strategies::RAILPACK, 'label' => 'Railpack']);
+
+        $this->assertSame(DeployVerdict::NO_START_COMMAND, $report['verdict']);
+        $this->assertTrue($report['deployable']);
+        $this->assertNull($report['issue']);
+    }
+
+    public function test_railpack_with_a_start_script_is_deployable(): void
+    {
+        $this->write('package.json', '{"name":"koa-app","scripts":{"start":"node app.mjs"}}');
+
+        $report = $this->report(['strategy' => Strategies::RAILPACK, 'label' => 'Railpack']);
+
+        $this->assertSame(DeployVerdict::DEPLOYABLE, $report['verdict']);
     }
 
     /**

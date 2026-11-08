@@ -10,9 +10,8 @@ use App\Lib\Http\OutboundUrl;
 use Symfony\Component\Process\Process;
 
 /**
- * Turns a repository URL, a directory on this server, a hosting project, or an
- * `owner/repo` host string into a directory AppInspector can read. Git sources clone
- * exactly as the deploy pipeline does (`--depth=1`, askpass token, no prompts).
+ * Turns a repository URL, a directory on this server, a hosting project, or an `owner/repo` host string into a directory
+ * AppInspector can read. Git sources clone exactly as the deploy pipeline does (`--depth=1`, askpass token, no prompts).
  */
 final class SourceResolver
 {
@@ -29,8 +28,10 @@ final class SourceResolver
     /** The kinds the API and MCP accept. */
     public const TYPES = [self::TYPE_GIT, self::TYPE_PROJECT];
 
-    /** How a git source was read: its GitHub file list, or a clone. */
+    /** How a git source was read: a blobless clone holding only what detection reads, its GitHub file list, or a clone. */
     public const METHOD_TREE = 'tree';
+
+    public const METHOD_PARTIAL = 'partial';
 
     public const METHOD_CLONE = 'clone';
 
@@ -55,9 +56,8 @@ final class SourceResolver
     ];
 
     /**
-     * GIT_TERMINAL_PROMPT only closes the terminal: an askpass program would still open a
-     * dialog nobody answers (the token path overrides GIT_ASKPASS). LFS media never decides
-     * a stack; the C locale keeps git's message stable for the API response it ends up in.
+     * GIT_TERMINAL_PROMPT only closes the terminal: an askpass program would still open a dialog nobody answers (the token
+     * path overrides GIT_ASKPASS). LFS media never decides a stack; the C locale keeps git's message stable for the API.
      */
     private const UNATTENDED_GIT_ENV = [
         'GIT_TERMINAL_PROMPT' => '0',
@@ -70,7 +70,7 @@ final class SourceResolver
 
     /**
      * @param  ?GitHubTree  $tree  reads a public GitHub repository from its file
-     *                             list before falling back to a clone; null always clones
+     *                             list when git is refused; null never does
      * @param  list<string>  $allowedProtocols  the transports the clone and its submodules may use
      */
     public function __construct(
@@ -81,11 +81,8 @@ final class SourceResolver
     ) {}
 
     /**
-     * Which of the three kinds of source this string names, or null when it is
-     * none of them.
-     *
-     * The order is what makes it unambiguous: a hosting username is 3-15 lowercase
-     * alphanumerics with no dot or slash, so nothing else can look like one.
+     * Which of the three kinds of source this string names, or null. The order makes it unambiguous: a hosting username is
+     * 3-15 lowercase alphanumerics with no dot or slash, so nothing else can look like one.
      */
     public static function classify(string $source): ?string
     {
@@ -128,8 +125,7 @@ final class SourceResolver
     }
 
     /**
-     * The same question POST /projects asks of `git_repo`, from the same
-     * place, carried whole so the suggestion survives. The address is checked
+     * The same question POST /projects asks of `git_repo`, carried whole so the suggestion survives. The address is checked
      * too: the inspection clone runs in core, whose network reaches the metadata service.
      *
      * @throws InspectException when the URL is not one this may clone
@@ -148,12 +144,8 @@ final class SourceResolver
     }
 
     /**
-     * Read $repoUrl into a temp directory: from its file list when it is a
-     * public GitHub repository, else (or when that fails) as a shallow clone.
-     * `meta.method` says which.
-     *
-     * $subdirectory only narrows which files the file list fetches; the
-     * caller still descends into it.
+     * Read $repoUrl into a temp directory from a blobless clone of only the files detection reads, else a shallow
+     * clone; `meta.method` says which. $subdirectory only narrows the blobless fetch.
      *
      * @throws InspectException
      */
@@ -165,17 +157,140 @@ final class SourceResolver
     ): ResolvedSource {
         $repoUrl = self::normaliseGitUrl($repoUrl);
         self::assertCloneable($repoUrl);
-        $hasToken = $token !== null && $token !== '';
-        if ($hasToken) {
+        $token = $token !== null && $token !== '' ? $token : null;
+        if ($token !== null) {
             GitUrl::assertSafeForToken($repoUrl);
-        } else {
-            $resolved = $this->fromTree($repoUrl, $branch, $subdirectory);
-            if ($resolved !== null) {
-                return $resolved;
+        }
+
+        try {
+            $partial = $this->partialClone($repoUrl, $branch, $token, $subdirectory);
+        } catch (InspectException $refused) {
+            return $this->treeWhenGitIsRefused($refused, $repoUrl, $branch, $token, $subdirectory);
+        }
+
+        return $partial ?? $this->cloneRepository($repoUrl, $branch, $token);
+    }
+
+    /**
+     * GitHub throttles anonymous git downloads while its API and raw files still answer, so a public github.com
+     * repository is then read from its file list. A refusal the caller has to see, such as a redirect, is not retried.
+     *
+     * @throws InspectException
+     */
+    private function treeWhenGitIsRefused(
+        InspectException $refused,
+        string $repoUrl,
+        ?string $branch,
+        ?string $token,
+        ?string $subdirectory
+    ): ResolvedSource {
+        if ($token !== null || $refused->problem !== null) {
+            throw $refused;
+        }
+
+        return $this->fromTree($repoUrl, $branch, $subdirectory) ?? throw $refused;
+    }
+
+    /**
+     * A bare blobless clone, written out with only the files detection reads, or null when that cannot be done exactly.
+     * A repository that cannot be cloned at all fails here rather than twice.
+     *
+     * @throws InspectException
+     */
+    private function partialClone(string $repoUrl, ?string $branch, ?string $token, ?string $subdirectory): ?ResolvedSource
+    {
+        $root = $this->makeTempDir();
+        $gitDir = $root.'/repo.git';
+        $askPass = $token === null ? null : $root.'/askpass.sh';
+        $checkout = new BloblessCheckout($gitDir, $this->timeout);
+
+        try {
+            $this->cloneBlobless($repoUrl, $branch, $gitDir, $token, $askPass, $root);
+            $checkout->writeTo(
+                $root.'/repo',
+                $subdirectory,
+                fn (array $ids) => $this->fetchBlobs($repoUrl, $gitDir, $ids, $askPass, $root)
+            );
+        } catch (TreeUnavailable) {
+            ResolvedSource::removeTree($root);
+
+            return null;
+        } catch (\Throwable $e) {
+            ResolvedSource::removeTree($root);
+            throw $e instanceof \InvalidArgumentException
+                ? new InspectException('Could not clone the repository: '.$e->getMessage(), 0, $e)
+                : $e;
+        } finally {
+            if ($askPass !== null) {
+                @unlink($askPass);
             }
         }
 
-        return $this->cloneRepository($repoUrl, $branch, $hasToken ? $token : null);
+        return $this->partialSource($repoUrl, $branch, $checkout->head(), $root);
+    }
+
+    /**
+     * @throws InspectException
+     */
+    private function cloneBlobless(
+        string $repoUrl,
+        ?string $branch,
+        string $gitDir,
+        ?string $token,
+        ?string $askPass,
+        string $root
+    ): void {
+        $command = self::cloneCommand($repoUrl, $branch, $gitDir, ['--bare', '--filter=blob:none']);
+        if ($token !== null && $askPass !== null) {
+            self::writeAskPass($askPass, $token, $repoUrl);
+            $command = GitUrl::withAskPass($command, $askPass);
+        }
+
+        $this->run($command, 'Could not clone the repository', $root);
+    }
+
+    /**
+     * One request for every blob named, pinned as the clone is to an address the egress check accepts.
+     *
+     * @param  list<string>  $ids
+     *
+     * @throws TreeUnavailable
+     */
+    private function fetchBlobs(string $repoUrl, string $gitDir, array $ids, ?string $askPass, string $root): void
+    {
+        $command = GitUrl::withResolve([
+            'git', ...self::UNATTENDED_GIT_CONFIG, '-c', 'fetch.negotiationAlgorithm=noop', '--git-dir='.$gitDir,
+            'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--recurse-submodules=no', '--filter=blob:none',
+            'origin', ...$ids,
+        ], OutboundUrl::pin($repoUrl));
+        if ($askPass !== null) {
+            $command = GitUrl::withAskPass($command, $askPass);
+        }
+
+        try {
+            $this->run($command, 'Could not fetch the files detection reads', $root);
+        } catch (InspectException $e) {
+            throw new TreeUnavailable($e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * @param  array{commit: ?string, branch: ?string}  $head
+     */
+    private function partialSource(string $repoUrl, ?string $branch, array $head, string $root): ResolvedSource
+    {
+        return new ResolvedSource(
+            self::TYPE_GIT,
+            GitUrl::sanitize($repoUrl),
+            $root.'/repo',
+            [
+                'repository' => GitUrl::sanitize($repoUrl),
+                'branch' => $branch ?? $head['branch'],
+                'commit' => $head['commit'],
+                'method' => self::METHOD_PARTIAL,
+            ],
+            $root
+        );
     }
 
     /**
@@ -214,11 +329,12 @@ final class SourceResolver
     }
 
     /**
+     * @param  list<string>  $options
      * @return list<string>
      */
-    private static function cloneCommand(string $repoUrl, ?string $branch, string $target): array
+    private static function cloneCommand(string $repoUrl, ?string $branch, string $target, array $options = []): array
     {
-        $command = ['git', ...self::UNATTENDED_GIT_CONFIG, 'clone', '--depth=1', '--single-branch', '--no-tags'];
+        $command = ['git', ...self::UNATTENDED_GIT_CONFIG, 'clone', '--depth=1', '--single-branch', '--no-tags', ...$options];
         if ($branch !== null && $branch !== '') {
             $command[] = '--branch';
             $command[] = $branch;
@@ -259,8 +375,8 @@ final class SourceResolver
     }
 
     /**
-     * The repository from its file list when it is a GitHub one, or null to clone
-     * it instead. A token never gets here: a repository needing one is not readable this way.
+     * The repository from its file list when it is a GitHub one, or null when it cannot be read that way.
+     * A token never gets here: a repository needing one is not readable this way.
      *
      * @throws InspectException
      */
@@ -346,12 +462,8 @@ final class SourceResolver
     }
 
     /**
-     * Where a hosting project keeps the application's files: `~/project` for a
-     * container project, else the main domain's document root for the classic
-     * PHP templates, which have no `~/project`. `$relative` overrides the guess.
-     * Each is held to the home like a caller's subdirectory: a `~/project` that
-     * leaves it is refused, a document root that does (or is missing) is skipped,
-     * and the read then reports ~/project missing.
+     * `~/project` for a container project, else the main domain's document root (classic PHP has no `~/project`), unless
+     * `$relative` says. Held to the home: a `~/project` leaving it is refused, a document root leaving it or missing is skipped.
      *
      * @throws InspectException
      */
@@ -455,11 +567,8 @@ final class SourceResolver
     }
 
     /**
-     * A caller-supplied path expressed relative to $root.
-     *
-     * An absolute path inside $root is accepted, because that is how these
-     * directories are named in the deploy log and an operator should be able to
-     * paste one back. Anything outside is an error, never a clamp.
+     * A caller-supplied path relative to $root. An absolute path inside $root is accepted, since the deploy log names
+     * directories that way and an operator may paste one back; anything outside is an error, never a clamp.
      *
      * @throws InspectException
      */
@@ -514,9 +623,8 @@ final class SourceResolver
     }
 
     /**
-     * A read from a repository that may not be one, so failure is an answer and not
-     * an error. `safe.directory=*` is needed because most checkouts here belong to
-     * another uid, which git otherwise refuses to read.
+     * A read from a repository that may not be one, so failure is an answer and not an error. `safe.directory=*` is
+     * needed because most checkouts here belong to another uid, which git otherwise refuses to read.
      *
      * @param  list<string>  $args
      */
@@ -571,9 +679,8 @@ final class SourceResolver
     }
 
     /**
-     * `submodule init` fetches nothing: it writes each URL into .git/config as the fetch
-     * will use it, a relative `../` resolved, so those are what gets checked. Each http(s)
-     * one is pinned to the address checked; null when any of them is refused.
+     * `submodule init` fetches nothing but writes each URL as the fetch will use it (`../` resolved), so those are checked,
+     * each http(s) one pinned to the address checked; null when any of them is refused.
      *
      * @param  list<string>  $git
      * @return ?list<string>
@@ -701,13 +808,11 @@ final class SourceResolver
 
         if (! $process->isSuccessful()) {
             $output = $process->getErrorOutput() ?: $process->getOutput();
-            $redirect = GitUrl::redirectedTo($output);
-            if ($redirect !== null) {
+            if (GitUrl::refusedRedirect($output)) {
                 throw InspectException::ofProblem([
                     'field' => 'source',
                     'code' => 'redirect_not_followed',
-                    'message' => "The repository redirects to {$redirect}. This engine does not follow Git "
-                        ."redirects; use {$redirect} instead.",
+                    'message' => GitUrl::redirectRefusal(GitUrl::redirectedTo($output)),
                 ]);
             }
             $message = self::reason($output, $redact);
@@ -716,9 +821,8 @@ final class SourceResolver
     }
 
     /**
-     * `protocol.allow` reaches only the process git runs it in; a submodule's clone is a
-     * child with its own config. GIT_ALLOW_PROTOCOL is git's own form of it and is inherited,
-     * so it limits the clone and every submodule fetch alike.
+     * `protocol.allow` reaches only the process git runs it in, not a submodule's clone; GIT_ALLOW_PROTOCOL is git's own
+     * form of it and is inherited, so it limits the clone and every submodule fetch alike.
      *
      * @return array<string, string>
      */
@@ -728,9 +832,8 @@ final class SourceResolver
     }
 
     /**
-     * The one line of git's output worth returning: the `fatal:` one, else the last thing
-     * said — not the first, which only announces the clone. $redact, the workspace that is
-     * already deleted by the time the caller reads this, is replaced by `<workspace>`.
+     * The one line of git's output worth returning: the `fatal:` one, else the last (the first only announces the clone),
+     * with $redact, a workspace already deleted by the time the caller reads this, replaced by `<workspace>`.
      */
     private static function reason(string $output, ?string $redact): string
     {
@@ -820,9 +923,8 @@ final class SourceResolver
     }
 
     /**
-     * Clean up after requests that never finished: the normal path deletes its own
-     * workspace in a finally block, so this only finds the leftovers of a php-fpm
-     * worker killed mid-clone, which would otherwise stay on disk.
+     * Clean up after requests that never finished: the normal path deletes its own workspace in a finally block, so this
+     * only finds what a php-fpm worker killed mid-clone left on disk.
      */
     private function sweepStaleWorkspaces(string $root): void
     {

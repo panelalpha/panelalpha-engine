@@ -3,10 +3,13 @@
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\Detect\DeployRefusal;
+use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\Probes\DotnetProjectProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -127,6 +130,119 @@ class DotnetRuntimeTest extends TestCase
         $this->assertSame('8.0', DotnetRuntime::targetFramework($this->dir));
     }
 
+    /** ArgoZhang/BootstrapAdmin: the web project is four folders down, and only BootstrapAdmin.slnx names it. */
+    public function test_a_web_project_deeper_down_is_found_through_the_root_solution(): void
+    {
+        $this->write('BootstrapAdmin.slnx', '<Solution><Folder Name="/src/blazor/admin/">'
+            . '<Project Path="src/blazor/admin/BootstrapAdmin.Caching/BootstrapAdmin.Caching.csproj" />'
+            . '<Project Path="src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj" />'
+            . '</Folder><File Path="README.md" /></Solution>');
+        $this->write('src/blazor/admin/BootstrapAdmin.Caching/BootstrapAdmin.Caching.csproj', '<Project Sdk="Microsoft.NET.Sdk"></Project>');
+        $this->write('src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+        $this->write('test/UnitTest/UnitTest.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFramework>net7.0</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertSame('src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj', DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue((new DotnetProjectProbe())->evaluate($this->context()));
+        $this->assertStringContainsString(
+            "dotnet publish 'src/blazor/admin/BootstrapAdmin.Web/BootstrapAdmin.Web.csproj' -p:SolutionDir=\"\$PWD/\"",
+            DotnetRuntime::buildCommand($this->dir)
+        );
+    }
+
+    public function test_a_backslashed_solution_path_is_read_as_a_path(): void
+    {
+        $this->write('Shop.sln', $this->solution('src\\server\\web\\Shop.Web\\Shop.Web.csproj'));
+        $this->write('src/server/web/Shop.Web/Shop.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertSame('src/server/web/Shop.Web/Shop.Web.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    public function test_a_solution_path_leading_out_of_the_repository_is_not_followed(): void
+    {
+        $this->write('repo/App.sln', $this->solution('..\\outside\\Evil.Web\\Evil.Web.csproj', 'a\\..\\..\\outside\\Evil.Web\\Evil.Web.csproj'));
+        $this->write('outside/Evil.Web/Evil.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertSame(['App.sln'], DotnetRuntime::findProjectFiles($this->dir . '/repo'));
+        $this->assertNull(DotnetRuntime::entryProject($this->dir . '/repo'));
+    }
+
+    public function test_a_project_within_reach_stays_ahead_of_a_deeper_one_the_solution_lists(): void
+    {
+        $this->write('App.sln', $this->solution('aaa\\samples\\web\\Sample.Web\\Sample.Web.csproj', 'src\\App.Web\\App.Web.csproj'));
+        $this->write('aaa/samples/web/Sample.Web/Sample.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+        $this->write('src/App.Web/App.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertSame('src/App.Web/App.Web.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    /**
+     * dotnet/maui: its solution lists a sample server whose framework only the repository's own build sets
+     * (`$(_MauiDotNetTfm)`), so the 8.0 default SDK would have built a framework repository's sample.
+     */
+    public function test_a_web_project_targeting_only_a_property_is_not_the_entry_point(): void
+    {
+        $this->write('Microsoft.Maui.sln', $this->solution(
+            'src\\Essentials\\samples\\Sample.Server.WebAuthenticator\\Essentials.Sample.Server.WebAuthenticator.csproj',
+            'src\\Essentials\\samples\\Samples.Server.Passkeys\\Essentials.Samples.Server.Passkeys.csproj',
+        ));
+        $this->write(
+            'src/Essentials/samples/Sample.Server.WebAuthenticator/Essentials.Sample.Server.WebAuthenticator.csproj',
+            '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>$(_MauiDotNetTfm)</TargetFramework></PropertyGroup></Project>'
+        );
+        $this->write(
+            'src/Essentials/samples/Samples.Server.Passkeys/Essentials.Samples.Server.Passkeys.csproj',
+            '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFrameworks>net$(_MauiDotNetVersion);$(MauiPlatforms)</TargetFrameworks></PropertyGroup></Project>'
+        );
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+        $this->assertSame([
+            'file' => 'src/Essentials/samples/Sample.Server.WebAuthenticator/Essentials.Sample.Server.WebAuthenticator.csproj',
+            'framework' => '$(_MauiDotNetTfm)',
+        ], DotnetRuntime::unresolvedFrameworkProject($this->dir));
+    }
+
+    public function test_a_library_or_window_targeting_only_a_property_is_no_server_passed_over(): void
+    {
+        $this->write('src/Core/Core.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFrameworks>$(MauiPlatforms)</TargetFrameworks></PropertyGroup></Project>');
+        $this->write('src/Sample/Sample.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>$(_MauiDotNetTfm)</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
+        $this->assertNull(DotnetRuntime::unresolvedFrameworkProject($this->dir));
+    }
+
+    public function test_a_web_project_naming_a_framework_beside_a_property_is_the_entry_point(): void
+    {
+        $this->write('Web/Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFrameworks>net8.0;$(ExtraFrameworks)</TargetFrameworks></PropertyGroup></Project>');
+
+        $this->assertSame('Web/Web.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    /** vpnhood/VpnHood: its browser UI is a WebAssembly page the app's own server hands out, not a server. */
+    public function test_a_webassembly_project_is_not_the_entry_point(): void
+    {
+        $this->write('src/VpnHood.AppUi.Browser/VpnHood.AppUi.Browser.csproj', '<Project Sdk="Microsoft.NET.Sdk.WebAssembly">'
+            . '<PropertyGroup><TargetFramework>net10.0-browser</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    public function test_the_web_sdk_is_recognised_however_the_project_names_it(): void
+    {
+        $this->write('A/A.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web/9.0.100"></Project>');
+        $this->assertSame('A/A.csproj', DotnetRuntime::entryProject($this->dir));
+
+        unlink($this->dir . '/A/A.csproj');
+        $this->write('B/B.csproj', '<Project><Sdk Name="Microsoft.NET.Sdk.Web" /></Project>');
+        $this->assertSame('B/B.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
     public function test_the_highest_target_framework_in_a_solution_wins(): void
     {
         $this->write('A/A.csproj', '<Project><TargetFramework>net8.0</TargetFramework></Project>');
@@ -134,6 +250,30 @@ class DotnetRuntimeTest extends TestCase
 
         // The SDK that can build the newest can build the rest.
         $this->assertSame('9.0', DotnetRuntime::targetFramework($this->dir));
+    }
+
+    /**
+     * ArgoZhang/BootstrapAdmin: its web project names no framework and builds for src/Directory.Build.props'
+     * net10.0, so the stale net7.0 test project alone picked an SDK that cannot build it.
+     */
+    public function test_a_project_naming_no_framework_builds_for_its_directory_build_props_one(): void
+    {
+        $this->write('test/UnitTest/UnitTest.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFramework>net7.0</TargetFramework></PropertyGroup></Project>');
+        $this->write('src/Directory.Build.props', '<Project><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>');
+        $this->write('src/Admin.Web/Admin.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertSame('10.0', DotnetRuntime::targetFramework($this->dir));
+        $this->assertSame('10.0', (new DotnetRuntime())->resolve($this->context())?->version);
+    }
+
+    public function test_a_classic_project_does_not_take_a_framework_from_directory_build_props(): void
+    {
+        $this->write('Directory.Build.props', '<Project><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>');
+        $this->write('Old/Old.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
+            . '<TargetFrameworkVersion>v4.8</TargetFrameworkVersion></PropertyGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::targetFramework($this->dir));
     }
 
     /** Library targets say nothing about which SDK to run. */
@@ -171,11 +311,19 @@ XML);
         $this->write('Server/Server.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
             . '<OutputType>Exe</OutputType><TargetFrameworkVersion>v4.7</TargetFrameworkVersion></PropertyGroup></Project>');
 
-        $this->assertSame('Server/Server.csproj targets .NET Framework v4.7', DotnetRuntime::legacyFrameworkEntry($this->dir));
+        $this->assertSame(
+            ['file' => 'Server/Server.csproj', 'framework' => 'v4.7', 'sdk_style' => false],
+            DotnetRuntime::legacyFrameworkEntry($this->dir)
+        );
 
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Server/Server.csproj targets .NET Framework v4.7');
-        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
+        try {
+            DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
+            $this->fail('A .NET Framework entry project was not refused.');
+        } catch (DeployRefusal $refusal) {
+            $this->assertSame(DeployabilityCheck::DOTNET_PROJECT_LEGACY, $refusal->refusal);
+            $this->assertStringStartsWith('Server/Server.csproj targets .NET Framework v4.7 (a <TargetFrameworkVersion> project).', $refusal->getMessage());
+            $this->assertSame(['file' => 'Server/Server.csproj'], $refusal->facts);
+        }
     }
 
     public function test_an_sdk_style_entry_project_is_deployable(): void
@@ -198,6 +346,29 @@ XML);
         $this->assertNotNull($requirement);
         $this->assertSame('9.0', $requirement->version);
         $this->assertSame('global.json sdk.version', $requirement->source);
+    }
+
+    /** dotnet/maui: an Arcade build pins its SDK under tools.dotnet and leaves sdk.version out. */
+    public function test_global_json_tools_dotnet_pins_the_sdk_when_sdk_version_is_absent(): void
+    {
+        $this->write('Microsoft.Maui.sln', $this->solution('src\\Core\\Core.csproj'));
+        $this->write('src/Core/Core.csproj', '<Project><PropertyGroup><TargetFramework>$(_MauiDotNetTfm)</TargetFramework></PropertyGroup></Project>');
+        $this->write('global.json', '{"tools":{"dotnet":"11.0.100-rtm.26514.118"},"sdk":{"paths":[".dotnet","$host$"]}}');
+
+        $requirement = (new DotnetRuntime())->resolve($this->context());
+
+        $this->assertNotNull($requirement);
+        $this->assertSame('11.0', $requirement->version);
+        $this->assertSame('11.0.100-rtm.26514.118', $requirement->constraint);
+        $this->assertSame('global.json tools.dotnet', $requirement->source);
+    }
+
+    public function test_global_json_sdk_version_outranks_tools_dotnet(): void
+    {
+        $this->write('App/App.csproj', '<Project><TargetFramework>net8.0</TargetFramework></Project>');
+        $this->write('global.json', '{"sdk":{"version":"9.0.101"},"tools":{"dotnet":"10.0.100"}}');
+
+        $this->assertSame('global.json sdk.version', (new DotnetRuntime())->resolve($this->context())?->source);
     }
 
     public function test_a_project_with_no_readable_target_still_resolves_to_the_default(): void
@@ -317,8 +488,207 @@ XML);
 </Project>');
 
         $this->assertNull(DotnetRuntime::entryProject($this->dir));
-        $this->assertTrue(DotnetRuntime::onlyConsoleExecutables($this->dir));
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
         $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    /**
+     * Fictiverse/Redream: a WinForms app the Linux SDK cannot build. Claimed, the
+     * build ran `dotnet publish` with no project and failed on the solution.
+     */
+    public function test_a_windows_desktop_app_is_not_claimed(): void
+    {
+        $this->write('Redream.sln', $this->solution('Redream\\Redream.csproj'));
+        $this->write('Redream/Redream.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>net6.0-windows</TargetFramework>'
+            . '<UseWindowsForms>true</UseWindowsForms></PropertyGroup></Project>');
+
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    /** Avalonia builds on Linux, but a window still has no port to answer on. */
+    public function test_a_cross_platform_desktop_app_is_not_claimed(): void
+    {
+        $this->write('YoutubeDownloader/YoutubeDownloader.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>'
+            . '<ItemGroup><PackageReference Include="Avalonia" Version="11.3.8" /></ItemGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    /**
+     * kitsuned/PotatoNV: a .NET Framework WPF app is refused with the reason, not built, once nothing else claims
+     * the repository.
+     */
+    public function test_a_classic_dotnet_framework_desktop_app_is_refused(): void
+    {
+        $this->write('PotatoNV-next.sln', $this->solution('PotatoNV-next\\PotatoNV-next.csproj'));
+        $this->write('PotatoNV-next/PotatoNV-next.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion></PropertyGroup></Project>');
+
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+        $this->assertSame(
+            ['file' => 'PotatoNV-next/PotatoNV-next.csproj', 'framework' => 'v4.7.2', 'sdk_style' => false],
+            DotnetRuntime::legacyFrameworkEntry($this->dir),
+        );
+
+        $decision = DetectProjectStrategy::detect($this->dir);
+        $this->assertSame(Strategies::FALLBACK, $decision['strategy']);
+        try {
+            DeployabilityCheck::assert($decision, $this->dir);
+            $this->fail('A .NET Framework desktop app nothing else claims was not refused.');
+        } catch (DeployRefusal $refusal) {
+            $this->assertSame(DeployabilityCheck::DOTNET_PROJECT_LEGACY, $refusal->refusal);
+            $this->assertSame(['file' => 'PotatoNV-next/PotatoNV-next.csproj'], $refusal->facts);
+        }
+    }
+
+    /** sqlkata/querybuilder: a library and its tests, with nothing to start. */
+    public function test_a_repository_of_libraries_is_not_claimed(): void
+    {
+        $this->write('SqlKata.sln', $this->solution('QueryBuilder\\QueryBuilder.csproj', 'QueryBuilder.Tests\\QueryBuilder.Tests.csproj'));
+        $this->write('QueryBuilder/QueryBuilder.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks></PropertyGroup></Project>');
+        $this->write('QueryBuilder.Tests/QueryBuilder.Tests.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    private function classicAspNetProject(string $version, string $import): string
+    {
+        return '<Project ToolsVersion="12.0" DefaultTargets="Build"><PropertyGroup>'
+            . '<ProjectTypeGuids>{349c5851-65df-11da-9384-00065b846f21};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids>'
+            . "<OutputType>Library</OutputType><TargetFrameworkVersion>{$version}</TargetFrameworkVersion></PropertyGroup>"
+            . '<ItemGroup><Reference Include="System.Web" /></ItemGroup>'
+            . "<Import Project=\"{$import}\" Condition=\"'\$(VSToolsPath)' != ''\" /></Project>";
+    }
+
+    /**
+     * jakubgarfield/Bonobo-Git-Server: an ASP.NET MVC 5 app is a Library IIS loads, so it
+     * got the placeholder page instead of the reason it cannot run here.
+     */
+    public function test_a_classic_aspnet_app_is_refused_with_the_dotnet_framework_reason(): void
+    {
+        $this->write('Bonobo.Git.Server.sln', $this->solution('Bonobo.Git.Server\\Bonobo.Git.Server.csproj'));
+        $this->write('Bonobo.Git.Server/Bonobo.Git.Server.csproj', $this->classicAspNetProject(
+            'v4.6',
+            '$(VSToolsPath)\\WebApplications\\Microsoft.WebApplication.targets'
+        ));
+
+        $this->assertSame(
+            ['file' => 'Bonobo.Git.Server/Bonobo.Git.Server.csproj', 'framework' => 'v4.6', 'sdk_style' => false],
+            DotnetRuntime::legacyFrameworkEntry($this->dir),
+        );
+
+        $decision = DetectProjectStrategy::detect($this->dir);
+        $this->assertSame(Strategies::FALLBACK, $decision['strategy']);
+
+        try {
+            DeployabilityCheck::assert($decision, $this->dir);
+            $this->fail('A classic ASP.NET app was not refused.');
+        } catch (DeployRefusal $refusal) {
+            $this->assertSame(DeployabilityCheck::DOTNET_PROJECT_LEGACY, $refusal->refusal);
+            $this->assertStringStartsWith('Bonobo.Git.Server/Bonobo.Git.Server.csproj targets .NET Framework v4.6', $refusal->getMessage());
+            $this->assertSame(['file' => 'Bonobo.Git.Server/Bonobo.Git.Server.csproj'], $refusal->facts);
+        }
+    }
+
+    /** OrchardCMS/Orchard: Orchard.Framework uses System.Web too, but only Orchard.Web is the application. */
+    public function test_a_dotnet_framework_library_using_system_web_is_not_the_classic_app(): void
+    {
+        $this->write('src/Orchard/Orchard.Framework.csproj', '<Project ToolsVersion="12.0"><PropertyGroup>'
+            . '<OutputType>Library</OutputType><TargetFrameworkVersion>v4.8</TargetFrameworkVersion></PropertyGroup>'
+            . '<ItemGroup><Reference Include="System.Web" /></ItemGroup></Project>');
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+
+        $this->write('src/Orchard.Web/Orchard.Web.csproj', $this->classicAspNetProject(
+            'v4.8',
+            '$(MSBuildExtensionsPath32)\\Microsoft\\VisualStudio\\v10.0\\WebApplications\\Microsoft.WebApplication.targets'
+        ));
+        $this->assertSame(
+            ['file' => 'src/Orchard.Web/Orchard.Web.csproj', 'framework' => 'v4.8', 'sdk_style' => false],
+            DotnetRuntime::legacyFrameworkEntry($this->dir)
+        );
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function sdkStyleFrameworkWebProjects(): array
+    {
+        return [
+            'MSBuild.SDK.SystemWeb' => ['<Project Sdk="MSBuild.SDK.SystemWeb/4.0.88"><PropertyGroup>'
+                . '<TargetFramework>net48</TargetFramework></PropertyGroup></Project>'],
+            'its SDK named in an element' => ['<Project><Sdk Name="MSBuild.SDK.SystemWeb" Version="4.0.88" /><PropertyGroup>'
+                . '<TargetFrameworks>net472;net48</TargetFrameworks></PropertyGroup></Project>'],
+            'ASP.NET Core on .NET Framework' => ['<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+                . '<TargetFramework>net48</TargetFramework></PropertyGroup></Project>'],
+        ];
+    }
+
+    /** An SDK-style web project for .NET Framework has no <TargetFrameworkVersion> and no WebApplication.targets import. */
+    #[DataProvider('sdkStyleFrameworkWebProjects')]
+    public function test_an_sdk_style_dotnet_framework_web_app_is_refused_with_the_dotnet_framework_reason(string $project): void
+    {
+        $this->write('Shop.sln', $this->solution('src\\Shop.Web\\Shop.Web.csproj'));
+        $this->write('src/Shop.Web/Shop.Web.csproj', $project);
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertSame(
+            ['file' => 'src/Shop.Web/Shop.Web.csproj', 'framework' => 'v4.8', 'sdk_style' => true],
+            DotnetRuntime::legacyFrameworkEntry($this->dir),
+        );
+
+        $decision = DetectProjectStrategy::detect($this->dir);
+        $this->assertSame(Strategies::FALLBACK, $decision['strategy']);
+
+        try {
+            DeployabilityCheck::assert($decision, $this->dir);
+            $this->fail('An SDK-style .NET Framework web app was not refused.');
+        } catch (DeployRefusal $refusal) {
+            $this->assertSame(DeployabilityCheck::DOTNET_PROJECT_LEGACY, $refusal->refusal);
+            $this->assertStringStartsWith('src/Shop.Web/Shop.Web.csproj targets .NET Framework v4.8. The .NET SDK', $refusal->getMessage());
+            $this->assertSame(['file' => 'src/Shop.Web/Shop.Web.csproj'], $refusal->facts);
+        }
+    }
+
+    public function test_an_sdk_style_dotnet_framework_web_app_beside_a_dotnet_one_changes_nothing(): void
+    {
+        $this->write('Legacy.Web/Legacy.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>net461</TargetFramework></PropertyGroup></Project>');
+        $this->write('Shop.Web/Shop.Web.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFrameworks>net48;net8.0</TargetFrameworks></PropertyGroup></Project>');
+
+        $this->assertSame('Shop.Web/Shop.Web.csproj', DotnetRuntime::entryProject($this->dir));
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+    }
+
+    /** iterate-ch/cyberduck: an SDK-style .NET Framework window beside a Java app serves nothing and is not claimed. */
+    public function test_an_sdk_style_dotnet_framework_desktop_app_is_left_to_later_strategies(): void
+    {
+        $this->write('windows/src/main/csharp/Cyberduck.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>net472</TargetFramework></PropertyGroup></Project>');
+        $this->write('Cyberduck.sln', $this->solution('windows\\src\\main\\csharp\\Cyberduck.csproj'));
+
+        $this->assertTrue(DotnetRuntime::servesNothing($this->dir));
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+    }
+
+    /** prometheus-net keeps a .NET Framework sample beside the ASP.NET Core one it deploys. */
+    public function test_a_classic_aspnet_app_beside_a_web_entry_changes_nothing(): void
+    {
+        $this->write('Sample.Grpc/Sample.Grpc.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+        $this->write('Sample.Web.NetFramework/Sample.Web.NetFramework.csproj', $this->classicAspNetProject(
+            'v4.6.2',
+            '$(VSToolsPath)\\WebApplications\\Microsoft.WebApplication.targets'
+        ));
+
+        $this->assertSame('Sample.Grpc/Sample.Grpc.csproj', DotnetRuntime::entryProject($this->dir));
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
     }
 
     /** Prowlarr.Console is a plain Exe; ASP.NET Core comes in through Prowlarr.Host. */

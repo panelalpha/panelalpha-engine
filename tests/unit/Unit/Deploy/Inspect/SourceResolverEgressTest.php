@@ -47,6 +47,32 @@ class SourceResolverEgressTest extends TestCase
         }
     }
 
+    /** With redirects off, git names only the status of a moved repository: it is still refused as a redirect. */
+    public function test_a_bare_redirect_status_is_refused_as_a_redirect(): void
+    {
+        $output = "fatal: unable to access 'https://gitlab.com/o/r/': The requested URL returned error: 301";
+
+        try {
+            $this->runGitCommand(['sh', '-c', 'printf %s ' . escapeshellarg($output) . ' >&2; exit 128']);
+            $this->fail('a redirecting remote was not refused');
+        } catch (InspectException $e) {
+            $problem = $e->toProblem();
+            $this->assertSame('redirect_not_followed', $problem['code'] ?? null);
+            $this->assertStringContainsString('redirects to another address', (string) ($problem['message'] ?? ''));
+        }
+    }
+
+    public function test_another_http_error_is_still_a_clone_failure(): void
+    {
+        try {
+            $this->runGitCommand(['sh', '-c', "printf %s 'fatal: unable to access: The requested URL returned error: 500' >&2; exit 128"]);
+            $this->fail('the clone failure was not raised');
+        } catch (InspectException $e) {
+            $this->assertNotSame('redirect_not_followed', $e->toProblem()['code'] ?? null);
+            $this->assertStringStartsWith('Could not clone the repository', $e->getMessage());
+        }
+    }
+
     /** @return list<string> */
     private function cloneCommand(string $repoUrl): array
     {

@@ -6,10 +6,8 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * .NET.
- *
- * Version source: `global.json` sdk.version, then the highest `netX.Y`
- * TargetFramework; the SDK is backwards compatible. One image builds and runs.
+ * .NET, versioned by `global.json` sdk.version (or Arcade's tools.dotnet), then the highest `netX.Y` TargetFramework.
+ * The SDK is backwards compatible, so one image builds and runs.
  */
 final class DotnetRuntime implements Runtime
 {
@@ -43,12 +41,9 @@ final class DotnetRuntime implements Runtime
 
     public function resolve(ProjectContext $context): ?Requirement
     {
-        $global = $context->json('global.json');
-        if (is_array($global)) {
-            $sdk = $global['sdk']['version'] ?? null;
-            if (is_string($sdk) && preg_match('/^(\d+)\.(\d+)/', $sdk, $m) === 1) {
-                return new Requirement('dotnet', $m[1].'.0', $sdk, 'global.json sdk.version');
-            }
+        $pinned = self::pinnedSdk($context->json('global.json') ?? []);
+        if ($pinned !== null) {
+            return $pinned;
         }
 
         $target = self::targetFramework($context->projectDir);
@@ -59,6 +54,26 @@ final class DotnetRuntime implements Runtime
         return self::hasProject($context->projectDir)
             ? new Requirement('dotnet', self::VERSION, '', 'engine default')
             : null;
+    }
+
+    /**
+     * The SDK global.json pins: `sdk.version`, else the `tools.dotnet` an Arcade build (dotnet/maui) installs instead.
+     *
+     * @param  array<mixed>  $global
+     */
+    private static function pinnedSdk(array $global): ?Requirement
+    {
+        $pins = [
+            'sdk.version' => $global['sdk']['version'] ?? null,
+            'tools.dotnet' => $global['tools']['dotnet'] ?? null,
+        ];
+        foreach ($pins as $key => $sdk) {
+            if (is_string($sdk) && preg_match('/^(\d+)\.(\d+)/', $sdk, $m) === 1) {
+                return new Requirement('dotnet', $m[1].'.0', $sdk, 'global.json '.$key);
+            }
+        }
+
+        return null;
     }
 
     public function defaultRequirement(): Requirement
@@ -89,15 +104,28 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
+     * Solutions and projects in the root and two levels below, then the deeper projects a root solution lists,
+     * so a project within reach stays ahead of one only the solution names.
+     *
      * @return list<string> paths relative to the project root
      */
     public static function findProjectFiles(string $projectDir): array
     {
         $projectDir = rtrim($projectDir, '/');
-        $found = [];
+        $near = self::projectFilesWithinReach($projectDir);
+        $deeper = array_values(array_diff(self::rootSolutionProjects($projectDir, $near), $near));
+        sort($deeper);
 
+        return [...$near, ...$deeper];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function projectFilesWithinReach(string $projectDir): array
+    {
+        $found = [];
         foreach (['*.sln', '*.slnx', '*.csproj', '*.fsproj', '*.vbproj'] as $pattern) {
-            // root, Jellyfin.Server/, src/Foo/
             foreach (['/', '/*/', '/*/*/'] as $depth) {
                 foreach (glob($projectDir.$depth.$pattern) ?: [] as $path) {
                     if (str_contains($pattern, '.sln') && ! self::solutionIsManaged($path)) {
@@ -116,28 +144,82 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
+     * The existing projects the root solutions list (BootstrapAdmin's web project is four folders down).
+     *
+     * @param  list<string>  $found
+     * @return list<string>
+     */
+    private static function rootSolutionProjects(string $projectDir, array $found): array
+    {
+        $projects = [];
+        foreach ($found as $relative) {
+            if (str_contains($relative, '/') || ! self::isSolution($relative)) {
+                continue;
+            }
+            $contents = AccountHomeRead::contents($projectDir.'/'.$relative);
+            foreach (self::projectsListedIn($relative, is_string($contents) ? $contents : '') as $path) {
+                if (is_file($projectDir.'/'.$path)) {
+                    $projects[$path] = true;
+                }
+            }
+        }
+
+        return array_keys($projects);
+    }
+
+    /**
+     * The C#, F# and VB projects a root .sln or .slnx lists, relative to the root. Their paths are written relative,
+     * often with backslashes; one that leads out of the repository is dropped.
+     *
+     * @return list<string>
+     */
+    public static function projectsListedIn(string $solution, string $contents): array
+    {
+        $projects = [];
+        foreach (self::listedProjects($solution, $contents) as $listed) {
+            $path = self::normalizePath(str_replace('\\', '/', $listed));
+            if ($path !== null) {
+                $projects[$path] = true;
+            }
+        }
+
+        return array_keys($projects);
+    }
+
+    public static function isSolution(string $relative): bool
+    {
+        return str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx');
+    }
+
+    /**
      * A C++-only solution (Seafile's holds just a .vcxproj) is not .NET and
      * cannot be published.
      */
     private static function solutionIsManaged(string $path): bool
     {
         $contents = AccountHomeRead::contents($path);
-        if (! is_string($contents)) {
-            return false;
-        }
 
-        return str_ends_with($path, '.slnx')
-            ? preg_match('/Path\s*=\s*"[^"]*\.(cs|fs|vb)proj"/i', $contents) === 1
-            : preg_match('/^\s*Project\("[^"]*"\)\s*=\s*"[^"]*"\s*,\s*"[^"]*\.(cs|fs|vb)proj"/mi', $contents) === 1;
+        return is_string($contents) && self::listedProjects($path, $contents) !== [];
     }
 
     /**
-     * The one project to publish: a web SDK project, else an `OutputType Exe`
-     * that serves HTTP ({@see servesHttp()}). Publishing a solution instead fails with `NETSDK1194`
-     * (test projects error and MSBuild's exit code is the build's). Tests are
-     * excluded by path and name, and so is a web SDK project that says it is a
-     * `Library` (Sonarr.SignalR) or targets only Windows. Null when nothing
-     * looks like an application.
+     * The C#, F# and VB project paths a .sln or .slnx names, as written.
+     *
+     * @return list<string>
+     */
+    private static function listedProjects(string $solution, string $contents): array
+    {
+        $pattern = str_ends_with($solution, '.slnx')
+            ? '/Path\s*=\s*"([^"]*\.(?:cs|fs|vb)proj)"/i'
+            : '/^\s*Project\("[^"]*"\)\s*=\s*"[^"]*"\s*,\s*"([^"]*\.(?:cs|fs|vb)proj)"/mi';
+        preg_match_all($pattern, $contents, $m);
+
+        return $m[1];
+    }
+
+    /**
+     * The one project to publish: a web SDK project, else an Exe that serves HTTP; a solution fails `NETSDK1194`.
+     * Tests, libraries (Sonarr.SignalR) and Windows-only projects are skipped; null when nothing is an app.
      */
     public static function entryProject(string $projectDir): ?string
     {
@@ -145,25 +227,45 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * Executables, but none that serves HTTP: a console worker (the voting
-     * app's Redis-to-Postgres mover), a desktop app, a build tool. Publishing
-     * one deploys something that can never answer on a port.
+     * No project that could answer on a port, only workers, desktop apps, libraries and tests. A .NET Framework one is
+     * left to later strategies too, and refused with that reason only when none claims the repository.
      */
-    public static function onlyConsoleExecutables(string $projectDir): bool
+    public static function servesNothing(string $projectDir): bool
     {
-        $found = self::candidates($projectDir);
-
-        // A .NET Framework one stays claimed, so the deploy is refused with that reason.
-        return $found['entry'] === null && $found['console'] !== null
-            && self::legacyFrameworkOf($projectDir, $found['console']) === null;
+        return self::candidates($projectDir)['entry'] === null;
     }
 
-    /** @return array{entry: ?string, console: ?string} */
+    /**
+     * A project that could serve HTTP but names its target framework only through an MSBuild property the repository's
+     * own build sets (dotnet/maui's sample servers), with that framework as written; null when none was passed over.
+     *
+     * @return array{file: string, framework: string}|null
+     */
+    public static function unresolvedFrameworkProject(string $projectDir): ?array
+    {
+        $file = self::candidates($projectDir)['unresolved'];
+        if ($file === null) {
+            return null;
+        }
+        $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$file);
+        preg_match('/<TargetFrameworks?>\s*([^<]*?)\s*<\/TargetFrameworks?>/i', is_string($contents) ? $contents : '', $m);
+
+        return ['file' => $file, 'framework' => $m[1] ?? ''];
+    }
+
+    /**
+     * classic: a .NET Framework web app; unresolved: a server passed over for a framework only a property names.
+     *
+     * @return array{entry: ?string, console: ?string, classic: ?string, unresolved: ?string}
+     */
     private static function candidates(string $projectDir): array
     {
         $webSdk = null;
         $executable = null;
         $console = null;
+        $classic = null;
+        $unresolvedWeb = null;
+        $unresolvedExecutable = null;
 
         foreach (self::findProjectFiles($projectDir) as $relative) {
             if (! preg_match('/\.(cs|fs|vb)proj$/', $relative) || self::looksLikeTests($relative)) {
@@ -173,18 +275,37 @@ final class DotnetRuntime implements Runtime
             if (! is_string($contents)) {
                 continue;
             }
-            if (preg_match('/<OutputType>\s*Library\s*<\/OutputType>/i', $contents) === 1
+            if (self::isFrameworkWebApp($contents)) {
+                $classic ??= $relative;
+
+                continue;
+            }
+            if (self::isLibrary($contents)
                 || self::targetsOnlyWindows($contents)
                 || self::looksLikeBenchmark($relative, $contents)
             ) {
                 continue;
             }
-            if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false) {
+            if (self::targetsOnlyAProperty($contents)) {
+                if (self::usesWebSdk($contents)) {
+                    $unresolvedWeb ??= $relative;
+                } elseif (self::isServingExecutable(rtrim($projectDir, '/'), $relative, $contents)) {
+                    $unresolvedExecutable ??= $relative;
+                }
+
+                continue;
+            }
+            if (self::usesWebSdk($contents)) {
                 $webSdk ??= $relative;
 
                 continue;
             }
-            if (preg_match('/<OutputType>\s*Exe\s*<\/OutputType>/i', $contents) === 1) {
+            if (self::isDesktopApp($contents)) {
+                $console ??= $relative;
+
+                continue;
+            }
+            if (self::isExecutable($contents)) {
                 if (self::servesHttp(rtrim($projectDir, '/'), $relative)) {
                     $executable ??= $relative;
                 } else {
@@ -193,13 +314,27 @@ final class DotnetRuntime implements Runtime
             }
         }
 
-        return ['entry' => $webSdk ?? $executable, 'console' => $console];
+        return [
+            'entry' => $webSdk ?? $executable,
+            'console' => $console,
+            'classic' => $classic,
+            'unresolved' => $unresolvedWeb ?? $unresolvedExecutable,
+        ];
+    }
+
+    private static function isExecutable(string $contents): bool
+    {
+        return preg_match('/<OutputType>\s*Exe\s*<\/OutputType>/i', $contents) === 1;
+    }
+
+    private static function isServingExecutable(string $root, string $relative, string $contents): bool
+    {
+        return self::isExecutable($contents) && self::servesHttp($root, $relative);
     }
 
     /**
-     * Whether a project, or one it references, hosts a web server: the web
-     * SDK, ASP.NET Core (Prowlarr.Console reaches it through Prowlarr.Host),
-     * another HTTP server package, or `HttpListener` in its own sources.
+     * Whether a project, or one it references (Prowlarr.Console via Prowlarr.Host), hosts a web server:
+     * the web SDK, ASP.NET Core, another HTTP server package, or `HttpListener` in its sources.
      *
      * @param  array<string, true>  $seen
      */
@@ -213,7 +348,7 @@ final class DotnetRuntime implements Runtime
         if (! is_string($contents)) {
             return false;
         }
-        if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false
+        if (self::usesWebSdk($contents)
             || preg_match('/<FrameworkReference\s+Include\s*=\s*"Microsoft\.AspNetCore\.App"/i', $contents) === 1
             || preg_match(self::HTTP_SERVER_PACKAGES, $contents) === 1
         ) {
@@ -234,6 +369,12 @@ final class DotnetRuntime implements Runtime
 
     private const HTTP_SERVER_PACKAGES = '/<PackageReference\s+Include\s*=\s*"[^"]*'
         .'(?:AspNetCore|Kestrel|EmbedIO|Nancy|ServiceStack|Suave|Giraffe|Saturn|WatsonWebserver|Owin)[^"]*"/i';
+
+    /** VpnHood's browser UI is Microsoft.NET.Sdk.WebAssembly, which publishes a page and serves nothing. */
+    private static function usesWebSdk(string $contents): bool
+    {
+        return preg_match('/Microsoft\.NET\.Sdk\.Web(?![\w.])/i', $contents) === 1;
+    }
 
     /** `a/b/../c/x.csproj` -> `a/c/x.csproj`; null when it climbs out of the project. */
     private static function normalizePath(string $path): ?string
@@ -306,23 +447,21 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * The highest `net<major>.<minor>` any project file targets, solution-wide
-     * -- the SDK that builds the newest builds the rest. `netstandard2.0` and
-     * `net48` are library targets and are ignored. Only `<TargetFramework(s)>`
-     * values count: Emby's HintPath `sqlite3.net45.1.1.11` read as sdk:45.1.
+     * The highest `netX.Y` any project's `<TargetFramework(s)>` names; the SDK building it builds the rest.
+     * Other text does not count: Emby's HintPath `sqlite3.net45.1.1.11` read as sdk:45.1.
      */
     public static function targetFramework(string $projectDir): ?string
     {
         $best = null;
         foreach (self::findProjectFiles($projectDir) as $relative) {
-            if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
+            if (self::isSolution($relative)) {
                 continue;
             }
             $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$relative);
             if (! is_string($contents)) {
                 continue;
             }
-            foreach (self::declaredFrameworks($contents) as $version) {
+            foreach (self::frameworksOf(rtrim($projectDir, '/'), $relative, $contents) as $version) {
                 if ($best === null || version_compare($version, $best, '>')) {
                     $best = $version;
                 }
@@ -333,29 +472,108 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * "<project> targets .NET Framework v4.7" when the project that would be
-     * published is a classic .NET Framework one (`<TargetFrameworkVersion>`, no
-     * `<TargetFramework>`), which `dotnet publish` on Linux cannot build.
+     * The project to publish, or with none a .NET Framework web app, and the .NET Framework version it targets
+     * (`v4.7`) when it is a .NET Framework one, which `dotnet publish` on Linux cannot build.
+     *
+     * @return array{file: string, framework: string, sdk_style: bool}|null
      */
-    public static function legacyFrameworkEntry(string $projectDir): ?string
+    public static function legacyFrameworkEntry(string $projectDir): ?array
     {
         $found = self::candidates($projectDir);
-        $entry = $found['entry'] ?? $found['console'];
+        $web = $found['entry'] ?? $found['classic'];
 
-        return $entry === null ? null : self::legacyFrameworkOf($projectDir, $entry);
+        return $web === null
+            ? self::classicConsole($projectDir, $found['console'])
+            : self::legacyFrameworkOf($projectDir, $web);
     }
 
-    private static function legacyFrameworkOf(string $projectDir, string $entry): ?string
+    /**
+     * A console or desktop program that is a classic .NET Framework project; an SDK-style `net4x` one only serves
+     * nothing.
+     *
+     * @return array{file: string, framework: string, sdk_style: bool}|null
+     */
+    private static function classicConsole(string $projectDir, ?string $console): ?array
+    {
+        $legacy = $console === null ? null : self::legacyFrameworkOf($projectDir, $console);
+
+        return $legacy !== null && ! $legacy['sdk_style'] ? $legacy : null;
+    }
+
+    /**
+     * @return array{file: string, framework: string, sdk_style: bool}|null
+     */
+    private static function legacyFrameworkOf(string $projectDir, string $entry): ?array
     {
         $contents = AccountHomeRead::contents(rtrim($projectDir, '/').'/'.$entry);
-        if (! is_string($contents)
-            || preg_match('/<TargetFrameworks?>/i', $contents) === 1
-            || preg_match('/<TargetFrameworkVersion>\s*([^<]+?)\s*<\/TargetFrameworkVersion>/i', $contents, $m) !== 1
-        ) {
+        if (! is_string($contents)) {
             return null;
         }
+        $classic = self::classicFrameworkVersion($contents);
+        $version = $classic ?? self::sdkFrameworkVersion($contents);
 
-        return $entry.' targets .NET Framework '.$m[1];
+        return $version === null ? null : ['file' => $entry, 'framework' => $version, 'sdk_style' => $classic === null];
+    }
+
+    /** The .NET Framework version a classic or an SDK-style project targets; null for one targeting .NET at all. */
+    private static function frameworkVersion(string $contents): ?string
+    {
+        return self::classicFrameworkVersion($contents) ?? self::sdkFrameworkVersion($contents);
+    }
+
+    /** The `<TargetFrameworkVersion>` of a classic .NET Framework project; null for an SDK-style one. */
+    private static function classicFrameworkVersion(string $contents): ?string
+    {
+        return preg_match('/<TargetFrameworks?>/i', $contents) !== 1
+            && preg_match('/<TargetFrameworkVersion>\s*([^<]+?)\s*<\/TargetFrameworkVersion>/i', $contents, $m) === 1
+            ? $m[1]
+            : null;
+    }
+
+    /**
+     * `v4.8` for an SDK-style project whose `<TargetFramework(s)>` name only .NET Framework (`net48`, `net472`), the
+     * newest when several; null when it names any other.
+     */
+    private static function sdkFrameworkVersion(string $contents): ?string
+    {
+        preg_match_all('/<TargetFrameworks?>\s*([^<]*?)\s*<\/TargetFrameworks?>/i', $contents, $elements);
+        $best = null;
+        foreach ($elements[1] as $list) {
+            foreach (explode(';', $list) as $framework) {
+                $framework = strtolower(trim($framework));
+                if ($framework === '') {
+                    continue;
+                }
+                if (preg_match('/^net([1-4]\d{1,2})$/', $framework, $m) !== 1) {
+                    return null;
+                }
+                $version = implode('.', str_split($m[1]));
+                if ($best === null || version_compare($version, $best, '>')) {
+                    $best = $version;
+                }
+            }
+        }
+
+        return $best === null ? null : 'v'.$best;
+    }
+
+    /**
+     * An ASP.NET app on .NET Framework, which no Linux SDK runs: System.Web MVC or Web Forms, or ASP.NET Core targeting
+     * `net4x`. It does not claim the repository, which another recipe may serve.
+     */
+    private static function isFrameworkWebApp(string $contents): bool
+    {
+        return self::frameworkVersion($contents) !== null
+            && (preg_match(self::SYSTEM_WEB_APP, $contents) === 1
+                || (self::usesWebSdk($contents) && ! self::isLibrary($contents)));
+    }
+
+    private const SYSTEM_WEB_APP = '/Microsoft\.WebApplication\.targets|\{349c5851-65df-11da-9384-00065b846f21\}'
+        .'|MSBuild\.SDK\.SystemWeb/i';
+
+    private static function isLibrary(string $contents): bool
+    {
+        return preg_match('/<OutputType>\s*Library\s*<\/OutputType>/i', $contents) === 1;
     }
 
     /**
@@ -381,10 +599,8 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * The Node image a build needs beside the SDK, or null. The SDK image has
-     * no Node, and an ASP.NET project whose targets run `npm ci` during
-     * publish fails with MSB3073 / exit 127. Chosen from the package.json next
-     * to the project that runs it, else the engine's default Node.
+     * The Node image a build needs beside the SDK, or null: a target running `npm ci` fails MSB3073 without it.
+     * Chosen from the package.json beside the project that runs it, else the engine's default Node.
      */
     public static function nodeBuildImage(string $projectDir): ?string
     {
@@ -403,7 +619,7 @@ final class DotnetRuntime implements Runtime
         }
 
         foreach ($files as $relative) {
-            if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
+            if (self::isSolution($relative)) {
                 continue;
             }
             $contents = AccountHomeRead::contents($root.'/'.$relative);
@@ -419,9 +635,8 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * `dotnet build` scatters output across each project's bin/; publish
-     * gathers one runnable directory. No `--no-restore`: restore is skipped
-     * nowhere and omitting it fails a clean checkout.
+     * `dotnet publish`, which gathers one runnable directory where `dotnet build` scatters each project's bin/.
+     * No `--no-restore`: a clean checkout fails without the restore.
      */
     public static function buildCommand(string $projectDir = ''): string
     {
@@ -438,11 +653,8 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * NuGet audit (NU1900-NU1904) stays a warning under the project's
-     * TreatWarningsAsErrors: Flink stopped at restore on `error NU1903: Warning
-     * As Error` for a transitive package. Appended to the project's own
-     * WarningsNotAsErrors from a targets file, because `-p:WarningsNotAsErrors=`
-     * would replace that list and turn its codes back into errors.
+     * Keeps NuGet audit (NU1900-NU1904) a warning under TreatWarningsAsErrors (Flink failed on NU1903).
+     * Appended from a targets file: `-p:WarningsNotAsErrors=` would replace the project's own list.
      */
     private const AUDIT_TARGETS = '<Project><PropertyGroup><WarningsNotAsErrors>'
         .'$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904'
@@ -451,12 +663,8 @@ final class DotnetRuntime implements Runtime
     private const AUDIT_TARGETS_FILE = '/tmp/panelalpha-nuget-audit.targets';
 
     /**
-     * The directory of the nearest solution above a project, relative to the
-     * project root ('.' for the root), or null outside any solution.
-     *
-     * Publishing one project leaves `$(SolutionDir)` undefined, where building
-     * the solution sets it; Prowlarr's props find stylecop.json through it, and
-     * without it every file failed SA1200 under TreatWarningsAsErrors.
+     * The nearest solution's directory above a project ('.' for the root), or null outside any solution.
+     * Publishing one project leaves `$(SolutionDir)` unset, and Prowlarr's props need it to find stylecop.json.
      */
     public static function solutionDir(string $projectDir, string $project): ?string
     {
@@ -475,11 +683,8 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * The framework to publish a project for, or null when the SDK needs no
-     * `-f`. `<TargetFrameworks>` -- plural, even with one entry -- makes
-     * publish refuse to guess (`NETSDK1129`; Prowlarr, Sonarr, Radarr), so the
-     * newest plain `netX.Y` in it is named. The list may come from a
-     * Directory.Build.props above the project.
+     * The newest plain `netX.Y` of a `<TargetFrameworks>` list (here or in a Directory.Build.props above), or null.
+     * With the plural element publish refuses to guess (`NETSDK1129`), even for one entry.
      */
     public static function publishFramework(string $projectDir, string $project): ?string
     {
@@ -513,10 +718,18 @@ final class DotnetRuntime implements Runtime
     /** The nearest Directory.Build.props that sets a framework decides. */
     private static function inheritedFrameworkList(string $root, string $dir): ?string
     {
+        $props = self::frameworkProps($root, $dir);
+
+        return $props === null ? null : self::frameworkList($props);
+    }
+
+    /** The nearest Directory.Build.props at or above $dir that sets a framework, as read. */
+    private static function frameworkProps(string $root, string $dir): ?string
+    {
         while (true) {
             $props = AccountHomeRead::contents($root.($dir === '.' ? '' : '/'.$dir).'/Directory.Build.props');
             if (is_string($props) && preg_match('/<TargetFrameworks?>/i', $props) === 1) {
-                return self::frameworkList($props);
+                return $props;
             }
             if ($dir === '.' || $dir === '/' || $dir === '') {
                 return null;
@@ -525,11 +738,32 @@ final class DotnetRuntime implements Runtime
         }
     }
 
+    /**
+     * A project naming no framework builds for the one its Directory.Build.props sets (BootstrapAdmin's web project).
+     *
+     * @return list<string>
+     */
+    private static function frameworksOf(string $root, string $relative, string $contents): array
+    {
+        if (preg_match('/<TargetFrameworks?>|<TargetFrameworkVersion>/i', $contents) === 1) {
+            return self::declaredFrameworks($contents);
+        }
+        $props = self::frameworkProps($root, dirname($relative));
+
+        return $props === null ? [] : self::declaredFrameworks($props);
+    }
+
     private static function frameworkList(string $contents): ?string
     {
         return preg_match('/<TargetFrameworks>\s*([^<]+?)\s*<\/TargetFrameworks>/i', $contents, $m) === 1
             ? $m[1]
             : null;
+    }
+
+    /** A WinForms, WPF or Avalonia window (PotatoNV), which has no port to answer on. */
+    private static function isDesktopApp(string $contents): bool
+    {
+        return preg_match('/<OutputType>\s*WinExe\s*<\/OutputType>/i', $contents) === 1;
     }
 
     /** Radarr.csproj targets net8.0-windows: a WinForms tray app, not a server. */
@@ -548,11 +782,31 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * The entry assembly is the one with a runtimeconfig beside it -- a publish
-     * directory holds dozens of library DLLs and no name distinguishes them.
-     * With nothing runnable this exits instead of restart-looping behind a 502.
-     * It runs from inside the publish directory: ASP.NET takes its content root,
-     * and so wwwroot, from the working directory.
+     * dotnet/maui's sample servers target `$(_MauiDotNetTfm)`: a framework named only through a property the
+     * repository's own build sets is a framework repository's sample, for which no SDK can be chosen.
+     */
+    private static function targetsOnlyAProperty(string $contents): bool
+    {
+        preg_match_all('/<TargetFrameworks?>\s*([^<]*?)\s*<\/TargetFrameworks?>/i', $contents, $elements);
+        $properties = 0;
+        foreach ($elements[1] as $list) {
+            foreach (explode(';', $list) as $framework) {
+                if (trim($framework) === '') {
+                    continue;
+                }
+                if (! str_contains($framework, '$(')) {
+                    return false;
+                }
+                $properties++;
+            }
+        }
+
+        return $properties > 0;
+    }
+
+    /**
+     * Runs the assembly with a runtimeconfig beside it, from the publish directory (ASP.NET's content root).
+     * With nothing runnable it exits instead of restart-looping behind a 502.
      */
     public static function startCommand(): string
     {
