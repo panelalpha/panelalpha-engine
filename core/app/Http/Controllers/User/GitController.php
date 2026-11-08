@@ -26,7 +26,9 @@ class GitController extends Controller
 {
     private const QUEUED_ON_DEPLOY = 'On a Deploy-managed checkout (`managed_by` is `deploy`) the request is checked at once '
         .'(the remote is read, 400 with git\'s error when it cannot be; the branch or ref must exist, 422 otherwise), then the change and the rebuild after it '
-        .'run in a queue job: the answer is 202 with a task. Poll GET /tasks/{id} until it is completed, failed or '
+        .'run in a queue job: the answer is 202 with a task. When git cannot run in the project\'s container (it is stopped, '
+        .'or refuses the exec), the check is left to the job, which starts or repairs the container before the change; a start '
+        .'that fails fails the task with its own error. Poll GET /tasks/{id} until it is completed, failed or '
         .'cancelled: a failure is on the task as `details.error` and `details.problems`, and `details.commit` is the '
         .'commit a completed one deployed. A new version that fails while the previous one still runs leaves it '
         .'serving, with its checkout put back';
@@ -44,20 +46,31 @@ class GitController extends Controller
 
     private const LOCK_RESPONSE = 'Deploy-managed checkout: the project could not be locked to queue the change; try again';
 
+    private const COULD_NOT_RUN_RESPONSE = 'Git could not run: the project\'s container is not running, or docker refused the exec; the message carries docker\'s error';
+
+    private const CHANGE_UNAVAILABLE_RESPONSE = self::LOCK_RESPONSE.'. '.self::COULD_NOT_RUN_RESPONSE;
+
+    private const STATUS = 'Call this first. Optional `path` defaults to `project` on DinD and the document root '
+        .'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
+        .'payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change '
+        .'or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or '
+        .'`site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` '
+        .'means a connect is still fetching the repository: wait and poll; do not call connect again.';
+
+    private const MCP_STOPPED_STATUS = 'A stopped project container answers 503 "Git could not run: the project\'s container is '
+        .'not running (...)". On a managed_by deploy checkout git_pull, git_revert and git_change_branch start it themselves, '
+        .'so do not tell the user to start the project first.';
+
     private const MCP_QUEUED = 'On a managed_by deploy checkout the change and the rebuild after it run in the background: '
-        .'the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure '
-        .'is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is '
-        .'already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get '
-        .'when task_id is null, instead of calling again.';
+        .'the answer is a task `id` at once (202); follow it with task_get until completed, failed or cancelled (a failure '
+        .'is in details.error and details.problems, the deployed commit in details.commit). A stopped container does not '
+        .'refuse the change: the task starts the container before it, so do not start the project first, and a start that '
+        .'fails fails the task with its own error. A 409 means a deploy is already running: follow the task_id it names '
+        .'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again.';
 
     #[OA\Get(
         path: '/projects/{username}/git/status',
-        description: 'Call this first. Optional `path` defaults to `project` on DinD and the document root '
-            .'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
-            .'payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change '
-            .'or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or '
-            .'`site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` '
-            .'means a connect is still fetching the repository: wait and poll; do not call connect again.',
+        description: self::STATUS,
         summary: 'Git repository status',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -82,7 +95,9 @@ class GitController extends Controller
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: self::COULD_NOT_RUN_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
+        x: ['mcp-description' => self::STATUS.' '.self::MCP_STOPPED_STATUS],
     )]
     public function status(string $username, GitStatusRequest $request, GitActions $git): JsonResponse
     {
@@ -164,7 +179,7 @@ class GitController extends Controller
                 new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'repo_url', description: 'HTTPS URL, or an SSH remote when the project has a deploy key.', type: 'string'),
                 new OA\Property(property: 'branch', type: 'string'),
-                new OA\Property(property: 'token', type: 'string', nullable: true),
+                new OA\Property(property: 'token', description: 'Access token, or the `vault:<key>` of a `git_token` vault entry.', type: 'string', nullable: true),
                 new OA\Property(property: 'auth_type', type: 'string', enum: ['pat']),
                 new OA\Property(property: 'repair', type: 'boolean'),
             ],
@@ -243,7 +258,7 @@ class GitController extends Controller
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
-            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 503, description: self::CHANGE_UNAVAILABLE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Switches the checkout to another branch. Optional `path` defaults to `project` on DinD and '
             .'the document root of the main domain on FPM/LiteSpeed. Refused (422) when the working tree is dirty or the '
@@ -261,13 +276,15 @@ class GitController extends Controller
         path: '/projects/{username}/git/update-credentials',
         description: 'Update git credentials for a directory. Optional `path` defaults to `project` on '
             .'DinD and the document root of the main domain on FPM/LiteSpeed. Sending `token` (including empty) updates stored '
-            .'credentials. Omitting `token` is a no-op that returns status.',
+            .'credentials. Omitting `token` is a no-op that returns status. When git cannot run in the project\'s container '
+            .'(it is stopped, or refuses the exec), a sent token is stored all the same and `warning` says the checkout could not be '
+            .'read, in place of its status.',
         summary: 'Update git credentials for a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
                 new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
-                new OA\Property(property: 'token', type: 'string', nullable: true),
+                new OA\Property(property: 'token', description: 'Access token, or the `vault:<key>` of a `git_token` vault entry.', type: 'string', nullable: true),
             ],
         )),
         tags: ['Git'],
@@ -295,7 +312,10 @@ class GitController extends Controller
             .'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
             .'files the incoming commits leave alone do not block it. It is refused, naming the paths, when a local '
             .'edit or untracked file sits where an incoming commit writes, or when history has diverged '
-            .'(for example after a force-push); the checkout is left as it was. On a `site_git` checkout the pull '
+            .'(for example after a force-push); the checkout is left as it was. `push_first` commits local changes, '
+            .'merges and pushes: a push the repository turns down is a 422 with `problems[].code` `git_push_rejected` '
+            .'or `git_push_unauthorized`, as POST /git/push answers, and HEAD goes back, with the files the merge '
+            .'changed unless that would overwrite a local change. On a `site_git` checkout the pull '
             .'runs in the request: 200 with the checkout, or 422 for those refusals. '.self::QUEUED_ON_DEPLOY
             .' (`details.action: git_pull`); a refused pull fails the task the same way. '.self::BUSY
             .' Confirm with the operator before `force`.',
@@ -320,13 +340,14 @@ class GitController extends Controller
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
-            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 503, description: self::CHANGE_UNAVAILABLE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Pulls the connected branch. Optional `path` defaults to `project` on DinD and the document '
             .'root of the main domain on FPM/LiteSpeed. `strategy`: `ff` (default) fast-forwards and is refused when history '
             .'has diverged or a local edit or untracked file sits where an incoming commit writes; `force` is `reset --hard` '
-            .'to origin plus clean -fd; `push_first` pushes local commits first. Confirm with the operator before `force`. '
-            .self::MCP_QUEUED],
+            .'to origin plus clean -fd; `push_first` pushes local commits first, and a push the repository turns down is a '
+            .'422 with problems[].code git_push_rejected or git_push_unauthorized. '
+            .'Confirm with the operator before `force`. '.self::MCP_QUEUED],
     )]
     public function pull(string $username, GitPullRequest $request, GitActions $git): JsonResponse
     {
@@ -341,7 +362,10 @@ class GitController extends Controller
         description: 'Push local git changes. Optional `path` defaults to `project` on DinD and '
             .'the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all '
             .'changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when '
-            .'managed_by is `deploy`.',
+            .'managed_by is `deploy`. A push the repository turns down is a 422 with `problems[].code` '
+            .'`git_push_rejected` (the branch moved on, or a protected branch or a server hook declined it) or '
+            .'`git_push_unauthorized` (no token, or a token or deploy key that may not write). Nothing is pushed, '
+            .'HEAD goes back to where it was, and what the push committed is uncommitted again; the files are not touched.',
         summary: 'Push local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -353,6 +377,7 @@ class GitController extends Controller
             new OA\Response(response: 200, description: 'Pushed', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
@@ -392,7 +417,7 @@ class GitController extends Controller
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
-            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 503, description: self::CHANGE_UNAVAILABLE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
         x: ['mcp-description' => 'Discards local changes: `reset --hard` and `clean -fd` to `ref` (default HEAD). Optional '
             .'`path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Confirm with '

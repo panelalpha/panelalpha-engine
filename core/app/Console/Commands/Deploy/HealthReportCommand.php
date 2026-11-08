@@ -68,14 +68,39 @@ class HealthReportCommand extends Command
     }
 
     /**
-     * A failed check, or ports that gave no answer at all: silence nothing
-     * could explain is not "fine" either.
+     * A failed check, ports that gave no answer at all, or an account container
+     * that was not running: silence nothing could explain is not "fine" either.
      *
      * @param  array<string, mixed>  $details
      */
     public static function notServing(array $details): bool
     {
-        return AppHealth::failedChecks($details) !== [] || AppHealth::nothingAnswered($details);
+        return AppHealth::failedChecks($details) !== []
+            || AppHealth::nothingAnswered($details)
+            || AppHealth::containerWasDown($details);
+    }
+
+    /**
+     * Null when the project serves itself. With no failed check to name, the
+     * probe's own error is the cause, a stopped container's included.
+     *
+     * @param  array<string, mixed>  $report  what the probe answered
+     * @param  array<string, mixed>  $details  the account's details as the probe recorded them
+     * @return array{project: string, serving: string, checks: string}|null
+     */
+    public static function row(string $project, array $report, array $details): ?array
+    {
+        if (! self::notServing($details)) {
+            return null;
+        }
+        $failures = AppHealth::failedChecks($details);
+        $error = $report['error'] ?? null;
+
+        return [
+            'project' => $project,
+            'serving' => (string) ($report['serving'] ?? CheckRunner::SERVING_UNKNOWN),
+            'checks' => $failures === [] && is_string($error) ? $error : self::describeFailures($failures),
+        ];
     }
 
     /**
@@ -127,20 +152,8 @@ class HealthReportCommand extends Command
     private function degradedRow(User $user, Dind $project): ?array
     {
         $report = $this->probe($user, $project);
-        if ($report === null) {
-            return null;
-        }
 
-        $details = $this->currentDetails($user);
-        if (! self::notServing($details)) {
-            return null;
-        }
-
-        return [
-            'project' => $user->username,
-            'serving' => (string) ($report['serving'] ?? CheckRunner::SERVING_UNKNOWN),
-            'checks' => self::describeFailures(AppHealth::failedChecks($details)),
-        ];
+        return $report === null ? null : self::row($user->username, $report, $this->currentDetails($user));
     }
 
     /**

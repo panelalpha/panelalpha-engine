@@ -26,12 +26,49 @@ OUT;
         );
     }
 
+    /** Fictiverse/Redream, a WinForms app, whose build step gives no reason beyond its exit code. */
+    public function test_explains_a_windows_only_dotnet_project(): void
+    {
+        $output = <<<'OUT'
+#11 1.396 /usr/share/dotnet/sdk/6.0.428/Sdks/Microsoft.NET.Sdk/targets/Microsoft.NET.Sdk.FrameworkReferenceResolution.targets(90,5): error NETSDK1100: To build a project targeting Windows on this operating system, set the EnableWindowsTargeting property to true. [/app/Redream/Redream.csproj]
+#11 ERROR: process "/bin/sh -c dotnet publish -c Release -o out --nologo" did not complete successfully: exit code: 1
+OUT;
+
+        $this->assertSame([
+            'rule' => 'dotnet-windows-only',
+            'message' => 'Redream/Redream.csproj targets Windows (a net*-windows framework, as WinForms and WPF apps do), '
+                . 'which the .NET SDK on Linux cannot build. A desktop app has no web server to run here; deploy a project '
+                . 'that serves HTTP, such as an ASP.NET Core one.',
+        ], DeployFailureExplainer::match($output));
+    }
+
     public function test_prefers_the_specific_cause_over_the_generic_exit_code(): void
     {
         $output = "no space left on device\n"
             . 'failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1';
 
         $this->assertStringContainsString('disk space', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /** Nothing ran on the host, so the project is not at fault. */
+    #[DataProvider('hostNamespaceRefusalProvider')]
+    public function test_a_host_namespace_refusal_names_the_server_not_the_project(string $line): void
+    {
+        $match = DeployFailureExplainer::match($line);
+
+        $this->assertSame('host-namespaces-unavailable', $match['rule'] ?? null);
+        $this->assertStringContainsString('problem on the server, not in the project', $match['message'] ?? '');
+        $this->assertStringContainsString('privileged', $match['message'] ?? '');
+        $this->assertStringContainsString('pid: host', $match['message'] ?? '');
+    }
+
+    /** @return array<string, array{string}> */
+    public static function hostNamespaceRefusalProvider(): array
+    {
+        return [
+            'setns refused' => ["pa-root: cannot enter the host's namespaces: Operation not permitted"],
+            'namespace unreadable' => ["pa-root: cannot enter the host's namespaces: Permission denied"],
+        ];
     }
 
     /**
@@ -1234,7 +1271,8 @@ OUT;
             $message = (string) DeployFailureExplainer::explain($output);
 
             $this->assertStringContainsString("The base image {$ref} is one this engine builds and is no longer on this server", $message);
-            $this->assertStringContainsString('pae system:image:prewarm', $message);
+            $this->assertStringContainsString('prewarm it', $message);
+            $this->assertStringNotContainsString('pae ', $message);
             $this->assertStringNotContainsString('rebuild', $message);
             $this->assertStringNotContainsString('never published', $message);
         }
@@ -1523,5 +1561,144 @@ OUT;
         $output = "  createResolver: [Function: createResolver],\nStatic build finished but dist/index.html is missing\n";
 
         $this->assertNull(DeployFailureExplainer::match($output));
+    }
+
+    /**
+     * The account container's start, under compose's progress, with sysbox-fs not running and its socket gone.
+     */
+    public function test_a_missing_sysbox_fs_socket_is_the_runtime_not_the_project(): void
+    {
+        $output = <<<'OUT'
+ Container shop  Recreate
+ Container shop  Recreated
+ Container shop  Starting
+Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: failed to get config from sysbox-fs: failed to get sysbox-fs mountpoint: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial unix /run/sysbox/sysfs.sock: connect: no such file or directory"
+OUT;
+
+        foreach ([$output, FailureOutput::select($output)] as $given) {
+            $this->assertSame([
+                'rule' => 'sysbox-not-running',
+                'message' => 'The sysbox runtime is not running on the engine host (sysbox-fs does not answer), so no '
+                    .'project container can start or build. This is a problem on the server, not in the project: '
+                    .'restart sysbox on the host (`systemctl restart sysbox`), then deploy again.',
+            ], DeployFailureExplainer::match($given));
+        }
+        $this->assertStringStartsWith('Error response from daemon:', FailureOutput::select($output));
+    }
+
+    public function test_the_socket_alone_still_names_sysbox_fs(): void
+    {
+        $match = DeployFailureExplainer::match('desc = "transport: Error while dialing: dial unix /run/sysbox/sysfs.sock: connect: no such file or directory"');
+
+        $this->assertSame('sysbox-not-running', $match['rule'] ?? null);
+    }
+
+    /** What a deploy refused by the sysbox preflight failed with. */
+    public function test_a_refused_preflight_names_the_daemons_that_are_down(): void
+    {
+        $match = DeployFailureExplainer::match('sysbox is not running on the engine host (sysbox-fs failed, sysbox-mgr inactive)');
+
+        $this->assertSame('sysbox-not-running', $match['rule'] ?? null);
+        $this->assertStringStartsWith(
+            'The sysbox runtime is not running on the engine host (sysbox-fs failed, sysbox-mgr inactive), so no project container',
+            $match['message'] ?? ''
+        );
+    }
+
+    /**
+     * A sysbox-fs that crashed or restarted answers every mount ENOSYS, and outranks the generic build-step rule.
+     */
+    #[DataProvider('lostSysboxFsProvider')]
+    public function test_a_mount_answered_function_not_implemented_is_a_lost_sysbox_fs(string $output, string $leads): void
+    {
+        $region = FailureOutput::select($output);
+
+        $this->assertStringStartsWith($leads, $region);
+        foreach ([$region, $output] as $given) {
+            $match = DeployFailureExplainer::match($given);
+            $this->assertSame('sysbox-fs-connection-lost', $match['rule'] ?? null);
+            $this->assertStringContainsString('`systemctl restart sysbox`', $match['message'] ?? '');
+            $this->assertStringContainsString('recreate the project\'s container', $match['message'] ?? '');
+        }
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function lostSysboxFsProvider(): array
+    {
+        return [
+            'runc mounting /proc' => [<<<'OUT'
+#16 [ 5/9] RUN npm ci --no-audit --no-fund
+#16 0.300 runc run failed: unable to start container process: error during container init: error mounting "proc" to rootfs at "/proc": mount src=proc, dst=/proc, dstFd=/proc/thread-self/fd/15, flags=MS_NOSUID|MS_NODEV|MS_NOEXEC: function not implemented
+#16 ERROR: process "/bin/sh -c npm ci --no-audit --no-fund" did not complete successfully: exit code: 1
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+failed to solve: process "/bin/sh -c npm ci --no-audit --no-fund" did not complete successfully: exit code: 1
+OUT, '#16 0.300 runc run failed:'],
+            'runc masking /proc/asound' => [<<<'OUT'
+#13 [build 6/7] RUN pnpm turbo run build --filter=@shop/web  && chown -R node:node apps/web/.next
+#13 1.274 runc run failed: unable to start container process: error during container init: can't mask dir "/proc/asound": mount src=tmpfs, dst=/proc/asound, flags=MS_RDONLY, data=nr_blocks=1,nr_inodes=2: function not implemented
+#13 ERROR: process "/bin/sh -c pnpm turbo run build --filter=@shop/web  && chown -R node:node apps/web/.next" did not complete successfully: exit code: 1
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+Dockerfile:21
+--------------------
+OUT, '#13 1.274 runc run failed:'],
+            'BuildKit mounting the Dockerfile' => [<<<'OUT'
+ Image project-app Building
+#1 [internal] load build definition from Dockerfile
+failed to solve: failed to read dockerfile: failed to mount /home/shop/docker/tmp/buildkit-mount3004835556: [{Type:bind Source:/home/shop/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/242/fs Target: Options:[rbind ro]}]: mount source: "/home/shop/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/242/fs", target: "/home/shop/docker/tmp/buildkit-mount3004835556", fstype: bind, flags: 20481, data: "", err: function not implemented
+OUT, 'failed to solve: failed to read dockerfile: failed to mount'],
+        ];
+    }
+
+    /** Node's own ENOSYS is the application's, not a mount the runtime refused. */
+    public function test_an_applications_function_not_implemented_is_not_a_lost_sysbox_fs(): void
+    {
+        $output = <<<'OUT'
+#12 4.511 Error: ENOSYS: function not implemented, copyfile '/app/node_modules/.cache/a' -> '/app/dist/a'
+#12 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1
+OUT;
+
+        $this->assertNotSame('sysbox-fs-connection-lost', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * BuildKit refuses an empty, comment-only or ARG-only Dockerfile before any pull, and nothing else says why.
+     */
+    public function test_a_dockerfile_with_no_from_line_is_explained(): void
+    {
+        $match = DeployFailureExplainer::match('failed to solve: no build stage in current context');
+
+        $this->assertSame('dockerfile-no-from', $match['rule'] ?? null);
+        $this->assertSame(
+            'The Dockerfile has no FROM line, so there is nothing to build. '
+                .'Start it with `FROM <base image>`, or remove it so the engine detects the project itself.',
+            $match['message'] ?? null
+        );
+    }
+
+    public function test_the_unreadable_dockerfile_form_is_explained_too(): void
+    {
+        $output = 'failed to solve: failed to read dockerfile: no build stage in current context';
+
+        $this->assertSame('dockerfile-no-from', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    #[DataProvider('stageLessDockerfileProvider')]
+    public function test_each_way_buildkit_names_a_dockerfile_with_no_from_is_explained(string $output): void
+    {
+        $this->assertSame('dockerfile-no-from', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * How the accounts' own dockerd words a missing FROM, per Dockerfile content.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function stageLessDockerfileProvider(): array
+    {
+        return [
+            'empty' => ['failed to solve: the Dockerfile cannot be empty'],
+            'comments only' => ["Dockerfile:1\n--------------------\n   1 | >>> # only a comment\n   2 |     \n--------------------\nfailed to solve: file with no instructions"],
+            'arg only' => ['failed to solve: dockerfile contains no stages to build'],
+        ];
     }
 }

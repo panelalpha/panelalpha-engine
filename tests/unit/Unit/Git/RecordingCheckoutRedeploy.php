@@ -13,7 +13,8 @@ use App\System\Project\Git\CheckoutRedeploy;
  * Records what the redeploy around a git change did, in order. The served
  * tree is kept aside and settled for real on the fake host, as for an app
  * whose one container `app-1` runs: the settle takes the deploy lock, so a
- * deploy left unfinished shows as `settle:skipped`. Only the rebuild is faked.
+ * deploy left unfinished shows as `settle:skipped`. Only the account's start
+ * and the rebuild are faked.
  */
 final class RecordingCheckoutRedeploy extends CheckoutRedeploy
 {
@@ -23,8 +24,19 @@ final class RecordingCheckoutRedeploy extends CheckoutRedeploy
     /** Runs once the tree is aside, before the git change. */
     public ?\Closure $beforeChange = null;
 
+    /** What starting the account throws, as a start that failed and finished its deploy does. */
+    public ?\Closure $startFails = null;
+
     public function __construct(private readonly ?\Closure $rebuilds = null)
     {
+    }
+
+    protected function startAccount(Project $project, ?DeployLogger $deployLogger): void
+    {
+        $this->events[] = 'start:' . (DeployLogger::isLockedFor($project->model()->username) ? 'locked' : 'unlocked');
+        if ($this->startFails !== null) {
+            ($this->startFails)($deployLogger);
+        }
     }
 
     public function keepingTheServedTree(ProjectGit $git, Project $project, callable $work): mixed

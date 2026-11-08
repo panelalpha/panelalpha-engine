@@ -10,11 +10,8 @@ use App\System\Project\Dind\Generation\GenerationSweep;
 use App\System\Project\Git as ProjectGit;
 
 /**
- * After a mutating git porcelain call on a deploy-managed checkout, rebuild
- * the running app from the files already in ~/project.
- *
- * Must not live in {@see ProjectGit}: that class talks to git, not to DinD.
- * Must not call a wipe-and-reclone rebuild: that path would undo pull/revert.
+ * Rebuilds a deploy-managed app from the files already in ~/project after a mutating git call: outside
+ * {@see ProjectGit}, which talks to git, not DinD, and never by re-cloning, which would undo the pull.
  */
 class CheckoutRedeploy
 {
@@ -38,10 +35,21 @@ class CheckoutRedeploy
     }
 
     /**
-     * Runs a change to a Deploy-managed checkout and the redeploy after it
-     * with the running app's tree kept aside: an app that mounts the checkout
-     * would otherwise read the new files before they passed the health check,
-     * and keep them after a failed deploy. Put back or removed afterwards.
+     * Starts the account of a Deploy-managed checkout when it is not running, as the rebuild would: git runs in the
+     * account's container, so a change made before the rebuild needs it up. A start that fails fails the deploy.
+     *
+     * @param  ?DeployLogger  $deployLogger  the deploy the change and its rebuild run under
+     */
+    public function startAccountIfStopped(ProjectGit $git, ProjectAggregate $project, ?DeployLogger $deployLogger): void
+    {
+        if ($git->isDeployManaged()) {
+            $this->startAccount($project, $deployLogger);
+        }
+    }
+
+    /**
+     * Runs a change to a Deploy-managed checkout and its redeploy with the served tree kept aside, so an app
+     * mounting the checkout never reads files that have not passed the health check.
      *
      * @template T
      *
@@ -61,6 +69,15 @@ class CheckoutRedeploy
         }
     }
 
+    protected function startAccount(ProjectAggregate $project, ?DeployLogger $deployLogger): void
+    {
+        $runtime = $project->runtime();
+        if ($runtime instanceof Dind) {
+            $runtime->deployment()->startAccountForCheckout($deployLogger);
+        }
+    }
+
+    /** rebuildFromCheckout() records its own verdict, and a partial one is not turned into a success here. */
     protected function rebuild(ProjectAggregate $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {
         $runtime = $project->runtime();
@@ -72,8 +89,6 @@ class CheckoutRedeploy
         $project->system()->webserver()->rebuildDomains();
 
         $user = $project->model();
-        // rebuildFromCheckout() already recorded its own verdict; a partial one must not be
-        // turned into a success here.
         if (in_array($user->getDeploymentStatus(), ['success', 'partial'], true)) {
             return;
         }

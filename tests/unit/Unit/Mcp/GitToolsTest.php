@@ -48,8 +48,8 @@ class GitToolsTest extends TestCase
         'git_disconnect' => ['deploy', 'origin'],
         'git_change_branch' => ['branch', 'dirty', 'deploy', 'project_rebuild'],
         'git_update_credentials' => ['token', 'omit'],
-        'git_pull' => ['ff', 'force', 'push_first', 'untracked', 'diverged', 'reset --hard'],
-        'git_push' => ['commit', 'Pull first', 'deploy'],
+        'git_pull' => ['ff', 'force', 'push_first', 'untracked', 'diverged', 'reset --hard', 'git_push_rejected', 'git_push_unauthorized'],
+        'git_push' => ['commit', 'Pull first', 'deploy', 'git_push_rejected', 'git_push_unauthorized'],
         'git_revert' => ['reset --hard', 'clean', 'HEAD'],
         'git_deploy_hook_create' => ['secret', 'once', 'url', 'match the repository'],
         'git_deploy_hook_show' => ['secret', 'never', 'url'],
@@ -153,6 +153,39 @@ class GitToolsTest extends TestCase
                 );
             }
         }
+    }
+
+    /**
+     * The three checkout changes a Deploy-managed project queues say a stopped container is started by the task, so an
+     * assistant neither waits for a refusal nor starts the project itself first.
+     */
+    public function test_a_queued_checkout_change_says_its_task_starts_a_stopped_container(): void
+    {
+        foreach (['git_pull', 'git_revert', 'git_change_branch'] as $name) {
+            $description = (new (self::GIT_TOOLS[$name])())->description();
+
+            $this->assertStringContainsString('the answer is a task `id` at once (202)', $description, $name);
+            $this->assertStringContainsString(
+                'A stopped container does not refuse the change: the task starts the container before it, so do not '
+                . 'start the project first, and a start that fails fails the task with its own error.',
+                $description,
+                $name,
+            );
+        }
+    }
+
+    /**
+     * git_status is called first, so it is where an assistant meets a stopped container: it says the three checkout
+     * changes start it themselves, so the user is not sent to start the project first.
+     */
+    public function test_git_status_says_a_stopped_container_is_started_by_the_checkout_changes(): void
+    {
+        $this->assertStringContainsString(
+            'A stopped project container answers 503 "Git could not run: the project\'s container is not running (...)". '
+            . 'On a managed_by deploy checkout git_pull, git_revert and git_change_branch start it themselves, so do not '
+            . 'tell the user to start the project first.',
+            (new (self::GIT_TOOLS['git_status'])())->description(),
+        );
     }
 
     public function test_readonly_mode_keeps_only_the_git_gets(): void

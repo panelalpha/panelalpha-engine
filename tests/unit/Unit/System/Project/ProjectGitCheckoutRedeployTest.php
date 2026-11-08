@@ -84,6 +84,23 @@ class ProjectGitCheckoutRedeployTest extends TestCase
 
         $this->assertSame([], $redeploy->usernames);
     }
+
+    /** Only a Deploy-managed checkout lives in the account's container; a Site Git one is on the host. */
+    public function test_only_a_deploy_managed_checkout_starts_the_account_before_a_change(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $model->setDetails(['git_repo' => 'https://github.com/org/repo.git', 'git_branch' => 'main', 'template' => 'dind']);
+        $model->putSiteGit('public_html', ['repo_url' => 'https://github.com/org/repo.git', 'branch' => 'main', 'token' => null]);
+        $project = new Project(new System(), $model);
+        $redeploy = new RecordingProjectCheckoutRedeploy();
+
+        $redeploy->startAccountIfStopped(new TestableProjectGit($project, 'public_html', new FakeGitRunner()), $project, null);
+        $this->assertSame([], $redeploy->starts);
+
+        $redeploy->startAccountIfStopped(new TestableProjectGit($project, 'project', new FakeGitRunner()), $project, null);
+        $this->assertSame(['alice'], $redeploy->starts);
+    }
 }
 
 final class RecordingProjectCheckoutRedeploy extends CheckoutRedeploy
@@ -93,6 +110,14 @@ final class RecordingProjectCheckoutRedeploy extends CheckoutRedeploy
 
     /** @var list<?string> */
     public array $branches = [];
+
+    /** @var list<string> */
+    public array $starts = [];
+
+    protected function startAccount(Project $project, ?DeployLogger $deployLogger): void
+    {
+        $this->starts[] = $project->username();
+    }
 
     protected function rebuild(Project $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {

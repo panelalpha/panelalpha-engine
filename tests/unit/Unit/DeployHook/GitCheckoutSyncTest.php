@@ -109,6 +109,54 @@ class GitCheckoutSyncTest extends TestCase
     }
 
     /**
+     * The start runs under the deploy the rebuild finishes, and a stopped container is never a missing repository.
+     */
+    public function test_a_push_starts_the_account_before_git_runs_in_it(): void
+    {
+        $runner = $this->runner();
+        $redeploy = new SpyCheckoutRedeploy();
+        $startsBeforeGit = null;
+        $git = new TestableProjectGit(
+            new Project(new System(), $this->user()),
+            'project',
+            static function (array $args, ?string $token, int $timeout = 600) use ($runner, $redeploy, &$startsBeforeGit): string {
+                $startsBeforeGit ??= count($redeploy->starts);
+
+                return $runner->run($args, $token, $timeout);
+            },
+        );
+
+        (new TestableGitCheckoutSync($redeploy, $git))->pullAndRebuild($this->user(), 'project', null);
+
+        $this->assertSame(1, $startsBeforeGit, 'git ran before the account was started');
+        $this->assertCount(1, $redeploy->starts);
+        $this->assertInstanceOf(DeployLogger::class, $redeploy->starts[0]);
+        $this->assertSame($redeploy->calls[0]['logger'], $redeploy->starts[0], 'the start runs under the deploy the rebuild finishes');
+    }
+
+    public function test_a_start_that_fails_fails_the_deploy_and_leaves_the_checkout_alone(): void
+    {
+        $runner = $this->runner();
+        $git = new TestableProjectGit(new Project(new System(), $this->user()), 'project', $runner);
+        $redeploy = new SpyCheckoutRedeploy();
+        $redeploy->startFailure = new \RuntimeException('/run/sysbox/sysfs.sock: no such file or directory');
+
+        try {
+            (new TestableGitCheckoutSync($redeploy, $git))->pullAndRebuild($this->user(), 'project', null);
+            $this->fail('A failed start was swallowed.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('/run/sysbox/sysfs.sock: no such file or directory', $e->getMessage());
+        }
+
+        $this->assertSame([], $runner->commands, 'git ran in an account that did not start');
+        $this->assertSame([], $redeploy->calls);
+        $latest = DeployLogger::readLatestFor($this->username);
+        $this->assertSame(DeployLogger::STATUS_FAILED, $latest['status'] ?? null);
+        $this->assertStringContainsString('/run/sysbox/sysfs.sock', (string) ($latest['error'] ?? ''));
+        $this->assertFalse(DeployLogger::isLockedFor($this->username));
+    }
+
+    /**
      * A deploy killed before finish() leaves latest.json `running`. The push
      * after it used to resume that dead deploy: its log continued the dead
      * one's under the dead one's id, and the delivery got no deploy_id.
@@ -225,6 +273,7 @@ class GitCheckoutSyncTest extends TestCase
     public function test_a_rebuild_that_fails_leaves_the_pulled_commit_in_place(): void
     {
         $runner = $this->runner();
+        $runner->stdout['rev-parse --verify HEAD'] = self::HEAD . "\n";
         $git = new TestableProjectGit(new Project(new System(), $this->user()), 'project', $runner);
         $redeploy = new SpyCheckoutRedeploy(new \RuntimeException('build failed'));
 
@@ -236,9 +285,7 @@ class GitCheckoutSyncTest extends TestCase
         }
 
         // Handled like a manual pull: no reset back to the previous commit.
-        $this->assertNotContains(
-            'reset --hard refs/panelalpha/backup',
-            $this->subcommands($runner),
-        );
+        $this->assertNotContains('reset --quiet ' . self::HEAD, $this->subcommands($runner));
+        $this->assertNotContains('reset --keep ' . self::HEAD, $this->subcommands($runner));
     }
 }
