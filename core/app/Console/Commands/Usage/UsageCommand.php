@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Validator;
 /** Prints usage data as JSON; a failed lookup or validation throws for artisan to print. */
 abstract class UsageCommand extends Command
 {
-    /** @param array<mixed> $data */
-    protected function printJson(array $data): int
+    /** @param array<mixed>|object $data */
+    protected function printJson(array|object $data): int
     {
         $this->output->write(json_encode($data, JSON_THROW_ON_ERROR));
 

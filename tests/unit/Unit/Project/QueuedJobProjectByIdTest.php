@@ -3,10 +3,12 @@
 namespace Tests\Unit\Project;
 
 use App\Exceptions\NotFoundException;
+use App\Jobs\CopyProject;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Project\ProjectCopier;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
@@ -18,9 +20,8 @@ use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
- * A queued first deploy or staging copy finds its project by row id, so a
- * project deleted and created again under the same name is never the one it
- * deploys into, copies into, marks or destroys.
+ * A queued first deploy, staging copy or project copy finds its project by row
+ * id, never a project deleted and created again under the same name.
  */
 class QueuedJobProjectByIdTest extends TestCase
 {
@@ -150,6 +151,24 @@ class QueuedJobProjectByIdTest extends TestCase
         $this->assertSame($dest->id, $lookup->invoke(new CreateStaging('alicestg'))?->id);
         $this->assertSame($dest->id, $lookup->invoke(new CreateStaging('alicestg', (int) $dest->id))?->id);
         $this->assertTrue((new ReflectionProperty(CreateStaging::class, 'destId'))->hasDefaultValue());
+    }
+
+    public function test_a_project_copy_never_copies_a_newer_project_that_took_the_sources_name(): void
+    {
+        [$oldId, $newer] = $this->nameTakenOver('alice');
+        $copy = $this->makeUser('alicecopy');
+        $task = $this->task(CopyProject::class, 'alicecopy');
+
+        try {
+            (new CopyProject($oldId, (int) $copy->id))->attachTask($task)->handle(new ProjectCopier());
+            $this->fail('The copy found a source.');
+        } catch (NotFoundException $e) {
+            $this->assertSame("The project 'alicecopy' was being copied from no longer exists.", $e->getMessage());
+        }
+
+        $this->assertSame(Task::STATUS_FAILED, $task->refresh()->status);
+        $this->assertSame([], $task->logs()->pluck('log')->all());
+        $this->assertTrue(User::query()->whereKey($newer->id)->exists());
     }
 
     public function test_a_rollback_never_destroys_a_newer_project_that_took_the_name(): void

@@ -3,12 +3,8 @@
 namespace App\Lib\Limits;
 
 /**
- * One of a project's resource limits: where it is stored, how it is spelled on
- * the command line, and how it reads back.
- *
- * The table below is the only place the set is written down. Every limit
- * stores UNLIMITED (-1) for "no limit" and null for "never set"; memory_limit
- * alone refuses -1, because every project runs with one.
+ * One project resource limit: where it is stored, its command-line spelling and how it reads back. UNLIMITED (-1) stores
+ * "no limit" and null "never set"; any other negative is refused, and memory_limit refuses -1 too.
  */
 final class ResourceLimit
 {
@@ -134,11 +130,16 @@ final class ResourceLimit
     /** Why a raw console value cannot be stored, or null when it can. */
     public function rejectionReason(string|int|float $raw): ?string
     {
-        if ($this->alwaysApplies && (float) $raw < 1) {
-            $name = str_replace('-', ' ', $this->option);
+        $name = str_replace('-', ' ', $this->option);
+        $value = (float) $raw;
 
+        if ($this->alwaysApplies && $value < 1) {
             return 'The '.$name.($this->unit === '' ? '' : ' is in'.$this->unit)
                 .' and must be a positive number.';
+        }
+
+        if ($value < 0 && $value !== (float) self::UNLIMITED) {
+            return 'The '.$name.' must be '.self::UNLIMITED.' for unlimited, or 0 or more.';
         }
 
         return null;

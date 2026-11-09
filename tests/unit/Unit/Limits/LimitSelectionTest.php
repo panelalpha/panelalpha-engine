@@ -58,6 +58,18 @@ class LimitSelectionTest extends TestCase
         $this->assertSame([], LimitSelection::rejections($this->opts([])));
     }
 
+    public function test_a_negative_other_than_minus_one_is_rejected_on_every_limit(): void
+    {
+        $this->assertSame(
+            ['cpu_limit' => 'The cpu limit must be -1 for unlimited, or 0 or more.'],
+            LimitSelection::rejections($this->opts(['cpu-limit' => '-2']))
+        );
+        $this->assertSame(
+            ['disk_space_limit' => 'The disk space limit must be -1 for unlimited, or 0 or more.'],
+            LimitSelection::rejections($this->opts(['disk-space-limit' => '-5']))
+        );
+    }
+
     /** A limit already applied live does not also ask for a rebuild. */
     public function test_needs_rebuild_skips_what_was_applied_live(): void
     {

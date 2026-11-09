@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ProjectPushDiffRequest;
 use App\Http\Requests\ProjectPushRequest;
@@ -13,6 +14,7 @@ use App\Jobs\PushState;
 use App\Lib\Domains\CopyDomain;
 use App\Lib\Helper;
 use App\Lib\Host\ProjectMemory;
+use App\Lib\Project\ProjectNameRefusal;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
@@ -56,7 +58,7 @@ class StagingController extends Controller
             new OA\Response(response: 202, description: 'Staging creation accepted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 403, description: ApiDefinitions::OUT_OF_SCOPE_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy (staging or push in progress)', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -88,15 +90,9 @@ class StagingController extends Controller
             }
         }
 
-        if (User::existsByUsername($newUsername)) {
-            throw ValidationException::withMessages([
-                'new_username' => 'User already exists.',
-            ]);
-        }
-        if (! $system->isUsernameAvailable($newUsername)) {
-            throw ValidationException::withMessages([
-                'new_username' => 'Username not available.',
-            ]);
+        $refusal = ProjectNameRefusal::messageFor($newUsername, $system);
+        if ($refusal !== null) {
+            throw ValidationException::withMessages(['new_username' => $refusal]);
         }
 
         $destDomain = CopyDomain::forCopy($source->domain, $params['domain'] ?? null);
@@ -106,10 +102,9 @@ class StagingController extends Controller
             ]);
         }
 
-        if ($destDomain->isTaken()) {
-            throw ValidationException::withMessages([
-                'domain' => 'Domain already exists.',
-            ]);
+        $domainRefusal = $destDomain->refusal($newUsername);
+        if ($domainRefusal !== null) {
+            throw ProblemException::one('domain', $domainRefusal['code'], $domainRefusal['message']);
         }
 
         $probe = User::make([
@@ -118,7 +113,7 @@ class StagingController extends Controller
         ]);
         if ($probe->project()->hostingExists()) {
             throw ValidationException::withMessages([
-                'new_username' => 'Username not available.',
+                'new_username' => ProjectNameRefusal::unavailable($newUsername),
             ]);
         }
 
@@ -188,11 +183,12 @@ class StagingController extends Controller
                 ),
                 new OA\Property(
                     property: 'tables',
-                    description: 'Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item names a source database and table.',
+                    description: 'Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item is an object with `database`, the source database, and `name`, the table in it.',
                     type: 'array',
                     maxItems: 500,
                     nullable: true,
                     items: new OA\Items(
+                        required: ['database', 'name'],
                         properties: [
                             new OA\Property(property: 'database', type: 'string', example: 'johndoe_wp'),
                             new OA\Property(property: 'name', type: 'string', example: 'wp_posts'),
@@ -207,7 +203,7 @@ class StagingController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Push accepted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Project busy (staging or push in progress). '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::BUSY_RESPONSE.', or a database rename of either project is in progress. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -223,8 +219,7 @@ class StagingController extends Controller
         $tables = $params['tables'] ?? null;
 
         try {
-            Projects::assertIdle($from);
-            Projects::assertIdle($to);
+            Projects::assertPushIdle($from, $to);
         } catch (\RuntimeException $e) {
             if ($e->getCode() === 409) {
                 abort(new JsonResponse(['message' => $e->getMessage()], 409));

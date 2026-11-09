@@ -27,8 +27,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     (an image's own VOLUME the compose file does not name) is not copied: the
     response's `warnings` names each one that held data.
 
-    Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
-    addresses are NOT cloned.
+    Subdomains, FTP/SFTP accounts and dedicated IP addresses are NOT copied.
+    MySQL databases are, under the clone's prefix, together with the users
+    that reach them, unless `copy_databases` is false.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectCloneTool extends ApiTool

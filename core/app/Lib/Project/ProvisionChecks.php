@@ -5,14 +5,8 @@ namespace App\Lib\Project;
 use App\Lib\Limits\ResourceLimit;
 
 /**
- * Everything knowable about a create request before anything is bought, asked
- * at once and answered at once.
- *
- * These used to be sequential throws, so a caller with a taken name *and* a bad
- * template learned about the second only after fixing the first -- a round trip
- * per mistake, for mistakes the server could see together. They run before
- * DomainAllocator, because allocation spends a panelalpha.online label out of a
- * namespace the whole fleet shares and a spent label is never released.
+ * Everything knowable about a create request before anything is bought, answered at once, not a round trip per mistake.
+ * Run before DomainAllocator: allocation spends a panelalpha.online label from a fleet-wide namespace, never released.
  */
 final class ProvisionChecks
 {
@@ -35,25 +29,27 @@ final class ProvisionChecks
         ]));
     }
 
-    /** @return array<string, string>|null */
+    /**
+     * Availability on the host is asked here as well as after the account is built: a label bought for a project that is
+     * then refused has to be given back.
+     *
+     * @return array<string, string>|null
+     */
     private function username(string $username, string $nameField): ?array
     {
         if ($this->env->usernameRowExists($username)) {
             return [
                 'field' => $nameField,
                 'code' => 'name_taken',
-                'message' => "A project named '{$username}' already exists. Choose another name.",
+                'message' => ProjectNameRefusal::taken($username),
             ];
         }
 
-        // Asked here as well as after the account is built, because allocation
-        // spends a label out of a namespace the whole fleet shares, and a name
-        // bought for a project that is then refused has to be given back.
         if (! $this->env->usernameAvailableOnHost($username)) {
             return [
                 'field' => $nameField,
                 'code' => 'name_unavailable',
-                'message' => "'{$username}' is reserved or already used by the system. Choose another name.",
+                'message' => ProjectNameRefusal::unavailable($username),
             ];
         }
 
@@ -61,6 +57,8 @@ final class ProvisionChecks
     }
 
     /**
+     * dind is what a git_repo deploys into anyway, so naming it is no conflict.
+     *
      * @param  array<string, mixed>  $params
      * @return array<string, string>|null
      */
@@ -71,7 +69,6 @@ final class ProvisionChecks
         }
         $template = (string) $params['template'];
 
-        // dind is what a git_repo deploys into anyway, so naming it is no conflict.
         if ($template !== 'dind' && ! empty($params['git_repo'])) {
             return [
                 'field' => 'template',
@@ -110,9 +107,8 @@ final class ProvisionChecks
     }
 
     /**
-     * A domain the caller named, checked before the allocator is asked -- it is
-     * the one candidate that never has an alternative, so learning it is taken
-     * is worth doing before anything is bought.
+     * A domain the caller named, checked before the allocator is asked: it is the one candidate that never has an
+     * alternative, so learning it is taken is worth doing before anything is bought.
      *
      * @param  array<string, mixed>  $params
      * @return array<string, string>|null

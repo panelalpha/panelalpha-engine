@@ -10,6 +10,7 @@ use App\Lib\Domains\CopyDomain;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\DetailsWrite;
 use App\Lib\Project\NewProjectDetails;
 use App\Lib\Project\ProjectIpAddresses;
 use App\Lib\Project\RuntimeSettings;
@@ -82,6 +83,9 @@ class User extends Authenticatable
         AppDatabase::PASSWORD_DETAIL,
     ];
 
+    /** Details whose entries different writers change independently: a save merges them entry by entry. */
+    private const COLLECTION_DETAILS = ['site_git', 'env_vars'];
+
     /** Top-level details encrypted at rest; site_git tokens are per entry. */
     private const SECRET_DETAILS = [...self::SECRET_STRING_DETAILS, 'env_vars', 'app_credentials'];
 
@@ -97,19 +101,21 @@ class User extends Authenticatable
         'deploy_image',
         'deploy_start_period',
         'deploy_admin_sso',
+        'deploy_app_config_fits',
         'git_commit',
         'git_branch',
     ];
 
     /**
      * What a project's env files are written from, which keys its last deploy
-     * merged into `.env`, and which values a vault reference set.
+     * merged into `.env` or set on the app service outside it, and which values
+     * a vault reference set.
      */
-    private const COPIED_ENV_KEYS = ['env_vars', 'used_custom_env_vars', 'env_override_keys', self::DETAIL_VAULT_ENV_KEYS];
+    private const COPIED_ENV_KEYS = ['env_vars', 'used_custom_env_vars', 'env_override_keys', 'env_service_keys', 'env_app_config_keys', self::DETAIL_VAULT_ENV_KEYS];
 
     /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
-    public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
-        .'token, the cloudflare-api-token or registry-auth setting, or the site password.';
+    public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: the environment variables, the Git token, the '
+        .'cloudflare-api-token or registry-auth setting, or the site password.';
 
     /** The `details` key of the `protected` project setting. */
     public const string DETAIL_PROTECTED = 'protected';
@@ -148,11 +154,13 @@ class User extends Authenticatable
             ->first();
     }
 
+    /** @return BelongsTo<self, $this> */
     public function liveUser(): BelongsTo
     {
         return $this->belongsTo(self::class, 'staging');
     }
 
+    /** @return HasOne<self, $this> */
     public function stagingUser(): HasOne
     {
         return $this->hasOne(self::class, 'staging');
@@ -291,6 +299,7 @@ class User extends Authenticatable
     {
         return self::createCopy($destUsername, $copyDomain, [
             'email' => $this->email,
+            'status' => 'active',
             'details' => $this->detailsForCopiedProject($destUsername),
         ]);
     }
@@ -380,6 +389,46 @@ class User extends Authenticatable
         $details = $this->transformSecretStrings($details, $this->decryptSecretString(...));
 
         return $this->decryptJsonDetails($details);
+    }
+
+    /** Another process may have written the details since this model read them: only what it changed is saved ({@see DetailsWrite}). */
+    public function save(array $options = []): bool
+    {
+        if (! $this->exists || ! $this->isDirty('details')) {
+            return parent::save($options);
+        }
+
+        return $this->getConnection()->transaction(function () use ($options): bool {
+            $this->attributes['details'] = $this->detailsOntoStoredRow();
+
+            return parent::save($options);
+        });
+    }
+
+    private function detailsOntoStoredRow(): string
+    {
+        $stored = $this->newQueryWithoutScopes()->whereKey($this->getKey())->lockForUpdate()->toBase()->value('details');
+        $write = new DetailsWrite(
+            fn (string $value): ?string => str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX) ? $this->decryptSecretString($value) : null,
+            $this->sealedDocument(...),
+            self::COLLECTION_DETAILS,
+        );
+
+        return (string) json_encode($write->onto(
+            self::detailsDocument($stored),
+            self::detailsDocument($this->getRawOriginal('details')),
+            self::detailsDocument($this->attributes['details'] ?? null),
+        ));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function detailsDocument(mixed $raw): array
+    {
+        $document = is_string($raw) ? json_decode($raw, true) : null;
+
+        return is_array($document) ? $document : [];
     }
 
     /**
@@ -472,13 +521,19 @@ class User extends Authenticatable
     {
         foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
             if (isset($details[$key]) && is_array($details[$key])) {
-                $details[$key] = $this->encryptSecretString(
-                    (string) json_encode($details[$key], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-                );
+                $details[$key] = $this->sealedDocument($details[$key]);
             }
         }
 
         return $details;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $document
+     */
+    private function sealedDocument(array $document): string
+    {
+        return $this->encryptSecretString((string) json_encode($document, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
     /**
@@ -625,8 +680,17 @@ class User extends Authenticatable
 
     private function withMysqlPrefix(string $name): string
     {
-        $prefix = $this->getMysqlPrefix();
+        return self::withPrefix($this->getMysqlPrefix(), $name);
+    }
 
+    /** An SFTP account name as stored: `<project>_<suffix>`, the prefix added when a caller sends the suffix alone. */
+    public function qualifySftpAccount(string $name): string
+    {
+        return self::withPrefix($this->username.'_', $name);
+    }
+
+    private static function withPrefix(string $prefix, string $name): string
+    {
         return Str::startsWith($name, $prefix) ? $name : $prefix.$name;
     }
 

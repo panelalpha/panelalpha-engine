@@ -11,6 +11,7 @@ use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\Lib\Project\ApiAccess;
+use App\Lib\Project\PublicRouting\ProjectPublicRouting;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -40,6 +41,7 @@ class ComposeWriter
             $yaml = $withProcesses;
             $this->project->shell()->logger()?->info('Running the Procfile processes too: '.implode(', ', array_keys($processes)));
         }
+        $yaml = $this->withDeclaredPorts($yaml);
         $procFiles = LxcfsProc::inAccount($this->project);
         $parsed = $procFiles === [] ? null : ComposeYaml::parse($yaml);
         if ($parsed !== null) {
@@ -49,10 +51,20 @@ class ComposeWriter
         $this->freezeRuntimeImage($yaml);
     }
 
+    private function withDeclaredPorts(string $yaml): string
+    {
+        $parsed = ProjectPublicRouting::declared($this->project->userModel())->ports === [] ? null : ComposeYaml::parse($yaml);
+        if ($parsed === null) {
+            return $yaml;
+        }
+        $published = ProjectPublicRouting::publishDeclaredPorts($this->project->userModel(), $parsed, $this->project->shell()->logger());
+
+        return $published === $parsed ? $yaml : ComposeYaml::dump($published, $yaml, 6, 2);
+    }
+
     /**
-     * Point the generated run file's `environment:` at the env_vars the account
-     * now carries. A generated file bakes them in, and `environment:` outranks
-     * `env_file:`; a file the repository owns reads `.env` and is left alone.
+     * Point the generated run file's `environment:` at the account's current env_vars: it bakes them in, and
+     * `environment:` outranks `env_file:`. A file the repository owns reads `.env` and is left alone.
      *
      * @param  array<string, string>  $vars  the account's current env_vars
      * @param  list<string>  $replaced  the keys the file was generated with
@@ -60,25 +72,12 @@ class ComposeWriter
      */
     public function mergeAccountEnv(array $vars, array $replaced): bool
     {
-        $path = $this->project->userAppComposeFilePath();
-        $fs = $this->project->system()->filesystem();
-        if (! $fs->fileExists($path)) {
+        $run = $this->generatedRunFile();
+        if ($run === null) {
             return false;
         }
-        $fs->assertNotSymlink($path);
-        $raw = (string) $fs->fileGetContents($path);
-        $compose = ComposeYaml::parse($raw);
-        if ($compose === null || ! self::isEngineGenerated($compose)) {
-            return false;
-        }
-        $service = $compose['services'][GeneratedCompose::APP_SERVICE] ?? null;
-        if (! is_array($service)) {
-            return false;
-        }
-        $environment = $service['environment'] ?? [];
-        if (! is_array($environment) || self::isListStyleEnvironment($environment)) {
-            return false;
-        }
+        [$path, $raw, $compose, $environment] = $run;
+        ProjectEnvironment::recordServiceKeys($this->project->userModel(), self::accountKeys($vars));
         $merged = self::withAccountEnv($environment, $vars, $replaced);
         if ($merged === null) {
             return false;
@@ -96,6 +95,39 @@ class ComposeWriter
     }
 
     /**
+     * The run file the engine generated, with its app service's `environment:` map; null for any other file.
+     *
+     * @return ?array{0: string, 1: string, 2: array<mixed>, 3: array<mixed>} path, raw text, parsed file, environment
+     */
+    private function generatedRunFile(): ?array
+    {
+        $path = $this->project->userAppComposeFilePath();
+        $fs = $this->project->system()->filesystem();
+        if (! $fs->fileExists($path)) {
+            return null;
+        }
+        $fs->assertNotSymlink($path);
+        $raw = (string) $fs->fileGetContents($path);
+        $compose = ComposeYaml::parse($raw);
+        $service = $compose !== null && self::isEngineGenerated($compose) ? ($compose['services'][GeneratedCompose::APP_SERVICE] ?? null) : null;
+        $environment = is_array($service) ? ($service['environment'] ?? []) : null;
+        if (! is_array($environment) || self::isListStyleEnvironment($environment)) {
+            return null;
+        }
+
+        return [$path, $raw, $compose, $environment];
+    }
+
+    /**
+     * @param  array<string, string>  $vars
+     * @return list<string> the keys {@see withAccountEnv()} sets
+     */
+    private static function accountKeys(array $vars): array
+    {
+        return array_values(array_filter(array_map('strval', array_keys($vars)), static fn (string $key): bool => ! ComposeEnvironment::isReserved($key)));
+    }
+
+    /**
      * @param  array<mixed>  $compose
      */
     private static function isEngineGenerated(array $compose): bool
@@ -110,8 +142,7 @@ class ComposeWriter
     }
 
     /**
-     * `environment:` is read as a map of KEY/value pairs. A non-empty list is
-     * the `- KEY=value` form and is not ours to write into; an empty list is
+     * A non-empty list is the `- KEY=value` form and is not ours to write into; an empty list is
      * indistinguishable from an absent map after parsing, and is read as one.
      *
      * @param  array<mixed>  $environment
@@ -148,10 +179,8 @@ class ComposeWriter
     }
 
     /**
-     * Point the generated run file's `environment:` at the engine's own API
-     * address, token and CA, or take them back out once the project is no longer
-     * allowed. A file the repository owns reads them from `.env.panelalpha`
-     * instead, which the environment rewrite already refreshed.
+     * Point the generated run file's `environment:` at the engine's API address, token and CA, or take them out
+     * when the project is not allowed. A repository's own file reads `.env.panelalpha`, already refreshed.
      *
      * @param  array<string, string>  $values
      * @param  ?string  $path  a run file other than the project's own
@@ -219,9 +248,8 @@ class ComposeWriter
     }
 
     /**
-     * Point the app service at another image, after the host compile had to
-     * build with it: the run file was written before the compile. False when
-     * the file does not name $from as the app's image.
+     * Point the app service at another image, after the host compile had to build with it: the run file was
+     * written before the compile. False when the file does not name $from as the app's image.
      */
     public function replaceAppImage(string $from, string $to, ?string $chown): bool
     {
@@ -244,16 +272,11 @@ class ComposeWriter
     }
 
     /**
-     * The nginx config that goes with {@see DeployCompose::staticNginx()}.
+     * The nginx config of {@see DeployCompose::staticNginx()}, which every caller writes, the fallback too: the file
+     * mounts it unconditionally, and a missing source is a directory Docker creates and nginx refuses to read.
      *
-     * Written by every caller of that compose file, including the fallback
-     * recipe whose entry really is index.html: the compose file mounts the
-     * config unconditionally, and a mount whose source does not exist is a
-     * directory Docker creates and nginx then refuses to read.
-     *
-     * `$entry` is the document `/` should serve, relative to the project
-     * root. Null leaves nginx looking for index.html, which is what the
-     * placeholder pages are called.
+     * @param  ?string  $entry  the document `/` serves, relative to the project root; null leaves
+     *                          index.html, which is what the placeholder pages are called
      */
     public function writeStaticNginxConf(string $projectDir, ?string $entry, ?string $chown): void
     {
@@ -265,17 +288,20 @@ class ComposeWriter
         );
     }
 
+    /** {@see NginxConfig::placeholder()}: the not-configured page on every path, never the checkout. */
+    public function writePlaceholderNginxConf(string $projectDir, ?string $chown): void
+    {
+        $this->project->system()->filesystem()->writeFileReplacingPath(
+            $projectDir.'/'.NginxConfig::FILENAME,
+            NginxConfig::placeholder(),
+            $chown,
+            '644'
+        );
+    }
+
     /**
-     * Correct the deploy snapshot to the image the account will actually run.
-     *
-     * {@see SourcePreparation} freezes `deploy_image` from the detection
-     * decision, before a strategy swaps in the shared base, the lockfile's
-     * interpreter or the Bun image. `AppLauncher` provisions
-     * `getDeployImage()` by name, so a stale snapshot seeds an image nothing
-     * runs. The compose file is the authority — it is what `compose up` obeys.
-     *
-     * Silent on anything unparseable: a slightly stale snapshot beats one
-     * overwritten with a guess.
+     * `deploy_image` from the compose file `up` obeys, as AppLauncher seeds it by name and {@see SourcePreparation}
+     * froze it before a strategy swapped the image. Unparseable leaves it: a slightly stale snapshot beats a guess.
      */
     private function freezeRuntimeImage(string $yaml): void
     {
@@ -315,18 +341,17 @@ class ComposeWriter
     /**
      * Placeholder shown when sources were ingested but no strategy could
      * bootstrap them. Never overwrites a real page the user shipped.
+     *
+     * @return bool false when the user's own index.html is the front page
      */
-    public function writeFallbackIndexHtml(string $projectDir, string $sourceDescription, ?string $chown): void
+    public function writeFallbackIndexHtml(string $projectDir, string $sourceDescription, ?string $chown): bool
     {
         $index = $projectDir.'/index.html';
         if (is_file($index) && ! PlaceholderPage::isOneOf($index)) {
-            return;
+            return false;
         }
 
-        $safeSource = htmlspecialchars($sourceDescription, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $sourceHtml = preg_match('#^https?://#i', $sourceDescription) === 1
-            ? "<a href=\"{$safeSource}\" target=\"_blank\" rel=\"noopener\">{$safeSource}</a>"
-            : "<code>{$safeSource}</code>";
+        $sourceHtml = self::sourceHtml($sourceDescription);
 
         $body = <<<HTML
             <p>
@@ -346,12 +371,22 @@ class ComposeWriter
             $chown,
             '644'
         );
+
+        return true;
+    }
+
+    private static function sourceHtml(string $sourceDescription): string
+    {
+        $safeSource = htmlspecialchars($sourceDescription, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        return preg_match('#^https?://#i', $sourceDescription) === 1
+            ? "<a href=\"{$safeSource}\" target=\"_blank\" rel=\"noopener\">{$safeSource}</a>"
+            : "<code>{$safeSource}</code>";
     }
 
     /**
-     * Shared chrome for the two placeholder pages. The title is load-bearing:
-     * PlaceholderPage::isOneOf() matches on it to tell an
-     * engine placeholder apart from a page the user actually shipped.
+     * Shared chrome for the two placeholder pages. The title is load-bearing: PlaceholderPage::isOneOf() matches
+     * on it to tell an engine placeholder apart from a page the user actually shipped.
      */
     private static function infoPage(string $title, string $heading, string $body): string
     {

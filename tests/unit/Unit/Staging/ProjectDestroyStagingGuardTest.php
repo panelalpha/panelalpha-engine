@@ -2,9 +2,9 @@
 
 namespace Tests\Unit\Staging;
 
+use App\Exceptions\ProblemException;
 use App\Models\User;
 use App\System;
-use Exception;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Mockery;
 use Tests\TestCase;
@@ -31,8 +31,8 @@ class ProjectDestroyStagingGuardTest extends TestCase
         try {
             $project->destroy();
             $this->fail('Expected destroy guard to throw before teardown runs.');
-        } catch (Exception $e) {
-            $this->assertInstanceOf(Exception::class, $e);
+        } catch (ProblemException $e) {
+            $this->assertSame('staging', $e->problems[0]['code']);
             $this->assertStringContainsString('Delete the staging project first.', $e->getMessage());
         }
     }

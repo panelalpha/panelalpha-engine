@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project\Dind;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\ProjectEnvironment;
 use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
@@ -52,6 +53,20 @@ class ComposeWriterMergeAccountEnvTest extends TestCase
         $this->assertSame('one', $environment['ADDED']);
         $this->assertSame('install', $environment['PA_DEPLOY_PHASE']);
         $this->assertSame(3000, $environment['PORT']);
+    }
+
+    /** What `environment:` sets counts as applied, the engine's own keys aside, and a removed key stops counting. */
+    public function test_the_keys_set_in_the_environment_are_recorded_as_applied(): void
+    {
+        $this->writeRunFile($this->generatedCompose(['A' => '1']));
+        $model = $this->model();
+        $writer = $this->dindFor($model)->composeWriter();
+
+        $writer->mergeAccountEnv(['A' => '1', 'PA_DEPLOY_PHASE' => 'install', 'B' => 'two'], []);
+        $this->assertSame(['A', 'B'], ProjectEnvironment::appliedKeys($model));
+
+        $writer->mergeAccountEnv(['A' => '1'], ['B']);
+        $this->assertSame(['A'], ProjectEnvironment::appliedKeys($model));
     }
 
     public function test_a_generated_service_without_an_environment_map_gets_one(): void
@@ -107,7 +122,12 @@ class ComposeWriterMergeAccountEnvTest extends TestCase
 
     private function dind(): DindProject
     {
-        $runtime = (new ProjectAggregate(new LocalHostSystem($this->tmpRoot, $this->tmpRoot . '/home'), $this->model()))->runtime();
+        return $this->dindFor($this->model());
+    }
+
+    private function dindFor(ModelsUser $model): DindProject
+    {
+        $runtime = (new ProjectAggregate(new LocalHostSystem($this->tmpRoot, $this->tmpRoot . '/home'), $model))->runtime();
         $this->assertInstanceOf(DindProject::class, $runtime);
 
         return $runtime;

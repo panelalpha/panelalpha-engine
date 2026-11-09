@@ -37,7 +37,7 @@ use OpenApi\Attributes as OA;
             type: 'array',
             items: new OA\Items(type: 'string'),
             example: ['APP_ENV', 'APP_KEY'],
-            description: 'The keys the last deploy merged into the application environment.'
+            description: 'The keys the last deploy or env var apply delivered to the application: merged into the project\'s `.env`, set in the app service\'s `environment:` of a run file the engine generated, or loaded from `.env.panelalpha` beside a `.env` the repository tracks. A key merged into `.env` is listed even when the project\'s own compose file does not read `.env`.'
         ),
     ],
     type: 'object',
