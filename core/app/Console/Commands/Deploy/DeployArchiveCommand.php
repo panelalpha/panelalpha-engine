@@ -2,43 +2,43 @@
 
 namespace App\Console\Commands\Deploy;
 
-use App\Console\Commands\Concerns\FollowsDeployLog;
 use App\Console\Commands\Concerns\ParsesEnvVarOptions;
-use App\Exceptions\DeployAlreadyRunningException;
 use App\Http\Requests\RecipeChoiceInput;
-use App\Lib\Deploy\EnvVarOverrides;
-use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Deploy\DeployLog\DeployLineFormat;
+use App\Lib\Deploy\DeployLog\DeployLogFollower;
 use App\Lib\Project\ArchiveDrop;
 use App\Lib\Project\ProjectRebuild;
-use App\Lib\Vault\RequestVault;
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Console\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Output\ConsoleOutputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * The CLI twin of POST /projects/{username}/deploy-archive. The operator names
- * a local archive; it is put into the project as the account, deployed in this
- * process with the log printed as it runs, and removed afterwards. The command
- * exits when the deploy has finished, and its exit code says how it ended.
- *
- * `pae` runs inside the core container, so the archive must be a path that
- * container can read (anything under /opt/panelalpha, for instance).
+ * The CLI twin of POST deploy-archive, following the worker's log until the task ends or --timeout passes.
+ * The archive must be a path the core container can read (/opt/panelalpha).
  */
 class DeployArchiveCommand extends Command
 {
-    use FollowsDeployLog;
     use ParsesEnvVarOptions;
 
     /** The archive formats the import reads. */
     private const EXTENSIONS = ['.tar.gz', '.tgz', '.zip'];
+
+    /** 128 + SIGINT, as a shell reports a command Ctrl-C stopped. */
+    private const INTERRUPTED = 130;
 
     protected $signature = 'project:deploy-archive
                             {--project= : Project username}
                             {--file= : Local .zip or .tar.gz archive to deploy}
                             {--recipe= : Deploy with this recipe instead of the detected one}
                             {--env-var=* : KEY=VALUE environment override, repeatable}
-                            {--quiet-deploy : Do not print the deploy log while it runs}';
+                            {--no-wait : Queue the deploy, print its task id and return}
+                            {--quiet-deploy : Do not print the deploy log while waiting for it}
+                            {--timeout=1800 : Seconds to wait for the deploy, a queue worker included, before giving up on watching it}';
 
-    protected $description = 'Deploy a local zip or tar.gz archive into a container project, as POST deploy-archive does';
+    protected $description = 'Deploy a local zip or tar.gz archive into a container project, queued as POST deploy-archive queues it';
 
     public function handle(ProjectRebuild $rebuild, ArchiveDrop $drop): int
     {
@@ -51,19 +51,15 @@ class DeployArchiveCommand extends Command
 
         ProjectRebuild::refuseArchiveOnClassicProject($user);
         ProjectRebuild::refuseArchiveOnGitProject($user);
-        app(RecipeChoiceContext::class)->set(RecipeChoiceInput::parse($this->option('recipe')));
+        $recipe = RecipeChoiceInput::parse($this->option('recipe'));
 
-        $zipPath = $drop->put($user, $file, (string) self::extension($file));
-        try {
-            $rebuild->assertArchive($user, $zipPath);
-            $rebuild->whileIdle($user, fn () => $this->deploy($rebuild, $user, $zipPath, $envVars));
-        } finally {
-            $this->removeArchive($drop, $user, $zipPath);
+        $task = $this->queue($rebuild, $drop, $user, $file, $envVars, $recipe);
+        $this->line("Queued the deploy of {$file} to {$user->username} as task {$task->id}.");
+        if ($this->option('no-wait')) {
+            return 0;
         }
 
-        $this->info("Deployed {$file} to {$user->username}.");
-
-        return 0;
+        return $this->await($task, $file, $user);
     }
 
     private function project(): ?User
@@ -113,34 +109,100 @@ class DeployArchiveCommand extends Command
         return null;
     }
 
-    /** @param array<string, string> $envVars */
-    private function deploy(ProjectRebuild $rebuild, User $user, string $zipPath, array $envVars): void
+    /**
+     * The archive is the job's once the deploy is queued; until then it is removed here if anything refuses it.
+     *
+     * @param  array<string, string>  $envVars
+     */
+    private function queue(ProjectRebuild $rebuild, ArchiveDrop $drop, User $user, string $file, array $envVars, ?string $recipe): Task
     {
+        $zipPath = $drop->put($user, $file, basename($file));
         try {
-            $logger = $rebuild->openLog($user, ProjectRebuild::DEPLOY_ARCHIVE);
-        } catch (DeployAlreadyRunningException) {
-            throw new \RuntimeException("A deploy of {$user->username} is already running.");
-        }
-        $this->storeEnvVars($user, $envVars);
+            $rebuild->assertArchive($user, $zipPath);
 
-        $this->followDeployLog();
-        try {
-            $rebuild->run($user, ProjectRebuild::DEPLOY_ARCHIVE, $logger, $zipPath);
-        } finally {
-            $this->stopFollowingDeployLog();
+            return $rebuild->whileIdle($user, function () use ($rebuild, $user, $envVars, $zipPath, $recipe): Task {
+                $rebuild->storeEnvVars($user, $envVars === [] ? null : ProjectRebuild::sentEnvVars($user, $envVars), $envVars);
+
+                return $rebuild->queue($user, ProjectRebuild::DEPLOY_ARCHIVE, $zipPath, null, $recipe, ownsArchive: true);
+            });
+        } catch (\Throwable $e) {
+            $this->removeArchive($drop, $user, $zipPath);
+            throw $e;
         }
     }
 
-    /** @param array<string, string> $envVars */
-    private function storeEnvVars(User $user, array $envVars): void
+    private function await(Task $task, string $file, User $user): int
     {
-        if ($envVars === []) {
+        $this->stopFollowingOnInterrupt($task);
+        $timeout = max(1, (int) $this->option('timeout'));
+        $task = (new DeployLogFollower($this->deployLineWriter()))->followTask($task, $timeout, $this->waitingForWorker(...));
+
+        if (! $task->isTerminal()) {
+            $this->errorOutput()->writeln("<error>Not finished after {$timeout}s; stopped following. The deploy goes on as task {$task->id}.</error>");
+
+            return 1;
+        }
+        if ($task->status === Task::STATUS_COMPLETED) {
+            $this->info("Deployed {$file} to {$user->username}.");
+
+            return 0;
+        }
+        $this->errorOutput()->writeln('<error>'.OutputFormatter::escape(self::failure($task)).'</error>');
+
+        return 1;
+    }
+
+    private function waitingForWorker(Task $task): void
+    {
+        $this->line("Waiting for a queue worker to start task {$task->id}.");
+    }
+
+    /** @return \Closure(array{ts?: int, level?: string, msg?: string}, int): void */
+    private function deployLineWriter(): \Closure
+    {
+        if ($this->option('quiet-deploy')) {
+            return static function (): void {};
+        }
+        $verbose = $this->output->isVerbose();
+
+        return function (array $line, int $startedAt) use ($verbose): void {
+            $rendered = DeployLineFormat::line($line, $startedAt, $verbose);
+            if ($rendered !== null) {
+                $this->output->writeln($rendered);
+            }
+        };
+    }
+
+    /** The task's error on one line, or what ended it when it carries none. */
+    private static function failure(Task $task): string
+    {
+        $error = trim((string) preg_replace('/\s+/', ' ', (string) ($task->details['error'] ?? '')));
+        if ($error !== '') {
+            return $error;
+        }
+
+        return $task->status === Task::STATUS_CANCELLED ? 'The deploy was cancelled.' : 'The deploy failed.';
+    }
+
+    /** The deploy is the worker's: Ctrl-C stops only the printing. Needs pcntl, which core's php-cli has. */
+    private function stopFollowingOnInterrupt(Task $task): void
+    {
+        if (! extension_loaded('pcntl')) {
             return;
         }
 
-        $resolved = RequestVault::resolve('env_vars', $envVars, $user->username);
-        $user->setEnvVars(EnvVarOverrides::applyIncoming($resolved, $user->getEnvVars()), $envVars);
-        $user->save();
+        $this->trap([\SIGINT], function () use ($task): void {
+            $this->newLine();
+            $this->warn("Stopped following. The deploy goes on as task {$task->id}.");
+            exit(self::INTERRUPTED);
+        });
+    }
+
+    private function errorOutput(): OutputInterface
+    {
+        $out = $this->output->getOutput();
+
+        return $out instanceof ConsoleOutputInterface ? $out->getErrorOutput() : $out;
     }
 
     private function removeArchive(ArchiveDrop $drop, User $user, string $zipPath): void

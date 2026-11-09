@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Lib\Traits\Models\HasDetails;
 use App\System;
+use App\System\Project\Dind\AppDatabase;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -98,6 +99,7 @@ class MysqlSsoToken extends Model
         return [
             'username' => $username,
             'password' => $password,
+            'host' => AppDatabase::hostname(),
         ];
     }
 }

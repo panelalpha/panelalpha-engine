@@ -99,7 +99,7 @@ class DindDeployMechanicsTest extends TestCase
         $body = self::methodBody($files, 'importProjectArchive');
 
         $milestones = [
-            "info('Copying the project archive into the stage directory')",
+            "info('Copying the project archive '.basename(\$archive->path).' into the stage directory')",
             "info('Unpacking the project archive')",
             "info('Writing the project archive into ~/project')",
         ];

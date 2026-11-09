@@ -48,6 +48,7 @@ class FileController extends Controller
             new OA\Response(response: 200, description: 'Existence check result', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'exists', type: 'boolean')],
             )),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function exists(string $username, FileExistsRequest $request, EngineSystem $system): JsonResponse
@@ -63,6 +64,8 @@ class FileController extends Controller
         $fileMan = $user->project($system)->fileManager();
         try {
             $exists = $fileMan->exists($path);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -193,6 +196,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'ZIP created', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function zip(string $username, ZipRequest $request): JsonResponse
@@ -223,6 +227,8 @@ class FileController extends Controller
                 $params['from_date'] ?? null,
                 ! empty($params['ignore_empty']),
             );
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -237,9 +243,13 @@ class FileController extends Controller
     #[OA\Post(
         path: '/projects/{username}/files/unzip',
         summary: 'Extract a ZIP archive',
-        description: 'Extracts a .zip, .tar.gz or .gz into path, which is created when missing. Nothing already '
-            .'in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level '
-            .'(for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted.',
+        description: 'Extracts a .zip, .tar.gz or .tgz, or .gz into path, which is created when missing; any other '
+            .'name is refused with 422. Nothing already in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level '
+            .'(for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted. A zip made on '
+            .'Windows, whose folders are separated by backslashes, is extracted into those folders and answered with '
+            .'unzip\'s warning in warnings; a zip whose backslashes would stay part of its file names is refused. '
+            .'A zip_path with no archive, an archive refused or that cannot be unpacked, a path the project '
+            .'cannot write to, and a zip_path or path through a link out of the home are refused with 422.',
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -251,8 +261,16 @@ class FileController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'ZIP extracted', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
-            new OA\Response(response: 409, description: 'The destination already holds an entry the archive unpacks to', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 200, description: 'ZIP extracted', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'success', type: 'boolean', example: true),
+                    new OA\Property(property: 'warnings', type: 'array', items: new OA\Items(type: 'string'), description: 'Present when unzip warned about the archive and extracted it all the same.'),
+                ],
+            )),
+            new OA\Response(response: 400, description: 'Any other failure: message says what failed', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'The destination already holds an entry the archive unpacks to: problems[].code destination_exists', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, no archive at zip_path (problems[].code not_found), an archive refused or that cannot be unpacked (on zip_path), a path the project cannot write to (problems[].code not_writable), or a zip_path or path through a link out of the home (problems[].code outside_home)', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function unzip(string $username, ZipRequest $request, EngineSystem $system): JsonResponse
@@ -271,8 +289,8 @@ class FileController extends Controller
 
         $fileMan = $user->project($system)->fileManager();
         try {
-            $fileMan->unzip($zipPath, $path);
-        } catch (ProblemException $e) {
+            $warnings = $fileMan->unzip($zipPath, $path);
+        } catch (ValidationException $e) {
             throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -280,9 +298,7 @@ class FileController extends Controller
             ], 400);
         }
 
-        return new JsonResponse([
-            'success' => true,
-        ]);
+        return new JsonResponse(['success' => true] + ($warnings === [] ? [] : ['warnings' => $warnings]));
     }
 
     #[OA\Post(
@@ -301,6 +317,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Children moved', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function moveContents(string $username, MoveContentsRequest $request): JsonResponse
@@ -321,6 +338,8 @@ class FileController extends Controller
         $fileMan = $user->project()->fileManager();
         try {
             $fileMan->moveDirectoryContents($source, $dest, $params['override'] ?? true);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -406,6 +425,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Mode set', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function chmod(string $username, ChmodRequest $request): JsonResponse
@@ -424,6 +444,8 @@ class FileController extends Controller
         $fileMan = $user->project()->fileManager();
         try {
             $fileMan->chmod($path, $params['mode']);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -450,6 +472,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Moved', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function mv(string $username, MvRequest $request): JsonResponse
@@ -475,6 +498,8 @@ class FileController extends Controller
             if (basename($destPath) === '.htaccess') {
                 ProjectFiles::htaccessChanged($destPath);
             }
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -501,6 +526,7 @@ class FileController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'Copied', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function cp(string $username, CpRequest $request): JsonResponse
@@ -523,6 +549,8 @@ class FileController extends Controller
             if (basename($destPath) === '.htaccess') {
                 ProjectFiles::htaccessChanged($destPath);
             }
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -548,6 +576,7 @@ class FileController extends Controller
                 properties: [new OA\Property(property: 'data', ref: '#/components/schemas/FileEntry')],
             )),
             new OA\Response(response: 404, description: 'Invalid path', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function stat(string $username, StatRequest $request, EngineSystem $system): JsonResponse
@@ -569,6 +598,8 @@ class FileController extends Controller
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -717,6 +748,7 @@ class FileController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'File download (binary)', content: new OA\MediaType(mediaType: 'application/octet-stream', schema: new OA\Schema(type: 'string', format: 'binary'))),
             new OA\Response(response: 404, description: 'File not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The path resolves outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -774,7 +806,7 @@ class FileController extends Controller
             new OA\Response(response: 200, description: 'Webp thumbnail (binary)', content: new OA\MediaType(mediaType: 'image/webp', schema: new OA\Schema(type: 'string', format: 'binary'))),
             new OA\Response(response: 304, description: 'The thumbnail is unchanged; the ETag matched If-None-Match'),
             new OA\Response(response: 404, description: 'File not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'Not a supported image, or too large', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Not a supported image, too large, or a path outside the project home: problems[].code outside_home', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function thumbnail(string $username, ThumbnailRequest $request, EngineSystem $system): Response

@@ -2,26 +2,19 @@
 
 namespace App\Lib\Deploy\Source;
 
+use App\System\Privileged;
 use InvalidArgumentException;
+use RuntimeException;
+use Symfony\Component\Process\Process;
 
 /**
- * An archive an account uploaded, once it has been shown to be one.
- *
- * Everything here is decided before a single byte is extracted: that the path
- * really resolves inside the account's own home, and which of the two
- * supported formats it is. The checks are the reason the type exists — a
- * relative path, a symlink pointing out of the home, or a `.php` renamed to
- * `.zip` are all refused here rather than by whichever `sudo tar` would
- * otherwise have been handed them.
- *
- * No Laravel or filesystem-mutating dependencies, so the rules are testable
- * without an account: the file itself is looked up by the caller, as the
- * account, since the engine's PHP cannot enter the account's private
- * directories (~/.panelalpha is 0700). {@see ArchiveSafety} covers the
- * separate question of what the archive is allowed to contain.
+ * An uploaded archive proven inside the account's home and of a supported format before any tar or unzip sees it.
+ * Pure; contents are {@see ArchiveSafety}'s, and root never parses the account's bytes.
  */
 final class UploadedArchive
 {
+    private const BROKER_DESCRIPTOR = '~/proc/self/fd/\d+~';
+
     private function __construct(
         /** The archive's resolved absolute path, inside the account home. */
         public readonly string $path,
@@ -76,26 +69,44 @@ final class UploadedArchive
     }
 
     /**
-     * Every {@see ArchiveSafety} check on the staged copy, each listing run through $run.
-     * The mode listing serves three checks: member types, symlink targets and the claimed size.
+     * Every {@see ArchiveSafety} check on the staged copy, each listing run through $run. The mode listing
+     * serves four checks: where a zip's backslashes separate folders, member types, symlink targets and the claimed size.
      *
      * @param  callable(list<string>): string  $run
      * @return list<string> the members
      */
     public function assertSafeContents(string $staged, callable $run): array
     {
-        $listed = ArchiveSafety::names($run($this->listNamesArgv($staged)));
+        $listed = ArchiveSafety::names($this->listing($staged, $this->listNamesArgv($staged), $run));
         $members = $this->isZip ? $listed : ArchiveSafety::unescapeTarNames($listed);
         ArchiveSafety::assertSafeNames($members, backslashSeparates: $this->isZip);
+        $modes = $this->listing($staged, $this->listModesArgv($staged), $run);
         if ($this->isZip) {
             ArchiveSafety::assertUnzipKeepsNames($members);
+            ArchiveSafety::assertBackslashesSeparateFolders($modes, $members);
         }
-        $modes = $run($this->listModesArgv($staged));
         ArchiveSafety::assertRegularMembersOnly($modes);
         ArchiveSafety::assertLinksStayInside($this->linkTargets($staged, $modes, $listed, $run), $members);
         ArchiveSafety::assertUncompressedSizeWithin($modes);
 
         return $members;
+    }
+
+    /**
+     * A listing that fails, as a corrupt zip's does, names the archive rather than its staged copy.
+     *
+     * @param  list<string>  $argv
+     * @param  callable(list<string>): string  $run
+     *
+     * @throws RuntimeException
+     */
+    private function listing(string $staged, array $argv, callable $run): string
+    {
+        try {
+            return $run($argv);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('Could not read '.$this->name().': '.implode(' ', $this->said($e->getMessage(), $staged)), 0, $e);
+        }
     }
 
     /**
@@ -119,24 +130,22 @@ final class UploadedArchive
         return $links;
     }
 
-    /** The name the staged root-owned copy is given. */
     public function stagedName(): string
     {
         return $this->isZip ? 'archive.zip' : 'archive.tar.gz';
     }
 
     /**
-     * Members of the archive, one per line, for {@see ArchiveSafety}. tar is told its
-     * quoting style rather than trusted with a default: a name is one line only while
-     * a newline in it is escaped, and {@see ArchiveSafety::unescapeTarNames()} reads that style.
+     * Members of the archive, one per line, for {@see ArchiveSafety}: tar is told its quoting style, so a
+     * newline in a name stays escaped as {@see ArchiveSafety::unescapeTarNames()} reads it.
      *
      * @return list<string>
      */
     public function listNamesArgv(string $staged): array
     {
         return $this->isZip
-            ? ['sudo', ...self::unzipCommand('-Z1', $staged)]
-            : ['sudo', 'tar', '--quoting-style=escape', '-tzf', $staged];
+            ? self::unzipCommand('-Z1', self::stagedPath($staged))
+            : self::tarCommand('-tzf', $staged);
     }
 
     /**
@@ -148,8 +157,8 @@ final class UploadedArchive
     public function listModesArgv(string $staged): array
     {
         return $this->isZip
-            ? ['sudo', ...self::unzipCommand('-Z', $staged)]
-            : ['sudo', 'tar', '--quoting-style=escape', '-tvzf', $staged];
+            ? self::unzipCommand('-Z', self::stagedPath($staged))
+            : self::tarCommand('-tvzf', $staged);
     }
 
     /**
@@ -164,27 +173,71 @@ final class UploadedArchive
             throw new InvalidArgumentException('Archive contains a symbolic link, which could redirect extraction outside the project directory.');
         }
 
-        return ['sudo', ...self::unzipCommand('-p', $staged, $name)];
+        return self::unzipCommand('-p', self::stagedPath($staged), self::memberName($name));
     }
 
     /**
-     * Extracts as the account, never restoring an owner the archive asked for. By uid/gid via
-     * `setpriv`: the account's passwd entry exists only on the host, so `sudo -u` fails in core.
-     * unzip writes the names `unzip -Z1` lists, a Unicode Path field included, so the checks see them.
+     * Extracts as the account by uid/gid through `setpriv`, its passwd entry being host-only, restoring no
+     * owner; unzip writes the names `unzip -Z1` lists, a Unicode Path field included, so the checks see them.
      *
      * @return list<string>
      */
     public function extractArgv(int $uid, int $gid, string $staged, string $into): array
     {
-        $asAccount = self::asAccount($uid, $gid);
-        if ($this->isZip) {
-            return [...$asAccount, ...self::unzipCommand('-o', $staged, '-d', $into)];
-        }
+        return $this->isZip
+            ? Privileged::account()->extractZip($uid, $gid, $staged, $into)
+            : Privileged::account()->extractTar($uid, $gid, $staged, $into);
+    }
 
-        return [
-            ...$asAccount, 'tar',
-            '--no-same-owner', '--no-same-permissions', '-xzf', $staged, '-C', $into,
-        ];
+    /**
+     * unzip's warning exit is a finished extraction, which the broker answers as 0; any other is not.
+     *
+     * @param  string  $staged  the copy the extractor read, which it names by this path unless the broker opened it as /proc/self/fd/N
+     *
+     * @throws RuntimeException what the extractor said, about the archive by its name
+     */
+    public function assertExtracted(Process $extraction, string $staged): void
+    {
+        if ($extraction->isSuccessful()) {
+            return;
+        }
+        $said = $this->said($extraction->getErrorOutput(), $staged) ?: $this->said($extraction->getOutput(), $staged);
+
+        throw new RuntimeException('Could not unpack '.$this->name().': '.implode(' ', $said));
+    }
+
+    /**
+     * What unzip warned about while it extracted, such as backslashes it read as folder separators, a line each.
+     * tar's are left out: it warns once per member about each macOS extended header it ignores.
+     *
+     * @param  string  $staged  the copy unzip extracted, which it names by this path unless the broker opened it as /proc/self/fd/N
+     * @return list<string>
+     */
+    public function extractionWarnings(Process $extraction, string $staged): array
+    {
+        return $this->isZip ? $this->said($extraction->getErrorOutput(), $staged) : [];
+    }
+
+    /**
+     * An extractor's lines with the archive named where they name the staged copy, by its path or as the /proc/self/fd/N
+     * the broker hands it; the extractor runs inside the extract directory, so the members it names are relative.
+     *
+     * @return list<string>
+     */
+    private function said(string $output, string $staged): array
+    {
+        $named = (string) preg_replace(self::BROKER_DESCRIPTOR, $this->name(), str_replace($staged, $this->name(), $output));
+        $lines = array_map(
+            static fn (string $line): string => trim((string) preg_replace('/\s+/', ' ', $line)),
+            preg_split('/\R/', $named) ?: []
+        );
+
+        return array_values(array_filter($lines, static fn (string $line): bool => $line !== ''));
+    }
+
+    private function name(): string
+    {
+        return basename($this->path);
     }
 
     /**
@@ -206,13 +259,33 @@ final class UploadedArchive
      */
     public function normaliseModesArgv(int $uid, int $gid, string $dir): array
     {
-        return [...self::asAccount($uid, $gid), 'chmod', '-R', 'u+rwX,go=rX', '--', $dir];
+        return Privileged::account()->normaliseModes($uid, $gid, $dir);
     }
 
     /** @return list<string> */
-    private static function asAccount(int $uid, int $gid): array
+    private static function tarCommand(string $listing, string $staged): array
     {
-        return ['sudo', 'setpriv', '--reuid', (string) $uid, '--regid', (string) $gid, '--clear-groups'];
+        return ['tar', '--quoting-style=escape', $listing, self::stagedPath($staged)];
+    }
+
+    /** Absolute, so neither tool can read it as an option. */
+    private static function stagedPath(string $staged): string
+    {
+        if (! str_starts_with($staged, '/') || preg_match('~[\x00\n\r]~', $staged) === 1) {
+            throw new InvalidArgumentException('Refusing staged archive path '.json_encode($staged, JSON_UNESCAPED_SLASHES));
+        }
+
+        return $staged;
+    }
+
+    /** unzip reads `-d` or `-x` after the archive as options too. */
+    private static function memberName(string $name): string
+    {
+        if (str_starts_with($name, '-') || preg_match('~[\x00\n\r]~', $name) === 1) {
+            throw new InvalidArgumentException('Refusing archive member name '.json_encode($name, JSON_UNESCAPED_SLASHES));
+        }
+
+        return $name;
     }
 
     private static function formatOf(string $path): bool

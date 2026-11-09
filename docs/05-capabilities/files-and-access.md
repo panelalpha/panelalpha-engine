@@ -80,8 +80,8 @@ Two possible causes, in order of likelihood. Either the files went to the accoun
 **"Permission denied" on upload.**
 The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
 
-**"... is not a folder the project's account can write to" on upload, write or new folder.**
-The folder exists but does not belong to the account, so nothing was written or created; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
+**"... is not a folder the project's account can write to" on upload, write, new folder or unzip.**
+The folder exists but does not belong to the account, so nothing was written, created or unpacked; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
 
 **"Could not connect to ...", "... answered HTTP 404." or "... timed out." when fetching a URL.**
 The engine could not download the address, so nothing was written; the answer is a 422 on `url` with the code `download_failed` and a `reason` (`resolve`, `connect`, `timeout`, `http` with `http_status`, `tls`, `interrupted`, `other`). Check that the address opens from the internet, without a login, and fetch it again. When the download worked but the file could not be saved where you asked, the answer is a 422 on `path` with `write_failed`: pick a folder the project can write to.
@@ -96,7 +96,10 @@ It is looking at the directory it was configured with. Check that against where 
 Your archive had a wrapper folder inside it, so the site's files ended up one level too deep. Repackage it with the files at the top level of the zip.
 
 **Unpacking an archive fails.**
-The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
+The answer is a 422 on `zip_path`: `not_found` when no file is there, otherwise the reason the archive was refused or could not be unpacked. Unzip reads a `.zip`, `.tar.gz` or `.tgz`, or `.gz` by its name and refuses any other, such as `.rar` or `.7z`. The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
+
+**Unpacking a zip made on Windows reports a warning about backslashes.**
+Some Windows tools write backslashes between folder names. A zip that says it was made on Windows is unpacked into the right folders, and the warning comes back in `warnings` (in the deploy log for an archive deploy); nothing more to do. A zip that uses backslashes without saying so is refused, because each backslash would end up inside a file name: re-create it with forward slashes, for example with 7-Zip or `tar -a -cf archive.zip <folder>`.
 
 ## More requests to try
 
@@ -184,7 +187,7 @@ Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
 login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. The key is one line of a `.pub` file: Ed25519, ECDSA, or RSA of at least 2048 bits. A shorter RSA key is refused as `ssh_key_too_weak`, a DSA key as `ssh_key_type_not_accepted`, and a line whose key data is not a key of its type as `ssh_key_corrupt`. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 

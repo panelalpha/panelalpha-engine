@@ -8,6 +8,27 @@ use PHPUnit\Framework\TestCase;
 
 class ArchiveSafetyTest extends TestCase
 {
+    private const DOS_LISTING = "Archive:  site.zip\nZip file size: 264 bytes, number of entries: 2\n"
+        . "-rw-a--     2.0 fat       30 b- stor 80-Jan-01 00:00 index.php\n"
+        . "-rw-a--     2.0 fat       16 b- stor 80-Jan-01 00:00 inc\\hello.php\n"
+        . "2 files, 46 bytes uncompressed, 46 bytes compressed:  0.0%\n";
+
+    /** `unzip -Z` of a zip made with python's zipfile as Windows tools make one: folders, attributes, a volume label, NTFS. */
+    private const WINDOWS_LISTING = <<<'LISTING'
+        Archive:  fixture.zip
+        Zip file size: 1076 bytes, number of entries: 9
+        drwx---     2.0 fat        0 b- stor 80-Jan-01 00:00 site\
+        -rw-a--     2.0 fat       30 b- stor 80-Jan-01 00:00 site\index.php
+        drwxa--     2.0 fat        0 b- stor 80-Jan-01 00:00 site\inc\
+        -r--a--     2.0 fat       13 b- stor 80-Jan-01 00:00 site\inc\hello.php
+        -rw-a--     2.0 fat   100000 b- defN 80-Jan-01 00:00 site\big.bin
+        -rwxa--     2.0 fat        2 b- stor 80-Jan-01 00:00 site\run.exe
+        -rw-ahs     2.0 fat        3 b- stor 80-Jan-01 00:00 site\hidden.ini
+        Vrw----     2.0 fat        0 b- stor 80-Jan-01 00:00 DISK
+        -rw-a--     2.0 ntf        4 b- stor 80-Jan-01 00:00 site\ntfs.txt
+        9 files, 100052 bytes uncompressed, 166 bytes compressed:  99.8%
+        LISTING;
+
     public function test_accepts_relative_archive_entries(): void
     {
         ArchiveSafety::assertSafeListing("project/\nproject/public/index.php\nproject/assets/app.js\n");
@@ -126,6 +147,52 @@ class ArchiveSafetyTest extends TestCase
         $this->expectExceptionMessage('Archive contains a file name unzip would rename on extraction');
 
         ArchiveSafety::assertUnzipKeepsNames(['index.php', $name]);
+    }
+
+    public function test_a_backslash_in_a_name_made_on_ms_dos_separates_folders(): void
+    {
+        ArchiveSafety::assertBackslashesSeparateFolders(self::DOS_LISTING, ['index.php', 'inc\\hello.php']);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** The name is everything after the time, a leading space and a date-like part included. */
+    public function test_a_name_made_on_ms_dos_is_read_whole(): void
+    {
+        $listing = "-rw-a--     6.3 fat        3 b- defN 80-Jan-01 00:00  lead\\x\n"
+            . "-rw-a--     6.3 fat        3 b- defN 80-Jan-01 00:00 a 80-Jan-01 00:00 b\\c\n";
+
+        ArchiveSafety::assertBackslashesSeparateFolders($listing, [' lead\\x', 'a 80-Jan-01 00:00 b\\c']);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** @return iterable<string, array{string, list<string>}> */
+    public static function backslashUnzipKeepsProvider(): iterable
+    {
+        yield 'made on Unix' => ["-rw-r--r--  2.0 unx       16 b- stor 80-Jan-01 00:00 inc\\hello.php\n", ['inc\\hello.php']];
+        yield 'made on NTFS' => ["-rw-a--     2.0 ntf       16 b- stor 80-Jan-01 00:00 inc\\hello.php\n", ['inc\\hello.php']];
+        yield 'made on MS-DOS, with a slash too' => ["-rw-a--     2.0 fat        1 b- stor 80-Jan-01 00:00 a/b\\c.txt\n", ['a/b\\c.txt']];
+        yield 'a second member of the name made on Unix' => [
+            self::DOS_LISTING . "-rw-r--r--  2.0 unx       16 b- stor 80-Jan-01 00:00 inc\\hello.php\n",
+            ['index.php', 'inc\\hello.php', 'inc\\hello.php'],
+        ];
+        yield 'a Unix member named like a DOS one after a space' => [
+            self::DOS_LISTING . "-rw-r--r--  2.0 unx       16 b- stor 80-Jan-01 00:00 x inc\\hello.php\n",
+            ['index.php', 'inc\\hello.php', 'x inc\\hello.php'],
+        ];
+        yield 'a line the attributes overrun' => ["RWED,RWED,RWED  vms        3 b- defN 80-Jan-01 00:00 vms\\x\n", ['vms\\x']];
+        yield 'a name the listing does not show' => [self::DOS_LISTING, ['index.php', 'lib\\x.php']];
+    }
+
+    /** @param list<string> $names */
+    #[DataProvider('backslashUnzipKeepsProvider')]
+    public function test_a_backslash_unzip_writes_into_the_file_name_is_refused(string $listing, array $names): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive uses backslashes in file names, which would be extracted as part of each name rather than as folders; re-create it with forward slashes.');
+
+        ArchiveSafety::assertBackslashesSeparateFolders($listing, $names);
     }
 
     public function test_a_zip_name_unzip_writes_as_listed_is_kept(): void
@@ -332,6 +399,77 @@ class ArchiveSafetyTest extends TestCase
         ArchiveSafety::assertUncompressedSizeWithin($listing);
 
         $this->addToAssertionCount(1);
+    }
+
+    public function test_sums_the_sizes_of_members_made_on_ms_dos(): void
+    {
+        ArchiveSafety::assertUncompressedSizeWithin(self::WINDOWS_LISTING, 100052);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/unpacks to more than/');
+
+        ArchiveSafety::assertUncompressedSizeWithin(self::WINDOWS_LISTING, 100051);
+    }
+
+    /** A volume label (`V`) is skipped by unzip; a file or a folder made on MS-DOS is never a link or a device. */
+    public function test_accepts_the_files_folders_and_volume_label_of_a_zip_made_on_ms_dos(): void
+    {
+        ArchiveSafety::assertRegularMembersOnly(self::WINDOWS_LISTING);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** The header names the archive by a path that can hold anything, the totals count bytes; neither is a member. */
+    public function test_the_header_and_totals_of_a_zip_listing_are_not_members(): void
+    {
+        $listing = "Archive:  /home/.panelalpha-unzip-stage/ab12/my 99999999 b- stor 80-Jan-01 00:00 x.zip\n"
+            . "Zip file size: 1076 bytes, number of entries: 1\n"
+            . "-rw-a--     2.0 fat       30 b- stor 80-Jan-01 00:00 index.php\n"
+            . "1 file, 30 bytes uncompressed, 30 bytes compressed:  0.0%\n";
+
+        ArchiveSafety::assertRegularMembersOnly($listing);
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 30);
+
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * As `unzip -Z` lists members made on other systems; unzip extracts the VMS ones as symlinks to `/etc`.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function unreadableZipMemberProvider(): iterable
+    {
+        yield 'a link made on VMS' => ['RWED,RWED,RWED  vms        4 b- stor 80-Jan-01 00:00 evil'];
+        yield 'a link made on VMS, owner only' => ['RWD,,       2.0 vms        4 b- stor 80-Jan-01 00:00 evil2'];
+        yield 'made on an Amiga' => ['?hsparwed   2.0 ami        4 b- stor 80-Jan-01 00:00 evil'];
+        yield 'made on THEOS' => ['KHM..E...   2.0 ths        4 b- stor 80-Jan-01 00:00 evil'];
+    }
+
+    #[DataProvider('unreadableZipMemberProvider')]
+    public function test_a_zip_member_neither_form_reads_is_refused_by_the_member_check(string $line): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive lists a member whose type or size cannot be read');
+
+        ArchiveSafety::assertRegularMembersOnly("Archive:  site.zip\n{$line}\n");
+    }
+
+    #[DataProvider('unreadableZipMemberProvider')]
+    public function test_a_zip_member_neither_form_reads_is_refused_by_the_size_check(string $line): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive lists a member whose type or size cannot be read');
+
+        ArchiveSafety::assertUncompressedSizeWithin("Archive:  site.zip\n{$line}\n");
+    }
+
+    public function test_a_member_whose_size_cannot_be_read_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive lists a member whose type or size cannot be read');
+
+        ArchiveSafety::assertUncompressedSizeWithin("crw-rw-rw- root/root 1,3 2024-01-01 00:00 dev/null\n");
     }
 
     /**

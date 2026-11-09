@@ -9,13 +9,8 @@ use Imagick;
 use ImagickException;
 
 /**
- * A webp thumbnail of a project image, for the file-manager grid.
- *
- * The source is read as the account through the same confined stream a
- * download uses, so the engine never opens a user-controlled path as its own
- * user. The coder is chosen from the file's own magic bytes and forced, so
- * ImageMagick is never the one deciding how to read the bytes; the pixel count
- * comes from the header before the pixels are there to exhaust memory with.
+ * A webp thumbnail of a project image, read as the account through a download's confined stream, never as the engine.
+ * The coder is forced from magic bytes, never ImageMagick's guess, and the pixel count read from the header before any pixels.
  */
 final class FileThumbnail
 {
@@ -37,6 +32,11 @@ final class FileThumbnail
     private const MAP_BYTES = 512 * 1024 * 1024;
 
     private const TIME_SECONDS = 30;
+
+    private const DISK_BYTES = 512 * 1024 * 1024;
+
+    /** A read named with a scene spec decodes only that frame of an animated GIF or WebP. */
+    private const FIRST_FRAME_ONLY = 'source[0]';
 
     public function __construct(private readonly ?System $system = null) {}
 
@@ -127,8 +127,7 @@ final class FileThumbnail
     private function assertDecodable(string $bytes, string $format): void
     {
         self::configureLimits();
-        $probe = new Imagick;
-        $probe->setFormat($format);
+        $probe = self::firstFrameReader($format);
         try {
             $probe->pingImageBlob($bytes);
             self::assertPixels($probe->getImageWidth(), $probe->getImageHeight());
@@ -141,8 +140,7 @@ final class FileThumbnail
 
     private function decode(string $bytes, string $format): Imagick
     {
-        $image = new Imagick;
-        $image->setFormat($format);
+        $image = self::firstFrameReader($format);
         try {
             $image->readImageBlob($bytes);
             $image->setIteratorIndex(0);
@@ -176,9 +174,8 @@ final class FileThumbnail
     }
 
     /**
-     * The coder for a supported image, taken from its own magic bytes; null
-     * for anything else. Forcing this is what keeps ImageMagick's own format
-     * detection - and the coders it can reach, SVG included - out of the path.
+     * The coder for a supported image, from its own magic bytes, or null. Forcing it keeps ImageMagick's own format
+     * detection, and the coders it can reach, SVG included, out of the path.
      */
     private static function sniffFormat(string $bytes): ?string
     {
@@ -196,6 +193,15 @@ final class FileThumbnail
         }
 
         return null;
+    }
+
+    private static function firstFrameReader(string $format): Imagick
+    {
+        $reader = new Imagick;
+        $reader->setFormat($format);
+        $reader->setFilename(self::FIRST_FRAME_ONLY);
+
+        return $reader;
     }
 
     private static function assertPixels(int $width, int $height): void
@@ -223,5 +229,6 @@ final class FileThumbnail
         Imagick::setResourceLimit(Imagick::RESOURCETYPE_MAP, self::MAP_BYTES);
         Imagick::setResourceLimit(Imagick::RESOURCETYPE_AREA, self::MAX_SOURCE_PIXELS);
         Imagick::setResourceLimit(Imagick::RESOURCETYPE_TIME, self::TIME_SECONDS);
+        Imagick::setResourceLimit(Imagick::RESOURCETYPE_DISK, self::DISK_BYTES);
     }
 }
