@@ -142,7 +142,7 @@ class TunnelManager
                     $expiresAt
                 );
             } catch (CloudflareException|PanelAlphaException $e) {
-                if (! DomainAllocator::nameIsTaken($e->getMessage())) {
+                if (! DomainAllocator::nameIsTaken($e)) {
                     throw $e;
                 }
             }

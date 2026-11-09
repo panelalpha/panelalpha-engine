@@ -5,10 +5,8 @@ namespace App\Lib\DeployHook;
 use App\Lib\Net\EgressRefusedException;
 
 /**
- * A webhook registration the git provider did not accept, or could not be
- * asked for. Carried out of the library rather than rendered there, because
- * only the HTTP boundary knows a refusal is a 422 body and an unreachable
- * provider a 502.
+ * A webhook registration the git provider did not accept, or could not be asked for. Carried out of the library, since only
+ * the HTTP boundary knows a refusal is a 422 body and an unreachable provider a 502.
  */
 final class ProviderRegistrationRefused extends \RuntimeException
 {
@@ -53,7 +51,8 @@ final class ProviderRegistrationRefused extends \RuntimeException
         return new self(
             "The git provider refused the webhook registration: {$provider} answered {$status}. "
                 .'The token needs permission to manage repository webhooks '
-                .'(GitHub admin:repo_hook on the repository, GitLab maintainer or owner, Bitbucket admin).',
+                .'(GitHub: Webhooks read and write on a fine-grained token, admin:repo_hook on a classic one; '
+                .'GitLab maintainer or owner; Bitbucket admin).',
             422,
             'provider_permission_denied',
             $status,

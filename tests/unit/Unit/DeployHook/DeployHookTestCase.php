@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\DeployHook;
 
+use App\Lib\Ssl\EngineCertificate;
 use App\Models\DeployHook;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,7 @@ abstract class DeployHookTestCase extends TestCase
             'database.connections.sqlite.foreign_key_constraints' => true,
         ]);
         $this->app->forgetInstance('encrypter');
+        $this->app->instance(EngineCertificate::class, new EngineCertificate(new CertificateEngine()));
         DB::purge('sqlite');
         DB::reconnect('sqlite');
         DB::setDefaultConnection('sqlite');

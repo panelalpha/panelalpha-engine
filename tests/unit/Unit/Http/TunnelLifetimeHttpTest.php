@@ -137,6 +137,39 @@ class TunnelLifetimeHttpTest extends TestCase
         $this->assertSame(0, Tunnel::query()->count());
     }
 
+    public function test_a_label_the_proxy_calls_not_available_draws_a_new_one(): void
+    {
+        Http::fake([
+            '*' => Http::response(['status' => 'error', 'message' => 'The domain name is not available'], 400),
+        ]);
+
+        $response = $this->postJson('/api/projects/shop/domains/shop.panelalpha.online/tunnels', [
+            'purpose' => 'preview',
+        ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('code', 'tunnel_hostname_unavailable');
+        $paths = array_map(static fn (array $pair): string => (string) $pair[0]['path'], Http::recorded()->all());
+        $this->assertCount(5, array_unique($paths));
+        $this->assertSame(0, Tunnel::query()->count());
+    }
+
+    public function test_a_proxy_that_is_not_available_is_answered_once_with_its_own_message(): void
+    {
+        Http::fake([
+            '*' => Http::response(['status' => 'error', 'message' => 'Service not available'], 503),
+        ]);
+
+        $response = $this->postJson('/api/projects/shop/domains/shop.panelalpha.online/tunnels', [
+            'purpose' => 'preview',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('errors.hostname.0', 'PanelAlpha Online create failed: Service not available (HTTP 503).');
+        Http::assertSentCount(1);
+        $this->assertSame(0, Tunnel::query()->count());
+    }
+
     public function test_get_omits_a_tunnel_past_its_lifetime_and_exposes_purpose_and_valid_until(): void
     {
         $liveUntil = now()->addHour()->toIso8601String();

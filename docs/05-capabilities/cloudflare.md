@@ -16,9 +16,10 @@ Three things must be true:
 - The project was deployed from a repository, so it runs in its own container. A site on another kind of hosting account cannot use a Cloudflare tunnel.
 - The hostname you want is in a zone in your Cloudflare account, and is not already in use on this engine.
 
-You also need a **Cloudflare API token**. A tunnel needs these two permissions:
+You also need a **Cloudflare API token**. A tunnel needs these three permissions:
 
 - **Account · Cloudflare Tunnel · Edit**
+- **Zone · Zone · Read**, so the engine can find the hostname's zone
 - **Zone · DNS · Edit**
 
 If you also want to purge the cache or change the security level from the engine, add these two to the same token:
@@ -26,7 +27,7 @@ If you also want to purge the cache or change the security level from the engine
 - **Zone · Cache Purge · Purge**
 - **Zone · Zone Settings · Edit**
 
-Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first two drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
+Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first three drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
 
 ## What you do, and what the engine does
 
@@ -70,7 +71,7 @@ Each action names one of the project's domains or aliases, and works on the Clou
 
 The engine reads the current value first, so a page can show the level before you change it. The same page reports whether the domain's DNS record is proxied through Cloudflare; if it is not, visitors are going straight to the engine and the cache is not in the way.
 
-These actions use the project's Cloudflare API token, and only a project deployed from a repository into its own container can hold one, as for tunnels. Traditional PHP hosting cannot use them. They are refused until the token has **Zone · Cache Purge · Purge** and **Zone · Zone Settings · Edit**. A refusal names the permission the call needed: reading the status needs Zone Settings Read and Zone DNS Read, which the **Edit** permissions above include.
+These actions use the project's Cloudflare API token, and only a project deployed from a repository into its own container can hold one, as for tunnels. Traditional PHP hosting cannot use them. They are refused until the token has **Zone · Cache Purge · Purge** and **Zone · Zone Settings · Edit**, and every one of them first finds the domain's zone, which needs **Zone · Zone · Read**. A refusal names the permission the call needed: reading the status needs Zone Settings Read and Zone DNS Read, which the **Edit** permissions above include.
 
 ## Check it worked
 

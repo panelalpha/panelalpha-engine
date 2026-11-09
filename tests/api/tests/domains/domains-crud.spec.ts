@@ -78,8 +78,15 @@ test.describe('addon domain lifecycle', () => {
     expect((details as Record<string, unknown> | undefined)?.force_https_redirect).toBe(true);
   });
 
-  test('delete it', async ({ domainFactory, domainAssertions, setupUser }) => {
-    await domainFactory.deleteDomain(setupUser.username, addonDomain);
+  test('delete it, keeping its files', async ({ authedRequest, domainAssertions, setupUser }) => {
+    const response = await authedRequest.delete(
+      `projects/${setupUser.username}/domains/${addonDomain}`
+    );
+    await expectStatus(response, 200);
+    expect(((await response.json()) as { files_kept?: string[] }).files_kept).toEqual([
+      `/${addonDomain}`,
+      `/${addonDomain}/public_html`,
+    ]);
     await domainAssertions.verifyDomainNotExists(setupUser.username, addonDomain);
   });
 });

@@ -48,7 +48,7 @@ class UnconfirmedChangeTest extends TestCase
             'project setting unset' => ['project:settings:unset', ['key' => 'protected', '--project' => 'bob']],
             'project limits' => ['project:limit:set', ['--project' => 'alice', '--memory-limit' => '512']],
             'domain create' => ['domain:create', ['domain' => 'new.test', '--project' => 'alice']],
-            'domain delete' => ['domain:delete', ['domain' => 'alice.test', '--project' => 'alice']],
+            'domain delete' => ['domain:delete', ['domain' => 'shop.test', '--project' => 'alice']],
             'domain set proxy' => ['domain:set-proxy', ['--domain' => 'alice.test', '--proxy-to' => '9090']],
             'domain unset proxy' => ['domain:unset-proxy', ['--domain' => 'alice.test']],
             'tunnel delete' => ['domain:tunnel:delete', ['hostname' => 'app.example.com', '--project' => 'alice']],
@@ -139,6 +139,7 @@ class UnconfirmedChangeTest extends TestCase
     {
         $alice = $this->makeUser('alice', ['template' => 'dind', 'memory_limit' => 256]);
         $domain = $this->makeMainDomain($alice, 'alice.test');
+        Domain::query()->create(['user_id' => $alice->id, 'domain' => 'shop.test', 'type' => 'addon']);
         $this->makeUser('bob', ['template' => 'dind', User::DETAIL_PROTECTED => User::PROTECTED_ON]);
 
         ProxyRule::query()->create([

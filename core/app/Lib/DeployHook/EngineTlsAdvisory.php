@@ -7,18 +7,8 @@ use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
 
 /**
- * What a client needs to know about the certificate a git host will see when
- * it calls this engine's Deploy Hook: whether it is one a git host trusts
- * outright, and, when it is not, how to make each supported provider call it
- * anyway.
- *
- * Deliberately collapses everything {@see CertificateStatus} can say into two
- * words. A caller here is not auditing the certificate -- it is deciding
- * whether a webhook delivery is going to fail on the TLS handshake before it
- * ever reaches this engine's own signature check, and every non-`trusted`
- * verdict (self-signed, expired, wrong name, an untrusted private CA, ...)
- * answers that question the same way: register anyway with per-provider
- * verification disabled, or fix the certificate first.
+ * Whether a git host will trust this engine's certificate when it calls the Deploy Hook, and if not,
+ * how to make each provider call it anyway. Every non-trusted {@see CertificateStatus} is `self_signed` here.
  */
 final class EngineTlsAdvisory
 {
@@ -33,7 +23,7 @@ final class EngineTlsAdvisory
     public static function forProvider(?string $provider = null): array
     {
         $url = rtrim((string) config('app.url'), '/');
-        $state = self::state($url);
+        $state = self::state($url, app(EngineCertificate::class));
 
         return [
             'state' => $state,
@@ -58,19 +48,11 @@ final class EngineTlsAdvisory
         return $text === null ? [] : [$provider => $text];
     }
 
-    private static function state(string $url): string
+    /** Read as `/system/info` reads it; no certificate to point to is no better than one nobody trusts. */
+    private static function state(string $url, EngineCertificate $engine): string
     {
-        $engine = new EngineCertificate;
-        $path = $engine->certificatePath();
-
-        if (! is_readable($path)) {
-            // No certificate to point to is no better than one nobody
-            // trusts: either way the safe thing to tell a client is how to
-            // get a git host past it.
-            return self::SELF_SIGNED;
-        }
-
-        $facts = CertificateFacts::fromPem((string) file_get_contents($path));
+        $pem = $engine->served();
+        $facts = $pem === null ? null : CertificateFacts::fromPem($pem);
         if ($facts === null) {
             return self::SELF_SIGNED;
         }
@@ -81,11 +63,7 @@ final class EngineTlsAdvisory
         return $status['status'] === CertificateStatus::TRUSTED ? self::VALID : self::SELF_SIGNED;
     }
 
-    /**
-     * A hostname is assumed reachable -- DNS is not this class's business to
-     * resolve. A literal IP is reachable only when it is outside the private
-     * and reserved ranges nothing on the public internet can route to.
-     */
+    /** A hostname is assumed reachable; a literal IP only outside the private and reserved ranges. */
     private static function hasPublicAddress(string $url): bool
     {
         $host = (string) (parse_url($url, PHP_URL_HOST) ?: '');

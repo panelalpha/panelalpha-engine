@@ -79,6 +79,25 @@ class CloudflareCdnTest extends TestCase
         }
     }
 
+    /** purge_cache answers a valid token without Cache Purge so, recorded live. */
+    public function test_a_401_carrying_only_an_authentication_error_is_a_missing_permission(): void
+    {
+        Http::fake(['*' => Http::response([
+            'result' => null,
+            'success' => false,
+            'errors' => [['code' => 10000, 'message' => 'Authentication error']],
+            'messages' => [],
+        ], 401)]);
+
+        try {
+            $this->client()->purgeCache('zone-id', false, ['https://shop.example.test/a.css']);
+            $this->fail('a 401 must raise');
+        } catch (CloudflareException $e) {
+            $this->assertTrue($e->isPermissionDenied());
+            $this->assertFalse($e->isInvalidToken());
+        }
+    }
+
     /** @return array<string, array{int, array<string, mixed>}> */
     public static function tokensCloudflareDoesNotAccept(): array
     {

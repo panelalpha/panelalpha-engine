@@ -5,7 +5,10 @@ namespace Tests\Unit\Integrations\Tunnels;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Setting;
+use App\Models\Tunnel;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -181,6 +184,46 @@ class PanelAlphaConnectTest extends TestCase
         $this->expectExceptionMessage('Site already exists. Use PUT to update.');
 
         (new PanelAlphaConnect())->createSite('local.test', TestNetwork::public(10), 'taken');
+    }
+
+    /** @return array<string, array{string, callable(PanelAlphaConnect): mixed}> */
+    public static function connectCalls(): array
+    {
+        return [
+            'create' => ['create', fn (PanelAlphaConnect $connect) => $connect->createSite('local.test', TestNetwork::public(10), 'shop')],
+            'update' => ['update', fn (PanelAlphaConnect $connect) => $connect->updateSite('shop.panelalpha.online', 'local.test', TestNetwork::public(10))],
+            'delete' => ['delete', fn (PanelAlphaConnect $connect) => $connect->deleteSite('shop.panelalpha.online')],
+        ];
+    }
+
+    #[DataProvider('connectCalls')]
+    public function test_a_connect_that_cannot_be_reached_is_refused_like_any_other_failure(string $action, callable $call): void
+    {
+        Setting::setRuntimeSettings(['license_key' => '']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
+        Http::fake(['*' => Http::failedConnection('cURL error 7: Failed to connect to connect.panelalpha.com port 443')]);
+
+        $this->expectException(PanelAlphaException::class);
+        $this->expectExceptionMessage(
+            "PanelAlpha Online {$action} failed: PanelAlpha Connect could not be reached (cURL error 7: Failed to connect to connect.panelalpha.com port 443)."
+        );
+
+        $call(new PanelAlphaConnect());
+    }
+
+    public function test_a_tunnel_delete_with_connect_unreachable_is_logged_not_thrown(): void
+    {
+        Setting::setRuntimeSettings(['license_key' => '']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
+        Http::fake(['*' => Http::failedConnection()]);
+        Log::spy();
+
+        PanelAlphaConnect::deleteTunnelRemote(new Tunnel(['hostname' => 'shop.panelalpha.online']));
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => ($context['hostname'] ?? null) === 'shop.panelalpha.online'
+                && str_contains((string) ($context['message'] ?? ''), 'PanelAlpha Connect could not be reached')
+        );
     }
 
     /**

@@ -119,8 +119,8 @@ class MainDomainRenameTunnelTest extends TestCase
         $this->assertSame(['shop.example.com'], Domain::query()->pluck('domain')->all());
         $this->assertSame(0, Tunnel::query()->count());
         Log::shouldHaveReceived('warning')->once()->withArgs(
-            static fn (string $message): bool => str_contains($message, 'shop.panelalpha.online')
-                && str_contains($message, 'connect.panelalpha.com is unreachable')
+            static fn (string $message, array $context = []): bool => ($context['hostname'] ?? null) === 'shop.panelalpha.online'
+                && str_contains((string) ($context['message'] ?? ''), 'connect.panelalpha.com is unreachable')
         );
     }
 
@@ -138,7 +138,8 @@ class MainDomainRenameTunnelTest extends TestCase
     private function hostWorkSucceeds(User $user): void
     {
         $projectDomain = Mockery::mock(ProjectDomain::class);
-        $projectDomain->allows('create', 'delete');
+        $projectDomain->allows('create');
+        $projectDomain->allows('delete');
         $project = Mockery::mock(Project::class);
         $project->allows('domain')->andReturn($projectDomain);
         $owner = new class ($project) extends User {

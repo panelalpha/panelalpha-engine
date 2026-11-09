@@ -348,9 +348,10 @@ class CdnHttpTest extends TestCase
             ->assertJsonPath('code', 'zone_not_found');
     }
 
+    /** Cloudflare's own answer, recorded live: a 401 with 10000, the same one a dead token gets there. */
     public function test_purge_without_the_cache_purge_scope_names_it(): void
     {
-        $this->fakeCdn(['purge_cache' => self::forbidden()]);
+        $this->fakeCdn(['purge_cache' => self::failure(401, 'Authentication error', 10000)]);
 
         $response = $this->postJson('/api/projects/alice/domains/shop.example.test/cdn/purge', ['everything' => true])
             ->assertUnprocessable();
@@ -485,11 +486,11 @@ class CdnHttpTest extends TestCase
         return self::failure(403, 'Unauthorized to access requested resource');
     }
 
-    private static function failure(int $status, string $message): PromiseInterface
+    private static function failure(int $status, string $message, int $code = 9109): PromiseInterface
     {
         return Http::response([
             'success' => false,
-            'errors' => [['code' => 9109, 'message' => $message]],
+            'errors' => [['code' => $code, 'message' => $message]],
         ], $status);
     }
 }

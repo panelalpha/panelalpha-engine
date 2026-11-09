@@ -21,6 +21,8 @@ use Illuminate\Support\Carbon;
  *   parent_domain?: string,
  *   aliases?: array<string>,
  *   is_example_domain?: bool,
+ *   https_ports?: list<int>,
+ *   https_port?: int,
  * }
  *
  * @property int $id
@@ -127,6 +129,17 @@ class Domain extends Model
     }
 
     /**
+     * Why a project's main domain cannot be deleted, or null when it can. The
+     * address is renamed with project_update instead of being removed.
+     */
+    public function mainDomainDeleteRefusal(): ?string
+    {
+        return $this->type === 'main'
+            ? 'Cannot delete the main domain: change the project\'s main domain instead.'
+            : null;
+    }
+
+    /**
      * Find the example domain if it exists
      */
     public static function findExampleDomain(): ?self
@@ -227,6 +240,17 @@ class Domain extends Model
     public function setDocumentRoot(string $path): void
     {
         $this->setDetails(['document_root' => $path]);
+    }
+
+    /**
+     * Home-relative directories a delete leaves in place: users write into them, and the
+     * document root may hold files that were there before the domain or serve another one.
+     *
+     * @return list<string>
+     */
+    public function directoriesKeptOnDelete(): array
+    {
+        return array_values(array_unique(['/'.$this->domain, $this->getDocumentRoot()]));
     }
 
     public function forceHttpsRedirectEnabled(): bool

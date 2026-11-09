@@ -124,6 +124,23 @@ class CloudflarePasteCheckTest extends VaultTestCase
         $this->assertFalse($other->refresh()->isSealed());
     }
 
+    public function test_a_token_listing_several_accounts_is_refused_like_the_project_setting(): void
+    {
+        $this->cloudflare([
+            '/accounts' => [200, ['success' => true, 'result' => [
+                ['id' => 'acc1', 'name' => 'Acme'],
+                ['id' => 'acc2', 'name' => 'Other'],
+            ]]],
+        ] + $this->workingToken());
+        [$entry, $ref] = $this->cloudflareEntry(['hostname' => 'shop.example.com']);
+
+        $response = $this->post('/vault/' . $ref, ['secret' => self::TOKEN]);
+
+        $response->assertStatus(422);
+        $response->assertSee('Not saved: This API token can see zones in more than one Cloudflare account (Acme [acc1], Other [acc2])');
+        $this->assertFalse($entry->refresh()->isSealed());
+    }
+
     public function test_cloudflare_unreachable_saves_unchecked(): void
     {
         Http::fake(fn () => throw new ConnectionException('timed out'));

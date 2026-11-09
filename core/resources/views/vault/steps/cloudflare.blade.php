@@ -3,9 +3,10 @@
     <ol>
         <li><span class="n">1.</span><span>Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare → My Profile → API Tokens</a>.</span></li>
         <li><span class="n">2.</span><span>Click <strong>Create Token</strong>, then <strong>Create Custom Token</strong>.</span></li>
-        <li><span class="n">3.</span><span>Add two permissions:
+        <li><span class="n">3.</span><span>Add three permissions:
             <ul>
                 <li><span class="dash">–</span><span><strong>Account</strong> → Cloudflare Tunnel → <strong>Edit</strong></span></li>
+                <li><span class="dash">–</span><span><strong>Zone</strong> → Zone → <strong>Read</strong></span></li>
                 <li><span class="dash">–</span><span><strong>Zone</strong> → DNS → <strong>Edit</strong></span></li>
             </ul>
             To purge the cache or change the security level from the engine, add two more:
