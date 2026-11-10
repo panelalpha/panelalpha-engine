@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Lib\Deploy\Health\CheckRunner;
 use App\Models\User;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
@@ -92,6 +93,12 @@ class CheckAppCommand extends Command
             $this->info("'{$username}' answered on every published port");
 
             return 0;
+        }
+
+        if (($report['serving'] ?? null) === CheckRunner::SERVING_PLACEHOLDER) {
+            $this->error("'{$username}' serves the PanelAlpha placeholder page: no application is running");
+
+            return 1;
         }
 
         $this->error("'{$username}' did not answer on every published port");

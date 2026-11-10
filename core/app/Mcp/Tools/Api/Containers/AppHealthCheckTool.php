@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Check that the deployed application answers on its published ports
 
-    Probes the app on its published ports from inside its container, bypassing domain, DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it is the app - `ok`, or what answered instead; `checks` say why and what to do.
+    Probes the app on its published ports from inside its container, bypassing domain, DNS, TLS and proxy. `healthy`: the app answered (false for the engine's placeholder page; null: no port published). `serving`: whether it is the app - `ok`, or what answered instead; `checks` say why and what to do.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
