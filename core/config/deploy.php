@@ -51,6 +51,12 @@ return [
     'prewarm_reserve' => env('DEPLOY_PREWARM_RESERVE', ''),
 
     /*
+     * Where scripts/publish-base-images.sh pushes our base images. A host keeps
+     * a pulled one only when built from the same Dockerfile; empty or `none` compiles.
+     */
+    'base_image_registry' => env('DEPLOY_BASE_IMAGE_REGISTRY', 'ghcr.io/panelalpha'),
+
+    /*
      * Seconds the deploy's `git clone` may take before it is stopped and the
      * deploy fails as `clone-timed-out`. Raise it for very large repositories
      * on a slow link.
@@ -96,7 +102,8 @@ return [
     /*
      * Free space the same guard keeps on the Docker root and /home: a share
      * of the filesystem (15%) or a size (20G). Below it the guard prunes build
-     * cache and then base images unused for 6h. `off` stops that half.
+     * cache and then base images unused for 6h, then 3h, 1.5h and so on until
+     * this much is free or only images in use are left. `off` stops that half.
      */
     'disk_pressure_free' => env('DEPLOY_DISK_PRESSURE_FREE', '15%'),
 ];

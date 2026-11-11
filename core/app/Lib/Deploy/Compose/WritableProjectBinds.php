@@ -88,7 +88,7 @@ final class WritableProjectBinds
         $stages = [];
         $current = null;
         foreach (preg_split('/\R/', DockerfileFinder::withoutHeredocBodies($contents)) ?: [] as $line) {
-            if (preg_match('/^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$/i', $line, $m) === 1) {
+            if (preg_match(DockerfileFinder::FROM_LINE_PATTERN, $line, $m) === 1) {
                 $stages[] = ['from' => $m[1], 'alias' => strtolower($m[2] ?? ''), 'user' => null];
                 $current = count($stages) - 1;
             } elseif ($current !== null && preg_match('/^\s*USER\s+(\S+)\s*$/i', $line, $m) === 1) {
@@ -151,7 +151,6 @@ final class WritableProjectBinds
         if (str_starts_with($source, './') || str_starts_with($source, '../') || $source === '.') {
             $source = $projectDir.'/'.$source;
         } elseif (! str_starts_with($source, '/')) {
-            // A named volume.
             return null;
         }
         $source = self::normalised($source);

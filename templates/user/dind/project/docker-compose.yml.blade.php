@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    image: ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028
+    image: {{ $image }}
     pull_policy: missing
     restart: always
     hostname: {{ $user }}

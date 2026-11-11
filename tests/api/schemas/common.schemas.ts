@@ -22,3 +22,17 @@ export function assertAuthErrorText(bodyText: string): void {
     throw new Error(`Expected auth-related error message, got: ${bodyText.slice(0, 200)}`);
   }
 }
+
+/** A refusal a program can act on: each problem names its field and a stable code. */
+export const problemsResponseSchema = z.object({
+  message: z.string().optional(),
+  problems: z
+    .array(
+      z.object({
+        field: z.string(),
+        code: z.string(),
+        message: z.string(),
+      })
+    )
+    .min(1),
+});

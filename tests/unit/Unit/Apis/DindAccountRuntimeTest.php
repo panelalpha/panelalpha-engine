@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Apis;
 
+use App\Lib\Deploy\Dind\AccountImage;
 use App\System\Project\Dind\AccountRuntime;
 use App\System\Project\Dind\AccountTemplate;
 use Illuminate\Support\Facades\Blade;
@@ -31,6 +32,7 @@ class DindAccountRuntimeTest extends TestCase
         $this->assertFileExists(self::TEMPLATE, 'the dind account template moved');
 
         $yaml = Blade::render((string) file_get_contents(self::TEMPLATE), [
+            'image' => AccountImage::REF,
             'user' => 'alice',
             'isolation' => AccountRuntime::composeIsolation(),
             'cpu_limit' => '',

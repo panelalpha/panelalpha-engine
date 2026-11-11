@@ -48,6 +48,13 @@
 #                                   # omit and this version cannot be
 #                                   # selected for warming at all
 #           why: "..."              # shown in the prewarm plan
+#         - version: "8.3"          # a variant of a built runtime
+#           extensions: ["imap"]    # PHP only: extensions on top of the base
+#           packages: ["ffmpeg"]    # apt packages on top of the runtime's own
+#           prewarm: 801
+#
+# A variant is built, prewarmed and published like a base. Name exactly the set
+# a deploy computes; a Python or Ruby version without `packages:` is stock.
 #
 #   extras:                         # images no runtime describes
 #     - image: "composer:2"
@@ -191,6 +198,19 @@ runtimes:
         extensions: ["swoole"]
         prewarm: 808
         why: "egroupware: its swoolepush module asks for ext-swoole"
+      - version: "8.3"
+        extensions: ["mcrypt"]
+        prewarm: 809
+        why: "qloapps: its composer.json resolves to 8.3 and requires ext-mcrypt; a deploy waits for it"
+      # A deploy needs every recipe's `system_packages:` set here, at its PHP minor.
+      - version: "8.5"
+        packages: ["ffmpeg"]
+        prewarm: 811
+        why: "castopod: system_packages ffmpeg"
+      - version: "8.3"
+        packages: ["ffmpeg", "mediainfo"]
+        prewarm: 812
+        why: "clipbucket-v5: system_packages ffmpeg, mediainfo"
 
   ruby:
     default: "3.3"
@@ -222,6 +242,19 @@ runtimes:
       - version: "3.4"
         prewarm: 155
         why: "Ruby minor pinned via .ruby-version"
+      # One Ruby base per apt set; libpq-dev alone is a Gemfile with no database gem.
+      - version: "3.3"
+        packages: ["libpq-dev"]
+        prewarm: 775
+        why: "Ruby base for a Gemfile with pg or no database gem"
+      - version: "3.2"
+        packages: ["libpq-dev"]
+        prewarm: 161
+        why: "Ruby base for a Gemfile with pg or no database gem"
+      - version: "3.4"
+        packages: ["libpq-dev"]
+        prewarm: 156
+        why: "Ruby base for a Gemfile with pg or no database gem"
 
   python:
     default: "3.12"
@@ -265,6 +298,39 @@ runtimes:
       - version: "3.14"
         prewarm: 185
         why: "Python minor pinned via requires-python"
+      # One Python base per apt set; libpq-dev alone is a project with no known library.
+      - version: "3.12"
+        packages: ["libpq-dev"]
+        prewarm: 785
+        why: "Python base for psycopg or no recognised library"
+      - version: "3.10"
+        packages: ["libpq-dev"]
+        prewarm: 176
+        why: "Python base for psycopg or no recognised library"
+      - version: "3.11"
+        packages: ["libpq-dev"]
+        prewarm: 181
+        why: "Python base for psycopg or no recognised library"
+      - version: "3.13"
+        packages: ["libpq-dev"]
+        prewarm: 191
+        why: "Python base for psycopg or no recognised library"
+      - version: "3.14"
+        packages: ["libpq-dev"]
+        prewarm: 186
+        why: "Python base for psycopg or no recognised library"
+      - version: "3.10"
+        packages: ["libjpeg-dev", "libpq-dev", "zlib1g-dev"]
+        prewarm: 177
+        why: "Python base for Pillow with psycopg"
+      - version: "3.10"
+        packages: ["default-libmysqlclient-dev", "libjpeg-dev", "libpq-dev", "libxml2-dev", "libxslt1-dev", "zlib1g-dev"]
+        prewarm: 178
+        why: "supysonic"
+      - version: "3.10"
+        packages: ["default-libmysqlclient-dev", "libffi-dev", "libjpeg-dev", "libssl-dev", "zlib1g-dev"]
+        prewarm: 179
+        why: "weewx"
 
   go:
     default: "1.22"
@@ -404,9 +470,8 @@ extras:
     prewarm: 900
     why: "welcome page and final stage of static deploys"
 
-  # Railpack's own build infrastructure. Only reached when every recipe has
-  # declined -- now that every runtime has one, that is a library with no entry
-  # point or a language we have no recipe for. Only the frontend is named here:
+  # Railpack's own build infrastructure. Only reached when a request names the
+  # recipe `railpack`; detection never picks it. Only the frontend is named here:
   # it is the one tag the engine passes itself. The builder and runtime tags
   # come from the plan the account's railpack writes and change with every
   # Railpack release, so a deploy fetches them onto the host the first time a

@@ -2,6 +2,7 @@ export {
   apiDataEnvelopeSchema,
   assertAuthErrorText,
   authErrorBodySchema,
+  problemsResponseSchema,
   testConnectionSchema,
 } from './common.schemas';
 export {
@@ -93,6 +94,20 @@ export {
   hostInfoSchema,
   metricsHistoryRanges,
   metricsHistoryResponseSchema,
+  engineImageSchema,
+  listedOperatorImageSchema,
+  operatorImageResponseSchema,
+  operatorImageSchema,
+  systemBuildCacheListResponseSchema,
+  systemBuildCacheQueuedResponseSchema,
+  systemBuildCacheRemovedResponseSchema,
+  systemBuildCacheSchema,
+  systemImageListResponseSchema,
+  systemImageOperationResponseSchema,
+  systemImageResponseSchema,
+  systemImageSchema,
+  systemImageSourceSchema,
+  systemImageStatusSchema,
 } from './system.schemas';
 export {
   createUserRequestSchema,
@@ -119,6 +134,8 @@ export {
   deployLogSnapshotSchema,
   deployHistoryItemSchema,
   deployHistoryListResponseSchema,
+  findingSchema,
+  hintSchema,
   deployHistoryLogResponseSchema,
   appHealthSchema,
   appHealthCheckSchema,

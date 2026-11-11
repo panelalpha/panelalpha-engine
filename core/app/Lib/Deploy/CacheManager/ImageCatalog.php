@@ -3,36 +3,14 @@
 namespace App\Lib\Deploy\CacheManager;
 
 use App\Lib\Deploy\Platform\Runtime\Php\PhpExtensions;
+use App\Lib\Deploy\Platform\Runtime\Python\SystemPackages as PythonSystemPackages;
+use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages as RubySystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The prewarm half of `config/core/images.yaml`: what the host holds before
- * any deploy asks for it.
- *
- * The same file's `runtimes` block is what a project resolves against
- * ({@see RuntimeImageCatalog}); a version there carries a `prewarm` priority
- * when this host should hold it. Reading one file for both is what stops a
- * version being warmed that nothing resolves to, or resolved to that nothing
- * warmed.
- *
- * Two things read it: {@see prewarmed()}, what the host pulls or builds ahead
- * of any deploy, and {@see all()}, everything named here at all, which account
- * teardown must not reclaim as one project's leftovers.
- *
- * It does not say what an account loads. A second file used to, listing images
- * to hand an account before a Railpack build; eight of its eleven entries were
- * never referenced by a Railpack plan and two of the three that were had gone
- * stale against the installed binary. That preload reads the plan railpack
- * writes instead.
- *
- * An entry naming a runtime and a version resolves through
- * {@see RuntimeImageCatalog}, so a PHP minor becomes the shared base image the
- * engine builds and a Go minor the stock tag, without either being spelled
- * out twice.
- *
- * A file that is missing, unparseable or empty yields nothing, and the caller
- * warms and loads nothing rather than guessing.
+ * The prewarm half of `config/core/images.yaml` ({@see RuntimeImageCatalog} reads its `runtimes`): what the
+ * host holds before any deploy asks for it. A missing, unparseable or empty file yields nothing.
  */
 final class ImageCatalog
 {
@@ -65,8 +43,7 @@ final class ImageCatalog
     }
 
     /**
-     * Every image named here, whatever it is for. What account teardown must
-     * not reclaim as if it belonged to one project.
+     * Every image named here, whatever it is for: what account teardown must not reclaim.
      *
      * @return list<string>
      */
@@ -120,9 +97,8 @@ final class ImageCatalog
     }
 
     /**
-     * One declared entry as something usable, or null when it names nothing
-     * this host can resolve — a runtime absent from the image catalogue, a
-     * version it does not describe, a ref docker would not accept.
+     * One declared entry as something usable, or null when it names nothing this host can resolve.
+     * Every entry declares a runtime, literal images included: it is how `--runtimes=php` selects composer:2.
      *
      * @param  array<string, mixed>  $entry
      * @return array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
@@ -131,8 +107,6 @@ final class ImageCatalog
     {
         $runtime = is_string($entry['runtime'] ?? null) ? strtolower(trim($entry['runtime'])) : null;
         if ($runtime === null) {
-            // Every entry declares one, literal images included: it is how
-            // `--runtimes=php` selects composer:2 along with the PHP bases.
             return null;
         }
         $prewarm = $entry['prewarm'] ?? null;
@@ -144,24 +118,39 @@ final class ImageCatalog
 
         $literal = $entry['image'] ?? null;
         if (is_string($literal) && $literal !== '') {
-            $ref = ImageTransfer::normalizeImageRef($literal);
-
-            return $ref === null ? null : [
-                'id' => self::repository($literal),
-                'ref' => $ref,
-                'kind' => HostPrewarmPlan::KIND_PULL,
-            ] + $common;
+            return self::resolveLiteral($literal, $common);
         }
 
-        $version = $entry['version'] ?? null;
-        if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
-            return null;
-        }
-        $version = trim((string) $version);
-        // Only a version the runtimes block declares. spec() substitutes
-        // {version} into the template whatever it is handed, so without this a
-        // typo names `php:9.9-apache-bookworm` -- a tag nobody published.
-        if (! in_array($version, RuntimeImageCatalog::versions($runtime), true)) {
+        return self::resolveVersion($entry, $runtime, $common);
+    }
+
+    /**
+     * @param  array{runtime: string, prewarm: ?int, why: string}  $common
+     * @return array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
+     */
+    private static function resolveLiteral(string $literal, array $common): ?array
+    {
+        $ref = ImageTransfer::normalizeImageRef($literal);
+
+        return $ref === null ? null : [
+            'id' => self::repository($literal),
+            'ref' => $ref,
+            'kind' => HostPrewarmPlan::KIND_PULL,
+        ] + $common;
+    }
+
+    /**
+     * Without `image.build` the entry is the stock tag; only a variant needs `extensions` or `packages`, but they
+     * have to survive to the build, and a plain entry resolves to the [] a plain base does.
+     *
+     * @param  array<string, mixed>  $entry
+     * @param  array{runtime: string, prewarm: ?int, why: string}  $common
+     * @return array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}|null
+     */
+    private static function resolveVersion(array $entry, string $runtime, array $common): ?array
+    {
+        $version = self::declaredVersion($entry, $runtime);
+        if ($version === null) {
             return null;
         }
         $spec = RuntimeImageCatalog::spec($runtime, $version);
@@ -169,27 +158,43 @@ final class ImageCatalog
             return null;
         }
 
-        // isBuilt() is the catalogue's own answer: strip `image.build` from a
-        // runtime and its entry becomes the stock tag.
-        $built = $spec->isBuilt() ? self::builtTag($runtime, $spec->from, $entry) : null;
+        $extensions = $runtime === 'php' ? self::entryExtensions($entry) : [];
+        $packages = self::entryPackages($runtime, $entry);
+        $built = $spec->isBuilt() ? self::builtTag($runtime, $spec->from, $extensions, $packages) : null;
         $ref = $built ?? $spec->from;
         if (! ImageTransfer::isSafeImageRef($ref)) {
             return null;
         }
-
-        $extensions = self::entryExtensions($entry);
-        sort($extensions);
+        $named = [...$extensions, ...self::declaredPackages($entry)];
+        sort($named);
 
         return [
-            'id' => $runtime.':'.$version.($extensions === [] ? '' : '+'.implode('+', $extensions)),
+            'id' => $runtime.':'.$version.($named === [] ? '' : '+'.implode('+', array_unique($named))),
             'ref' => $ref,
             'kind' => $built === null ? HostPrewarmPlan::KIND_PULL : HostPrewarmPlan::KIND_BUILD,
-            // Only a variant needs it -- a plain base's Dockerfile is derivable
-            // from its tag -- but the extensions have to survive to the build,
-            // and an extension-less entry resolves to the same [] a plain base
-            // does.
-            'extensions' => $built === null ? [] : self::entryExtensions($entry),
+            'extensions' => $built === null ? [] : $extensions,
+            'packages' => $built === null ? [] : $packages,
         ] + $common;
+    }
+
+    /**
+     * Only a version the runtimes block declares: spec() substitutes any {version}, so a typo
+     * would name `php:9.9-apache-bookworm`, a tag nobody published.
+     *
+     * @param  array<string, mixed>  $entry
+     */
+    private static function declaredVersion(array $entry, string $runtime): ?string
+    {
+        $version = $entry['version'] ?? null;
+        if (! is_string($version) && ! is_int($version) && ! is_float($version)) {
+            return null;
+        }
+        $version = trim((string) $version);
+        if (! in_array($version, RuntimeImageCatalog::versions($runtime), true)) {
+            return null;
+        }
+
+        return $version;
     }
 
     /** An extra's id: its image without the tag, which moves with upstream releases. */
@@ -203,33 +208,60 @@ final class ImageCatalog
     }
 
     /**
-     * The tag the engine would build for this runtime at this version, or null
-     * when there is nothing to build ahead of a deploy.
+     * The tag the engine would build ahead of a deploy. A plain PHP entry is the base every PHP app runs on; a Python
+     * or Ruby base depends on the project's packages, so only an entry naming `packages:` has one.
      *
-     * Only PHP has one. Ruby's and Python's bases fingerprint an apt package
-     * set that comes from the project's own Gemfile or requirements, so there
-     * is no tag to compute from a version alone — the entry is the stock image
-     * their base will be built from.
+     * @param  list<string>  $extensions
+     * @param  list<string>  $packages
      */
-    private static function builtTag(string $runtime, string $upstream, array $entry = []): ?string
+    private static function builtTag(string $runtime, string $upstream, array $extensions, array $packages): ?string
     {
         return match ($runtime) {
-            // An `extensions:` list on the entry names an extension *variant*
-            // (…-pa<date>-x<hash>): the same image plus those extensions in one
-            // layer. A variant is normally built by the deploy that needs it,
-            // which is why it can never be warmed -- but the engine also knows
-            // the sets its own apps ask for, and those belong in the plan
-            // instead of in somebody's first deploy.
-            'php' => PhpBaseImage::tag($upstream, self::entryExtensions($entry)),
+            'php' => PhpBaseImage::tag($upstream, $extensions, $packages),
+            'python' => $packages === [] ? null : PythonBaseImage::tag($upstream, $packages),
+            'ruby' => $packages === [] ? null : RubyBaseImage::tag($upstream, $packages),
             default => null,
         };
     }
 
     /**
-     * The `extensions:` a catalogue entry declares, or none.
+     * The packages the build installs, as a deploy computes them: PHP's own system-package filter, or the
+     * runtime's always-installed set plus what the entry names, since a Python or Ruby deploy always adds it.
      *
-     * Validated by {@see PhpBaseImage::normalizeExtras()}, so a bad name is
-     * dropped rather than reaching a shell.
+     * @param  array<string, mixed>  $entry
+     * @return list<string>
+     */
+    private static function entryPackages(string $runtime, array $entry): array
+    {
+        $declared = self::declaredPackages($entry);
+        if ($declared === []) {
+            return [];
+        }
+
+        return match ($runtime) {
+            'php' => PhpBaseImage::normalizeSystemPackages($declared),
+            'python' => [...PythonSystemPackages::always(), ...$declared],
+            'ruby' => [...RubySystemPackages::always(), ...$declared],
+            default => [],
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @return list<string>
+     */
+    private static function declaredPackages(array $entry): array
+    {
+        $packages = $entry['packages'] ?? null;
+
+        return is_array($packages)
+            ? array_values(array_filter(array_map(static fn (mixed $p): string => is_string($p) ? strtolower(trim($p)) : '', $packages)))
+            : [];
+    }
+
+    /**
+     * The `extensions:` a catalogue entry declares, reduced through the same three filters a deploy
+     * applies, or it names a variant no deploy computes and the host builds an image nobody asks for.
      *
      * @param  array<string, mixed>  $entry
      * @return list<string>
@@ -241,26 +273,13 @@ final class ImageCatalog
             return [];
         }
 
-        // Reduced the way a deploy reduces it, not merely normalised. Reading a
-        // composer.json, three filters stand between `ext-foo` and a variant:
-        // PHP's own bundled set (PhpExtensions), the set this base already
-        // bakes (missingExtensions), and the MAX_BAKED_EXTRAS ceiling past
-        // which there is no variant at all (bakeableExtras). An `extensions:`
-        // list arrives from the other direction and has to pass the same three,
-        // or it names a variant no deploy can ever compute: `["mongodb", "gd"]`
-        // hashes one way here and, because gd is baked, another way there. The
-        // host would then build and keep an image nobody asks for while the app
-        // that needed mongodb still compiles it on its first deploy -- no
-        // error, no warning, just a silently wasted build and a slow deploy.
         return PhpBaseImage::bakeableExtras(
             PhpBaseImage::missingExtensions(PhpExtensions::installable($extensions))
         );
     }
 
     /**
-     * Every declared entry, runtime versions first and then the extras, in the
-     * shape {@see resolve()} takes. A runtime version already knows its own
-     * runtime and version; an extra states them.
+     * Every declared entry, runtime versions first and then the extras, in the shape {@see resolve()} takes.
      *
      * @return list<array<string, mixed>>
      */

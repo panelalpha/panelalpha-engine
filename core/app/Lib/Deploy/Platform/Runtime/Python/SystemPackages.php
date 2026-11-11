@@ -3,38 +3,23 @@
 namespace App\Lib\Deploy\Platform\Runtime\Python;
 
 /**
- * The apt packages a Python image needs to build the project's dependencies
- * from source.
+ * The apt packages a Python image needs when pip finds no wheel and must compile on a headerless slim
+ * image; kept apart from the Ruby class while only the edited lists differ. No Laravel dependencies.
  *
- * Wheels hide this most of the time. When there is no wheel for this
- * interpreter, pip falls back to compiling, and on python:3.12-slim — no
- * compiler, no headers — that is not a slow install but a dead deploy:
- * `psycopg2-binary` stops with `Error: pg_config executable not found` for a
- * Django project whose requirements.txt looks entirely ordinary.
- *
- * Installing every database client would double the image and installing only
- * Postgres breaks every MySQL app, so the manifest decides. Same shape as
- * {@see \App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages}, kept apart while
- * the lists are all that differ — the lists being what anyone comes here to
- * edit.
- *
- * No Laravel dependencies — unit-testable.
+ * @see \App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages
  */
 final class SystemPackages
 {
     /**
-     * Needed to build anything at all. Many setup.py builds shell out to
-     * `pkg-config`, whose absence reads as a missing library rather than a
-     * missing tool.
+     * Needed to build anything at all; a missing `pkg-config` reads as a missing library.
      *
      * @var list<string>
      */
     private const ALWAYS = ['build-essential', 'pkg-config', 'git', 'curl'];
 
     /**
-     * Distribution name as requirements.txt spells it => apt package that lets
-     * it compile. `psycopg2-binary` is here beside `psycopg2` because when its
-     * promised wheel is missing pip builds the same C source.
+     * Distribution name as requirements.txt spells it => apt packages that let it compile;
+     * `psycopg2-binary` builds the same C source when its wheel is missing.
      *
      * @var array<string, string>
      */
@@ -60,6 +45,19 @@ final class SystemPackages
     private const DEFAULT_DATABASE_PACKAGE = 'libpq-dev';
 
     /**
+     * What every base of this runtime carries, whatever the project asks for: a catalogue entry names only what it adds.
+     *
+     * @return list<string>
+     */
+    public static function always(): array
+    {
+        return self::ALWAYS;
+    }
+
+    /**
+     * Only the database clients the manifests mention: all of them would double the image, and
+     * Postgres alone breaks every MySQL app.
+     *
      * @param  list<string>  $manifests  contents of requirements.txt, pyproject.toml,
      *                                   Pipfile — whatever the project ships
      * @return list<string>
@@ -74,11 +72,7 @@ final class SystemPackages
             if (! self::mentions($text, $distribution)) {
                 continue;
             }
-            foreach (explode(' ', $libraries) as $library) {
-                if (! in_array($library, $packages, true)) {
-                    $packages[] = $library;
-                }
-            }
+            $packages = self::withLibraries($packages, $libraries);
             if ($libraries === self::DEFAULT_DATABASE_PACKAGE
                 || str_contains($libraries, 'libmysqlclient')
             ) {
@@ -94,10 +88,23 @@ final class SystemPackages
     }
 
     /**
-     * Bounded on both sides by the character set a distribution name may use,
-     * because these names are substrings of one another constantly: `psycopg`
-     * must not fire inside `psycopg2-binary`, and nothing should match inside a
-     * URL or a comment.
+     * @param  list<string>  $packages
+     * @return list<string>
+     */
+    private static function withLibraries(array $packages, string $libraries): array
+    {
+        foreach (explode(' ', $libraries) as $library) {
+            if (! in_array($library, $packages, true)) {
+                $packages[] = $library;
+            }
+        }
+
+        return $packages;
+    }
+
+    /**
+     * Bounded on both sides by the distribution-name character set, so `psycopg` does not fire
+     * inside `psycopg2-binary`, a URL or a comment.
      */
     private static function mentions(string $text, string $distribution): bool
     {

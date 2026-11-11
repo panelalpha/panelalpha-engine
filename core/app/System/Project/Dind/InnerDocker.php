@@ -97,9 +97,11 @@ class InnerDocker
         $this->seeding()->preloadRailpack($images);
     }
 
+    /** Sidecars the file runs, then the operator images its builds start FROM. */
     public function preloadComposeImages(string $composePath): void
     {
         $this->seeding()->preloadCompose($composePath);
+        $this->seeding()->preloadOperatorBases($composePath);
     }
 
     /**

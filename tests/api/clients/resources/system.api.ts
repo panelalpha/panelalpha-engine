@@ -5,12 +5,18 @@ import {
   type ApiAccessEntry,
   type ApiAccessRemoval,
   type ApiAccessRotation,
+  type ApiListResponse,
   type ApiResponse,
   type EngineCertificateRequest,
   type Ipv4NatMap,
   type MetricsHistory,
   type MetricsHistoryRange,
+  type ListedOperatorImage,
   type SslConfig,
+  type SystemImage,
+  type SystemImageCreateRequest,
+  type SystemImageOperation,
+  type SystemImageUpdateRequest,
   type SystemInfo,
 } from '@/types';
 import { describeAttempts, httpReason, recordAttempts } from '@/helpers/attempts';
@@ -277,5 +283,85 @@ export class SystemApi extends ModSecurityApi {
 
   async rotateApiAccessRaw(project: string): Promise<{ status: number; body: unknown }> {
     return this.rawCall(await this.api.post(`system/api-access/${project}/rotate`));
+  }
+
+  /** BuildKit caches the host keeps for public repositories, one per repository, branch and build. */
+  async listBuildCachesRaw(): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.get('system/build-caches'));
+  }
+
+  /** Queues the task that builds a public repository's caches: 202 with its id. */
+  async buildCacheRaw(
+    payload: Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.post('system/build-caches', { data: payload }));
+  }
+
+  /** Removes a repository's caches, of one branch or all: 200 with what went. */
+  async removeBuildCachesRaw(params: {
+    repository: string;
+    branch?: string;
+  }): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.delete('system/build-caches', { params }));
+  }
+
+  /** Base images the host keeps for its projects: the operator's own first, then the engine's catalogue. */
+  async listSystemImages(): Promise<ApiListResponse<SystemImage>> {
+    const response = await this.api.get('system/images');
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async getSystemImage(id: number): Promise<ApiResponse<ListedOperatorImage>> {
+    const response = await this.api.get(`system/images/${id}`);
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async getSystemImageRaw(id: number): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.get(`system/images/${id}`));
+  }
+
+  /** Records an operator image and queues the task that publishes it to the cache registry. */
+  async createSystemImage(payload: SystemImageCreateRequest): Promise<SystemImageOperation> {
+    const response = await this.api.post('system/images', { data: payload });
+    await this.assertStatus(response, 202);
+    return response.json();
+  }
+
+  async createSystemImageRaw(
+    payload: SystemImageCreateRequest | Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.post('system/images', { data: payload }));
+  }
+
+  /** 200 when nothing has to be rebuilt, 202 with a task when the build changed. */
+  async updateSystemImageRaw(
+    id: number,
+    payload: SystemImageUpdateRequest | Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.put(`system/images/${id}`, { data: payload }));
+  }
+
+  /** Re-pulls, rebuilds from upstream or re-pushes the image, as a task. */
+  async refreshSystemImage(id: number): Promise<SystemImageOperation> {
+    const response = await this.api.post(`system/images/${id}/refresh`);
+    await this.assertStatus(response, 202);
+    return response.json();
+  }
+
+  async refreshSystemImageRaw(id: number): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.post(`system/images/${id}/refresh`));
+  }
+
+  /** Queues the removal; the image is gone once its task completes. */
+  async deleteSystemImage(id: number): Promise<SystemImageOperation> {
+    const response = await this.api.delete(`system/images/${id}`);
+    await this.assertStatus(response, 202);
+    return response.json();
+  }
+
+  async deleteSystemImageRaw(id: number): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.delete(`system/images/${id}`));
   }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem;
@@ -77,6 +78,7 @@ class ContainerLimitsTest extends TestCase
     private function rendered(array $vars): array
     {
         $yaml = Blade::render((string) file_get_contents(self::TEMPLATE), [
+            'image' => AccountImage::REF,
             'user' => 'alice',
             'isolation' => AccountRuntime::composeIsolation(),
             ...$vars,

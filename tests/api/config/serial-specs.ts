@@ -28,6 +28,15 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
   { glob: 'system/ssl-config*', reason: 'engine-wide certificate issuer settings' },
   { glob: 'system/network-config*', reason: 'engine-wide network settings' },
   { glob: 'system/ipv4-nat*', reason: 'engine-wide NAT map' },
+  {
+    glob: 'system/images',
+    reason:
+      'adds and removes images every project builds from; a removal garbage-collects the registry',
+  },
+  {
+    glob: 'system/build-caches',
+    reason: 'builds and removes build caches every project imports, under the cache registry lock',
+  },
   { glob: 'ip/ipam-*', reason: 'fixed subnets; unassigning frees addresses of every project' },
   {
     glob: 'proxy-rules/*',
@@ -101,6 +110,8 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
   { glob: 'mcp/mcp-tokens', reason: 'global token list' },
   { glob: 'mcp/mcp-activity-logs', reason: 'global activity log' },
   { glob: 'vault/vault-secrets', reason: 'global secret list' },
+  { glob: 'vault/vault-config', reason: 'lists every filled global secret' },
+  { glob: 'overlay/system-overlay', reason: 'the global overlay is written into every site' },
 ];
 
 /**

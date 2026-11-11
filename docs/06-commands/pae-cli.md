@@ -97,15 +97,23 @@ pae project:create --repo=https://github.com/org/private-app --git-token=<token>
 
 `--branch` picks a branch, tag, or commit. `--project` and `--domain` set the name and hostname when you do not want them generated. `--env-var=KEY=VALUE` can be repeated.
 
+An application that manages the engine, such as a hosting panel:
+
+```bash
+pae project:create --repo=https://github.com/org/panel --full-privileges
+```
+
+What this does: before the first deploy, it does what `pae system:api-access:allow {project} --scope=all` and `pae system:public-routing:allow {project} --host-domain --ports` do, so that deploy already hands the application its Engine API token and can move it to the server's own name. Once the application is live, the project is protected as with `pae project:settings:set protected on`. If the deploy fails, the project is not protected. `--full-privileges` needs a container project: `--repo`, or `--template=dind`.
+
 Deploy a local archive into a project that was created without a repository:
 
 ```bash
 pae project:deploy-archive --project={project} --file=/opt/panelalpha/app.tar.gz
 ```
 
-What this does: puts the archive into the project, deploys it in this command, and removes the archive again. `.zip`, `.tar.gz` and `.tgz` are accepted. `pae` runs inside the engine's container, so the file must be somewhere that container can read; anything under `/opt/panelalpha` is. A project that deploys from a repository refuses an archive: push the change and rebuild instead.
+What this does: puts the archive into the project and queues its deploy, as the API does. The engine's queue worker runs it and removes the archive once the deploy has ended, whether it worked, failed or was cancelled. `.zip`, `.tar.gz` and `.tgz` are accepted. `pae` runs inside the engine's container, so the file must be somewhere that container can read; anything under `/opt/panelalpha` is. A project that deploys from a repository refuses an archive: push the change and rebuild instead. While a deploy of the project is queued or running, the command refuses at once, and a deploy asked for through the API meanwhile is refused with this one's task.
 
-What you should see: the deploy log while it runs, then `Deployed <file> to <project>.` The command exits non-zero when the deploy fails. `--recipe`, `--env-var=KEY=VALUE` and `--quiet-deploy` work as they do for `project:create`.
+What you should see: `Queued the deploy of <file> to <project> as task <id>.`, the deploy log as the worker writes it, then `Deployed <file> to <project>.` When the deploy fails or is cancelled, the command prints why on one line and exits non-zero. Ctrl-C stops only the printing: the deploy goes on, and the command names its task. While no queue worker has taken the deploy, it says so once. `--timeout` (default 1800 seconds, the wait for a worker included) stops watching the same way and exits non-zero. `--no-wait` returns as soon as the deploy is queued. `--quiet-deploy` hides the log but still waits for the result. `--recipe` and `--env-var=KEY=VALUE` work as they do for `project:create`.
 
 The usual way to deploy is to ask your assistant: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
@@ -116,6 +124,8 @@ More project commands:
 | `pae project:deploy:list` | Lists every project that has deploy logs. Pass a name for that project's kept deploys: status, install or redeploy, source, branch, trigger, commit and times. `DEPLOY_LOG_KEEP` in `.env-core` sets how many each project keeps (10). |
 | `pae project:attach {project}` | Opens a shell inside the project's container. `--u=root` to attach as another user. |
 | `pae projects:php-config:refresh` | On traditional PHP hosting, makes projects created before this version write PHP errors to a log file of their own, which the assistant can then read. `--project={project}` does one, `--all` every project. Safe to run again. Each project picks it up when its PHP handler next restarts. |
+| `pae projects:domain-config:refresh` | On traditional PHP hosting behind nginx-proxy, writes the Apache config of each domain inside the project again from the current template and reloads that Apache, so a fix to the template reaches domains created before it. Certificates, PHP handlers and container projects are not touched. `--project={project}` does one, `--all` every project; an update runs it for every project. Safe to run again. |
+| `pae projects:wp-config:restrict` | On traditional PHP hosting, makes the `wp-config.php` in each domain's document root, and in the folder above it, readable by the project's own user only, as the engine writes new ones: one written before this version is readable by every other project. A link at that name is left alone. `--project={project}` does one, `--all` every project; an update runs it for every project. Safe to run again. |
 
 ## Environment variables and settings
 
@@ -178,7 +188,9 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae domain:list --project={project}` | Lists a project's hostnames. |
 | `pae domain:show {domain}` | Shows how that hostname is routed. |
 | `pae domain:create {domain} --project={project}` | Adds a domain to a project. |
-| `pae domain:delete {domain}` | Removes a hostname. |
+| `pae domain:delete {domain} --project={project}` | Removes a hostname. Its folder and document root stay in the project home. |
+| `pae project:domain:main {domain} --project={project}` | Makes an addon domain of a container project its main domain; the old main domain stays as an addon. Redeploys the project so its application is told the new address. |
+| `pae project:domain:https-ports {domain} --project={project} --ports=443,8443 --main=8443` | Shows or changes the ports a container project's domain answers HTTPS on, and the one its address names. A port other than 443 needs `system:public-routing:allow --ports`. |
 | `pae ssl:project-cert:request {domain}` | Requests a Let's Encrypt certificate for a site. |
 | `pae ssl:project-cert:renew --domain={domain} --force` | Renews a site's certificate now. |
 | `pae ssl:check {domain}` | Connects to the site over HTTPS and reports the certificate it really serves. Exits 1 unless visitors get a trusted one. `--json` prints everything. |
@@ -200,9 +212,11 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 
 Every command takes the project first. They work on traditional PHP hosting and on WordPress in the project's own containers. Each one also takes `--path=` (the WordPress directory), `--service=` (the Compose service that runs WordPress) and `--skip-plugins` (load WordPress without its plugins and themes, for a site a broken plugin stops).
 
+A WP-CLI flag it does not name itself goes after `--`, or the engine's own command line reads it first and refuses it: `pae wordpress:command shop -- core version --version=6.8.2`, `pae wordpress:search-replace shop old.example new.example -- --dry-run`.
+
 | Command | What it does |
 |---|---|
-| `pae wordpress:command {project} {args}` | Runs any WP-CLI command, for example `pae wordpress:command shop plugin list`. |
+| `pae wordpress:command {project} {args}` | Runs any WP-CLI command, for example `pae wordpress:command shop plugin list`. Its flags follow `--`, as every WP-CLI flag here does. |
 | `pae wordpress:plugin:list {project}` | Lists plugins. `--fields=` and `--status=` narrow it. Also `plugin:get`, `plugin:search {term}` (`--per-page=`), `plugin:is-installed`, `plugin:install` (`--force`), `plugin:activate`, `plugin:deactivate`, `plugin:update` and `plugin:delete`, each with the plugin's slug. |
 | `pae wordpress:theme:list {project}` | Lists themes, with the same options. Also `theme:get`, `theme:search`, `theme:is-installed`, `theme:install`, `theme:activate`, `theme:update` and `theme:delete`. |
 | `pae wordpress:user:list {project}` | Lists users. `--role=` and `--fields=` narrow it. Also `user:create {login} {email} {password}` (`--role=`, `--send-email`), `user:update {user}`, `user:password {user} {password}`, `user:delete {user}` (`--reassign=`) and `user:sso {user}` for a one-time login link. |
@@ -214,7 +228,7 @@ Every command takes the project first. They work on traditional PHP hosting and 
 | `pae wordpress:option:list {project}` | Lists options. Also `option:get {option}` and `option:set {option} {value}`. |
 | `pae wordpress:auto-update:get {project}` / `auto-update:set {project} {core} {plugins} {themes}` | Reads or sets automatic updates: core `off`, `on` or `minor`; plugins and themes `off` or `on`. |
 | `pae wordpress:language:set {project} {language}` | Sets the site language, for example `pl_PL`. |
-| `pae wordpress:search-replace {project} {search} {replacement}` | Replaces a string in the database. Takes only its own flags and table names after that. |
+| `pae wordpress:search-replace {project} {search} {replacement}` | Replaces a string in the database. After that, table names, and its flags (`--dry-run`, `--precise`, `--all-tables`, `--all-tables-with-prefix`, `--regex`, `--skip-columns=`, `--regex-delimiter=`) following `--`. |
 | `pae wordpress:database:export {project} {file}` | Exports the database to a file only the project's user can read. `--tables=` (comma-separated) limits it. Also `database:import {project} {file}`. |
 
 ### Importing a site
@@ -259,11 +273,23 @@ An application that manages the engine itself, such as a dashboard or an agent r
 | `pae system:api-access:allow {project} --scope=self` | Allows a project. `--scope` is `self` (only that project, the default), `all` (every project), or a comma-separated list of project names. `--mcp` lets the token call assistant tools as well. Run again with the same scope, nothing changes. A different scope makes a new token. |
 | `pae system:api-access:list` | Lists the allowed projects, their scope, whether they have assistant tools, and the token ids. Never the token itself. |
 | `pae system:api-access:rotate {project}` | Replaces the project's token and keeps its scope, less any project deleted since. The old token stops working once the application runs on the new one. If that fails, both stay valid and the task says why. |
-| `pae system:api-access:deny {project}` | Takes the access away: the token is revoked and the way to the API is closed. |
+| `pae system:api-access:deny {project}` | Takes the access away: every token the project was given is revoked and the way to the API is closed. |
 
 Deleting a project takes it out of every other project's scope, so a project created later under the same name is not reached. A scope left with no project reaches none until you allow the project again with a new one.
 
 The project's environment gets `PANELALPHA_ENGINE_URL` and `PANELALPHA_ENGINE_TOKEN` on every deploy. `PANELALPHA_ENGINE_CA` is added only when the engine's certificate is not one the project could verify on its own. A token limited to a project cannot change that project's limits or suspend it.
+
+## Public ports and the server's name for projects
+
+A project's `panelalpha.yaml` can ask for TCP or UDP ports on the server (`public_ports:`) and for the server's own name (`domain: host`). It gets them only once you allow it: [Ports and the server's name an application asks for](../05-capabilities/domains-and-ssl.md#ports-and-the-servers-name-an-application-asks-for).
+
+| Command | What it does |
+|---|---|
+| `pae system:public-routing:allow {project} --ports --host-domain` | Allows one or both. Ports its last deploy declared open at once; the server's name is taken at its next deploy. |
+| `pae system:public-routing:deny {project}` | Takes both back at once, or only `--ports` or `--host-domain`. The ports close and the project's domains go back to HTTPS on 443 alone; a project on the server's name goes back to the name it had, and an addon or alias of that name is removed. Redeploy it so the application uses that address. |
+| `pae system:public-routing:list` | Lists the projects allowed either, or asking for either, with their main domain and each port's state. |
+
+Deleting a project takes its permission with it, so a project created later under the same name has none.
 
 ## Secrets
 
@@ -302,6 +328,12 @@ Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visito
 |---|---|
 | `pae project:set-password --project={project}` | Asks visitors for a password on every address of that project. Prompts for the password. `--password=` sets it without a prompt. `--force` skips the confirmation. |
 | `pae project:unset-password --project={project}` | Removes that password. `--force` skips the confirmation. |
+| `pae project:overlay:set --project={project} --html=<html>` | Writes that HTML into every HTML page of that project, before `</body>`. `--file=` reads it from a file; `--position=head_end` puts it before `</head>`. `--hide-global` keeps the global overlay off that project. |
+| `pae project:overlay:show --project={project}` | Shows that project's overlay, and whether the global one reaches it. `--json` for scripts. |
+| `pae project:overlay:unset --project={project}` | Removes that project's own overlay and shows the global one on it again. |
+| `pae system:overlay:set --html=<html>` | Writes that HTML into every HTML page of every project, before `</body>`. `--file=` and `--position=` as above. |
+| `pae system:overlay:show` | Shows the global overlay. `--json` for scripts. |
+| `pae system:overlay:unset` | Removes the global overlay. |
 | `pae modsec:log:show` | Lists the ModSecurity audit log files. Pass a filename to print one. |
 | `pae project:domain:log {project} {domain}` | Lists the webserver logs for a hostname. Pass a filename to print one. |
 
@@ -348,14 +380,40 @@ Every image download on your server goes to Docker Hub under one login. Without 
 
 Create the token on Docker Hub under **Account settings → Personal access tokens**, with the **Public Repo Read-only** scope. If the token can read private repositories, `docker-hub:login` lists them and stops: every project on your server could download them. `--allow-private` saves it anyway.
 
+## Base images for every project
+
+Images you keep in the server's image cache for every project's Dockerfile to start `FROM`. Everything in it is readable by every project on the server: no secrets. Context: [Your own base images](../05-capabilities/base-images.md).
+
+| Command | What it does |
+|---|---|
+| `pae system:image:add {name:tag} --build < Dockerfile` | Builds the Dockerfile on the server, with no build context, and publishes it. `--build-arg=NAME=value` as often as needed, `--why="..."` for a note. |
+| `pae system:image:add {name:tag} --pull` | Downloads a public image and publishes it. |
+| `pae system:image:add {name:tag} --local` | Publishes an image you already built on the server. |
+| `pae system:image:list` | Your images and the engine's, whether the image cache holds each now, size, last refresh. `--operator` shows only yours. |
+| `pae system:image:update {name:tag} --build < Dockerfile` | Replaces the Dockerfile and rebuilds. `--build-arg`, `--no-build-args` and `--why` change the rest. |
+| `pae system:image:refresh {name:tag}` | Builds again from scratch, downloads again, or publishes your copy again, as the weekly refresh does. |
+| `pae system:image:remove {name:tag}` | Takes the image out of the image cache and forgets it. A new build `FROM` it then fails. |
+
+## Build caches for public repositories
+
+A build cache lets every project that deploys the same public repository start its image build from layers the server already built, instead of building from nothing. It covers the repository's own Dockerfile, each compose service that builds from the repository, and a Railpack build. The server builds the repository in an isolated container with no access to the server itself, and projects only ever read the cache.
+
+| Command | What it does |
+|---|---|
+| `pae system:build-cache:build {https-url}` | Builds the repository's default branch the way a deploy would and publishes its caches. `--branch={name}` for another branch. |
+| `pae system:build-cache:list` | The build caches the image cache holds, one per repository, branch and build. |
+| `pae system:build-cache:remove {https-url}` | Removes the repository's build caches. `--branch={name}` removes only that branch's. |
+
+A cache helps a deploy of the same commit; once the repository moves on, build it again. The weekly image refresh keeps build caches; only `system:build-cache:remove` takes them away. The same three operations are on the API (`GET`, `POST` and `DELETE /system/build-caches`; a build answers with a task) and in MCP (`system_build_cache_list`, `system_build_cache_build`, `system_build_cache_remove`).
+
 ## Advanced and server maintenance
 
 The engine ships more commands than belong on a daily list. Most are for support to point you at, or for server upkeep the engine normally handles on its own. Each one describes itself with `pae <command> --help`. The main groups:
 
 - **Server upkeep:** `system:version`, `system:database:test`, `system:ip:sync`, `system:domain:rebuild`, `system:modsec:rebuild`, `system:sftp:rebuild`, `system:exim:rebuild`, `system:webserver:update`.
 - **Scheduled jobs:** `backups:run-scheduled` (every minute: starts the automatic backups that are due, set with `project:backup:schedule`), `metrics:projects:disk` (every 15 minutes: measures each project's disk use for `project:usage`), `metrics:projects:sample` (every minute: CPU and memory of each project and its containers), `metrics:projects:rollup` (every hour: hourly averages of those), `metrics:projects:bandwidth` (every hour: this month's transfer on each project), `tunnels:expire` (every five minutes: removes tunnels whose lifetime has passed), `proxy:rule:refresh-certificates` (every hour: serves each extra route on port 443 with the certificate on the server that covers it now, so a renewed, removed or newly added one is picked up), `git:credentials:sweep` (every hour: removes leftover git credential helpers and deploy keys from account homes).
-- **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day; while a deploy is running the image half waits and is retried the next hour: removes deploy base images not selected in `pae configure prewarm` that no deploy has pulled, built or named for 3 days, and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, `--due-after=20h` skips the image half when it last completed within that window, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `system:disk:guard` (every five minutes: keeps host build cache under `DEPLOY_HOST_BUILD_CACHE_MAX`, 10G, and while free space on the Docker root or /home is below `DEPLOY_DISK_PRESSURE_FREE`, 15% by default, prunes the oldest build cache and then base images unused for 6 hours; `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
-- **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, which a runtime restart or a host crash leaves behind; `--dry-run` only prints).
+- **Scheduled cleanup:** `task:prune` (keeps the newest tasks of each project; a deleted project's tasks stay as its record, and `--project=<name> --keep=0 --keep-other=0` removes them), `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day; while a deploy is running the image half waits and is retried the next hour: removes deploy base images and host build images (`panelalpha/build-node`, `panelalpha/build-rust`) not selected in `pae configure prewarm` that no deploy has pulled, built or named for 3 days, except the newest of each kind (an old PHP recipe goes once unused), never your own base images, their tags in the cache registry (then garbage-collected), and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, `--due-after=20h` skips the image half when it last completed within that window, `--until-free=35G` (or a share, 15%) repeats the image half with the window halved, down to any age, until that much is free on the Docker root and is not deferred by a deploy, which keeps only what its log names, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `system:disk:guard` (every five minutes: keeps host build cache under `DEPLOY_HOST_BUILD_CACHE_MAX`, 10G, and while free space on the Docker root or /home is below `DEPLOY_DISK_PRESSURE_FREE`, 15% by default, prunes the oldest build cache and then base images unused for 6 hours, 3, 1.5 and less until enough is free; `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
+- **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, or that started before sysbox-fs last did, which a runtime restart or a host crash leaves behind, and prints what it found in each, such as `sysbox-fs no longer serves its mounts`; `--dry-run` only prints).
 - **PHP Apache modules (inside a project, not on the VPS):** `apache:mod:enable`, `apache:mod:disable`.
 - **Engine settings:** `settings:get`, `settings:set`, `settings:exists`.
 

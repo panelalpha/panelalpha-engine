@@ -12,7 +12,7 @@ use GuzzleHttp\Client;
  */
 final class RegistryImageConfig
 {
-    private const ACCEPT = 'application/vnd.oci.image.index.v1+json, '
+    public const ACCEPT = 'application/vnd.oci.image.index.v1+json, '
         .'application/vnd.docker.distribution.manifest.list.v2+json, '
         .'application/vnd.oci.image.manifest.v1+json, '
         .'application/vnd.docker.distribution.manifest.v2+json';
@@ -76,7 +76,21 @@ final class RegistryImageConfig
      */
     public function downloadBytes(string $image): ?int
     {
-        foreach (self::sources($image) as [$base, $repository, $reference]) {
+        return $this->layerBytes(self::sources($image));
+    }
+
+    /** {@see downloadBytes()} as the cache registry alone holds $image. */
+    public function cachedDownloadBytes(string $image): ?int
+    {
+        return $this->layerBytes(array_slice(self::sources($image), 0, 1));
+    }
+
+    /**
+     * @param  list<array{0: string, 1: string, 2: string}>  $sources
+     */
+    private function layerBytes(array $sources): ?int
+    {
+        foreach ($sources as [$base, $repository, $reference]) {
             $layers = $this->manifest($base, $repository, $reference)['layers'] ?? null;
             if (! is_array($layers)) {
                 continue;
@@ -98,7 +112,8 @@ final class RegistryImageConfig
      * Where to ask, in order, as [base URL, repository, tag or digest].
      *
      * The cache registry stores an image under the reference it was pushed
-     * with; registry-proxy takes Docker Hub's own path, `library/` included.
+     * with; registry-proxy takes Docker Hub's own path, `library/` included,
+     * and a pull-through cache such as ghcr-proxy the path without its host.
      *
      * @return list<array{0: string, 1: string, 2: string}>
      */
@@ -114,16 +129,22 @@ final class RegistryImageConfig
         if ($hub !== null) {
             $sources[] = ['http://'.DindImageStore::PROXY_REGISTRY, $hub, $reference];
         }
+        $through = DindImageStore::pullThroughRef($name);
+        if ($through !== null) {
+            [$registry, $repository] = explode('/', $through, 2);
+            $sources[] = ['http://'.$registry, $repository, $reference];
+        }
 
         return $sources;
     }
 
     /**
+     * The digest wins over a tag beside it, which would otherwise end up in the repository path.
+     *
      * @return array{0: string, 1: string} name and tag or digest
      */
     private static function split(string $image): array
     {
-        // A tag beside a digest would end up in the repository path.
         $image = ImageTransfer::preferDigest($image);
         $at = strpos($image, '@');
         if ($at !== false) {
@@ -218,9 +239,9 @@ final class RegistryImageConfig
         return is_array($decoded) ? $decoded : null;
     }
 
+    /** 15 s: a cold proxy pays Hub's token handshake first. */
     private static function httpGet(string $url, string $accept): ?string
     {
-        // A cold proxy pays Hub's token handshake first: 5.0s measured for postgres.
         try {
             $response = (new Client(['connect_timeout' => 2, 'timeout' => 15, 'http_errors' => false]))
                 ->get($url, ['headers' => ['Accept' => $accept]]);

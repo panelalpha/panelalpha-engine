@@ -2,24 +2,34 @@
 
 namespace App\Console\Commands\System;
 
+use App\Lib\Deploy\CacheManager\BuildCache;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\CacheRegistry;
+use App\Lib\Deploy\CacheManager\CacheRegistryLock;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\OperatorImages;
 use App\Lib\Deploy\CacheManager\RegistryImageConfig;
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\EngineFactory;
+use App\Models\OperatorImage;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 
 /**
  * Warm the host image cache so no customer deploy pays a first-use penalty,
  * then publish it to panelalpha-cache-registry, where accounts pull from.
  *
+ * The account image is warmed on every host first, outside the budget, and is
+ * never published.
+ *
  * `--refresh` (the weekly schedule) also rebuilds or re-pulls what is already
  * here, one image at a time, so the registry never holds anything older than a
- * week. The registry keeps only the catalogue: other tags are removed and
- * garbage-collected, under a lock deploy-time pushes also take.
+ * week. The registry keeps only the catalogue and operator images ({@see OperatorImage});
+ * other tags are removed and garbage-collected under a lock deploy-time pushes also take.
  *
  * What may be warmed and in what order comes from `config/core/images.yaml`;
  * what is, from `DEPLOY_PREWARM_IMAGES` (`pae configure prewarm`, empty by
@@ -44,6 +54,8 @@ class PrewarmImages extends Command
 
     protected $description = 'Prebuild and pull the base images deploys need, within a disk budget';
 
+    private float $operatorRefreshStartedAt = 0.0;
+
     public function handle(): int
     {
         $system = new System;
@@ -67,6 +79,7 @@ class PrewarmImages extends Command
 
         $present = $this->presentImages($system);
         $present = $this->dropStaleBaseImages($system, $present);
+        $present = $this->dropSupersededAccountImages($system, $present);
         $available = $this->availableBytes($system) ?? $available;
         $present = $this->reclaimUnderPressure(
             $system,
@@ -78,9 +91,10 @@ class PrewarmImages extends Command
         $available = $this->availableBytes($system) ?? $available;
 
         $catalog = HostPrewarmPlan::catalog($runtimes);
+        $items = [...HostPrewarmPlan::required(), ...$catalog];
         $plan = HostPrewarmPlan::select(
-            $catalog,
-            $this->plannedSizes($system, $catalog, $present),
+            $items,
+            $this->plannedSizes($system, $items, $present),
             $available,
             $reserve,
             $budget,
@@ -113,6 +127,9 @@ class PrewarmImages extends Command
             [$refreshed, $refreshFailed] = $this->refreshAll($system, array_values($present));
             $built += $refreshed;
             $failed += $refreshFailed;
+            if ($runtimes === []) {
+                $this->refreshOperatorImages();
+            }
         }
 
         if (! $this->option('keep-build-cache')) {
@@ -159,7 +176,7 @@ class PrewarmImages extends Command
             $changed = $before !== null && $after !== null && $before !== $after;
             if ($changed) {
                 try {
-                    $system->exec(['sudo', 'docker', 'rmi', $before], [], 120);
+                    $system->exec(Privileged::docker()->removeImages($before), [], 120);
                 } catch (\Exception $e) {
                     // Still in use by a container; the next prune gets it.
                 }
@@ -174,10 +191,41 @@ class PrewarmImages extends Command
         return [$done, $failed];
     }
 
+    /**
+     * Renew every operator image the way its source says, one at a time. A
+     * failure keeps what the cache registry already holds.
+     */
+    private function refreshOperatorImages(): void
+    {
+        if (! OperatorImages::make()->refreshAll($this->reportOperatorRefresh(...))) {
+            $this->warn('Could not read the operator images; none refreshed.');
+        }
+    }
+
+    private function reportOperatorRefresh(OperatorImage $image, string $step, ?string $error): void
+    {
+        match ($step) {
+            OperatorImages::REFRESH_SKIPPED => $this->line("↷ operator {$image->ref}: being changed, skipped"),
+            OperatorImages::REFRESH_STARTED => $this->startOperatorRefresh($image),
+            OperatorImages::REFRESH_FAILED => $this->warn('  refresh failed, the cache registry keeps the current image: '.Str::limit(trim((string) $error), 300)),
+            default => $this->info(sprintf(
+                '  %s in %ds',
+                $step === OperatorImages::REFRESH_RENEWED ? 'refreshed' : 'kept, not on the host',
+                (int) round(microtime(true) - $this->operatorRefreshStartedAt)
+            )),
+        };
+    }
+
+    private function startOperatorRefresh(OperatorImage $image): void
+    {
+        $this->line("↻ operator {$image->source} {$image->ref}");
+        $this->operatorRefreshStartedAt = microtime(true);
+    }
+
     private function imageId(System $system, string $ref): ?string
     {
         try {
-            $id = trim((string) $system->exec(['sudo', 'docker', 'image', 'inspect', '-f', '{{.Id}}', '--', $ref], [], 60));
+            $id = trim((string) $system->exec(Privileged::docker()->imageId($ref), [], 60));
         } catch (\Exception $e) {
             return null;
         }
@@ -219,11 +267,8 @@ class PrewarmImages extends Command
     }
 
     /**
-     * Remove every registry tag outside the catalogue, then garbage-collect,
-     * which also frees the layers a refresh left behind under a re-pushed tag.
-     *
-     * Holds the push lock exclusive: an upload's layers belong to no manifest
-     * until it finishes, and a GC in between deletes them.
+     * Keeps the catalogue, operator images and build caches ({@see BuildCache}); garbage-collect also frees
+     * layers a refresh left under a re-pushed tag. Nothing goes when the operator's images cannot be read.
      *
      * @param  list<array<string, mixed>>  $catalog
      */
@@ -233,17 +278,27 @@ class PrewarmImages extends Command
             return;
         }
 
-        $path = DindImageStore::PUSH_LOCK;
-        if (! file_exists($path)) {
-            @touch($path);
-        }
-        $lock = @fopen($path, 'r');
-        if ($lock === false || ! flock($lock, LOCK_EX)) {
-            $this->warn("Could not lock {$path}; leaving the cache registry as it is.");
+        $operatorRefs = OperatorImage::refs();
+        if ($operatorRefs === null) {
+            $this->warn('Could not read the operator images; leaving the cache registry as it is.');
 
             return;
         }
 
+        $keep = array_merge(
+            array_map(static fn (array $item): string => (string) $item['ref'], $catalog),
+            $operatorRefs
+        );
+        if (! CacheRegistryLock::exclusive(fn () => $this->trimRegistryTo($system, $keep))) {
+            $this->warn('Could not lock '.DindImageStore::pushLock().'; leaving the cache registry as it is.');
+        }
+    }
+
+    /**
+     * @param  list<string>  $keep
+     */
+    private function trimRegistryTo(System $system, array $keep): void
+    {
         try {
             $registry = new CacheRegistry;
             $refs = $registry->refs();
@@ -257,7 +312,7 @@ class PrewarmImages extends Command
             foreach ($refs as $ref) {
                 $digests[$ref] = $registry->digest($ref);
             }
-            $keep = array_map(static fn (array $item): string => (string) $item['ref'], $catalog);
+            $keep = [...$keep, ...array_values(array_filter($refs, BuildCache::isCacheRef(...)))];
             foreach (CacheRegistry::unwanted($digests, $keep) as $ref) {
                 $deleted = $registry->delete($ref, (string) $digests[$ref]);
                 $this->line(($deleted ? 'removed from the cache registry: ' : 'could not remove: ').$ref);
@@ -265,6 +320,7 @@ class PrewarmImages extends Command
 
             $before = $this->registryBytes($system);
             $system->exec(DindImageStore::garbageCollectArgv(), [], 1800);
+            $registry->removeEmptyRepositories($system);
             $after = $this->registryBytes($system);
             $this->info(sprintf(
                 'Cache registry garbage-collected: %s → %s',
@@ -273,9 +329,6 @@ class PrewarmImages extends Command
             ));
         } catch (\Exception $e) {
             $this->warn('Cache registry garbage-collect failed: '.trim($e->getMessage()));
-        } finally {
-            flock($lock, LOCK_UN);
-            fclose($lock);
         }
     }
 
@@ -283,7 +336,7 @@ class PrewarmImages extends Command
     {
         try {
             return trim((string) $system->exec(
-                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER],
+                Privileged::docker()->isRunning(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER),
                 [],
                 30
             )) === 'true';
@@ -296,7 +349,7 @@ class PrewarmImages extends Command
     {
         try {
             $out = (string) $system->exec(
-                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, 'du', '-sk', '/var/lib/registry'],
+                Privileged::docker()->registryStorageKilobytes(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER),
                 [],
                 300
             );
@@ -367,7 +420,8 @@ class PrewarmImages extends Command
                 ));
                 break;
             }
-            if ($budget !== null && $spent >= $budget) {
+            $required = HostPrewarmPlan::isRequired($item);
+            if (! $required && $budget !== null && $spent >= $budget) {
                 $this->warn(sprintf(
                     'Stopping before %s: spent %s of a %s budget',
                     $ref,
@@ -383,7 +437,7 @@ class PrewarmImages extends Command
                 $built++;
                 $after = $this->availableBytes($system);
                 $cost = $before !== null && $after !== null ? max(0, $before - $after) : 0;
-                $spent += $cost;
+                $spent += $required ? 0 : $cost;
                 $this->info(sprintf(
                     '  done in %ds, %s of disk',
                     (int) round(microtime(true) - $started),
@@ -451,7 +505,7 @@ class PrewarmImages extends Command
     private function inspectedSize(System $system, string $ref): ?int
     {
         try {
-            $out = $system->exec(['sudo', 'docker', 'manifest', 'inspect', '--verbose', $ref], [], 60);
+            $out = $system->exec(Privileged::docker()->inspectManifest($ref), [], 60);
         } catch (\Exception $e) {
             return null;
         }
@@ -490,10 +544,16 @@ class PrewarmImages extends Command
         $ref = (string) $item['ref'];
 
         try {
+            if ($item['kind'] === HostPrewarmPlan::KIND_ACCOUNT) {
+                $system->exec($this->accountImageCommand($system, $refresh), [], 2400);
+
+                return true;
+            }
             if ($item['kind'] === HostPrewarmPlan::KIND_BUILD) {
                 $dockerfile = BuiltImage::dockerfile(
                     $ref,
-                    is_array($item['extensions'] ?? null) ? $item['extensions'] : []
+                    is_array($item['extensions'] ?? null) ? $item['extensions'] : [],
+                    is_array($item['packages'] ?? null) ? $item['packages'] : []
                 );
                 if ($dockerfile === null) {
                     return false;
@@ -507,7 +567,7 @@ class PrewarmImages extends Command
                 return true;
             }
 
-            $system->exec(['sudo', 'docker', 'pull', $ref], [], 900);
+            $system->exec(Privileged::docker()->pull($ref), [], 900);
 
             return true;
         } catch (\Exception $e) {
@@ -515,6 +575,13 @@ class PrewarmImages extends Command
 
             return false;
         }
+    }
+
+    private function accountImageCommand(System $system, bool $refresh): string
+    {
+        return $refresh
+            ? AccountImage::refreshCommand()
+            : AccountImage::ensureCommand($system->projectFilesTemplateDirPath('dind'));
     }
 
     /**
@@ -593,7 +660,7 @@ class PrewarmImages extends Command
         $wanted = array_flip($present);
         try {
             $out = $system->exec(
-                ['sudo', 'docker', 'images', '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}'],
+                Privileged::docker()->imageNamesWithSizes(),
                 [],
                 60
             );
@@ -638,7 +705,7 @@ class PrewarmImages extends Command
         $removed = [];
         foreach ($refs as $ref) {
             try {
-                $system->exec(['sudo', 'docker', 'rmi', '-f', $ref], [], 120);
+                $system->exec(Privileged::docker()->forceRemoveImages($ref), [], 120);
                 $this->line("{$verb} base image {$ref}");
                 $removed[] = $ref;
             } catch (\Exception $e) {
@@ -656,7 +723,7 @@ class PrewarmImages extends Command
     private function pruneBuildCache(System $system): void
     {
         try {
-            $system->exec(['sudo', 'docker', 'buildx', 'prune', '-af'], [], 300);
+            $system->exec(Privileged::docker()->pruneBuildCache(), [], 300);
         } catch (\Exception $e) {
             $this->warn('Could not prune the build cache: '.$e->getMessage());
         }
@@ -691,7 +758,7 @@ class PrewarmImages extends Command
 
         foreach ($stale as $ref) {
             try {
-                $system->exec(['sudo', 'docker', 'rmi', '-f', $ref], [], 120);
+                $system->exec(Privileged::docker()->forceRemoveImages($ref), [], 120);
                 $this->line("removed superseded base image {$ref}");
             } catch (\Exception $e) {
                 $this->warn("Could not remove {$ref}: ".$e->getMessage());
@@ -702,13 +769,41 @@ class PrewarmImages extends Command
     }
 
     /**
+     * Remove older tags of the account image. Never forced: a tag an account
+     * container still runs on stays until that account moves to the new one.
+     *
+     * @param  list<string>  $present
+     * @return list<string> $present minus what was removed
+     */
+    private function dropSupersededAccountImages(System $system, array $present): array
+    {
+        $removed = [];
+        foreach (AccountImage::superseded($present) as $ref) {
+            if ($this->option('dry-run')) {
+                $this->line("would remove superseded account image {$ref}");
+
+                continue;
+            }
+            try {
+                $system->exec(Privileged::docker()->removeImages($ref), [], 120);
+                $this->line("removed superseded account image {$ref}");
+                $removed[] = $ref;
+            } catch (\Exception $e) {
+                $this->line("kept superseded account image {$ref}: an account still runs on it");
+            }
+        }
+
+        return array_values(array_diff($present, $removed));
+    }
+
+    /**
      * @return list<string>
      */
     private function presentImages(System $system): array
     {
         try {
             $out = $system->exec(
-                ['sudo', 'docker', 'images', '--format', '{{.Repository}}:{{.Tag}}'],
+                Privileged::docker()->imageNames(),
                 [],
                 60
             );
@@ -727,16 +822,12 @@ class PrewarmImages extends Command
         return $refs;
     }
 
-    /**
-     * Free space on the filesystem holding the images. Falls back to / so the
-     * command still works where the data root is elsewhere or not yet created.
-     */
+    /** Free space where the host keeps its images, else under core's own /. */
     private function availableBytes(System $system): ?int
     {
-        foreach (['/var/lib/docker', '/'] as $path) {
+        foreach ([Privileged::probes()->diskFreeInKilobytes('/var/lib/docker'), ['df', '-Pk', '/']] as $command) {
             try {
-                // No sudo: df is a read-only stat and works as any user.
-                $out = $system->exec(['df', '-Pk', $path], [], 60);
+                $out = $system->exec($command, [], 60);
             } catch (\Exception $e) {
                 continue;
             }
