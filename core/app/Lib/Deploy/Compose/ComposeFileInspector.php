@@ -10,24 +10,14 @@ use App\Lib\Deploy\Port\PortMapping;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
- * What kind of compose file is this: a live hosting stack, a workstation
- * bind-mount setup that only runs on a laptop, a documentation template the
- * repo ships but nothing loads, or engine-written bootstrap output.
- *
- * Read by {@see DetectProjectStrategy} to decide whether a compose file wins
- * the deploy strategy, and by the runtime-sidecar readers to decide whether a
- * compose file is a source of backing services rather than a thing to run.
- *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * What kind of compose file this is: a live stack, a workstation bind-mount setup, a template nothing
+ * loads, or engine-written bootstrap. Read by {@see DetectProjectStrategy} and the sidecar readers.
  */
 class ComposeFileInspector
 {
     /**
-     * Host-user mapping vars. Templates pass these from the laptop; they are
-     * empty in hosting and `groupadd -g` exits 3.
-     *
-     * `UID`/`GID` are included and matched case-insensitively because a
-     * hand-written Dockerfile tends to say `ARG uid` / `useradd -u $uid`.
+     * Host-user mapping vars, passed from the laptop and empty in hosting, where `groupadd -g` exits 3.
+     * `UID`/`GID` are matched case-insensitively for a hand-written `ARG uid` / `useradd -u $uid`.
      */
     private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|USERID|GROUPID|USER_UID|USER_GID'
         .'|HOST_UID|HOST_GID|HOSTUID|HOSTGID|UID|GID';
@@ -43,9 +33,15 @@ class ComposeFileInspector
         .'|(?:[^/]+/)*cockroachdb/cockroach$|(?:[^/]+/)*gvenzl/oracle-|container-registry\.oracle\.com/database/'
         .'|(?:[^/]+/)*[^/]*oracle[^/]*-xe)#';
 
+    /** The one name the engine wrote its static bootstrap under. */
+    private const STATIC_BOOTSTRAP_FILE = 'docker-compose.yml';
+
     private const STATIC_BOOTSTRAP_IMAGE = 'nginx:alpine';
 
     private const STATIC_BOOTSTRAP_DOCROOT = '/usr/share/nginx/html';
+
+    /** @var list<string> the only keys the static bootstrap gave its service */
+    private const STATIC_BOOTSTRAP_SERVICE_KEYS = ['image', 'ports', 'volumes'];
 
     /**
      * Docker Compose V2 filename priority.
@@ -60,11 +56,8 @@ class ComposeFileInspector
     ];
 
     /**
-     * Compose files a repo ships as a template rather than as a live stack:
-     * the author documents the full stack and expects the operator to copy it
-     * and fill in secrets. They are read for their runtime services only; the
-     * file itself is never run. Stack slices named by engine
-     * (`docker-compose.mysql.yml`) count too.
+     * Compose files a repo ships as a template for the operator to copy, stack slices such as
+     * `docker-compose.mysql.yml` included: read for their runtime services only, never run.
      */
     public const COMPOSE_EXAMPLE_CANDIDATES = [
         'compose.example.yml',
@@ -106,9 +99,7 @@ class ComposeFileInspector
     }
 
     /**
-     * Compose-spec Dockerfile paths that are missing on disk.
-     *
-     * `dockerfile:` is relative to `build.context`, not the repo root.
+     * Compose-spec Dockerfile paths missing on disk. `dockerfile:` is relative to `build.context`:
      * `context: ./console` + `dockerfile: Dockerfile` → `console/Dockerfile`.
      *
      * @return list<string> project-relative paths (for error messages)
@@ -133,7 +124,7 @@ class ComposeFileInspector
      */
     public static function composeBuildDockerfileAbsolute(string $projectDir, array|string $build): ?string
     {
-        $resolved = self::resolveComposeBuildDockerfile($projectDir, $build);
+        $resolved = ComposeBuildDockerfile::resolve($projectDir, $build);
 
         return $resolved['absolute'] ?? null;
     }
@@ -166,14 +157,9 @@ class ComposeFileInspector
      */
     private static function composeBuildDockerfileRefs(string $composePath, string $projectDir): array
     {
-        $raw = self::readNonEmpty($composePath);
-        $parsed = $raw === null ? null : self::parseOrNull($raw);
-        if (self::servicesOf($parsed) === null) {
+        $parsed = self::rebasedComposeWithServices($composePath, $projectDir);
+        if ($parsed === null) {
             return [];
-        }
-        $nested = NestedCompose::relativeDir($composePath, $projectDir);
-        if ($nested !== null) {
-            $parsed = NestedCompose::rebase($parsed, $nested);
         }
 
         $refs = [];
@@ -182,7 +168,7 @@ class ComposeFileInspector
             if (! is_string($build) && ! is_array($build)) {
                 continue;
             }
-            $resolved = self::resolveComposeBuildDockerfile($projectDir, $build);
+            $resolved = ComposeBuildDockerfile::resolve($projectDir, $build);
             if ($resolved !== null) {
                 $refs[] = $resolved;
             }
@@ -192,95 +178,28 @@ class ComposeFileInspector
     }
 
     /**
-     * @param  array<string, mixed>|string  $build
-     * @return array{relative: string, absolute: string}|null
-     */
-    private static function resolveComposeBuildDockerfile(string $projectDir, array|string $build): ?array
-    {
-        $paths = self::buildContextAndDockerfile($build);
-        if ($paths === null || self::isUncheckableBuildPath(...$paths)) {
-            return null;
-        }
-        [$context, $dockerfile] = $paths;
-        if (str_starts_with($dockerfile, '/')) {
-            return [
-                'relative' => $dockerfile,
-                'absolute' => $dockerfile,
-            ];
-        }
-
-        $relative = self::dockerfileInContext($context, $dockerfile);
-        if ($relative === '' || str_contains($relative, '..')) {
-            return null;
-        }
-
-        return [
-            'relative' => $relative,
-            'absolute' => rtrim($projectDir, '/').'/'.ltrim($relative, '/'),
-        ];
-    }
-
-    /**
-     * A `build:`'s context and Dockerfile with compose's defaults applied, or
-     * null for an inline Dockerfile.
+     * The parsed file with its paths rebased onto the project root, or null when it has no services.
      *
-     * @param  array<string, mixed>|string  $build
-     * @return array{0: string, 1: string}|null
+     * @return array<mixed>|null
      */
-    private static function buildContextAndDockerfile(array|string $build): ?array
+    private static function rebasedComposeWithServices(string $composePath, string $projectDir): ?array
     {
-        if (is_string($build)) {
-            $context = $build;
-            $dockerfile = 'Dockerfile';
-        } else {
-            if (isset($build['dockerfile_inline'])) {
-                return null;
-            }
-            $context = $build['context'] ?? '.';
-            if (! is_string($context) || $context === '') {
-                $context = '.';
-            }
-            $dockerfile = $build['dockerfile'] ?? 'Dockerfile';
-            if (! is_string($dockerfile) || $dockerfile === '') {
-                $dockerfile = 'Dockerfile';
-            }
+        $raw = self::readNonEmpty($composePath);
+        $parsed = $raw === null ? null : self::parseOrNull($raw);
+        if (self::servicesOf($parsed) === null) {
+            return null;
+        }
+        $nested = NestedCompose::relativeDir($composePath, $projectDir);
+        if ($nested !== null) {
+            $parsed = NestedCompose::rebase($parsed, $nested);
         }
 
-        return [str_replace('\\', '/', trim($context)), str_replace('\\', '/', trim($dockerfile))];
-    }
-
-    /** Empty, a git/HTTP context, or a path climbing out with `..`: nothing on disk to check. */
-    private static function isUncheckableBuildPath(string $context, string $dockerfile): bool
-    {
-        return $context === '' || $dockerfile === ''
-            || preg_match('#^(https?://|git@|ssh://)#i', $context) === 1
-            || str_contains($context, '..') || str_contains($dockerfile, '..');
-    }
-
-    private static function dockerfileInContext(string $context, string $dockerfile): string
-    {
-        $contextRel = self::stripDotSlash($context);
-        $fileRel = self::stripDotSlash($dockerfile);
-        if ($contextRel === '' || $contextRel === '.') {
-            return $fileRel;
-        }
-
-        return rtrim($contextRel, '/').'/'.ltrim($fileRel, '/');
-    }
-
-    private static function stripDotSlash(string $path): string
-    {
-        if (str_starts_with($path, './')) {
-            return substr($path, 2);
-        }
-
-        return $path;
+        return $parsed;
     }
 
     /**
-     * Local-dev compose: bind-mount of the repo plus a build, or build-args
-     * that interpolate a host UID/GID without a default. Framework-agnostic —
-     * Sail, Symfony Docker, Vite, and similar workstation stacks all match.
+     * Local-dev compose: a bind-mount of the repo plus a build, or build args interpolating a host
+     * UID/GID with no default, as Sail, Symfony Docker, Vite and similar workstation stacks do.
      */
     public static function isLocalDevCompose(string $composePath): bool
     {
@@ -295,9 +214,8 @@ class ComposeFileInspector
     }
 
     /**
-     * Why a file reads as a workstation dev compose, or null when it does not.
-     * The boolean check and the deploy log share this, so a demotion can name
-     * the service and mount that triggered it.
+     * Why a file reads as a workstation dev compose, or null. Shared with the deploy log, so a demotion
+     * can name the service and mount that triggered it.
      */
     public static function localDevComposeReason(string $composePath): ?string
     {
@@ -338,9 +256,8 @@ class ComposeFileInspector
     }
 
     /**
-     * A Compose v1 file: services at the top level, no `services:` mapping.
-     * Compose v2 refuses the whole file (`additional properties 'rapidbay'
-     * not allowed`), so running it can only fail.
+     * A Compose v1 file: services at the top level, no `services:` mapping. Compose v2 refuses the
+     * whole file (`additional properties 'rapidbay' not allowed`), so running it can only fail.
      */
     public static function isLegacyV1Compose(string $composePath): bool
     {
@@ -366,9 +283,8 @@ class ComposeFileInspector
     }
 
     /**
-     * Why `docker compose up` starts nothing from this file as written: every
-     * service sits behind a profile nobody activates, or one has neither image
-     * nor build and Compose rejects the project. Null when it can start something.
+     * Why `docker compose up` starts nothing from this file: every service is behind an inactive
+     * profile, or one has neither image nor build and Compose rejects the project. Null otherwise.
      *
      * @param  list<string>  $activeProfiles  COMPOSE_PROFILES the repository sets
      */
@@ -441,9 +357,8 @@ class ComposeFileInspector
     }
 
     /**
-     * A datastore or a console that comes with one: a file of only these is a
-     * development environment with no application in it. A published port's
-     * number alone does not make one (an app may serve on Elasticsearch's 9200).
+     * A datastore or a console that comes with one: a file of only these has no application in it.
+     * A published port's number alone does not make one (an app may serve on Elasticsearch's 9200).
      *
      * @param  array<string, mixed>  $service
      */
@@ -484,10 +399,8 @@ class ComposeFileInspector
     }
 
     /**
-     * Dockerfile that maps a host UID/GID with no numeric ARG or ENV default.
-     * Nested copies of local-dev runtimes (docker/8.x, docker/Dockerfile)
-     * must not win over PHP/JS/Railpack recipes. Heredoc bodies are ignored:
-     * an entrypoint written as one reads $PUID at run time, not from a build ARG.
+     * A Dockerfile mapping a host UID/GID with no numeric ARG or ENV default, so local-dev runtimes do
+     * not win over recipes. Heredoc bodies are ignored: such an entrypoint reads $PUID at run time.
      */
     public static function isHostUidMappedDockerfile(string $path): bool
     {
@@ -541,9 +454,8 @@ class ComposeFileInspector
     }
 
     /**
-     * The service mounts the whole checkout (`.`/`./`/`${PWD}`), with or
-     * without `build:`: it runs the repository's own code from a laptop's
-     * working tree.
+     * The service mounts the whole checkout (`.`/`./`/`${PWD}`), with or without `build:`: it runs
+     * the repository's own code from a laptop's working tree.
      *
      * @param  array<string, mixed>  $service
      */
@@ -579,9 +491,8 @@ class ComposeFileInspector
     }
 
     /**
-     * The bind source that marks a service a workstation app service, or null:
-     * the project root, which a laptop mounts over the built image for live
-     * reload, or a {@see isSourceTreeBind() source-tree subdirectory}.
+     * The bind source that marks a workstation app service, or null: the project root a laptop mounts
+     * over the image for live reload, or a {@see isSourceTreeBind() source-tree subdirectory}.
      *
      * @param  array<string, mixed>  $service
      */
@@ -602,9 +513,8 @@ class ComposeFileInspector
     }
 
     /**
-     * A read-write `./subdir` holding source (a whole shop under `./upload`).
-     * Not a read-only bind, a single injected file or a log directory: those
-     * are a recipe injecting an artifact, not a workstation.
+     * A read-write `./subdir` holding source (a whole shop under `./upload`). A read-only bind, one
+     * file or a log directory is a recipe injecting an artifact, not a workstation.
      */
     private static function isSourceTreeBind(string $source, string $target, bool $readOnly): bool
     {
@@ -615,9 +525,8 @@ class ComposeFileInspector
     }
 
     /**
-     * `./nginx/log:/var/log/nginx`, `./logs:/app/logs`: a directory the
-     * service only writes its logs to. It holds no source and the stack runs
-     * with it empty, so it says nothing about a workstation.
+     * `./nginx/log:/var/log/nginx`, `./logs:/app/logs`: a directory the service only writes logs to,
+     * which holds no source and says nothing about a workstation.
      */
     private static function mountsLogDirectory(string $source, string $target): bool
     {
@@ -693,9 +602,8 @@ class ComposeFileInspector
     }
 
     /**
-     * A bind of one file rather than a source tree: the source's last segment
-     * or the target's carries a filename extension. One file is always an
-     * injected artifact, never a mounted app directory.
+     * A bind of one file, whose source or target ends in a filename extension: always an injected
+     * artifact, never a mounted app directory.
      */
     private static function mountsSingleFile(string $source, string $target): bool
     {
@@ -710,11 +618,31 @@ class ComposeFileInspector
     }
 
     /**
-     * Engine-written compose (welcome nginx, framework recipe, Dockerfile
-     * wrap). Skipping it lets a zip of HTML or a known framework win on
-     * rebuild instead of freezing strategy=compose. An unreadable file counts
-     * as generated: the engine's own may be mode 600 to the app user, which
-     * PHP-FPM (www-data) cannot read.
+     * Why detection passes over the compose file at $composePath, worded for the deploy log: it cannot be read, it
+     * reads as the engine's own, it is a workstation dev compose, or it has the v1 layout. Null when none applies.
+     */
+    public static function ignoredReason(string $composePath): ?string
+    {
+        if (is_file($composePath) && ! is_readable($composePath)) {
+            return 'cannot be read by the engine';
+        }
+        if (self::isGeneratedBootstrapCompose($composePath)) {
+            return "reads as one the engine generated, not the project's own";
+        }
+        $workstation = self::localDevComposeReason($composePath);
+        if ($workstation !== null) {
+            return "looks like a workstation dev compose ({$workstation})";
+        }
+        if (self::isLegacyV1Compose($composePath)) {
+            return 'uses the v1 layout (no `services:`), which Docker Compose v2 refuses';
+        }
+
+        return null;
+    }
+
+    /**
+     * Engine-written compose, skipped so a known framework wins on rebuild instead of freezing
+     * strategy=compose. An unreadable one counts: the engine's own may be mode 600 to the app user.
      */
     public static function isGeneratedBootstrapCompose(string $composePath): bool
     {
@@ -729,7 +657,8 @@ class ComposeFileInspector
             return false;
         }
 
-        return self::hasEngineService(ComposeYaml::parse($raw)) || self::isUnlabelledStaticBootstrapYaml($raw);
+        return self::hasEngineService(ComposeYaml::parse($raw))
+            || (basename($composePath) === self::STATIC_BOOTSTRAP_FILE && self::isUnlabelledStaticBootstrapYaml($raw));
     }
 
     /**
@@ -753,30 +682,43 @@ class ComposeFileInspector
     }
 
     /**
-     * The static bootstrap as the engine wrote it before it carried the label:
-     * one `nginx:alpine` service, no build, serving the project root itself.
-     * Only the root: a client stack serving `./html` or `./dist` with the same
-     * image is the client's own.
+     * The static bootstrap from before the label, as the engine wrote it: one `app` service on `nginx:alpine` with the
+     * project root mounted on the docroot, ports or none. Any other key, service or volume is the client's own.
      */
     private static function isUnlabelledStaticBootstrapYaml(string $raw): bool
     {
         $parsed = self::parseOrNull($raw);
-        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
-        if (! is_array($services) || count($services) !== 1) {
+        if ($parsed === null || array_keys($parsed) !== ['services']) {
             return false;
         }
-        $service = reset($services);
-        if (! is_array($service) || isset($service['build']) || ($service['image'] ?? null) !== self::STATIC_BOOTSTRAP_IMAGE) {
+        $services = self::servicesOf($parsed);
+        if ($services === null || array_keys($services) !== [GeneratedCompose::APP_SERVICE]) {
+            return false;
+        }
+        $service = $services[GeneratedCompose::APP_SERVICE];
+        if (! is_array($service)
+            || array_diff(array_keys($service), self::STATIC_BOOTSTRAP_SERVICE_KEYS) !== []
+            || ($service['image'] ?? null) !== self::STATIC_BOOTSTRAP_IMAGE
+        ) {
             return false;
         }
 
-        foreach ((array) ($service['volumes'] ?? []) as $volume) {
-            if (is_string($volume) && self::servesProjectRootAsDocroot($volume)) {
-                return true;
+        return self::servesOnlyTheProjectRoot($service['volumes'] ?? null);
+    }
+
+    /** At least one volume, each the project root bound onto the docroot. */
+    private static function servesOnlyTheProjectRoot(mixed $volumes): bool
+    {
+        if (! is_array($volumes) || $volumes === []) {
+            return false;
+        }
+        foreach ($volumes as $volume) {
+            if (! is_string($volume) || ! self::servesProjectRootAsDocroot($volume)) {
+                return false;
             }
         }
 
-        return false;
+        return true;
     }
 
     private static function servesProjectRootAsDocroot(string $volume): bool

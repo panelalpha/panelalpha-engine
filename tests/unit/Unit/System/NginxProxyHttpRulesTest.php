@@ -60,7 +60,7 @@ class NginxProxyHttpRulesTest extends TestCase
         $conf = NginxProxy::renderHttpProxyRule($vars);
 
         $this->assertMatchesRegularExpression('/^\s*listen \[2a01:4f8::1\]:8443 ssl;$/m', $conf);
-        $this->assertStringContainsString('access_log /var/log/nginx/proxy-rule-2a01:4f8::1:8443.access.log;', $conf);
+        $this->assertStringContainsString('access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/proxy-rule-2a01:4f8::1:8443.access.log;', $conf);
     }
 
     public function test_a_host_that_never_had_a_rule_port_never_touches_the_firewall(): void

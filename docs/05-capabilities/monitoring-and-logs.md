@@ -115,6 +115,8 @@ Show me what the app container of shop printed between 14:00 and 14:30 today.
 
 The assistant reads up to 5000 lines at a time, and can limit them to a period such as the last two hours.
 
+The webserver logs, per domain and the project's own Apache logs, are rotated every month, or sooner when a file grows past 100 MB, and the 24 newest older copies are kept, compressed. Copies named by month only (`access-2026-09.log.gz`) are not part of that count and are never removed: delete them when you no longer need them.
+
 **PHP errors.** On traditional PHP hosting, every project keeps its own PHP error log, one file for all its domains. It holds the last errors your PHP code raised, such as a fatal error behind a blank page.
 
 ```text
@@ -175,7 +177,7 @@ Linux does not scope these two to a container, so an agent that reads them repor
 | `/sys/fs/cgroup/memory.current` | the memory in use now, in bytes |
 | `/sys/fs/cgroup/cpu.stat` | CPU time used (`usage_usec`) |
 
-In an app container, `memory.max` reads `max` unless that service sets a limit of its own. The project's plan limit still applies to it.
+In an app container, `memory.max` is that service's own limit. A limit above the project's is lowered to fit inside it when the project deploys. A service that sets only a reservation reads `max`, and the project's plan limit still applies to it.
 
 ## 5. Lighthouse - "is it fast?"
 
@@ -270,7 +272,7 @@ Run a Lighthouse report on https://shop.example.com/ for desktop, summary only.
 Then try https://example.org/.
 ```
 
-Mode: modify. Tools: `lighthouse_report_create` with `desktop_preset`, `summary`. Check: the first returns scores. The second is refused, because only the engine's own domains, aliases and tunnel hostnames are accepted. An IP address is refused the same way.
+Mode: read. Tools: `lighthouse_report_create` with `desktop_preset`, `summary`. Check: the first returns scores. The second is refused, because only the engine's own domains, aliases and tunnel hostnames are accepted. An IP address is refused the same way.
 
 **Report a problem**
 

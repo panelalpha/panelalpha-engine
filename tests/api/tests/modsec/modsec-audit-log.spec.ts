@@ -41,6 +41,32 @@ test.describe('ModSecurity audit log', () => {
     expect(Array.isArray(tail.data)).toBe(true);
   });
 
+  test('a tail returns no more entries than its limit', async ({
+    api,
+    anonymousRequest,
+    setupUser,
+  }) => {
+    const data = await auditLogFiles(api, anonymousRequest, setupUser.url);
+    test.skip(
+      data.length === 0,
+      'The engine lists no audit log files even after a request the WAF should flag.'
+    );
+
+    const tail = await api.tailModSecurityAuditLog(data[0].file, 1);
+    await expectStatus(tail, 200);
+    expect(tail.data.length).toBeLessThanOrEqual(1);
+  });
+
+  test('a tail limit below 1 is refused', async ({ api, anonymousRequest, setupUser }) => {
+    const data = await auditLogFiles(api, anonymousRequest, setupUser.url);
+    test.skip(
+      data.length === 0,
+      'The engine lists no audit log files even after a request the WAF should flag.'
+    );
+
+    await expectStatus(await api.tailModSecurityAuditLog(data[0].file, 0), 422);
+  });
+
   test('downloading an unknown file returns 404', async ({ api }) => {
     await expectStatus(
       await api.downloadModSecurityAuditLog('non-existent-audit-log-12345.log'),

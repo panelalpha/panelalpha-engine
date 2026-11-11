@@ -10,6 +10,7 @@ use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\AppConfig\AppConfigStack;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\PlatformStage;
@@ -19,7 +20,10 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Telemetry\DetectionSignal;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\Lib\Project\PublicRouting\ProjectPublicRouting;
+use App\Lib\Project\PublicRouting\PublicRouting;
 use App\Models\User as ModelsUser;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 use App\System\Project\Dind\Strategy\ManifestDatabase;
@@ -42,9 +46,8 @@ class PrepareFromSource
     }
 
     /**
-     * Shared by git clone and zip import, so an upload gets the same treatment as a clone.
-     * Credentials are delivered before the app config's prepare hook, which may read them,
-     * and finally from the manifest detection chose.
+     * Shared by git clone and zip import. Credentials reach the app config's prepare hook, which may read them; from
+     * detection on, the app config speaks only for its own stack ({@see AppConfigStack}) but its credentials stay.
      */
     public function prepare(): void
     {
@@ -57,6 +60,7 @@ class PrepareFromSource
         $logger?->stage(DeployLogger::STAGE_RUNNING);
 
         $appConfig = $this->dind->appConfig($gitRepo);
+        app(ProjectPublicRouting::class)->prepare($user, $appConfig?->publicRouting() ?? PublicRouting::none(), $logger);
         $this->dind->appCredentials()->deliver($appConfig?->credentials(), final: false);
         $this->dind->strategy()->bootstrap($appConfig, $projectDir, $chown);
 
@@ -64,14 +68,15 @@ class PrepareFromSource
 
         $decision = $this->detectDecision($projectDir, $gitRepo, $logger);
         $this->assertDeployable($decision, $projectDir, $gitRepo, $logger);
-        $this->freezeSnapshot($decision, $appConfig, $projectDir, $gitRepo);
+        $stackConfig = AppConfigStack::for($decision, $appConfig);
+        $this->freezeSnapshot($decision, $stackConfig, $stackConfig === $appConfig, $projectDir, $gitRepo);
         $this->logDecision($decision, $logger);
         $this->explainIgnoredComposeFile($decision, $projectDir, $logger);
         $this->warnInertDatabase($decision, $logger);
         $this->reportUnreciped($user->username, $decision, $projectDir);
         $this->deliverManifestCredentials($decision, $appConfig);
 
-        $this->applyDecision($user, $decision, $appConfig, $projectDir, $gitRepo);
+        $this->applyDecision($user, $decision, $stackConfig, $projectDir, $gitRepo);
     }
 
     /**
@@ -116,12 +121,13 @@ class PrepareFromSource
     }
 
     /**
-     * Record what was detected. `deploy_platform` is the manifest that claimed it (`html` and
-     * `static` share a strategy); the recipe's checks dir and the resolved image are frozen, not re-derived.
+     * `deploy_platform` is the manifest that claimed it (`html` and `static` share a strategy). The rest is frozen,
+     * not re-derived, so a project list reads no checkout.
      *
      * @param  array<string, mixed>  $decision
+     * @param  ?AppConfig  $stackConfig  the app config when it is written for this stack
      */
-    private function freezeSnapshot(array $decision, ?AppConfig $appConfig, string $projectDir, ?string $gitRepo): void
+    private function freezeSnapshot(array $decision, ?AppConfig $stackConfig, bool $appConfigFits, string $projectDir, ?string $gitRepo): void
     {
         $this->dind->freezeDeploySnapshot([
             'deploy_source' => $gitRepo !== null ? 'git' : 'archive',
@@ -132,10 +138,10 @@ class PrepareFromSource
             'deploy_platform' => is_string($decision['platform'] ?? null) ? $decision['platform'] : null,
             'deploy_checks_dir' => $this->recipeChecksDirectory($gitRepo),
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
-            AppHealth::DETAIL_START_PERIOD => $appConfig?->startPeriod(),
+            AppHealth::DETAIL_START_PERIOD => $stackConfig?->startPeriod(),
             'git_commit' => $gitRepo !== null ? $this->readGitCommit($projectDir) : null,
-            // Frozen so a project list can say it without reading every checkout.
-            'deploy_admin_sso' => $this->dind->appConfig($gitRepo)?->supportsAdminSso() ?? false,
+            'deploy_admin_sso' => $stackConfig?->supportsAdminSso() ?? false,
+            AppManager::DETAIL_APP_CONFIG_FITS => $appConfigFits,
         ]);
     }
 
@@ -155,41 +161,33 @@ class PrepareFromSource
     private function logDecision(array $decision, ?DeployLogger $logger): void
     {
         $sourceRecipe = $decision['source_recipe'] ?? null;
-        if (is_string($sourceRecipe)) {
-            $logger?->info("Recipe named by {$sourceRecipe}");
+        $origin = $decision['source_recipe_origin'] ?? null;
+        if (is_string($sourceRecipe) && is_string($origin)) {
+            $logger?->info("Recipe named by {$sourceRecipe} ({$origin})");
         }
         $logger?->info("Detected project type: {$decision['label']}");
         $logger?->info("Using strategy: {$decision['strategy']}");
     }
 
     /**
-     * Why a compose file the repository ships was not used (a workstation dev compose, or the
-     * v1 layout), so a wrong strategy is one log line rather than a silent hunt.
+     * Why a compose file the repository ships was not used ({@see ComposeFileInspector::ignoredReason()}),
+     * so a wrong strategy is one log line rather than a silent hunt.
      *
      * @param  array<string, mixed>  $decision
      */
     private function explainIgnoredComposeFile(array $decision, string $projectDir, ?DeployLogger $logger): void
     {
-        if ($decision['strategy'] === Strategies::COMPOSE) {
+        $composePath = ComposeFileInspector::firstIn($projectDir);
+        if ($decision['strategy'] === Strategies::COMPOSE || $composePath === null) {
             return;
         }
 
-        if (($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
-            && ($reason = ComposeFileInspector::localDevComposeReason($composePath)) !== null
-        ) {
+        $why = ComposeFileInspector::ignoredReason($composePath);
+        if ($why !== null) {
             $logger?->info(sprintf(
-                'Compose file %s looks like a workstation dev compose (%s); using strategy %s instead',
+                'Compose file %s %s; using strategy %s instead',
                 basename($composePath),
-                $reason,
-                $decision['strategy']
-            ));
-        }
-        if (($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
-            && ComposeFileInspector::isLegacyV1Compose($composePath)
-        ) {
-            $logger?->info(sprintf(
-                'Compose file %s uses the v1 layout (no `services:`), which Docker Compose v2 refuses; using strategy %s instead',
-                basename($composePath),
+                $why,
                 $decision['strategy']
             ));
         }
@@ -237,9 +235,8 @@ class PrepareFromSource
     }
 
     /**
-     * Apply the strategy, then the project's env vars and proxy rules. The port scheme is kept on
-     * the project for every later rule sync; ports are detected after `.env` exists, since compose
-     * publishes a host port taken from it.
+     * Apply the strategy, then env vars and proxy rules, the domain's then the declared public ports. The port scheme is kept
+     * on the project for every later rule sync; ports are detected after `.env` exists, since compose publishes a host port taken from it.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -254,14 +251,13 @@ class PrepareFromSource
         $user->setAppPortScheme($decision['port_scheme'] ?? $appConfig?->portScheme());
         $this->dind->applyProjectEnvVars(is_string($decision['compose_path'] ?? null) ? $decision['compose_path'] : null);
         $this->dind->networking()->detectAndCreateProxyRules($user);
+        app(ProjectPublicRouting::class)->routePorts($user, $this->dind->shell()->logger());
         $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 
     /**
-     * Run the precheck stage: validation that should stop a deploy before it costs a clone.
-     * Nothing is cloned yet, so the app config is the engine's, no `when` guard can be evaluated,
-     * and a refusal is marked so telemetry does not report it as a broken deploy.
-     * {@see PlatformStage::PRECHECK}
+     * The {@see PlatformStage::PRECHECK} stage, stopping a deploy before it costs a clone: the app config is the
+     * engine's, no `when` guard can be evaluated, and a refusal is marked so telemetry does not report a broken deploy.
      */
     public function preCheck(): void
     {
@@ -350,7 +346,7 @@ class PrepareFromSource
             return;
         }
 
-        $this->dind->system()->exec(['sudo', 'rm', '-f', $index]);
+        $this->dind->system()->exec(Privileged::files()->removeIfExists($index));
         $logger?->info('Removed the placeholder page: the project has files of its own');
     }
 }

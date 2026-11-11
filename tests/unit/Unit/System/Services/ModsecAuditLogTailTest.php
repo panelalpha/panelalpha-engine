@@ -65,6 +65,17 @@ class ModsecAuditLogTailTest extends TestCase
         $this->assertSame('x', $tail[0]->transaction->unique_id);
     }
 
+    public function test_a_limit_keeps_only_the_newest_entries(): void
+    {
+        $lines = array_map(static fn (string $id): string => json_encode(['transaction' => ['unique_id' => $id]]), ['a', 'b', 'c']);
+        file_put_contents($this->dir . '/audit.log', implode("\n", $lines) . "\n");
+
+        $tail = $this->files()->tail('audit.log', 2);
+
+        $this->assertSame(['c', 'b'], array_map(static fn (object $entry): string => $entry->transaction->unique_id, $tail));
+        $this->assertCount(3, $this->files()->tail('audit.log'));
+    }
+
     public function test_a_broken_gzip_file_reads_as_nothing_rather_than_error(): void
     {
         file_put_contents($this->dir . '/audit-2026-10-02.log.gz', 'not gzip at all');

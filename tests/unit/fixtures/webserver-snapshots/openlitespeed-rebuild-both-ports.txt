@@ -1,0 +1,316 @@
+run ["/usr/local/lib/panelalpha/pa-root","files.listNames","--","/etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem"]
+run ["/usr/local/lib/panelalpha/pa-root","files.listNames","--","/etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem"]
+put /opt/engine/webserver-config/openlitespeed/vhosts/app-lite-ca.conf 994:994
+docRoot /opt/engine/webserver-config/document-root
+errorpage 404 {
+  url /404.html
+}
+errorlog /opt/engine/webserver-logs/openlitespeed/app-lite-ca/error.log {
+  logLevel                WARNING
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+accesslog /opt/engine/webserver-logs/openlitespeed/app-lite-ca/access.log {
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+extprocessor proxy-app-lite-ca {
+  type                    proxy
+  address                 http://app-lite-ca:8080
+  maxConns                10
+  initTimeout             5
+  retryTimeout            5
+  respBuffer              0
+}
+context / {
+  type                    proxy
+  handler                 proxy-app-lite-ca
+}
+websocket /ws/ {
+  address                 app-lite-ws-rewrite:6002
+}
+<<< end of /opt/engine/webserver-config/openlitespeed/vhosts/app-lite-ca.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/openlitespeed/app-lite-ca"]
+put /opt/engine/webserver-config/openlitespeed/vhosts/app-lite-aa.conf 994:994
+docRoot /opt/engine/webserver-config/document-root
+errorpage 404 {
+  url /404.html
+}
+errorlog /opt/engine/webserver-logs/openlitespeed/app-lite-aa/error.log {
+  logLevel                WARNING
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+accesslog /opt/engine/webserver-logs/openlitespeed/app-lite-aa/access.log {
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+extprocessor proxy-app-lite-aa {
+  type                    proxy
+  address                 http://app-lite-aa:8081
+  maxConns                10
+  initTimeout             5
+  retryTimeout            5
+  respBuffer              0
+}
+context / {
+  type                    proxy
+  handler                 proxy-app-lite-aa
+}
+websocket /ws/ {
+  address                 app-lite-ws-rewrite:6002
+}
+<<< end of /opt/engine/webserver-config/openlitespeed/vhosts/app-lite-aa.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/openlitespeed/app-lite-aa"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.pem"]
+put /opt/engine/webserver-config/openlitespeed/vhosts/alice.test.conf 994:994
+docRoot                   /home/alice/alice.test/public_html
+vhDomain                  alice.test
+vhAliases www.alice.test
+enableGzip                1
+
+errorlog /opt/panelalpha/shared-hosting/webserver-logs/openlitespeed/alice.test/error.log {
+  logLevel                WARNING
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+
+accesslog /opt/panelalpha/shared-hosting/webserver-logs/openlitespeed/alice.test/access.log {
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+
+index  {
+  useServer               0
+  indexFiles              index.php, index.html
+  autoIndex               0
+  autoIndexURI            /_autoindex/default.php
+}
+
+errorpage 403 {
+  url                     /alice-error-pages/403.html
+}
+errorpage 404 {
+  url                     /alice-error-pages/404.html
+}
+errorpage 500 {
+  url                     /alice-error-pages/500.html
+}
+errorpage 502 {
+  url                     /alice-error-pages/502.html
+}
+errorpage 503 {
+  url                     /alice-error-pages/503.html
+}
+
+scripthandler  {
+  add                     lsapi:alice-alice.test php
+}
+
+expires  {
+  enableExpires           1
+}
+
+accessControl  {
+  allow                   *
+}
+
+extprocessor alice-alice.test {
+  type                    lsapi
+  address                 alice:9082
+  maxConns                4
+  initTimeout             1
+  retryTimeout            1
+  respBuffer              0
+  autoStart               0
+}
+
+extprocessor alice-phpmyadmin {
+  type                    proxy
+  address                 http://phpmyadmin-users.shared-hosting.palocal:80
+  maxConns                10
+  initTimeout             5
+  retryTimeout            5
+  respBuffer              0
+}
+
+
+context / {
+  location                $DOC_ROOT/
+  allowBrowse             1
+  rewrite  {
+    enable                  1
+    logLevel                0
+    RewriteEngine On
+    RewriteBase /
+    RewriteRule ^index\\.php$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /index.php [L,QSA]
+    RewriteFile .htaccess
+  }
+}
+
+context /alice-error-pages/ {
+  location                /opt/panelalpha/shared-hosting/webserver-config/error-pages/
+  allowBrowse             1
+}
+
+rewrite  {
+  enable                  1
+  autoLoadHtaccess        1
+  logLevel                0
+  RewriteEngine On
+  RewriteCond %{QUERY_STRING} pmassotoken=
+  RewriteRule .* - [E=pmapass:1]
+  RewriteCond %{HTTP_COOKIE} PMASignonSession
+  RewriteRule .* - [E=pmapass:1]
+  RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+  RewriteRule ^ /phpmyadmin/ [R=301,L]
+  RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+  RewriteCond %{ENV:pmapass} =1
+  RewriteRule ^/phpmyadmin/(.*)$ http://alice-phpmyadmin/$1 [P,L]
+}
+
+
+module cache {
+  storagePath /home/alice/alice.test/.lscache
+  checkPrivateCache 1
+  checkPublicCache 1
+  maxCacheObjSize 10000000
+  maxStaleAge 0
+  qsCache 1
+  reqCookieCache 1
+  respCookieCache 1
+  ignoreReqCacheCtrl 0
+  ignoreRespCacheCtrl 0
+  enableCache 1
+  expireInSeconds 43200
+  enablePrivateCache 1
+  privateExpireInSeconds 3600
+  ls_enabled 0
+}
+<<< end of /opt/engine/webserver-config/openlitespeed/vhosts/alice.test.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/openlitespeed/alice.test"]
+put /opt/engine/webserver-config/openlitespeed/vhosts/fallback.conf 994:994
+docRoot /opt/engine/webserver-config/document-root
+errorpage 404 {
+  url /404.html
+}
+errorlog /opt/engine/webserver-logs/openlitespeed/fallback/error.log {
+  logLevel                WARNING
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+accesslog /opt/engine/webserver-logs/openlitespeed/fallback/access.log {
+  useServer               0
+  rollingSize             100M
+  keepDays                30
+  compressArchive         1
+}
+rewrite  {
+  enable                  1
+  RewriteCond %{REQUEST_URI} !^/404\.html$
+  RewriteRule .* /404.html [L]
+}
+<<< end of /opt/engine/webserver-config/openlitespeed/vhosts/fallback.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/openlitespeed/fallback"]
+put /opt/engine/webserver-config/openlitespeed/httpd_config.conf -
+serverName engine
+user nobody
+
+module cgi {
+}
+
+listener 198.51.100.10 {
+  address                 198.51.100.10:80
+  secure                  0
+  map alice.test alice.test, www.alice.test 
+  map fallback *
+}
+
+listener 198.51.100.10-SSL {
+  address                 198.51.100.10:443
+  secure                  1
+  keyFile                 /usr/local/lsws/admin/conf/webadmin.key
+  certFile                /usr/local/lsws/admin/conf/webadmin.crt
+  map alice.test alice.test, www.alice.test 
+  map fallback *
+}
+
+listener 2001:db8::7 {
+  address                 [2001:db8::7]:80
+  secure                  0
+  map alice.test alice.test, www.alice.test 
+  map fallback *
+}
+
+listener 2001:db8::7-SSL {
+  address                 [2001:db8::7]:443
+  secure                  1
+  keyFile                 /usr/local/lsws/admin/conf/webadmin.key
+  certFile                /usr/local/lsws/admin/conf/webadmin.crt
+  map alice.test alice.test, www.alice.test 
+  map fallback *
+}
+
+listener listener-app-lite-ca {
+  address                 *:8443
+  secure                  1
+  keyFile                 /opt/engine/crt/server.key
+  certFile                /opt/engine/crt/server.cert
+  map app-lite-ca client.example.test
+}
+listener listener-app-lite-aa {
+  address                 *:9443
+  secure                  1
+  keyFile                 /opt/engine/crt/server.key
+  certFile                /opt/engine/crt/server.cert
+  map app-lite-aa *
+}
+
+virtualhost alice.test {
+  vhRoot                  /home/alice/alice.test/public_html
+  configFile              $SERVER_ROOT/conf/vhosts/alice.test.conf
+  allowSymbolLink         1
+  enableScript            1
+  restrained              1
+  setUIDMode              0
+}
+
+virtualhost fallback {
+  vhRoot /opt/engine/webserver-config/document-root
+  configFile $SERVER_ROOT/conf/vhosts/fallback.conf
+  allowSymbolLink         1
+  enableScript            0
+  restrained              1
+}
+virtualhost app-lite-ca {
+  vhRoot /opt/engine/webserver-config/document-root
+  configFile $SERVER_ROOT/conf/vhosts/app-lite-ca.conf
+  allowSymbolLink         1
+  enableScript            0
+  restrained              1
+}
+virtualhost app-lite-aa {
+  vhRoot /opt/engine/webserver-config/document-root
+  configFile $SERVER_ROOT/conf/vhosts/app-lite-aa.conf
+  allowSymbolLink         1
+  enableScript            0
+  restrained              1
+}
+<<< end of /opt/engine/webserver-config/openlitespeed/httpd_config.conf
