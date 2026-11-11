@@ -83,7 +83,6 @@ class ServiceHardenerTest extends TestCase
             './data:/data',
             '.cache:/cache',
             '../.panelalpha/app/config.json:/config.json',
-            '../:/account',
             'named:/named',
         ], $service['volumes']);
     }
@@ -792,6 +791,105 @@ class ServiceHardenerTest extends TestCase
         $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'mem_reservation' => '256m']);
 
         $this->assertArrayNotHasKey('mem_limit', $service);
+    }
+
+    public function test_a_limit_above_the_projects_is_held_to_what_the_project_leaves_its_services(): void
+    {
+        $service = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '8g'], 4096);
+
+        $this->assertSame('3584m', $service['mem_limit']);
+    }
+
+    public function test_a_limit_within_the_projects_is_kept(): void
+    {
+        $service = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '1g'], 4096);
+
+        $this->assertSame('1g', $service['mem_limit']);
+    }
+
+    public function test_a_reservation_above_the_projects_is_held_too(): void
+    {
+        $service = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_reservation' => '6g'], 4096);
+
+        $this->assertSame('3584m', $service['mem_reservation']);
+        $this->assertArrayNotHasKey('mem_limit', $service);
+    }
+
+    public function test_a_deploy_resources_limit_above_the_projects_is_held(): void
+    {
+        $service = ServiceHardener::harden('web', [
+            'image' => 'nginx:alpine',
+            'deploy' => ['resources' => ['limits' => ['memory' => '8G']]],
+        ], 4096);
+
+        $this->assertSame('3584m', $service['mem_limit']);
+    }
+
+    public function test_a_catalogued_datastore_above_a_small_project_is_held(): void
+    {
+        $service = ServiceHardener::harden('db', ['image' => 'postgres:16'], 256);
+
+        $this->assertSame('192m', $service['mem_limit']);
+    }
+
+    public function test_the_heap_cap_follows_the_held_limit(): void
+    {
+        $service = ServiceHardener::harden('worker', ['image' => 'node:22-alpine', 'mem_limit' => '8g'], 4096);
+
+        $this->assertSame('--max-old-space-size=2508', $service['environment']['NODE_OPTIONS']);
+    }
+
+    public function test_an_interpolated_limit_above_the_project_whatever_its_variable_holds_is_held(): void
+    {
+        $unset = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '${APP_MEMORY:-8g}'], 4096);
+        $set = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '${APP_MEMORY:-8g}'], 4096, false, ['APP_MEMORY' => ['6g', null]]);
+
+        $this->assertSame('3584m', $unset['mem_limit']);
+        $this->assertSame('3584m', $set['mem_limit']);
+    }
+
+    public function test_an_interpolated_reservation_above_the_project_is_held(): void
+    {
+        $service = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_reservation' => '${APP_RESERVED:-6g}'], 4096);
+
+        $this->assertSame('3584m', $service['mem_reservation']);
+    }
+
+    public function test_an_interpolated_limit_that_may_fit_the_project_is_kept(): void
+    {
+        $service = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '${APP_MEMORY:-8g}'], 4096, false, ['APP_MEMORY' => ['1g', null]]);
+
+        $this->assertSame('${APP_MEMORY:-8g}', $service['mem_limit']);
+    }
+
+    public function test_an_interpolated_limit_that_cannot_be_read_is_kept(): void
+    {
+        $unsetWithoutDefault = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '${APP_MEMORY}'], 4096);
+        $processVariable = ServiceHardener::harden('web', ['image' => 'nginx:alpine', 'mem_limit' => '${HOME}'], 4096);
+
+        $this->assertSame('${APP_MEMORY}', $unsetWithoutDefault['mem_limit']);
+        $this->assertSame('${HOME}', $processVariable['mem_limit']);
+    }
+
+    public function test_the_heap_cap_follows_an_interpolated_limit(): void
+    {
+        $service = ServiceHardener::harden('worker', ['image' => 'node:22-alpine', 'mem_limit' => '${APP_MEMORY:-2g}'], 4096);
+
+        $this->assertSame('--max-old-space-size=1433', $service['environment']['NODE_OPTIONS']);
+    }
+
+    public function test_the_heap_cap_fits_the_smallest_value_an_interpolated_limit_can_take(): void
+    {
+        $service = ServiceHardener::harden('worker', ['image' => 'node:22-alpine', 'mem_limit' => '${APP_MEMORY:-8g}'], 4096, false, ['APP_MEMORY' => ['1g', null]]);
+
+        $this->assertSame('--max-old-space-size=716', $service['environment']['NODE_OPTIONS']);
+    }
+
+    public function test_the_heap_cap_follows_an_interpolated_limit_once_held(): void
+    {
+        $service = ServiceHardener::harden('worker', ['image' => 'node:22-alpine', 'mem_limit' => '${APP_MEMORY:-8g}'], 4096);
+
+        $this->assertSame('--max-old-space-size=2508', $service['environment']['NODE_OPTIONS']);
     }
 
     public function test_deploy_resources_become_the_limits_this_class_speaks(): void

@@ -6,7 +6,14 @@ use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
+use App\System;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\Dind;
+use App\System\Project\Dind\CpuLimitDeferred;
+use App\System\Project\Runtime;
 use Illuminate\Support\Facades\Artisan;
+use Mockery;
+use Mockery\MockInterface;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -79,7 +86,7 @@ class ProjectLimitCommandsTest extends TestCase
 
         $this->artisan(
             'project:limit:set --project=alice --memory-limit=512 --cpu-limit=1.5'
-            . ' --disk-space-limit=1024 --inodes-limit=900 --mysql-databases-limit=5'
+            .' --disk-space-limit=1024 --inodes-limit=900 --mysql-databases-limit=5'
         )
             ->expectsConfirmation('Do you wish to continue?', 'yes')
             ->expectsOutputToContain('Limits have been updated.')
@@ -118,6 +125,31 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(-1, $user->getBandwidthLimit());
         $this->assertSame(-1, $user->getDiskSpaceLimit());
         $this->assertSame(-1.0, $user->getCpuLimit());
+    }
+
+    public function test_set_refuses_a_negative_other_than_minus_one(): void
+    {
+        $this->makeUser('alice', ['cpu_limit' => 1.5, 'disk_space_limit' => 1024]);
+
+        $this->assertSame(1, Artisan::call('project:limit:set', [
+            '--project' => 'alice',
+            '--cpu-limit' => '-2',
+        ]));
+        $this->assertStringContainsString(
+            'The cpu limit must be -1 for unlimited, or 0 or more.',
+            Artisan::output()
+        );
+        $this->assertSame(1.5, User::findByUsername('alice')->getCpuLimit());
+
+        $this->assertSame(1, Artisan::call('project:limit:set', [
+            '--project' => 'alice',
+            '--disk-space-limit' => '-5',
+        ]));
+        $this->assertStringContainsString(
+            'The disk space limit must be -1 for unlimited, or 0 or more.',
+            Artisan::output()
+        );
+        $this->assertSame(1024, User::findByUsername('alice')->getDiskSpaceLimit());
     }
 
     /** Every project has a memory limit, so -1 is refused rather than stored. */
@@ -246,7 +278,7 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertStringContainsString("  inodes_limit:    no limit\n", $output);
 
         foreach (ResourceLimit::all() as $limit) {
-            $this->assertStringContainsString($limit->key . ':', $output);
+            $this->assertStringContainsString($limit->key.':', $output);
         }
     }
 
@@ -313,5 +345,69 @@ class ProjectLimitCommandsTest extends TestCase
             ->expectsOutputToContain('2.5 CPUs')
             ->expectsOutputToContain('subdomains_limit:')
             ->assertExitCode(0);
+    }
+
+    /** A rebuild of a running account does not render its compose file again, so CPU is put on it here, live. */
+    public function test_a_container_projects_cpu_limit_is_applied_at_once_and_asks_for_no_rebuild(): void
+    {
+        $user = $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512]);
+        /** @var Dind&MockInterface $runtime */
+        $runtime = Mockery::mock(Dind::class);
+        $runtime->shouldReceive('applyCpuLimit')->once();
+        $this->bindRuntime($user, $runtime);
+
+        $this->artisan('project:limit:set --project=dock --cpu-limit=2 --force')
+            ->expectsOutputToContain('dock: CPU limit applied to the account.')
+            ->doesntExpectOutputToContain('Changes will take effect after rebuild')
+            ->assertExitCode(0);
+
+        $this->assertSame(2.0, User::findByUsername('dock')->getCpuLimit());
+    }
+
+    /** A root broker image without the action: the limit is stored, and the answer says when it applies. */
+    public function test_a_cpu_limit_the_running_account_cannot_take_says_when_it_applies(): void
+    {
+        $user = $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512]);
+        /** @var Dind&MockInterface $runtime */
+        $runtime = Mockery::mock(Dind::class);
+        $runtime->shouldReceive('applyCpuLimit')->once()
+            ->andThrow(CpuLimitDeferred::refusedByTheRootBroker("pa-root: refused: there is no action 'docker.limitCpu'\n"));
+        $this->bindRuntime($user, $runtime);
+
+        $this->artisan('project:limit:set --project=dock --cpu-limit=-1 --force')
+            ->expectsOutputToContain(
+                'dock: The CPU limit is saved, but the running account keeps its current one until its container is '
+                    . "next recreated: the root broker refused it (there is no action 'docker.limitCpu')."
+            )
+            ->doesntExpectOutputToContain('CPU limit applied')
+            ->doesntExpectOutputToContain('Changes will take effect after rebuild')
+            ->assertExitCode(0);
+
+        $this->assertSame(-1.0, User::findByUsername('dock')->getCpuLimit());
+    }
+
+    private function bindRuntime(User $user, Dind $runtime): void
+    {
+        $project = new class (new System(), $user, $runtime) extends ProjectAggregate {
+            public function __construct(System $system, User $model, private Runtime $fake)
+            {
+                parent::__construct($system, $model);
+            }
+
+            public function runtime(): Runtime
+            {
+                return $this->fake;
+            }
+        };
+        $this->app->instance(System::class, new class ($project) extends System {
+            public function __construct(private ProjectAggregate $project)
+            {
+            }
+
+            public function project(User $model): ProjectAggregate
+            {
+                return $this->project;
+            }
+        });
     }
 }

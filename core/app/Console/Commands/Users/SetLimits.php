@@ -9,7 +9,9 @@ use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\LimitSelection;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
+use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\CpuLimitDeferred;
 use App\System\Projects;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
@@ -88,7 +90,7 @@ class SetLimits extends Command
             return 1;
         }
 
-        $one = $this->option('username') ? $projects[0] : null;
+        $one = $this->option('project') ? $projects[0] : null;
         $this->warn($one !== null
             ? "Following limits will be set for user `{$one->username}`:"
             : 'Following limits will be set for all ('.count($projects).') users:');
@@ -140,11 +142,9 @@ class SetLimits extends Command
             }
             $user->save();
 
-            // A DinD account takes memory live; anything else waits for its rebuild.
-            $runtime = $user->project()->runtime();
-            if ($selection->has('memory_limit') && $runtime instanceof Dind) {
-                $runtime->applyMemoryLimit();
-                $this->info("  {$user->username}: memory limit applied to the running account.");
+            $runtime = $user->project(app(System::class))->runtime();
+            if ($runtime instanceof Dind) {
+                $this->applyLive($user, $runtime, $selection);
                 $appliedLive++;
             }
         }
@@ -152,11 +152,27 @@ class SetLimits extends Command
         $this->info('Limits have been updated.');
         // Only ask for a rebuild when one is still pending for some account;
         // with no accounts at all, none is.
-        $except = $appliedLive === count($users) ? ['memory_limit'] : [];
+        $except = $appliedLive === count($users) ? ['memory_limit', 'cpu_limit'] : [];
         if (count($users) > 0 && $selection->needsRebuild($except)) {
             $this->warn('Changes will take effect after rebuild');
         }
 
         return 0;
+    }
+
+    private function applyLive(User $user, Dind $runtime, LimitSelection $selection): void
+    {
+        if ($selection->has('memory_limit')) {
+            $runtime->applyMemoryLimit();
+            $this->info("  {$user->username}: memory limit applied to the running account.");
+        }
+        if ($selection->has('cpu_limit')) {
+            try {
+                $runtime->applyCpuLimit();
+                $this->info("  {$user->username}: CPU limit applied to the account.");
+            } catch (CpuLimitDeferred $deferred) {
+                $this->warn("  {$user->username}: {$deferred->getMessage()}");
+            }
+        }
     }
 }

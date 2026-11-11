@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get CPU and memory of each container inside a project
 
-    Without range: each container's latest sample (taken every minute). With range: each container's history in the buckets of GET /metrics/history. cpu_percent counts one core as 100; memory_bytes leaves out page cache the kernel can drop at once, as `docker stats` does. memory_limit_bytes is null when the container has no limit of its own.
+    Without range: each container's latest sample (taken every minute). With range: each container's history in the buckets of GET /metrics/history. cpu_percent counts one core as 100; memory_bytes leaves out page cache the kernel can drop at once, as `docker stats` does. memory_limit_bytes is the most the container can use: its own limit or its project's, whichever is lower.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

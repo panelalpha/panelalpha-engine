@@ -128,4 +128,25 @@ class ServiceLimitsTest extends TestCase
         $this->assertNull(ServiceLimits::toMegabytes(-1));
         $this->assertNull(ServiceLimits::toMegabytes('512p'));
     }
+
+    public function test_a_limit_above_the_account_is_held_to_what_the_account_leaves_its_services(): void
+    {
+        $this->assertSame('3584m', ServiceLimits::heldToAccount('8g', 4096));
+        $this->assertSame('3584m', ServiceLimits::heldToAccount(8589934592, 4096));
+        $this->assertSame('3584m', ServiceLimits::heldToAccount('4g', 4096));
+    }
+
+    public function test_a_limit_within_the_account_is_kept_as_written(): void
+    {
+        $this->assertSame('3584m', ServiceLimits::heldToAccount('3584m', 4096));
+        $this->assertSame('1G', ServiceLimits::heldToAccount('1G', 4096));
+        $this->assertSame(536870912, ServiceLimits::heldToAccount(536870912, 4096));
+    }
+
+    public function test_a_limit_is_kept_when_there_is_nothing_to_hold_it_to(): void
+    {
+        $this->assertSame('8g', ServiceLimits::heldToAccount('8g', null));
+        $this->assertSame('8g', ServiceLimits::heldToAccount('8g', 0));
+        $this->assertSame('${APP_MEMORY:-8g}', ServiceLimits::heldToAccount('${APP_MEMORY:-8g}', 4096));
+    }
 }
