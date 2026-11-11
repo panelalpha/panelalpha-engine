@@ -10,10 +10,13 @@ use App\System;
 use App\System\Services\Webserver;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
+use Tests\Support\AccountFileOwner;
 use Tests\TestCase;
 
 class PhpErrorLogDownloadTest extends TestCase
 {
+    use AccountFileOwner;
+
     private string $root;
 
     protected function setUp(): void
@@ -70,7 +73,7 @@ class PhpErrorLogDownloadTest extends TestCase
         $user = User::make([
             'username' => 'alice',
             'domain' => 'alice.test',
-            'details' => ['template' => 'default', 'UID' => 1001, 'GID' => 1001],
+            'details' => ['template' => 'default', 'UID' => self::accountUid(), 'GID' => self::accountGid()],
         ]);
         $user->save();
 
@@ -101,7 +104,20 @@ class PhpErrorLogDownloadTest extends TestCase
 
         $logFiles = DomainLogFiles::find(User::findByUsername('alice'), 'a.example', app(System::class));
         $this->assertNotNull($logFiles);
-        $this->assertSame('sudophp://' . $this->logPath(), $logFiles->readablePath('php_error.log', true));
+        $this->assertSame('rootfile://' . $this->logPath(), $logFiles->readablePath('php_error.log', true));
+    }
+
+    /** A query string sends the flag as a word: `all_webservers=false` lists what leaving it out lists. */
+    public function test_all_webservers_false_is_the_default_listing(): void
+    {
+        $this->writeLog("one\n");
+
+        $off = $this->getJson('/api/projects/alice/domains/a.example/log-files?all_webservers=false')->assertOk();
+        $on = $this->getJson('/api/projects/alice/domains/a.example/log-files?all_webservers=true')->assertOk();
+
+        $this->assertSame($this->getJson('/api/projects/alice/domains/a.example/log-files')->json('data'), $off->json('data'));
+        $this->assertNull($this->entry($off->json('data')));
+        $this->assertNotNull($this->entry($on->json('data')));
     }
 
     public function test_a_symlinked_log_is_not_listed_and_does_not_download(): void
@@ -153,7 +169,6 @@ class PhpErrorLogDownloadTest extends TestCase
     private function writeLog(string $contents): void
     {
         file_put_contents($this->logPath(), $contents);
-        chown($this->logPath(), 1001);
-        chgrp($this->logPath(), 1001);
+        self::ownByAccount($this->logPath());
     }
 }

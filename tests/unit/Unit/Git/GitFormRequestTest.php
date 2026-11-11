@@ -10,9 +10,7 @@ use App\Http\Requests\Git\GitPullRequest;
 use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use ReflectionMethod;
 use Tests\TestCase;
 
 class GitFormRequestTest extends TestCase
@@ -26,23 +24,6 @@ class GitFormRequestTest extends TestCase
         if (method_exists($request, 'withValidator')) {
             $request->withValidator($validator);
         }
-
-        return $validator->fails();
-    }
-
-    /** @param array<string, mixed> $payload */
-    private function failsAfterPrepare(array $payload, string $requestClass): bool
-    {
-        $base = Request::create('/git/status', 'GET', $payload);
-        /** @var FormRequest $request */
-        $request = $requestClass::createFrom($base);
-        $request->setContainer($this->app);
-        $request->setRedirector($this->app->make('redirect'));
-
-        $prepare = new ReflectionMethod($request, 'prepareForValidation');
-        $prepare->invoke($request);
-
-        $validator = Validator::make($request->all(), $request->rules());
 
         return $validator->fails();
     }
@@ -122,24 +103,24 @@ class GitFormRequestTest extends TestCase
         $this->assertFalse($this->fails(['ref' => 'HEAD'], GitRevertRequest::class));
     }
 
-    public function test_fetch_query_string_true_passes_after_prepare(): void
+    public function test_fetch_query_string_true_passes(): void
     {
-        $this->assertFalse($this->failsAfterPrepare([
+        $this->assertFalse($this->fails([
             'path' => 'public_html',
             'fetch' => 'true',
         ], GitStatusRequest::class));
     }
 
-    public function test_fetch_query_string_false_passes_after_prepare(): void
+    public function test_fetch_query_string_false_passes(): void
     {
-        $this->assertFalse($this->failsAfterPrepare([
+        $this->assertFalse($this->fails([
             'fetch' => 'false',
         ], GitStatusRequest::class));
     }
 
-    public function test_fetch_query_string_banana_fails_after_prepare(): void
+    public function test_fetch_query_string_banana_fails(): void
     {
-        $this->assertTrue($this->failsAfterPrepare([
+        $this->assertTrue($this->fails([
             'fetch' => 'banana',
         ], GitStatusRequest::class));
     }

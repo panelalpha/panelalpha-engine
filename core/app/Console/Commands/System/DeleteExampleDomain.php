@@ -30,7 +30,7 @@ class DeleteExampleDomain extends Command
         $domain = Domain::findExampleDomain();
         if (! $domain) {
             $this->warn('Could not find example domain to delete.');
-            Setting::set('example-domain-created', '');
+            $this->forgetCreatedDomain();
 
             return 0;
         }
@@ -38,7 +38,7 @@ class DeleteExampleDomain extends Command
         $user = $domain->user;
         if (! $user) {
             $this->warn('Example domain found but associated user not found.');
-            Setting::set('example-domain-created', '');
+            $this->forgetCreatedDomain();
 
             return 0;
         }
@@ -60,7 +60,7 @@ class DeleteExampleDomain extends Command
             $exitCode = $this->call('project:delete', $commandArgs);
 
             if ($exitCode === 0) {
-                Setting::set('example-domain-created', '');
+                $this->forgetCreatedDomain();
                 $this->info('Example domain and user deleted successfully.');
 
                 return 0;
@@ -73,6 +73,13 @@ class DeleteExampleDomain extends Command
             $this->info('Deletion cancelled.');
 
             return 0;
+        }
+    }
+
+    private function forgetCreatedDomain(): void
+    {
+        foreach (['example-domain-created', 'vhost-default-ip-domain', 'default_wildcard_domain'] as $name) {
+            Setting::set($name, '');
         }
     }
 }

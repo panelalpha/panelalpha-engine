@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Domains\NewDomain;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
@@ -22,7 +21,6 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsCreate extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = ['domains:create', 'projects:domains:create'];
 
@@ -30,7 +28,6 @@ class DomainsCreate extends Command
         {domain? : Domain name to create}
         {--domain= : Domain name (alternative to the positional argument)}
         {--project= : Project username that will own the domain}
-        {--username= : Deprecated alias for --project}
         {--type=addon : Domain type: addon or sub}
         {--parent-domain= : Parent domain (required for type=sub)}
         {--alias=* : Optional alias hostname(s)}
@@ -42,8 +39,6 @@ class DomainsCreate extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
         $request = $this->validatedRequest();
         if ($request === null) {
             return 1;
@@ -90,7 +85,8 @@ class DomainsCreate extends Command
         }
 
         $refusal = $this->typeRefusal($user, $project, $type, $domainName, $parentDomain)
-            ?? $this->nameRefusal($domainName, $aliases);
+            ?? $this->nameRefusal($domainName, $aliases)
+            ?? NewDomain::claimProblem($project, $domainName, $aliases)['message'] ?? null;
         if ($refusal !== null) {
             $this->error($refusal);
 
@@ -120,7 +116,7 @@ class DomainsCreate extends Command
         if ($domainName === null) {
             return null;
         }
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $type = $this->requestedType();
         $parentDomain = self::normalised($this->option('parent-domain'));
 

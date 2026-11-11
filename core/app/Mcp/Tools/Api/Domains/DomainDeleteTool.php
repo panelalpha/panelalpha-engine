@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('domain_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a domain
+
+    Removes the domain, its aliases, proxy rules, vhosts and any attached tunnel. Its files are kept: the domain directory and its document root stay in the project home, listed in `files_kept`, since they may hold the site's files or serve another domain. Delete them with the file tools when they are no longer needed.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

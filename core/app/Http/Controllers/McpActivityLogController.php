@@ -6,6 +6,7 @@ use App\Http\Requests\McpActivityLogIndexRequest;
 use App\Http\Requests\McpActivityLogStoreRequest;
 use App\Models\McpActivityLog;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\JsonResource;
 use OpenApi\Attributes as OA;
 
 class McpActivityLogController extends Controller
@@ -56,7 +57,7 @@ class McpActivityLogController extends Controller
         $query = McpActivityLog::matching($request->tokenIds(), $request->tokenName(), $request->project())
             ->orderByDesc('created_at');
 
-        return response()->json($query->paginate(20)->withQueryString());
+        return JsonResource::collection($query->paginate(20)->withQueryString())->response();
     }
 
     #[OA\Post(

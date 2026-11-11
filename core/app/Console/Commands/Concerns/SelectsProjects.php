@@ -12,8 +12,6 @@ use Illuminate\Database\Eloquent\Collection;
  */
 trait SelectsProjects
 {
-    use ResolvesProject;
-
     /**
      * The projects this invocation names, or null when it names none -- in
      * which case the reason has already been printed and the command should
@@ -27,7 +25,7 @@ trait SelectsProjects
             return null;
         }
 
-        $username = $this->option('username');
+        $username = $this->option('project');
         if ($username) {
             $user = User::findByUsername((string) $username);
             if (! $user) {
@@ -49,9 +47,7 @@ trait SelectsProjects
      */
     protected function namesProjects(): bool
     {
-        $this->foldProjectOption();
-
-        if (! $this->option('username') && ! $this->option('all')) {
+        if (! $this->option('project') && ! $this->option('all')) {
             $this->error('One of following options is required: `--project=NAME` or `--all`');
 
             return false;

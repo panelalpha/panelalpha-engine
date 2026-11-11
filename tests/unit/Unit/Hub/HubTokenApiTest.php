@@ -314,14 +314,14 @@ class HubTokenApiTest extends HubTestCase
     private function assertRefusedByAbility(TestResponse $response, string $what): void
     {
         $this->assertSame(403, $response->getStatusCode(), $what);
-        $this->assertStringContainsString('This token is limited to part of the API', (string) $response->json('error'), $what);
+        $this->assertStringContainsString('This token is limited to part of the API', (string) $response->json('message'), $what);
     }
 
     private function assertNotRefusedByAbility(TestResponse $response, string $what): void
     {
         $this->assertStringNotContainsString(
             'This token is limited to part of the API',
-            (string) $response->json('error'),
+            (string) $response->json('message'),
             "{$what} answered {$response->getStatusCode()}"
         );
         $this->assertNotSame(401, $response->getStatusCode(), $what);

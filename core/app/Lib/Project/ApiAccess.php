@@ -15,22 +15,14 @@ use App\Models\Task;
 use App\Models\User;
 use App\System;
 use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Throwable;
 
 /**
- * Which projects may use the Engine API, and what the engine hands them.
- *
- * One setting, `api_access_projects`, is the whole record: an entry per allowed
- * project carrying the scope its token was minted with, the token's id and an
- * encrypted copy of its plain value. Nothing outside this class reads it, and
- * the entry it reports never carries the token.
- *
- * Allowing does three things: tells the host firewall to let the project's
- * containers reach :2011, mints a token with the abilities the scope implies,
- * and delivers the URL, the token and, where a client would need it, the CA to
- * the application as environment variables.
+ * Which projects may use the Engine API: one `api_access_projects` entry each, its token encrypted and never reported.
+ * Allowing opens :2011 in the firewall, mints the scope's token and hands the URL, token and CA to the application.
  */
 class ApiAccess
 {
@@ -107,33 +99,28 @@ class ApiAccess
     }
 
     /**
-     * Allows a project, or changes the scope of one already allowed. Allowing a
-     * project that already carries this scope and this MCP flag mints nothing
-     * and queues nothing: it only says so. A changed scope changes the token,
-     * which is the only way the new abilities can reach the application, and the
-     * old one is revoked once the apply that carries the new one has succeeded.
+     * Allows a project or changes its scope, minting a new token on a change; the old one is revoked once an apply delivers
+     * the new one. $deliver false queues no apply, for a first deploy that delivers the token itself.
      *
      * @param  string|list<string>  $scope  self, all, or the projects to allow
      * @return array<string, mixed> the entry, without the token
      */
-    public function allow(User $user, string|array $scope, bool $mcp): array
+    public function allow(User $user, string|array $scope, bool $mcp, bool $deliver = true): array
     {
         $this->assertContainerProject($user);
         $planned = $this->mutate(fn (): array => $this->recordAllowance($user, $scope, $mcp));
         $this->firewall()->apply(self::allowedProjects($this->entries()), [$user->username]);
 
-        if ($planned['apply']) {
-            $this->queueApply($user, $planned['revoke']);
+        if ($planned['apply'] && $deliver) {
+            $this->queueApply($user);
         }
 
         return self::reported($planned['entry']);
     }
 
     /**
-     * Mints a new token for an allowed project with the scope it already has,
-     * less any project deleted since, and revokes the one it replaces and any
-     * older one still tracked once the apply that carries the new one has
-     * succeeded.
+     * Mints a new token with the scope the project has, less any project deleted since; the tokens it
+     * replaces are revoked once an apply has delivered the new one.
      *
      * @param  ?int  $applyTaskId  set to the task the new token travels in
      * @return array<string, mixed> the entry, without the token
@@ -158,16 +145,14 @@ class ApiAccess
                 (bool) ($entry['mcp'] ?? false)
             );
         });
-        $applyTaskId = $this->queueApply($user, $planned['revoke']);
+        $applyTaskId = $this->queueApply($user);
 
         return self::reported($planned['entry']);
     }
 
     /**
-     * Revokes every token this project holds at once -- the current one and one
-     * an earlier replacement left behind -- and clears the entry. The environment
-     * variables leave the running application on the next apply, which is queued
-     * here unless the project is going away with them.
+     * Revokes every token the project was given and clears the entry, answering false when there was none. The
+     * variables leave the application on the next apply, queued here unless the project is going away.
      */
     public function deny(User|string $project, bool $apply = true): bool
     {
@@ -187,9 +172,8 @@ class ApiAccess
     }
 
     /**
-     * Takes a deleted project out of every allowance's list, so a project created
-     * later under its name is not handed to their next token. A list left empty
-     * stays empty: its token reaches no project, never itself or every project.
+     * Takes a deleted project out of every allowance's list, so a project later created under its name is not handed
+     * to their next token. A list left empty stays empty: its token reaches no project, never itself or every project.
      */
     public function removeFromScopes(string $project): void
     {
@@ -203,26 +187,25 @@ class ApiAccess
     }
 
     /**
-     * The apply that carries a new token finished: the token it replaced, and any
-     * older one an earlier failed apply left valid, are revoked now.
+     * The apply that handed the application $env finished: every token minted for the project before the one it
+     * carries is revoked. That one stays the previous token when a newer one is still waiting for its apply.
+     *
+     * @param  array<string, string>  $env  what {@see envFor()} gave the apply
      */
-    public function confirmRevocation(string $project, ?int $tokenId): void
+    public function confirmDelivery(string $project, array $env): void
     {
-        $this->mutate(function () use ($project, $tokenId): void {
-            self::revokeToken($tokenId);
+        $delivered = self::tokenIdIn($env);
+        if ($delivered === null) {
+            return;
+        }
+
+        $this->mutate(function () use ($project, $delivered): void {
+            self::validTokensOf($project)->where('id', '<', $delivered)->update(['revoked_at' => now()]);
 
             $entry = $this->entryOf($project);
-            if ($entry === null) {
-                return;
+            if ($entry !== null) {
+                $this->store($this->withEntry(self::afterDelivery($entry, $delivered)));
             }
-
-            $pending = self::idOf($entry[self::PENDING] ?? null);
-            if ($pending !== null && $pending !== $tokenId) {
-                self::revokeToken($pending);
-            }
-
-            unset($entry[self::PENDING], $entry[self::PENDING_FAILED]);
-            $this->store($this->withEntry($entry));
         });
     }
 
@@ -252,6 +235,12 @@ class ApiAccess
         return (new self)->entryFor($user) !== null;
     }
 
+    /** Whether the project still holds a token an earlier allowance left valid, with or without an entry. */
+    public static function hasValidToken(User|string $project): bool
+    {
+        return self::validTokensOf($project instanceof User ? $project->username : $project)->exists();
+    }
+
     /**
      * A scope as an operator reads it: `self`, `all`, or the projects named.
      *
@@ -259,23 +248,7 @@ class ApiAccess
      */
     public static function scopeLabel(string|array $scope): string
     {
-        if ($scope === []) {
-            return 'no project';
-        }
-
-        return is_array($scope) ? implode(', ', $scope) : $scope;
-    }
-
-    /**
-     * Revokes a token by id; one already gone is not an error.
-     */
-    public static function revokeToken(?int $id): void
-    {
-        if ($id === null) {
-            return;
-        }
-
-        PersonalAccessToken::query()->whereKey($id)->update(['revoked_at' => now()]);
+        return ApiAccessScope::label($scope);
     }
 
     /**
@@ -325,9 +298,8 @@ class ApiAccess
     }
 
     /**
-     * Only a container project has somewhere to put the address, the token and the
-     * certificate, and an address on the tenant network the firewall can admit. A
-     * classic project allowed here would read as allowed and change nothing.
+     * Only a container project has somewhere to put the address, token and certificate, and a tenant-network
+     * address the firewall can admit; a classic project allowed here would read as allowed and change nothing.
      */
     private function assertContainerProject(User $user): void
     {
@@ -345,49 +317,51 @@ class ApiAccess
     }
 
     /**
-     * The setting under the one lock every read-modify-write takes, so two
-     * allowances granted at once cannot each write the other's entry away. A
-     * seam, so a test can shorten the wait or watch the section.
+     * The setting under the one lock every read-modify-write takes, so two allowances at once lose no entry.
+     * A seam, so a test can shorten the wait or watch the section.
      */
     protected function mutate(callable $work): mixed
     {
-        return Cache::lock(self::LOCK, self::LOCK_SECONDS)->block(self::LOCK_SECONDS, $work);
+        return Cache::lock(self::LOCK, self::LOCK_SECONDS)->block(self::LOCK_SECONDS, function () use ($work) {
+            Setting::flushCache();
+
+            return $work();
+        });
     }
 
     /**
      * Stores the allowance a call asked for, or finds the one already there.
      *
      * @param  string|list<string>  $scope
-     * @return array{entry: array<string, mixed>, apply: bool, revoke: ?int}
+     * @return array{entry: array<string, mixed>, apply: bool}
      */
     private function recordAllowance(User $user, string|array $scope, bool $mcp): array
     {
         if ($scope === []) {
-            throw self::scopeProblem($scope);
+            throw ApiAccessScope::problem($scope);
         }
 
         $previous = $this->entryOf($user->username);
         if ($previous !== null && self::sameAllowance($previous, $scope, $mcp)) {
-            return ['entry' => $previous, 'apply' => false, 'revoke' => null];
+            return ['entry' => $previous, 'apply' => false];
         }
 
         return $this->replaceToken($user->username, $previous, $scope, $mcp);
     }
 
     /**
-     * Mints the token the scope needs, stores it and answers the apply that has to
-     * carry it, with the token it replaces.
+     * Mints the token the scope needs and stores it; an apply has to carry it.
      *
      * @param  null|array<string, mixed>  $previous
      * @param  string|list<string>  $scope
-     * @return array{entry: array<string, mixed>, apply: bool, revoke: ?int}
+     * @return array{entry: array<string, mixed>, apply: bool}
      */
     private function replaceToken(string $project, ?array $previous, string|array $scope, bool $mcp): array
     {
         $fresh = $this->freshEntry($project, $previous, $scope, $mcp);
         $this->store($this->withEntry($fresh));
 
-        return ['entry' => $fresh, 'apply' => true, 'revoke' => self::idOf($previous['token_id'] ?? null)];
+        return ['entry' => $fresh, 'apply' => true];
     }
 
     /**
@@ -400,21 +374,20 @@ class ApiAccess
     private static function sameAllowance(array $entry, string|array $scope, bool $mcp): bool
     {
         return ($entry['mcp'] ?? false) === $mcp
-            && self::scopeOf($entry['scope'] ?? self::SCOPE_SELF) === self::scopeOf($scope);
+            && ApiAccessScope::canonical($entry['scope'] ?? self::SCOPE_SELF) === ApiAccessScope::canonical($scope);
     }
 
     /**
-     * Takes the entry away, revoking every token it holds.
+     * Takes the entry away, revoking every token minted for the project; with no entry, still any token an earlier
+     * allowance left valid. True when there was an entry.
      */
     private function forgetAllowance(string $project): bool
     {
-        $entry = $this->entryOf($project);
-        if ($entry === null) {
+        self::validTokensOf($project)->update(['revoked_at' => now()]);
+        if ($this->entryOf($project) === null) {
             return false;
         }
 
-        self::revokeToken(self::idOf($entry['token_id'] ?? null));
-        self::revokeToken(self::idOf($entry[self::PENDING] ?? null));
         $this->store($this->withoutEntry($project));
 
         return true;
@@ -438,9 +411,8 @@ class ApiAccess
     }
 
     /**
-     * The PEM a client has to be given: what :2011 serves is self-signed, or it
-     * is not for the name in the URL. A trusted certificate for that name is
-     * already in the client's store.
+     * The PEM a client has to be given: what :2011 serves is self-signed, or not for the name in the URL.
+     * A trusted certificate for that name is already in the client's store.
      */
     private static function certificateAuthority(?string $url, ?string $pem): ?string
     {
@@ -474,9 +446,8 @@ class ApiAccess
     }
 
     /**
-     * The scheme and the host of an engine URL, without the port it may already
-     * carry: a shipped engine answers on `https://<host>:2011`, and the API port
-     * has to be added exactly once.
+     * The scheme and host of an engine URL, without the port it may carry: a shipped engine answers on
+     * `https://<host>:2011`, and the API port has to be added exactly once.
      */
     private static function hostOnly(string $url): ?string
     {
@@ -495,14 +466,14 @@ class ApiAccess
     {
         $new = Admin::rootAccount()->createToken(
             self::TOKEN_NAME.$project,
-            TokenAbilities::build(api: true, mcp: $mcp, projects: self::projectsFor($project, $scope))
+            TokenAbilities::build(api: true, mcp: $mcp, projects: ApiAccessScope::projects($project, $scope))
         );
 
         $pending = self::idOf($previous[self::PENDING] ?? null);
 
         return [
             'project' => $project,
-            'scope' => self::scopeOf($scope),
+            'scope' => ApiAccessScope::canonical($scope),
             'mcp' => $mcp,
             'token_id' => (int) $new->accessToken->getKey(),
             'token' => Crypt::encryptString($new->plainTextToken),
@@ -513,59 +484,8 @@ class ApiAccess
     }
 
     /**
-     * The entry's own spelling of the scope: self, all, or the named projects, in
-     * one order, so the same set of projects reads the same however it was named.
-     *
-     * @param  string|list<string>  $scope
-     * @return string|list<string>
-     */
-    private static function scopeOf(string|array $scope): string|array
-    {
-        if (is_string($scope)) {
-            return $scope;
-        }
-
-        $names = array_values(array_unique(array_map('strval', $scope)));
-        sort($names);
-
-        return $names;
-    }
-
-    /**
-     * @param  string|list<string>  $scope
-     * @return list<string>|null null for every project on this host
-     */
-    private static function projectsFor(string $project, string|array $scope): ?array
-    {
-        if ($scope === self::SCOPE_ALL) {
-            return null;
-        }
-        if ($scope === self::SCOPE_SELF) {
-            return [$project];
-        }
-        if (! is_array($scope)) {
-            throw self::scopeProblem($scope);
-        }
-
-        $names = [];
-        foreach ($scope as $name) {
-            if (! is_string($name) || ! User::existsByUsername($name)) {
-                throw ProblemException::one(
-                    'scope',
-                    self::PROJECT_UNKNOWN,
-                    sprintf("'%s' is not a project on this engine.", is_string($name) ? $name : gettype($name))
-                );
-            }
-            $names[] = $name;
-        }
-
-        return array_values(array_unique($names));
-    }
-
-    /**
-     * The scope a rotation mints: a listed name that is no longer a project, or
-     * that the token being replaced no longer reaches, is never granted again --
-     * a project created later under a deleted project's name is someone else's.
+     * The scope a rotation mints: a listed name that is gone, or that the old token does not reach, is never granted
+     * again, since a project later created under that name is someone else's.
      *
      * @param  array<string, mixed>  $entry
      * @return string|list<string>
@@ -577,7 +497,7 @@ class ApiAccess
             return (string) $scope;
         }
 
-        $reached = self::projectsReachedBy(self::idOf($entry['token_id'] ?? null));
+        $reached = ApiAccessScope::reachedBy(self::idOf($entry['token_id'] ?? null));
 
         return array_values(array_filter(
             $scope,
@@ -585,16 +505,6 @@ class ApiAccess
                 && ($reached === null || in_array($name, $reached, true))
                 && User::existsByUsername($name)
         ));
-    }
-
-    /**
-     * @return null|list<string> null when the token is gone or reaches every project
-     */
-    private static function projectsReachedBy(?int $tokenId): ?array
-    {
-        $token = $tokenId === null ? null : PersonalAccessToken::query()->find($tokenId);
-
-        return $token instanceof PersonalAccessToken ? TokenAbilities::of($token)->projects() : null;
     }
 
     /**
@@ -611,21 +521,7 @@ class ApiAccess
         return $entry;
     }
 
-    private static function scopeProblem(mixed $scope): ProblemException
-    {
-        return ProblemException::one(
-            'scope',
-            self::SCOPE_INVALID,
-            sprintf(
-                'A scope is "%s", "%s", or a non-empty list of project names, not %s.',
-                self::SCOPE_SELF,
-                self::SCOPE_ALL,
-                is_array($scope) ? 'an empty list' : gettype($scope)
-            )
-        );
-    }
-
-    private function queueApply(User $user, ?int $revokeTokenId = null): ?int
+    private function queueApply(User $user): ?int
     {
         $task = Task::start(
             jobType: ApplyEnvVars::class,
@@ -633,7 +529,7 @@ class ApiAccess
             username: $user->username,
             details: ['action' => self::TASK_ACTION, 'project' => $user->username],
         );
-        ApplyEnvVars::dispatch($user->username, [], (int) $user->getKey(), $revokeTokenId)->attachTask($task);
+        ApplyEnvVars::dispatch($user->username, [], (int) $user->getKey())->attachTask($task);
 
         return (int) $task->getKey();
     }
@@ -644,6 +540,49 @@ class ApiAccess
     private static function idOf(mixed $value): ?int
     {
         return is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * The id of the token $env carries, or null when it carries none this engine issued.
+     *
+     * @param  array<string, string>  $env
+     */
+    private static function tokenIdIn(array $env): ?int
+    {
+        $token = $env[self::ENV_TOKEN] ?? null;
+
+        return $token === null ? null : self::idOf(PersonalAccessToken::findToken($token)?->getKey());
+    }
+
+    /**
+     * The project's valid tokens, by the name every one minted for it carries, untracked ones included.
+     *
+     * @return Builder<PersonalAccessToken>
+     */
+    private static function validTokensOf(string $project): Builder
+    {
+        return PersonalAccessToken::query()
+            ->whereMorphedTo('tokenable', Admin::rootAccount())
+            ->where('name', self::TOKEN_NAME.$project)
+            ->whereNull('revoked_at');
+    }
+
+    /**
+     * The entry once $delivered is in use: nothing is pending when it is the entry's token, and otherwise it is the
+     * one previous token still valid, since every older one is revoked.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return array<string, mixed>
+     */
+    private static function afterDelivery(array $entry, int $delivered): array
+    {
+        if (self::idOf($entry['token_id'] ?? null) === $delivered) {
+            unset($entry[self::PENDING], $entry[self::PENDING_FAILED]);
+
+            return $entry;
+        }
+
+        return [self::PENDING => $delivered] + $entry;
     }
 
     /**
@@ -669,9 +608,8 @@ class ApiAccess
     }
 
     /**
-     * The stored entries. A setting that cannot be read at all -- outside a
-     * booted engine, as a deploy step's unit test is -- allows nobody, like the
-     * database hostname the deploy reads beside it.
+     * The stored entries. A setting that cannot be read at all, outside a booted engine as in a deploy
+     * step's unit test, allows nobody, like the database hostname the deploy reads beside it.
      *
      * @return list<array<string, mixed>>
      */

@@ -59,7 +59,7 @@ class SftpSessionKillTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'sftpUser' => $schema->string()->required(),
+            'sftpUser' => $schema->string()->description('The SFTP account name, with or without its "<project username>_" prefix.')->required(),
         ];
     }
 }

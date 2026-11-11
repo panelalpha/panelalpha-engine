@@ -10,13 +10,15 @@ use App\Mcp\Tools\Api\ApiTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
-use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
+use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('lighthouse_report_create')]
 #[Description(<<<'MARKDOWN'
     Generate a Lighthouse performance report
     MARKDOWN)]
-#[IsDestructive]
+#[IsReadOnly]
+#[IsIdempotent]
 class LighthouseReportCreateTool extends ApiTool
 {
     protected function method(): string

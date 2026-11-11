@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\Domain;
@@ -15,14 +14,12 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsUnsetProxy extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = ['domains:unset-proxy', 'projects:domains:unset-proxy'];
 
     protected $signature = 'domain:unset-proxy
         {--domain= : Domain name or alias}
         {--project= : Project username (optional check)}
-        {--username= : Deprecated alias for --project}
         {--port=* : Listen port(s) to unset; defaults to 80 and 443}
         {--force : Skip confirmation}';
 
@@ -30,10 +27,8 @@ class DomainsUnsetProxy extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
         $domainName = strtolower(trim((string) $this->option('domain')));
-        $projectOpt = trim((string) $this->option('username'));
+        $projectOpt = trim((string) $this->option('project'));
         if ($domainName === '') {
             $this->error('--domain is required.');
 

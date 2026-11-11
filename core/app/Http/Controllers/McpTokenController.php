@@ -138,6 +138,24 @@ class McpTokenController extends Controller
         return response()->json(['data' => $this->formatToken($token)]);
     }
 
+    #[OA\Put(
+        path: '/mcp-tokens/{id}/revoke',
+        summary: 'Revoke an MCP token',
+        description: 'Marks the token revoked, so it is refused everywhere at once and cannot be un-revoked. It stays '
+            .'on the list with `revoked_at` set. Panel-facing; not an MCP tool.',
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['MCP'],
+        parameters: [
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Revoked token', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
     public function revoke(int $id): JsonResponse
     {
         $token = $this->findMcpToken($id);
@@ -146,6 +164,24 @@ class McpTokenController extends Controller
         return response()->json(['data' => $this->formatToken($token)]);
     }
 
+    #[OA\Delete(
+        path: '/mcp-tokens/{id}',
+        summary: 'Delete an MCP token',
+        description: 'Removes the token, which refuses it everywhere at once. Activity log rows it wrote keep their '
+            .'token id. Panel-facing; not an MCP tool.',
+        x: ['mcp-hide' => true],
+        security: [['bearerAuth' => []]],
+        tags: ['MCP'],
+        parameters: [
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'The deleted token\'s id', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
     public function destroy(int $id): JsonResponse
     {
         $token = $this->findMcpToken($id);

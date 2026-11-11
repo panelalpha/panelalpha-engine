@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List the deploys the project still has a log of, newest first
 
-    The project's kept deploys, newest first: id, status, error, kind (install, redeploy), source, branch, commit, trigger (api, mcp, cli, hook), action, task_id and unix start/finish times. Read one with deploy_log_read.
+    The project's kept deploys, newest first: id, status, error, warnings, kind (install, redeploy), source, branch, commit, trigger (api, mcp, cli, hook), action, task_id and unix start/finish times. Read one with deploy_log_read. Container projects only, as for deploy_log_get. Pass page/per_page for one page.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -44,6 +44,17 @@ class DeployListTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'per_page',
+            'page',
+        ];
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function argumentNames(): array
@@ -60,6 +71,8 @@ class DeployListTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
+            'per_page' => $schema->integer()->min(1)->max(200)->description('With per_page or page the answer is one page, newest first, with `meta` and `links` as other lists have, and only that page\'s logs are read. Without either, every kept deploy.'),
+            'page' => $schema->integer()->min(1),
         ];
     }
 }

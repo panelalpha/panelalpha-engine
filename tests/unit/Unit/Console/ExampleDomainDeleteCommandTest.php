@@ -36,7 +36,9 @@ class ExampleDomainDeleteCommandTest extends TestCase
         $this->assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
         $this->assertSame(['example'], $this->projectDelete->projects);
         $this->assertTrue($this->projectDelete->forced);
-        $this->assertSame('', (string) Setting::get('example-domain-created'));
+        foreach (['example-domain-created', 'vhost-default-ip-domain', 'default_wildcard_domain'] as $name) {
+            $this->assertSame('', (string) Setting::get($name), $name);
+        }
     }
 
     public function test_a_failed_delete_keeps_the_example_marked_as_created(): void
@@ -47,6 +49,7 @@ class ExampleDomainDeleteCommandTest extends TestCase
 
         $this->assertSame(1, $tester->getStatusCode());
         $this->assertSame('1', (string) Setting::get('example-domain-created'));
+        $this->assertSame('example.test', Setting::get('vhost-default-ip-domain'), 'A failed delete leaves the domain naming settings alone.');
     }
 
     private function runForced(): CommandTester
@@ -67,6 +70,8 @@ class ExampleDomainDeleteCommandTest extends TestCase
             'details' => ['is_example_domain' => true],
         ]);
         Setting::set('example-domain-created', '1');
+        Setting::set('vhost-default-ip-domain', 'example.test');
+        Setting::set('default_wildcard_domain', '10-0-0-1.sslip.io');
     }
 }
 

@@ -167,7 +167,7 @@ abstract class ApiTool extends Tool
     }
 
     /** The name the tool exposes for an API parameter. */
-    protected function argument(string $apiName): string
+    public function argument(string $apiName): string
     {
         return array_search($apiName, $this->argumentNames(), true) ?: $apiName;
     }
@@ -222,8 +222,8 @@ abstract class ApiTool extends Tool
     {
         $body = $this->decode($response);
         $status = $response->getStatusCode();
-        if ($status >= 400 && $status < 500 && is_array($body)) {
-            $body = $this->withArgumentNames($body);
+        if ($status >= 400 && $status < 500) {
+            $body = $this->errorBody($response, $body);
         }
 
         $payload = ['status' => $status, 'data' => $body];
@@ -303,6 +303,19 @@ abstract class ApiTool extends Tool
     private static function pageThatFits(int $limit, int $size): int
     {
         return max(1, intdiv($limit * self::MAX_RESULT_BYTES, $size * 2));
+    }
+
+    /**
+     * An error body names fields as the API knows them; the caller sent the
+     * tool's names. The arrays withArgumentNames() renames are what an
+     * associative decode gives; a body that is not a JSON object is relayed
+     * as it came.
+     */
+    private function errorBody(SymfonyResponse $response, mixed $body): mixed
+    {
+        $decoded = json_decode((string)$response->getContent(), true);
+
+        return is_array($decoded) ? $this->withArgumentNames($decoded) : $body;
     }
 
     /**
@@ -393,18 +406,21 @@ abstract class ApiTool extends Tool
      */
     protected function rules(): array
     {
+        $types = $this->argumentTypes();
         $rules = [];
 
         foreach ($this->pathParams() as $name) {
-            $rules[$this->argument($name)] = 'required';
+            $argument = $this->argument($name);
+            $rules[$argument] = self::typed('required', $types[$argument] ?? null);
         }
 
         foreach ([...$this->queryParams(), ...$this->bodyParams()] as $name) {
-            $rules[$this->argument($name)] ??= 'sometimes';
+            $argument = $this->argument($name);
+            $rules[$argument] ??= self::typed('sometimes', $types[$argument] ?? null);
         }
         foreach ($this->fileParams() as $param) {
             foreach (UploadArguments::virtualNames($param) as $name) {
-                $rules[$name] ??= 'sometimes';
+                $rules[$name] ??= self::typed('sometimes', $types[$name] ?? null);
             }
         }
         if ($this->returnsFile()) {
@@ -412,6 +428,57 @@ abstract class ApiTool extends Tool
         }
 
         return $rules;
+    }
+
+    /**
+     * The presence rule joined to the schema type, so a wrong-typed value is
+     * refused here. Null stays admitted unless the argument is required.
+     */
+    private static function typed(string $presence, ?string $type): string
+    {
+        if ($type === null) {
+            return $presence;
+        }
+
+        return $presence . '|' . ($presence === 'required' ? $type : 'nullable|' . $type);
+    }
+
+    /**
+     * The validation rule for each argument's JSON type.
+     *
+     * @return array<string, string>
+     */
+    private function argumentTypes(): array
+    {
+        $types = [];
+        foreach ($this->schemaProperties() as $argument => $definition) {
+            $type = self::laravelType($definition['type'] ?? null);
+            if ($type !== null) {
+                $types[(string)$argument] = $type;
+            }
+        }
+
+        return $types;
+    }
+
+    /** A JSON object arrives as an array too, so both take Laravel's `array` rule. */
+    private static function laravelType(mixed $declared): ?string
+    {
+        foreach ((array)$declared as $type) {
+            $rule = match ($type) {
+                'string' => 'string',
+                'integer' => 'integer',
+                'number' => 'numeric',
+                'boolean' => 'boolean',
+                'array', 'object' => 'array',
+                default => null,
+            };
+            if ($rule !== null) {
+                return $rule;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -501,6 +568,8 @@ abstract class ApiTool extends Tool
      * files bag, as a browser sends them; everything else is a JSON body, which is
      * put in the `request` bag too, as Request::createFromBase() does for a real one.
      * REMOTE_ADDR is the caller's, not 127.0.0.1: the firewall checks a deny against it.
+     * The scheme and host are the ones the MCP call came in on, so the links and
+     * `meta.path` an endpoint answers with are the ones REST gives, not http://localhost.
      *
      * @param array<string, mixed> $input
      * @param array<string, mixed> $files
@@ -510,7 +579,7 @@ abstract class ApiTool extends Tool
         $query = $this->only($input, $this->queryParams());
         $body = $this->only($input, $this->bodyParams());
 
-        $uri = '/api' . $path;
+        $uri = (request()?->getSchemeAndHttpHost() ?? '') . '/api' . $path;
         if ($query !== []) {
             $uri .= '?' . http_build_query($query);
         }
@@ -613,16 +682,25 @@ abstract class ApiTool extends Tool
      */
     private function nullableParams(): array
     {
-        $properties = JsonSchemaFactory::object($this->schema(...))->toArray()['properties'] ?? [];
         $renamed = $this->argumentNames();
         $names = [];
-        foreach ((array)$properties as $argument => $definition) {
+        foreach ($this->schemaProperties() as $argument => $definition) {
             if (in_array('null', (array)($definition['type'] ?? []), true)) {
                 $names[] = $renamed[$argument] ?? $argument;
             }
         }
 
         return $names;
+    }
+
+    /**
+     * The properties the tool's schema gives the model, under the argument names it takes.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function schemaProperties(): array
+    {
+        return (array)(JsonSchemaFactory::object($this->schema(...))->toArray()['properties'] ?? []);
     }
 
     /**
@@ -656,7 +734,7 @@ abstract class ApiTool extends Tool
     }
 
     /**
-     * Read through the stream rather than stat(): the path may be sudophp://.
+     * Read through the stream, since the path may be rootfile://.
      *
      * @return ?array<string, mixed>
      */
@@ -671,7 +749,7 @@ abstract class ApiTool extends Tool
         return $window;
     }
 
-    /** Content sniffing cannot see through sudophp://, so an unspecific type falls back to the extension. */
+    /** Content sniffing cannot see through rootfile://, so an unspecific type falls back to the extension. */
     private static function mimeTypeOf(BinaryFileResponse $response, \SplFileInfo $file): string
     {
         $mimeType = explode(';', (string)$response->headers->get('Content-Type'))[0];
@@ -690,7 +768,7 @@ abstract class ApiTool extends Tool
             return null;
         }
 
-        $decoded = json_decode($content, true);
+        $decoded = json_decode($content);
 
         return json_last_error() === JSON_ERROR_NONE ? $decoded : $content;
     }

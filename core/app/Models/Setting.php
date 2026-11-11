@@ -61,6 +61,12 @@ class Setting extends Model
         return self::$allSettings;
     }
 
+    /** Drops the in-process copy, so the next read sees writes another process made. */
+    public static function flushCache(): void
+    {
+        self::$allSettings = null;
+    }
+
     /**
      * @param  array<string, string>  $settings
      */

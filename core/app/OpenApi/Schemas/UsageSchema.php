@@ -33,7 +33,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(
             property: 'bandwidth',
             ref: '#/components/schemas/UsageQuota',
-            description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes; -1 when unlimited, null when no limit is set.',
+            description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes; -1 when unlimited, null when no limit is set. The limit is only reported: a project past it keeps serving.',
         ),
         new OA\Property(property: 'addon_domains', ref: '#/components/schemas/UsageQuota'),
         new OA\Property(property: 'subdomains', ref: '#/components/schemas/UsageQuota'),

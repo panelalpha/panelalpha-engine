@@ -7,7 +7,6 @@ use App\Console\Commands\Concerns\MintsTokens;
 use App\Mcp\ClientRegistration;
 use App\Models\Admin;
 use Illuminate\Console\Command;
-use InvalidArgumentException;
 
 class McpTokensCreateCommand extends Command
 {
@@ -43,6 +42,10 @@ class McpTokensCreateCommand extends Command
             return 1;
         }
 
+        if (! $this->clientIsKnown($client)) {
+            return 1;
+        }
+
         $expiry = $this->expiry();
 
         if ($expiry === false) {
@@ -72,16 +75,32 @@ class McpTokensCreateCommand extends Command
         $this->comment('=============================');
 
         if (! $this->option('no-register')) {
-            try {
-                $this->registrationHint($token->plainTextToken, $client);
-            } catch (InvalidArgumentException $e) {
-                $this->error($e->getMessage());
-
-                return 1;
-            }
+            $this->registrationHint($token->plainTextToken, $client);
         }
 
         return 0;
+    }
+
+    /**
+     * Checked before a token exists, so a typo does not leave one behind.
+     */
+    private function clientIsKnown(?string $client): bool
+    {
+        if ($client === null || $client === '') {
+            return true;
+        }
+
+        if (in_array(strtolower(trim($client)), ClientRegistration::clients(), true)) {
+            return true;
+        }
+
+        $this->error(sprintf(
+            'Unknown client "%s". Known clients: %s.',
+            $client,
+            implode(', ', ClientRegistration::clients())
+        ));
+
+        return false;
     }
 
     /**

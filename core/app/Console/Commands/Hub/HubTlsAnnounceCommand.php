@@ -25,6 +25,8 @@ class HubTlsAnnounceCommand extends Command
         try {
             $connection = HubConnection::active();
             if ($connection === null) {
+                $this->line('Not connected to PanelAlpha Connect; no certificate to announce.');
+
                 return self::SUCCESS;
             }
 

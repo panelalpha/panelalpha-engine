@@ -67,6 +67,7 @@ class DomainController extends Controller
         )),
         responses: [
             new OA\Response(response: 204, description: 'PHP version set'),
+            new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]

@@ -143,13 +143,13 @@ class SystemApiAccessController extends Controller
     #[OA\Delete(
         path: '/system/api-access/{project}',
         summary: 'Stop a project using the Engine API',
-        description: 'Revokes the project\'s token at once, removes its firewall rule and queues an apply that '
+        description: 'Revokes every token the project was given at once, removes its firewall rule and queues an apply that '
             .'takes the API address, the token and the certificate back out of the running application. A project '
-            .'that was not allowed is answered with `removed: false` and nothing changes. Refused with 403 for a '
-            .'token scoped to some projects.',
+            .'that was not allowed is answered with `removed: false`; a token an earlier allowance left valid is '
+            .'revoked all the same. Refused with 403 for a token scoped to some projects.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
-        x: ['mcp-description' => 'Revokes a project\'s Engine API token and closes the host firewall to its containers. Refused 403 for a project-scoped token.'],
+        x: ['mcp-description' => 'Revokes every Engine API token a project was given and closes the host firewall to its containers. Refused 403 for a project-scoped token.'],
         parameters: [
             new OA\Parameter(name: 'project', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
         ],

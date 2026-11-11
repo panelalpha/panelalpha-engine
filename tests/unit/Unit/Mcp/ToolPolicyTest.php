@@ -18,6 +18,7 @@ use App\Mcp\Tools\Api\System\SystemUpdateTool;
 use App\Mcp\Tools\Api\WPCLI\WpCliRunTool;
 use App\Mcp\Tools\Api\ServerMetrics\MetricsCurrentTool;
 use App\Mcp\Tools\Api\Files\FileDownloadTool;
+use App\Mcp\Tools\Api\Lighthouse\LighthouseReportCreateTool;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
 use Laravel\Mcp\Server\Tools\ToolSearch;
@@ -126,6 +127,20 @@ class ToolPolicyTest extends TestCase
         $this->assertTrue($policy->readsOnly(SourceInspectTool::class));
         $this->assertSame('read', $policy->accessOf(SourceInspectTool::class));
         $this->assertContains(SourceInspectTool::class, $policy->filter(self::SAMPLE));
+    }
+
+    /**
+     * A Lighthouse run loads one of the engine's own sites and returns the
+     * report; it stores nothing, so a read-only client may measure a site.
+     */
+    public function test_readonly_mode_offers_the_lighthouse_report(): void
+    {
+        $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => 'readonly']);
+
+        $this->assertSame('POST', $policy->verbOf(LighthouseReportCreateTool::class));
+        $this->assertTrue($policy->readsOnly(LighthouseReportCreateTool::class));
+        $this->assertSame('read', $policy->accessOf(LighthouseReportCreateTool::class));
+        $this->assertSame([LighthouseReportCreateTool::class], $policy->filter([LighthouseReportCreateTool::class]));
     }
 
     /**

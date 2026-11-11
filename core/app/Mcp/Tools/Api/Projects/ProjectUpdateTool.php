@@ -90,7 +90,7 @@ class ProjectUpdateTool extends ApiTool
             'cpu_limit' => $schema->number()->description('CPU cores, -1 for unlimited; null clears the limit')->nullable(),
             'device_read_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
             'device_write_bps' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
-            'bandwidth_limit' => $schema->integer()->description('MB a month, -1 for unlimited; null clears the limit')->nullable(),
+            'bandwidth_limit' => $schema->integer()->description('MB a month, -1 for unlimited; null clears the limit. Reported against the month\'s transfer, never enforced')->nullable(),
             'mysql_databases_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
             'ftp_accounts_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),
             'sftp_accounts_limit' => $schema->integer()->description('-1 for unlimited; null clears the limit')->nullable(),

@@ -2,28 +2,23 @@
 
 namespace App\Console\Commands\System;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\ProxyRule;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 
 class ProxyRuleListCommand extends Command
 {
-    use ResolvesProject;
-
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:list'];
 
-    protected $signature = 'proxy:rule:list {--scope=all : Filter by owner_scope (all, system, user)} {--project= : Filter by username (for user-owned rules)} {--user= : Deprecated alias for --project}';
+    protected $signature = 'proxy:rule:list {--scope=all : Filter by owner_scope (all, system, user)} {--project= : Filter by username (for user-owned rules)}';
 
     protected $description = 'List proxy rules';
 
     public function handle(): int
     {
-        $this->foldProjectOption('user');
-
         $scope = $this->option('scope');
-        $username = $this->option('user');
+        $username = $this->option('project');
 
         $query = ProxyRule::query();
 

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Rename a MySQL database
 
-    Renames one of a project's MySQL databases: copies its data, moves the grants of every project MySQL user to the new name, updates the stored row and drops the old database. Works for classic and dind projects. Refuses the deploy-managed dind application database (<prefix>app) and a name another database of the project already uses. Returns HTTP 202 with the rename Task; poll `GET /tasks/{id}`.
+    Renames one of a project's MySQL databases: copies its data, moves the grants of every project MySQL user to the new name, updates the stored row and drops the old database. Works for classic and dind projects. Refuses the deploy-managed dind application database (<prefix>app) and a name another database of the project already uses. A database of base tables only is renamed in one atomic step; one that also holds views, triggers, routines or events is copied by a dump, and the project's MySQL users lose access to the old name and have their open connections closed before the copy starts, so writes made during it fail instead of being lost. Access is put back if the rename fails. Returns HTTP 202 with the rename Task; poll `GET /tasks/{id}`.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -2,29 +2,23 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\User;
 use App\System\Project\SitePasswordProtection;
 use Illuminate\Console\Command;
 
 class ProjectUnsetPassword extends Command
 {
-    use ResolvesProject;
-
     protected $aliases = ['projects:unset-password'];
 
     protected $signature = 'project:unset-password
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--force : Skip confirmation}';
 
     protected $description = 'Remove site password protection from a project';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $username = trim((string) $this->option('username'));
+        $username = trim((string) $this->option('project'));
         if ($username === '') {
             $this->error('--project is required.');
 

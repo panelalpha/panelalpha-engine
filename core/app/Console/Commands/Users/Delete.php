@@ -2,11 +2,14 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Exceptions\ProblemException;
 use App\Exceptions\ProjectBusyException;
 use App\Lib\Project\ProjectDeleter;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Output\ConsoleOutputInterface;
 
 class Delete extends Command
 {
@@ -28,14 +31,14 @@ class Delete extends Command
         $forced = (bool) $this->option('force');
 
         if (! $forced && ! $this->input->isInteractive()) {
-            $this->error('Deleting without confirmation requires --force.');
+            $this->failLine('Deleting without confirmation requires --force.');
 
             return 1;
         }
 
         if ($this->option('all')) {
             if ($usernames !== []) {
-                $this->error('Pass project names or --all, not both.');
+                $this->failLine('Pass project names or --all, not both.');
 
                 return 1;
             }
@@ -54,7 +57,7 @@ class Delete extends Command
         }
 
         if ($usernames === []) {
-            $this->error('Name at least one project, or pass --all.');
+            $this->failLine('Name at least one project, or pass --all.');
 
             return 1;
         }
@@ -82,7 +85,7 @@ class Delete extends Command
     {
         $user = User::findByUsername($username);
         if (! $user) {
-            $this->error("User `{$username}` not found in database.");
+            $this->failLine("User `{$username}` not found in database.");
 
             return false;
         }
@@ -97,7 +100,11 @@ class Delete extends Command
 
             return true;
         } catch (ProjectBusyException $e) {
-            $this->error($e->plainMessage());
+            $this->failLine($e->getMessage());
+
+            return false;
+        } catch (ProblemException $e) {
+            $this->failLine((string) $e->validator->errors()->first());
 
             return false;
         } catch (\Throwable $e) {
@@ -105,9 +112,17 @@ class Delete extends Command
                 "Could not delete user '{$user->username}': ".$e->getMessage(),
                 ['exception' => $e],
             );
-            $this->error("ERROR deleting user `{$username}`: ".$e->getMessage());
+            $this->failLine("ERROR deleting user `{$username}`: ".$e->getMessage());
 
             return false;
         }
+    }
+
+    /** A reason the operator can act on goes to stderr, as the handler prints one that propagates. */
+    private function failLine(string $message): void
+    {
+        $out = $this->output->getOutput();
+        $err = $out instanceof ConsoleOutputInterface ? $out->getErrorOutput() : $out;
+        $err->writeln('<error>'.OutputFormatter::escape(trim($message)).'</error>');
     }
 }

@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
@@ -16,7 +15,6 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsDeleteTunnel extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     /**
      * Never alias as domains:delete-* — Artisan would resolve `domains:delete` here
@@ -32,16 +30,13 @@ class DomainsDeleteTunnel extends Command
         {--hostname= : Public tunnel hostname (alternative to the positional argument)}
         {--domain= : Local domain the tunnel is attached to (optional filter)}
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--force : Skip confirmation}';
 
     protected $description = 'Detach and delete a public tunnel hostname from a local domain';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $domainOpt = strtolower(trim((string) ($this->option('domain') ?? '')));
 
         $positional = strtolower(trim((string) ($this->argument('hostname') ?? '')));

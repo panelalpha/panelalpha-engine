@@ -59,11 +59,11 @@ class FirewallRuleCreateTool extends ApiTool
             'scope' => $schema->string()->description('Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept, except both on an outbound rule, which is host. One of: host, published, both.'),
             'direction' => $schema->string()->description('Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination. One of: in, out, both.'),
             'protocol' => $schema->string()->description('Omit for both. Required with a port range or list. One of: tcp, udp.'),
-            'port' => $schema->string()->description('Destination port, range (30000:30009) or comma list. Example: 22.'),
+            'port' => $schema->string()->description('Destination port, range (30000:30009) or comma list; at most 15 ports in one rule, a range counting as two. Example: 22.'),
             'source' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any. Example: 203.0.113.7.'),
             'destination' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any.'),
-            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
-            'confirm' => $schema->boolean()->description('A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
+            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, one that is only delete or that has in or out followed by more words (delete everything is kept). A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
+            'confirm' => $schema->boolean()->description('A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose port, range or list includes the engine API port is always refused; a deny with no port blocks its address from every port, the API port included, and is added with a warning for each port the engine opened that it covers.'),
         ];
     }
 }

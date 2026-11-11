@@ -102,9 +102,29 @@ class McpActivityLogIndexTest extends TestCase
 
         $page = $this->list(['token_ids' => [7], 'token_name' => 'pan']);
 
-        $this->assertSame(21, $page['total']);
-        $this->assertStringContainsString('token_ids', urldecode((string) $page['next_page_url']));
-        $this->assertStringContainsString('token_name=pan', (string) $page['next_page_url']);
+        $this->assertSame(21, $page['meta']['total']);
+        $this->assertStringContainsString('token_ids', urldecode((string) $page['links']['next']));
+        $this->assertStringContainsString('token_name=pan', (string) $page['links']['next']);
+    }
+
+    /** The page is the documented data/meta/links shape every other list answers with. */
+    public function test_the_page_carries_meta_and_links_objects(): void
+    {
+        $this->log(['token_id' => 7]);
+        $this->log(['token_id' => 7]);
+
+        $page = $this->list([]);
+
+        $keys = array_keys($page);
+        sort($keys);
+        $this->assertSame(['data', 'links', 'meta'], $keys);
+        $this->assertIsArray($page['data']);
+        $this->assertSame(2, $page['meta']['total']);
+        $this->assertSame(1, $page['meta']['current_page']);
+        $this->assertSame(20, $page['meta']['per_page']);
+        $this->assertNull($page['links']['prev']);
+        $this->assertNull($page['links']['next']);
+        $this->assertIsString($page['links']['first']);
     }
 
     /** @return iterable<string, array{array<string, mixed>}> */

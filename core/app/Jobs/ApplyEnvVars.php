@@ -44,14 +44,11 @@ class ApplyEnvVars implements ShouldQueue
     /**
      * @param  list<string>  $replaced  the keys the run file was generated with, so the ones
      *                                  the account no longer sets are taken back out of its `environment:`
-     * @param  ?int  $revokeTokenId  the token this apply replaces, revoked once the
-     *                               application is up on the new one
      */
     public function __construct(
         public string $username,
         public array $replaced = [],
         ?int $userId = null,
-        public ?int $revokeTokenId = null,
     ) {
         $this->userId = $userId;
         $this->onQueue('default');
@@ -112,14 +109,15 @@ class ApplyEnvVars implements ShouldQueue
         $api = new ApiAccess($runtime->system());
         $runtime->applyProjectEnvVars();
         $runtime->composeWriter()->mergeAccountEnv($user->getEnvVars(), $this->replaced);
-        $runtime->composeWriter()->mergeApiAccessEnv($api->envFor($user));
+        $apiEnv = $api->envFor($user);
+        $runtime->composeWriter()->mergeApiAccessEnv($apiEnv);
 
         $result = $runtime->projectAction('up');
         if (($result['exit_code'] ?? 1) !== 0) {
             throw new RuntimeException(self::composeError($result));
         }
 
-        $api->confirmRevocation($this->username, $this->revokeTokenId);
+        $api->confirmDelivery($this->username, $apiEnv);
     }
 
     /**

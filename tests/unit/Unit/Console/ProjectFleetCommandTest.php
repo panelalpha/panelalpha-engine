@@ -6,6 +6,7 @@ use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\ProjectFleetCommand;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
+use Symfony\Component\Console\Exception\InvalidOptionException;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -67,13 +68,17 @@ class ProjectFleetCommandTest extends TestCase
         $this->assertSame(['alice', 'bob'], SpyFleetCommand::$touched);
     }
 
-    /** `--username` is the old spelling and still answers. */
-    public function test_the_deprecated_username_option_still_works(): void
+    public function test_the_retired_username_option_is_refused(): void
     {
         $this->makeUser('alice');
 
-        $this->assertSame(0, Artisan::call('spy:fleet', ['--username' => 'alice']));
-        $this->assertSame(['alice'], SpyFleetCommand::$touched);
+        $this->expectException(InvalidOptionException::class);
+
+        try {
+            Artisan::call('spy:fleet', ['--username' => 'alice']);
+        } finally {
+            $this->assertSame([], SpyFleetCommand::$touched);
+        }
     }
 
     public function test_the_progress_and_finished_lines_are_printed(): void

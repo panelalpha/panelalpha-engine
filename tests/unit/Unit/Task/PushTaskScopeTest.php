@@ -43,7 +43,7 @@ class PushTaskScopeTest extends TestCase
         $response->assertStatus(403);
         $this->assertSame(
             "This token is limited to projects {$from->username}; POST /projects/{username}/push is outside it.",
-            $response->json('error'),
+            $response->json('message'),
         );
 
         $this->assertSame(0, Task::query()->count());

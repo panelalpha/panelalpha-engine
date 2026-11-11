@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
@@ -17,7 +16,6 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsCreateTunnel extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     /**
      * Do not alias as domains:create-* — exact domains:create already exists, but
@@ -37,7 +35,6 @@ class DomainsCreateTunnel extends Command
         {--hostname= : Public tunnel hostname (alternative to the positional argument)}
         {--domain= : Existing local domain to attach the tunnel to}
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--provider=cloudflare : Tunnel provider (cloudflare|panelalpha)}
         {--force : Skip confirmation}';
 
@@ -45,9 +42,7 @@ class DomainsCreateTunnel extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $domainOpt = strtolower(trim((string) $this->option('domain')));
         $provider = strtolower(trim((string) $this->option('provider')));
 

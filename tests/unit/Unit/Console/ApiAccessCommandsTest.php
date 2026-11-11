@@ -81,7 +81,7 @@ class ApiAccessCommandsTest extends TestCase
     public function test_the_listing_says_when_a_token_is_still_valid_because_its_apply_failed(): void
     {
         $token = $this->allow('alice');
-        (new ApiAccess())->confirmRevocation('alice', null);
+        (new ApiAccess())->confirmDelivery('alice', (new ApiAccess())->envFor($this->user('alice')));
         Setting::set(ApiAccess::SETTING, (string) json_encode([[
             'project' => 'alice',
             'scope' => ApiAccess::SCOPE_ALL,
@@ -146,5 +146,41 @@ class ApiAccessCommandsTest extends TestCase
 
         $this->assertStringContainsString('Allowed alice', $first);
         $this->assertStringContainsString('nothing changed', Artisan::output());
+    }
+
+    public function test_denying_a_project_revokes_its_tokens_and_removes_the_allowance(): void
+    {
+        $this->allow('alice');
+        $this->assertTrue(ApiAccess::hasValidToken('alice'));
+
+        $exit = Artisan::call('system:api-access:deny', ['project' => 'alice']);
+
+        $this->assertSame(0, $exit);
+        $this->assertStringContainsString('Denied alice', Artisan::output());
+        $this->assertNull((new ApiAccess())->entryFor($this->user('alice')));
+        $this->assertFalse(ApiAccess::hasValidToken('alice'));
+    }
+
+    public function test_denying_a_never_allowed_project_says_nothing_changed(): void
+    {
+        $exit = Artisan::call('system:api-access:deny', ['project' => 'classic1']);
+
+        $this->assertSame(0, $exit);
+        $this->assertStringContainsString('nothing changed', Artisan::output());
+    }
+
+    public function test_denying_revokes_a_token_an_allowance_left_behind(): void
+    {
+        $this->allow('alice');
+        Setting::set(ApiAccess::SETTING, '[]');
+        $this->assertTrue(ApiAccess::hasValidToken('alice'));
+
+        $exit = Artisan::call('system:api-access:deny', ['project' => 'alice']);
+
+        $output = Artisan::output();
+        $this->assertSame(0, $exit);
+        $this->assertStringContainsString('left valid is revoked now', $output);
+        $this->assertStringNotContainsString('nothing changed', $output);
+        $this->assertFalse(ApiAccess::hasValidToken('alice'));
     }
 }

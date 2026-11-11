@@ -5,6 +5,7 @@ namespace App\Console\Commands\System;
 use App\System;
 use App\System\Network;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 
 class BuildIpv4NatMap extends Command
 {
@@ -19,7 +20,14 @@ class BuildIpv4NatMap extends Command
 
     public function handle(): int
     {
-        $lookupUrl = $this->option('lookup-url') ?: Network::DEFAULT_IPV4_NAT_LOOKUP_URL;
+        $lookupUrl = (string) $this->option('lookup-url');
+        if ($lookupUrl !== '' && ! Str::isUrl($lookupUrl)) {
+            $this->error('The --lookup-url must be a URL.');
+
+            return self::FAILURE;
+        }
+
+        $lookupUrl = $lookupUrl !== '' ? $lookupUrl : Network::DEFAULT_IPV4_NAT_LOOKUP_URL;
         $replaceDefaultIpv4 = (bool) $this->option('replace-default-ipv4');
 
         $result = (new System)->network()->rebuildIpv4NatMaps($lookupUrl, $replaceDefaultIpv4);

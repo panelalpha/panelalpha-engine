@@ -18,11 +18,11 @@ class PruneHttpAcmeChallenges extends Command
 
     public function handle(): int
     {
-        $ttlHours = (int) ($this->option('ttl-hours') ?: env('HTTP_ACME_CHALLENGE_TTL_HOURS', HttpAcmeChallengeStore::DEFAULT_TTL_HOURS));
+        $ttlHours = (int) ($this->option('ttl-hours') ?? env('HTTP_ACME_CHALLENGE_TTL_HOURS', HttpAcmeChallengeStore::DEFAULT_TTL_HOURS));
         if ($ttlHours < 1) {
-            $this->warn('TTL hours must be >= 1, skipping.');
+            $this->error('TTL hours must be >= 1.');
 
-            return 0;
+            return 1;
         }
 
         $this->info("Pruning HTTP ACME challenges older than {$ttlHours}h...");
