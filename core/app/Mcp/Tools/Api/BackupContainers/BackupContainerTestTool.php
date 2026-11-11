@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_container_test')]
 #[Description(<<<'MARKDOWN'
     Test backup container connectivity
+
+    Writes and removes a probe file. A failure answers 422 with `message`: the driver, host and location, then the storage's own error, its secrets masked.
     MARKDOWN)]
 #[IsDestructive]
 class BackupContainerTestTool extends ApiTool

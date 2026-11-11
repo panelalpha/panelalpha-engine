@@ -13,12 +13,12 @@ use App\Integrations\Storage\Local;
 use App\Jobs\CreateBackup;
 use App\Jobs\DeleteBackup;
 use App\Jobs\RestoreBackup;
-use App\Lib\Project\ProjectRebuild;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
+use App\System\Projects;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -80,6 +80,7 @@ class BackupController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Backup accepted', content: new OA\JsonContent(ref: '#/components/schemas/Backup')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::BUSY_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -108,12 +109,10 @@ class BackupController extends Controller
             username: $backup->username,
             details: ['backup_id' => $backup->id, 'action' => 'backup', 'kind' => $backup->kind],
         );
+        $backup->recordTask('backup', $task);
         CreateBackup::dispatch($backup->id)->attachTask($task);
 
-        $this->recordTask($backup, $task);
-        $backup->load(['container', 'items']);
-
-        return (new BackupResource($backup))
+        return (new BackupResource($backup->fresh(['container', 'items'])))
             ->response()
             ->setStatusCode(202);
     }
@@ -144,13 +143,23 @@ class BackupController extends Controller
     #[OA\Post(
         path: '/projects/{username}/backups/{id}/restore',
         summary: 'Restore a project backup',
+        description: 'Restores the whole backup, or the parts `only` names, or all but the parts `exclude` names; the two cannot be combined (422 on `only`). '
+            .'Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['confirm'],
             properties: [
                 new OA\Property(property: 'confirm', type: 'boolean'),
-                new OA\Property(property: 'only', type: 'object', nullable: true),
-                new OA\Property(property: 'exclude', type: 'object', nullable: true),
+                new OA\Property(
+                    property: 'only',
+                    description: 'Restore only these parts. Not with `exclude`.',
+                    allOf: [new OA\Schema(ref: '#/components/schemas/BackupRestoreFilter')],
+                ),
+                new OA\Property(
+                    property: 'exclude',
+                    description: 'Restore all but these parts. Not with `only`.',
+                    allOf: [new OA\Schema(ref: '#/components/schemas/BackupRestoreFilter')],
+                ),
                 new OA\Property(property: 'delete_existing_files', description: 'Default true: swap the home for the restored copy. False extracts over the existing tree.', type: 'boolean'),
             ],
         )),
@@ -162,7 +171,7 @@ class BackupController extends Controller
         responses: [
             new OA\Response(response: 202, description: 'Restore accepted', content: new OA\JsonContent(ref: '#/components/schemas/Backup')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Backup is not completed. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
+            new OA\Response(response: 409, description: ApiDefinitions::BUSY_RESPONSE.'. Backup is not completed. '.ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -198,9 +207,8 @@ class BackupController extends Controller
             username: $backup->username,
             details: ['backup_id' => $backup->id, 'action' => 'restore'],
         );
+        $backup->recordTask('restore', $task);
         RestoreBackup::dispatch($backup->id, $only, $exclude, $deleteExistingFiles)->attachTask($task);
-
-        $this->recordTask($backup, $task);
 
         return (new BackupResource($backup->fresh(['container', 'items'])))
             ->response()
@@ -237,9 +245,8 @@ class BackupController extends Controller
             username: $backup->username,
             details: ['backup_id' => $backup->id, 'action' => 'delete'],
         );
+        $backup->recordTask('delete', $task);
         DeleteBackup::dispatch($backup->id)->attachTask($task);
-
-        $this->recordTask($backup, $task);
 
         return (new BackupResource($backup->fresh(['container', 'items'])))
             ->response()
@@ -337,7 +344,7 @@ class BackupController extends Controller
     /** A 409 now rather than a queued task that fails: backup and restore stop the stack and need the deploy lock. */
     private function assertIdle(User $user): void
     {
-        app(ProjectRebuild::class)->assertIdle($user);
+        Projects::assertIdle($user);
     }
 
     /** The project's own backup with its container and items loaded, or a 404. */
@@ -353,14 +360,5 @@ class BackupController extends Controller
         $backup->loadMissing(['container', 'items']);
 
         return $backup;
-    }
-
-    private function recordTask(BackupRecord $backup, Task $task): void
-    {
-        $backup->refresh();
-        $status = $backup->async_status ?? [];
-        $status['task_id'] = $task->id;
-        $backup->async_status = $status;
-        $backup->save();
     }
 }

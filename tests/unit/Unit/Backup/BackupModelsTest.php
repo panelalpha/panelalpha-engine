@@ -34,6 +34,19 @@ class BackupModelsTest extends TestCase
         $this->assertSame('super-secret', $row->credentials['secret_access_key']);
     }
 
+    public function test_a_container_names_the_values_to_mask_in_a_message(): void
+    {
+        $row = new BackupContainer();
+        $row->driver = 'sftp';
+        $row->credentials = ['host' => 'h.example', 'username' => 'u', 'password' => 'p4ss', 'private_key' => 'KEY', 'passphrase' => ''];
+
+        $this->assertSame(['p4ss', 'KEY'], $row->maskedInMessages());
+
+        $row->driver = 's3';
+        $row->credentials = ['access_key_id' => 'AKIA', 'secret_access_key' => 'S3CRET'];
+        $this->assertSame(['AKIA', 'S3CRET'], $row->maskedInMessages());
+    }
+
     public function test_credentials_column_is_declared_as_long_text(): void
     {
         $create = file_get_contents(base_path('database/migrations/2026_09_04_120000_create_backup_containers_table.php'));

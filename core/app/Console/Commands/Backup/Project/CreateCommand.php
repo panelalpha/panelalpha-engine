@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Backup\Project;
 
+use App\Exceptions\DeployAlreadyRunningException;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\User;
@@ -45,7 +46,11 @@ class CreateCommand extends Command
         $backup = BackupRecord::prepare($user, $container, 'artisan');
 
         try {
-            $user->project()->backup($backup)->run();
+            $user->project()->backup($backup)->runOrDiscard();
+        } catch (DeployAlreadyRunningException $e) {
+            $this->error($e->getMessage());
+
+            return 1;
         } catch (LogicException $e) {
             $this->error($e->getMessage());
 

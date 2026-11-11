@@ -18,6 +18,9 @@ final class JobBudget
     /** An inner command's own timeout, below the job's. */
     public const COMMAND_SECONDS = 6600;
 
+    /** Left of SECONDS for the rollback and cleanup that runs after a step's window is spent. */
+    public const CLEANUP_SECONDS = self::SECONDS - self::COMMAND_SECONDS;
+
     /** The worker's `--timeout`, above the job's so it never kills a live job. */
     public const WORKER_SECONDS = 7800;
 

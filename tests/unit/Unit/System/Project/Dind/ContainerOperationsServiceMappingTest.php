@@ -3,10 +3,14 @@
 namespace Tests\Unit\System\Project\Dind;
 
 use App\Models\User as ModelsUser;
+use App\Support\JobBudget;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AbstractApplication;
 use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\ShellOperations;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -16,12 +20,15 @@ use Tests\TestCase;
  */
 class ContainerOperationsServiceMappingTest extends TestCase
 {
-    private const COMPOSE = '/opt/users/alice/docker-compose.yml';
+    private const COMPOSE = '/opt/panelalpha/shared-hosting/users/alice/docker-compose.yml';
 
     private string $storage;
 
     /** @var list<list<string>> */
     private array $commands = [];
+
+    /** @var list<int> */
+    private array $timeouts = [];
 
     /** @var list<string|\Throwable> what each `stat` of /root answers, in turn */
     private array $owners = [];
@@ -80,6 +87,19 @@ class ContainerOperationsServiceMappingTest extends TestCase
         $this->assertSame([], $this->probes());
     }
 
+    public function test_compose_stop_and_start_run_on_the_cleanup_reserve(): void
+    {
+        $operations = $this->operations(hasApp: true);
+
+        $operations->composeStop();
+        $operations->composeStart();
+
+        $this->assertNotEmpty($this->timeouts);
+        foreach ($this->timeouts as $timeout) {
+            $this->assertSame(JobBudget::CLEANUP_SECONDS, $timeout);
+        }
+    }
+
     /** @return list<list<string>> */
     private function recreates(): array
     {
@@ -100,9 +120,9 @@ class ContainerOperationsServiceMappingTest extends TestCase
     private function indexOfServiceAction(string $action): int
     {
         return $this->indexOf(static function (array $c) use ($action): bool {
-            $script = (string) end($c);
+            $compose = LocalRoot::composeCommand($c);
 
-            return str_contains($script, "'{$action}'") && str_contains($script, "'web'");
+            return in_array($action, $compose, true) && in_array('web', $compose, true);
         });
     }
 
@@ -118,28 +138,30 @@ class ContainerOperationsServiceMappingTest extends TestCase
         $this->fail('the expected command was never run');
     }
 
-    private function operations(): ContainerOperations
+    private function operations(bool $hasApp = false): ContainerOperations
     {
-        $project = $this->project();
+        $project = $this->project($hasApp);
 
         return new ContainerOperations($project, new ShellOperations($project));
     }
 
-    private function project(): Dind
+    private function project(bool $hasApp = false): Dind
     {
-        $system = new class ($this->commands, $this->owners) extends System {
+        $system = new class ($this->commands, $this->owners, $this->timeouts) extends System {
             /**
              * @param list<list<string>> $commands
              * @param list<string|\Throwable> $owners
+             * @param list<int> $timeouts
              */
-            public function __construct(private array &$commands, private array &$owners)
+            public function __construct(private array &$commands, private array &$owners, private array &$timeouts)
             {
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $argv = array_values((array) $cmd);
+                $argv = LocalRoot::plain(array_values((array) $cmd));
                 $this->commands[] = $argv;
+                $this->timeouts[] = $timeout;
                 if (array_slice($argv, -2) === ['%u', '/root']) {
                     $owner = array_shift($this->owners) ?? '';
                     if ($owner instanceof \Throwable) {
@@ -150,6 +172,16 @@ class ContainerOperationsServiceMappingTest extends TestCase
                 }
 
                 return '';
+            }
+
+            /** The account's and sysbox's start times are unknown, as on a host that cannot answer. */
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->commands[] = LocalRoot::plain(array_values((array) $cmd));
+                $unknown = new Process(['php', '-r', 'exit(1);']);
+                $unknown->run();
+
+                return $unknown;
             }
         };
 
@@ -166,6 +198,9 @@ class ContainerOperationsServiceMappingTest extends TestCase
         $project->method('awaitReady')->willReturnCallback(function (): void {
             $this->awaited++;
         });
+        if ($hasApp) {
+            $project->method('app')->willReturn($this->createStub(AbstractApplication::class));
+        }
 
         return $project;
     }

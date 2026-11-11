@@ -27,7 +27,9 @@ under one of the three paths the engine persists on the host: `/home`,
 Anywhere else (a plain `/var/backups`, say) lives in the container's writable
 layer and would be lost the next time that container is recreated, while the
 backup rows still point at it, so the engine refuses such a location with a 422
-when you create or change the store.
+when you create or change the store. It refuses the engine's own directory,
+`/opt/panelalpha/shared-hosting`, the same way: only the engine's own files may
+be written there, so every backup into it would fail.
 
 Keep local stores under `/opt/panelalpha/backups/`. Avoid a folder directly in
 `/home`: every project's home is `/home/<project name>`, so `/home/backups`

@@ -2,12 +2,24 @@
 
 namespace Tests\Unit\Copy;
 
+use App\Exceptions\DeployBusyException;
+use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\User;
 use App\System\Projects;
+use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 class GuardsTest extends TestCase
 {
+    use InMemoryDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->bootInMemoryDatabase();
+    }
+
     private function user(string $username, ?string $template, ?int $id = 1, ?int $stagingOf = null, string $status = 'active'): User
     {
         $u = new User();
@@ -131,6 +143,20 @@ class GuardsTest extends TestCase
         } catch (\RuntimeException $e) {
             $this->assertSame(409, $e->getCode());
             throw $e;
+        }
+    }
+
+    public function test_assert_idle_rejects_a_backup_holding_the_deploy_lock(): void
+    {
+        $username = 'lock' . bin2hex(random_bytes(6));
+        $lock = DeployLock::acquireFor($username, DeployLock::HOLDER_BACKUP);
+
+        try {
+            $this->expectException(DeployBusyException::class);
+            Projects::assertIdle($this->user($username, 'dind'));
+        } finally {
+            $lock->release();
+            DeployLogger::deleteUserLogs($username);
         }
     }
 }

@@ -2,24 +2,54 @@
 
 namespace Tests\Unit\System\Project\Backup;
 
-use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use App\Support\JobBudget;
+use App\Support\JobDeadline;
 use App\System;
 use App\System\Project as ProjectAggregate;
-use App\System\Project\Backup;
+use App\System\Project\Backup\ProjectFiles;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 
 /**
- * engine#791: `Backup::tarProject()` and `extractProjectArchive()` ran `tar`
+ * `ProjectFiles::archive()` and `extract()` ran `tar`
  * through `execOnHost()`'s 600 s default, so a ~/project of tens of GB was
  * killed mid-tar. They must pass the job's long budget.
+ *
+ * That budget is shared with the other backup and restore steps, so a step is
+ * capped at what is left of one deadline, not at the full window.
  */
 class BackupProjectTarTimeoutTest extends TestCase
 {
     public function test_the_project_tar_steps_use_the_job_budget_not_the_600s_default(): void
     {
-        $system = new class () extends System {
+        $system = $this->recordingSystem();
+        $files = $this->projectFilesFor($system);
+
+        $files->archive('/tmp/files.tar.gz');
+        $files->extract('/tmp/files.tar.gz', 'project.incoming');
+
+        $tars = $this->tarTimeouts($system);
+        $this->assertCount(2, $tars, 'the archive step and the extract step both run tar');
+        foreach ($tars as $timeout) {
+            $this->assertSame(JobBudget::COMMAND_SECONDS, $timeout, 'tar must not run on the 600 s default');
+        }
+    }
+
+    public function test_a_shared_deadline_caps_a_project_tar_below_the_single_command_window(): void
+    {
+        $system = $this->recordingSystem();
+        $files = $this->projectFilesFor($system, new JobDeadline(microtime(true) + 120));
+
+        $files->archive('/tmp/files.tar.gz');
+
+        $this->assertSame([120], $this->tarTimeouts($system));
+    }
+
+    private function recordingSystem(): System
+    {
+        return new class () extends System {
             /** @var list<array{0: list<string>, 1: int}> */
             public array $ran = [];
 
@@ -28,8 +58,18 @@ class BackupProjectTarTimeoutTest extends TestCase
                 return sys_get_temp_dir();
             }
 
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                $argv = (array) $cmd;
+
+                return array_slice(array_values($argv), 0, 2) === [LocalRoot::CLIENT, '--host']
+                    ? $this->execOnHost($argv, $env, $timeout)
+                    : parent::exec($cmd, $env, $timeout);
+            }
+
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $this->ran[] = [(array) $cmd, $timeout];
 
                 return '';
@@ -50,32 +90,25 @@ class BackupProjectTarTimeoutTest extends TestCase
                 };
             }
         };
+    }
 
+    private function projectFilesFor(System $system, ?JobDeadline $deadline = null): ProjectFiles
+    {
         $user = new User();
         $user->username = 'alice';
         $project = new ProjectAggregate($system, $user);
-        $backup = new class ($project, new BackupRecord()) extends Backup {
-            public function tarForTest(string $dest): void
-            {
-                $this->tarProject($dest);
-            }
 
-            public function extractForTest(string $archivePath, string $incomingDir): void
-            {
-                $this->extractProjectArchive($archivePath, $incomingDir);
-            }
-        };
+        return new ProjectFiles($project, $deadline ?? JobDeadline::startingNow());
+    }
 
-        $backup->tarForTest('/tmp/files.tar.gz');
-        $backup->extractForTest('/tmp/files.tar.gz', 'project.incoming');
-
-        $tars = array_values(array_filter(
-            $system->ran,
-            static fn (array $call): bool => in_array('tar', $call[0], true)
+    /**
+     * @return list<int>
+     */
+    private function tarTimeouts(object $system): array
+    {
+        return array_values(array_map(
+            static fn (array $call): int => $call[1],
+            array_filter($system->ran, static fn (array $call): bool => in_array('tar', $call[0], true)),
         ));
-        $this->assertCount(2, $tars, 'the archive step and the extract step both run tar');
-        foreach ($tars as [$cmd, $timeout]) {
-            $this->assertSame(JobBudget::COMMAND_SECONDS, $timeout, 'tar must not run on the 600 s default');
-        }
     }
 }

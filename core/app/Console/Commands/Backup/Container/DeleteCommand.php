@@ -33,6 +33,12 @@ class DeleteCommand extends Command
             return 1;
         }
 
+        if ($container->schedules()->exists()) {
+            $this->error('Cannot delete backup container while a backup schedule uses it.');
+
+            return 1;
+        }
+
         $hasBackups = $container->backups()->exists();
         if ($hasBackups && ! $this->option('delete-backups')) {
             $this->error('Cannot delete backup container while backups exist.');
@@ -83,7 +89,7 @@ class DeleteCommand extends Command
             }
         }
 
-        $container->delete();
+        $container->deleteWithEmptyLocation();
         $this->info('Backup container deleted successfully.');
 
         return 0;

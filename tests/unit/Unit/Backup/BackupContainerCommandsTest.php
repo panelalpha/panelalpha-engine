@@ -3,6 +3,7 @@
 namespace Tests\Unit\Backup;
 
 use App\Models\BackupContainer;
+use Illuminate\Testing\PendingCommand;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -18,18 +19,18 @@ class BackupContainerCommandsTest extends TestCase
     {
         parent::setUp();
         // Credentials are an encrypted cast.
-        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
         $this->bootInMemoryDatabase();
     }
 
-    private function create(string $args): \Illuminate\Testing\PendingCommand
+    private function create(string $args): PendingCommand
     {
-        return $this->artisan('backup:container:create --no-interaction ' . $args);
+        return $this->artisan('backup:container:create --no-interaction '.$args);
     }
 
-    private function update(string $args): \Illuminate\Testing\PendingCommand
+    private function update(string $args): PendingCommand
     {
-        return $this->artisan('backup:container:update --no-interaction ' . $args);
+        return $this->artisan('backup:container:update --no-interaction '.$args);
     }
 
     public function test_create_refuses_what_a_script_left_out_or_got_wrong(): void
@@ -41,7 +42,7 @@ class BackupContainerCommandsTest extends TestCase
             ['--name=a --location=/b', 'The --driver option is required in non-interactive mode.'],
             ['--name=a --driver=local', 'The --location option is required in non-interactive mode.'],
             ['--name=a --driver=nfs --location=/b', 'Driver must be one of: local, s3, ftp, ftps, sftp.'],
-            ['--name=a --driver=local --location=' . str_repeat('x', 1025), 'Storage location must be at most 1024 characters.'],
+            ['--name=a --driver=local --location='.str_repeat('x', 1025), 'Storage location must be at most 1024 characters.'],
             ['--name=a --driver=local --location=/home', 'Local backup location must not be empty, filesystem root, or /home.'],
             ['--name=a --driver=local --location=/opt/panelalpha/backups/../etc', 'Local backup location must not contain .. segments.'],
             ['--name=taken --driver=local --location=/opt/panelalpha/backups/taken', "A backup container named 'taken' already exists."],
@@ -96,11 +97,45 @@ class BackupContainerCommandsTest extends TestCase
             ['disk', 'No updates provided.'],
             ['disk --driver=s3', 'Credentials are required for non-local backup storage.'],
             ['disk --driver=sftp --sftp-host=h', 'Credential username is required for this driver.'],
+            ['disk --location=/var/backups/v', 'Local backup location must be under a path this engine persists'],
+            ['disk --driver=local --location=/home', 'Local backup location must not be empty, filesystem root, or /home.'],
         ];
 
         foreach ($cases as [$args, $message]) {
             $this->update($args)->expectsOutputToContain($message)->assertExitCode(1);
         }
+
+        $this->assertSame('/opt/panelalpha/backups/disk', BackupContainer::query()->where('name', 'disk')->firstOrFail()->location);
+    }
+
+    public function test_create_and_update_refuse_a_local_location_in_the_engine_directory(): void
+    {
+        BackupContainer::create(['name' => 'disk', 'driver' => 'local', 'location' => '/opt/panelalpha/backups/disk', 'credentials' => null]);
+        $refusal = "Local backup location must not be inside the engine's directory (/opt/panelalpha/shared-hosting)";
+
+        $this->create('--force --name=inside --driver=local --location=/opt/panelalpha/shared-hosting/backups')
+            ->expectsOutputToContain($refusal)
+            ->assertExitCode(1);
+        $this->update('disk --force --location=/opt/panelalpha/shared-hosting/backups')
+            ->expectsOutputToContain($refusal)
+            ->assertExitCode(1);
+
+        $this->assertSame(1, BackupContainer::query()->count());
+        $this->assertSame('/opt/panelalpha/backups/disk', BackupContainer::query()->where('name', 'disk')->firstOrFail()->location);
+    }
+
+    public function test_a_failing_store_test_names_what_failed(): void
+    {
+        BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'my-bucket', 'credentials' => [
+            'access_key_id' => 'AKIAIOSFODNN7EXAMPLE',
+            'secret_access_key' => 'wJalrXUtnFEMI-K7MDENG',
+            'endpoint' => 'http://127.0.0.1:1',
+            'use_path_style_endpoint' => true,
+        ]]);
+
+        $this->artisan('backup:container:test bucket')
+            ->expectsOutputToContain('Backup storage is not writable: Error executing "PutObject" on "http://127.0.0.1:1/my-bucket/')
+            ->assertExitCode(1);
     }
 
     public function test_update_merges_new_credentials_over_the_stored_ones(): void
@@ -121,6 +156,20 @@ class BackupContainerCommandsTest extends TestCase
             ['host' => 'new.example', 'username' => 'u', 'password' => 'p', 'port' => 2121],
             $box->fresh()->credentials
         );
+    }
+
+    public function test_switching_to_local_without_a_location_checks_the_kept_location(): void
+    {
+        BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'my-bucket', 'credentials' => ['access_key_id' => 'a', 'secret_access_key' => 'b']]);
+        BackupContainer::create(['name' => 'ftpdir', 'driver' => 'ftp', 'location' => '/opt/panelalpha/backups/ftpdir', 'credentials' => ['host' => 'h', 'username' => 'u']]);
+
+        $this->update('bucket --force --driver=local')
+            ->expectsOutputToContain('Local backup location must be under a path this engine persists')
+            ->assertExitCode(1);
+        $this->update('ftpdir --force --driver=local')->assertExitCode(0);
+
+        $this->assertSame('s3', BackupContainer::query()->where('name', 'bucket')->firstOrFail()->driver);
+        $this->assertSame('local', BackupContainer::query()->where('name', 'ftpdir')->firstOrFail()->driver);
     }
 
     public function test_switching_to_local_drops_the_credentials(): void

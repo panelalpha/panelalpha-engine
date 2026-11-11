@@ -7,13 +7,14 @@ use App\Http\Requests\BackupContainerUpdateRequest;
 use App\Http\Resources\BackupContainerCollection;
 use App\Http\Resources\BackupContainerResource;
 use App\Jobs\DeleteBackupContainer;
+use App\Lib\Backup\StorageProbe;
 use App\Models\BackupContainer;
 use App\Models\Task;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
-use Throwable;
+use RuntimeException;
 
 class BackupContainerController extends Controller
 {
@@ -72,7 +73,7 @@ class BackupContainerController extends Controller
         )),
         tags: ['Backup Containers'],
         responses: [
-            new OA\Response(response: 200, description: 'Backup container created', content: new OA\JsonContent(ref: '#/components/schemas/BackupContainer')),
+            new OA\Response(response: 201, description: 'Backup container created', content: new OA\JsonContent(ref: '#/components/schemas/BackupContainer')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
@@ -204,7 +205,7 @@ class BackupContainerController extends Controller
         }
 
         if (! $container->backups()->exists()) {
-            $container->delete();
+            $container->deleteWithEmptyLocation();
 
             return new BackupContainerResource($container);
         }
@@ -237,6 +238,7 @@ class BackupContainerController extends Controller
     #[OA\Post(
         path: '/backup-containers/{id}/test',
         summary: 'Test backup container connectivity',
+        description: 'Writes and removes a probe file. A failure answers 422 with `message`: the driver, host and location, then the storage\'s own error, its secrets masked.',
         security: [['bearerAuth' => []]],
         tags: ['Backup Containers'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -253,8 +255,8 @@ class BackupContainerController extends Controller
         $container = BackupContainer::findOrFail($id);
 
         try {
-            $container->storage()->test();
-        } catch (Throwable $e) {
+            StorageProbe::check($container);
+        } catch (RuntimeException $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
             ], 422);

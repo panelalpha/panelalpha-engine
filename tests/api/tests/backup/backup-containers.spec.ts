@@ -57,23 +57,25 @@ test.describe('backup stores', () => {
     });
   });
 
-  test('a store whose location cannot be written fails its test', async ({ api }) => {
-    // Allowed (under /opt/panelalpha, engine#809) but not creatable: its parent is a
-    // regular file, so the probe cannot create the root (Local.php ensureWritableDirectory).
-    const created = await api.createBackupContainer({
+  test('a local store in the engine directory is refused', async ({ api }) => {
+    // Under /opt/panelalpha, but backups cannot be written there: below the engine's
+    // directory only the engine's own files are.
+    const response = await api.createBackupContainerRaw({
       name: `pa-api-${rand('ro')}`,
       driver: 'local',
-      location: `/opt/panelalpha/shared-hosting/docker-compose.yml/pa-api-${rand('ro')}`,
+      location: `/opt/panelalpha/shared-hosting/pa-api-${rand('ro')}`,
     });
+    const createdId = (response.body as { data?: { id?: unknown } }).data?.id;
     try {
-      const probed = await api.testBackupContainerRaw(created.data.id);
-      await expectStatus(probed, 422);
+      await expectStatus(response, 422);
       expect(
-        String((probed.body as { message?: unknown }).message),
-        'the failure names the backup storage directory'
-      ).toMatch(/backup storage (directory|root)/i);
+        (response.body as { errors?: Record<string, unknown> }).errors,
+        'the refusal names the location'
+      ).toHaveProperty('location');
     } finally {
-      await api.deleteBackupContainerSafe(created.data.id);
+      if (typeof createdId === 'number') {
+        await api.deleteBackupContainerSafe(createdId);
+      }
     }
   });
 

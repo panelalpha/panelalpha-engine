@@ -55,6 +55,26 @@ test.describe('classic project backups', () => {
         createHash('sha256').update(body).digest('hex'),
         'the downloaded sha256 matches details.sha256'
       ).toBe(filesItem?.details?.sha256);
+
+      await test.step('a store below that archive fails its test', async () => {
+        // Outside the engine directory, and on every host its parent is a regular
+        // file, so neither core nor the root broker can create it.
+        const below = await api.createBackupContainer({
+          name: `${name}-below`,
+          driver: 'local',
+          location: `/opt/panelalpha/backups/${name}/${filesItem?.remote_path}/store`,
+        });
+        try {
+          const probed = await api.testBackupContainerRaw(below.data.id);
+          await expectStatus(probed, 422);
+          expect(
+            String((probed.body as { message?: unknown }).message),
+            'the failure names the backup storage directory'
+          ).toMatch(/backup storage directory/i);
+        } finally {
+          await api.deleteBackupContainerSafe(below.data.id);
+        }
+      });
     } finally {
       await api.deleteBackupContainerSafe(store.data.id);
     }

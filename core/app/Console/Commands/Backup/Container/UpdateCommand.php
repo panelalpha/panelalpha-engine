@@ -2,10 +2,14 @@
 
 namespace App\Console\Commands\Backup\Container;
 
+use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
 use App\Models\BackupContainer;
+use Illuminate\Validation\ValidationException;
 
 class UpdateCommand extends BackupContainerCommand
 {
+    use NormalizesBackupContainerCredentials;
+
     protected $signature = 'backup:container:update {container : Container ID or name}'.self::OPTIONS;
 
     protected $description = 'Update a backup container';
@@ -91,6 +95,16 @@ class UpdateCommand extends BackupContainerCommand
         }
 
         $effectiveDriver = $updates['driver'] ?? $container->driver;
+        if ($effectiveDriver === 'local') {
+            try {
+                $this->assertLocalLocationIsSafe($updates['location'] ?? $container->location);
+            } catch (ValidationException $e) {
+                $this->error(collect($e->errors())->flatten()->first() ?? $e->getMessage());
+
+                return null;
+            }
+        }
+
         if ($this->credentialFlagsProvided($effectiveDriver)) {
             try {
                 $merged = array_merge($container->credentials ?? [], $this->buildCredentials($effectiveDriver) ?? []);

@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_restore')]
 #[Description(<<<'MARKDOWN'
     Restore a project backup
+
+    Restores the whole backup, or the parts `only` names, or all but the parts `exclude` names; the two cannot be combined (422 on `only`). Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database.
     MARKDOWN)]
 #[IsDestructive]
 class BackupRestoreTool extends ApiTool
@@ -72,8 +74,16 @@ class BackupRestoreTool extends ApiTool
             'name' => $schema->string()->required(),
             'id' => $schema->integer()->required(),
             'confirm' => $schema->boolean()->required(),
-            'only' => $schema->object(),
-            'exclude' => $schema->object(),
+            'only' => $schema->object(fn ($schema): array => [
+                'files' => $schema->boolean()->description('The project files.'),
+                'databases' => $schema->array()->description('Database names, each the `details.name` of a database item. Example: ["shop"].'),
+                'volumes' => $schema->array()->description('Volume names, each the `details.name` of a volume item. A container project only; on PHP hosting 422 `volumes_not_applicable`. Example: ["app_data"].'),
+            ])->description('Restore only these parts. Not with `exclude`.'),
+            'exclude' => $schema->object(fn ($schema): array => [
+                'files' => $schema->boolean()->description('The project files.'),
+                'databases' => $schema->array()->description('Database names, each the `details.name` of a database item. Example: ["shop"].'),
+                'volumes' => $schema->array()->description('Volume names, each the `details.name` of a volume item. A container project only; on PHP hosting 422 `volumes_not_applicable`. Example: ["app_data"].'),
+            ])->description('Restore all but these parts. Not with `only`.'),
             'delete_existing_files' => $schema->boolean()->description('Default true: swap the home for the restored copy. False extracts over the existing tree.'),
         ];
     }

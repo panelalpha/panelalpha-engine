@@ -60,6 +60,37 @@ class BackupContainerApiTest extends TestCase
         $this->assertNull(BackupContainer::query()->where('name', 'disk')->firstOrFail()->credentials);
     }
 
+    public function test_a_local_location_in_the_engine_directory_is_refused_on_create_and_update(): void
+    {
+        $box = $this->container('box');
+        $inside = '/opt/panelalpha/shared-hosting/backups';
+
+        $this->postJson('/api/backup-containers', ['name' => 'disk', 'driver' => 'local', 'location' => $inside])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('location');
+        $this->putJson("/api/backup-containers/{$box->id}", ['location' => $inside])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('location');
+
+        $this->assertNull(BackupContainer::query()->where('name', 'disk')->first());
+        $this->assertSame('/opt/panelalpha/backups/box', $box->fresh()->location);
+    }
+
+    public function test_a_failing_store_test_names_what_failed_without_its_credentials(): void
+    {
+        $box = BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'my-bucket', 'credentials' => [
+            'access_key_id' => 'AKIAIOSFODNN7EXAMPLE',
+            'secret_access_key' => 'wJalrXUtnFEMI-K7MDENG',
+            'endpoint' => 'http://127.0.0.1:1',
+            'use_path_style_endpoint' => true,
+        ]]);
+
+        $response = $this->postJson("/api/backup-containers/{$box->id}/test")->assertUnprocessable();
+
+        $this->assertStringContainsString('http://127.0.0.1:1/my-bucket/', (string) $response->json('message'));
+        $this->assertStringNotContainsString('wJalrXUtnFEMI-K7MDENG', (string) $response->getContent());
+    }
+
     public function test_switching_to_local_drops_the_credentials(): void
     {
         $box = $this->container('box', 'sftp', ['host' => 'h', 'username' => 'u']);

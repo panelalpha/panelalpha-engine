@@ -87,6 +87,57 @@ class BackupContainerRequestTest extends TestCase
         $this->assertTrue(true);
     }
 
+    /** The root broker writes nothing below the engine's directory but the engine's own files, so no backup lands there. */
+    public function test_a_local_location_in_the_engine_directory_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/opt/panelalpha/shared-hosting', '/opt/panelalpha/shared-hosting/backups/', '/opt/panelalpha/shared-hosting/users/alice/backups'] as $inside) {
+            try {
+                $request->assertLocalLocationIsSafe($inside);
+                $this->fail("{$inside} was accepted");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString("inside the engine's directory (/opt/panelalpha/shared-hosting)", $e->errors()['location'][0]);
+            }
+        }
+    }
+
+    /** The broker drops empty path parts, so a doubled slash or a `.` segment names the same directory. */
+    public function test_a_respelt_engine_directory_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/opt/panelalpha//shared-hosting/x', '/opt/panelalpha/./shared-hosting/x'] as $respelt) {
+            try {
+                $request->assertLocalLocationIsSafe($respelt);
+                $this->fail("{$respelt} was accepted");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString("inside the engine's directory", $e->errors()['location'][0]);
+            }
+        }
+    }
+
+    public function test_a_respelt_home_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/home/', '//home', '/home/.'] as $respelt) {
+            try {
+                $request->assertLocalLocationIsSafe($respelt);
+                $this->fail("{$respelt} was accepted");
+            } catch (ValidationException $e) {
+                $this->assertSame('Local backup location must not be empty, filesystem root, or /home.', $e->errors()['location'][0]);
+            }
+        }
+    }
+
+    public function test_a_local_location_beside_the_engine_directory_is_kept(): void
+    {
+        $this->expectNotToPerformAssertions();
+
+        (new BackupContainerStoreRequest())->assertLocalLocationIsSafe('/opt/panelalpha/shared-hosting-backups');
+    }
+
     public function test_local_driver_drops_credentials(): void
     {
         $request = new BackupContainerStoreRequest();
@@ -200,6 +251,49 @@ class BackupContainerRequestTest extends TestCase
         $container->save();
 
         $request = $this->updateRequest($container->id, ['driver' => 'sftp']);
+        $validator = Validator::make($request->all(), $request->rules());
+        $request->withValidator($validator);
+
+        $this->assertFalse($validator->fails());
+    }
+
+    public function test_a_persistent_root_itself_is_refused(): void
+    {
+        $request = new BackupContainerStoreRequest();
+
+        foreach (['/opt/panelalpha', '/var/www/html/storage'] as $root) {
+            try {
+                $request->assertLocalLocationIsSafe($root);
+                $this->fail("{$root} was accepted");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString('not one of those paths itself', $e->errors()['location'][0]);
+            }
+        }
+    }
+
+    public function test_switching_to_local_without_a_location_checks_the_kept_location(): void
+    {
+        $container = $this->makeContainer(['access_key_id' => 'key', 'secret_access_key' => 'secret']);
+        $container->driver = 's3';
+        $container->location = 'my-bucket';
+        $container->save();
+
+        $request = $this->updateRequest($container->id, ['driver' => 'local']);
+        $validator = Validator::make($request->all(), $request->rules());
+        $request->withValidator($validator);
+
+        $this->assertTrue($validator->fails());
+        $this->assertStringContainsString('must be under a path this engine persists', (string) $validator->errors()->first('location'));
+    }
+
+    public function test_switching_to_local_keeps_a_safe_location(): void
+    {
+        $container = $this->makeContainer(['access_key_id' => 'key', 'secret_access_key' => 'secret']);
+        $container->driver = 's3';
+        $container->location = '/opt/panelalpha/backups';
+        $container->save();
+
+        $request = $this->updateRequest($container->id, ['driver' => 'local']);
         $validator = Validator::make($request->all(), $request->rules());
         $request->withValidator($validator);
 

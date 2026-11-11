@@ -2,9 +2,10 @@
 
 namespace App\Console\Commands\Backup\Container;
 
+use App\Lib\Backup\StorageProbe;
 use App\Models\BackupContainer;
 use Illuminate\Console\Command;
-use Throwable;
+use RuntimeException;
 
 class TestCommand extends Command
 {
@@ -29,10 +30,9 @@ class TestCommand extends Command
         }
 
         try {
-            $container->storage()->test();
-        } catch (Throwable $e) {
-            $message = trim($e->getMessage());
-            $this->error($message !== '' ? $message : 'Backup storage connection test failed.');
+            StorageProbe::check($container);
+        } catch (RuntimeException $e) {
+            $this->error($e->getMessage());
 
             return 1;
         }
