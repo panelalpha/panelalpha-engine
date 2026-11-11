@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Git;
 
 use App\Lib\Vault\RequestVault;
+use App\Models\SecretVaultEntry;
 use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Validator;
@@ -107,7 +108,7 @@ trait PrintsGitJson
         }
 
         $project = User::findByUsernameOrFail((string) $this->argument('username'));
-        $input['token'] = RequestVault::resolve('token', $input['token'], $project->username);
+        $input['token'] = RequestVault::resolve('token', $input['token'], $project->username, SecretVaultEntry::GIT_TOKEN_FIELD_TYPES);
 
         return $input;
     }

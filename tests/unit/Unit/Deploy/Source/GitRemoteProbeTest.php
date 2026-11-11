@@ -5,9 +5,9 @@ namespace Tests\Unit\Deploy\Source;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Http\OutboundUrl;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\IpUtils;
 use Tests\Support\TestNetwork;
+use Tests\TestCase;
 
 /**
  * The probe against real remotes. Grouped `network` so a run without egress
@@ -65,6 +65,16 @@ class GitRemoteProbeTest extends TestCase
         $this->assertNotNull($problem);
         $this->assertSame('git_token_rejected', $problem['code']);
         $this->assertSame('git_token', $problem['field']);
+    }
+
+    /** GitLab answers an address without `.git` with a redirect to the one with it. */
+    public function test_a_gitlab_address_without_dot_git_names_the_one_to_use(): void
+    {
+        $problem = (new GitRemoteProbe())->problem('git_repo', 'https://gitlab.com/gitlab-org/gitlab-runner', null);
+
+        $this->assertNotNull($problem);
+        $this->assertSame('git_repo_redirect_not_followed', $problem['code']);
+        $this->assertStringContainsString('https://gitlab.com/gitlab-org/gitlab-runner.git', $problem['message']);
     }
 
     public function test_a_host_that_does_not_resolve_is_refused_before_git_runs(): void

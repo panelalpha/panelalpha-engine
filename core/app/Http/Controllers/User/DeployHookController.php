@@ -56,7 +56,7 @@ class DeployHookController extends Controller
             .'webhook at the git provider the checkout came from, using the token the checkout itself clones with, '
             .'and the response carries `registration` (`provider_hook_id` and `registered_at`; a GitLab hook made '
             .'before 2.2 cannot be signed, and `registration_warning` then says to rotate it); the token needs '
-            .'permission to manage repository webhooks (GitHub admin:repo_hook, GitLab maintainer, Bitbucket admin), '
+            .'permission to manage repository webhooks (GitHub Webhooks read and write on a fine-grained token or admin:repo_hook on a classic one, GitLab maintainer, Bitbucket admin), '
             .'else 422 `provider_token_missing` or `provider_permission_denied`; a provider that cannot be reached is '
             .'502. The provider API is called only at a public address of the repository\'s host, pinned to the '
             .'address checked, and a redirect is followed only on that same host; any other host is never called '
@@ -134,8 +134,8 @@ class DeployHookController extends Controller
             .'and the '.HookDelivery::KEEP_REJECTED.' most recent rejected ones, newest first:`outcome` is what the request was answered with (queued, ignored, rejected, coalesced) '
             .'and `result` is what the queued work then reached (deployed, partial, deploy_failed, pull_refused, superseded), '
             .'null while still queued or for a delivery that queued nothing. `detail` carries the reason for a '
-            .'refused pull or a failure; `deploy_id` points at the full build log '
-            .'(`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. '
+            .'refused pull or a failure; `deploy_id` names the deploy a delivery started, whose full build log '
+            .'GET /projects/{username}/deploys/{deploy_id}/log (deploy_log_read) reads while the project keeps it. '
             .'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             .'404 when the checkout has no hook.',
         summary: 'Show a push-to-deploy hook',

@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Push local git changes
 
-    Push local git changes. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when managed_by is `deploy`.
+    Push local git changes. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when managed_by is `deploy`. A push the repository turns down is a 422 with `problems[].code` `git_push_rejected` (the branch moved on, or a protected branch or a server hook declined it) or `git_push_unauthorized` (no token, or a token or deploy key that may not write). Nothing is pushed, HEAD goes back to where it was, and what the push committed is uncommitted again; the files are not touched.
     MARKDOWN)]
 #[IsDestructive]
 class GitPushTool extends ApiTool

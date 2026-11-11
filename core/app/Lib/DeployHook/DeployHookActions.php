@@ -8,17 +8,10 @@ use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use App\Models\User;
 use App\System\Project\Git as ProjectGit;
-use Illuminate\Support\Facades\Log;
 
 /**
- * Create, show, rotate and delete a checkout's Deploy Hook, shared by the
- * deploy-hook endpoints and `git:deploy-hook`. Each action takes its
- * endpoint's validated input; `path` selects the checkout as the git tools do.
- * A checkout without a hook is {@see DeployHookNotFound}.
- *
- * Creating with `register` also makes the webhook at the git provider the
- * checkout came from ({@see ProviderRegistrar}); rotating updates it and
- * deleting removes it, so a client does not need a provider API of its own.
+ * Create, show, rotate and delete a checkout's Deploy Hook for the endpoints and `git:deploy-hook` ({@see DeployHookNotFound}
+ * when there is none); with `register`, the provider webhook follows ({@see ProviderRegistrar}), so a client needs no provider API.
  */
 class DeployHookActions
 {
@@ -37,9 +30,8 @@ class DeployHookActions
     ) {}
 
     /**
-     * The URL and, this once, the secret (`created` true). Asking again gives
-     * the same URL and no secret, and never rotates it. With `register` the
-     * webhook is made at the provider too, and `registration` says so.
+     * The URL and, this once, the secret (`created` true); asking again gives the same URL, no secret, and never rotates
+     * it. With `register` the webhook is made at the provider too, and `registration` says so.
      *
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
@@ -144,7 +136,7 @@ class DeployHookActions
         $this->git->onCheckout($user, $params['path'] ?? null, function (ProjectGit $git) use ($user): void {
             $hook = $this->hooks->show($user, $git) ?? throw new DeployHookNotFound($git->pathKey());
             if ($hook->isRegistered()) {
-                $this->forget($user, $git, $hook);
+                $this->registrar->forgetQuietly(CheckoutRemote::of($user, $git->pathKey()), $hook);
             }
             if (! $this->hooks->delete($user, $git)) {
                 throw new DeployHookNotFound($git->pathKey());
@@ -153,11 +145,8 @@ class DeployHookActions
     }
 
     /**
-     * Make the provider webhook when `register` was asked for. A hook that
-     * already existed is registered with the secret it already holds; one
-     * whose ciphertext no longer decrypts cannot be, which is a warning rather
-     * than a rotation the caller did not ask for. Answers the warning to
-     * return with the hook, if any.
+     * Make the provider webhook when `register` was asked for, with the secret an existing hook holds; one whose ciphertext
+     * fails to decrypt is a returned warning rather than a rotation the caller did not ask for.
      *
      * @param  array<string, mixed>  $params
      *
@@ -175,7 +164,7 @@ class DeployHookActions
         }
 
         $registration = $this->registrar->register(
-            $this->remote($user, $git),
+            CheckoutRemote::of($user, $git->pathKey()),
             $creation->hook->url(),
             $secret,
             $this->named($params),
@@ -208,7 +197,7 @@ class DeployHookActions
         }
         try {
             $done = $this->registrar->refresh(
-                $this->remote($user, $git),
+                CheckoutRemote::of($user, $git->pathKey()),
                 (string) $hook->provider_hook_id,
                 $hook->url(),
                 $rotation->secret,
@@ -222,9 +211,8 @@ class DeployHookActions
     }
 
     /**
-     * The rotation stands whatever the provider answered: it is what retires a
-     * leaked URL and secret. A webhook the provider no longer shows (404) is
-     * forgotten, so a create with `register` can make a new one.
+     * The rotation stands whatever the provider answered: it is what retires a leaked URL and secret. A webhook the
+     * provider answers 404 for is forgotten, so a create with `register` can make a new one.
      */
     private function notRefreshed(DeployHook $hook, ProviderRegistrationRefused $refusal): string
     {
@@ -233,39 +221,6 @@ class DeployHookActions
         }
 
         return self::PROVIDER_NOT_UPDATED_WARNING.' '.$refusal->getMessage();
-    }
-
-    /**
-     * Best effort on purpose: the hook the client asked to delete is the
-     * engine's own, and a provider that will not answer must not keep a URL
-     * alive that the engine has already stopped serving.
-     */
-    private function forget(User $user, ProjectGit $git, DeployHook $hook): void
-    {
-        try {
-            $this->registrar->forget($this->remote($user, $git), (string) $hook->provider_hook_id, $hook->provider);
-        } catch (ProviderRegistrationRefused $e) {
-            Log::warning('Could not delete the provider webhook of a deleted deploy hook', [
-                'deploy_hook_id' => $hook->id,
-                'provider' => $hook->provider,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * The checkout's remote as the git tools see it: the Deploy-managed
-     * `git_token`, or a Site Git entry's own token.
-     */
-    private function remote(User $user, ProjectGit $git): CheckoutRemote
-    {
-        $entry = $user->getSiteGit($git->pathKey()) ?? [];
-        $token = $entry['token'] ?? null;
-
-        return new CheckoutRemote(
-            (string) ($entry['repo_url'] ?? ''),
-            is_string($token) && $token !== '' ? $token : null,
-        );
     }
 
     /**
@@ -318,10 +273,8 @@ class DeployHookActions
     }
 
     /**
-     * The hook's retained deliveries (HookDelivery::pruneOldest()'s two windows), newest
-     * first, each with the outcome the request was answered with and the
-     * result the queued work reached (or hasn't yet, or never will -- an
-     * ignored or rejected delivery queued nothing).
+     * The hook's retained deliveries (HookDelivery::pruneOldest()'s two windows), newest first, each with the outcome
+     * it was answered with and the result its queued work reached, if any: an ignored or rejected delivery queued nothing.
      *
      * @return list<array<string, mixed>>
      */

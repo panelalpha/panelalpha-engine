@@ -17,8 +17,9 @@ trait ResolvesVaultFields
      * secret rather than the reference.
      *
      * @param  list<string>  $fields
+     * @param  array<string, list<string>>  $types  the vault types a field accepts, when not its own name
      */
-    protected function resolveVaultFields(array $fields): void
+    protected function resolveVaultFields(array $fields, array $types = []): void
     {
         $references = array_filter($fields, fn (string $field): bool => $this->has($field) && self::holdsReference($this->input($field)));
         if ($references === []) {
@@ -27,7 +28,7 @@ trait ResolvesVaultFields
 
         $project = $this->routeProjectOr404();
         foreach ($references as $field) {
-            $this->merge([$field => RequestVault::resolve($field, $this->input($field), $project)]);
+            $this->merge([$field => RequestVault::resolve($field, $this->input($field), $project, $types[$field] ?? null)]);
         }
     }
 

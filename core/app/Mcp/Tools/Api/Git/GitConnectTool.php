@@ -76,7 +76,7 @@ class GitConnectTool extends ApiTool
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
             'repo_url' => $schema->string()->description('HTTPS URL, or an SSH remote when the project has a deploy key.')->required(),
             'branch' => $schema->string()->required(),
-            'token' => $schema->string(),
+            'token' => $schema->string()->description('Access token, or the `vault:<key>` of a `git_token` vault entry.'),
             'auth_type' => $schema->string()->description('One of: pat.'),
             'repair' => $schema->boolean(),
         ];

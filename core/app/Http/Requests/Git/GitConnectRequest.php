@@ -5,6 +5,7 @@ namespace App\Http\Requests\Git;
 use App\Http\Requests\Concerns\ChecksGitRefName;
 use App\Http\Requests\Concerns\ResolvesVaultFields;
 use App\Lib\Deploy\Source\GitRepoInput;
+use App\Models\SecretVaultEntry;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Fluent;
 use Illuminate\Validation\Rule;
@@ -17,7 +18,7 @@ class GitConnectRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->resolveVaultFields(['token']);
+        $this->resolveVaultFields(['token'], ['token' => SecretVaultEntry::GIT_TOKEN_FIELD_TYPES]);
     }
 
     public function authorize(): bool

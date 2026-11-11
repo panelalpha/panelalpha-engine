@@ -3,9 +3,16 @@
 namespace Tests\Unit\DeployHook;
 
 use App\Jobs\RunHookDelivery;
+use App\Lib\Deploy\DeployLog\DeployFinishLine;
+use App\Lib\Deploy\DeployLog\DeployHistory;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployLogPaths;
+use App\Lib\DeployHook\CheckoutSync;
 use App\Lib\DeployHook\Coalescing;
+use App\Lib\DeployHook\DeliveryRunner;
 use App\Lib\DeployHook\HookReceiver;
+use App\Lib\Findings\Finding;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use App\Models\User;
@@ -360,5 +367,122 @@ class CoalescingTest extends DeployHookTestCase
 
         Queue::assertPushed(RunHookDelivery::class, 1);
         $this->assertNull($siteHook->fresh()->pending_delivery_id);
+    }
+
+    /**
+     * The caller's second finish leaves the deploy the parked push's worker started alone: record, log and verdict.
+     */
+    public function test_a_finish_after_the_coalesced_push_started_its_deploy_leaves_that_deploy_alone(): void
+    {
+        $username = $this->username();
+        $user = $this->user('main', [], $username);
+        $hook = $this->hook($user, self::SECRET);
+        $change = $this->startRunningDeploy($username);
+        $this->assertSame('coalesced', $this->push($hook, 'guid-during-the-change')->body['outcome']);
+
+        $change->finishPartial([new Finding('app-not-answering', 'The application did not answer')]);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+        $push = DeployLogger::start($username);
+        $push->info('Deploy started (source: push)');
+        $pushRecord = DeployLogger::readLatestFor($username);
+        $pushLog = (string) file_get_contents($push->getLogPath());
+
+        if ($change->isRunning()) {
+            $change->finish(DeployLogger::STATUS_SUCCESS);
+        }
+        $change->finish(DeployLogger::STATUS_SUCCESS);
+        $change->finish(DeployLogger::STATUS_FAILED, 'a failure handler closing it again');
+        $change->stage(DeployLogger::STAGE_RUNNING);
+        $change->setPid(getmypid());
+        $change->markPreCheckRejected();
+
+        $this->assertSame($pushRecord, DeployLogger::readLatestFor($username), 'the push deploy\'s record is its own');
+        $this->assertSame($pushLog, (string) file_get_contents($push->getLogPath()), 'the push deploy\'s log is its own');
+        $this->assertTrue($push->isRunning());
+        $this->assertFalse($change->isRunning());
+        $this->assertTrue($change->isFinished());
+        $finishLines = array_values(array_filter(
+            $change->entries(),
+            static fn (array $line): bool => DeployFinishLine::find([$line]) !== null,
+        ));
+        $this->assertCount(1, $finishLines, 'one verdict in the change\'s log');
+        $this->assertSame('Deploy finished with warnings: The application did not answer', $finishLines[0]['msg']);
+        $this->assertSame(DeployLogger::STATUS_PARTIAL, DeployHistory::find($user, $change->getDeployId())['status']);
+        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployHistory::find($user, $push->getDeployId())['status']);
+        $push->finish(DeployLogger::STATUS_SUCCESS);
+    }
+
+    /**
+     * The settle takes the lock right after the deploy's finish, so the dispatched delivery parks again until then.
+     */
+    public function test_a_delivery_the_settle_turned_away_runs_once_the_settle_releases_the_lock(): void
+    {
+        $username = $this->username();
+        $hook = $this->hookFor($username);
+        $change = $this->startRunningDeploy($username);
+        $this->push($hook, 'guid-behind-the-change');
+        $delivery = $this->delivery('guid-behind-the-change');
+
+        $change->finishPartial([new Finding('app-not-answering', 'The application did not answer')]);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+        $settle = new DeployLock(new DeployLogPaths($username));
+        $settle->acquire();
+        $this->runTheLastDeliveryJob();
+
+        $this->assertSame($delivery->id, $hook->fresh()->pending_delivery_id, 'turned away by the settle, it waits again');
+        $this->assertNull($delivery->fresh()->result);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+
+        $settle->release();
+
+        Queue::assertPushed(RunHookDelivery::class, 2);
+        $this->assertNull($hook->fresh()->pending_delivery_id);
+        $this->runTheLastDeliveryJob();
+        $fresh = $delivery->fresh();
+        $this->assertSame(HookDelivery::RESULT_DEPLOYED, $fresh->result);
+        $this->assertSame(DeployLogger::readLatestFor($username)['id'], $fresh->deploy_id);
+        $this->assertNotSame($change->getDeployId(), $fresh->deploy_id);
+        DeployLock::acquireFor($username)->release();
+        Queue::assertPushed(RunHookDelivery::class, 2);
+    }
+
+    /** A delivery whose job a deploy started meanwhile turned away waits for that deploy's finish, and runs after it. */
+    public function test_a_delivery_a_running_deploy_turned_away_waits_for_its_finish(): void
+    {
+        $username = $this->username();
+        $hook = $this->hookFor($username);
+        $this->push($hook, 'guid-before-the-deploy');
+        $delivery = $this->delivery('guid-before-the-deploy');
+        Queue::assertPushed(RunHookDelivery::class, 1);
+        $running = $this->startRunningDeploy($username);
+
+        $this->runTheLastDeliveryJob();
+
+        $this->assertSame($delivery->id, $hook->fresh()->pending_delivery_id);
+        Queue::assertPushed(RunHookDelivery::class, 1);
+
+        $running->finish(DeployLogger::STATUS_SUCCESS);
+
+        Queue::assertPushed(RunHookDelivery::class, 2);
+        $this->runTheLastDeliveryJob();
+        $this->assertSame(HookDelivery::RESULT_DEPLOYED, $delivery->fresh()->result);
+        $this->assertNotSame($running->getDeployId(), $delivery->fresh()->deploy_id);
+    }
+
+    /** The job a worker would run for the last delivery dispatched, with a sync that deploys under the account's lock. */
+    private function runTheLastDeliveryJob(): void
+    {
+        $sync = new class () implements CheckoutSync {
+            public function pullAndRebuild(User $user, string $pathKey, ?string $pushedCommit, ?callable $onDeployStarted = null): void
+            {
+                $deploy = DeployLogger::start($user->username);
+                if ($onDeployStarted !== null) {
+                    $onDeployStarted($deploy->getDeployId());
+                }
+                $deploy->finish(DeployLogger::STATUS_SUCCESS);
+            }
+        };
+
+        Queue::pushed(RunHookDelivery::class)->last()->handle(new DeliveryRunner($sync));
     }
 }

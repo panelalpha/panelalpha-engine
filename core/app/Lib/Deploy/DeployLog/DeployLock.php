@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\DeployLog;
 
 use App\Exceptions\DeployAlreadyRunningException;
+use App\Lib\DeployHook\Coalescing;
 use RuntimeException;
 
 /**
@@ -118,10 +119,8 @@ final class DeployLock
     }
 
     /**
-     * Whether some process holds the lock right now, without taking it. A
-     * deploy that died without reaching finish() left its status `running`,
-     * but the kernel dropped its lock with it -- this is what tells the two
-     * apart.
+     * Whether some process holds the lock, without taking it: a deploy that died before finish() is still `running`,
+     * but the kernel dropped its lock with it, so this tells the two apart.
      */
     public function isHeld(): bool
     {
@@ -143,17 +142,43 @@ final class DeployLock
         return ! $free;
     }
 
+    /**
+     * Free the lock, then run the pushes {@see Coalescing} parked on it while it was held: whatever held it (a deploy, a
+     * backup, the served tree's settle), a delivery it turned away is due the moment it is free.
+     */
     public function release(): void
     {
-        if (is_resource($this->handle)) {
-            if ($this->ownsDirectory) {
-                $this->removeLockDirectory();
-            }
-            flock($this->handle, LOCK_UN);
-            fclose($this->handle);
-            unset(self::$heldByThisProcess[$this->paths->username]);
+        if ($this->unlock()) {
+            Coalescing::runPendingFor($this->paths->username);
         }
+    }
+
+    /**
+     * Free the lock without running what is parked on it: for a logger's destructor, which can run as the process shuts
+     * down; a deploy it left unfinished is closed, and its parked pushes run, by {@see DeployLogger::settleOrphaned()}.
+     */
+    public function releaseQuietly(): void
+    {
+        $this->unlock();
+    }
+
+    /** Whether this lock was held and has been released. */
+    private function unlock(): bool
+    {
+        if (! is_resource($this->handle)) {
+            $this->handle = null;
+
+            return false;
+        }
+        if ($this->ownsDirectory) {
+            $this->removeLockDirectory();
+        }
+        flock($this->handle, LOCK_UN);
+        fclose($this->handle);
+        unset(self::$heldByThisProcess[$this->paths->username]);
         $this->handle = null;
+
+        return true;
     }
 
     /**
