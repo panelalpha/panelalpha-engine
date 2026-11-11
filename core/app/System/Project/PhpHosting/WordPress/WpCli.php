@@ -6,29 +6,15 @@ use App\Exceptions\ProblemException;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
+use App\System\Project;
 use App\System\Projects;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Raw WP-CLI invocation for a project's WordPress install.
- *
- * Optional path is bound on construction (null = main domain document root on
- * PHP hosting; on a container project, the install the runner finds, and a
- * path is as the container sees it, absolute or relative to the container's
- * working directory, and an optional compose service picks the container).
- * An args --path= still wins over the bound path, matching PhpRuntime::runWpCli.
- *
- * Cache flush (named or raw) shares scheduleReloadAfterCacheFlush: after a
- * zero exit, when the host webserver is OpenLiteSpeed, a webserver reload is
- * scheduled in the background. Schedule failures are logged and do not fail
- * the call. An optional System collaborator is for tests that fake the
- * webserver; production leaves it null and constructs System on demand.
- *
- * With skipPlugins every run adds --skip-plugins --skip-themes, so a fatal
- * error in one plugin or theme does not block operations that do not need
- * them loaded (lists, wp-config, maintenance mode, database).
+ * Raw WP-CLI invocation for a project's WordPress install, at the path bound on construction or, when null, the main
+ * domain's document root on PHP hosting or the install a container's runner finds; a compose service may be bound.
  */
 final class WpCli
 {
@@ -37,6 +23,9 @@ final class WpCli
 
     /** On PHP hosting, WP-CLI's working directory: the home, mounted a second time. */
     private const PHP_HOSTING_WORKING_DIR = '/var/www';
+
+    /** Run by WP-CLI before its command, so a file the command creates is its owner's alone from the start. */
+    private const OWNER_ONLY_FILES = '--exec=umask(0077);';
 
     public function __construct(
         private User $user,
@@ -66,17 +55,15 @@ final class WpCli
             throw new Exception('service applies only to WordPress in the project\'s own containers.');
         }
         $args = $this->mergePath($this->withSkips($args));
-        $result = $this->user->project()->runWpCli($args, $this->service);
+        $result = $this->project()->runWpCli($args, $this->service);
         $this->scheduleReloadAfterCacheFlush($args, $result);
 
         return $result;
     }
 
     /**
-     * Run WP-CLI and throw when the exit code is non-zero.
-     *
-     * Named operations use this so a failure is an exception (HTTP error),
-     * never a 200 body with exit_code. The raw command keeps run().
+     * Run WP-CLI and throw on a non-zero exit, so a named operation fails as an exception (HTTP error), never as a 200
+     * body with exit_code; the raw command keeps run().
      *
      * @param  list<string>  $args
      * @return array{exit_code: int, stdout: string, stderr: string}
@@ -105,11 +92,8 @@ final class WpCli
     }
 
     /**
-     * A file WP-CLI reads or writes for the caller, as WP-CLI is to be given
-     * it: on PHP hosting an absolute path inside the project home; in the
-     * project's own containers a path below the checkout's mount, or one
-     * relative to the install directory, WP-CLI's working directory there.
-     * `..` is resolved first, so it cannot lead out.
+     * A caller's file as WP-CLI is to get it: on PHP hosting absolute in the project home, in its containers below the
+     * checkout's mount or relative to the install, WP-CLI's working dir; `..` is resolved first, so it cannot lead out.
      *
      * @throws ProblemException 422 on $field for any other path
      */
@@ -125,7 +109,7 @@ final class WpCli
     {
         $parts = [];
         foreach (['stderr', 'stdout'] as $key) {
-            $chunk = trim((string) ($result[$key] ?? ''));
+            $chunk = trim(self::withoutControlCharacters((string) ($result[$key] ?? '')));
             if ($chunk !== '') {
                 $parts[] = $chunk;
             }
@@ -134,11 +118,15 @@ final class WpCli
         return $parts !== [] ? implode("\n", $parts) : 'WP-CLI command failed.';
     }
 
+    /** Drops terminal controls such as the bell mysqldump rings before an error, keeping line breaks and tabs. */
+    private static function withoutControlCharacters(string $text): string
+    {
+        return (string) preg_replace('/[\x00-\x08\x0B-\x1F\x7F]/', '', $text);
+    }
+
     /**
-     * Absolute WP-CLI --path inside the project home: the bound path read the
-     * way the file manager reads one (absolute, or relative to the home), so a
-     * directory outside the home is never the WP-CLI container's own;
-     * otherwise the project's main-domain document root.
+     * Absolute WP-CLI --path inside the project home: the bound path read as the file manager reads one (absolute or
+     * relative to the home), so no directory outside it is the WP-CLI container's own; else the main-domain docroot.
      */
     public function resolvePath(): string
     {
@@ -164,8 +152,8 @@ final class WpCli
     }
 
     /**
-     * Adds --path unless the args carry one: in a container the bound path as
-     * the container sees it, or none, so the runner finds the install.
+     * Adds --path unless the args carry one, as PhpRuntime::runWpCli does: in a container the bound path as the container
+     * sees it, absolute or relative to its working directory, or none, so the runner finds the install.
      *
      * @param  list<string>  $args
      * @return list<string>
@@ -192,6 +180,8 @@ final class WpCli
     }
 
     /**
+     * A fatal error in one plugin or theme then blocks no operation that does not need them loaded.
+     *
      * @param  list<string>  $args
      * @return list<string>
      */
@@ -219,9 +209,39 @@ final class WpCli
     /** Whether the PHP hosting install directory holds this file, as the account sees it. */
     public function installHasFile(string $relativePath): bool
     {
-        return $this->user->project()->fileManager()->isFile(
-            rtrim($this->resolvePath(), '/').'/'.ltrim($relativePath, '/'),
-        );
+        return $this->project()->fileManager()->isFile(self::installPath($relativePath));
+    }
+
+    /**
+     * On PHP hosting no other account can read the file at any moment: umask 077, and a file `--force` replaces is
+     * made 600 before the write and after. A container project keeps its image's mode.
+     *
+     * @param  list<string>  $options
+     * @return array{exit_code: int, stdout: string, stderr: string}
+     */
+    public function createConfigFile(array $options): array
+    {
+        if ($this->runsInContainer()) {
+            return $this->runOrFail(['config', 'create', ...$options]);
+        }
+
+        if (in_array('--force', $options, true) && $this->installHasFile('wp-config.php')) {
+            $this->restrictConfigFile();
+        }
+        $result = $this->runOrFail(['config', 'create', ...$options, self::OWNER_ONLY_FILES]);
+        $this->restrictConfigFile();
+
+        return $result;
+    }
+
+    private function restrictConfigFile(): void
+    {
+        $this->project()->fileManager()->chmod($this->installPath('wp-config.php'), '600');
+    }
+
+    private function installPath(string $relativePath): string
+    {
+        return rtrim($this->resolvePath(), '/').'/'.ltrim($relativePath, '/');
     }
 
     /** WordPress in the project's own containers rather than on PHP hosting. */
@@ -233,7 +253,7 @@ final class WpCli
     private function homePath(string $path): string
     {
         try {
-            return rtrim($this->user->project()->resolvePath($path), '/');
+            return rtrim($this->project()->resolvePath($path), '/');
         } catch (ValidationException) {
             throw new Exception("The path {$path} does not name a directory inside the project home.");
         }
@@ -242,7 +262,7 @@ final class WpCli
     /** WP-CLI's container mounts the home at its own path, and at its working directory /var/www. */
     private function homeFile(string $field, string $file): string
     {
-        $home = rtrim($this->user->project()->homeDirPath(), '/');
+        $home = rtrim($this->project()->homeDirPath(), '/');
         $path = self::normalised(str_starts_with($file, '/') ? $file : self::PHP_HOSTING_WORKING_DIR.'/'.$file);
         if ($path !== null && self::isBelow($path, self::PHP_HOSTING_WORKING_DIR)) {
             $path = $home.substr($path, strlen(self::PHP_HOSTING_WORKING_DIR));
@@ -301,18 +321,23 @@ final class WpCli
 
     private function absoluteDocumentRoot(Domain $domain): string
     {
-        return $this->user->project()->homeDirPath().$domain->getDocumentRoot();
+        return $this->project()->homeDirPath().$domain->getDocumentRoot();
     }
 
+    /** A System given on construction fakes the webserver in tests; production builds one on demand. */
     private function system(): System
     {
         return $this->system ??= new System;
     }
 
+    private function project(): Project
+    {
+        return $this->user->project($this->system());
+    }
+
     /**
-     * Shared side effect for named cache flush and raw `cache flush`: after a
-     * successful flush on OpenLiteSpeed, schedule a webserver reload. Used by
-     * run() so both paths stay one implementation.
+     * After a named or raw `cache flush` exits 0 on OpenLiteSpeed, schedule a background webserver reload, from run() so
+     * both paths share it. A failure to schedule is logged and does not fail the call.
      *
      * @param  list<string>  $args
      * @param  array{exit_code?: int, stdout?: string, stderr?: string}  $result

@@ -19,6 +19,14 @@ use PHPUnit\Framework\TestCase;
  */
 class UsersTest extends TestCase
 {
+    private const FOUND_USER = ['exit_code' => 0, 'stdout' => "7\n", 'stderr' => ''];
+
+    private const MISSING_USER = [
+        'exit_code' => 1,
+        'stdout' => '',
+        'stderr' => "Error: Invalid user ID, email or login: 'missing'\n",
+    ];
+
     protected function tearDown(): void
     {
         Mockery::close();
@@ -27,10 +35,10 @@ class UsersTest extends TestCase
 
     public function test_list_returns_decoded_users_and_passes_default_path(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: [
+            $sequence,
+            results: [
                 'exit_code' => 0,
                 'stdout' => '[{"ID":"1","user_login":"admin","user_email":"admin@example.com","roles":"administrator"}]',
                 'stderr' => '',
@@ -41,7 +49,7 @@ class UsersTest extends TestCase
 
         $this->assertSame(
             ['user', 'list', '--format=json', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[0]
         );
         $this->assertSame(
             [['ID' => '1', 'user_login' => 'admin', 'user_email' => 'admin@example.com', 'roles' => 'administrator']],
@@ -51,23 +59,23 @@ class UsersTest extends TestCase
 
     public function test_list_with_explicit_path(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured, path: '/home/alice/other.test/public_html');
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence, path: '/home/alice/other.test/public_html');
 
         $users->list();
 
         $this->assertSame(
             ['user', 'list', '--format=json', '--path=/home/alice/other.test/public_html'],
-            $captured
+            $sequence[0]
         );
     }
 
     public function test_create_passes_login_email_password_and_optional_fields(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: ['exit_code' => 0, 'stdout' => "Success: Created user 2.\n", 'stderr' => ''],
+            $sequence,
+            results: ['exit_code' => 0, 'stdout' => "Success: Created user 2.\n", 'stderr' => ''],
         );
 
         $body = $users->create([
@@ -90,7 +98,7 @@ class UsersTest extends TestCase
                 '--last_name=Doe',
                 '--path=/home/alice/example.test/public_html',
             ],
-            $captured
+            $sequence[0]
         );
         $this->assertSame('jdoe', $body['user']);
         $this->assertSame('Success: Created user 2.', $body['message']);
@@ -98,8 +106,8 @@ class UsersTest extends TestCase
 
     public function test_create_without_optional_fields_omits_them(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured);
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
 
         $users->create([
             'login' => 'bob',
@@ -113,16 +121,67 @@ class UsersTest extends TestCase
                 '--user_pass=AnotherPass1',
                 '--path=/home/alice/example.test/public_html',
             ],
-            $captured
+            $sequence[0]
         );
+    }
+
+    public function test_create_reports_the_login_wordpress_stores(): void
+    {
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
+
+        $body = $users->create(['login' => ' bob ', 'email' => 'bob@example.com', 'password' => 'AnotherPass1']);
+
+        $this->assertSame('bob', $sequence[0][2]);
+        $this->assertSame('bob', $body['user']);
+    }
+
+    public function test_create_refuses_a_login_the_api_refuses(): void
+    {
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
+
+        try {
+            $users->create(['login' => 'a;b', 'email' => 'ab@example.com', 'password' => 'AnotherPass1']);
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('a;b', $e->getMessage());
+        }
+
+        $this->assertSame([], $sequence);
+    }
+
+    public function test_a_password_shorter_than_the_api_rule_is_refused_before_wp_cli_runs(): void
+    {
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
+
+        foreach (
+            [
+                static fn (Users $users) => $users->create(['login' => 'bob', 'email' => 'bob@example.com', 'password' => 'short']),
+                static fn (Users $users) => $users->setPassword('bob', 'short'),
+                static fn (Users $users) => $users->update('bob', ['password' => 'short']),
+            ] as $call
+        ) {
+            try {
+                $call($users);
+                $this->fail('Expected WordPressException');
+            } catch (WordPressException $e) {
+                $this->assertSame('The password must be at least 8 characters.', $e->getMessage());
+                $this->assertSame(422, $e->httpStatus);
+            }
+        }
+
+        $this->assertSame([], $sequence);
     }
 
     public function test_update_passes_selected_fields(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: ['exit_code' => 0, 'stdout' => 'Success: Updated user.', 'stderr' => ''],
+            $sequence,
+            results: [self::FOUND_USER, ['exit_code' => 0, 'stdout' => 'Success: Updated user.', 'stderr' => '']],
         );
 
         $body = $users->update('jdoe', [
@@ -139,15 +198,15 @@ class UsersTest extends TestCase
                 '--display_name=Jane',
                 '--path=/home/alice/example.test/public_html',
             ],
-            $captured
+            $sequence[1]
         );
         $this->assertSame(['user' => 'jdoe', 'message' => 'Success: Updated user.'], $body);
     }
 
     public function test_list_passes_role_and_fields(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured);
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
 
         $users->list('administrator', 'user_login,user_email,roles,id');
 
@@ -156,93 +215,120 @@ class UsersTest extends TestCase
                 'user', 'list', '--format=json', '--role=administrator', '--fields=user_login,user_email,roles,id',
                 '--path=/home/alice/example.test/public_html',
             ],
-            $captured
+            $sequence[0]
         );
     }
 
     public function test_create_can_send_the_new_user_an_email(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured);
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence);
 
         $users->create(['login' => 'bob', 'email' => 'bob@example.com', 'password' => 'AnotherPass1', 'send_email' => true]);
 
         $this->assertSame(
             ['user', 'create', 'bob', 'bob@example.com', '--user_pass=AnotherPass1', '--send-email', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[0]
         );
     }
 
     public function test_update_sets_the_password_in_the_same_call(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured);
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence, results: [self::FOUND_USER]);
 
         $users->update('7', ['role' => 'editor', 'password' => 'NewSecret123']);
 
         $this->assertSame(
             ['user', 'update', '7', '--role=editor', '--user_pass=NewSecret123', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[1]
         );
     }
 
     public function test_delete_passes_yes_and_optional_reassign(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: ['exit_code' => 0, 'stdout' => 'Success: Removed user jdoe.', 'stderr' => ''],
+            $sequence,
+            results: [self::FOUND_USER, ['exit_code' => 0, 'stdout' => 'Success: Removed user jdoe.', 'stderr' => '']],
         );
 
         $body = $users->delete('jdoe', reassign: 'admin');
 
         $this->assertSame(
             ['user', 'delete', 'jdoe', '--yes', '--reassign=admin', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[1]
         );
         $this->assertSame('jdoe', $body['user']);
     }
 
     public function test_delete_without_reassign_omits_reassign_flag(): void
     {
-        $captured = [];
-        $users = $this->usersWithFakeRunner($captured);
+        $sequence = [];
+        $users = $this->usersWithFakeRunner($sequence, results: [self::FOUND_USER]);
 
         $users->delete('jdoe');
 
         $this->assertSame(
             ['user', 'delete', 'jdoe', '--yes', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[1]
         );
     }
 
     public function test_set_password_uses_caller_provided_value(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: ['exit_code' => 0, 'stdout' => 'Success: Updated user.', 'stderr' => ''],
+            $sequence,
+            results: [self::FOUND_USER, ['exit_code' => 0, 'stdout' => 'Success: Updated user.', 'stderr' => '']],
         );
 
         $body = $users->setPassword('jdoe', 'NewSecret99');
 
         $this->assertSame(
             ['user', 'update', 'jdoe', '--user_pass=NewSecret99', '--path=/home/alice/example.test/public_html'],
-            $captured
+            $sequence[1]
         );
         $this->assertSame(['user' => 'jdoe', 'message' => 'Success: Updated user.'], $body);
     }
 
+    public function test_a_user_wordpress_does_not_have_is_a_404(): void
+    {
+        foreach (
+            [
+                static fn (Users $users) => $users->update('missing', ['role' => 'editor']),
+                static fn (Users $users) => $users->delete('missing'),
+                static fn (Users $users) => $users->setPassword('missing', 'NewSecret99'),
+            ] as $call
+        ) {
+            $sequence = [];
+            $users = $this->usersWithFakeRunner($sequence, results: [self::MISSING_USER]);
+
+            try {
+                $call($users);
+                $this->fail('Expected WordPressException');
+            } catch (WordPressException $e) {
+                $this->assertSame(404, $e->httpStatus);
+                $this->assertStringContainsString("Invalid user ID, email or login: 'missing'", $e->getMessage());
+            }
+
+            $this->assertSame(
+                ['user', 'get', 'missing', '--field=ID', '--path=/home/alice/example.test/public_html'],
+                $sequence[0]
+            );
+        }
+    }
+
     public function test_non_zero_exit_throws_with_command_output(): void
     {
-        $captured = [];
+        $sequence = [];
         $users = $this->usersWithFakeRunner(
-            $captured,
-            result: [
+            $sequence,
+            results: [self::FOUND_USER, [
                 'exit_code' => 1,
                 'stdout' => 'Error: Invalid user ID, email or login: \'missing\'',
                 'stderr' => '',
-            ],
+            ]],
         );
 
         try {
@@ -255,24 +341,26 @@ class UsersTest extends TestCase
     }
 
     /**
-     * @param  list<string>  $captured
-     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
+     * @param  list<list<string>>  $sequence
      */
     private function usersWithFakeRunner(
-        array &$captured,
-        array $result = ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
+        array &$sequence,
+        array $results = ['exit_code' => 0, 'stdout' => '[]', 'stderr' => ''],
         ?string $path = null,
     ): Users {
+        $results = array_is_list($results) ? $results : [$results];
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
         $project->shouldReceive('resolvePath')
             ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
+        $call = 0;
         $project->shouldReceive('runWpCli')
-            ->once()
-            ->andReturnUsing(function (array $args) use (&$captured, $result): array {
-                $captured = $args;
+            ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {
+                $sequence[] = $args;
+                $result = $results[$call] ?? ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+                $call++;
 
                 return $result;
             });

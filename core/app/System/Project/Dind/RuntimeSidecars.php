@@ -13,11 +13,8 @@ use App\Lib\Deploy\Source\GitUrl;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Backing services (databases, caches) a repo implies but does not run itself
- * — read from a live/local-dev compose file it ships, an example compose
- * template, or inferred from DATABASE_URL/REDIS_URL in .env — so the deploy
- * has the sidecars the app expects even though {@see DeployStrategy} never
- * runs the file they came from.
+ * Backing services a repo implies but does not run: from a local-dev compose file, an example template or
+ * DATABASE_URL/REDIS_URL in .env, though {@see DeployStrategy} never runs the file they came from.
  */
 class RuntimeSidecars
 {
@@ -48,62 +45,96 @@ class RuntimeSidecars
             if ($raw === null || ! ComposeFileInspector::isLocalDevComposeYaml($raw)) {
                 continue;
             }
-            // The repo says what production runs beside the app: that beats
-            // the workstation stack (LinkAce's dev file adds caddy, a second
-            // database and buggregator; its production file does not).
-            $production = $this->fromTemplates(
-                $projectDir,
-                self::productionComposeFilenames($projectDir),
-                " instead of the development {$candidate}"
-            );
-            if ($production !== null) {
-                return $production;
-            }
-            $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
-                $raw,
-                false,
-                $this->imagePortLookup(),
-                $this->projectIdentity(),
-                $this->accountMemoryMb(),
-                $this->placeholderSeed(),
-                $this->passwords(),
-                $this->dind->environment()->forInterpolation(),
-                $this->dind->userModel()->username,
-                $this->dind->userAppDirPath()
-            );
-            $this->logDroppedProxies($extracted);
-            $this->logDroppedTestServices($extracted, $candidate);
-            // Every service it kept was a test suite: still the app's own
-            // settings, as when the suite was kept (Zerobyte's APP_SECRET).
-            $suiteOnly = $extracted['services'] === [] && self::droppedATestSuite($extracted);
-            if ($extracted['services'] !== [] || $suiteOnly) {
-                if ($extracted['services'] !== []) {
-                    $names = implode(', ', array_keys($extracted['services']));
-                    $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
-                }
-                foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
-                    $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
-                }
-                $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
-                foreach ($extracted['replaced_mounts'] ?? [] as $mount) {
-                    $this->dind->shell()->logger()?->info("Moved the datastore bind {$mount} to a named volume: its data does not belong in the checkout");
-                }
-                $this->logHardeningRemovals($extracted);
-
-                return $extracted;
+            $found = $this->fromLocalDevCompose($projectDir, $candidate, $raw);
+            if ($found !== null) {
+                return $found;
             }
         }
 
-        // Nothing live to learn from: fall back to a template the repo ships
-        // (compose.example.yml, docker-compose.mysql.yml, …).
+        return $this->fromTemplatesOrEnv($projectDir);
+    }
+
+    /**
+     * A production compose file the repo ships beats its workstation stack (LinkAce's dev file adds caddy);
+     * a stack that kept only a test suite still gives the app its settings (Zerobyte's APP_SECRET).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function fromLocalDevCompose(string $projectDir, string $candidate, string $raw): ?array
+    {
+        $production = $this->fromTemplates(
+            $projectDir,
+            self::productionComposeFilenames($projectDir),
+            " instead of the development {$candidate}"
+        );
+        if ($production !== null) {
+            return $production;
+        }
+        $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
+            $raw,
+            false,
+            $this->imagePortLookup(),
+            $this->projectIdentity(),
+            $this->accountMemoryMb(),
+            $this->placeholderSeed(),
+            $this->passwords(),
+            $this->dind->environment()->forInterpolation(),
+            $this->dind->userModel()->username,
+            $this->dind->userAppDirPath()
+        );
+        $this->logDroppedProxies($extracted);
+        $this->logDroppedTestServices($extracted, $candidate);
+        $suiteOnly = $extracted['services'] === [] && self::droppedATestSuite($extracted);
+        if ($extracted['services'] !== [] || $suiteOnly) {
+            $this->logKeptServices($extracted);
+
+            return $extracted;
+        }
+
+        return null;
+    }
+
+    /** @param  array<string, mixed>  $extracted */
+    private function logKeptServices(array $extracted): void
+    {
+        if ($extracted['services'] !== []) {
+            $names = implode(', ', array_keys($extracted['services']));
+            $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+        }
+        foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
+            $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
+        }
+        $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
+        foreach ($extracted['replaced_mounts'] ?? [] as $mount) {
+            $this->dind->shell()->logger()?->info("Moved the datastore bind {$mount} to a named volume: its data does not belong in the checkout");
+        }
+        $this->logHardeningRemovals($extracted);
+    }
+
+    /**
+     * Nothing live to learn from: a template the repo ships (compose.example.yml, docker-compose.mysql.yml,
+     * …), else the services .env implies, else none.
+     *
+     * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}
+     */
+    private function fromTemplatesOrEnv(string $projectDir): array
+    {
         $template = $this->fromTemplates($projectDir, self::exampleComposeFilenames($projectDir));
         if ($template !== null) {
             return $template;
         }
 
-        // No compose at all — DATABASE_URL / REDIS_URL on localhost still need a
-        // companion container or the app 500s on every request (TanStack + Drizzle).
-        // Through the account's file layer: a 0600 .env is invisible to www-data.
+        return $this->fromEnv($projectDir) ?? ['services' => [], 'volumes' => [], 'env' => []];
+    }
+
+    /**
+     * DATABASE_URL or REDIS_URL on localhost still needs a companion, or the app 500s (TanStack + Drizzle).
+     * Read through the account's file layer: a 0600 .env is invisible to www-data.
+     *
+     * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}|null
+     */
+    private function fromEnv(string $projectDir): ?array
+    {
         $fromEnv = EnvSidecars::fromProjectDir($projectDir, $this->dind->projectTree()->read(...), $this->passwords());
         if ($fromEnv['services'] !== []) {
             $names = implode(', ', array_keys($fromEnv['services']));
@@ -114,12 +145,11 @@ class RuntimeSidecars
             return $fromEnv;
         }
 
-        return ['services' => [], 'volumes' => [], 'env' => []];
+        return null;
     }
 
     /**
-     * The first template of $candidates that yields a backing service, read
-     * for its datastores only.
+     * The first template of $candidates that yields a backing service, read for its datastores only.
      *
      * @param  list<string>  $candidates
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}|null
@@ -163,9 +193,8 @@ class RuntimeSidecars
     }
 
     /**
-     * A secret-like variable harvested with its literal value still tells
-     * every deploy of this repository the same thing an attacker can already
-     * read from it.
+     * A secret-like variable harvested with its literal value tells every deploy of this repository what an
+     * attacker can already read from it.
      *
      * @param  array<string, list<string>>  $byService
      */
@@ -237,8 +266,7 @@ class RuntimeSidecars
     }
 
     /**
-     * `docker-compose.prod.yml`, `compose.production.yaml`: the author's own
-     * production stack, present on disk.
+     * `docker-compose.prod.yml`, `compose.production.yaml`: the author's own production stack, on disk.
      *
      * @return list<string>
      */
@@ -251,8 +279,8 @@ class RuntimeSidecars
     }
 
     /**
-     * The words between `compose` and the extension that are in $words:
-     * `docker-compose.local-dev.yml` gives `local`, `dev`.
+     * The words between `compose` and the extension that are in $words: `docker-compose.local-dev.yml`
+     * gives `local`, `dev`.
      *
      * @param  list<string>  $words
      * @return list<string>
@@ -266,62 +294,17 @@ class RuntimeSidecars
     }
 
     /**
-     * Filenames a repo uses as a stack template rather than a live compose.
-     *
-     * Listed here as well as on ComposeFileInspector so a php-fpm worker
-     * that still has the previous ComposeFileInspector in opcache does not
-     * 500 on an undefined constant mid-rebuild. Also picks up
-     * `docker-compose.<engine>.yml` slices when present on disk.
+     * Stack templates, then the `docker-compose.<x>.yml` slices on disk, non-production ones (`.dev`, `.test`) last.
      *
      * @return list<string>
      */
     private static function exampleComposeFilenames(string $projectDir = ''): array
     {
-        if (defined(ComposeFileInspector::class.'::COMPOSE_EXAMPLE_CANDIDATES')) {
-            /** @var list<string> $names */
-            $names = ComposeFileInspector::COMPOSE_EXAMPLE_CANDIDATES;
-        } else {
-            $names = [
-                'compose.example.yml',
-                'compose.example.yaml',
-                'docker-compose.example.yml',
-                'docker-compose.example.yaml',
-                'compose.sample.yml',
-                'docker-compose.sample.yml',
-                'compose.yml.example',
-                'docker-compose.yml.example',
-                'docker-compose.yml.dist',
-                'compose.yml.dist',
-                'docker-compose.mysql.yml',
-                'docker-compose.postgres.yml',
-                'docker-compose.db.yml',
-            ];
-        }
+        $names = ComposeFileInspector::COMPOSE_EXAMPLE_CANDIDATES;
 
         $projectDir = rtrim($projectDir, '/');
         if ($projectDir !== '' && is_dir($projectDir)) {
-            $found = [];
-            foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
-                foreach (glob($projectDir.'/'.$pattern) ?: [] as $path) {
-                    $base = basename($path);
-                    if (in_array($base, Paths::composeFileCandidates(), true)) {
-                        continue;
-                    }
-                    // The engine's own compose output can match this glob
-                    // (a reserved name still shaped like docker-compose.*.yml)
-                    // and must never be read back as the client's sidecar template.
-                    if (Paths::isEngineComposeFile($path)) {
-                        continue;
-                    }
-                    // A recipe's own override we just copied in, not a stack template.
-                    if ($base === Paths::CLIENT_OVERRIDE_FILENAME) {
-                        continue;
-                    }
-                    $found[] = $base;
-                }
-            }
-            // A file its name marks as not for production (`.dev`, `.test`,
-            // `.ci`) is read last, so it only speaks when nothing else does.
+            $found = self::composeSlicesIn($projectDir);
             $nonProduction = array_values(array_filter(
                 $found,
                 static fn (string $name): bool => self::suffixWords($name, self::NON_PRODUCTION_WORDS) !== []
@@ -333,6 +316,37 @@ class RuntimeSidecars
     }
 
     /**
+     * The `docker-compose.*.yml` files on disk docker does not read by itself, never the engine's own output
+     * or a recipe's override copied in, which are no stack template.
+     *
+     * @return list<string>
+     */
+    private static function composeSlicesIn(string $projectDir): array
+    {
+        $found = [];
+        foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
+            foreach (glob($projectDir.'/'.$pattern) ?: [] as $path) {
+                $base = basename($path);
+                if (in_array($base, Paths::composeFileCandidates(), true)) {
+                    continue;
+                }
+                if (Paths::isEngineComposeFile($path)) {
+                    continue;
+                }
+                if ($base === Paths::CLIENT_OVERRIDE_FILENAME) {
+                    continue;
+                }
+                $found[] = $base;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The sidecars into the decision; without services only a test-suite-only file's app env, ranked below
+     * what the strategy generates.
+     *
      * @param  array<string, mixed>  $decision
      * @param array{
      *   services: array<string, array<string, mixed>>,
@@ -354,8 +368,6 @@ class RuntimeSidecars
             $decision['app_aliases'] = $sidecars['app_aliases'];
         }
         if ($sidecars['services'] === []) {
-            // Only a file whose kept services were all a test suite gets here
-            // with app env; it ranks below what the strategy generates, as below.
             if (($sidecars['app_env'] ?? []) !== []) {
                 $decision['env'] = array_merge($sidecars['app_env'], $decision['env'] ?? []);
             }
@@ -364,13 +376,24 @@ class RuntimeSidecars
         }
         $decision['sidecars'] = array_merge($sidecars['services'], $decision['sidecars'] ?? []);
         $decision['volumes'] = array_merge($sidecars['volumes'], $decision['volumes'] ?? []);
-        // Harvested app env < what the strategy generates < sidecar connection
-        // env; the account's env_vars go on top later, in composeDecision().
+        $decision = self::withSidecarEnv($decision, $sidecars);
+        $decision['depends_on'] = array_keys($sidecars['services']);
+
+        return $decision;
+    }
+
+    /**
+     * Harvested app env < the strategy's < the sidecars' connection env, except an app-declared URL to a kept
+     * sidecar with its credentials, whose driver (CTFd's mysql+pymysql://) the generic one drops.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, mixed>  $sidecars
+     * @return array<string, mixed>
+     */
+    private static function withSidecarEnv(array $decision, array $sidecars): array
+    {
         $generated = $decision['env'] ?? [];
         $decision['env'] = array_merge($sidecars['app_env'] ?? [], $decision['env'] ?? [], $sidecars['env']);
-        // Except a connection URL the app's own service declared for a kept
-        // sidecar with the credentials it runs with: it carries the driver the
-        // app ships (CTFd's mysql+pymysql://), which the generic one drops.
         foreach (self::urlsToKeptSidecars($sidecars['app_env'] ?? [], array_keys($sidecars['services'])) as $key => $url) {
             if (isset($sidecars['env'][$key]) && ! isset($generated[$key])
                 && self::sameCredentials($url, $sidecars['env'][$key])
@@ -378,7 +401,6 @@ class RuntimeSidecars
                 $decision['env'][$key] = $url;
             }
         }
-        $decision['depends_on'] = array_keys($sidecars['services']);
 
         return $decision;
     }
@@ -414,8 +436,8 @@ class RuntimeSidecars
     }
 
     /**
-     * A sidecar under the generated app's own name makes `app -> app`. The
-     * extractor renames genuine ones, so one still here is the app itself.
+     * A sidecar under the generated app's own name makes `app -> app`; the extractor renames genuine ones,
+     * so one still here is the app itself.
      *
      * @param  array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}  $sidecars
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}
@@ -439,10 +461,8 @@ class RuntimeSidecars
     }
 
     /**
-     * The password a database sidecar gets when nobody set one:
-     * per account, unless the account's databases were initialised under the
-     * old `app` and would lock the app out if it changed. Decided on the
-     * first deploy that asks and stored with the account.
+     * A database sidecar's password when nobody set one: per account, unless its databases were initialised
+     * under the old `app`; decided on the first deploy that asks and stored with the account.
      */
     public function passwords(): SidecarPasswords
     {
@@ -472,12 +492,10 @@ class RuntimeSidecars
     private function accountHasVolumes(): ?bool
     {
         try {
-            $out = $this->dind->shell()->execAsUserQuiet(['docker', 'volume', 'ls', '-q'], [], 60);
+            return $this->dind->accountDaemon()->volumeNames(60) !== [];
         } catch (\Throwable) {
             return null;
         }
-
-        return trim($out) !== '';
     }
 
     /** The seed {@see Strategy\UserComposeStrategy} fills compose placeholders from, so both paths agree. */
@@ -486,19 +504,15 @@ class RuntimeSidecars
         return $this->dind->strategy()->secrets()->for('compose-placeholders');
     }
 
-    /**
-     * The account's own memory ceiling, so a project the operator has raised
-     * gets services sized to match. Null when none is set.
-     */
+    /** The account's own memory ceiling, so a project the operator raised gets services sized to match; null when none. */
     private function accountMemoryMb(): ?int
     {
         return $this->dind->userModel()->effectiveMemoryLimit();
     }
 
     /**
-     * owner/repo of the repository being deployed, so a compose file that
-     * references the project's own published image is recognised as the
-     * application rather than started beside the copy we build.
+     * owner/repo of the repository deployed, so a compose file naming the project's own published image is
+     * recognised as the app rather than started beside the copy we build.
      */
     private function projectIdentity(): ?string
     {
@@ -508,9 +522,8 @@ class RuntimeSidecars
     }
 
     /**
-     * What the repository's compose files call the app they build from its
-     * root, so a template naming it is not started beside our build without
-     * a repository URL to match (an archive or upload deploy).
+     * What the repository's compose files call the app they build from its root, so a template naming it is
+     * not started beside our build when no repository URL matches (an archive or upload deploy).
      *
      * @return list<string>
      */
@@ -528,8 +541,8 @@ class RuntimeSidecars
     }
 
     /**
-     * Lets the classifier ask what an image says about itself, memoised so a
-     * compose file with the same image twice costs one round-trip, not two.
+     * Lets the classifier ask what an image says about itself, memoised so the same image twice costs one
+     * round-trip.
      *
      * @return callable(string): list<int>
      */

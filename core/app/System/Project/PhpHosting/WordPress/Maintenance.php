@@ -3,11 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named maintenance-mode operations for a PHP hosting WordPress install.
- *
- * Read reports whether maintenance mode is active. Set turns it on or off,
- * then reads it back. Status treats a non-zero is-active exit as
- * enabled=false, not as a failure.
+ * Set reads the mode back. Status takes a silent non-zero is-active exit as enabled=false;
+ * one with an error, such as no WordPress at the path, fails like every other operation.
  */
 final class Maintenance
 {
@@ -21,6 +18,7 @@ final class Maintenance
     public function get(): array
     {
         $result = $this->cli->run(['maintenance-mode', 'is-active']);
+        $this->refuseFailedRun($result);
 
         return [
             'enabled' => ($result['exit_code'] ?? 1) === 0,
@@ -40,6 +38,18 @@ final class Maintenance
             'enabled' => $enabled,
             'message' => trim($result['stdout']),
         ];
+    }
+
+    /**
+     * is-active answers "off" with a bare exit 1; an error message beside it means WP-CLI could not tell.
+     *
+     * @param  array{exit_code?: int, stdout?: string, stderr?: string}  $result
+     */
+    private function refuseFailedRun(array $result): void
+    {
+        if (($result['exit_code'] ?? 1) !== 0 && trim((string) ($result['stderr'] ?? '')) !== '') {
+            throw new Exception($this->cli->failureMessage($result));
+        }
     }
 
     /**

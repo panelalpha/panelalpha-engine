@@ -99,10 +99,10 @@ You can manage a site's WordPress users from the chat. On WordPress in its own c
 List the users on this WordPress site.
 Add an editor to this WordPress site: login jdoe, email jdoe@example.com.
 Reset the password for user 5 on this WordPress site.
-Delete WordPress user 5 on this site.
+Delete WordPress user 5 on this site, reassigning their posts to user 1.
 ```
 
-Ask for the list of roles if you are not sure which one to give a new user. Passwords for WordPress users must also be at least 8 characters. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the `reassign` user id you give, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Passwords for WordPress users must also be at least 8 characters. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## Run WP-CLI
 
@@ -119,11 +119,11 @@ On WordPress in its own container, the engine finds the container that runs Word
 
 WordPress does not have to be at the top of the project. Two settings point the engine at it:
 
-- **path**: the WordPress directory. On PHP hosting it is inside the project's home: give it relative to the home, such as `blog`, or in full. A path outside the home is read as inside it, the way the file manager reads one, and a path that climbs out of the home with `..` is refused. On WordPress in its own container, it is the directory as the container sees it: in full, such as `/var/www/html/blog`, or relative to the container's working directory, such as `blog`.
+- **path**: the WordPress directory. On PHP hosting it is inside the project's home: give it relative to the home, such as `example.com/blog`, or in full. The top level of the home belongs to root, so a folder is made below the domain's own, never at the home's top level. A path outside the home is read as inside it, the way the file manager reads one, and a path that climbs out of the home with `..` is refused. On WordPress in its own container, it is the directory as the container sees it: in full, such as `/var/www/html/blog`, or relative to the container's working directory, such as `blog`.
 - **service**: the Compose service whose container runs WordPress. Use it when more than one container has PHP and WordPress.
 
 ```text
-Run `wp core version` on this site, with WordPress in the blog directory.
+Run `wp core version` on this site, with WordPress in the `example.com/blog` directory.
 List the plugins of the WordPress in the shop service.
 ```
 
@@ -186,7 +186,7 @@ Two different things, and the difference explains some confusing results.
 
 **Detected frameworks** are Next.js, Laravel, Django and the rest. The engine works these out from the files in your repository: [How detection works](../07-supported-projects/how-detection-works.md).
 
-**Known apps** are WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Adminer, and phpMyAdmin. These get extra handling because the general-purpose approach would get something wrong, such as serving the wrong folder or missing a database.
+**Known apps** are WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Roundcube, Adminer, and phpMyAdmin. These get extra handling because the general-purpose approach would get something wrong, such as serving the wrong folder or missing a database.
 
 To see what the engine will pick for a given repository, and whether another type could also run it:
 
@@ -203,6 +203,8 @@ A few other known apps worth knowing:
 - **Passbolt** gets a database and the keys it needs to start. The first user is created on Passbolt's own registration page, not by the engine.
 - **Flarum, SuiteCRM, and Chamilo** get a database, and you finish their own installer in the browser.
 - **MantisBT and Easy!Appointments** get a database and a configuration file written from it, so you are not asked for credentials the engine already has.
+- **OpenCart** is supported on its 4.1 release line, branch `4.1.x.x`. Its default branch is an unreleased rewrite that does not render, and a deploy of it is refused with that explanation.
+- **Roundcube** gets a database, its tables, and a configuration file written from it, so the first page is its login. It is a mail client only: set `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST` in the project's environment variables to the mail servers it logs in to and sends through.
 - **Adminer** is built into a single page you can open. It does not get a database of its own.
 - **phpMyAdmin** deployed from its repository is a project that signs in to that project's database. The sign-on link on [Databases](databases.md#phpmyadmin) is different: it opens the engine's own phpMyAdmin for a project you already have.
 

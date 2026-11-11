@@ -11,11 +11,8 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 
 /**
- * wp_admin: upload the migrator zip through the source wp-admin and activate
- * the plugin, with this import's own token in its config.php instead of the
- * one published with the release, then check how its transfer routes treat a
- * call without that token ({@see SourcePluginTokenCheck}). Login failure fails
- * this step and never starts remote-sync.
+ * wp_admin: upload and activate the migrator zip with this import's own token, then check its routes without it
+ * ({@see SourcePluginTokenCheck}). A copy already there is recorded first, so the cleanups leave it alone.
  */
 final class InstallSourcePluginStep implements MigrationStep
 {
@@ -60,6 +57,7 @@ final class InstallSourcePluginStep implements MigrationStep
 
     private function install(WordpressMigration $migration, SourceWordpressClient $client, string $package, string $token): void
     {
+        $migration->recordSourcePluginPreinstalled($client->hasPlugin(SourceWordpressClient::PLUGIN_SLUG));
         $client->installPluginFromZip($package);
         $client->activatePlugin(SourceWordpressClient::PLUGIN_SLUG);
         $client->assertPluginAcceptsToken($token);

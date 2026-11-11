@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\NotFoundException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AppUserDeleteRequest;
 use App\Lib\Helpers\SafeRedirect;
 use App\Lib\Vault\RequestVault;
 use App\Models\AppSsoToken;
@@ -60,14 +62,16 @@ class AppUserController extends Controller
 
     /**
      * abort()'s HttpResponseException passes through with its own status and message, since
-     * its getMessage() is empty; any other failure becomes a validation error.
+     * its getMessage() is empty, and so does a lookup that found no such app user; any other
+     * failure becomes a validation error.
      *
      * @throws HttpResponseException
+     * @throws NotFoundException
      * @throws ValidationException
      */
     private function rethrowAppException(\Exception $e): never
     {
-        if ($e instanceof HttpResponseException) {
+        if ($e instanceof HttpResponseException || $e instanceof NotFoundException) {
             throw $e;
         }
 
@@ -148,21 +152,33 @@ class AppUserController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/app/users/{userId}',
         summary: 'Delete an app user',
+        description: 'WordPress hands the user\'s posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`.',
         security: [['bearerAuth' => []]],
         tags: ['App Users'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'userId', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(
+                name: 'reassign',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'string'),
+                description: 'WordPress: app user id that receives the deleted user\'s content. Omitted: the first other administrator.',
+            ),
         ],
         responses: [
             new OA\Response(response: 204, description: 'App user deleted'),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Refused: no `reassign` user was given and no other administrator can receive the content', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function destroy(string $username, string $userId): JsonResponse
+    public function destroy(string $username, string $userId, AppUserDeleteRequest $request): JsonResponse
     {
-        return $this->callApp(function () use ($username, $userId) {
-            $this->appManager($username)->deleteUser($userId);
+        /** @var array{reassign?: ?string} $validated */
+        $validated = $request->validated();
+
+        return $this->callApp(function () use ($username, $userId, $validated) {
+            $this->appManager($username)->deleteUser($userId, $validated['reassign'] ?? null);
 
             return new JsonResponse(null, 204);
         });

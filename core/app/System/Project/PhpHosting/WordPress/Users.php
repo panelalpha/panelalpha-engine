@@ -2,14 +2,17 @@
 
 namespace App\System\Project\PhpHosting\WordPress;
 
+use App\Rules\WpCliArgument;
+
 /**
- * Named user operations for a PHP hosting WordPress install.
- *
- * Password set accepts a caller-provided value; there is no named generate-
- * and-print password operation.
+ * Password set takes the caller's value; nothing generates and prints one. An operation naming a user WordPress
+ * does not have answers 404, and a password is as long as the API's password rule allows.
  */
 final class Users
 {
+    /** The shortest password this sets, the API's rule for the same operations. */
+    public const MIN_PASSWORD_LENGTH = 8;
+
     public function __construct(
         private WpCli $cli,
     ) {}
@@ -48,7 +51,8 @@ final class Users
      */
     public function create(array $fields): array
     {
-        $login = $fields['login'];
+        $login = self::storedLogin($fields['login']);
+        self::assertPasswordLength($fields['password']);
         $args = ['user', 'create', WpCli::positional($login), WpCli::positional($fields['email']), '--user_pass='.$fields['password']];
         if (! empty($fields['role'])) {
             $args[] = '--role='.$fields['role'];
@@ -86,6 +90,11 @@ final class Users
      */
     public function update(string $user, array $fields): array
     {
+        $password = is_string($fields['password'] ?? null) && $fields['password'] !== '' ? $fields['password'] : null;
+        if ($password !== null) {
+            self::assertPasswordLength($password);
+        }
+        $this->assertExists($user);
         $args = ['user', 'update', WpCli::positional($user)];
         if (array_key_exists('email', $fields) && is_string($fields['email']) && $fields['email'] !== '') {
             $args[] = '--user_email='.$fields['email'];
@@ -102,8 +111,8 @@ final class Users
         if (array_key_exists('last_name', $fields) && is_string($fields['last_name']) && $fields['last_name'] !== '') {
             $args[] = '--last_name='.$fields['last_name'];
         }
-        if (array_key_exists('password', $fields) && is_string($fields['password']) && $fields['password'] !== '') {
-            $args[] = '--user_pass='.$fields['password'];
+        if ($password !== null) {
+            $args[] = '--user_pass='.$password;
         }
         $result = $this->cli->runOrFail($args);
 
@@ -115,6 +124,7 @@ final class Users
      */
     public function delete(string $user, ?string $reassign = null): array
     {
+        $this->assertExists($user);
         $args = ['user', 'delete', WpCli::positional($user), '--yes'];
         if (is_string($reassign) && $reassign !== '') {
             $args[] = '--reassign='.$reassign;
@@ -131,11 +141,44 @@ final class Users
      */
     public function setPassword(string $user, string $password): array
     {
+        self::assertPasswordLength($password);
+        $this->assertExists($user);
         $result = $this->cli->runOrFail(
             ['user', 'update', WpCli::positional($user), '--user_pass='.$password],
         );
 
         return $this->mutationBody($user, $result['stdout']);
+    }
+
+    /**
+     * WP-CLI's `user update` and `user delete` only warn about a login or ID no user has, and answer 0.
+     */
+    private function assertExists(string $user): void
+    {
+        $result = $this->cli->run(['user', 'get', WpCli::positional($user), '--field=ID']);
+        if ($result['exit_code'] !== 0) {
+            throw new Exception($this->cli->failureMessage($result), 404);
+        }
+    }
+
+    /**
+     * A login WordPress keeps as it is given: it trims it and drops what {@see WpCliArgument::LOGIN} refuses.
+     */
+    private static function storedLogin(string $login): string
+    {
+        $login = trim(WpCli::positional($login));
+        if (preg_match('~^'.WpCliArgument::LOGIN.'$~D', $login) !== 1) {
+            throw new Exception("The login must be letters, digits, spaces and _ . @ -: '{$login}' is not.", 422);
+        }
+
+        return $login;
+    }
+
+    private static function assertPasswordLength(string $password): void
+    {
+        if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
+            throw new Exception('The password must be at least '.self::MIN_PASSWORD_LENGTH.' characters.', 422);
+        }
     }
 
     /**

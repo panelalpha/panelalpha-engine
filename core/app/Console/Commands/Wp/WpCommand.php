@@ -11,7 +11,7 @@ class WpCommand extends Command
     use SelectsWordPressInstall;
 
     protected $signature = 'wordpress:command
-                            {arg* : WP-CLI arguments}';
+                            {arg* : WP-CLI arguments, and after -- its options}';
 
     protected $description = "Run a WP-CLI command on a project's WordPress install";
 
@@ -35,12 +35,22 @@ class WpCommand extends Command
             return 1;
         }
 
+        return $this->report($result);
+    }
+
+    /**
+     * Prints what WP-CLI answered and answers its exit code, so a script sees a failed command as a failure.
+     *
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $result
+     */
+    protected function report(array $result): int
+    {
         $this->line('stdout:');
         $this->info(trim($result['stdout']));
         $this->line('stderr:');
         $this->warn(trim($result['stderr']));
         $this->line('exit_code: '.$result['exit_code']);
 
-        return 0;
+        return (int) $result['exit_code'];
     }
 }

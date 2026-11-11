@@ -3,12 +3,10 @@
 namespace App\System\Project\PhpHosting\WordPress\Migration\Steps;
 
 use App\Models\Domain;
-use App\Models\User;
 use App\Models\WordpressMigration;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationStep;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceConnection;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceRequestAborted;
-use App\System\Project\PhpHosting\WordPress\Migration\SourceUrl;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceWordpressClient;
 use App\System\Project\PhpHosting\WordPress\WordPress;
 use Closure;
@@ -16,15 +14,13 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Uninstall wordpress-migrator on the source (wp-admin, wp_admin only) and on
- * the destination (WP-CLI). Both removals are tried before a failure is
- * reported, so one failing never leaves the other copy exposed. A
- * manual_plugin source plugin stays for the user to remove
- * ({@see WordpressMigration::notices}). Failure here must not clear secrets
- * (clear-secrets is skipped).
+ * Uninstall wordpress-migrator on the source (wp_admin only) and the destination, both tried so one failing never
+ * leaves the other exposed. A source plugin the import did not install stays ({@see WordpressMigration::keepsSourcePlugin}).
  */
 final class RemovePluginsStep implements MigrationStep
 {
+    use LocatesDestinationInstall;
+
     public function __construct(
         private SourceConnection $source = new SourceConnection,
     ) {}
@@ -37,7 +33,7 @@ final class RemovePluginsStep implements MigrationStep
     public function run(WordpressMigration $migration): void
     {
         $failures = [];
-        if (! $migration->usesManualPlugin()) {
+        if (! $migration->keepsSourcePlugin()) {
             $failures[] = self::attempt(fn () => $this->removeSourcePlugin($migration));
         }
         $failures[] = self::attempt(fn () => $this->removeDestinationPlugin($migration));
@@ -87,14 +83,8 @@ final class RemovePluginsStep implements MigrationStep
             throw new RuntimeException("Domain '{$label}' not found for destination plugin removal");
         }
 
-        $user = $domain->user;
-        if (! $user instanceof User) {
-            throw new RuntimeException("No user for domain '{$label}'");
-        }
-
-        $docRoot = $user->project()->homeDirPath().$domain->getDocumentRoot();
-        $subdir = SourceUrl::installSubdirectory($migration->source_url);
-        $path = $subdir === '' ? $docRoot : $docRoot.'/'.$subdir;
+        $user = $this->destinationUser($domain, $label);
+        $path = $this->destinationPath($migration, $user, $domain);
 
         $wp = WordPress::for($user, $path);
         $wp->plugins()->deactivate(SourceWordpressClient::PLUGIN_SLUG);

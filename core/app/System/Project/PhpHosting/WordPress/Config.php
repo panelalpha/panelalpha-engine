@@ -5,13 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress;
 use App\System\Project\Dind\AppDatabase;
 
 /**
- * Named wp-config operations for a PHP hosting WordPress install.
- *
- * List/read/set/delete map to `wp config list|get|set|delete`. The type picks
- * constants (the default), variables such as $table_prefix, or all; for set,
- * all updates whichever exists and adds a constant otherwise. These commands
- * read wp-config.php without loading WordPress. Create writes a new
- * wp-config.php from database credentials.
+ * `wp config list|get|set|delete`, which read wp-config.php without loading WordPress, and `config create`.
+ * The type picks constants (the default), variables such as $table_prefix, or all.
  */
 final class Config
 {
@@ -63,6 +58,8 @@ final class Config
     }
 
     /**
+     * With type all, WP-CLI updates whichever of the constant and the variable exists, and adds a constant otherwise.
+     *
      * @return array{constant: string, value: string, message: string}
      */
     public function set(string $name, string $value, bool $raw = false, string $type = 'constant'): array
@@ -83,10 +80,8 @@ final class Config
     }
 
     /**
-     * Writes a new wp-config.php (WP-CLI `config create`), e.g. after a core
-     * download. Without force an existing file is a failure; without
-     * skip_check WP-CLI first connects to the database. Without dbhost,
-     * {@see defaultDatabaseHost()} picks the host.
+     * An existing file fails without force, WP-CLI checks the database without skip_check, and
+     * {@see defaultDatabaseHost()} picks a missing dbhost; {@see WpCli::createConfigFile()} keeps the file private.
      *
      * @param array{
      *     dbname: string,
@@ -105,19 +100,19 @@ final class Config
     public function create(array $fields): array
     {
         $fields['dbhost'] ??= $this->defaultDatabaseHost();
-        $args = ['config', 'create'];
+        $options = [];
         foreach (['dbname', 'dbuser', 'dbpass', 'dbhost', 'dbprefix', 'dbcharset', 'dbcollate', 'locale'] as $key) {
             if (isset($fields[$key])) {
-                $args[] = "--{$key}=".$fields[$key];
+                $options[] = "--{$key}=".$fields[$key];
             }
         }
         if (! empty($fields['force'])) {
-            $args[] = '--force';
+            $options[] = '--force';
         }
         if (! empty($fields['skip_check'])) {
-            $args[] = '--skip-check';
+            $options[] = '--skip-check';
         }
-        $result = $this->cli->runOrFail($args);
+        $result = $this->cli->createConfigFile($options);
 
         return [
             'message' => trim($result['stdout']),
@@ -125,10 +120,8 @@ final class Config
     }
 
     /**
-     * On PHP hosting the projects' MySQL server, which the engine's own
-     * installer writes too: localhost there is the account's PHP container.
-     * In the project's own containers the host wp-config.php already names,
-     * its compose database service; null, WP-CLI's localhost, without one.
+     * PHP hosting: the projects' MySQL server, as the engine's installer writes (localhost is the PHP container there).
+     * Own containers: the host wp-config.php already names, its compose database service; without one null, WP-CLI's localhost.
      */
     private function defaultDatabaseHost(): ?string
     {

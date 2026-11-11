@@ -37,6 +37,24 @@ class WpCliTest extends TestCase
         $this->assertSame('', $result['stderr']);
     }
 
+    public function test_a_failure_message_drops_terminal_controls_and_keeps_its_lines(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            result: ['exit_code' => 2, 'stdout' => '', 'stderr' => "\u{7}mysqldump: Got error: 1044\n\tAccess denied\u{1b}[0m"],
+        );
+
+        try {
+            $cli->runOrFail(['db', 'export', 'x.sql']);
+            $this->fail('A failed run did not throw.');
+        } catch (WordPressException $e) {
+            $this->assertSame("mysqldump: Got error: 1044\n\tAccess denied[0m", $e->getMessage());
+        }
+    }
+
     public function test_skip_plugins_adds_both_skip_flags_before_the_path(): void
     {
         $captured = [];

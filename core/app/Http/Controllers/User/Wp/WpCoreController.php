@@ -294,7 +294,7 @@ class WpCoreController extends WordPressController
         responses: [
             new OA\Response(response: 200, description: 'Core updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object', properties: [
-                    new OA\Property(property: 'version', type: 'string'),
+                    new OA\Property(property: 'version', type: 'string', description: 'The version installed after the update, which is the requested one only when it was installed.'),
                     new OA\Property(property: 'message', type: 'string'),
                 ])],
             )),

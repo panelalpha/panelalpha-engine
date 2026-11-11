@@ -133,4 +133,19 @@ class ComposeYamlAnchorTest extends TestCase
         $this->assertIsArray($parsed);
         $this->assertSame('v', $parsed['x-a']['K']);
     }
+
+    /** The first anchor's line is gone once it moves; the second one's scan upward must step over it. */
+    public function test_a_second_standalone_anchor_below_a_moved_one_raises_no_deprecation(): void
+    {
+        set_error_handler(static function (int $level, string $message): never {
+            throw new \ErrorException($message, 0, $level);
+        }, E_DEPRECATED);
+        try {
+            $parsed = ComposeYaml::parse("x-base:\n  &one\n  &two\n  image: nginx\n");
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertNull($parsed);
+    }
 }

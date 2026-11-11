@@ -125,6 +125,7 @@ class WordpressMigrationCancelTest extends ImportTargetTestCase
     {
         $migration = $this->started(MigrationTarget::newProject('example.com', null), 'https://example.com');
         $migration->storeResolvedSource('https://example.com', null, SourceSite::REST_WP_JSON);
+        $migration->recordSourcePluginPreinstalled(false);
         $migration->markStepFailed(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN);
         $migration->requestCancel();
 

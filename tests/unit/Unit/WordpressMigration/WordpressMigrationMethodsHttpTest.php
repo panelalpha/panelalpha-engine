@@ -38,7 +38,8 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
             WordpressMigrationStoreRequest::SOURCE_RESOLVER,
             static fn (string $host): array => $host === 'example.com' ? [TestNetwork::routable(34)] : [$host],
         );
-        $this->app->instance(EngineAddresses::class, new class extends EngineAddresses {
+        $this->app->instance(EngineAddresses::class, new class extends EngineAddresses
+        {
             public function ranges(): array
             {
                 return [TestNetwork::routable(40)];
@@ -142,7 +143,7 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
             static fn (string $host): array => $host === 'sites-db' ? [TestNetwork::container2(2)] : [$host],
         );
 
-        foreach (['http://' . TestNetwork::container(5) . ':5000/', 'http://' . TestNetwork::private(1) . ':8006/', 'http://sites-db:3306/', 'https://' . TestNetwork::routable(40) . '/'] as $url) {
+        foreach (['http://'.TestNetwork::container(5).':5000/', 'http://'.TestNetwork::private(1).':8006/', 'http://sites-db:3306/', 'https://'.TestNetwork::routable(40).'/'] as $url) {
             $this->postJson('/api/wordpress/migrations/test', [
                 'url' => $url,
                 'username' => 'admin',
@@ -154,7 +155,7 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
     public function test_the_connection_test_answers_200_and_creates_nothing(): void
     {
         Queue::fake();
-        $http = (new RoutedSourceHttpClient())
+        $http = (new RoutedSourceHttpClient)
             ->on('GET', 'https://example.com/wp-login.php', RoutedSourceHttpClient::loginPage('https://example.com', 'https://example.com/wp-login.php'))
             ->on('GET', 'https://example.com/wp-json/', RoutedSourceHttpClient::restIndex('https://example.com'))
             ->on('POST', 'https://example.com/wp-login.php', new SourceHttpResponse('ok', 200))
@@ -186,7 +187,22 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
         $download = $this->get($url);
         $download->assertOk();
         $config = $this->configInZip($download->baseResponse->getFile()->getPathname());
-        $this->assertStringContainsString("'token' => '" . $token . "'", $config);
+        $this->assertStringContainsString("'token' => '".$token."'", $config);
+    }
+
+    public function test_the_download_link_names_the_engine_address_not_the_request_host(): void
+    {
+        config(['app.url' => 'https://engine.example.test:2011']);
+
+        $url = $this->postJson('/api/wordpress/migrations/plugin-package')->json('download_url');
+        $other = $this->postJson('https://'.TestNetwork::LOOPBACK.':2011/api/wordpress/migrations/plugin-package')
+            ->json('download_url');
+
+        $this->assertStringStartsWith(
+            'https://engine.example.test:2011/api/wordpress/migrations/plugin-package/download?',
+            $url,
+        );
+        $this->assertSame(parse_url($url, PHP_URL_HOST), parse_url($other, PHP_URL_HOST));
     }
 
     public function test_the_download_link_is_signed_instead_of_authenticated(): void
@@ -211,24 +227,25 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
 
     private function assertPackageNotFound(string $package): void
     {
-        $this->getJson('/api/wordpress/migrations/plugin-package/download?' . http_build_query(['package' => $package]))
+        $this->getJson('/api/wordpress/migrations/plugin-package/download?'.http_build_query(['package' => $package]))
             ->assertNotFound()
             ->assertExactJson(['message' => 'Not found']);
     }
 
     private function fixtureZip(): WordpressMigratorZip
     {
-        return new class extends WordpressMigratorZip {
+        return new class extends WordpressMigratorZip
+        {
             public function downloadAndRepack(?string $releaseUrl = null): string
             {
-                $source = sys_get_temp_dir() . '/wp-migrator-fixture-' . bin2hex(random_bytes(4)) . '.zip';
-                $zip = new ZipArchive();
+                $source = sys_get_temp_dir().'/wp-migrator-fixture-'.bin2hex(random_bytes(4)).'.zip';
+                $zip = new ZipArchive;
                 $zip->open($source, ZipArchive::CREATE);
                 $zip->addFromString('panelalpha-wordpress-migrator-1.2.0/wordpress-migrator.php', "<?php\n");
                 $zip->addFromString('panelalpha-wordpress-migrator-1.2.0/config.php', "<?php\n\nreturn [\n    'token' => '',\n    'mode' => 'source',\n];\n");
                 $zip->close();
 
-                $workDir = sys_get_temp_dir() . '/wp-migrator-' . bin2hex(random_bytes(4));
+                $workDir = sys_get_temp_dir().'/wp-migrator-'.bin2hex(random_bytes(4));
                 mkdir($workDir, 0700, true);
                 try {
                     return $this->repackFromTagArchive($source, $workDir);
@@ -241,7 +258,7 @@ class WordpressMigrationMethodsHttpTest extends WordpressMigrationTestCase
 
     private function configInZip(string $path): string
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $this->assertTrue($zip->open($path) === true);
         $config = (string) $zip->getFromName('wordpress-migrator/config.php');
         $zip->close();

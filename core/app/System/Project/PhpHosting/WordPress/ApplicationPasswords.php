@@ -14,12 +14,14 @@ final class ApplicationPasswords
     ) {}
 
     /**
+     * The stored password hashes stay off the list: each row names the application, never its secret.
+     *
      * @return list<array<string, mixed>>
      */
     public function list(string $wpUser): array
     {
         $result = $this->cli->runOrFail(
-            ['user', 'application-password', 'list', WpCli::positional($wpUser), '--format=json'],
+            ['user', 'application-password', 'list', WpCli::positional($wpUser), '--fields=uuid,name,created', '--format=json'],
         );
 
         return JsonOutput::decodeList($result['stdout']);
@@ -62,11 +64,8 @@ final class ApplicationPasswords
     }
 
     /**
-     * Extract the one-time plaintext from create stdout.
-     *
-     * Prefer --porcelain (a single trimmed line). Fall back to a
-     * "Password: …" line when chrome is present. Porcelain is the first
-     * non-empty line that is not a Success: banner.
+     * Extract the one-time plaintext from create stdout: --porcelain prints it alone, the first non-empty line that
+     * is not a Success: banner; when chrome is present it is the "Password: …" line.
      */
     private function parseCreateSecret(string $stdout): string
     {

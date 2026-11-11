@@ -6,13 +6,10 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Source-site wp-admin + migrator-plugin client. Cookies stay in the HTTP
- * transport (process memory). Never logs the wp-admin password or migrator token.
+ * Source-site wp-admin and migrator-plugin client; never logs the password or token. Transfer routes need only
+ * the site ({@see useSite}) and the plugin's token ({@see useSourceToken}), plugin changes a session ({@see logIn}).
  *
- * The plugin's transfer routes need no wp-admin session, only the site
- * ({@see useSite}) and the token the plugin carries ({@see useSourceToken}),
- * which every transfer call sends; installing, activating and deleting the
- * plugin need a session ({@see logIn}).
+ * @psalm-type BatchResult = array{finalized: bool, current_phase: string|null, current_item: string|null, current_phase_percent: float, next_item: string|null, next_phase: string|null, sent_chunks: int, total_chunks: int}
  */
 final class SourceWordpressClient
 {
@@ -92,14 +89,8 @@ final class SourceWordpressClient
     }
 
     /**
-     * Build the JSON body for POST …/remote-sync.
-     * destination_url is the destination site URL (incl. subdirectory) plus ?token=.
-     * ip, when given, is where the plugin sends the destination's name
-     * (CURLOPT_RESOLVE), so the transfer reaches this engine while the
-     * domain's DNS still points at the old server; insecure_tls goes with it,
-     * since this engine has no certificate for that name yet. force takes over
-     * a transfer holding the source's lock, so only a caller that knows it
-     * started that transfer sets it.
+     * The JSON body for POST …/remote-sync: ip resolves the destination to this engine while DNS still points
+     * away, with insecure_tls since there is no certificate yet; force takes over a transfer holding the lock.
      *
      * @param  list<string>  $extraExclusions
      * @return array{
@@ -136,10 +127,8 @@ final class SourceWordpressClient
     }
 
     /**
-     * Log into wp-admin at the site's login URL. On success the ajax nonce is
-     * returned; cookies stay on $this->http. WordPress's admin e-mail check is
-     * answered only with $confirmAdminEmail: the session already exists behind
-     * it, and answering it changes the site.
+     * Log into wp-admin and return the ajax nonce; cookies stay on $this->http. The admin e-mail check is
+     * answered only with $confirmAdminEmail, since the session exists behind it and answering changes the site.
      *
      * @throws SourceCheckFailed on bad credentials, a missing nonce or a Cloudflare block
      */
@@ -221,9 +210,8 @@ final class SourceWordpressClient
     }
 
     /**
-     * Whether any transfer route answers a call without the token, as releases
-     * before 1.2.0 do. Changes nothing on the source: those calls carry no
-     * destination or migration.
+     * Whether any transfer route answers a call without the token, as releases before 1.2.0 do. Changes
+     * nothing on the source: those calls carry no destination or migration.
      */
     public function answersWithoutToken(): bool
     {
@@ -262,15 +250,24 @@ final class SourceWordpressClient
             && $code !== null && $code !== 'rest_no_route';
     }
 
+    /** Whether the plugin is installed on the source, active or not. */
+    public function hasPlugin(string $slug = self::PLUGIN_SLUG): bool
+    {
+        $this->assertAdminSession();
+
+        $list = $this->http->request('POST', $this->homeUrl.'/wp-admin/plugins.php');
+        $plugins = WpAdminHtml::plugins($list->body);
+
+        return isset($plugins['inactive'][$slug]) || isset($plugins['active'][$slug]);
+    }
+
     /**
-     * Upload and leave the migrator plugin installed (active or inactive is fine;
-     * call {@see activatePlugin} next). A copy already on the site is removed
-     * first, so the installed plugin is the one in this zip, with its token.
+     * Upload the migrator plugin with WordPress's own replace-with-uploaded, so a copy already there is overwritten
+     * by one carrying this zip's token and is never deleted first; call {@see activatePlugin} next.
      */
     public function installPluginFromZip(string $zipPath): void
     {
         $this->assertAdminSession();
-        $this->deletePlugin(self::PLUGIN_SLUG);
 
         $uploadPage = $this->http->request(
             'GET',
@@ -288,8 +285,8 @@ final class SourceWordpressClient
             throw new RuntimeException('Migrator install zip is missing: '.$zipPath);
         }
 
-        $this->http->postMultipart(
-            $this->homeUrl.'/wp-admin/update.php?action=upload-plugin',
+        $upload = $this->http->postMultipart(
+            $this->homeUrl.'/wp-admin/update.php?action=upload-plugin&overwrite=update-plugin',
             [
                 '_wpnonce' => $nonce,
                 '_wp_http_referer' => '/wp-admin/plugin-install.php',
@@ -298,11 +295,21 @@ final class SourceWordpressClient
             ],
         );
 
-        $list = $this->http->request('POST', $this->homeUrl.'/wp-admin/plugins.php');
-        $plugins = WpAdminHtml::plugins($list->body);
-        if (! isset($plugins['inactive'][self::PLUGIN_SLUG]) && ! isset($plugins['active'][self::PLUGIN_SLUG])) {
-            throw new RuntimeException('Source plugin install did not leave wordpress-migrator installed');
+        if (! $this->hasPlugin(self::PLUGIN_SLUG)) {
+            throw new RuntimeException(self::installFailedMessage($upload->body));
         }
+    }
+
+    /**
+     * WordPress answers a refused upload with its own sentence, which names the precondition: a site that forbids
+     * plugin installs, or a proxy in front of wp-admin that answers the upload itself.
+     */
+    private static function installFailedMessage(string $uploadHtml): string
+    {
+        $notice = WpAdminHtml::errorNotice($uploadHtml);
+
+        return 'Source plugin install did not leave wordpress-migrator installed'
+            .($notice === '' ? '' : ': '.$notice);
     }
 
     public function activatePlugin(string $slug = self::PLUGIN_SLUG): void
@@ -328,7 +335,8 @@ final class SourceWordpressClient
         }
     }
 
-    public function deletePlugin(string $slug = self::PLUGIN_SLUG): void
+    /** Whether the plugin was there to delete; one the source does not have is left as it is. */
+    public function deletePlugin(string $slug = self::PLUGIN_SLUG): bool
     {
         $this->assertAdminSession();
 
@@ -342,7 +350,7 @@ final class SourceWordpressClient
         } elseif (isset($plugins['inactive'][$slug])) {
             $ajaxNonce = WpAdminHtml::ajaxNonce($list->body);
         } else {
-            return;
+            return false;
         }
 
         $pluginFile = $slug.'/'.$slug.'.php';
@@ -353,6 +361,8 @@ final class SourceWordpressClient
             '_ajax_nonce' => $ajaxNonce,
         ]);
         $this->http->request('POST', $this->homeUrl.'/wp-admin/admin-ajax.php', $query);
+
+        return true;
     }
 
     /**
@@ -404,42 +414,14 @@ final class SourceWordpressClient
     {
         $this->assertSite();
 
-        $result = [
-            'finalized' => false,
-            'current_phase' => null,
-            'current_item' => null,
-            'current_phase_percent' => 0.00,
-            'next_item' => null,
-            'next_phase' => null,
-            'sent_chunks' => 0,
-            'total_chunks' => 0,
-        ];
+        $result = self::emptyBatchResult();
 
         $attempts = 3;
         for ($i = 0; $i < $attempts; $i++) {
             try {
                 $response = $this->runProcessBatch($migrationId);
-                $progress = $response['progress'] ?? [];
-                $result['finalized'] = (bool) ($response['finalized'] ?? false);
-                $result['current_phase'] = isset($response['phase']) && is_string($response['phase'])
-                    ? $response['phase']
-                    : null;
-                $result['current_item'] = is_array($progress)
-                    ? ($progress['current_item'] ?? null)
-                    : null;
-                $result['next_item'] = is_array($progress)
-                    ? ($progress['next_item'] ?? null)
-                    : null;
-                $result['current_phase_percent'] = is_array($progress)
-                    ? (float) ($progress['percentage'] ?? 0.00)
-                    : 0.00;
-                $result['next_phase'] = isset($response['next_phase']) && is_string($response['next_phase'])
-                    ? $response['next_phase']
-                    : null;
-                $result['sent_chunks'] = self::chunkCount($progress, 'sent_chunks');
-                $result['total_chunks'] = self::chunkCount($progress, 'total_chunks');
 
-                return $result;
+                return self::batchResult($result, $response);
             } catch (Throwable $e) {
                 if ($i === $attempts - 1 || $e instanceof SourceRequestAborted) {
                     throw $e;
@@ -507,6 +489,53 @@ final class SourceWordpressClient
         return true;
     }
 
+    /** @psalm-return BatchResult */
+    private static function emptyBatchResult(): array
+    {
+        return [
+            'finalized' => false,
+            'current_phase' => null,
+            'current_item' => null,
+            'current_phase_percent' => 0.00,
+            'next_item' => null,
+            'next_phase' => null,
+            'sent_chunks' => 0,
+            'total_chunks' => 0,
+        ];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $response
+     *
+     * @psalm-param BatchResult $result
+     *
+     * @psalm-return BatchResult
+     */
+    private static function batchResult(array $result, array $response): array
+    {
+        $progress = $response['progress'] ?? [];
+        $result['finalized'] = (bool) ($response['finalized'] ?? false);
+        $result['current_phase'] = isset($response['phase']) && is_string($response['phase'])
+            ? $response['phase']
+            : null;
+        $result['current_item'] = is_array($progress)
+            ? ($progress['current_item'] ?? null)
+            : null;
+        $result['next_item'] = is_array($progress)
+            ? ($progress['next_item'] ?? null)
+            : null;
+        $result['current_phase_percent'] = is_array($progress)
+            ? (float) ($progress['percentage'] ?? 0.00)
+            : 0.00;
+        $result['next_phase'] = isset($response['next_phase']) && is_string($response['next_phase'])
+            ? $response['next_phase']
+            : null;
+        $result['sent_chunks'] = self::chunkCount($progress, 'sent_chunks');
+        $result['total_chunks'] = self::chunkCount($progress, 'total_chunks');
+
+        return $result;
+    }
+
     private static function chunkCount(mixed $progress, string $key): int
     {
         return is_array($progress) && is_numeric($progress[$key] ?? null) ? (int) $progress[$key] : 0;
@@ -539,10 +568,8 @@ final class SourceWordpressClient
     }
 
     /**
-     * One call to a transfer route, with the source token. It goes again in the
-     * other REST mode only when it did not reach the plugin (no answer, a
-     * missing route, or a page that is not the REST API); an answer from the
-     * plugin itself, an error included, is never sent again.
+     * One call to a transfer route, with the source token, sent again in the other REST mode only when it did
+     * not reach the plugin; an answer from the plugin itself, an error included, is never sent again.
      *
      * @param  array<array-key, mixed>|null  $params
      * @return array<array-key, mixed>

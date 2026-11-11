@@ -115,7 +115,8 @@ class ConfigTest extends TestCase
     public function test_create_passes_the_given_credentials_and_flags(): void
     {
         $sequence = [];
-        $config = $this->configWithFakeRunner($sequence, results: [
+        $modes = [];
+        $config = $this->configWithFakeRunner($sequence, modes: $modes, results: [
             ['exit_code' => 0, 'stdout' => "Success: Generated 'wp-config.php' file.\n", 'stderr' => ''],
         ]);
 
@@ -134,10 +135,11 @@ class ConfigTest extends TestCase
         $this->assertSame([
             'config', 'create',
             '--dbname=alice_wp', '--dbuser=alice_u', '--dbpass= p@ss ', '--dbhost=localhost:3306',
-            '--dbprefix=wp_', '--dbcharset=utf8mb4', '--locale=pl_PL', '--force',
+            '--dbprefix=wp_', '--dbcharset=utf8mb4', '--locale=pl_PL', '--force', '--exec=umask(0077);',
             '--path=/home/alice/example.test/public_html',
         ], $sequence[0]);
         $this->assertSame(['message' => "Success: Generated 'wp-config.php' file."], $body);
+        $this->assertSame(['/home/alice/example.test/public_html/wp-config.php' => '600'], $modes);
     }
 
     public function test_create_omits_what_is_not_given(): void
@@ -149,7 +151,7 @@ class ConfigTest extends TestCase
 
         $this->assertSame([
             'config', 'create', '--dbname=db', '--dbuser=u', '--dbpass=', '--dbhost=db.test', '--skip-check',
-            '--path=/home/alice/example.test/public_html',
+            '--exec=umask(0077);', '--path=/home/alice/example.test/public_html',
         ], $sequence[0]);
     }
 
@@ -290,12 +292,14 @@ class ConfigTest extends TestCase
 
     /**
      * @param  list<list<string>>  $sequence
+     * @param  array<string, string>  $modes  path => mode set on it
      * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
     private function configWithFakeRunner(
         array &$sequence,
         array $results = [['exit_code' => 0, 'stdout' => '', 'stderr' => '']],
         ?string $path = null,
+        array &$modes = [],
     ): Config {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
@@ -303,6 +307,7 @@ class ConfigTest extends TestCase
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
         $project->shouldReceive('resolvePath')
             ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
+        $project->shouldReceive('fileManager')->andReturn($this->filesThatChmod($modes));
         $call = 0;
         $project->shouldReceive('runWpCli')
             ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {
@@ -316,6 +321,20 @@ class ConfigTest extends TestCase
         $user->shouldReceive('getMainDomain')->andReturn($this->domain('/example.test/public_html'));
 
         return new Config(WpCli::for($user, $path));
+    }
+
+    /**
+     * @param  array<string, string>  $modes
+     */
+    private function filesThatChmod(array &$modes): FileManager
+    {
+        $files = Mockery::mock(FileManager::class);
+        $files->shouldReceive('chmod')->andReturnUsing(function (string $path, string $mode) use (&$modes): void {
+            $modes[$path] = $mode;
+        });
+        $files->shouldReceive('isFile')->andReturn(false);
+
+        return $files;
     }
 
     private function domain(string $documentRoot): Domain
