@@ -13,12 +13,13 @@
 #   - everything else leaves, masqueraded.
 # DNS is unaffected: Docker's embedded resolver forwards from the daemon.
 #
-# Usage: build-network-firewall.sh [--create] [network]   (default panelalpha-build)
+# Usage: build-network-firewall.sh [--create] [--network-on-stdin] [network]   (default panelalpha-build)
 # Idempotent. Run by the engine before every host build -- a reboot drops these
 # rules. --create makes the network first; the installers run that right after
 # restarting Docker, because once a firewall flush (moving a host off CSF) has
 # removed Docker's chains `docker network create` fails
 # ("iptables ... -A DOCKER-FORWARD ...: No chain/target/match by that name").
+# --network-on-stdin reads `id`, `bridge` and `subnet` lines from stdin instead of docker's CLI.
 
 # iptables-legacy gives up at once ("Another app is currently holding the
 # xtables lock") while Docker, ufw or fail2ban is changing rules; -w waits for
@@ -26,7 +27,9 @@
 iptables() { command iptables -w 30 "$@"; }
 
 CREATE=0
+ON_STDIN=0
 if [ "${1:-}" = "--create" ]; then CREATE=1; shift; fi
+if [ "${1:-}" = "--network-on-stdin" ]; then ON_STDIN=1; shift; fi
 NET="${1:-panelalpha-build}"
 
 if [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
@@ -37,15 +40,28 @@ fi
 CHAIN=PA-BUILD-EGRESS
 REFUSED="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
 
-bridge=$(docker network inspect -f '{{index .Options "com.docker.network.bridge.name"}}' "$NET" 2>/dev/null) || {
+network_lines() {
+    if [ "$ON_STDIN" = 1 ]; then
+        cat
+        return
+    fi
+    docker network inspect -f 'id {{.Id}}
+bridge {{index .Options "com.docker.network.bridge.name"}}
+subnet {{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" 2>/dev/null
+}
+lines=$(network_lines)
+field() { printf '%s\n' "$lines" | awk -v name="$1" '$1 == name { print $2; exit }'; }
+id=$(field id)
+[ -n "$id" ] || {
     echo "build-network-firewall: no docker network $NET" >&2
     exit 1
 }
-[ -n "$bridge" ] || bridge="br-$(docker network inspect -f '{{.Id}}' "$NET" | cut -c1-12)"
-subnet=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" | awk '{print $1}')
+bridge=$(field bridge)
+[ -n "$bridge" ] || bridge="br-$(printf '%s' "$id" | cut -c1-12)"
+subnet=$(field subnet)
 
 # Two builds can start together; the chain is emptied and refilled below.
-exec 9>/run/pa-build-network.lock
+exec 9>"${PA_BUILD_LOCK:-/run/pa-build-network.lock}"
 flock 9
 
 set -e

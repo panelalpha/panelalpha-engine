@@ -8,9 +8,11 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
 use Tests\TestCase;
 use Tests\Unit\System\Project\SuccessfulProcess;
@@ -58,7 +60,9 @@ class AppPortAlignmentRealignTest extends TestCase
         $this->assertArrayHasKey(self::RUN_PATH, $this->copiedTo, 'the run file was never rewritten');
         $this->assertStringContainsString('8080:8081', $this->copiedTo[self::RUN_PATH]);
         $this->assertNotEmpty($this->ranMatching('up -d --no-build'), 'the app is started again on it');
-        $this->assertNotEmpty($this->ranMatching('ps -q app'), 'the app\'s own container is measured');
+        $this->assertNotEmpty($this->ranMatching('label com.docker.compose.service=app'), 'the app\'s own container is measured');
+        $this->assertNotEmpty($this->ranMatching("account-docker.listeningSockets -- {$this->username} app1"));
+        $this->assertNotEmpty($this->ranMatching("account-docker.containers -- {$this->username} app1"));
     }
 
     public function test_a_redeploys_second_copy_is_measured_itself_and_started_again_by_the_caller(): void
@@ -68,12 +72,12 @@ class AppPortAlignmentRealignTest extends TestCase
         $this->assertTrue($realigned);
         $this->assertSame(['9000', '8081'], $this->probed);
         $this->assertStringContainsString('8080:8081', $this->copiedTo[self::RUN_PATH] ?? '');
-        $measured = $this->ranMatching('cid=');
+        $measured = [...$this->ranMatching('account-docker.listeningSockets'), ...$this->ranMatching('account-docker.containers')];
         $this->assertNotEmpty($measured);
         foreach ($measured as $line) {
-            $this->assertStringContainsString("cid='next1'", $line, 'the copy, not the running app');
-            $this->assertStringNotContainsString('ps -q app', $line);
+            $this->assertStringEndsWith(" -- {$this->username} next1", $line, 'the copy, not the running app');
         }
+        $this->assertSame([], $this->ranMatching('label com.docker.compose.service=app'));
         $this->assertSame([], $this->ranMatching('up -d'));
     }
 
@@ -89,7 +93,7 @@ class AppPortAlignmentRealignTest extends TestCase
 
         $this->assertFalse($realigned);
         $this->assertSame(1, $asked);
-        $this->assertCount(1, $this->ranMatching('net/tcp'));
+        $this->assertCount(1, $this->ranMatching('account-docker.listeningSockets'));
         $this->assertSame([], $this->probed);
         $this->assertSame([], $this->copiedTo);
     }
@@ -110,7 +114,7 @@ class AppPortAlignmentRealignTest extends TestCase
         } catch (DeployCancelledException) {
         }
 
-        $this->assertCount(2, $this->ranMatching('net/tcp'));
+        $this->assertCount(2, $this->ranMatching('account-docker.listeningSockets'));
         $this->assertSame([], $this->probed);
         $this->assertSame([], $this->copiedTo);
         $deploy->finish(DeployLogger::STATUS_CANCELLED);
@@ -127,7 +131,7 @@ class AppPortAlignmentRealignTest extends TestCase
         } catch (DeployCancelledException) {
         }
 
-        $this->assertCount(1, $this->ranMatching('net/tcp'));
+        $this->assertCount(1, $this->ranMatching('account-docker.listeningSockets'));
         $this->assertSame([], $this->ranMatching('up -d'));
         $deploy->finish(DeployLogger::STATUS_CANCELLED);
     }
@@ -228,16 +232,24 @@ class AppPortAlignmentRealignTest extends TestCase
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->ran[] = $line;
-                if (str_contains($line, 'net/tcp')) {
+                $action = LocalRoot::action((array) $cmd);
+                if ($action === 'account-docker.listeningSockets') {
                     return $this->procNetTcp;
                 }
-                if (str_contains($line, 'curl') && preg_match('/ip:(\d+)\//', $line, $m) === 1) {
+                if ($action === 'account-docker.containers') {
+                    return '[{"NetworkSettings":{"Networks":{"bridge":{"IPAddress":""},"project_default":{"IPAddress":"172.18.0.5"}}}}]';
+                }
+                if ($action === 'account-docker.listContainers' && str_contains($line, 'label com.docker.compose.service=app')) {
+                    return '[{"Id":"app1","Names":["/project-app-1"]},{"Id":"app2","Names":["/project-app-2"]}]';
+                }
+                if (str_contains($line, 'curl') && preg_match('/ probe 172\.18\.0\.5 (\d+)$/', $line, $m) === 1) {
                     $this->probed[] = $m[1];
 
                     return $this->statuses[(int) $m[1]] ?? '000';
                 }
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                [$source, $target] = LocalRoot::action((array) $cmd) === 'files.copy' ? LocalRoot::values((array) $cmd) : [null, null];
+                if ($source !== null && is_file($source)) {
+                    $this->copiedTo[$target] = (string) file_get_contents($source);
                 }
                 $this->renameStaged($cmd);
 
@@ -274,6 +286,8 @@ class AppPortAlignmentRealignTest extends TestCase
         $dind->method('userAppComposeFileToRun')->willReturn(self::RUN_PATH);
         $dind->method('userAppComposeCommand')->willReturn(['docker', 'compose', 'up', '-d', '--no-build']);
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
+        $dind->method('userAppComposeProjectName')->willReturn('project');
 
         $alignment = new AppPortAlignment($dind, static function (int $seconds): void {
         });

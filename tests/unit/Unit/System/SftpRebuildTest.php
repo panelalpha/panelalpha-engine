@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Services\Sftp;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class SftpRebuildTest extends TestCase
 {
@@ -16,10 +17,12 @@ class SftpRebuildTest extends TestCase
         parent::setUp();
         $this->tmpRoot = sys_get_temp_dir() . '/pa-sftp-' . bin2hex(random_bytes(4));
         mkdir($this->tmpRoot . '/config/sftp', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -49,23 +52,15 @@ class SftpRebuildTest extends TestCase
         $this->assertSame("alice_sftp:secret:1001:1001:/home/alice:\n", file_get_contents($confPath));
     }
 
-    public function test_sync_logins_runs_sync_script_without_t_flag(): void
+    public function test_sync_logins_asks_the_broker_to_run_the_sync_script(): void
     {
         $system = $this->recordingSystem();
         $system->sftp()->syncLogins();
 
-        $this->assertContains('sync-logins', $system->journal);
-        $syncCmd = null;
-        foreach ($system->processJournal as $cmd) {
-            if (str_contains($cmd, 'sync-logins.sh')) {
-                $syncCmd = $cmd;
-                break;
-            }
-        }
-        $this->assertNotNull($syncCmd);
-        $this->assertStringContainsString('docker compose -f', $syncCmd);
-        $this->assertStringContainsString('exec sftp bash /etc/sftp/sync-logins.sh', $syncCmd);
-        $this->assertStringNotContainsString('exec -T sftp', $syncCmd);
+        $this->assertSame(['sync-logins'], $system->journal);
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'compose.sftpSyncLogins', '--', $this->tmpRoot . '/docker-compose.yml'],
+        ], $system->requests);
     }
 
     public function test_apply_logins_writes_and_syncs(): void
@@ -85,8 +80,8 @@ class SftpRebuildTest extends TestCase
             /** @var list<string> */
             public array $journal = [];
 
-            /** @var list<string> */
-            public array $processJournal = [];
+            /** @var list<list<string>> */
+            public array $requests = [];
 
             public function __construct(
                 private string $engineRoot,
@@ -105,9 +100,9 @@ class SftpRebuildTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->processJournal[] = $line;
-                if (str_contains($line, 'sync-logins.sh')) {
+                $argv = (array) $cmd;
+                $this->requests[] = $argv;
+                if (in_array('compose.sftpSyncLogins', $argv, true)) {
                     $this->journal[] = 'sync-logins';
                 }
 

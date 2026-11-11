@@ -2,8 +2,10 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Generation\CancelledGeneration;
 use App\System\Project\Dind\Generation\GenerationState;
@@ -26,9 +28,8 @@ final class AccountTeardown
         $username = $this->project->username();
         $sidecarRefs = $this->hostSidecarRefsToRemove($username);
 
-        $storage = $this->project->engine()->storage();
         $this->abortRunningDeploy(false, removeVolumes: true);
-        $this->tryStep($storage->pruneAllArgv(), 300, true);
+        $this->tryDaemonStep('system prune', static fn (AccountDaemon $daemon) => $daemon->pruneSystem(true, 300));
         $this->wipeInnerDockerStore($username);
 
         $this->purgeHostDockerCache($sidecarRefs);
@@ -107,14 +108,11 @@ final class AccountTeardown
      */
     public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
-        $storage = $this->project->engine()->storage();
         $down = $removeVolumes ? ['down', '-v', '--remove-orphans'] : ['down', '--remove-orphans'];
         $this->tryStep($this->project->userAppComposeCommand($down), 120, true);
-        foreach ($storage->pruneBuildCacheArgv() as $prune) {
-            $this->tryStep($prune, 120, true);
-        }
+        $this->tryDaemonStep('build cache prune', static fn (AccountDaemon $daemon) => $daemon->pruneBuildCache(120));
         if ($stopInnerDocker) {
-            $this->tryStep($storage->stopEngineArgv(), 60, false);
+            $this->tryStep($this->project->engine()->storage()->stopEngineArgv(), 60, false);
         }
     }
 
@@ -166,16 +164,12 @@ final class AccountTeardown
     private function innerDaemonImageRefs(): array
     {
         try {
-            $out = $this->project->shell()->execAsUserQuiet(
-                $this->project->engine()->images()->listImagesArgv(),
-                [],
-                60
-            );
+            $tags = $this->project->accountDaemon()->imageTags();
         } catch (\Exception) {
             return [];
         }
 
-        return DindAccountCleanup::parseImageRefLines((string) $out);
+        return DindAccountCleanup::parseImageRefLines(implode("\n", $tags));
     }
 
     /**
@@ -185,7 +179,7 @@ final class AccountTeardown
     {
         try {
             $out = $this->project->system()->exec(
-                ['sudo', 'docker', 'ps', '-a', '--format', '{{.Image}}'],
+                Privileged::docker()->containerImages(),
                 [],
                 30
             );
@@ -230,19 +224,30 @@ final class AccountTeardown
         $username = $this->project->username();
 
         try {
-            $this->project->system()->exec(
-                $this->project->engine()->storage()->hostCleanupArgv(
-                    $this->project->engineAccount(),
-                    $sidecarRefs
-                ),
-                [],
-                300
+            $commands = $this->project->engine()->storage()->hostCleanupArgvs(
+                $this->project->engineAccount(),
+                $sidecarRefs
             );
         } catch (\Exception $e) {
-            Log::warning(
-                "Could not purge host Docker cache for {$username}: ".$e->getMessage(),
-            );
+            $this->reportHostDockerCacheFailure($username, $e);
+
+            return;
         }
+
+        foreach ($commands as $command) {
+            try {
+                $this->project->system()->exec($command, [], 300);
+            } catch (\Exception $e) {
+                $this->reportHostDockerCacheFailure($username, $e);
+            }
+        }
+    }
+
+    private function reportHostDockerCacheFailure(string $username, \Exception $e): void
+    {
+        Log::warning(
+            "Could not purge host Docker cache for {$username}: ".$e->getMessage(),
+        );
     }
 
     /**
@@ -260,6 +265,25 @@ final class AccountTeardown
             Log::warning(
                 "Dind delete step failed for {$this->project->username()}: ".$e->getMessage(),
                 ['command' => $command],
+            );
+        }
+    }
+
+    /**
+     * {@see tryStep()} for a request to the account's dockerd: the daemon refusing it, a stopped account included,
+     * is quiet as a failed command's exit is.
+     *
+     * @param  \Closure(AccountDaemon): void  $request
+     */
+    private function tryDaemonStep(string $step, \Closure $request): void
+    {
+        try {
+            $request($this->project->accountDaemon());
+        } catch (DockerErrorException) {
+        } catch (\Exception $e) {
+            Log::warning(
+                "Dind delete step failed for {$this->project->username()}: ".$e->getMessage(),
+                ['step' => $step],
             );
         }
     }

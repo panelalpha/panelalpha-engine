@@ -7,6 +7,7 @@ use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Images;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -23,44 +24,39 @@ class BuildNetworkTest extends TestCase
         return new EngineAccount('acme', '/home/acme', '1001:1002');
     }
 
-    /** @return array<string, list<string>> */
-    private function allArgv(DindHostBuilder $builder): array
+    /** @return array<string, array<string, mixed>> */
+    private function allBuilds(DindHostBuilder $builder): array
     {
-        return [
+        return array_map(LocalRoot::build(...), [
             'node' => $builder->nodeBuildArgv($this->account(), Images::NODE_IMAGE, 'npm ci', 'npm run build'),
             'php' => $builder->phpBuildArgv($this->account(), 'panelalpha/php:8.3-cli-bookworm-pa1', 'composer install'),
             'composer' => $builder->composerInstallArgv($this->account()),
-        ];
+        ]);
     }
 
     public function test_every_host_build_runs_on_the_build_network(): void
     {
         $builder = new DindHostBuilder(null, '', 'panelalpha-build');
 
-        foreach ($this->allArgv($builder) as $kind => $argv) {
-            $at = array_search('--network', $argv, true);
-            $this->assertNotFalse($at, "$kind build has no --network");
-            $this->assertSame('panelalpha-build', $argv[$at + 1], $kind);
-            // A docker run option, so it has to come before the image.
-            $image = $kind === 'composer' ? Images::COMPOSER_IMAGE : ($kind === 'node' ? Images::NODE_IMAGE : 'panelalpha/php:8.3-cli-bookworm-pa1');
-            $this->assertLessThan(array_search($image, $argv, true), $at, $kind);
+        foreach ($this->allBuilds($builder) as $kind => $build) {
+            $this->assertSame('panelalpha-build', $build['network'], "$kind build is off the build network");
         }
     }
 
     public function test_the_engine_puts_builds_on_it_by_default(): void
     {
         config(['deploy.build_network' => 'panelalpha-build']);
-        $this->assertSame('panelalpha-build', (new DindEngine())->hostBuilder()->network());
+        $this->assertSame('panelalpha-build', (new DindEngine)->hostBuilder()->network());
     }
 
     public function test_an_empty_setting_opts_out_to_the_default_bridge(): void
     {
         config(['deploy.build_network' => '']);
-        $builder = (new DindEngine())->hostBuilder();
+        $builder = (new DindEngine)->hostBuilder();
 
         $this->assertNull($builder->network());
-        foreach ($this->allArgv($builder) as $kind => $argv) {
-            $this->assertNotContains('--network', $argv, $kind);
+        foreach ($this->allBuilds($builder) as $kind => $build) {
+            $this->assertSame('', $build['network'], $kind);
         }
     }
 
@@ -73,13 +69,13 @@ class BuildNetworkTest extends TestCase
 
     public function test_the_network_has_a_fixed_bridge_and_leaves_br_netfilter_alone(): void
     {
-        $argv = BuildNetwork::createArgv('panelalpha-build');
+        $request = BuildNetwork::createArgv('panelalpha-build');
 
-        $this->assertSame(['sudo', 'docker', 'network', 'create'], array_slice($argv, 0, 4));
-        $this->assertContains('com.docker.network.bridge.name=br-pa-build', $argv);
+        $this->assertTrue(LocalRoot::isRequest($request));
+        $this->assertSame('docker.createBridgeNetwork', LocalRoot::action($request));
+        $this->assertSame(['panelalpha-build', 'br-pa-build', 'build'], LocalRoot::values($request));
         // icc=false would make Docker load br_netfilter host-wide.
-        $this->assertNotContains('com.docker.network.bridge.enable_icc=false', $argv);
-        $this->assertSame('panelalpha-build', $argv[array_key_last($argv)]);
+        $this->assertStringNotContainsString('enable_icc', implode(' ', $request));
         // br- so the DNAT for :2011 leaves it to docker-proxy like any bridge.
         $this->assertStringStartsWith('br-', BuildNetwork::BRIDGE);
         $this->assertLessThanOrEqual(15, strlen(BuildNetwork::BRIDGE), 'Linux interface names stop at 15');
@@ -88,19 +84,18 @@ class BuildNetworkTest extends TestCase
     public function test_the_firewall_runs_in_the_host_namespace(): void
     {
         $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'sh', BuildNetwork::FIREWALL_SCRIPT, 'panelalpha-build'],
+            [LocalRoot::CLIENT, '--host', 'host.applyBuildNetworkFirewall', '--', 'panelalpha-build'],
             BuildNetwork::firewallArgv('panelalpha-build')
         );
     }
 
     public function test_the_firewall_script_refuses_the_host_and_every_private_range(): void
     {
-        $path = __DIR__ . '/../../../../../scripts/build-network-firewall.sh';
-        if (!is_file($path)) {
+        $path = __DIR__.'/../../../../../scripts/build-network-firewall.sh';
+        if (! is_file($path)) {
             $this->markTestSkipped('scripts/ is not beside core/ here');
         }
         $script = (string) file_get_contents($path);
-        $this->assertSame(basename(BuildNetwork::FIREWALL_SCRIPT), basename($path));
 
         foreach ([TestNetwork::PRIVATE_10_CIDR, TestNetwork::PRIVATE_172_CIDR, TestNetwork::PRIVATE_192_CIDR, TestNetwork::LINK_LOCAL_CIDR, TestNetwork::CGNAT_CIDR, TestNetwork::LOOPBACK_CIDR] as $cidr) {
             $this->assertStringContainsString($cidr, $script);
@@ -116,7 +111,7 @@ class BuildNetworkTest extends TestCase
         $this->assertStringContainsString('--create', $script);
         $this->assertStringContainsString(
             'build-network-firewall.sh --create panelalpha-build',
-            (string) file_get_contents(dirname($path) . '/installer.sh')
+            (string) file_get_contents(dirname($path).'/installer.sh')
         );
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\DockerErrorException;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
@@ -13,29 +14,44 @@ use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
- * WP-CLI for WordPress in a project's own containers. The account script is
- * run for real against a `docker` shim on PATH, so container choice, the phar
- * copy, the user WP-CLI runs as and the failure messages are all exercised.
+ * WP-CLI for WordPress in a project's own containers. Every request to the account's daemon is answered by a fake
+ * of it, so container choice, the phar copy, the user WP-CLI runs as and the failure messages are all exercised.
  */
 class WordPressCliTest extends TestCase
 {
+    private const ENVIRONMENT = ['2', 'HOME', '/tmp', 'WP_CLI_CACHE_DIR', '/tmp/.wp-cli-cache'];
+
     private string $tmp;
 
-    /** @var list<list<string>> */
-    private array $commands = [];
+    /** @var list<array<string, mixed>>|null the broker's rows of the running containers; null when the daemon cannot say */
+    private ?array $rows = [];
 
-    private ?Process $reply = null;
+    /** @var array<string, string> */
+    private array $probes = [];
+
+    /** @var list<string> */
+    private array $calls = [];
+
+    /** @var list<list<string>> */
+    private array $execs = [];
+
+    /** @var list<list<string>> */
+    private array $copies = [];
+
+    private bool $copyFails = false;
+
+    /** @var array{0: int, 1: string, 2: string} */
+    private array $wpCliReply = [0, '', ''];
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->tmp = sys_get_temp_dir().'/pa-wpcli-'.bin2hex(random_bytes(4));
-        mkdir($this->tmp.'/bin', 0777, true);
-        file_put_contents($this->tmp.'/wp-cli.phar', str_repeat('x', 1234));
-        file_put_contents($this->tmp.'/bin/docker', self::SHIM);
-        chmod($this->tmp.'/bin/docker', 0755);
+        mkdir(dirname($this->enginePhar()), 0777, true);
+        file_put_contents($this->enginePhar(), str_repeat('x', 1234));
     }
 
     protected function tearDown(): void
@@ -46,19 +62,59 @@ class WordPressCliTest extends TestCase
 
     public function test_it_runs_in_the_wordpress_container_as_the_owner_of_wp_content(): void
     {
-        $this->containers("cli1|wpcli|wordpress:cli\ndb1|db|mysql:8.0\nwp1|wordpress|wordpress:latest");
+        $this->containers('cli1|wpcli|wordpress:cli', 'db1|db|mysql:8.0', 'wp1|wordpress|wordpress:latest');
         $this->probe('wp1', "/var/www/html\n33:33\n0");
+        $this->wpCliReply = [0, "[]\n", ''];
 
-        $process = $this->runScript(['plugin', 'list', '--format=json']);
+        $result = $this->wpCli(['plugin', 'list', '--format=json']);
 
-        $this->assertSame(0, $process->getExitCode(), $process->getErrorOutput());
+        $this->assertSame(['stdout' => "[]\n", 'stderr' => '', 'exit_code' => 0], $result);
+        $this->assertSame(['probe wp1', 'copy wp1', 'run wp1'], $this->calls, 'the cli and db containers are never probed');
         $this->assertSame(
-            'RAN -u 33:33 -e HOME=/tmp -e WP_CLI_CACHE_DIR=/tmp/.wp-cli-cache -w /var/www/html wp1 '
-            .'php -d memory_limit=512M '.$this->dest().' --path=/var/www/html --exec='.MustUsePlugin::MEND_ON_LOAD.' plugin list --format=json',
-            trim($process->getOutput())
+            ['wp', 'wp1', '33:33', '/var/www/html', ...self::ENVIRONMENT, 'php', '-d', 'memory_limit=512M', WordPressCli::CONTAINER_PHAR,
+                '--path=/var/www/html', '--exec='.MustUsePlugin::MEND_ON_LOAD, 'plugin', 'list', '--format=json'],
+            $this->lastExec()
         );
-        $this->assertSame(['probe wp1', 'copy wp1', 'run wp1'], $this->calls(), 'the cli and db containers are never probed');
-        $this->assertSame(1234, filesize($this->dest()), 'the phar was streamed into the container');
+    }
+
+    public function test_the_engines_phar_replaces_one_of_another_size(): void
+    {
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n99");
+
+        $this->wpCli(['core', 'version']);
+
+        $this->assertSame([['wp', 'wp1', WordPressCli::ENGINE_FILE, WordPressCli::CONTAINER_PHAR]], $this->copies);
+        $this->assertSame(['probe wp1', 'copy wp1', 'run wp1'], $this->calls);
+    }
+
+    public function test_a_phar_the_container_cannot_take_says_so(): void
+    {
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n0");
+        $this->copyFails = true;
+
+        $this->expectRuntimeFailure('Could not copy WP-CLI into the container: its /tmp is not writable.', fn () => $this->wpCli(['core', 'version']));
+        $this->assertSame(['probe wp1', 'copy wp1'], $this->calls);
+    }
+
+    public function test_without_the_engines_phar_nothing_is_asked(): void
+    {
+        unlink($this->enginePhar());
+        $this->containers('wp1|wordpress|wordpress:latest');
+
+        $this->expectRuntimeFailure("WP-CLI is missing from the engine: {$this->enginePhar()} is not readable.", fn () => $this->wpCli(['core', 'version']));
+        $this->assertSame([], $this->calls);
+    }
+
+    public function test_the_probe_runs_as_the_containers_default_user_in_its_working_directory(): void
+    {
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n1234");
+
+        $this->wpCli(['core', 'version']);
+
+        $this->assertSame(['wp', 'wp1', '', '', '0', 'sh', '-c', WordPressCli::PROBE, 'sh', '', WordPressCli::CONTAINER_PHAR], $this->execs[0]);
     }
 
     public function test_a_root_owned_install_gets_allow_root_and_a_current_phar_is_not_copied_again(): void
@@ -66,96 +122,118 @@ class WordPressCliTest extends TestCase
         $this->containers('app1|app|myimage');
         $this->probe('app1', "/app/public\n0:0\n1234");
 
-        $process = $this->runScript(['core', 'version']);
+        $this->wpCli(['core', 'version']);
 
-        $this->assertStringContainsString('--allow-root core version', $process->getOutput());
-        $this->assertSame(['probe app1', 'run app1'], $this->calls());
+        $this->assertSame(['--allow-root', 'core', 'version'], array_slice($this->lastExec(), -3));
+        $this->assertSame('0:0', $this->lastExec()[2]);
+        $this->assertSame(['probe app1', 'run app1'], $this->calls);
     }
 
     public function test_containers_without_wordpress_are_skipped(): void
     {
-        $this->containers("nginx1|web|nginx:alpine\nfpm1|php|php:8.3-fpm");
+        $this->containers('nginx1|web|nginx:alpine', 'fpm1|php|php:8.3-fpm');
         $this->probe('fpm1', "/srv/site\n82:82\n1234");
 
-        $process = $this->runScript(['option', 'get', 'siteurl']);
+        $this->wpCli(['option', 'get', 'siteurl']);
 
-        $this->assertStringContainsString('-u 82:82', $process->getOutput());
-        $this->assertSame(['probe nginx1', 'probe fpm1', 'run fpm1'], $this->calls());
+        $this->assertSame('82:82', $this->lastExec()[2]);
+        $this->assertSame(['probe nginx1', 'probe fpm1', 'run fpm1'], $this->calls);
     }
 
     public function test_wp_clis_own_exit_code_and_output_come_back(): void
     {
         $this->containers('wp1|wordpress|wordpress:latest');
         $this->probe('wp1', "/var/www/html\n33:33\n1234");
-        putenv('SHIM_EXIT=1');
+        $this->wpCliReply = [1, '', "Error: The 'nope' plugin could not be found.\n"];
 
-        try {
-            $process = $this->runScript(['plugin', 'get', 'nope']);
-        } finally {
-            putenv('SHIM_EXIT');
-        }
+        $result = $this->wpCli(['plugin', 'get', 'nope']);
 
-        $this->assertSame(1, $process->getExitCode());
-        $this->assertStringNotContainsString(WordPressCli::MARKER, $process->getErrorOutput());
+        $this->assertSame(['stdout' => '', 'stderr' => "Error: The 'nope' plugin could not be found.\n", 'exit_code' => 1], $result);
     }
 
     public function test_a_stopped_project_says_so(): void
     {
-        $this->containers('');
+        $this->containers();
 
-        $process = $this->runScript(['core', 'version']);
+        $this->expectRuntimeFailure('The application is not running. Deploy or start the project, then try again.', fn () => $this->wpCli(['core', 'version']));
+    }
 
-        $this->assertSame(70, $process->getExitCode());
-        $this->assertSame(
-            WordPressCli::MARKER.' The application is not running. Deploy or start the project, then try again.',
-            trim($process->getErrorOutput())
-        );
+    public function test_a_daemon_that_cannot_list_its_containers_says_the_application_is_not_running(): void
+    {
+        $this->rows = null;
+
+        $this->expectRuntimeFailure('The application is not running. Deploy or start the project, then try again.', fn () => $this->wpCli(['core', 'version']));
     }
 
     public function test_no_wordpress_anywhere_says_so(): void
     {
         $this->containers('db1|db|mysql:8.0');
 
-        $process = $this->runScript(['core', 'version']);
-
-        $this->assertSame(WordPressCli::NOT_FOUND_EXIT, $process->getExitCode());
-        $this->assertStringContainsString('No WordPress install was found in this project\'s containers.', $process->getErrorOutput());
+        $this->expectNotFound(
+            "No WordPress install was found in this project's containers. Pass path with the WordPress directory as the container sees it.",
+            ['core', 'version']
+        );
     }
 
     public function test_an_explicit_path_is_what_the_probe_looks_for(): void
     {
         $this->containers('wp1|wordpress|wordpress:latest');
 
-        $process = $this->runScript(['core', 'version', '--path=/var/www/site/']);
+        $this->expectNotFound('No WordPress with PHP was found at /var/www/site.', ['core', 'version', '--path=/var/www/site/']);
+        $this->assertSame(['probe wp1 /var/www/site'], $this->calls);
+    }
 
-        $this->assertSame(['probe wp1 /var/www/site'], $this->calls());
-        $this->assertSame(WordPressCli::NOT_FOUND_EXIT, $process->getExitCode());
-        $this->assertStringContainsString('No WordPress with PHP was found at /var/www/site.', $process->getErrorOutput());
+    public function test_a_path_is_taken_out_of_the_arguments_and_the_rest_follow_the_flags(): void
+    {
+        $this->containers('web1|web|wordpress:latest');
+        $this->probe('web1', "/var/www/html\n33:33\n1234");
+
+        $this->wpCli(['plugin', '--path=/var/www/html/', 'install', '--activate', 'akismet'], 'web');
+
+        $this->assertSame(['probe web1 /var/www/html', 'run web1'], $this->calls);
+        $this->assertSame(['--path=/var/www/html', '--exec='.MustUsePlugin::MEND_ON_LOAD, 'plugin', 'install', '--activate', 'akismet'], array_slice($this->lastExec(), -6));
+    }
+
+    public function test_the_last_path_wins(): void
+    {
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/srv/site\n33:33\n1234\n1\n1013:1013");
+
+        $this->wpCli(['--path=wp', 'db', 'export', '--path=/srv/site//', 'dump.sql']);
+
+        $this->assertSame(['probe wp1 /srv/site', 'run wp1'], $this->calls);
+        $this->assertSame(['db', 'export', 'dump.sql'], array_slice($this->lastExec(), -3));
     }
 
     public function test_a_service_picks_the_container(): void
     {
-        $this->containers("wp1|wordpress|wordpress:latest\nwp2|blog|wordpress:latest");
+        $this->containers('wp1|wordpress|wordpress:latest', 'wp2|blog|wordpress:latest');
         $this->probe('wp1', "/var/www/html\n33:33\n1234");
         $this->probe('wp2', "/var/www/html/blog\n33:33\n1234");
 
-        $process = $this->runScript(['core', 'version'], 'blog');
+        $this->wpCli(['core', 'version'], 'blog');
 
-        $this->assertStringContainsString('--path=/var/www/html/blog', $process->getOutput());
-        $this->assertSame(['probe wp2', 'run wp2'], $this->calls());
+        $this->assertContains('--path=/var/www/html/blog', $this->lastExec());
+        $this->assertSame('/var/www/html/blog', $this->lastExec()[3]);
+        $this->assertSame(['probe wp2', 'run wp2'], $this->calls);
+    }
+
+    public function test_a_service_may_be_named_by_the_containers_name(): void
+    {
+        $this->containers('wp1|wordpress|wordpress:latest|site-wordpress-1', 'wp2|wordpress|wordpress:latest|blog-wordpress-1');
+        $this->probe('wp1', "/var/www/html\n33:33\n1234");
+        $this->probe('wp2', "/var/www/html\n33:33\n1234");
+
+        $this->wpCli(['core', 'version'], 'blog-wordpress-1');
+
+        $this->assertSame(['probe wp2', 'run wp2'], $this->calls);
     }
 
     public function test_an_unknown_service_says_so(): void
     {
         $this->containers('wp1|wordpress|wordpress:latest');
 
-        $process = $this->runScript(['core', 'version'], 'blog');
-
-        $this->assertSame(70, $process->getExitCode());
-        $this->assertSame(
-            WordPressCli::MARKER.' No running container of this project belongs to service blog.',
-            trim($process->getErrorOutput())
-        );
+        $this->expectRuntimeFailure('No running container of this project belongs to service blog.', fn () => $this->wpCli(['core', 'version'], 'blog'));
     }
 
     public function test_a_relative_path_is_taken_from_the_containers_working_directory(): void
@@ -227,93 +305,68 @@ class WordPressCliTest extends TestCase
         $this->assertSame('host still running', $loaded->getOutput(), $loaded->getErrorOutput());
     }
 
-    public function test_a_script_failure_is_an_exception_and_wp_cli_output_is_a_result(): void
-    {
-        $this->reply = $this->process(70, '', WordPressCli::MARKER." No WordPress install was found.\n");
-        try {
-            $this->dind()->wordPressCli()->run(['core', 'version']);
-            $this->fail('Expected the script failure to surface');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('No WordPress install was found.', $e->getMessage());
-        }
-
-        $this->reply = $this->process(1, '', "Error: The 'nope' plugin could not be found.\n");
-        $result = $this->dind()->wordPressCli()->run(['plugin', 'get', 'nope']);
-        $this->assertSame(1, $result['exit_code']);
-        $this->assertSame("Error: The 'nope' plugin could not be found.\n", $result['stderr']);
-
-        $exec = array_search('exec', $this->commands[0], true);
-        $this->assertSame(['-u', '1000:1000', '-T', 'dind', 'bash', '-c'], array_slice($this->commands[0], $exec + 1, 6));
-        $this->assertSame(['wp', '', '', WordPressCli::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD, '0', '0', 'core', 'version'], array_slice($this->commands[0], -9));
-    }
-
-    public function test_no_wordpress_is_its_own_exception_and_other_script_failures_are_not(): void
-    {
-        $this->reply = $this->process(WordPressCli::NOT_FOUND_EXIT, '', WordPressCli::MARKER." No WordPress with PHP was found at /var/www/site.\n");
-        try {
-            $this->dind()->wordPressCli()->run(['core', 'is-installed']);
-            $this->fail('Expected WordPressNotFound');
-        } catch (WordPressNotFound $e) {
-            $this->assertSame('No WordPress with PHP was found at /var/www/site.', $e->getMessage());
-        }
-
-        $this->reply = $this->process(70, '', WordPressCli::MARKER." The application is not running.\n");
-        try {
-            $this->dind()->wordPressCli()->run(['core', 'is-installed']);
-            $this->fail('Expected the script failure to surface');
-        } catch (\RuntimeException $e) {
-            $this->assertNotInstanceOf(WordPressNotFound::class, $e);
-        }
-    }
-
     public function test_a_database_command_runs_in_the_first_container_with_a_mysql_client(): void
     {
-        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli\ndb1|db|mysql:8.0");
+        $this->containers('wp1|wordpress|wordpress:latest', 'cli1|wp-cli|wordpress:cli', 'db1|db|mysql:8.0');
         $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
         $this->probe('cli1', "/var/www/html\n33:33\n1234\n1\n1013:1013");
 
-        $process = $this->runScript(['db', 'export', '/var/www/html/backup.sql', '--tables=wp_posts']);
+        $this->wpCli(['db', 'export', '/var/www/html/backup.sql', '--tables=wp_posts']);
 
-        $this->assertSame(0, $process->getExitCode(), $process->getErrorOutput());
-        $this->assertSame(['probe wp1', 'probe db1', 'probe cli1', 'run cli1'], $this->calls());
-        $this->assertStringContainsString('-u 1013:1013', $process->getOutput(), 'as the owner of the tree the dump is written into');
+        $this->assertSame(['probe wp1', 'probe db1', 'probe cli1', 'run cli1'], $this->calls);
+        $this->assertSame('1013:1013', $this->lastExec()[2], 'as the owner of the tree the dump is written into');
     }
 
     public function test_any_other_command_still_runs_in_the_wordpress_container(): void
     {
-        $this->containers("cli1|wp-cli|wordpress:cli\nwp1|wordpress|wordpress:latest");
+        $this->containers('cli1|wp-cli|wordpress:cli', 'wp1|wordpress|wordpress:latest');
         $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
         $this->probe('cli1', "/var/www/html\n33:33\n1234\n1\n1013:1013");
 
-        $tables = $this->runScript(['db', 'tables']);
-        $this->runScript(['plugin', 'list']);
+        $this->wpCli(['db', 'tables']);
+        $tables = $this->lastExec();
+        $this->wpCli(['plugin', 'list']);
 
-        $this->assertSame(['probe wp1', 'run wp1', 'probe wp1', 'run wp1'], $this->calls());
-        $this->assertStringContainsString('-u 33:33', $tables->getOutput());
+        $this->assertSame(['probe wp1', 'run wp1', 'probe wp1', 'run wp1'], $this->calls);
+        $this->assertSame('33:33', $tables[2]);
     }
 
     public function test_a_database_command_with_no_mysql_client_anywhere_says_so(): void
     {
-        $this->containers("wp1|wordpress|wordpress:latest\ndb1|db|mysql:8.0");
+        $this->containers('wp1|wordpress|wordpress:latest', 'db1|db|mysql:8.0');
         $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
 
-        $process = $this->runScript(['db', 'query', 'SELECT 1']);
-
-        $this->assertSame(WordPressCli::NO_DATABASE_CLIENT_EXIT, $process->getExitCode());
-        $this->assertSame(['probe wp1', 'probe db1'], $this->calls());
-        $this->assertStringContainsString("WP-CLI's database commands need the MySQL client", $process->getErrorOutput());
-        $this->assertStringContainsString('such as wordpress:cli', $process->getErrorOutput());
+        try {
+            $this->wpCli(['db', 'query', 'SELECT 1']);
+            $this->fail('Expected DatabaseClientMissing');
+        } catch (DatabaseClientMissing $e) {
+            $this->assertSame(
+                "WP-CLI's database commands need the MySQL client (mysql, mysqldump and mysqlcheck), and no running container that has WordPress has one."
+                .' Run them in a service whose image has the client, such as wordpress:cli with the same volumes.',
+                $e->getMessage()
+            );
+        }
+        $this->assertSame(['probe wp1', 'probe db1'], $this->calls);
     }
 
     public function test_a_service_without_a_mysql_client_names_it(): void
     {
-        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli");
+        $this->containers('wp1|wordpress|wordpress:latest', 'cli1|wp-cli|wordpress:cli');
         $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
 
-        $process = $this->runScript(['db', 'import', 'dump.sql'], 'wordpress');
+        try {
+            $this->wpCli(['db', 'import', 'dump.sql'], 'wordpress');
+            $this->fail('Expected DatabaseClientMissing');
+        } catch (DatabaseClientMissing $e) {
+            $this->assertStringContainsString('no running container in service wordpress that has WordPress has one', $e->getMessage());
+        }
+    }
 
-        $this->assertSame(WordPressCli::NO_DATABASE_CLIENT_EXIT, $process->getExitCode());
-        $this->assertStringContainsString('no running container in service wordpress that has WordPress has one', $process->getErrorOutput());
+    public function test_a_service_without_wordpress_names_it(): void
+    {
+        $this->containers('db1|db|mysql:8.0');
+
+        $this->expectNotFound('No WordPress with PHP was found in service db. Pass path with the WordPress directory as the container sees it.', ['core', 'version'], 'db');
     }
 
     public function test_only_the_db_subcommands_that_run_the_client_need_it(): void
@@ -331,14 +384,13 @@ class WordPressCliTest extends TestCase
 
     public function test_maintenance_mode_runs_in_the_wordpress_container_as_the_owner_of_the_install_directory(): void
     {
-        $this->containers("wp1|wordpress|wordpress:latest\ncli1|wp-cli|wordpress:cli");
+        $this->containers('wp1|wordpress|wordpress:latest', 'cli1|wp-cli|wordpress:cli');
         $this->probe('wp1', "/var/www/html\n33:33\n1234\n0\n1013:1013");
 
-        $process = $this->runScript(['maintenance-mode', 'activate']);
+        $this->wpCli(['maintenance-mode', 'activate']);
 
-        $this->assertSame(0, $process->getExitCode(), $process->getErrorOutput());
-        $this->assertSame(['probe wp1', 'run wp1'], $this->calls(), 'no MySQL client is needed');
-        $this->assertStringContainsString('-u 1013:1013', $process->getOutput(), 'as the owner of the directory .maintenance goes into');
+        $this->assertSame(['probe wp1', 'run wp1'], $this->calls, 'no MySQL client is needed');
+        $this->assertSame('1013:1013', $this->lastExec()[2], 'as the owner of the directory .maintenance goes into');
     }
 
     public function test_only_maintenance_mode_writes_into_the_install_directory(): void
@@ -351,101 +403,106 @@ class WordPressCliTest extends TestCase
         $this->assertFalse(WordPressCli::writesInstallDirectory([]));
     }
 
-    public function test_the_runner_is_told_which_commands_run_as_the_install_owner(): void
-    {
-        $command = fn (array $args): array => array_slice((new WordPressCli($this->dind()))->command($args), 8, 2);
-
-        $this->assertSame(['0', '0'], $command(['plugin', 'list']));
-        $this->assertSame(['0', '1'], $command(['maintenance-mode', 'activate']));
-        $this->assertSame(['1', '1'], $command(['db', 'export', 'backup.sql']));
-    }
-
     public function test_a_missing_mysql_client_is_its_own_exception(): void
     {
-        $this->reply = $this->process(WordPressCli::NO_DATABASE_CLIENT_EXIT, '', WordPressCli::MARKER." WP-CLI's database commands need the MySQL client.\n");
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n0");
 
-        try {
-            $this->dind()->wordPressCli()->run(Core::DB_PROBE);
-            $this->fail('Expected DatabaseClientMissing');
-        } catch (DatabaseClientMissing $e) {
-            $this->assertSame("WP-CLI's database commands need the MySQL client.", $e->getMessage());
-        }
-        $this->assertSame(['1', '1', 'db', 'query', 'SELECT 1'], array_slice($this->commands[0], -5));
+        $this->expectException(DatabaseClientMissing::class);
+        $this->wpCli(Core::DB_PROBE);
     }
 
     public function test_a_database_probe_without_a_mysql_client_comes_back_as_a_result(): void
     {
-        $this->reply = $this->process(127, '', "/usr/bin/env: 'mysql': No such file or directory\n");
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n1234\n1\n33:33");
+        $this->wpCliReply = [127, '', "/usr/bin/env: 'mysql': No such file or directory\n"];
 
-        $result = $this->dind()->wordPressCli()->run(Core::DB_PROBE);
+        $result = $this->wpCli(Core::DB_PROBE);
 
         $this->assertSame(127, $result['exit_code']);
-        $this->assertSame(['db', 'query', 'SELECT 1'], array_slice($this->commands[0], -3));
+        $this->assertSame(['db', 'query', 'SELECT 1'], array_slice($this->lastExec(), -3));
         $this->assertDoesNotMatchRegularExpression(Core::MYSQL_CLIENT_ERROR_PATTERN, $result['stderr']);
     }
 
     public function test_project_routes_wp_cli_on_a_container_project_to_the_runner(): void
     {
-        $this->reply = $this->process(0, "6.8.3\n", '');
+        $this->containers('wp1|wordpress|wordpress:latest');
+        $this->probe('wp1', "/var/www/html\n33:33\n1234");
+        $this->wpCliReply = [0, "6.8.3\n", ''];
 
         $result = $this->dind()->project()->runWpCli(['core', 'version']);
 
         $this->assertSame("6.8.3\n", $result['stdout']);
     }
 
-    private const SHIM = <<<'SH'
-        #!/bin/bash
-        log="$SHIM_DIR/calls"
-        if [ "$1" = ps ]; then cat "$SHIM_DIR/ps"; exit 0; fi
-        shift
-        if [ "$1" = -i ]; then echo "copy $2" >> "$log"; shift 2; exec "$@"; fi
-        if [ "$1" = -u ]; then
-          id=$9; echo "run $id" >> "$log"; echo "RAN $*"; exit "${SHIM_EXIT:-0}"
-        fi
-        id=$1; want=$6
-        echo "probe $id${want:+ $want}" >> "$log"
-        [ -f "$SHIM_DIR/probe-$id" ] || exit 4
-        cat "$SHIM_DIR/probe-$id"
-        SH;
-
-    private function containers(string $rows): void
+    /**
+     * Each row is `id|service|image[|name]`; the name defaults to compose's.
+     */
+    private function containers(string ...$rows): void
     {
-        file_put_contents($this->tmp.'/ps', $rows === '' ? '' : $rows."\n");
+        $this->rows = array_map(static function (string $row): array {
+            [$id, $service, $image, $name] = array_pad(explode('|', $row), 4, null);
+
+            return [
+                'Id' => $id,
+                'Names' => ['/'.($name ?? "project-{$service}-1")],
+                'Image' => $image,
+                'Labels' => ['com.docker.compose.project' => 'project', 'com.docker.compose.service' => $service],
+            ];
+        }, $rows);
     }
 
     private function probe(string $id, string $out): void
     {
-        file_put_contents($this->tmp.'/probe-'.$id, $out."\n");
+        $this->probes[$id] = $out."\n";
     }
 
-    private function dest(): string
+    private function enginePhar(): string
     {
-        return $this->tmp.'/container.phar';
+        return $this->tmp.'/templates/user/dind/project/'.WordPressCli::ENGINE_PHAR;
     }
 
     /** @return list<string> */
-    private function calls(): array
+    private function lastExec(): array
     {
-        return file($this->tmp.'/calls', FILE_IGNORE_NEW_LINES) ?: [];
+        $last = end($this->execs);
+        $this->assertIsArray($last);
+
+        return $last;
     }
 
-    /** @param list<string> $args */
-    private function runScript(array $args, ?string $service = null): Process
+    /**
+     * @param  list<string>  $args
+     * @return array{exit_code: int, stdout: string, stderr: string}
+     */
+    private function wpCli(array $args, ?string $service = null): array
     {
-        $command = (new WordPressCli($this->dind()))->command($args, $service);
-        $command[2] = strtr($command[2], [
-            escapeshellarg(WordPressCli::PHAR) => escapeshellarg($this->tmp.'/wp-cli.phar'),
-            escapeshellarg(WordPressCli::CONTAINER_PHAR) => escapeshellarg($this->dest()),
-        ]);
+        return $this->dind()->wordPressCli()->run($args, $service);
+    }
 
-        $process = new Process($command, null, [
-            'PATH' => $this->tmp.'/bin:'.getenv('PATH'),
-            'SHIM_DIR' => $this->tmp,
-            'SHIM_EXIT' => getenv('SHIM_EXIT') ?: '0',
-        ]);
-        $process->run();
+    /** @param  \Closure(): mixed  $run */
+    private function expectRuntimeFailure(string $message, \Closure $run): void
+    {
+        try {
+            $run();
+            $this->fail("Expected: {$message}");
+        } catch (\RuntimeException $e) {
+            $this->assertNotInstanceOf(WordPressNotFound::class, $e);
+            $this->assertNotInstanceOf(DatabaseClientMissing::class, $e);
+            $this->assertSame($message, $e->getMessage());
+        }
+    }
 
-        return $process;
+    /** @param  list<string>  $args */
+    private function expectNotFound(string $message, array $args, ?string $service = null): void
+    {
+        try {
+            $this->wpCli($args, $service);
+            $this->fail('Expected WordPressNotFound');
+        } catch (WordPressNotFound $e) {
+            $this->assertSame($message, $e->getMessage());
+        }
     }
 
     private function dind(): Dind
@@ -462,9 +519,7 @@ class WordPressCliTest extends TestCase
 
     private function system(): System
     {
-        $test = $this;
-
-        return new class($this->tmp, $test) extends System
+        return new class($this->tmp, $this) extends System
         {
             public function __construct(private string $root, private WordPressCliTest $test) {}
 
@@ -483,19 +538,70 @@ class WordPressCliTest extends TestCase
                 return $this->root.'/users/'.$username;
             }
 
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return $this->test->answer(array_values((array) $cmd));
+            }
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                return $this->test->replyTo(is_array($cmd) ? array_values($cmd) : [$cmd]);
+                return $this->test->execute(array_values((array) $cmd));
             }
         };
     }
 
-    /** @param list<string> $cmd */
-    public function replyTo(array $cmd): Process
+    /** @param  list<string>  $cmd */
+    public function answer(array $cmd): string
     {
-        $this->commands[] = $cmd;
+        $values = LocalRoot::values($cmd);
 
-        return $this->reply ?? $this->process(0, '', '');
+        return match (LocalRoot::action($cmd)) {
+            'account-docker.listContainers' => $this->listed($values),
+            'account-docker.putEngineFile' => $this->copied($values),
+            default => throw new \LogicException('Unexpected request: '.implode(' ', $cmd)),
+        };
+    }
+
+    /** @param  list<string>  $cmd */
+    public function execute(array $cmd): Process
+    {
+        $this->assertSame('account-docker.exec', LocalRoot::action($cmd), implode(' ', $cmd));
+        $values = LocalRoot::values($cmd);
+        $this->execs[] = $values;
+        $id = $values[1];
+        $argv = array_slice($values, 5 + 2 * (int) $values[4]);
+
+        if ($argv[0] === 'php') {
+            $this->calls[] = "run {$id}";
+
+            return $this->process(...$this->wpCliReply);
+        }
+        $this->calls[] = "probe {$id}".($argv[4] === '' ? '' : " {$argv[4]}");
+
+        return isset($this->probes[$id]) ? $this->process(0, $this->probes[$id], '') : $this->process(4, '', '');
+    }
+
+    /** @param  list<string>  $values */
+    private function listed(array $values): string
+    {
+        $this->assertSame(['wp', '', '0'], $values, 'the running containers, unfiltered');
+        if ($this->rows === null) {
+            throw new DockerErrorException('container wp is not running');
+        }
+
+        return (string) json_encode($this->rows);
+    }
+
+    /** @param  list<string>  $values */
+    private function copied(array $values): string
+    {
+        $this->calls[] = "copy {$values[1]}";
+        $this->copies[] = $values;
+        if ($this->copyFails) {
+            throw new DockerErrorException('Error response from daemon: Could not find the file /tmp in container wp1');
+        }
+
+        return '';
     }
 
     private function process(int $code, string $out, string $err): Process

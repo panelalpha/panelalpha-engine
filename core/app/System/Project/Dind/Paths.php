@@ -4,7 +4,9 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Compose\ComposeProjectName;
 use App\Lib\Deploy\Platform\Strategies;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -13,10 +15,8 @@ use App\System\Project\Dind as DindProject;
 final class Paths
 {
     /**
-     * Compose's own name for a layer applied over the base file, when the
-     * client ships one themselves. Layered only for the compose/PAEMD
-     * strategies (D8) — an engine-generated recipe never reads a file this
-     * name, because a recipe author never intended it to sit under one.
+     * Compose's own name for a layer the client ships over the base file. Layered only for the compose and
+     * PAEMD strategies (D8): no recipe author meant a generated stack to sit under one.
      */
     public const CLIENT_OVERRIDE_FILENAME = 'docker-compose.override.yml';
 
@@ -39,10 +39,8 @@ final class Paths
     }
 
     /**
-     * The compose file the project brings: an app config's `replace`-mode
-     * file if one is present (read ahead of the repository's own, per D2),
-     * else the project's own by conventional name, or null when it ships
-     * none.
+     * The compose file the project brings: an app config's `replace`-mode file first (D2), else the
+     * project's own by conventional name, or null when it ships none.
      */
     public function existingComposeFile(): ?string
     {
@@ -62,10 +60,8 @@ final class Paths
     }
 
     /**
-     * The compose file `compose up` runs. Always {@see composeFile()} — every
-     * strategy writes its result there — kept as its own method because
-     * callers ask "which file do I run" and "which file did the project
-     * bring" as two different questions.
+     * The compose file `compose up` runs: always {@see composeFile()}, kept apart because "which file do I
+     * run" and "which file did the project bring" are different questions.
      */
     public function composeFileToRun(): string
     {
@@ -79,13 +75,8 @@ final class Paths
     }
 
     /**
-     * The compose file whose ports matter for detection: the hardened run
-     * file when it exists, otherwise the project's own. Unlike
-     * {@see composeFileToRun()}, this does not depend on the deploy
-     * strategy — every caller that only cares about published ports
-     * (proxy rules, welcome bootstrap, staging clone) wants this file
-     * whether or not a strategy has been decided yet, and before a first
-     * deploy has produced a run file at all.
+     * The compose file whose published ports count: the run file when it exists, else the project's own,
+     * whether or not a strategy was decided or a first deploy wrote a run file yet.
      */
     public function composeFileForPorts(): string
     {
@@ -98,9 +89,8 @@ final class Paths
     }
 
     /**
-     * The compose filenames docker compose recognises, in the priority
-     * order it searches them. The one place this list is spelled out;
-     * every reader of "is this an inner compose file" goes through here.
+     * The compose filenames docker compose recognises, in its search order; every reader of
+     * "is this an inner compose file" goes through here.
      *
      * @return list<string>
      */
@@ -110,9 +100,8 @@ final class Paths
     }
 
     /**
-     * Whether $path is a compose file the engine itself owns — one of the
-     * reserved run-file names, or (for backward compatibility with an
-     * account not yet migrated) an unnamed file the engine generated.
+     * Whether $path is a compose file the engine owns: a reserved run-file name, or, on an account not yet
+     * migrated, an unnamed file the engine generated.
      */
     public static function isEngineComposeFile(string $path): bool
     {
@@ -129,10 +118,8 @@ final class Paths
     }
 
     /**
-     * The files docker compose is invoked with, in layering order (D8): the
-     * run file, the client's own override when the strategy is compose or
-     * PAEMD (a recipe's generated stack is never one the client meant to
-     * extend), then the engine's own override from an app config.
+     * The files compose is invoked with, in layering order (D8): the run file, the client's override under
+     * the compose and PAEMD strategies only, then the engine's override from an app config.
      *
      * @return list<string>
      */
@@ -157,15 +144,12 @@ final class Paths
     }
 
     /**
-     * The client's override as the engine layers it: the hardened copy the
-     * last deploy wrote ({@see EngineArtifacts::RUN_CLIENT_OVERRIDE}), else
-     * the file itself for an account not redeployed since that copy existed.
+     * The client's override as layered: the hardened copy the last deploy wrote, else the file itself; under
+     * an app config's replacing compose file only the copy, since none is left for the repository's own.
      */
     private function clientOverrideIn(string $appDir): ?string
     {
         $fs = $this->project->system()->filesystem();
-        // Under an app config's replacing compose file only the copy counts:
-        // the deploy leaves none when the override is the repository's own.
         $names = $fs->fileExists($appDir.'/'.EngineArtifacts::APP_CONFIG_COMPOSE)
             ? [EngineArtifacts::RUN_CLIENT_OVERRIDE]
             : [EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME];
@@ -187,6 +171,41 @@ final class Paths
         $strategy = $this->project->userModel()->getDeployStrategy();
 
         return $strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD;
+    }
+
+    /**
+     * The project name compose runs the app's stack under, from the files {@see composeCommand()} hands it and the
+     * environment the broker runs root's client with.
+     *
+     * @throws \InvalidArgumentException where compose refuses the name
+     */
+    public function composeProjectName(): string
+    {
+        $appDir = $this->appDir();
+        $envFiles = $this->envFiles($appDir);
+        if ($envFiles === [] && $this->project->system()->filesystem()->fileExists($appDir.'/.env')) {
+            $envFiles = [$appDir.'/.env'];
+        }
+
+        return ComposeProjectName::of(
+            $appDir,
+            array_map($this->contentsOf(...), $this->composeFiles()),
+            array_map($this->contentsOf(...), $envFiles),
+            Privileged::accountCompose($this->project->username())->clientEnvironment(
+                $this->project->homeDirPath(),
+                ['DOCKER_CONFIG' => $this->project->shell()->dockerConfigDir(), 'PWD' => $appDir],
+            ),
+        );
+    }
+
+    /** A file's contents, '' when it cannot be read: compose then reads no name from it either. */
+    private function contentsOf(string $path): string
+    {
+        try {
+            return (string) $this->project->system()->filesystem()->fileGetContents($path);
+        } catch (\Throwable) {
+            return '';
+        }
     }
 
     /**
@@ -222,10 +241,8 @@ final class Paths
     }
 
     /**
-     * The files compose interpolates from, when the engine keeps values in
-     * `.env.panelalpha` (generated secrets, a tracked .env's overrides). Naming
-     * any env file replaces the default `.env`, so it is named too. Empty when
-     * there is no `.env.panelalpha`: compose's own default then applies.
+     * With a `.env.panelalpha`, the existing files compose interpolates from, `.env` named too since naming
+     * any replaces it (compose refuses a missing one); empty without, so compose's default applies.
      *
      * @return list<string>
      */
@@ -239,7 +256,6 @@ final class Paths
 
         $files = [];
         foreach (['.env', EngineArtifacts::ENV_OVERRIDES] as $name) {
-            // Compose refuses a named env file that does not exist.
             if ($fs->fileExists($appDir.'/'.$name)) {
                 $files[] = $appDir.'/'.$name;
             }
@@ -249,9 +265,8 @@ final class Paths
     }
 
     /**
-     * {@see composeCommand()} as environment, for scripts that call a bare
-     * `docker compose`: with the first file in appDir(), compose derives the
-     * same project directory and name the deploy used.
+     * {@see composeCommand()} as environment for a bare `docker compose` in a script: with the first file in appDir(),
+     * compose derives the same project directory and name the deploy used.
      *
      * @return array<string, string> COMPOSE_FILE, COMPOSE_PATH_SEPARATOR and, with {@see envFiles()}, COMPOSE_ENV_FILES
      */
@@ -286,6 +301,8 @@ final class Paths
     }
 
     /**
+     * The same layering as composeFiles() (D8), for the compose file found in $appDir.
+     *
      * @return list<string>
      */
     private function composeFilesIn(string $appDir): array
@@ -295,8 +312,6 @@ final class Paths
         $primary = $fs->fileExists($run) ? $run : ($this->existingComposeFileIn($appDir) ?? $run);
         $files = [$primary];
 
-        // Same layering as composeFiles() (D8): the client's override only
-        // under the compose strategies, then the app config's override.
         if ($this->layersClientOverride()) {
             $clientOverride = $this->clientOverrideIn($appDir);
             if ($clientOverride !== null && ! in_array($clientOverride, $files, true)) {

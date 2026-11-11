@@ -5,10 +5,8 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 
 /**
- * The image an account had under a tag a push builds again from the pushed
- * tree, held under `<repository>:pre-push` meanwhile. A target whose own run
- * file names that tag would otherwise come back from a failed push on the
- * pushed image.
+ * The image an account had under a tag a push rebuilds from the pushed tree, held under `<repository>:pre-push`
+ * meanwhile, so a target whose run file names that tag does not come back from a failed push on the pushed image.
  */
 final class HeldImage
 {
@@ -26,31 +24,23 @@ final class HeldImage
             return null;
         }
         $held = new self($project, $image);
-        $held->docker(['tag', $image, $held->holdingTag()]);
+        $project->accountDaemon()->tag($image, $held->holdingTag(), self::TIMEOUT_SECONDS);
 
         return $held;
     }
 
     public function putBack(): void
     {
-        $this->docker(['tag', $this->holdingTag(), $this->image]);
+        $this->project->accountDaemon()->tag($this->holdingTag(), $this->image, self::TIMEOUT_SECONDS);
     }
 
     public function release(): void
     {
-        $this->docker(['rmi', '-f', $this->holdingTag()]);
+        $this->project->accountDaemon()->removeImages([$this->holdingTag()], true, self::TIMEOUT_SECONDS);
     }
 
     public function holdingTag(): string
     {
         return (preg_replace('/:[^:\/]*$/', '', $this->image) ?? $this->image).':pre-push';
-    }
-
-    /**
-     * @param  list<string>  $args
-     */
-    private function docker(array $args): void
-    {
-        $this->project->shell()->execQuiet(['docker', ...$args], [], self::TIMEOUT_SECONDS);
     }
 }

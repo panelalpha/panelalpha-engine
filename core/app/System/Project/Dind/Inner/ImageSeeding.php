@@ -4,13 +4,15 @@ namespace App\System\Project\Dind\Inner;
 
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\OperatorBaseImages;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindImageStore;
-use App\Lib\Deploy\Dind\RegistryConfigSync;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Runtime\Images;
+use App\Models\OperatorImage;
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\InnerDocker;
 
@@ -120,6 +122,20 @@ class ImageSeeding
     }
 
     /**
+     * Fetches the operator images $composePath builds FROM out of the cache
+     * registry, so BuildKit finds them instead of asking Docker Hub.
+     */
+    public function preloadOperatorBases(string $composePath): void
+    {
+        foreach ($this->operatorBasesFor($composePath) as $image) {
+            $this->runSeed($image, $this->inner->imageStore()->operatorSeedCommand(
+                $this->inner->dind()->engineAccount(),
+                $image
+            ));
+        }
+    }
+
+    /**
      * The images the compose file at $composePath runs without building them
      * that this account still lacks: what `compose create` or `up` would go
      * to a registry for.
@@ -165,6 +181,35 @@ class ImageSeeding
         }
 
         return $images;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function operatorBasesFor(string $composePath): array
+    {
+        $operatorRefs = OperatorImage::refs();
+        $fs = $this->inner->dind()->system()->filesystem();
+        if ($operatorRefs === null || $operatorRefs === [] || ! $fs->fileExists($composePath)) {
+            return [];
+        }
+        $read = static function (string $path) use ($fs): ?string {
+            try {
+                $contents = $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
+            } catch (\Throwable) {
+                return null;
+            }
+
+            return is_string($contents) ? $contents : null;
+        };
+
+        return OperatorBaseImages::neededBy(
+            $composePath,
+            (string) $read($composePath),
+            $operatorRefs,
+            $read,
+            $this->activeProfiles(dirname($composePath).'/.env')
+        );
     }
 
     /**
@@ -227,16 +272,10 @@ class ImageSeeding
     private function presentImages(): array
     {
         try {
-            $output = $this->inner->dind()->shell()->execQuiet(
-                $this->inner->imageStore()->listImagesArgv(),
-                [],
-                60
-            );
+            $tags = $this->inner->dind()->accountDaemon()->imageTags();
         } catch (\Exception $e) {
             return [];
         }
-
-        $tags = preg_split('/\r?\n/', trim((string) $output)) ?: [];
 
         return array_values(array_filter($tags, static fn (string $t): bool => $t !== '' && $t !== '<none>:<none>'));
     }
@@ -302,14 +341,14 @@ class ImageSeeding
         }
 
         try {
-            $env = json_decode(trim($this->inner->dind()->shell()->execQuiet(
-                ['docker', 'image', 'inspect', '--format', '{{json .Config.Env}}', '--', $image],
-                [],
-                30
-            )), true);
-        } catch (\Exception $e) {
+            $held = $this->inner->dind()->accountDaemon()->image($image, 30);
+        } catch (\Exception) {
+            $held = null;
+        }
+        if ($held === null) {
             return (new RegistryImageConfig)->environment($image);
         }
+        $env = $held['Config']['Env'] ?? null;
 
         return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
     }
@@ -508,8 +547,8 @@ class ImageSeeding
      * An account created after the mount shipped reads that file directly:
      * {@see Dind::rewriteDaemonJsonInPlace()} keeps the
      * same inode the bind mount already serves (refusing a symlink
-     * there), so HUPing the account's own dockerd from the host (never a
-     * shell inside the account) is enough to pick it up, no restart needed.
+     * there), so a SIGHUP to the account's dockerd through the host daemon's
+     * Engine API picks it up, no restart needed.
      *
      * An account that predates the mount has no mount to tell apart from one
      * that is simply missing, so it only gets the plain, symlink-safe render
@@ -535,7 +574,7 @@ class ImageSeeding
                 return;
             }
 
-            if (! $this->accountHasDaemonJsonMount()) {
+            if (! $this->daemonConfigMounted()) {
                 // No bind mount to keep live: a plain, symlink-safe render,
                 // which is what this account gets when it is next recreated
                 // either way. Nothing to signal -- its own init script is
@@ -550,11 +589,7 @@ class ImageSeeding
             if (! $dind->rewriteDaemonJsonInPlace()) {
                 return;
             }
-            $pid = $this->dockerdHostPid();
-            if ($pid === null) {
-                return;
-            }
-            $dind->system()->execOnHost($this->inner->imageStore()->hostSignalDockerdArgv($pid));
+            $this->reloadDaemon();
             $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
         } catch (\Exception $e) {
             // Not fatal: public images still come straight from their registries.
@@ -563,11 +598,11 @@ class ImageSeeding
     }
 
     /** Whether the running container already binds daemon.json from the host, or still carries its own. */
-    private function accountHasDaemonJsonMount(): bool
+    private function daemonConfigMounted(): bool
     {
         try {
-            $json = $this->inner->dind()->system()->exec(
-                $this->inner->imageStore()->hostAccountMountsArgv($this->inner->dind()->engineAccount()),
+            $mounted = $this->inner->dind()->system()->exec(
+                Privileged::accountContainer($this->inner->dind()->username())->daemonConfigMounted(),
                 [],
                 15
             );
@@ -575,39 +610,24 @@ class ImageSeeding
             return false;
         }
 
-        return RegistryConfigSync::hasDaemonJsonMount((string) $json);
+        return trim((string) $mounted) === '1';
     }
 
-    /** The account's dockerd, by the PID the host can actually signal -- the account is its own PID namespace. */
-    private function dockerdHostPid(): ?int
+    /** SIGHUP to the account's own dockerd, which then rereads the daemon.json just written. */
+    private function reloadDaemon(): void
     {
-        try {
-            $output = $this->inner->dind()->system()->exec(
-                $this->inner->imageStore()->hostAccountProcessesArgv($this->inner->dind()->engineAccount()),
-                [],
-                15
-            );
-        } catch (\Exception $e) {
-            return null;
-        }
-
-        return RegistryConfigSync::dockerdHostPid((string) $output);
+        $this->inner->dind()->system()->exec(
+            Privileged::accountContainer($this->inner->dind()->username())->reloadDaemon(),
+            [],
+            15
+        );
     }
 
     public function hasImage(string $image): bool
     {
         // Every deploy asks this first, even when each image is already there.
         $this->ensureRegistryConfig();
-        try {
-            $id = trim($this->inner->dind()->shell()->execQuiet(
-                $this->inner->imageStore()->imageIdArgv($image),
-                [],
-                30
-            ));
 
-            return $id !== '';
-        } catch (\Exception $e) {
-            return false;
-        }
+        return $this->inner->dind()->accountDaemon()->hasImage($image, 30);
     }
 }

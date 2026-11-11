@@ -9,6 +9,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\GenerationSweep;
 use App\System\Project\Dind\Networking;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Sleep;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -132,6 +134,8 @@ class GenerationSweepTest extends TestCase
 
         $this->assertContains('deploy details restored', $done);
         $this->assertContains('checkout restored', $done);
+        $this->assertContains('1 image tag(s) back on the running version', $done);
+        $this->assertRan("account-docker.tag -- {$this->username} panelalpha-serving:bbbbbbbbbbbb project-app");
         $this->assertNotRan(self::UP);
         $this->assertStringContainsString('the previous version (commit aaaaaaa) still serves on port 3000', $this->lastLine());
         $this->assertClosedAsInterrupted();
@@ -145,8 +149,8 @@ class GenerationSweepTest extends TestCase
         $done = GenerationSweep::settleInterrupted($this->project());
 
         $this->assertSame('previous version started again', $done[0]);
-        $this->assertRan('docker tag "$2" "$1"');
-        $this->assertRan('project-app panelalpha-serving:bbbbbbbbbbbb');
+        $this->assertRan("account-docker.tag -- {$this->username} panelalpha-serving:bbbbbbbbbbbb project-app");
+        $this->assertRan("account-docker.removeImages -- {$this->username}  panelalpha-serving:bbbbbbbbbbbb");
         $this->assertRan(self::UP . " '--remove-orphans' '--no-build'");
         $this->assertStringContainsString(
             'the previous version (commit aaaaaaa) was started again on port 3000, because the new version had not passed its health check; it answers',
@@ -168,10 +172,12 @@ class GenerationSweepTest extends TestCase
 
         $this->assertContains('second generation removed', $done);
         $this->assertNotRan(self::UP);
-        $this->assertNotRan('docker tag "$2" "$1"');
+        $this->assertNotRan('account-docker.tag');
         $this->assertSame(8080, ProxyRule::find($site)->upstream_port, 'on to the new version, not back to a port nothing serves');
         $this->assertSame(8080, ProxyRule::find($hand)->upstream_port, 'the operator\'s rule follows');
         $this->assertSame([8080], $this->routed);
+        $this->assertRan("account-docker.listContainers -- {$this->username}  1 publish 8080");
+        $this->assertRan("account-docker.containers -- {$this->username} new1");
         $this->assertStringContainsString(
             'the new version (commit bbbbbbb) serves on port 8080, because it passed its health check before the deploy stopped',
             $this->lastLine()
@@ -282,7 +288,7 @@ class GenerationSweepTest extends TestCase
         $this->assertContains('routes left on the second copy', $done);
         $this->assertSame(32771, ProxyRule::find($site)->upstream_port, 'the site stays where it is served');
         $this->assertSame([], $this->routed);
-        $this->assertNotRan('rm -f -v');
+        $this->assertNotRan('account-docker.removeContainers');
         $this->assertSame(8080, (new GenerationState($this->username))->get(GenerationState::NEXT)['back']);
         $this->assertSame(
             'The redeploy stopped before it finished: the new version (commit bbbbbbb) does not answer on port 8080 (it answers HTTP 500), and the previous one '
@@ -294,7 +300,9 @@ class GenerationSweepTest extends TestCase
         $this->answers = [8080 => 200, 32771 => 200];
         $this->assertContains('second generation removed', GenerationSweep::settleInterrupted($this->project()));
         $this->assertSame(8080, ProxyRule::find($site)->upstream_port);
-        $this->assertRan('rm -f -v');
+        $this->assertRan("account-docker.listContainers -- {$this->username} all 1 label com.docker.compose.project=project-next");
+        $this->assertRan("account-docker.removeContainers -- {$this->username} force volumes new1");
+        $this->assertRan('files.removeIfExists -- /home/u/.panelalpha-next-generation.yml');
     }
 
     /** The previous version is started again but does not answer: the copy keeps the site until it does. */
@@ -312,7 +320,7 @@ class GenerationSweepTest extends TestCase
         $this->assertRan(self::UP . " '--remove-orphans' '--no-build'");
         $this->assertSame(32771, ProxyRule::find($site)->upstream_port);
         $this->assertSame([], $this->routed, 'not routed to a version that does not answer');
-        $this->assertNotRan('rm -f -v');
+        $this->assertNotRan('account-docker.removeContainers');
         $this->assertStringEndsWith(
             'because the new version had not passed its health check; it does not answer: it answers HTTP 500. The new version\'s second copy keeps serving the site until it does',
             $this->lastLine()
@@ -425,6 +433,7 @@ class GenerationSweepTest extends TestCase
         $project->method('userAppDirPath')->willReturn('/home/u/project');
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
 
         return $project;
     }
@@ -432,22 +441,11 @@ class GenerationSweepTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         $this->ran[] = $line;
-        if (in_array('retag', $argv, true)) {
-            return '0';
-        }
-        if (str_contains($line, '{{.State.Running}}')) {
-            return $this->oldRunning ? "true\n" : "gone\n";
-        }
-        if (str_contains($line, 'echo held')) {
-            return $this->held ? 'held' : 'gone';
-        }
-        if (str_contains($line, 'docker tag "$2" "$1"')) {
-            return '1';
-        }
-        if (str_contains($line, 'publish=')) {
-            return 'sha256:cccccccccccc0000';
+        $action = LocalRoot::action($argv);
+        if ($action !== null && str_starts_with($action, 'account-docker.')) {
+            return $this->daemon($action, array_slice(LocalRoot::values($argv), 1));
         }
         if (str_contains($line, 'curl')) {
             return implode("\n", array_map(
@@ -459,6 +457,25 @@ class GenerationSweepTest extends TestCase
         }
 
         return '';
+    }
+
+    /**
+     * The account's dockerd: the previous version's container while it runs, the new one on the app's port.
+     *
+     * @param list<string> $values
+     */
+    private function daemon(string $action, array $values): string
+    {
+        return match ($action) {
+            'account-docker.containers' => (string) json_encode(array_map(fn (string $id): ?array => match ($id) {
+                'old1' => $this->oldRunning ? ['State' => ['Running' => true], 'Image' => self::OLD_IMAGE] : null,
+                'new1' => ['State' => ['Running' => true], 'Image' => 'sha256:cccccccccccc0000'],
+                default => null,
+            }, $values)),
+            'account-docker.listContainers' => '[{"Id":"new1"}]',
+            'account-docker.images' => (string) json_encode(array_map(fn (): ?array => $this->held ? ['Id' => self::OLD_IMAGE] : null, $values)),
+            default => '',
+        };
     }
 
     private function assertRan(string $needle): void

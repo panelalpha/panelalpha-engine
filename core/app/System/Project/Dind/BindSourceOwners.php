@@ -6,23 +6,21 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\WritableProjectBinds;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\System\Filesystem;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Hands checkout paths a non-root service writes through a bind mount to the
- * uid it runs as, before `compose up` ({@see WritableProjectBinds}).
- *
- * Owner becomes that uid, the group stays the account's with group write, so
- * the account keeps writing them too; nothing is widened to other uids.
+ * Hands checkout paths a non-root service writes through a bind mount to its uid before `compose up`
+ * ({@see WritableProjectBinds}); the group stays the account's with group write, nothing wider.
  */
 final class BindSourceOwners
 {
     private const TIMEOUT_SECONDS = 60;
 
     /**
-     * Run as root in the account: $1 the checkout, $2 uid:gid, then the paths.
-     * A path that resolves outside the checkout (a committed symlink to /usr)
-     * is skipped, and nothing below it is followed (-h, -P).
+     * Run as root in the account: $1 the checkout, $2 uid:gid, then the paths. One resolving outside the
+     * checkout (a committed symlink to /usr) is skipped, and nothing below it is followed (-h, -P).
      */
     private const HAND_OVER = 'root=$1; owner=$2; shift 2; for p; do '
         .'[ -L "$p" ] && continue; r=$(realpath -e -- "$p" 2>/dev/null) || continue; '
@@ -53,75 +51,134 @@ final class BindSourceOwners
         }
 
         $fs = $this->project->system()->filesystem();
+        $env = $this->interpolationEnv();
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+        $builtHere = DeployCompose::imagesBuiltHere(array_values($services), $env);
+        foreach (WritableProjectBinds::of($compose, $this->project->userAppDirPath()) as $service => $bind) {
+            $this->handOverBind($service, $bind, $fs, $services, $env, $builtHere, $accountUid, $accountGid, $logger);
+        }
+    }
+
+    /** @return array<string, list<?string>|string> */
+    private function interpolationEnv(): array
+    {
         try {
             $env = $this->project->environment()->forInterpolation();
         } catch (\Throwable) {
             $env = [];
         }
-        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
-        $builtHere = DeployCompose::imagesBuiltHere(array_values($services), $env);
-        foreach (WritableProjectBinds::of($compose, $this->project->userAppDirPath()) as $service => $bind) {
-            // Directories too: keycloak's ./keycloak/themes is a directory bind.
-            $sources = array_values(array_filter(
-                $bind['sources'],
-                static fn (string $path): bool => $fs->fileExists($path) || $fs->directoryExists($path)
-            ));
-            if ($sources === []) {
-                continue;
-            }
-            // `wordpress:${WORDPRESS_VERSION:-latest}` is an image only once interpolated.
-            $image = $bind['image'] === null ? null : DeployCompose::resolvedImageRef($bind['image'], $env);
-            $build = $this->buildOf($services[$service] ?? null, $image, $services, $env, $builtHere);
-            if ($bind['user'] !== null) {
-                $user = $bind['user'];
-                // `docker create` would ask a registry for a tag not built yet.
-                $passwdImage = $build !== null && ($image === null || ! $this->hasLocalImage($image)) ? null : $image;
-            } elseif ($build !== null) {
-                [$user, $passwdImage] = $this->builtImageUser($image, $build);
-            } else {
-                $user = $image === null ? null : $this->imageUser($image);
-                $passwdImage = $image;
-            }
-            if ($user === null) {
-                continue;
-            }
-            $uid = WritableProjectBinds::uidOf(
-                $user,
-                ctype_digit(explode(':', $user)[0]) || $passwdImage === null ? null : $this->imagePasswd($passwdImage)
-            );
-            if ($uid === null || $uid === $accountUid) {
-                continue;
-            }
-            $projectDir = rtrim($this->project->userAppDirPath(), '/');
-            try {
-                $handed = $this->project->shell()->execQuiet(
-                    ['sh', '-c', self::HAND_OVER, 'sh', $projectDir, "{$uid}:{$accountGid}", ...$sources],
-                    [],
-                    self::TIMEOUT_SECONDS
-                );
-            } catch (\Throwable $e) {
-                $logger?->warn("Could not hand the paths service {$service} writes to uid {$uid}: ".trim($e->getMessage()));
 
-                continue;
-            }
-            $relative = array_map(
-                static fn (string $path): string => ltrim(substr($path, strlen($projectDir)), '/'),
-                array_values(array_filter(array_map('trim', explode("\n", $handed))))
-            );
-            if ($relative === []) {
-                continue;
-            }
-            $logger?->info(
-                "Service {$service} runs as uid {$uid} and writes to ".implode(', ', $relative)
-                .' through a bind mount; handed them to that uid (the account keeps group write)'
-            );
-        }
+        return $env;
     }
 
     /**
-     * The `build:` that produces this service's image: its own, or the one of
-     * the service building the tag it runs (kassambara's `image: wpcli`).
-     * Null for an image from a registry.
+     * One service's bound paths that exist, handed to the uid it runs as; its image is interpolated first,
+     * since `wordpress:${WORDPRESS_VERSION:-latest}` is an image only then.
+     *
+     * @param  array{sources: list<string>, image: ?string, user: ?string}  $bind
+     * @param  array<string, mixed>  $services
+     * @param  array<string, list<?string>|string>  $env
+     * @param  list<string>  $builtHere
+     */
+    private function handOverBind(
+        int|string $service,
+        array $bind,
+        Filesystem $fs,
+        array $services,
+        array $env,
+        array $builtHere,
+        int $accountUid,
+        int $accountGid,
+        ?DeployLogger $logger
+    ): void {
+        $sources = self::existingSources($bind['sources'], $fs);
+        if ($sources === []) {
+            return;
+        }
+        $image = $bind['image'] === null ? null : DeployCompose::resolvedImageRef($bind['image'], $env);
+        $build = $this->buildOf($services[$service] ?? null, $image, $services, $env, $builtHere);
+        [$user, $passwdImage] = $this->runsAs($bind, $image, $build);
+        if ($user === null) {
+            return;
+        }
+        $uid = WritableProjectBinds::uidOf(
+            $user,
+            ctype_digit(explode(':', $user)[0]) || $passwdImage === null ? null : $this->imagePasswd($passwdImage)
+        );
+        if ($uid === null || $uid === $accountUid) {
+            return;
+        }
+        $this->handOverTo($service, $uid, $accountGid, $sources, $logger);
+    }
+
+    /**
+     * Directories too: keycloak's ./keycloak/themes is a directory bind.
+     *
+     * @param  list<string>  $sources
+     * @return list<string>
+     */
+    private static function existingSources(array $sources, Filesystem $fs): array
+    {
+        return array_values(array_filter(
+            $sources,
+            static fn (string $path): bool => $fs->fileExists($path) || $fs->directoryExists($path)
+        ));
+    }
+
+    /**
+     * The user the service runs as, and the image to read its passwd from; never an image `docker create`
+     * would ask a registry for because it is not built yet.
+     *
+     * @param  array{sources: list<string>, image: ?string, user: ?string}  $bind
+     * @param  array<string, mixed>|string|null  $build
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function runsAs(array $bind, ?string $image, array|string|null $build): array
+    {
+        if ($bind['user'] !== null) {
+            $user = $bind['user'];
+            $passwdImage = $build !== null && ($image === null || ! $this->hasLocalImage($image)) ? null : $image;
+        } elseif ($build !== null) {
+            [$user, $passwdImage] = $this->builtImageUser($image, $build);
+        } else {
+            $user = $image === null ? null : $this->imageUser($image);
+            $passwdImage = $image;
+        }
+
+        return [$user, $passwdImage];
+    }
+
+    /** @param  list<string>  $sources */
+    private function handOverTo(int|string $service, int $uid, int $accountGid, array $sources, ?DeployLogger $logger): void
+    {
+        $projectDir = rtrim($this->project->userAppDirPath(), '/');
+        try {
+            $handed = $this->project->shell()->execQuiet(
+                ['sh', '-c', self::HAND_OVER, 'sh', $projectDir, "{$uid}:{$accountGid}", ...$sources],
+                [],
+                self::TIMEOUT_SECONDS
+            );
+        } catch (\Throwable $e) {
+            $logger?->warn("Could not hand the paths service {$service} writes to uid {$uid}: ".trim($e->getMessage()));
+
+            return;
+        }
+        $relative = array_map(
+            static fn (string $path): string => ltrim(substr($path, strlen($projectDir)), '/'),
+            array_values(array_filter(array_map('trim', explode("\n", $handed))))
+        );
+        if ($relative === []) {
+            return;
+        }
+        $logger?->info(
+            "Service {$service} runs as uid {$uid} and writes to ".implode(', ', $relative)
+            .' through a bind mount; handed them to that uid (the account keeps group write)'
+        );
+    }
+
+    /**
+     * The `build:` that produces this service's image: its own, or that of the service building the tag it
+     * runs (kassambara's `image: wpcli`); null for an image from a registry.
      *
      * @param  array<string, mixed>  $services
      * @param  array<string, list<?string>|string>  $env
@@ -151,8 +208,7 @@ final class BindSourceOwners
     }
 
     /**
-     * Who an image this file builds runs as, without asking a registry for a
-     * tag that only exists once the build runs: the Dockerfile's own `USER`,
+     * Who an image this file builds runs as, never asking a registry for the tag: the Dockerfile's `USER`,
      * else the image a previous deploy built, else the base it starts from.
      *
      * @param  array<string, mixed>|string  $build
@@ -191,25 +247,20 @@ final class BindSourceOwners
     private function hasLocalImage(string $image): bool
     {
         try {
-            $this->project->shell()->execQuiet(['docker', 'image', 'inspect', '--format', '{{.Id}}', $image], [], self::TIMEOUT_SECONDS);
+            return $this->project->accountDaemon()->image($image, self::TIMEOUT_SECONDS) !== null;
         } catch (\Throwable) {
             return false;
         }
-
-        return true;
     }
 
     private function inspectUser(string $image): ?string
     {
         try {
-            $user = trim($this->project->shell()->execQuiet(
-                ['docker', 'image', 'inspect', '--format', '{{.Config.User}}', $image],
-                [],
-                self::TIMEOUT_SECONDS
-            ));
+            $held = $this->project->accountDaemon()->image($image, self::TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
+        $user = trim((string) ($held['Config']['User'] ?? ''));
 
         return $user === '' ? null : $user;
     }
@@ -225,16 +276,11 @@ final class BindSourceOwners
         return $this->inspectUser($image);
     }
 
-    /** The image's /etc/passwd, read from a created (never started) container. */
+    /** The image's /etc/passwd; null when the daemon cannot read it. */
     private function imagePasswd(string $image): ?string
     {
-        $name = 'pa-passwd-'.bin2hex(random_bytes(4));
-        // Created with a dummy entrypoint: create never checks it, and an image without a CMD is refused otherwise.
-        $script = 'docker create --name "$1" --entrypoint /pa-none "$2" >/dev/null 2>&1 || exit 0; '
-            .'docker cp "$1:/etc/passwd" - 2>/dev/null | tar -xO 2>/dev/null; '
-            .'docker rm "$1" >/dev/null 2>&1; exit 0';
         try {
-            return $this->project->shell()->execQuiet(['sh', '-c', $script, 'sh', $name, $image], [], self::TIMEOUT_SECONDS);
+            return $this->project->accountDaemon()->readImageFile($image, '/etc/passwd', self::TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }

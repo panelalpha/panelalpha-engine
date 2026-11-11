@@ -7,10 +7,12 @@ use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -38,6 +40,7 @@ class ContainerOperationsBuildGuardTest extends TestCase
         $this->assertSame($expected, $this->ran);
     }
 
+    /** What each action runs; `down` leaves the anonymous volumes of VOLUME images behind, so those go after it. */
     public static function actions(): array
     {
         return [
@@ -45,6 +48,7 @@ class ContainerOperationsBuildGuardTest extends TestCase
             'pull' => ['pull', ['build-guard', 'compose pull', 'compose up', 'build-guard-release']],
             'restart' => ['restart', ['compose restart']],
             'stop' => ['stop', ['compose stop']],
+            'down' => ['down', ['compose down', 'account-docker.pruneAnonymousVolumes']],
         ];
     }
 
@@ -53,9 +57,14 @@ class ContainerOperationsBuildGuardTest extends TestCase
         $system = $this->createStub(System::class);
         $system->method('exec')->willReturnCallback(function (string|array $cmd): string {
             $argv = array_values((array) $cmd);
+            $action = (string) LocalRoot::action($argv);
+            if (str_starts_with($action, 'account-docker.')) {
+                $this->ran[] = $action;
+
+                return '';
+            }
             $guard = array_values(preg_grep('/^build-guard/', $argv) ?: []);
-            preg_match("/'compose' '(\\w+)'/", (string) end($argv), $compose);
-            $this->ran[] = $guard[0] ?? 'compose ' . ($compose[1] ?? '?');
+            $this->ran[] = $guard[0] ?? 'compose ' . (LocalRoot::composeCommand($argv)[2] ?? '?');
 
             return '';
         });
@@ -79,6 +88,7 @@ class ContainerOperationsBuildGuardTest extends TestCase
         $shell = new ShellOperations($project);
         $project->method('shell')->willReturn($shell);
         $project->method('innerBuildGuard')->willReturn(new InnerBuildGuard($project));
+        $project->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($project));
 
         return $project;
     }

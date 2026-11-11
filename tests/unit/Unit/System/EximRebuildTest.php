@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Services\Exim;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -17,6 +18,7 @@ class EximRebuildTest extends TestCase
     {
         parent::setUp();
         $this->tmpRoot = sys_get_temp_dir() . '/pa-exim-' . bin2hex(random_bytes(4));
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot]));
         mkdir($this->tmpRoot . '/config/exim', 0777, true);
         mkdir($this->tmpRoot . '/templates/config', 0777, true);
         $this->writeTemplates();
@@ -24,6 +26,7 @@ class EximRebuildTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -61,27 +64,11 @@ class EximRebuildTest extends TestCase
         $transport = file_get_contents($this->tmpRoot . '/config/exim/transport.conf');
         $this->assertStringNotContainsString('REMOTE_SMTP_SMARTHOST_PROTOCOL', $transport);
 
-        $this->assertContains('update-exim4.conf', $system->journal);
-        $this->assertContains('exim4-restart', $system->journal);
-
-        $updateCmd = null;
-        $reloadCmd = null;
-        foreach ($system->execJournal as $cmd) {
-            if (str_contains($cmd, 'update-exim4.conf')) {
-                $updateCmd = $cmd;
-            }
-            if (str_contains($cmd, 'service exim4 start')) {
-                $reloadCmd = $cmd;
-            }
-        }
-        $this->assertNotNull($updateCmd);
-        $this->assertStringContainsString('docker compose -f', $updateCmd);
-        $this->assertStringContainsString('exec mail update-exim4.conf', $updateCmd);
-        $this->assertStringNotContainsString('exec -T mail', $updateCmd);
-
-        $this->assertNotNull($reloadCmd);
-        $this->assertStringContainsString('exec mail sh -c', $reloadCmd);
-        $this->assertStringNotContainsString('exec -T mail', $reloadCmd);
+        $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'compose.eximUpdateConfig', '--', $this->tmpRoot . '/docker-compose.yml'],
+            [LocalRoot::CLIENT, 'compose.eximRestart', '--', $this->tmpRoot . '/docker-compose.yml'],
+        ], $system->requests);
     }
 
     /**
@@ -268,26 +255,6 @@ class EximRebuildTest extends TestCase
         $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
     }
 
-    /**
-     * The daemon a container start left retrying its bind has no pid file, so
-     * `service exim4 stop` misses it; the restart also stops every `exim4 -bd`
-     * before starting the new one.
-     */
-    public function test_the_restart_stops_a_daemon_the_init_script_missed(): void
-    {
-        $script = Exim::RESTART_SCRIPT;
-
-        $stop = strpos($script, 'service exim4 stop');
-        $kill = strpos($script, 'kill $left');
-        $start = strpos($script, 'service exim4 start');
-        $this->assertNotFalse($stop);
-        $this->assertNotFalse($kill);
-        $this->assertNotFalse($start);
-        $this->assertTrue($stop < $kill && $kill < $start);
-        $this->assertStringContainsString('-bd', $script);
-        $this->assertStringContainsString('kill -9', $script);
-    }
-
     public function test_parse_network_addresses(): void
     {
         $gateway = TestNetwork::container(1);
@@ -320,14 +287,9 @@ class EximRebuildTest extends TestCase
         $this->assertSame(0, $result['exit_code']);
 
         $this->assertEmpty($system->execJournal);
-        $this->assertCount(1, $system->processJournal);
-
-        $cmd = $system->processJournal[0];
-        $this->assertStringContainsString('docker compose -f', $cmd);
-        $this->assertStringContainsString('exec mail bash -c', $cmd);
-        $this->assertStringContainsString('exim4 -v -odf', $cmd);
-        $this->assertStringContainsString('probe@example.com', $cmd);
-        $this->assertStringNotContainsString('exec -T mail', $cmd);
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'compose.eximSendTestEmail', '--', $this->tmpRoot . '/docker-compose.yml', 'probe@example.com'],
+        ], $system->requests);
     }
 
     /**
@@ -415,8 +377,8 @@ class EximRebuildTest extends TestCase
             /** @var list<string> */
             public array $execJournal = [];
 
-            /** @var list<string> */
-            public array $processJournal = [];
+            /** @var list<list<string>> */
+            public array $requests = [];
 
             public function __construct(
                 private string $engineRoot,
@@ -435,12 +397,13 @@ class EximRebuildTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->execJournal[] = $line;
-                if (str_contains($line, 'update-exim4.conf')) {
+                $argv = (array) $cmd;
+                $this->requests[] = $argv;
+                $this->execJournal[] = implode(' ', $argv);
+                if (in_array('compose.eximUpdateConfig', $argv, true)) {
                     $this->journal[] = 'update-exim4.conf';
                 }
-                if (str_contains($line, 'service exim4 stop') && str_contains($line, 'service exim4 start')) {
+                if (in_array('compose.eximRestart', $argv, true)) {
                     $this->journal[] = 'exim4-restart';
                 }
 
@@ -449,8 +412,7 @@ class EximRebuildTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->processJournal[] = $line;
+                $this->requests[] = (array) $cmd;
 
                 return new class extends Process {
                     public function __construct()

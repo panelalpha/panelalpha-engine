@@ -3,6 +3,7 @@
 namespace Tests\Unit\Console;
 
 use App\Console\Commands\System\TrimRegistryProxy;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class TrimRegistryProxyTest extends TestCase
@@ -13,22 +14,21 @@ class TrimRegistryProxyTest extends TestCase
      */
     public function test_it_wipes_the_store_inside_the_container(): void
     {
-        $this->assertSame(
-            [
-                'sudo', 'docker', 'exec', 'panelalpha-registry-proxy',
-                'rm', '-rf', '/var/lib/registry/docker', '/var/lib/registry/scheduler-state.json',
-            ],
-            TrimRegistryProxy::wipeArgv()
-        );
-        $this->assertNotContains('/var/lib/registry', TrimRegistryProxy::wipeArgv());
+        $wipe = TrimRegistryProxy::wipeArgv();
+
+        $this->assertTrue(LocalRoot::isRequest($wipe));
+        $this->assertSame('docker.wipeRegistryStorage', LocalRoot::action($wipe));
+        $this->assertSame(['panelalpha-registry-proxy'], LocalRoot::values($wipe));
+        $this->assertNotContains('/var/lib/registry', $wipe);
     }
 
     public function test_it_restarts_the_container_after_the_wipe(): void
     {
-        $this->assertSame(
-            ['sudo', 'docker', 'restart', 'panelalpha-registry-proxy'],
-            TrimRegistryProxy::clearArgv()
-        );
+        $clear = TrimRegistryProxy::clearArgv();
+
+        $this->assertTrue(LocalRoot::isRequest($clear));
+        $this->assertSame('docker.restart', LocalRoot::action($clear));
+        $this->assertSame(['panelalpha-registry-proxy'], LocalRoot::values($clear));
     }
 
     /** Array form end to end, so no part of this is reparsed by a shell. */

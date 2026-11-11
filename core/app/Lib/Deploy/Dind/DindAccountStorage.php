@@ -6,9 +6,8 @@ use App\Lib\Deploy\Engine\AccountStorage;
 use App\Lib\Deploy\Engine\EngineAccount;
 
 /**
- * The nested daemon's data-root: `~/docker` inside the account's own home, so a
- * full store fills the tenant's quota while the host has terabytes free. The
- * probes run inside the account; deletion removes the tree explicitly.
+ * The nested daemon's data-root, `~/docker` in the account's home, so a full store fills the tenant's quota,
+ * not the host. The free-space probe runs inside the account; deletion removes the tree explicitly.
  */
 final class DindAccountStorage implements AccountStorage
 {
@@ -34,66 +33,9 @@ final class DindAccountStorage implements AccountStorage
         return DindBuildStorage::parseDfAvailableBytes($output);
     }
 
-    /**
-     * @return list<string>
-     */
-    public function buildCacheProbeArgv(): array
-    {
-        return ['sh', '-lc', 'docker buildx du 2>/dev/null || true'];
-    }
-
-    public function parseBuildCacheBytes(string $output): ?int
-    {
-        return DindBuildStorage::parseBuildxTotalBytes($output);
-    }
-
-    /**
-     * `-a`, not just running: a stopped container still owns layers a prune
-     * would take.
-     *
-     * @return list<string>
-     */
-    public function containersProbeArgv(): array
-    {
-        return ['sh', '-lc', 'docker ps -aq 2>/dev/null || true'];
-    }
-
-    /**
-     * `system prune -a` takes the unused images; the builder prunes take
-     * BuildKit's cache under both the classic builder and buildx.
-     *
-     * @return list<list<string>>
-     */
-    public function reclaimArgvs(): array
-    {
-        return [['docker', 'system', 'prune', '-af'], ...$this->pruneBuildCacheArgv()];
-    }
-
     public function fullWipeScript(): string
     {
         return DindBuildStorage::fullWipeScript();
-    }
-
-    /**
-     * @return list<string>
-     */
-    public function pruneAllArgv(): array
-    {
-        return ['docker', 'system', 'prune', '-af', '--volumes'];
-    }
-
-    /**
-     * Two prunes: BuildKit's cache is reachable under both the classic builder
-     * and buildx, and an interrupted build can leave records in either.
-     *
-     * @return list<list<string>>
-     */
-    public function pruneBuildCacheArgv(): array
-    {
-        return [
-            ['docker', 'builder', 'prune', '-af'],
-            ['docker', 'buildx', 'prune', '-af'],
-        ];
     }
 
     /**
@@ -109,11 +51,11 @@ final class DindAccountStorage implements AccountStorage
 
     /**
      * @param  list<string>  $sidecarRefs
-     * @return list<string>
+     * @return list<list<string>>
      */
-    public function hostCleanupArgv(EngineAccount $account, array $sidecarRefs = []): array
+    public function hostCleanupArgvs(EngineAccount $account, array $sidecarRefs = []): array
     {
-        return DindAccountCleanup::hostCleanupArgv(
+        return DindAccountCleanup::hostCleanupArgvs(
             $account->username,
             $account->homeDir,
             $sidecarRefs

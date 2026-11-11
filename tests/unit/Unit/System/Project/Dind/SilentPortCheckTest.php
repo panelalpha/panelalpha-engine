@@ -4,10 +4,12 @@ namespace Tests\Unit\System\Project\Dind;
 
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\SilentPortCheck;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\ComposePsFixture;
 use Tests\Support\TestNetwork;
 
 /**
@@ -27,7 +29,11 @@ class SilentPortCheckTest extends TestCase
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
 
-                return str_contains($line, '/proc/') ? $this->procNet : $this->ps;
+                if (str_contains($line, 'account-docker.listeningSockets -- acme project-app-1')) {
+                    return $this->procNet;
+                }
+
+                return (is_array($cmd) ? ComposePsFixture::answer($cmd, $this->ps) : null) ?? $this->ps;
             }
         };
 
@@ -36,7 +42,8 @@ class SilentPortCheckTest extends TestCase
         $dind->method('username')->willReturn('acme');
         $dind->method('composeFilePath')->willReturn('/home/acme/docker-compose.yml');
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
-        $dind->method('userAppComposeCommand')->willReturnCallback(static fn (array $rest): array => array_merge(['docker', 'compose'], $rest));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
+        $dind->method('userAppComposeProjectName')->willReturn('project');
 
         return (new SilentPortCheck($dind))->check($results);
     }

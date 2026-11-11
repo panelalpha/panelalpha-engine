@@ -8,6 +8,7 @@ use App\System\Services\Webserver;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -22,7 +23,7 @@ use Tests\TestCase;
  * `pruneDomainConfigs()` exists to remove.
  *
  * So every path that restarts the container tests the config first -- the
- * queued one included, where the test has to run next to the restart. The
+ * queued one included, where the broker runs the test next to the restart. The
  * other half matters as much: only nginx's own verdict refuses, because a
  * container that is down is exactly what the restart is for.
  */
@@ -110,70 +111,42 @@ class WebserverRestartConfigGuardTest extends TestCase
      * branch, and the branch that restarts the container -- the only one that
      * can crash-loop it -- went out unguarded.
      */
-    public function test_the_queued_rebind_restart_tests_the_config_first(): void
+    public function test_the_queued_rebind_restart_asks_for_the_job_that_tests_the_config_first(): void
     {
         $commands = [];
         $this->system('nginx-proxy', $commands)->webserver()->scheduleWebserverReloadInBackground(true);
 
         $this->assertCount(1, $commands);
-        $queued = $commands[0];
-        $this->assertStringContainsString('restart sites-http', $queued);
-        $this->assertStringContainsString('nginx -t', $queued);
-        $this->assertLessThan(
-            strpos($queued, 'restart sites-http'),
-            strpos($queued, 'nginx -t'),
-            'the config test has to run before the restart, in the job that restarts'
+        $this->assertSame(
+            '/usr/local/lib/panelalpha/pa-root --host webserver.queueReload -- /opt/panelalpha/shared-hosting/docker-compose.yml nginx-rebind',
+            $commands[0]
         );
     }
 
     /** The method is documented non-blocking: nothing may be run before the queueing. */
-    public function test_a_plain_reload_is_queued_without_asking_the_container_anything(): void
+    public function test_a_plain_reload_asks_for_the_reload_and_nothing_else(): void
     {
         $commands = [];
         $this->system('nginx-proxy', $commands)->webserver()->scheduleWebserverReloadInBackground();
 
         $this->assertCount(1, $commands);
-        $this->assertStringContainsString('/etc/init.d/nginx reload', $commands[0]);
-        $this->assertStringNotContainsString('nginx -t', $commands[0]);
+        $this->assertSame(
+            '/usr/local/lib/panelalpha/pa-root --host webserver.queueReload -- /opt/panelalpha/shared-hosting/docker-compose.yml nginx',
+            $commands[0]
+        );
     }
 
-    /** A host without `at` never runs the job, and nothing else would say so. */
-    public function test_a_job_the_host_could_not_queue_is_logged(): void
+    /** A broker that could not be asked never runs the job, and nothing else would say so. */
+    public function test_a_reload_the_broker_could_not_run_is_logged(): void
     {
         Log::spy();
         $commands = [];
-        $this->system('nginx-proxy', $commands, 'echo "bash: line 1: at: command not found" >&2; exit 127')
+        $this->system('nginx-proxy', $commands, 'echo "pa-root: refused: no such action" >&2; exit 77')
             ->webserver()->scheduleWebserverReloadInBackground();
 
         Log::shouldHaveReceived('warning')
             ->once()
-            ->withArgs(fn (string $message) => str_contains($message, 'at: command not found'));
-    }
-
-    #[DataProvider('guardedRestartCases')]
-    public function test_the_queued_guard_refuses_only_on_a_verdict(string $testOutput, int $testExit, bool $expectRestart): void
-    {
-        $command = Webserver::restartGuardedByConfigTest(
-            'printf %s ' . escapeshellarg($testOutput) . '; exit ' . $testExit,
-            'echo RESTARTED'
-        );
-
-        $process = Process::fromShellCommandline($command);
-        $process->run();
-
-        $this->assertSame($expectRestart, str_contains($process->getOutput(), 'RESTARTED'));
-    }
-
-    /** @return array<string, array{string, int, bool}> */
-    public static function guardedRestartCases(): array
-    {
-        return [
-            'config is fine' => ['nginx: configuration file /etc/nginx/nginx.conf test is successful', 0, true],
-            'config is refused' => [self::EMERG . "\nnginx: configuration file test failed", 1, false],
-            'container is down' => ['service "sites-http" is not running', 1, true],
-            'container is restarting' => ['Error response from daemon: Container 3f2a is restarting', 1, true],
-            'exec never reached nginx' => ['OCI runtime exec failed: cannot exec in a stopped state: unknown', 1, true],
-        ];
+            ->withArgs(fn (string $message) => str_contains($message, 'no such action'));
     }
 
     /**
@@ -192,7 +165,8 @@ class WebserverRestartConfigGuardTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->commands[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $argv = is_array($cmd) ? array_values($cmd) : [];
+                $this->commands[] = implode(' ', LocalRoot::plain($argv) ?: $argv);
                 $process = Process::fromShellCommandline($this->hostAnswers);
                 $process->run();
 

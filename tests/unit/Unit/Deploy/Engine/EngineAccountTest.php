@@ -37,11 +37,4 @@ class EngineAccountTest extends TestCase
         new EngineAccount('alice', '/home/alice', 'www-data:www-data');
     }
 
-    public function test_a_missing_control_file_is_reported_where_it_is_needed(): void
-    {
-        $account = new EngineAccount('alice', '/home/alice');
-
-        $this->expectException(\LogicException::class);
-        $account->controlFileOrFail();
-    }
 }

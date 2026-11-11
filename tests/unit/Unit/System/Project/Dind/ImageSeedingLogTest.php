@@ -7,12 +7,14 @@ use App\Lib\Deploy\Engine\EngineAccount;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Inner\HostCommands;
 use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * What a deploy log says about a shared base image: that it uses it, or
@@ -111,7 +113,7 @@ class ImageSeedingLogTest extends TestCase
             $this->logged
         );
         $script = implode("\n", $this->system->scripts);
-        $this->assertStringContainsString("docker pull -q '{$image}'", $script);
+        $this->assertStringContainsString("account-docker.pull -- demo {$image} ''", $script);
         $this->assertStringNotContainsString(DindImageStore::CACHE_REGISTRY, $script);
     }
 
@@ -126,7 +128,7 @@ class ImageSeedingLogTest extends TestCase
         $seeding->ensureCurrent('node:22-bookworm-slim');
 
         $this->assertCount(1, $this->system->scripts);
-        $this->assertStringContainsString("docker pull -q 'node:22-bookworm-slim'", $this->system->scripts[0]);
+        $this->assertStringContainsString(LocalRoot::CLIENT . ' account-docker.pull -- demo node:22-bookworm-slim', $this->system->scripts[0]);
         $this->assertSame([['info', 'Updated base image node:22-bookworm-slim']], $this->logged);
     }
 
@@ -185,10 +187,12 @@ class ImageSeedingLogTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                // The image question goes through the account's shell as argv;
-                // the seed ladder is one script.
                 if (is_array($cmd)) {
-                    return $this->presentAfter ? "sha256:abc\n" : '';
+                    if (LocalRoot::action($cmd) !== 'account-docker.hasImage' || ! $this->presentAfter) {
+                        throw new \Exception('Error response from daemon: No such image');
+                    }
+
+                    return '';
                 }
                 $this->scripts[] = $cmd;
                 if ($this->seedResult instanceof \Exception) {
@@ -201,8 +205,10 @@ class ImageSeedingLogTest extends TestCase
 
         $dind = $this->createStub(Dind::class);
         $dind->method('system')->willReturn($system);
+        $dind->method('username')->willReturn('demo');
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
         $dind->method('composeFilePath')->willReturn('/users/demo/docker-compose.yml');
-        $dind->method('engineAccount')->willReturn(new EngineAccount('demo', '/home/demo', '33:33', '/users/demo/docker-compose.yml'));
+        $dind->method('engineAccount')->willReturn(new EngineAccount('demo', '/home/demo', '33:33'));
         $dind->method('shell')->willReturn(new ShellOperations($dind));
         $user = $this->createStub(User::class);
         $user->method('getRegistryAuth')->willReturn($registryAuth);

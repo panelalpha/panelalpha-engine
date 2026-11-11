@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Support\JobBudget;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -11,7 +12,7 @@ use App\System\Project\Dind as DindProject;
  */
 final class ContainerOperations
 {
-    private const COMPOSE_TIMEOUT = 7200;
+    private const COMPOSE_TIMEOUT = JobBudget::CLEANUP_SECONDS;
 
     /** The most lines one logs read returns; rotation keeps a container's log to ~30 MB. */
     public const MAX_LOG_LINES = 5000;
@@ -49,44 +50,18 @@ final class ContainerOperations
     ) {}
 
     /**
-     * @return array<array<string, mixed>>
+     * The stack's containers, stopped and one-off ones too, as `docker compose ps --format json --all` prints them; none
+     * when the account's daemon cannot say.
+     *
+     * @return list<array<string, mixed>>
      */
     public function getContainers(): array
     {
         try {
-            $output = $this->shell->execAsUser($this->project->userAppComposeCommand([
-                'ps',
-                '--format',
-                'json',
-                '--all',
-            ]));
-
-            return self::jsonLines($output);
+            return $this->project->accountDaemon()->stackRows(true);
         } catch (\Exception) {
             return [];
         }
-    }
-
-    /**
-     * The JSON objects of a one-object-per-line output; other lines are skipped.
-     *
-     * @return array<array<string, mixed>>
-     */
-    private static function jsonLines(string $output): array
-    {
-        $items = [];
-        foreach (explode("\n", trim($output)) as $line) {
-            $line = trim($line);
-            if ($line === '') {
-                continue;
-            }
-            $item = json_decode($line, true);
-            if (is_array($item)) {
-                $items[] = $item;
-            }
-        }
-
-        return $items;
     }
 
     /**
@@ -179,30 +154,19 @@ final class ContainerOperations
         return $stdout;
     }
 
-    /** A failed cleanup leaves the disk for the next `down` to reclaim; the action itself worked. */
+    /**
+     * `down` leaves the anonymous volumes of VOLUME images behind, so those go after it; named ones are app data.
+     * A failed cleanup leaves the disk for the next `down` to reclaim; the action itself worked.
+     */
     private function cleanUpAfter(string $action): void
     {
-        $cleanup = self::cleanupArgvAfter($action);
-        if ($cleanup === null) {
+        if ($action !== 'down') {
             return;
         }
         try {
-            $this->shell->execAsUser($cleanup, [], 120);
+            $this->project->accountDaemon()->pruneAnonymousVolumes(120);
         } catch (\Exception) {
         }
-    }
-
-    /**
-     * What runs after `$action` succeeded: `down` leaves the anonymous volumes of VOLUME images behind,
-     * so prune those (by label: named ones are app data, and a pre-23 daemon then prunes nothing).
-     *
-     * @return list<string>|null
-     */
-    public static function cleanupArgvAfter(string $action): ?array
-    {
-        return $action === 'down'
-            ? ['docker', 'volume', 'prune', '-f', '--filter', 'label=com.docker.volume.anonymous']
-            : null;
     }
 
     /**
@@ -417,40 +381,19 @@ final class ContainerOperations
     {
         self::assertServiceName($service);
 
-        $tag = 'PANELALPHA_LOG_FOLLOW='.bin2hex(random_bytes(6));
-        $command = $this->followCommand($tag, $service, $lines, $since);
-
         $buffer = '';
-        try {
-            $this->shell->followAsUser(
-                $command,
-                self::FOLLOW_SECONDS + 10,
-                function (string $type, string $data) use (&$buffer, $onLine): void {
-                    $buffer = self::emitBufferedLines($buffer.$data, $onLine);
-                },
-                $onIdle,
-                self::FOLLOW_IDLE_SECONDS,
-            );
-        } catch (\Throwable $e) {
-            $this->stopFollow($tag);
-            throw $e;
-        }
+        $this->shell->followAsUser(
+            $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, null, true)),
+            self::FOLLOW_SECONDS,
+            function (string $type, string $data) use (&$buffer, $onLine): void {
+                $buffer = self::emitBufferedLines($buffer.$data, $onLine);
+            },
+            $onIdle,
+            self::FOLLOW_IDLE_SECONDS,
+        );
         if ($buffer !== '') {
             $onLine(...self::splitTimestamp(rtrim(substr($buffer, 0, self::MAX_LINE_BYTES), "\r")));
         }
-    }
-
-    /**
-     * The follow, tagged so it can be killed: the compose command starts with `env`, so the tag rides
-     * along as one more variable, and `timeout` bounds it inside the account, which the outer exec cannot.
-     *
-     * @return list<string>
-     */
-    private function followCommand(string $tag, string $service, int $lines, ?string $since): array
-    {
-        $compose = $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, null, true));
-
-        return ['timeout', (string) self::FOLLOW_SECONDS, 'env', $tag, ...array_slice($compose, 1)];
     }
 
     /**
@@ -472,15 +415,6 @@ final class ContainerOperations
         }
 
         return $buffer;
-    }
-
-    /** Kill the follow inside the account by its tag; if nothing is left, `timeout` ends it anyway. */
-    private function stopFollow(string $tag): void
-    {
-        try {
-            $this->shell->execAsUser(['pkill', '-TERM', '-f', $tag], [], 30);
-        } catch (\Throwable) {
-        }
     }
 
     /**

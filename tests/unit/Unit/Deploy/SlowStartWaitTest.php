@@ -17,7 +17,12 @@ use Tests\TestCase;
  */
 class SlowStartWaitTest extends TestCase
 {
-    public const RUNNING_SNAPSHOT = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":0}';
+    public const RUNNING_SNAPSHOT = [[
+        'Name' => '/project-app-1',
+        'Config' => ['Labels' => ['com.docker.compose.service' => 'app']],
+        'State' => ['Status' => 'running', 'ExitCode' => 0],
+        'RestartCount' => 0,
+    ]];
 
     /** @param list<?array<string, mixed>> $silentChecks one per poll */
     private function health(array $details, array $silentChecks, array $snapshots = []): AppHealth
@@ -54,7 +59,7 @@ class SlowStartWaitTest extends TestCase
                 return $this->silentChecks === [] ? self::stillStarting() : array_shift($this->silentChecks);
             }
 
-            protected function containerSnapshot(): ?string
+            protected function containerSnapshot(): ?array
             {
                 return $this->snapshots === [] ? SlowStartWaitTest::RUNNING_SNAPSHOT : array_shift($this->snapshots);
             }
@@ -157,7 +162,7 @@ class SlowStartWaitTest extends TestCase
 
     public function test_a_container_that_restarts_ends_the_wait_at_once(): void
     {
-        $restarted = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":1}';
+        $restarted = [['Name' => '/project-app-1', 'Config' => ['Labels' => ['com.docker.compose.service' => 'app']], 'State' => ['Status' => 'running', 'ExitCode' => 0], 'RestartCount' => 1]];
         $health = $this->health([], [], [$restarted]);
 
         $health->wait(self::silentReport(), $this->logger());
@@ -241,7 +246,7 @@ class SlowStartWaitTest extends TestCase
                 return $this->bound;
             }
 
-            protected function containerSnapshot(): ?string
+            protected function containerSnapshot(): ?array
             {
                 return SlowStartWaitTest::RUNNING_SNAPSHOT;
             }

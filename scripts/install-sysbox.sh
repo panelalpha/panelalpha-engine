@@ -12,8 +12,6 @@ SYSBOX_VERSION="0.7.1"
 # Package filename keeps the "-0" revision suffix used by Nestybox downloads.
 SYSBOX_DEB_URL="https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_amd64.deb"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # Functions
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -157,24 +155,10 @@ ensure_registry_mirror() {
     fi
 }
 
-install_helper_script() {
-    local name="$1"
-    local dest="$2"
-    local src="${SCRIPT_DIR}/${name}"
-    if [ ! -f "$src" ]; then
-        src="/opt/panelalpha/shared-hosting/scripts/${name}"
-    fi
-    if [ -f "$src" ]; then
-        install -m 0755 "$src" "$dest"
-        log_info "Installed ${dest}"
-        return 0
-    fi
-    log_warn "${name} not found next to installer — skip"
-    return 1
-}
-
-install_recovery_helpers() {
-    install_helper_script "recover-sysbox-dind.sh" /usr/local/sbin/recover-sysbox-dind.sh || true
+# A sysbox container that will not stop is wedged; core runs on runc, so it is up to recover it.
+recover_with_the_engine() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan project:dind:recover --project="$1" --wipe-inner </dev/null
 }
 
 sysbox_installed_version() {
@@ -271,7 +255,6 @@ install_sysbox() {
 
     ensure_fuse3
     ensure_fusermount_apparmor
-    install_recovery_helpers
     ensure_go_gc
 
     local current
@@ -287,7 +270,7 @@ install_sysbox() {
                 if [ "$rt" = "sysbox-runc" ]; then
                     docker update --restart=no "$id" >/dev/null 2>&1 || true
                     timeout 60 docker stop "$id" >/dev/null 2>&1 || \
-                        /usr/local/sbin/recover-sysbox-dind.sh --username="$(docker inspect -f '{{.Name}}' "$id" | sed 's#^/##')" --wipe-inner || true
+                        recover_with_the_engine "$(docker inspect -f '{{.Name}}' "$id" | sed 's#^/##')" || true
                 fi
             done
             install_or_upgrade_sysbox_package
@@ -385,9 +368,6 @@ show_usage() {
     echo ""
     echo "This script installs or uninstalls Sysbox runtime for enhanced Docker-in-Docker security."
     echo "Supported systems: Debian, Ubuntu"
-    echo ""
-    echo "Also installs:"
-    echo "  /usr/local/sbin/recover-sysbox-dind.sh  # recover wedged DinD without host reboot"
     echo ""
     echo "Requirements:"
     echo "  - curl (for install)"

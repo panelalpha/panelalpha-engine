@@ -4,6 +4,7 @@ namespace App\System\Project;
 
 use App\Models\User;
 use App\System\Project;
+use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Dind\HeldImage;
 use App\System\Project\Dind\ProvisionedAppDatabase;
 use App\System\Project\PhpHosting\WordPress\KeptSite;
@@ -11,9 +12,8 @@ use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\TableReplacement;
 
 /**
- * One push from a source project into a target: what it copies, where it
- * stages the copy, and what it has changed on the target so far, which is
- * what a rollback undoes.
+ * One push from a source project into a target: what it copies, where it stages the copy, and what it has changed
+ * on the target so far, which is what a rollback undoes.
  */
 final class PushAttempt
 {
@@ -28,6 +28,9 @@ final class PushAttempt
     public ?TableReplacement $tableReplacement = null;
 
     public ?HeldImage $heldImage = null;
+
+    /** Whether the push staged volume data in the target's home, which a rollback puts back or drops. */
+    public bool $volumesStaged = false;
 
     public bool $volumesSwapStarted = false;
 
@@ -48,7 +51,7 @@ final class PushAttempt
 
     public readonly string $prePushDir;
 
-    public readonly string $rollbackDir;
+    public readonly string $volumeStagingDir;
 
     /**
      * @param  list<array{database: string, name: string}>|null  $tables
@@ -65,12 +68,14 @@ final class PushAttempt
         public readonly Project $toProject,
         public readonly string $fromHome,
         public readonly string $toHome,
+        /** The target's database dumps a rollback replays, outside its home. */
+        public readonly string $rollbackDir,
         public readonly bool $isDindDest,
         public readonly HomeSwap $homeSwap,
     ) {
         $this->incomingDir = $toHome.'/.incoming';
         $this->prePushDir = $toHome.'/.pre-push';
-        $this->rollbackDir = $toHome.'/.pre-push-db';
+        $this->volumeStagingDir = $toHome.'/'.CopyVolumes::STAGING;
         $this->result = new DatabaseCopyResult;
     }
 

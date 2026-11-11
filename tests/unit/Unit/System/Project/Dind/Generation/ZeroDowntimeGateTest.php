@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\RouteSwitch;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -106,7 +108,9 @@ class ZeroDowntimeGateTest extends TestCase
         $lines = $this->lines();
         $this->assertContains('[warn] The new version did not become healthy on port 32768: it answers HTTP 200 with an empty page', $lines);
         $this->assertNotContains('[ok] The new version answers on port 32768', $lines);
-        $this->assertRan('docker rm -f -v');
+        $this->assertRan("account-docker.listContainers -- {$this->username} all 1 label com.docker.compose.project=project-next");
+        $this->assertRan("account-docker.removeContainers -- {$this->username} force volumes next1");
+        $this->assertRan('files.removeIfExists -- /home/u/.panelalpha-next-generation.yml');
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::NEXT), 'the second copy is gone');
     }
 
@@ -167,6 +171,8 @@ class ZeroDowntimeGateTest extends TestCase
         $project->method('userAppDirPath')->willReturn('/home/u/project');
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return $project;
     }
@@ -174,7 +180,7 @@ class ZeroDowntimeGateTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         $this->ran[] = $line;
         if (preg_match('/for port in (\d+); do/', $line, $m) === 1) {
             $port = (int) $m[1];
@@ -195,12 +201,12 @@ class ZeroDowntimeGateTest extends TestCase
         }
 
         return match (true) {
-            str_contains($line, "'ps' '--quiet' '--status' 'running'") => "old1\n",
-            str_contains($line, 'docker rm -f -v') => '',
-            str_contains($line, 'label=com.docker.compose.service=app') => "next1\n",
-            str_contains($line, 'docker port next1 3000/tcp') => TestNetwork::ANY . ':' . self::NEXT_PORT . "\n",
+            preg_match('/account-docker\.listContainers .*label com\.docker\.compose\.project=project(?: |$)/', $line) === 1 => '[{"Id":"old1","Names":["/project-app-1"]}]',
+            str_ends_with($line, 'label com.docker.compose.project=project-next') => '[{"Id":"next1"}]',
+            str_contains($line, 'account-docker.listContainers') && str_contains($line, 'label com.docker.compose.service=app') => '[{"Id":"next1"}]',
+            str_contains($line, 'account-docker.containers') => (string) json_encode([self::running(str_ends_with($line, ' next1'))]),
+            str_contains($line, 'account-docker.logTail') => "booting v2\nlistening 3000\n",
             str_contains($line, 'docker inspect') => "running 0 0\n",
-            str_contains($line, 'docker logs') => "booting v2\nlistening 3000\n",
             default => '',
         };
     }
@@ -212,6 +218,16 @@ class ZeroDowntimeGateTest extends TestCase
             static fn (array $line): string => "[{$line['level']}] {$line['msg']}",
             DeployLogger::forDeploy($this->username, $this->logger->getDeployId())->tail(500)
         );
+    }
+
+    /** @return array<string, mixed> a running container's inspect; the copy publishes 3000 on NEXT_PORT */
+    private static function running(bool $copy): array
+    {
+        return [
+            'State' => ['Status' => 'running', 'ExitCode' => 0],
+            'RestartCount' => 0,
+            'NetworkSettings' => ['Ports' => $copy ? ['3000/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => (string) self::NEXT_PORT]]] : []],
+        ];
     }
 
     private function assertRan(string $needle): void

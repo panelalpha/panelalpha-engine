@@ -2,15 +2,21 @@
 
 namespace Tests\Unit\System\Project\Dind\Generation;
 
+use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Health\ProbedResponse;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 
 /**
@@ -20,29 +26,36 @@ use Tests\Support\TestNetwork;
  */
 class ZeroDowntimeRedeployTest extends TestCase
 {
+    /** @var list<string> each daemon request and each command in the account, in order */
+    private array $ran = [];
+
     public function test_the_port_docker_chose_is_read_ipv4_first(): void
     {
-        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort("[::]:32772\n".TestNetwork::ANY.":32771\n"));
-        $this->assertSame(32772, ZeroDowntimeRedeploy::boundPort("[::]:32772\n"));
-        $this->assertNull(ZeroDowntimeRedeploy::boundPort(''));
+        $this->assertSame(32771, ZeroDowntimeRedeploy::boundPort([
+            ['HostIp' => '::', 'HostPort' => '32772'],
+            ['HostIp' => TestNetwork::ANY, 'HostPort' => '32771'],
+        ]));
+        $this->assertSame(32772, ZeroDowntimeRedeploy::boundPort([['HostIp' => '::', 'HostPort' => '32772']]));
+        $this->assertSame(32773, ZeroDowntimeRedeploy::boundPort([['HostIp' => TestNetwork::ANY, 'HostPort' => ''], ['HostIp' => '::', 'HostPort' => '32773']]));
+        $this->assertNull(ZeroDowntimeRedeploy::boundPort([]));
     }
 
     public function test_a_running_container_has_not_failed_yet(): void
     {
-        $this->assertNull(ZeroDowntimeRedeploy::containerFailure('running 0 0'));
-        $this->assertNull(ZeroDowntimeRedeploy::containerFailure("created 0 0\n"));
+        $this->assertNull(ZeroDowntimeRedeploy::containerFailure(self::inspected('running', 0, 0)));
+        $this->assertNull(ZeroDowntimeRedeploy::containerFailure(self::inspected('created', 0, 0)));
         // Docker's code for a start that failed elsewhere than on the image's command (the network, the daemon).
-        $this->assertNull(ZeroDowntimeRedeploy::containerFailure('created 128 0'));
+        $this->assertNull(ZeroDowntimeRedeploy::containerFailure(self::inspected('created', 128, 0)));
     }
 
     public function test_a_container_that_stopped_or_loops_will_not_answer(): void
     {
-        $this->assertSame('it exited with code 1', ZeroDowntimeRedeploy::containerFailure('exited 1 0'));
-        $this->assertSame('it keeps restarting (last exit code 1)', ZeroDowntimeRedeploy::containerFailure('restarting 1 3'));
-        $this->assertSame('it keeps restarting (2 restarts so far)', ZeroDowntimeRedeploy::containerFailure('running 0 2'));
-        $this->assertSame('its container is gone', ZeroDowntimeRedeploy::containerFailure(''));
-        $this->assertSame('it could not be started (exit code 127)', ZeroDowntimeRedeploy::containerFailure('created 127 0'));
-        $this->assertSame('it could not be started (exit code 126)', ZeroDowntimeRedeploy::containerFailure('created 126 0'));
+        $this->assertSame('it exited with code 1', ZeroDowntimeRedeploy::containerFailure(self::inspected('exited', 1, 0)));
+        $this->assertSame('it keeps restarting (last exit code 1)', ZeroDowntimeRedeploy::containerFailure(self::inspected('restarting', 1, 3)));
+        $this->assertSame('it keeps restarting (2 restarts so far)', ZeroDowntimeRedeploy::containerFailure(self::inspected('running', 0, 2)));
+        $this->assertSame('its container is gone', ZeroDowntimeRedeploy::containerFailure(null));
+        $this->assertSame('it could not be started (exit code 127)', ZeroDowntimeRedeploy::containerFailure(self::inspected('created', 127, 0)));
+        $this->assertSame('it could not be started (exit code 126)', ZeroDowntimeRedeploy::containerFailure(self::inspected('created', 126, 0)));
     }
 
     public function test_traffic_goes_back_the_way_it_came(): void
@@ -60,10 +73,11 @@ class ZeroDowntimeRedeployTest extends TestCase
 
     public function test_the_old_checkout_comes_back_only_while_all_its_readers_still_run(): void
     {
-        $this->assertTrue(CheckoutAside::allTrue("true\ntrue\n", 2));
-        $this->assertFalse(CheckoutAside::allTrue("true\ngone\n", 2), 'one was replaced');
-        $this->assertFalse(CheckoutAside::allTrue("true\nfalse\n", 2));
-        $this->assertFalse(CheckoutAside::allTrue("true\n", 2), 'an answer missing');
+        $running = ['State' => ['Running' => true]];
+        $this->assertTrue(CheckoutAside::allTrue([$running, $running], 2));
+        $this->assertFalse(CheckoutAside::allTrue([$running, null], 2), 'one was replaced');
+        $this->assertFalse(CheckoutAside::allTrue([$running, ['State' => ['Running' => false]]], 2));
+        $this->assertFalse(CheckoutAside::allTrue([$running], 2), 'an answer missing');
     }
 
     /** A redeploy pulls before it replaces anything; what it builds itself is not pulled. */
@@ -118,6 +132,12 @@ class ZeroDowntimeRedeployTest extends TestCase
         $this->assertSame([32771 => 3000], ZeroDowntimeRedeploy::inverse(ZeroDowntimeRedeploy::switchMap([8080 => 32771], 8080, 3000)));
         // Taking traffic lands on the new version's own port.
         $this->assertSame([32771 => 8080], ZeroDowntimeRedeploy::inverse([8080 => 32771]));
+    }
+
+    /** @return array<string, mixed> a container's inspect, as the account's daemon gives it */
+    private static function inspected(string $status, int $exitCode, int $restarts): array
+    {
+        return ['State' => ['Status' => $status, 'ExitCode' => $exitCode], 'RestartCount' => $restarts];
     }
 
     /** One line of the probe script's output, as the gate parses it. */
@@ -188,5 +208,78 @@ class ZeroDowntimeRedeployTest extends TestCase
         $silent = ZeroDowntimeRedeploy::gateAnswer(AppHealth::parseProbeOutput("32768\thttp\t000 0\tConnection refused\t\t/\n", [32768])[0]);
         $this->assertSame('fail', $silent['status']);
         $this->assertNull($silent['http_code']);
+    }
+
+    public function test_a_discard_removes_the_copys_containers_then_its_override(): void
+    {
+        ZeroDowntimeRedeploy::discardProject($this->account('[{"Id":"c1"},{"Id":"c2"}]'), 'project-next');
+
+        $this->assertSame([
+            'account-docker.listContainers acme all 1 label com.docker.compose.project=project-next',
+            'account-docker.removeContainers acme force volumes c1 c2',
+            'files.removeIfExists /home/acme/.panelalpha-next-generation.yml',
+        ], $this->ran);
+    }
+
+    public function test_a_discard_with_no_container_left_removes_only_the_override(): void
+    {
+        ZeroDowntimeRedeploy::discardProject($this->account('[]'), 'project-next');
+
+        $this->assertSame([
+            'account-docker.listContainers acme all 1 label com.docker.compose.project=project-next',
+            'files.removeIfExists /home/acme/.panelalpha-next-generation.yml',
+        ], $this->ran);
+    }
+
+    /** A daemon that cannot list or remove the copy does not fail the discard; the override still goes. */
+    public function test_a_daemon_that_cannot_remove_the_copy_still_has_its_override_removed(): void
+    {
+        ZeroDowntimeRedeploy::discardProject($this->account('[{"Id":"c1"}]', 'Error response from daemon: removal of container c1 is already in progress'), 'project-next');
+
+        $this->assertSame([
+            'account-docker.listContainers acme all 1 label com.docker.compose.project=project-next',
+            'account-docker.removeContainers acme force volumes c1',
+            'files.removeIfExists /home/acme/.panelalpha-next-generation.yml',
+        ], $this->ran);
+    }
+
+    public function test_an_override_that_cannot_be_removed_fails_the_discard(): void
+    {
+        $this->expectExceptionMessage('Permission denied');
+
+        ZeroDowntimeRedeploy::discardProject($this->account('[]', null, 'Permission denied'), 'project-next');
+    }
+
+    /** The account: its daemon lists $listed, refuses removal with $refused; removing the override fails with $down. */
+    private function account(string $listed, ?string $refused = null, ?string $down = null): Dind
+    {
+        $system = $this->createStub(System::class);
+        $system->method('exec')->willReturnCallback(function (array $cmd) use ($listed, $refused, $down): string {
+            $action = LocalRoot::action($cmd);
+            if ($action !== null && str_starts_with($action, 'account-docker.')) {
+                $this->ran[] = $action . ' ' . implode(' ', LocalRoot::values($cmd));
+
+                return match (true) {
+                    $action === 'account-docker.listContainers' => $listed,
+                    $refused !== null => throw new DockerErrorException($refused),
+                    default => '',
+                };
+            }
+            $this->ran[] = $action . ' ' . implode(' ', LocalRoot::values($cmd));
+            if ($down !== null) {
+                throw new DockerErrorException($down);
+            }
+
+            return '';
+        });
+
+        $dind = $this->createStub(Dind::class);
+        $dind->method('system')->willReturn($system);
+        $dind->method('username')->willReturn('acme');
+        $dind->method('homeDirPath')->willReturn('/home/acme');
+        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
+
+        return $dind;
     }
 }

@@ -27,6 +27,20 @@ interface ImageStore
     public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string;
 
     /**
+     * {@see hostBuildCommand()} as root, for a deploy that waits for it.
+     *
+     * @return list<string>
+     */
+    public function hostBuildArgv(string $tag, string $dockerfile, bool $pull = true): array;
+
+    /**
+     * {@see hostBuildCommand()} as root and detached, for a deploy that does not wait.
+     *
+     * @return list<string>
+     */
+    public function hostBuildInBackgroundArgv(string $tag, string $dockerfile): array;
+
+    /**
      * Push a host image to where accounts pull shared images from, so an
      * account can have it without the host being asked again.
      */
@@ -35,8 +49,10 @@ interface ImageStore
     /**
      * Host store → account store for an image the host holds, such as one
      * {@see hostBuildCommand()} produced, where a registry pull would only 404.
+     *
+     * @return list<string>
      */
-    public function loadFromHostCommand(EngineAccount $account, string $image): string;
+    public function loadFromHostArgv(EngineAccount $account, string $image): array;
 
     /**
      * Get one image into the account by whatever route works, printing one
@@ -61,6 +77,12 @@ interface ImageStore
     public function seedThroughHostCommand(EngineAccount $account, string $image): string;
 
     /**
+     * {@see seedCommand()} for an operator image: from the cache registry first, so a refreshed image reaches the
+     * next deploy, and the account's copy only when the registry cannot answer.
+     */
+    public function operatorSeedCommand(EngineAccount $account, string $image): string;
+
+    /**
      * Seed several images at once, never more than $concurrency in flight.
      *
      * One script, not N commands, so a cancelled deploy has a single PID to
@@ -71,55 +93,6 @@ interface ImageStore
     public function parallelImportCommand(EngineAccount $account, array $images, int $concurrency): string;
 
     /**
-     * Inside the account: every image tag its store holds, one per line, so
-     * the caller can ask once instead of once per image.
-     *
-     * @return list<string>
-     */
-    public function listImagesArgv(): array;
-
-    /**
-     * Inside the account: non-empty output when the store has $image and can
-     * read its config, empty output or a failure otherwise.
-     *
-     * @return list<string>
-     */
-    public function imageIdArgv(string $image): array;
-
-    /**
-     * On the host: the account's own container's mounts, so a registry
-     * refresh can tell whether its daemon.json is a file this engine renders
-     * and can safely rewrite in place, or still an older account's own.
-     *
-     * @return list<string>
-     */
-    public function hostAccountMountsArgv(EngineAccount $account): array;
-
-    /**
-     * On the host: the account's processes with their host-visible PIDs, so
-     * its daemon can be signalled from the host without a shell inside it.
-     *
-     * @return list<string>
-     */
-    public function hostAccountProcessesArgv(EngineAccount $account): array;
-
-    /**
-     * On the host: signal the account's daemon, found by a host-visible PID.
-     *
-     * @return list<string>
-     */
-    public function hostSignalDockerdArgv(int $pid): array;
-
-    /**
-     * Inside the account: $image's declared ports as JSON, in the
-     * `{"5432/tcp":{}}` shape {@see ImageTransfer::parseExposedPorts()}
-     * reads.
-     *
-     * @return list<string>
-     */
-    public function imageExposedPortsArgv(string $image): array;
-
-    /**
      * On the host: succeed iff the host store already holds $image, i.e.
      * whether providing it to an account is a registry transfer, not a build.
      *
@@ -128,9 +101,8 @@ interface ImageStore
     public function hostImageInspectArgv(string $image): array;
 
     /**
-     * On the host: the same port metadata as {@see imageExposedPortsArgv()},
-     * read from the host store — what lets an unfamiliar vendor image be
-     * classified before any account has it.
+     * On the host: $image's declared ports as JSON, in the `{"5432/tcp":{}}` shape
+     * {@see ImageTransfer::parseExposedPorts()} reads, so a vendor image is classified before any account has it.
      *
      * @return list<string>
      */
@@ -152,8 +124,10 @@ interface ImageStore
      * a lock of that image's own, so a second deploy waits and then finds the
      * image the first one built instead of building it again; only the push
      * takes the push lock.
+     *
+     * @return list<string>
      */
-    public function hostRebuildCommand(string $image, string $dockerfile): string;
+    public function hostRebuildArgv(string $image, string $dockerfile): array;
 
     /**
      * Pull a public base image the account already holds again, so a moving

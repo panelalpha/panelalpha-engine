@@ -8,6 +8,7 @@ use App\System\ComposeProject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 
 class AccountContainersTest extends TestCase
 {
@@ -69,11 +70,11 @@ class AccountContainersTest extends TestCase
         $report = (new AccountContainers($system))->orphanReport(['rvgotify', 'pwbd1c1d74']);
 
         $this->assertSame(1, $report['count']);
-        $this->assertSame([[
-            'sudo', 'docker', 'ps', '-a',
-            '--filter', 'label=com.docker.compose.project.working_dir',
-            '--format', '{{.Names}}\t{{.State}}\t{{.Label "com.docker.compose.project.working_dir"}}',
-        ]], $system->ran);
+        $this->assertCount(1, $system->ran);
+        $this->assertTrue(LocalRoot::isRequest($system->ran[0]));
+        $this->assertSame('docker.containersLabelled', LocalRoot::action($system->ran[0]));
+        $this->assertSame([AccountContainers::WORKING_DIR_LABEL], LocalRoot::values($system->ran[0]));
+        $this->assertSame([], LocalRoot::plain($system->ran[0]));
     }
 
     public function test_a_report_within_some_accounts_names_only_their_orphans(): void
@@ -98,6 +99,71 @@ class AccountContainersTest extends TestCase
 
         $this->assertSame(0, $report['count']);
         $this->assertStringContainsString('Cannot connect to the Docker daemon', (string) $report['warning']);
+    }
+
+    /** One listing for the IDs and one inspect for all of them; a foreign container sharing nothing but a label is left out. */
+    public function test_running_accounts_carry_their_runtime_and_start_from_one_typed_inspect(): void
+    {
+        $system = $this->answering([
+            FakeProcess::ok("aaaa\nbbbb\ncccc\n"),
+            FakeProcess::of(1, "/alice\tsysbox-runc\t".self::USERS."/alice\t2026-10-10T15:00:00.123456789Z\t\"\"\n"
+                ."/hubtest\trunc\t/root/hubtest\t2026-10-10T14:00:00Z\t\"\"\n"
+                ."/bob\ttrunc\t".self::USERS."/bob\t2026-10-10T15:10:00.5Z\t\"boom\"\n", 'error: no such object: dddd'),
+        ]);
+
+        $running = (new AccountContainers($system))->running();
+
+        $this->assertSame([
+            'alice' => ['runtime' => 'sysbox-runc', 'startedAt' => '2026-10-10T15:00:00.123456789Z'],
+            'bob' => ['runtime' => 'trunc', 'startedAt' => '2026-10-10T15:10:00.5Z'],
+        ], $running);
+        $this->assertCount(2, $system->ran);
+        $this->assertSame('docker.inspect', LocalRoot::action($system->ran[1]));
+        $this->assertSame(['aaaa', 'bbbb', 'cccc'], LocalRoot::values($system->ran[1]));
+    }
+
+    public function test_a_failed_start_is_the_containers_last_error(): void
+    {
+        $system = $this->answering([
+            FakeProcess::ok("cccc\n"),
+            FakeProcess::ok("/carol\tsysbox-runc\t".self::USERS."/carol\t0001-01-01T00:00:00Z\t\"db down\"\n"
+                ."/dave\tsysbox-runc\t".self::USERS."/dave\t2026-10-10T15:00:00Z\t\"\"\n"),
+        ]);
+
+        $this->assertSame(
+            ['carol' => ['runtime' => 'sysbox-runc', 'error' => 'db down']],
+            (new AccountContainers($system))->failedStarts()
+        );
+    }
+
+    public function test_an_inspect_of_containers_all_gone_answers_null(): void
+    {
+        $system = $this->answering([FakeProcess::ok("cccc\n"), FakeProcess::failed('error: no such object: cccc')]);
+
+        $this->assertNull((new AccountContainers($system))->failedStarts());
+    }
+
+    /**
+     * @param  list<Process>  $answers
+     */
+    private function answering(array $answers): System
+    {
+        return new class ($answers) extends System {
+            /** @var list<string|list<string>> */
+            public array $ran = [];
+
+            /** @param  list<Process>  $answers */
+            public function __construct(private array $answers)
+            {
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $this->ran[] = $cmd;
+
+                return array_shift($this->answers) ?? FakeProcess::ok();
+            }
+        };
     }
 
     private function system(Process $answer): System

@@ -8,16 +8,20 @@
 # are loaded — flock and the entrypoint are skipped.
 
 ENGINE_DIR=/opt/panelalpha/shared-hosting
+BROKER_LIB=/usr/local/lib/panelalpha
 SERIAL_NO=""
 
-CURRENT_WEBSERVER=$(docker compose -f $ENGINE_DIR/docker-compose.yml ps -a sites-http --format json 2>/dev/null | jq '.Labels' 2>/dev/null | tr ',' '\n' | awk -F= '$1=="com.panelalpha.webserver"{print $2}')
-if [ -z "$CURRENT_WEBSERVER" ]; then
-    CURRENT_WEBSERVER=unknown
-fi
+# sites-http's label, read for the help alone: a switch asks Docker for nothing but compose's down and up and the
+# rebuild in core.
+current_webserver() {
+    local webserver
+    webserver=$(docker compose -f $ENGINE_DIR/docker-compose.yml ps -a sites-http --format json 2>/dev/null | jq '.Labels' 2>/dev/null | tr ',' '\n' | awk -F= '$1=="com.panelalpha.webserver"{print $2}')
+    echo "${webserver:-unknown}"
+}
 
 print_info() {
     echo ""
-    echo "Current webserver: $CURRENT_WEBSERVER"
+    echo "Current webserver: $(current_webserver)"
     echo ""
     echo "Temporarily only nginx-proxy is supported (required for DinD projects)."
     echo "Switching to apache, nginx, litespeed, or openlitespeed is disabled."
@@ -35,6 +39,16 @@ prepare_litespeed_serial() {
     chown 994:994 "$config_dir/serial.no"
     rm -f "$config_dir/trial.key"
     echo "LiteSpeed serial number configured before webserver start"
+}
+
+# users:rebuild in core: through the host's Engine API from the root broker's code where the broker runs this script
+# on its own files, else with the docker CLI.
+rebuild_vhosts() {
+    if [ -d "$BROKER_LIB/rootbroker" ]; then
+        PYTHONPATH=$BROKER_LIB python3 -m rootbroker.enginecommand core php artisan users:rebuild --all --wipe-vhosts-dir -v
+    else
+        docker compose -f $ENGINE_DIR/docker-compose.yml exec core php artisan users:rebuild --all --wipe-vhosts-dir -v
+    fi
 }
 
 set_webserver() {
@@ -79,7 +93,7 @@ set_webserver() {
     docker compose -f $ENGINE_DIR/docker-compose.yml down sites-http
     ln -sfn $ENGINE_DIR/$COMPOSE_FILENAME $ENGINE_DIR/docker-compose.yml-webserver
     docker compose -f $ENGINE_DIR/docker-compose.yml up -d
-    docker compose -f $ENGINE_DIR/docker-compose.yml exec core php artisan users:rebuild --all --wipe-vhosts-dir -v
+    rebuild_vhosts
     echo ""
     echo "Webserver switched to '$1'"
     echo ""

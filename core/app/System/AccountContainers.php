@@ -19,27 +19,29 @@ final class AccountContainers
     /** The account's own container of that name exists; one with only the name does not count. */
     public function ownsContainerNamed(string $username): bool
     {
-        $result = $this->system->runProcess([
-            'sudo', 'docker', 'ps', '-a',
-            '--filter', 'name=^/'.preg_quote($username, null).'$',
-            '--filter', 'label='.self::WORKING_DIR_LABEL.'='.$this->system->projectDirPath($username),
-            '--format', '{{.Names}}',
-        ]);
+        $result = $this->system->runProcess(Privileged::docker()->containerNamedWithLabel(
+            $username,
+            self::WORKING_DIR_LABEL,
+            $this->system->projectDirPath($username),
+        ));
 
         return $result->isSuccessful() && trim($result->getOutput()) !== '';
     }
 
     /**
-     * Running account containers, each with the runtime it runs under; only
-     * those Compose started from <projects dir>/<name>. Null when Docker could not be asked.
+     * Running account containers, each with the runtime it runs under and when it started, as docker inspect
+     * prints that time; only those Compose started from <projects dir>/<name>. Null when Docker could not be asked.
      *
-     * @return ?array<string, string> container name => runtime
+     * @return ?array<string, array{runtime: string, startedAt: string}> container name => container
      */
-    public function runningRuntimes(): ?array
+    public function running(): ?array
     {
-        $running = $this->inspectAccounts([]);
+        $running = $this->inspectAccounts(Privileged::docker()->runningContainerIdsLabelled(self::WORKING_DIR_LABEL));
 
-        return $running === null ? null : array_map(static fn (array $fields): string => $fields[0], $running);
+        return $running === null ? null : array_map(
+            static fn (array $fields): array => ['runtime' => $fields[0], 'startedAt' => $fields[1]],
+            $running,
+        );
     }
 
     /**
@@ -50,16 +52,13 @@ final class AccountContainers
      */
     public function failedStarts(): ?array
     {
-        $stopped = $this->inspectAccounts(
-            ['-a', '--filter', 'status=exited', '--filter', 'status=created'],
-            '{{json .State.Error}}',
-        );
+        $stopped = $this->inspectAccounts(Privileged::docker()->stoppedContainerIdsLabelled(self::WORKING_DIR_LABEL));
         if ($stopped === null) {
             return null;
         }
 
         $failed = [];
-        foreach ($stopped as $name => [$runtime, $error]) {
+        foreach ($stopped as $name => [$runtime, , $error]) {
             $error = json_decode($error);
             if (is_string($error) && $error !== '') {
                 $failed[$name] = ['runtime' => $runtime, 'error' => $error];
@@ -70,30 +69,28 @@ final class AccountContainers
     }
 
     /**
-     * @param  list<string>  $psArgs
-     * @return ?array<string, list<string>> container name => [runtime, ...$fields]
+     * @param  list<string>  $listIds  the root `docker ps` that prints the IDs
+     * @return ?array<string, array{0: string, 1: string, 2: string}> container name => [runtime, start, last start's error]
      */
-    private function inspectAccounts(array $psArgs, string ...$fields): ?array
+    private function inspectAccounts(array $listIds): ?array
     {
-        $ids = $this->labelledContainerIds($psArgs);
+        $ids = $this->labelledContainerIds($listIds);
         if ($ids === null || $ids === []) {
             return $ids;
         }
 
-        $output = $this->inspectOutput($ids, $fields);
+        $output = $this->inspectOutput($ids);
 
-        return $output === null ? null : $this->accountsIn($output, count($fields));
+        return $output === null ? null : $this->accountsIn($output);
     }
 
     /**
-     * @param  list<string>  $psArgs
+     * @param  list<string>  $listIds
      * @return ?list<string> IDs of the containers Compose labelled with a working directory
      */
-    private function labelledContainerIds(array $psArgs): ?array
+    private function labelledContainerIds(array $listIds): ?array
     {
-        $ps = $this->system->runProcess([
-            'sudo', 'docker', 'ps', ...$psArgs, '--filter', 'label='.self::WORKING_DIR_LABEL, '--format', '{{.ID}}',
-        ], [], 30);
+        $ps = $this->system->runProcess($listIds, [], 30);
         if (! $ps->isSuccessful()) {
             return null;
         }
@@ -102,20 +99,14 @@ final class AccountContainers
     }
 
     /**
-     * Name, runtime, working directory and $fields per container, tab-separated.
-     * A container gone since it was listed fails inspect but the others still
-     * print, so only a failure with no output at all is null.
+     * Name, runtime, working directory, start and last start's error per container, tab-separated; null only when
+     * inspect prints nothing, since a container gone since listing fails it while the others still print.
      *
      * @param  list<string>  $ids
-     * @param  list<string>  $fields
      */
-    private function inspectOutput(array $ids, array $fields): ?string
+    private function inspectOutput(array $ids): ?string
     {
-        $format = '{{.Name}}{{"\t"}}{{.HostConfig.Runtime}}{{"\t"}}{{index .Config.Labels "'.self::WORKING_DIR_LABEL.'"}}';
-        foreach ($fields as $field) {
-            $format .= '{{"\t"}}'.$field;
-        }
-        $inspect = $this->system->runProcess(['sudo', 'docker', 'inspect', '--format', $format, ...$ids], [], 30);
+        $inspect = $this->system->runProcess(Privileged::docker()->inspect(...$ids), [], 30);
         if (! $inspect->isSuccessful() && trim($inspect->getOutput()) === '') {
             return null;
         }
@@ -126,19 +117,19 @@ final class AccountContainers
     /**
      * The containers whose working directory is their own account's directory.
      *
-     * @return array<string, list<string>> container name => [runtime, ...$fields]
+     * @return array<string, array{0: string, 1: string, 2: string}> container name => [runtime, start, last start's error]
      */
-    private function accountsIn(string $inspectOutput, int $fieldCount): array
+    private function accountsIn(string $inspectOutput): array
     {
         $containers = [];
         foreach (preg_split('/\R/', trim($inspectOutput)) ?: [] as $line) {
             $values = explode("\t", $line);
-            if (count($values) !== 3 + $fieldCount) {
+            if (count($values) !== 5) {
                 continue;
             }
             $name = ltrim($values[0], '/');
             if ($name !== '' && $values[2] === $this->system->projectDirPath($name)) {
-                $containers[$name] = [$values[1], ...array_slice($values, 3)];
+                $containers[$name] = [$values[1], $values[3], $values[4]];
             }
         }
 
@@ -155,11 +146,7 @@ final class AccountContainers
      */
     public function orphanReport(iterable $projects, ?array $within = null): array
     {
-        $result = $this->system->runProcess([
-            'sudo', 'docker', 'ps', '-a',
-            '--filter', 'label='.self::WORKING_DIR_LABEL,
-            '--format', '{{.Names}}\t{{.State}}\t{{.Label "'.self::WORKING_DIR_LABEL.'"}}',
-        ], [], 30);
+        $result = $this->system->runProcess(Privileged::docker()->containersLabelled(self::WORKING_DIR_LABEL), [], 30);
 
         if (! $result->isSuccessful()) {
             return [

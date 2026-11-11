@@ -5,9 +5,11 @@ namespace Tests\Unit\System\Project\Dind;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * Ticket 04: port detection has to read the run file the engine generated
@@ -99,27 +101,37 @@ class AppPortAlignmentTest extends TestCase
                     {
                         return $this->files[$path] ?? '';
                     }
+
+                    public function isSymlink(string $path): bool
+                    {
+                        return false;
+                    }
                 };
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                // The port-settle script cats /proc/$pid/net/tcp[6]; answer it
-                // directly rather than needing a real docker daemon.
-                if (str_contains($line, 'net/tcp')) {
+                $action = LocalRoot::action((array) $cmd);
+                if ($action === 'account-docker.listeningSockets') {
                     return $this->procNetTcp;
+                }
+                if ($action === 'account-docker.containers') {
+                    return '[{"NetworkSettings":{"Networks":{"project_default":{"IPAddress":"172.18.0.5"}}}}]';
+                }
+                if (str_contains($line, 'ps -q app')) {
+                    return "app1\n";
                 }
                 if (str_contains($line, 'curl')) {
                     if (is_array($this->httpStatus)) {
-                        preg_match('/ip:(\d+)\//', $line, $m);
+                        preg_match('/ probe \S+ (\d+)$/', $line, $m);
 
                         return $this->httpStatus[$m[1] ?? ''] ?? '000';
                     }
 
                     return $this->httpStatus;
                 }
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
+                if (preg_match('/^sudo cp -- (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
 
@@ -136,7 +148,9 @@ class AppPortAlignmentTest extends TestCase
         $dind->method('composeFilePath')->willReturn('/home/acme/docker-compose.yml');
         $dind->method('userAppComposeFilePath')->willReturn($composeFilePath);
         $dind->method('userAppComposeFileToRun')->willReturn($composeFileToRun);
+        $dind->method('username')->willReturn('acme');
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
 
         return $dind;
     }

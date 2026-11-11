@@ -2,12 +2,14 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
-use App\Lib\Deploy\Dind\DindAccountStorage;
-use App\Lib\Deploy\Engine\ContainerEngine;
+use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Inner\StorageReclaim;
 use App\System\Project\Dind\InnerDocker;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * After a step is stopped for disk, the account gets back what
@@ -58,16 +60,39 @@ class StorageReclaimAfterDiskLimitTest extends TestCase
 
     public function test_a_running_app_keeps_its_daemon_and_its_images(): void
     {
-        $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('storage')->willReturn(new DindAccountStorage());
+        $asked = [];
+        $system = $this->createStub(System::class);
+        $system->method('exec')->willReturnCallback(function (string|array $cmd) use (&$asked): string {
+            $asked[] = (string) LocalRoot::action((array) $cmd);
+
+            return '';
+        });
         $dind = $this->createStub(Dind::class);
-        $dind->method('engine')->willReturn($engine);
+        $dind->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
+        $dind->method('system')->willReturn($system);
+        $dind->method('username')->willReturn('disk-limit-test');
+        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
         $inner = $this->createStub(InnerDocker::class);
         $inner->method('dind')->willReturn($dind);
 
-        $argvs = array_map(static fn (array $a): string => implode(' ', $a), (new StorageReclaim($inner))->whileRunningArgvs());
+        $reclaim = new class ($inner) extends StorageReclaim {
+            public bool $restarted = false;
 
-        // `image prune -a` takes only images no container uses, stopped ones included.
-        $this->assertSame(['docker builder prune -af', 'docker buildx prune -af', 'docker image prune -af'], $argvs);
+            public function canAggressivelyReclaim(): bool
+            {
+                return false;
+            }
+
+            protected function restartEngine(): void
+            {
+                $this->restarted = true;
+            }
+        };
+
+        $reclaim->reclaimAfterDiskLimit();
+
+        $this->assertSame(['account-docker.pruneBuildCache', 'account-docker.pruneImages'], $asked);
+        $this->assertFalse($reclaim->restarted);
     }
 }

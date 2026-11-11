@@ -7,6 +7,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\PreviousVersion;
 use App\System\Project\Dind\ShellOperations;
@@ -68,6 +69,7 @@ class PreviousVersionTest extends TestCase
         $user->method('getDetails')->willReturn([]);
 
         $project = $this->createStub(Dind::class);
+        $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('username')->willReturn($this->username);
         $project->method('system')->willReturn($system);
         $project->method('userModel')->willReturn($user);
@@ -75,6 +77,7 @@ class PreviousVersionTest extends TestCase
         $project->method('userAppDirPath')->willReturn('/home/u/project');
         $project->method('userAppComposeCommand')->willReturn(['docker', 'compose', 'up', '-d']);
         $project->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($project));
+        $project->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($project));
 
         return $project;
     }

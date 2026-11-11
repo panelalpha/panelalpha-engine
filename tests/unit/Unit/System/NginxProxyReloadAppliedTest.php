@@ -7,6 +7,7 @@ use App\System as EngineSystem;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\NginxProxy;
 use Illuminate\Support\Facades\Log;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -35,10 +36,12 @@ class NginxProxyReloadAppliedTest extends TestCase
             "http {\n    server {\n        listen {$address}:80 default_server;\n    }\n"
             . "    server {\n        listen {$address}:443 ssl default_server;\n    }\n}\n"
         );
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->dir], JSON_THROW_ON_ERROR));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         @unlink($this->dir . '/webserver-config/nginx-proxy/nginx.conf');
         @rmdir($this->dir . '/webserver-config/nginx-proxy');
         @rmdir($this->dir . '/webserver-config');
@@ -179,12 +182,13 @@ class NginxProxyReloadAppliedTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                if (is_array($cmd) && array_slice($cmd, 0, 2) === ['sudo', 'cp']) {
-                    copy($cmd[2], $cmd[3]);
-                    return '';
-                }
-                if (is_string($cmd) && str_contains($cmd, '/proc/net/tcp')) {
+                $argv = is_array($cmd) ? array_values($cmd) : [];
+                if (LocalRoot::action($argv) === 'compose.openTcpSockets') {
                     return self::procNetTcp($this->restarts > 0 ? $this->after : $this->before, $this->extra);
+                }
+                $planned = LocalRoot::plain($argv);
+                if (array_slice($planned, 0, 2) === ['cp', '--']) {
+                    copy($planned[2], $planned[3]);
                 }
 
                 return '';

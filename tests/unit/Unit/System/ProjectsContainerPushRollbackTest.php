@@ -12,6 +12,7 @@ use App\System\Services\Mysql;
 use Illuminate\Support\Facades\Facade;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\Dind\RecordingAppMysql;
 
@@ -19,9 +20,7 @@ use Tests\Unit\System\Project\Dind\RecordingAppMysql;
  * A container push whose pushed app does not come up is rolled back while
  * that app may already run: its containers are stopped before the target's
  * volumes and home are put back, and started again in new containers, so
- * none keeps running on the pushed data the rollback removed. The file and
- * volume commands run for real in a scratch directory; the account's inner
- * compose and the app start are recorded.
+ * none keeps running on the pushed data the rollback removed.
  */
 class ProjectsContainerPushRollbackTest extends TestCase
 {
@@ -41,17 +40,19 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $this->app->forgetInstance('encrypter');
         Facade::clearResolvedInstances();
         $this->root = sys_get_temp_dir().'/pa-push-dind-rollback-'.bin2hex(random_bytes(6));
-        $this->record = (object) ['events' => [], 'failStarts' => 1, 'notRunning' => null, 'checks' => 0];
+        $this->record = (object) ['events' => [], 'failStarts' => 1, 'notRunning' => null, 'checks' => 0, 'failedRuns' => []];
         $this->containerHome('live', 'live data', 'live code');
         $this->containerHome('stg', 'staging data', 'staging code');
         $live = $this->containerProject('live', 1001);
         $stg = $this->containerProject('stg', 2002);
         $stg->staging = $live->id;
         $stg->save();
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['homes' => $this->root]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         exec('rm -rf '.escapeshellarg($this->root));
         parent::tearDown();
     }
@@ -63,7 +64,7 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $events = $this->record->events;
         $failedStart = array_search('start live recreate=no', $events, true);
         $stop = $this->firstAfter($events, 'stop live', (int) $failedStart);
-        $volumeBack = $this->firstAfter($events, 'rm '.$this->volume('live').'/_data', (int) $failedStart);
+        $volumeBack = $this->firstAfter($events, 'replace live project_db with _data.pre-push', (int) $failedStart);
         $homeBack = $this->firstAfter($events, 'mv '.$this->root.'/live/.pre-push/project '.$this->root.'/live/', (int) $failedStart);
 
         $this->assertNotFalse($failedStart);
@@ -79,7 +80,7 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $this->assertSame(['start live recreate=no', 'start live recreate=yes'], $starts);
         $this->assertSame('live data', file_get_contents($this->volume('live').'/_data/marker'));
         $this->assertSame('live code', file_get_contents($this->root.'/live/project/index.js'));
-        $this->assertDirectoryDoesNotExist($this->volume('live').'/_data.pre-push');
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.panelalpha-volumes');
         $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push');
     }
 
@@ -132,6 +133,79 @@ class ProjectsContainerPushRollbackTest extends TestCase
         $this->assertSame(['start live recreate=no'], array_values(preg_grep('/^start live /', $this->record->events) ?: []));
         $this->assertSame(1, $this->record->checks);
         $this->assertSame('staging code', file_get_contents($this->root.'/live/project/index.js'));
+        $this->assertSame('staging data', file_get_contents($this->volume('live').'/_data/marker'));
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.panelalpha-volumes');
+    }
+
+    public function test_a_swap_that_fails_at_a_volume_rolls_the_whole_target_back(): void
+    {
+        $this->record->failStarts = 0;
+        $this->record->failedRuns = ['replace live project_db with _data.incoming'];
+
+        $message = $this->failedPush();
+
+        $this->assertStringStartsWith("Failed to swap incoming volume data for 'project_db': tar: short read", $message);
+        $this->assertStringNotContainsString('not fully restored', $message);
+        $this->assertTargetIsItsOwn();
+        $this->assertContains('start live recreate=yes', $this->record->events);
+    }
+
+    public function test_a_volume_that_cannot_be_put_back_still_gets_the_home_back_and_is_named(): void
+    {
+        $this->record->failedRuns = ['replace live project_db with _data.pre-push'];
+
+        $message = $this->failedPush();
+
+        $staging = $this->root.'/live/.panelalpha-volumes';
+        $this->assertStringContainsString("not fully restored (failed: restoring the volumes (their data before the push is kept in {$staging})", $message);
+        $this->assertStringNotContainsString('restoring the files', $message);
+        $this->assertSame('live code', file_get_contents($this->root.'/live/project/index.js'));
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push');
+        $this->assertFileExists($staging.'/project_db/_data.pre-push');
+    }
+
+    public function test_a_push_that_fails_while_staging_a_volume_leaves_nothing_staged(): void
+    {
+        $this->record->failedRuns = ['archive stg project_db as _data.incoming'];
+
+        $message = $this->failedPush();
+
+        $this->assertStringStartsWith("Failed to rsync volume data for 'project_db': tar: short read", $message);
+        $this->assertStringNotContainsString('not fully restored', $message);
+        $this->assertTargetIsItsOwn();
+    }
+
+    public function test_volume_data_a_failed_push_kept_refuses_the_next_push_and_stays(): void
+    {
+        $kept = $this->root.'/live/.panelalpha-volumes/project_db';
+        mkdir($kept, 0777, true);
+        file_put_contents($kept.'/_data.pre-push', 'the target before the last push');
+
+        $message = $this->failedPush();
+
+        $this->assertStringStartsWith('Incomplete previous push (.panelalpha-volumes present); refuse to continue.', $message);
+        $this->assertSame('the target before the last push', file_get_contents($kept.'/_data.pre-push'));
+        $this->assertSame('live data', file_get_contents($this->volume('live').'/_data/marker'));
+        $this->assertNotContains('replace live project_db with _data.pre-push', $this->record->events);
+    }
+
+    private function failedPush(): string
+    {
+        try {
+            (new Projects($this->system()))->pushToApp('stg', 'live');
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
+        }
+        $this->fail('the push should have failed');
+    }
+
+    private function assertTargetIsItsOwn(): void
+    {
+        $this->assertSame('live data', file_get_contents($this->volume('live').'/_data/marker'));
+        $this->assertSame('live code', file_get_contents($this->root.'/live/project/index.js'));
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.panelalpha-volumes');
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push');
+        $this->assertDirectoryDoesNotExist($this->root.'/live/.incoming');
     }
 
     private function pushFails(): void
@@ -204,6 +278,11 @@ class ProjectsContainerPushRollbackTest extends TestCase
         {
             public function __construct(private string $root, private object $record, private ?Mysql $server) {}
 
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
+
             public function mysql(): Mysql
             {
                 return $this->server ?? parent::mysql();
@@ -248,12 +327,17 @@ class ProjectsContainerPushRollbackTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                return $this->runProcess($cmd)->getOutput();
+                $process = $this->runProcess($cmd);
+                if (! $process->isSuccessful()) {
+                    throw new \RuntimeException($process->getErrorOutput());
+                }
+
+                return $process->getOutput();
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                return is_array($cmd) ? $this->apply(array_values($cmd)) : new ContainerPushRollbackProcess(0);
+                return is_array($cmd) ? $this->apply(LocalRoot::checked($cmd)) : new ContainerPushRollbackProcess(0);
             }
 
             /**
@@ -261,31 +345,65 @@ class ProjectsContainerPushRollbackTest extends TestCase
              */
             private function apply(array $argv): Process
             {
-                if (in_array('dind', $argv, true)) {
-                    return $this->innerCompose($argv);
+                if (LocalRoot::composeCommand($argv) !== []) {
+                    return $this->compose(LocalRoot::values($argv)[0], LocalRoot::composeCommand($argv));
+                }
+                if (($argv[0] ?? '') === 'pa-root') {
+                    return $this->daemon($argv[1], array_slice($argv, 3));
                 }
                 $path = (string) end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => new ContainerPushRollbackProcess(is_dir($path) ? 0 : 1),
-                    ['sudo', 'test', '-e'] => new ContainerPushRollbackProcess(file_exists($path) ? 0 : 1),
-                    ['sudo', 'test', '-f'] => new ContainerPushRollbackProcess(is_file($path) ? 0 : 1),
-                    ['sudo', 'test', '-L'] => new ContainerPushRollbackProcess(is_link($path) ? 0 : 1),
-                    ['sudo', 'ls', '-A'], ['sudo', 'ls', '-1'] => new ContainerPushRollbackProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
-                    ['sudo', 'df', '-P'] => new ContainerPushRollbackProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => new ContainerPushRollbackProcess(is_dir($path) ? 0 : 1),
+                    ['test', '-e'] => new ContainerPushRollbackProcess(file_exists($path) ? 0 : 1),
+                    ['test', '-f'] => new ContainerPushRollbackProcess(is_file($path) ? 0 : 1),
+                    ['test', '-L'] => new ContainerPushRollbackProcess(is_link($path) ? 0 : 1),
+                    ['ls', '-A'], ['ls', '-1A'], ['ls', '-1'] => new ContainerPushRollbackProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
+                    ['df', '-P'] => new ContainerPushRollbackProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
                     default => new ContainerPushRollbackProcess($this->change($argv)),
                 };
             }
 
             /**
+             * The account's daemon: its volumes are the directories under its docker/volumes, and a run is the archive or
+             * the replace its tar container would make there.
+             *
+             * @param  list<string>  $values
+             */
+            private function daemon(string $action, array $values): Process
+            {
+                $volumes = "{$this->root}/{$values[0]}/docker/volumes";
+                if ($action === 'account-docker.listVolumes') {
+                    $names = array_values(array_diff(scandir($volumes) ?: [], ['.', '..', 'metadata.db']));
+
+                    return new ContainerPushRollbackProcess(0, (string) json_encode(array_map(static fn (string $name): array => ['Name' => $name], $names)));
+                }
+                if ($action !== 'account-docker.run') {
+                    return new ContainerPushRollbackProcess(0);
+                }
+                [$account, , , $volume, , , $mounted] = $values;
+                $data = "{$volumes}/{$volume}/_data";
+                $archives = $values[9] === 'tar';
+                $event = $archives ? "archive {$account} {$volume} as ".basename($values[13]) : "replace {$account} {$volume} with ".basename($mounted);
+                $this->record->events[] = $event;
+                if (in_array($event, $this->record->failedRuns, true)) {
+                    return new ContainerPushRollbackProcess(1, '', 'tar: short read');
+                }
+                $script = $archives
+                    ? 'tar -czf '.escapeshellarg($mounted.'/'.basename($values[13])).' -C '.escapeshellarg($data).' .'
+                    : 'sh -c '.escapeshellarg(str_replace(['/data', '/archive'], [$data, $mounted], $values[11]));
+                exec($script, $output, $code);
+
+                return new ContainerPushRollbackProcess($code);
+            }
+
+            /**
              * @param  list<string>  $argv
              */
-            private function innerCompose(array $argv): Process
+            private function compose(string $username, array $argv): Process
             {
-                $inner = (string) end($argv);
-                $username = $argv[array_search('/bin/bash', $argv, true) + 1] ?? '';
                 foreach (['stop', 'create', 'up'] as $action) {
-                    if (str_contains($inner, "'{$action}'")) {
+                    if (in_array($action, $argv, true)) {
                         $this->record->events[] = "{$action} {$username}";
                     }
                 }
@@ -298,11 +416,11 @@ class ProjectsContainerPushRollbackTest extends TestCase
              */
             private function change(array $argv): int
             {
-                $args = array_values(array_filter(array_slice($argv, 2), static fn (string $a): bool => ! str_starts_with($a, '-')));
-                if (in_array($argv[1] ?? '', ['rm', 'mv'], true)) {
-                    $this->record->events[] = $argv[1].' '.implode(' ', $args);
+                $args = array_values(array_filter(array_slice($argv, 1), static fn (string $a): bool => ! str_starts_with($a, '-')));
+                if (in_array($argv[0] ?? '', ['rm', 'mv'], true)) {
+                    $this->record->events[] = $argv[0].' '.implode(' ', $args);
                 }
-                match ($argv[1] ?? '') {
+                match ($argv[0] ?? '') {
                     'mkdir' => is_dir($args[0]) || mkdir($args[0], 0777, true),
                     'rm' => array_map(static fn (string $p) => exec('rm -rf '.escapeshellarg($p)), $args),
                     'rmdir' => rmdir($args[0]),
@@ -333,7 +451,7 @@ class ProjectsContainerPushRollbackTest extends TestCase
 
 class ContainerPushRollbackProcess extends Process
 {
-    public function __construct(private int $code, private string $output = '')
+    public function __construct(private int $code, private string $output = '', private string $error = '')
     {
         parent::__construct(['true']);
     }
@@ -350,7 +468,7 @@ class ContainerPushRollbackProcess extends Process
 
     public function getErrorOutput(): string
     {
-        return '';
+        return $this->error;
     }
 
     public function getOutput(): string

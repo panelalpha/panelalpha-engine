@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Inner;
 
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\Engine\AccountStorage;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\InnerDocker;
 
 /**
@@ -12,6 +13,8 @@ use App\System\Project\Dind\InnerDocker;
  */
 class StorageReclaim
 {
+    private const PRUNE_SECONDS = 300;
+
     private InnerDocker $inner;
 
     public function __construct(InnerDocker $inner)
@@ -20,9 +23,8 @@ class StorageReclaim
     }
 
     /**
-     * Clear the build cache before a heavy build when the account is low on
-     * disk and nothing is running that could be disrupted. Best-effort like the
-     * prune itself: a probe that times out or fails is logged and the build goes on.
+     * Clear the build cache before a heavy build when the account is low on disk and nothing running could be
+     * disrupted; best effort, so a probe that times out or fails is logged and the build goes on.
      */
     public function reclaimIfNeeded(): void
     {
@@ -41,28 +43,23 @@ class StorageReclaim
 
     private function isLowOnDiskForBuild(): bool
     {
-        $shell = $this->inner->dind()->shell();
+        $dind = $this->inner->dind();
         $storage = $this->storage();
         $availableBytes = $storage->parseFreeBytes(
-            $shell->execAsUserQuiet($storage->freeSpaceProbeArgv(), [], 60)
+            $dind->shell()->execAsUserQuiet($storage->freeSpaceProbeArgv(), [], 60)
         );
-        $buildCacheBytes = $storage->parseBuildCacheBytes(
-            $shell->execAsUserQuiet($storage->buildCacheProbeArgv(), [], 120)
-        );
+        $buildCacheBytes = $dind->accountDaemon()->buildCacheBytes(120);
 
         return DindBuildStorage::shouldReclaimBeforeBuild($availableBytes, $buildCacheBytes, false);
     }
 
     /**
-     * Safe to prune everything only when the account runs no containers.
+     * Safe to prune everything only when the account holds no container, stopped ones included. A daemon that
+     * cannot say throws rather than reading as holding none.
      */
     public function canAggressivelyReclaim(): bool
     {
-        $containers = trim(
-            $this->inner->dind()->shell()->execAsUserQuiet($this->storage()->containersProbeArgv(), [], 60)
-        );
-
-        return $containers === '';
+        return $this->inner->dind()->accountDaemon()->containerIds(true, [], 60) === [];
     }
 
     /**
@@ -76,9 +73,8 @@ class StorageReclaim
                 ? 'Clearing inner Docker cache after disk-full build failure'
                 : 'Clearing inner Docker cache before heavy build'
         );
-        foreach ($this->storage()->reclaimArgvs() as $argv) {
-            $this->prune($argv);
-        }
+        $this->prune('unused data', static fn (AccountDaemon $daemon) => $daemon->pruneSystem(false, self::PRUNE_SECONDS));
+        $this->pruneBuildCache();
     }
 
     /**
@@ -95,34 +91,30 @@ class StorageReclaim
         }
 
         $this->inner->host()->logInfo('Clearing inner Docker build cache and unused images after the disk limit');
-        foreach ($this->whileRunningArgvs() as $argv) {
-            $this->prune($argv);
-        }
+        $this->pruneBuildCache();
+        $this->prune('unused images', static fn (AccountDaemon $daemon) => $daemon->pruneImages(self::PRUNE_SECONDS));
+    }
+
+    private function pruneBuildCache(): void
+    {
+        $this->prune('build cache', static fn (AccountDaemon $daemon) => $daemon->pruneBuildCache(self::PRUNE_SECONDS));
     }
 
     /**
      * Best-effort: a prune that times out or meets a daemon error must not fail
      * the deploy it was meant to help, and the next prune still runs.
      *
-     * @param  list<string>  $argv
+     * @param  \Closure(AccountDaemon): void  $prune
      */
-    private function prune(array $argv): void
+    private function prune(string $what, \Closure $prune): void
     {
+        $dind = $this->inner->dind();
         try {
-            $this->inner->dind()->shell()->exec($argv, [], 300);
+            $dind->shell()->logger()?->throwIfCancelled();
+            $prune($dind->accountDaemon());
         } catch (\Throwable $e) {
-            $this->inner->host()->logWarn('Could not reclaim inner Docker disk ('.implode(' ', $argv).'): '.$e->getMessage());
+            $this->inner->host()->logWarn('Could not reclaim inner Docker disk ('.$what.'): '.$e->getMessage());
         }
-    }
-
-    /**
-     * What goes while the app still runs: nothing a container uses.
-     *
-     * @return list<list<string>>
-     */
-    public function whileRunningArgvs(): array
-    {
-        return [...$this->storage()->pruneBuildCacheArgv(), ['docker', 'image', 'prune', '-af']];
     }
 
     protected function restartEngine(): void

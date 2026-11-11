@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\System;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class SftpKillSessionsTest extends TestCase
 {
@@ -17,47 +18,28 @@ class SftpKillSessionsTest extends TestCase
         $this->assertSame(0, $this->fakeSystem("0\n")->sftp()->killSessions(['alice_sftp']));
     }
 
-    public function test_it_runs_in_the_sftp_container(): void
+    public function test_it_asks_the_broker_for_the_sftp_service_with_the_login(): void
     {
         $system = $this->fakeSystem("1\n");
 
         $system->sftp()->killSessions(['alice_sftp']);
 
         $this->assertSame(
-            ['sudo', 'docker', 'compose', '-f', '/engine/docker-compose.yml', 'exec', 'sftp', 'sh', '-c'],
-            array_slice($system->command, 0, 9)
+            [LocalRoot::CLIENT, 'compose.sftpKillSessions', '--', '/engine/docker-compose.yml', 'alice_sftp'],
+            $system->command
         );
     }
 
-    public function test_the_script_matches_a_session_by_login_never_by_uid(): void
+    public function test_every_login_travels_once_and_only_as_a_login(): void
     {
-        $script = $this->scriptFor(['alice_sftp']);
+        $system = $this->fakeSystem("0\n");
 
-        $this->assertStringContainsString("'^sshd: alice_sftp(@|\\s|$)'", $script);
-        $this->assertStringContainsString('pgrep -f', $script);
-        $this->assertStringContainsString('kill -TERM $pids', $script);
-        $this->assertStringContainsString('sleep 2', $script);
-        $this->assertStringContainsString('kill -KILL $pids', $script);
-        $this->assertStringNotContainsString('pkill', $script);
-        $this->assertStringNotContainsString(' -u ', $script);
-    }
+        $system->sftp()->killSessions(['alice_sftp', 'bob_sftp', 'alice_sftp', 'not a login', '']);
 
-    public function test_the_script_counts_the_monitor_process_one_per_session(): void
-    {
-        $script = $this->scriptFor(['alice_sftp']);
-
-        $this->assertStringContainsString("'^sshd: alice_sftp \\[priv\\]'", $script);
-        $this->assertStringContainsString('pgrep -cf "$pattern"', $script);
-        $this->assertStringContainsString('echo "$killed"', $script);
-    }
-
-    public function test_every_login_gets_its_own_pattern_and_a_bad_one_is_dropped(): void
-    {
-        $script = $this->scriptFor(['alice_sftp', 'bob_sftp', 'alice_sftp', 'not a login']);
-
-        $this->assertSame(1, substr_count($script, "'^sshd: alice_sftp \\[priv\\]'"));
-        $this->assertSame(1, substr_count($script, "'^sshd: bob_sftp \\[priv\\]'"));
-        $this->assertStringNotContainsString('not a login', $script);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.sftpKillSessions', '--', '/engine/docker-compose.yml', 'alice_sftp', 'bob_sftp'],
+            $system->command
+        );
     }
 
     public function test_with_no_login_it_asks_the_container_nothing(): void
@@ -66,14 +48,6 @@ class SftpKillSessionsTest extends TestCase
 
         $this->assertSame(0, $system->sftp()->killSessions([]));
         $this->assertSame([], $system->command);
-    }
-
-    private function scriptFor(array $logins): string
-    {
-        $system = $this->fakeSystem("0\n");
-        $system->sftp()->killSessions($logins);
-
-        return (string) end($system->command);
     }
 
     private function fakeSystem(string $output): System

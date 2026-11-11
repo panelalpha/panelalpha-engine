@@ -10,9 +10,8 @@ use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Nothing answered, and nothing is restarting either: the containers are up
- * and silent. Says, per container that publishes a probed port, what it is
- * listening on instead. {@see SilentPort}.
+ * Nothing answered and nothing is restarting: per container publishing a probed port, what it listens on
+ * instead. {@see SilentPort}.
  */
 final class SilentPortCheck
 {
@@ -25,47 +24,20 @@ final class SilentPortCheck
     ) {}
 
     /**
+     * The failed check, its evidence naming the services up but bound to nothing yet, which the deploy waits on.
+     *
      * @param  list<array<string, mixed>>  $results  the probe's per-port results
      * @return array<string, mixed>|null
      */
     public function check(array $results): ?array
     {
-        $silent = [];
-        foreach ($results as $result) {
-            if (($result['status'] ?? null) === AppHealth::STATUS_OK) {
-                return null;
-            }
-            // A port that answered a 5xx is not silent: that is an application
-            // error, which the response checks already report.
-            if (($result['http_code'] ?? null) !== null) {
-                continue;
-            }
-            $silent[] = (int) ($result['port'] ?? 0);
-        }
-        if ($silent === []) {
+        $silent = self::silentPorts($results);
+        if ($silent === null || $silent === []) {
             return null;
         }
 
         try {
-            $ps = $this->project->shell()->execAsUserQuiet(
-                $this->project->userAppComposeCommand(['ps', '--format', 'json']),
-                [],
-                self::TIMEOUT_SECONDS
-            );
-            $findings = [];
-            $starting = [];
-            foreach (SilentPort::publishers($ps, $silent) as $publisher) {
-                $sockets = $this->socketsOf($publisher['name']);
-                $findings[] = SilentPort::diagnose(
-                    $publisher['service'],
-                    $publisher['published'],
-                    $publisher['target'],
-                    $sockets
-                );
-                if (SilentPort::listensOnNothing($sockets, $publisher['target'])) {
-                    $starting[] = $publisher['service'];
-                }
-            }
+            [$findings, $starting] = $this->diagnose($silent);
         } catch (\Throwable $e) {
             Log::debug('Silent-port check could not run: '.AppHealth::trimReason($e->getMessage()));
 
@@ -82,10 +54,57 @@ final class SilentPortCheck
             'severity' => HealthCheck::SEVERITY_ERROR,
             'title' => 'The application is running but does not answer on the port it publishes.',
             'detail' => implode(' ', $findings),
-            'fix' => 'Its output is in the deploy log, or read it with container_service_logs.',
-            // Services up but bound to nothing yet; the deploy waits on these.
+            'fix' => 'Its output is in the deploy log and in the container output.',
             'evidence' => ['silent' => $findings, 'starting' => array_values(array_unique($starting))],
         ];
+    }
+
+    /**
+     * The ports nobody answered on; null once one answered. One that answered a 5xx is not silent: that is an
+     * application error, which the response checks report.
+     *
+     * @param  list<array<string, mixed>>  $results
+     * @return ?list<int>
+     */
+    private static function silentPorts(array $results): ?array
+    {
+        $silent = [];
+        foreach ($results as $result) {
+            if (($result['status'] ?? null) === AppHealth::STATUS_OK) {
+                return null;
+            }
+            if (($result['http_code'] ?? null) !== null) {
+                continue;
+            }
+            $silent[] = (int) ($result['port'] ?? 0);
+        }
+
+        return $silent;
+    }
+
+    /**
+     * @param  list<int>  $silent
+     * @return array{0: list<string>, 1: list<string>} the findings, and the services bound to nothing
+     */
+    private function diagnose(array $silent): array
+    {
+        $ps = $this->project->accountDaemon()->stackPs(false, self::TIMEOUT_SECONDS);
+        $findings = [];
+        $starting = [];
+        foreach (SilentPort::publishers($ps, $silent) as $publisher) {
+            $sockets = $this->socketsOf($publisher['name']);
+            $findings[] = SilentPort::diagnose(
+                $publisher['service'],
+                $publisher['published'],
+                $publisher['target'],
+                $sockets
+            );
+            if (SilentPort::listensOnNothing($sockets, $publisher['target'])) {
+                $starting[] = $publisher['service'];
+            }
+        }
+
+        return [$findings, $starting];
     }
 
     /**
@@ -104,20 +123,15 @@ final class SilentPortCheck
     }
 
     /**
-     * What the container listens on, from its own /proc: the image may ship
+     * What the container listens on, read from its process: the image may ship
      * neither `ss` nor a shell.
      *
      * @return list<array{addr: string, port: int}>
      */
     private function socketsOf(string $container): array
     {
-        $name = escapeshellarg($container);
-        $script = "pid=\$(docker inspect -f '{{.State.Pid}}' {$name} 2>/dev/null); "
-            .'[ -n "$pid" ] && [ "$pid" != "0" ] || exit 0; '
-            .'cat /proc/$pid/net/tcp /proc/$pid/net/tcp6 2>/dev/null';
-
         return ListeningSockets::fromProcNet(
-            $this->project->shell()->execQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS)
+            $this->project->accountDaemon()->listeningSockets($container, self::TIMEOUT_SECONDS)
         );
     }
 }

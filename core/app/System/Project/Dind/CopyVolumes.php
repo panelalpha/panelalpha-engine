@@ -2,18 +2,24 @@
 
 namespace App\System\Project\Dind;
 
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Pause/resume and DinD volume staging for clone/push (not part of the public Project contract).
+ * Pause/resume and the named volumes' copy for clone/push, through the accounts' own daemons ({@see VolumeArchive}):
+ * staged as `<volume>/_data.incoming`, with a push keeping this account's data as `_data.pre-push` until it commits.
  */
 final class CopyVolumes
 {
-    private const INSPECT_TIMEOUT_SECONDS = 30;
+    /** The home entry a copy stages volumes in, which a push's home swap leaves where it is. */
+    public const STAGING = '.panelalpha-volumes';
 
-    /** `docker inspect` per container: its compose service, then each `<volume>=<mount point>` tab-separated. */
-    private const MOUNTS_FORMAT = "{{index .Config.Labels \"com.docker.compose.service\"}}|{{range .Mounts}}{{.Name}}={{.Destination}}\t{{end}}";
+    private const INCOMING = '_data.incoming';
+
+    private const PRE_PUSH = '_data.pre-push';
+
+    private const INSPECT_TIMEOUT_SECONDS = 30;
 
     public function __construct(
         private DindProject $project,
@@ -39,8 +45,8 @@ final class CopyVolumes
     }
 
     /**
-     * The copied source starts again as it was stopped: `up` would rewrite its
-     * run file first and apply what was stored for later, such as env vars.
+     * The copied source starts again as it was stopped: `up` would rewrite its run file first and apply what
+     * was stored for later, such as env vars.
      */
     public function resumeSourceAfterCopy(): void
     {
@@ -70,37 +76,31 @@ final class CopyVolumes
         }
     }
 
-    public function copyVolumeDataFrom(string $sourceHomeDir): int
+    /**
+     * Each named volume of $source that this account has, its data put in place of this one's; how many were. Nothing
+     * staged is left, whether or not the copy got through.
+     */
+    public function copyVolumeDataFrom(self $source): int
     {
-        $srcVolumes = rtrim($sourceHomeDir, '/').'/docker/volumes';
-        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-
-        if (! $this->pathIsDirectoryAsRoot($srcVolumes) || ! $this->pathIsDirectoryAsRoot($destVolumes)) {
-            return 0;
+        try {
+            return $this->putInPlaceFrom($source);
+        } finally {
+            $this->removeStaging();
         }
+    }
 
+    private function putInPlaceFrom(self $source): int
+    {
         $copied = 0;
-        foreach ($this->listDockerVolumeEntriesAsRoot($srcVolumes) as $entry) {
-            $srcData = "{$srcVolumes}/{$entry}/_data";
-            $destData = "{$destVolumes}/{$entry}/_data";
-            if (! $this->pathIsDirectoryAsRoot($srcData)) {
-                continue;
-            }
-            if (! $this->pathIsDirectoryAsRoot($destData)) {
-                Log::warning('Skipping volume data copy; dest volume _data missing', [
-                    'volume' => $entry,
-                    'dest' => $destData,
-                ]);
-
-                continue;
-            }
+        foreach ($this->volumesToCopyFrom($source) as $volume) {
+            $this->stageVolume($source, $volume);
+            $this->step(
+                fn () => $this->archive()->replaceVolume($volume, $this->staged($volume, self::INCOMING)),
+                "Failed to rsync volume data for '{$volume}'",
+            );
             $this->runVolumeProcess(
-                [
-                    'sudo', 'rsync', '-a', '--delete',
-                    rtrim($srcData, '/').'/',
-                    rtrim($destData, '/').'/',
-                ],
-                "Failed to rsync volume data for '{$entry}'"
+                Privileged::files()->removeTree($this->staged($volume)),
+                "Failed to remove staged volume data for '{$volume}'",
             );
             $copied++;
         }
@@ -108,161 +108,106 @@ final class CopyVolumes
         return $copied;
     }
 
-    public function copyVolumeDataToIncoming(string $sourceHomeDir): int
+    /** Each named volume of $source that this account has, staged beside its home's entries; how many were. */
+    public function copyVolumeDataToIncoming(self $source): int
     {
-        $srcVolumes = rtrim($sourceHomeDir, '/').'/docker/volumes';
-        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-
-        if (! $this->pathIsDirectoryAsRoot($srcVolumes) || ! $this->pathIsDirectoryAsRoot($destVolumes)) {
-            return 0;
-        }
-
         $copied = 0;
-        foreach ($this->listDockerVolumeEntriesAsRoot($srcVolumes) as $entry) {
-            $srcData = "{$srcVolumes}/{$entry}/_data";
-            $destVolumeDir = "{$destVolumes}/{$entry}";
-            $destIncoming = "{$destVolumeDir}/_data.incoming";
-
-            if (! $this->pathIsDirectoryAsRoot($srcData)) {
-                continue;
-            }
-            if (! $this->pathIsDirectoryAsRoot($destVolumeDir)) {
-                Log::warning('Skipping push volume data copy; dest volume missing', [
-                    'volume' => $entry,
-                    'dest' => $destVolumeDir,
-                ]);
-
-                continue;
-            }
-
-            $this->runVolumeProcess(
-                ['sudo', 'mkdir', '-p', $destIncoming],
-                "Failed to create incoming volume directory for '{$entry}'"
-            );
-            $this->runVolumeProcess(
-                [
-                    'sudo', 'rsync', '-a', '--delete',
-                    rtrim($srcData, '/').'/',
-                    rtrim($destIncoming, '/').'/',
-                ],
-                "Failed to rsync volume data for '{$entry}'"
-            );
+        foreach ($this->volumesToCopyFrom($source) as $volume) {
+            $this->stageVolume($source, $volume);
             $copied++;
         }
 
         return $copied;
     }
 
+    /** Each staged volume's data put in place, this account's own archived beside it first. */
     public function swapIncomingVolumes(): void
     {
-        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
-            return;
-        }
-
-        foreach ($this->listDockerVolumeEntriesAsRoot($destVolumes) as $entry) {
-            $incomingData = "{$destVolumes}/{$entry}/_data.incoming";
-            if (! $this->pathIsDirectoryAsRoot($incomingData)) {
+        foreach ($this->stagedVolumes() as $volume) {
+            $incoming = $this->staged($volume, self::INCOMING);
+            if (! $this->pathIsFileAsRoot($incoming)) {
                 continue;
             }
-
-            $currentData = "{$destVolumes}/{$entry}/_data";
-            $backupData = "{$destVolumes}/{$entry}/_data.pre-push";
-
-            if ($this->pathIsDirectoryAsRoot($currentData)) {
-                $this->runVolumeProcess(
-                    ['sudo', 'mv', $currentData, $backupData],
-                    "Failed to move volume '{$entry}' aside before swap"
-                );
-            }
-            $this->runVolumeProcess(
-                ['sudo', 'mv', $incomingData, $currentData],
-                "Failed to swap incoming volume data for '{$entry}'"
+            $this->step(
+                fn () => $this->archive()->tarVolume($volume, $this->staged($volume, self::PRE_PUSH)),
+                "Failed to move volume '{$volume}' aside before swap",
             );
+            $this->step(
+                fn () => $this->archive()->replaceVolume($volume, $incoming),
+                "Failed to swap incoming volume data for '{$volume}'",
+            );
+            $this->runVolumeProcess(Privileged::files()->removeIfExists($incoming), "Failed to swap incoming volume data for '{$volume}'");
         }
     }
 
     /**
-     * Undo swapIncomingVolumes(): every volume whose data was moved aside gets
-     * it back, and data that was only staged is dropped.
+     * Undo swapIncomingVolumes(): data archived aside comes back, and data that was only staged is dropped. Every volume
+     * is tried; one that could not be restored keeps its archive, and the failures are thrown together.
      */
     public function restoreVolumeBackups(): void
     {
-        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
-            return;
+        $failures = [];
+        foreach ($this->stagedVolumes() as $volume) {
+            try {
+                $this->restoreVolumeBackup($volume);
+            } catch (\RuntimeException $e) {
+                $failures[] = $e->getMessage();
+            }
         }
-
-        foreach ($this->listDockerVolumeEntriesAsRoot($destVolumes) as $entry) {
-            $this->restoreVolumeBackup("{$destVolumes}/{$entry}", $entry);
+        if ($failures !== []) {
+            throw new \RuntimeException(implode('; ', $failures));
         }
+        $this->removeStaging();
     }
 
-    private function restoreVolumeBackup(string $volumeDir, string $entry): void
+    private function restoreVolumeBackup(string $volume): void
     {
-        $backupData = "{$volumeDir}/_data.pre-push";
-        if ($this->pathIsDirectoryAsRoot($backupData)) {
-            $this->runVolumeProcess(
-                ['sudo', 'rm', '-rf', "{$volumeDir}/_data"],
-                "Failed to remove pushed volume data for '{$entry}'"
-            );
-            $this->runVolumeProcess(
-                ['sudo', 'mv', $backupData, "{$volumeDir}/_data"],
-                "Failed to restore volume data for '{$entry}'"
+        $prePush = $this->staged($volume, self::PRE_PUSH);
+        if ($this->pathIsFileAsRoot($prePush)) {
+            $this->step(
+                fn () => $this->archive()->replaceVolume($volume, $prePush),
+                "Failed to restore volume data for '{$volume}'",
             );
         }
 
-        if ($this->pathIsDirectoryAsRoot("{$volumeDir}/_data.incoming")) {
-            $this->runVolumeProcess(
-                ['sudo', 'rm', '-rf', "{$volumeDir}/_data.incoming"],
-                "Failed to remove staged volume data for '{$entry}'"
-            );
-        }
+        $this->runVolumeProcess(
+            Privileged::files()->removeTree($this->staged($volume)),
+            "Failed to remove staged volume data for '{$volume}'",
+        );
     }
 
     public function discardVolumeBackups(): void
     {
-        $destVolumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-        if (! $this->pathIsDirectoryAsRoot($destVolumes)) {
-            return;
-        }
-
-        foreach ($this->listDockerVolumeEntriesAsRoot($destVolumes) as $entry) {
-            foreach (['_data.pre-push', '_data.incoming'] as $suffix) {
-                $path = "{$destVolumes}/{$entry}/{$suffix}";
-                if ($this->pathIsDirectoryAsRoot($path)) {
+        foreach ($this->stagedVolumes() as $volume) {
+            foreach ([self::PRE_PUSH, self::INCOMING] as $suffix) {
+                $path = $this->staged($volume, $suffix);
+                if ($this->pathIsFileAsRoot($path)) {
                     $this->runVolumeProcess(
-                        ['sudo', 'rm', '-rf', $path],
-                        "Failed to remove volume backup '{$entry}/{$suffix}'"
+                        Privileged::files()->removeIfExists($path),
+                        "Failed to remove volume backup '{$volume}/{$suffix}'"
                     );
                 }
             }
         }
-    }
-
-    public function countVolumeDataDirs(): int
-    {
-        $volumes = rtrim($this->project->homeDirPath(), '/').'/docker/volumes';
-        if (! $this->pathIsDirectoryAsRoot($volumes)) {
-            return 0;
-        }
-
-        $count = 0;
-        foreach ($this->listDockerVolumeEntriesAsRoot($volumes) as $entry) {
-            $data = "{$volumes}/{$entry}/_data";
-            if ($this->pathIsDirectoryAsRoot($data)) {
-                $count++;
-            }
-        }
-
-        return $count;
+        $this->removeStaging();
     }
 
     /**
-     * One warning for each anonymous volume of this account that holds data
-     * and is mounted by one of its containers, which a copy leaves out, named
-     * by where it is mounted. When the containers cannot be read, every
-     * anonymous volume holding data is named.
+     * The named volumes a copy carries, as this account's daemon lists them; 0 when it cannot say, and the copy that
+     * follows fails with the reason.
+     */
+    public function countVolumeDataDirs(): int
+    {
+        try {
+            return count($this->namedVolumes());
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * A warning per anonymous volume holding data that a container mounts, which a copy leaves out, named by
+     * where it is mounted; every one holding data when the containers cannot be read.
      *
      * @return list<string>
      */
@@ -297,36 +242,38 @@ final class CopyVolumes
     }
 
     /**
-     * Where each anonymous volume is mounted, read from the account's own
-     * containers; null when they cannot be read.
+     * Where each anonymous volume is mounted, read from the account's own containers; null when they cannot be read.
      *
      * @return array<string, list<string>>|null
      */
     private function anonymousMounts(): ?array
     {
-        $script = 'ids=$(docker ps -aq) || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            .escapeshellarg(self::MOUNTS_FORMAT).' $ids';
         try {
-            return self::parseMounts(
-                $this->project->shell()->execQuiet(['bash', '-c', $script], [], self::INSPECT_TIMEOUT_SECONDS)
-            );
+            $daemon = $this->project->accountDaemon();
+            $inspected = $daemon->containers($daemon->containerIds(true, [], self::INSPECT_TIMEOUT_SECONDS), self::INSPECT_TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
+
+        return in_array(null, $inspected, true) ? null : self::mountsOf($inspected);
     }
 
     /**
+     * `<service>:<mount point>` of each anonymous volume the containers mount, from their inspects.
+     *
+     * @param  list<array<string, mixed>>  $inspected
      * @return array<string, list<string>>
      */
-    private static function parseMounts(string $inspect): array
+    private static function mountsOf(array $inspected): array
     {
         $mounts = [];
-        foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
-            [$service, $list] = array_pad(explode('|', $line, 2), 2, '');
-            foreach (explode("\t", $list) as $mount) {
-                [$volume, $destination] = array_pad(explode('=', $mount, 2), 2, '');
+        foreach ($inspected as $container) {
+            $service = trim((string) ($container['Config']['Labels']['com.docker.compose.service'] ?? ''));
+            foreach (is_array($container['Mounts'] ?? null) ? $container['Mounts'] : [] as $mount) {
+                $volume = (string) ($mount['Name'] ?? '');
+                $destination = (string) ($mount['Destination'] ?? '');
                 if (self::isAnonymousVolume($volume) && $destination !== '') {
-                    $mounts[$volume][] = trim($service) === '' ? $destination : trim($service).':'.$destination;
+                    $mounts[$volume][] = $service === '' ? $destination : $service.':'.$destination;
                 }
             }
         }
@@ -336,7 +283,7 @@ final class CopyVolumes
 
     private function holdsDataAsRoot(string $path): bool
     {
-        $process = $this->project->system()->runProcess(['sudo', 'find', $path, '-mindepth', '1', '-maxdepth', '1', '-print', '-quit']);
+        $process = $this->project->system()->runProcess(Privileged::files()->firstEntry($path));
 
         return $process->isSuccessful() && trim($process->getOutput()) !== '';
     }
@@ -353,19 +300,93 @@ final class CopyVolumes
     }
 
     /**
-     * The named volumes under the account's docker/volumes. Anonymous volumes
-     * (64 hex characters) are left out: an image's own VOLUME the compose file
-     * never names, which a copy has nowhere to put and the image recreates.
-     * {@see anonymousVolumeWarnings()} names the ones that held data.
+     * The named volumes of the account's daemon, not the anonymous ones a copy has nowhere to put and the image
+     * recreates; {@see anonymousVolumeWarnings()} names those that held data.
      *
      * @return list<string>
      */
-    private function listDockerVolumeEntriesAsRoot(string $volumesDir): array
+    private function namedVolumes(): array
     {
         return array_values(array_filter(
-            $this->volumeEntriesAsRoot($volumesDir),
-            static fn (string $entry): bool => ! self::isAnonymousVolume($entry),
+            $this->project->accountDaemon()->volumeNames(),
+            static fn (string $volume): bool => ! self::isAnonymousVolume($volume),
         ));
+    }
+
+    /**
+     * The named volumes of $source this account has too; one it lacks is skipped and logged.
+     *
+     * @return list<string>
+     */
+    private function volumesToCopyFrom(self $source): array
+    {
+        $named = $source->namedVolumes();
+        $present = $named === [] ? [] : $this->project->accountDaemon()->volumeNames();
+        $volumes = [];
+        foreach ($named as $volume) {
+            if (in_array($volume, $present, true)) {
+                $volumes[] = $volume;
+
+                continue;
+            }
+            Log::warning('Skipping volume data copy; dest volume missing', [
+                'volume' => $volume,
+                'dest' => $this->project->username(),
+            ]);
+        }
+
+        return $volumes;
+    }
+
+    /** $volume of $source archived by a tar container of $source's daemon, into this home's staging. */
+    private function stageVolume(self $source, string $volume): void
+    {
+        $this->runVolumeProcess(
+            Privileged::files()->makeDirectories($this->staged($volume)),
+            "Failed to create incoming volume directory for '{$volume}'"
+        );
+        $this->step(
+            fn () => $source->archive()->tarVolume($volume, $this->staged($volume, self::INCOMING)),
+            "Failed to rsync volume data for '{$volume}'",
+        );
+    }
+
+    /** @return list<string> */
+    private function stagedVolumes(): array
+    {
+        return $this->pathIsDirectoryAsRoot($this->staging()) ? $this->volumeEntriesAsRoot($this->staging()) : [];
+    }
+
+    private function removeStaging(): void
+    {
+        if ($this->pathIsDirectoryAsRoot($this->staging())) {
+            $this->runVolumeProcess(Privileged::files()->removeTree($this->staging()), "Failed to remove '".self::STAGING."'");
+        }
+    }
+
+    private function staging(): string
+    {
+        return rtrim($this->project->homeDirPath(), '/').'/'.self::STAGING;
+    }
+
+    private function staged(string $volume, ?string $file = null): string
+    {
+        return $this->staging().'/'.$volume.($file === null ? '' : '/'.$file);
+    }
+
+    private function archive(): VolumeArchive
+    {
+        return new VolumeArchive($this->project);
+    }
+
+    /** $step, its failure thrown as $message and the reason. */
+    private function step(callable $step, string $message): void
+    {
+        try {
+            $step();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($message.': '.$e->getMessage(), 0, $e);
+        }
     }
 
     /**
@@ -381,7 +402,7 @@ final class CopyVolumes
      */
     private function volumeEntriesAsRoot(string $volumesDir): array
     {
-        $process = $this->project->system()->runProcess(['sudo', 'ls', '-1', $volumesDir]);
+        $process = $this->project->system()->runProcess(Privileged::files()->listNames($volumesDir));
         if (! $process->isSuccessful()) {
             return [];
         }
@@ -405,6 +426,11 @@ final class CopyVolumes
 
     private function pathIsDirectoryAsRoot(string $path): bool
     {
-        return $this->project->system()->runProcess(['sudo', 'test', '-d', $path])->isSuccessful();
+        return $this->project->system()->runProcess(Privileged::files()->isDirectory($path))->isSuccessful();
+    }
+
+    private function pathIsFileAsRoot(string $path): bool
+    {
+        return $this->project->system()->runProcess(Privileged::files()->isFile($path))->isSuccessful();
     }
 }

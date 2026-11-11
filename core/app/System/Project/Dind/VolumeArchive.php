@@ -4,16 +4,17 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Support\JobBudget;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 
 /**
- * Named-volume archive for backup/restore (docker run alpine tar).
- * Distinct from {@see CopyVolumes} which rsyncs volume _data between accounts.
+ * Named-volume archive for backup/restore and for the copies of {@see CopyVolumes} (an alpine container running tar).
  */
 final class VolumeArchive
 {
-    /** The job's own budget, so a long tar fails here and cleans up before the job's alarm kills the worker. */
+    /** The cap a volume archive runs on when the caller passes no timeout. */
     private const COMPOSE_TIMEOUT = JobBudget::COMMAND_SECONDS;
 
     private const VOLUME_TAR_IMAGE = 'alpine:3.20';
@@ -22,7 +23,14 @@ final class VolumeArchive
 
     public function __construct(
         private DindProject $project,
+        private ?int $timeout = null,
     ) {}
+
+    /** The job's step budget when one is passed; one command's cap otherwise. */
+    private function timeout(): int
+    {
+        return $this->timeout ?? self::COMPOSE_TIMEOUT;
+    }
 
     /**
      * @param  array{services?: mixed, volumes?: mixed}  $compose
@@ -90,24 +98,12 @@ final class VolumeArchive
 
         $this->ensureDirectoryOnHost($scratchDir);
 
-        $this->project->shell()->execAsUser([
-            'docker',
-            'run',
-            '--rm',
-            '-v',
-            $dockerName.':/data:ro',
-            '-v',
-            $scratchDir.':/out',
-            self::VOLUME_TAR_IMAGE,
-            'tar',
-            '-C',
-            '/data',
-            '-czf',
-            '/out/'.$basename,
-            '.',
-        ], [], self::COMPOSE_TIMEOUT);
+        $this->runTarImage(
+            [[$dockerName, '/data', 'ro'], [$scratchDir, '/out', 'rw']],
+            ['tar', '-C', '/data', '-czf', '/out/'.$basename, '.'],
+        );
 
-        $this->project->system()->execOnHost(['mv', '-f', $scratchFile, $dest]);
+        $this->project->system()->exec(Privileged::hostFiles()->moveOverwriting($scratchFile, $dest));
         $this->cleanScratchDir($scratchDir);
     }
 
@@ -116,11 +112,7 @@ final class VolumeArchive
         $this->assertDockerVolumeName($dockerName);
 
         try {
-            $this->project->shell()->execAsUser(
-                ['docker', 'volume', 'create', $dockerName],
-                [],
-                120,
-            );
+            $this->project->accountDaemon()->createVolume($dockerName, 120);
         } catch (\Throwable $e) {
             if (! str_contains($e->getMessage(), 'already exists')) {
                 throw $e;
@@ -134,7 +126,12 @@ final class VolumeArchive
      */
     public static function volumeRestoreScript(): string
     {
-        return str_replace("\r", '', <<<'SH'
+        return str_replace("\r", '', self::volumeRestoreShell());
+    }
+
+    private static function volumeRestoreShell(): string
+    {
+        return <<<'SH'
 set -e
 cd /data
 if [ -d .panelalpha-aside ]; then
@@ -163,7 +160,7 @@ for entry in .panelalpha-incoming/* .panelalpha-incoming/.*; do
 done
 rm -rf .panelalpha-incoming
 rm -rf .panelalpha-aside
-SH);
+SH;
     }
 
     /**
@@ -209,52 +206,66 @@ SH);
         $scratchArchive = rtrim($scratchDir, '/').'/'.$basename;
 
         $this->ensureDirectoryOnHost($scratchDir);
-        $this->project->system()->execOnHost(['cp', $archivePath, $scratchArchive]);
+        $this->project->system()->exec(Privileged::hostFiles()->copy($archivePath, $scratchArchive));
 
-        $this->project->shell()->execAsUser([
-            'docker',
-            'run',
-            '--rm',
-            '-v',
-            $dockerName.':/data',
-            '-v',
-            $scratchArchive.':/archive:ro',
-            self::VOLUME_TAR_IMAGE,
-            'sh',
-            '-c',
-            self::volumeRestoreScript(),
-        ], [], self::COMPOSE_TIMEOUT);
+        $this->runTarImage(
+            [[$dockerName, '/data', 'rw'], [$scratchArchive, '/archive', 'ro']],
+            ['sh', '-c', self::volumeRestoreScript()],
+        );
 
-        $this->project->system()->execOnHost(['rm', '-f', $scratchArchive]);
+        $this->project->system()->exec(Privileged::hostFiles()->removeIfExists($scratchArchive));
         $this->cleanScratchDir($scratchDir);
+    }
+
+    /** The volume's data replaced by an archive already in the account's home, as a copy stages it. */
+    public function replaceVolume(string $dockerName, string $archiveInHome): void
+    {
+        $this->assertDockerVolumeName($dockerName);
+
+        $this->runTarImage(
+            [[$dockerName, '/data', 'rw'], [$archiveInHome, '/archive', 'ro']],
+            ['sh', '-c', self::volumeReplaceScript()],
+        );
+    }
+
+    /** Ash-compatible: everything in the volume removed, then the archive extracted into it. */
+    public static function volumeReplaceScript(): string
+    {
+        return str_replace("\r", '', <<<'SH'
+set -e
+cd /data
+find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+tar -xzf /archive -C /data
+SH);
     }
 
     public function rollbackVolume(string $dockerName): void
     {
         $this->assertDockerVolumeName($dockerName);
 
-        $this->project->shell()->execAsUser([
-            'docker',
-            'run',
-            '--rm',
-            '-v',
-            $dockerName.':/data',
-            self::VOLUME_TAR_IMAGE,
-            'sh',
-            '-c',
-            self::volumeRollbackScript(),
-        ], [], self::COMPOSE_TIMEOUT);
+        $this->runTarImage([[$dockerName, '/data', 'rw']], ['sh', '-c', self::volumeRollbackScript()]);
+    }
+
+    /**
+     * The tar image run once and removed; like {@see ShellOperations::execAsUser()}, refused once a deploy is
+     * cancelled and its output written to a running deploy's log.
+     *
+     * @param  list<array{0: string, 1: string, 2: string}>  $mounts
+     * @param  list<string>  $argv
+     */
+    private function runTarImage(array $mounts, array $argv): void
+    {
+        $logger = $this->project->shell()->logger();
+        $logger?->throwIfCancelled();
+        $output = $this->project->accountDaemon()->runOnce(self::VOLUME_TAR_IMAGE, $mounts, $argv, $this->timeout());
+        $logger?->writeProcessBuffer(Process::OUT, $output);
+        $logger?->flushBuffers();
     }
 
     private function inspectDockerVolumeName(string $dockerName): string
     {
-        $output = $this->project->shell()->execAsUser(
-            ['docker', 'volume', 'inspect', '-f', '{{.Name}}', $dockerName],
-            [],
-            60,
-        );
-        $name = trim($output);
-        if ($name === '') {
+        $name = $this->project->accountDaemon()->volume($dockerName, 60)['Name'] ?? '';
+        if (! is_string($name) || $name === '') {
             throw new RuntimeException('Docker volume inspect returned empty name for: '.$dockerName);
         }
 
@@ -275,7 +286,7 @@ SH);
 
     private function ensureDirectoryOnHost(string $path): void
     {
-        $this->project->system()->execOnHost(['mkdir', '-p', $path]);
+        $this->project->system()->exec(Privileged::hostFiles()->makeDirectories($path));
     }
 
     private function cleanScratchDir(string $path): void
@@ -284,16 +295,11 @@ SH);
             return;
         }
 
-        $this->project->system()->execOnHost(['rm', '-rf', $path]);
+        $this->project->system()->exec(Privileged::hostFiles()->removeTree($path));
     }
 
     private function pathExistsOnHost(string $path): bool
     {
-        return $this->project->system()->runProcess([
-            'sudo',
-            'test',
-            '-e',
-            $path,
-        ])->getExitCode() === 0;
+        return $this->project->system()->runProcess(Privileged::files()->exists($path))->getExitCode() === 0;
     }
 }

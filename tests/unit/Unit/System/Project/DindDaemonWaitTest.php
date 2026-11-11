@@ -8,6 +8,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * A DinD account has two things to wait for, and only one of them was named.
@@ -60,7 +61,7 @@ class DindDaemonWaitTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->state->probes++;
-                $this->state->commands[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $this->state->commands[] = is_array($cmd) ? implode(' ', LocalRoot::plain($cmd)) : $cmd;
 
                 $answers = $this->state->answers;
                 $up = $answers[$this->state->probes - 1] ?? (end($answers) ?: false);
@@ -107,14 +108,24 @@ class DindDaemonWaitTest extends TestCase
 
         $shell = new ShellOperations($account);
 
-        return new class ($shell) extends Dind {
-            public function __construct(private ShellOperations $standIn)
+        return new class ($shell, $host) extends Dind {
+            public function __construct(private ShellOperations $standIn, private System $host)
             {
             }
 
             public function shell(): ShellOperations
             {
                 return $this->standIn;
+            }
+
+            public function system(): System
+            {
+                return $this->host;
+            }
+
+            public function username(): string
+            {
+                return 'test';
             }
         };
     }
@@ -153,20 +164,14 @@ class DindDaemonWaitTest extends TestCase
     }
 
     /**
-     * It asks `docker info` inside the account, and not `test -S` on the socket
-     * file: the file exists before the daemon behind it can serve a request,
-     * and the request is what the failing commands actually make.
+     * Not `test -S`: the socket file exists before the daemon behind it can serve a request.
      */
-    public function test_the_probe_is_a_request_inside_the_account(): void
+    public function test_the_probe_is_a_request_to_the_account_s_daemon(): void
     {
         $state = $this->probe([true]);
         $this->dind($state)->awaitReady(tries: 1, intervalSeconds: 0);
 
-        $this->assertCount(1, $state->commands);
-        $command = $state->commands[0];
-        $this->assertStringContainsString('docker info --format', $command);
-        $this->assertStringNotContainsString('test -S', $command);
-        $this->assertStringContainsString('docker compose', $command, 'the request runs through the account, not on the host');
+        $this->assertSame(['pa-root account-docker.ping -- test'], $state->commands);
     }
 
     /**
@@ -187,6 +192,6 @@ class DindDaemonWaitTest extends TestCase
         $body = implode('', array_slice($lines, $method->getStartLine() - 1, $method->getEndLine() - $method->getStartLine() + 1));
 
         $this->assertStringContainsString('innerDockerIsUp', $body, 'the wait must probe the inner daemon');
-        $this->assertStringContainsString('docker info', (string) file_get_contents($method->getFileName()), 'the probe is a request, not a socket check');
+        $this->assertStringContainsString('accountDaemon()->answers(', (string) file_get_contents($method->getFileName()), 'the probe is a request, not a socket check');
     }
 }

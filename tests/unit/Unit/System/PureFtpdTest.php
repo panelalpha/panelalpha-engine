@@ -7,6 +7,7 @@ use App\System\Services\PureFtpd;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class PureFtpdTest extends TestCase
 {
@@ -18,10 +19,12 @@ class PureFtpdTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-pureftpd-' . bin2hex(random_bytes(4));
         mkdir($this->tmpRoot, 0777, true);
         file_put_contents($this->tmpRoot . '/docker-compose.yml', "services: {}\n");
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -32,17 +35,15 @@ class PureFtpdTest extends TestCase
         $this->assertInstanceOf(PureFtpd::class, $system->ftp());
     }
 
-    public function test_exec_prefixes_compose_exec_t_ftp(): void
+    public function test_make_database_asks_the_broker_for_the_ftp_service(): void
     {
         $system = $this->recordingSystem();
-        $system->ftp()->exec(['pure-pw', 'mkdb']);
+        $system->ftp()->makeDatabase();
 
-        $this->assertCount(1, $system->execJournal);
-        $cmd = $system->execJournal[0];
-        $this->assertStringContainsString('docker compose -f', $cmd);
-        $this->assertStringContainsString($this->tmpRoot . '/docker-compose.yml', $cmd);
-        $this->assertStringContainsString('exec -T ftp', $cmd);
-        $this->assertStringContainsString('pure-pw mkdb', $cmd);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpMakeDatabase', '--', $this->tmpRoot . '/docker-compose.yml'],
+            $system->requestJournal[0],
+        );
     }
 
     public function test_reload_touches_passwd_and_runs_mkdb(): void
@@ -50,9 +51,15 @@ class PureFtpdTest extends TestCase
         $system = $this->recordingSystem();
         $system->ftp()->reload();
 
-        $this->assertCount(2, $system->execJournal);
-        $this->assertStringContainsString('touch /etc/pureftpd/pureftpd.passwd', $system->execJournal[0]);
-        $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[1]);
+        $this->assertCount(2, $system->requestJournal);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpTouchPasswordFile', '--', $this->tmpRoot . '/docker-compose.yml'],
+            $system->requestJournal[0],
+        );
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpMakeDatabase', '--', $this->tmpRoot . '/docker-compose.yml'],
+            $system->requestJournal[1],
+        );
     }
 
     public function test_user_exists_returns_false_on_exit_16(): void
@@ -75,13 +82,16 @@ class PureFtpdTest extends TestCase
         $system->ftp()->userExists('ftp@example.com');
     }
 
-    public function test_delete_user_runs_userdel(): void
+    public function test_delete_user_asks_for_the_user_to_be_deleted(): void
     {
         $system = $this->recordingSystem();
         $system->ftp()->deleteUser('ftp@example.com');
 
-        $this->assertCount(1, $system->execJournal);
-        $this->assertStringContainsString('pure-pw userdel ftp@example.com -m', $system->execJournal[0]);
+        $this->assertCount(1, $system->requestJournal);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpDeleteUser', '--', $this->tmpRoot . '/docker-compose.yml', 'ftp@example.com'],
+            $system->requestJournal[0],
+        );
     }
 
     public function test_usermod_quota_passes_empty_string_for_unlimited(): void
@@ -89,8 +99,10 @@ class PureFtpdTest extends TestCase
         $system = $this->recordingSystem();
         $system->ftp()->usermodQuota('ftp@example.com', null);
 
-        $cmd = $system->execJournal[0];
-        $this->assertStringContainsString('pure-pw usermod ftp@example.com -N', $cmd);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpSetQuota', '--', $this->tmpRoot . '/docker-compose.yml', 'ftp@example.com', ''],
+            $system->requestJournal[0],
+        );
     }
 
     #[DataProvider('quotasWithoutACap')]
@@ -106,8 +118,11 @@ class PureFtpdTest extends TestCase
             $quota,
         );
 
-        $this->assertStringContainsString('pure-pw useradd', $system->execJournal[0]);
-        $this->assertStringNotContainsString('-N', $system->execJournal[0]);
+        $this->assertSame(
+            [LocalRoot::CLIENT, '--env', 'PA_FTP_PASSWORD', 'compose.ftpAddUser', '--', $this->tmpRoot . '/docker-compose.yml',
+                'ftp@example.com', '1001', '1001', '/home/ftpuser/alice/public_html', ''],
+            $system->requestJournal[0],
+        );
     }
 
     #[DataProvider('quotasWithoutACap')]
@@ -116,9 +131,10 @@ class PureFtpdTest extends TestCase
         $system = $this->recordingSystem();
         $system->ftp()->usermodQuota('ftp@example.com', $quota);
 
-        $cmd = $system->execJournal[0];
-        $this->assertStringContainsString('pure-pw usermod ftp@example.com -N', $cmd);
-        $this->assertDoesNotMatchRegularExpression('/-N\s+-?\d/', $cmd);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpSetQuota', '--', $this->tmpRoot . '/docker-compose.yml', 'ftp@example.com', ''],
+            $system->requestJournal[0],
+        );
     }
 
     /** @return list<array{?int}> */
@@ -139,21 +155,17 @@ class PureFtpdTest extends TestCase
             512,
         );
 
-        $this->assertCount(2, $system->execJournal);
-        $addCmd = $system->execJournal[0];
-        $this->assertStringContainsString('/bin/sh -c', $addCmd);
-        $this->assertStringNotContainsString('secret', $addCmd, 'the password is on a command line');
+        $this->assertCount(2, $system->requestJournal);
+        $this->assertSame([
+            LocalRoot::CLIENT, '--env', 'PA_FTP_PASSWORD', 'compose.ftpAddUser', '--', $this->tmpRoot . '/docker-compose.yml',
+            'ftp@example.com', '1001', '1001', '/home/ftpuser/alice/public_html', '512',
+        ], $system->requestJournal[0]);
+        $this->assertNotContains('secret', $system->requestJournal[0], 'the password is on a command line');
         $this->assertSame(['PA_FTP_PASSWORD' => 'secret'], $system->envJournal[0]);
-        // sudo resets the environment unless told to keep the variable, and
-        // compose copies it into the exec only when named.
-        $this->assertStringContainsString('sudo --preserve-env=PA_FTP_PASSWORD docker compose', $addCmd);
-        $this->assertStringContainsString('exec -T -e PA_FTP_PASSWORD ftp', $addCmd);
-        $this->assertStringContainsString('"$PA_FTP_PASSWORD" | pure-pw useradd', $addCmd);
-        $this->assertStringContainsString('pure-pw useradd', $addCmd);
-        $this->assertStringContainsString('/home/ftpuser/alice/public_html', $addCmd);
-        $this->assertStringContainsString('-N', $addCmd);
-        $this->assertStringContainsString('512', $addCmd);
-        $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[1]);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpMakeDatabase', '--', $this->tmpRoot . '/docker-compose.yml'],
+            $system->requestJournal[1],
+        );
     }
 
     public function test_passwd_keeps_the_password_off_the_command_line(): void
@@ -161,19 +173,26 @@ class PureFtpdTest extends TestCase
         $system = $this->recordingSystem();
         $system->ftp()->passwd('ftp@example.com', "p'w d");
 
-        $this->assertStringNotContainsString("p'w d", $system->execJournal[0]);
-        $this->assertStringContainsString('pure-pw passwd', $system->execJournal[0]);
+        $this->assertSame(
+            [LocalRoot::CLIENT, '--env', 'PA_FTP_PASSWORD', 'compose.ftpSetPassword', '--', $this->tmpRoot . '/docker-compose.yml',
+                'ftp@example.com'],
+            $system->requestJournal[0],
+        );
+        $this->assertNotContains("p'w d", $system->requestJournal[0], 'the password is on a command line');
         $this->assertSame(['PA_FTP_PASSWORD' => "p'w d"], $system->envJournal[0]);
     }
 
     /**
-     * @return System&object{execJournal: list<string>, envJournal: list<array<string, string>>}
+     * @return System&object{execJournal: list<string>, requestJournal: list<list<string>>, envJournal: list<array<string, string>>}
      */
     private function recordingSystem(int $exitCode = 0, string $errorOutput = ''): System
     {
         return new class ($this->tmpRoot, $exitCode, $errorOutput) extends System {
             /** @var list<string> */
             public array $execJournal = [];
+
+            /** @var list<list<string>> */
+            public array $requestJournal = [];
 
             /** @var list<array<string, string>> */
             public array $envJournal = [];
@@ -197,6 +216,7 @@ class PureFtpdTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $this->requestJournal[] = (array) $cmd;
                 $this->execJournal[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->envJournal[] = $env;
 

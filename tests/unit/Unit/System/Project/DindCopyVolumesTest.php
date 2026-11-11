@@ -11,6 +11,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\CopyVolumes;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class DindCopyVolumesTest extends TestCase
@@ -21,15 +22,24 @@ class DindCopyVolumesTest extends TestCase
     /** @var list<string> */
     private array $processLog = [];
 
+    /** @var list<string> */
+    private array $rootLog = [];
+
     public bool $failComposeCreate = false;
 
     public bool $recordInnerCompose = false;
 
-    public ?string $innerInspect = null;
+    /** @var list<array<string, mixed>>|null each container's inspect, as the account's daemon gives it; null when it does not answer */
+    public ?array $innerInspect = null;
 
     public function logProcess(string $line): void
     {
         $this->processLog[] = $line;
+    }
+
+    public function logRootCommand(string $line): void
+    {
+        $this->rootLog[] = $line;
     }
 
     protected function setUp(): void
@@ -38,6 +48,7 @@ class DindCopyVolumesTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-dind-vol-' . bin2hex(random_bytes(4));
         $this->homeRoot = $this->tmpRoot . '/home';
         $this->processLog = [];
+        $this->rootLog = [];
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
         mkdir($this->tmpRoot . '/users/bob', 0777, true);
     }
@@ -66,145 +77,15 @@ class DindCopyVolumesTest extends TestCase
         $this->assertSame($app->copyVolumes(), $app->copyVolumes());
     }
 
-    public function test_count_volume_data_dirs_returns_zero_when_volumes_tree_missing(): void
-    {
-        $project = $this->dindProject('alice');
-
-        $this->assertSame(0, $project->app()->copyVolumes()->countVolumeDataDirs());
-    }
-
-    public function test_count_volume_data_dirs_counts_data_directories(): void
-    {
-        $this->mkdirVolumeData('alice', 'project_db', 'seed');
-
-        $project = $this->dindProject('alice');
-
-        $this->assertSame(1, $project->app()->copyVolumes()->countVolumeDataDirs());
-    }
-
-    public function test_copy_volume_data_from_returns_zero_when_dest_or_source_tree_missing(): void
-    {
-        $source = $this->dindProject('alice');
-        $dest = $this->dindProject('bob');
-
-        $this->assertSame(0, $dest->app()->copyVolumes()->copyVolumeDataFrom($source->homeDirPath()));
-    }
-
-    public function test_copy_volume_data_from_rsyncs_matching_volumes(): void
-    {
-        $this->mkdirVolumeData('alice', 'project_db', 'from-source');
-        $this->mkdirVolumeDir('bob', 'project_db');
-
-        $source = $this->dindProject('alice');
-        $dest = $this->dindProject('bob');
-
-        $copied = $dest->app()->copyVolumes()->copyVolumeDataFrom($source->homeDirPath());
-
-        $this->assertSame(1, $copied);
-        $this->assertSame(
-            'from-source',
-            file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt')
-        );
-        $this->assertContains('rsync-volume', $this->processLog);
-    }
-
-    public function test_copy_volume_data_to_incoming_stages_under_data_incoming(): void
-    {
-        $this->mkdirVolumeData('alice', 'project_db', 'push-payload');
-        $this->mkdirVolumeDir('bob', 'project_db');
-
-        $source = $this->dindProject('alice');
-        $dest = $this->dindProject('bob');
-
-        $copied = $dest->app()->copyVolumes()->copyVolumeDataToIncoming($source->homeDirPath());
-
-        $this->assertSame(1, $copied);
-        $incoming = $this->homeRoot . '/bob/docker/volumes/project_db/_data.incoming/marker.txt';
-        $this->assertFileExists($incoming);
-        $this->assertSame('push-payload', file_get_contents($incoming));
-    }
-
-    public function test_swap_incoming_volumes_promotes_incoming_and_preserves_backup(): void
-    {
-        $this->mkdirVolumeData('bob', 'project_db', 'old');
-        $incoming = $this->homeRoot . '/bob/docker/volumes/project_db/_data.incoming';
-        mkdir($incoming, 0777, true);
-        file_put_contents($incoming . '/marker.txt', 'new');
-
-        $dest = $this->dindProject('bob');
-        $dest->app()->copyVolumes()->swapIncomingVolumes();
-
-        $this->assertSame('new', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
-        $backup = $this->homeRoot . '/bob/docker/volumes/project_db/_data.pre-push/marker.txt';
-        $this->assertFileExists($backup);
-        $this->assertSame('old', file_get_contents($backup));
-    }
-
-    public function test_discard_volume_backups_removes_staging_suffixes(): void
-    {
-        $this->mkdirVolumeData('bob', 'project_db', 'live');
-        $base = $this->homeRoot . '/bob/docker/volumes/project_db';
-        mkdir($base . '/_data.pre-push', 0777, true);
-        mkdir($base . '/_data.incoming', 0777, true);
-
-        $dest = $this->dindProject('bob');
-        $dest->app()->copyVolumes()->discardVolumeBackups();
-
-        $this->assertDirectoryDoesNotExist($base . '/_data.pre-push');
-        $this->assertDirectoryDoesNotExist($base . '/_data.incoming');
-        $this->assertDirectoryExists($base . '/_data');
-    }
-
-    public function test_restore_volume_backups_undoes_a_swap(): void
-    {
-        $this->mkdirVolumeData('bob', 'project_db', 'old');
-        $incoming = $this->homeRoot . '/bob/docker/volumes/project_db/_data.incoming';
-        mkdir($incoming, 0777, true);
-        file_put_contents($incoming . '/marker.txt', 'new');
-        $copyVolumes = $this->dindProject('bob')->app()->copyVolumes();
-        $copyVolumes->swapIncomingVolumes();
-
-        $copyVolumes->restoreVolumeBackups();
-
-        $base = $this->homeRoot . '/bob/docker/volumes/project_db';
-        $this->assertSame('old', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
-        $this->assertDirectoryDoesNotExist($base . '/_data.pre-push');
-        $this->assertDirectoryDoesNotExist($base . '/_data.incoming');
-    }
-
-    public function test_restore_volume_backups_drops_data_that_was_only_staged(): void
-    {
-        $this->mkdirVolumeData('bob', 'project_db', 'live');
-        $base = $this->homeRoot . '/bob/docker/volumes/project_db';
-        mkdir($base . '/_data.incoming', 0777, true);
-
-        $this->dindProject('bob')->app()->copyVolumes()->restoreVolumeBackups();
-
-        $this->assertSame('live', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
-        $this->assertDirectoryDoesNotExist($base . '/_data.incoming');
-    }
-
-    public function test_anonymous_volumes_are_neither_counted_nor_copied(): void
-    {
-        $this->mkdirVolumeData('alice', 'project_db', 'seed');
-        $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'image volume');
-        $this->mkdirVolumeDir('bob', 'project_db');
-
-        $source = $this->dindProject('alice');
-        $copied = $this->dindProject('bob')->app()->copyVolumes()->copyVolumeDataFrom($this->homeRoot . '/alice');
-
-        $this->assertSame(1, $source->app()->copyVolumes()->countVolumeDataDirs());
-        $this->assertSame(1, $copied);
-        $this->assertSame('seed', file_get_contents($this->volumeDataPath('bob', 'project_db') . '/marker.txt'));
-    }
-
     public function test_an_anonymous_volume_holding_data_is_named_with_where_it_is_mounted(): void
     {
         $this->mkdirVolumeData('alice', 'project_db', 'seed');
         $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'mysql data');
         $this->mkdirVolumeDir('alice', str_repeat('cd', 32));
-        $this->innerInspect = 'db|' . str_repeat('ab', 32) . "=/var/lib/mysql\tproject_db=/data\t\n"
-            . 'web|' . str_repeat('cd', 32) . "=/var/www/html\t\n";
+        $this->innerInspect = [
+            self::container('c1', 'db', [str_repeat('ab', 32) => '/var/lib/mysql', 'project_db' => '/data']),
+            self::container('c2', 'web', [str_repeat('cd', 32) => '/var/www/html']),
+        ];
 
         $warnings = $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings();
 
@@ -220,7 +101,7 @@ class DindCopyVolumesTest extends TestCase
     public function test_an_anonymous_volume_no_container_mounts_is_not_named(): void
     {
         $this->mkdirVolumeData('alice', str_repeat('ab', 32), 'left behind by a removed container');
-        $this->innerInspect = "db|project_db=/data\t\n";
+        $this->innerInspect = [self::container('c1', 'db', ['project_db' => '/data'])];
 
         $this->assertSame([], $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings());
     }
@@ -240,7 +121,7 @@ class DindCopyVolumesTest extends TestCase
         $this->mkdirVolumeData('alice', 'project_db', 'seed');
 
         $this->assertSame([], $this->dindProject('alice')->app()->copyVolumes()->anonymousVolumeWarnings());
-        $this->assertSame([], array_values(array_filter($this->processLog, static fn (string $line): bool => str_contains($line, 'docker inspect'))));
+        $this->assertSame([], array_values(array_filter($this->processLog, static fn (string $line): bool => str_starts_with($line, 'account-docker.'))));
     }
 
     public function test_prepare_volumes_failure_does_not_remove_project_compose(): void
@@ -289,8 +170,8 @@ class DindCopyVolumesTest extends TestCase
 
         $this->assertSame(['start'], $this->innerComposeActions());
         $this->assertSame([], array_values(array_filter(
-            $this->processLog,
-            static fn (string $line): bool => str_starts_with($line, 'sudo cp '),
+            $this->rootLog,
+            static fn (string $line): bool => str_starts_with($line, 'cp '),
         )));
         $this->assertSame("services:\n  app:\n    image: as-deployed\n", file_get_contents($runFile));
     }
@@ -316,6 +197,20 @@ class DindCopyVolumesTest extends TestCase
         }
 
         return $actions;
+    }
+
+    /**
+     * @param  array<string, string>  $volumes  volume name => mount point
+     * @return array<string, mixed>
+     */
+    private static function container(string $id, string $service, array $volumes): array
+    {
+        $mounts = [['Type' => 'bind', 'Name' => '', 'Source' => '/home/alice/project', 'Destination' => '/app']];
+        foreach ($volumes as $name => $destination) {
+            $mounts[] = ['Type' => 'volume', 'Name' => $name, 'Source' => "/var/lib/docker/volumes/{$name}/_data", 'Destination' => $destination];
+        }
+
+        return ['Id' => $id, 'Config' => ['Labels' => ['com.docker.compose.service' => $service]], 'Mounts' => $mounts];
     }
 
     private function dindProject(string $username, string $strategy = 'express'): Dind
@@ -398,13 +293,18 @@ class DindCopyVolumesTest extends TestCase
                     return FakeProcess::ok();
                 }
 
-                if (count($parts) >= 4 && $parts[0] === 'sudo' && $parts[1] === 'test' && $parts[2] === '-d') {
-                    $path = $parts[3];
-                    return is_dir($path) ? FakeProcess::ok() : FakeProcess::failed();
+                $action = LocalRoot::action($parts);
+                $values = $action === null ? [] : LocalRoot::values($parts);
+                if ($action !== null) {
+                    $this->test->logRootCommand(implode(' ', LocalRoot::plain($parts)));
                 }
 
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'ls' && ($parts[2] ?? '') === '-1') {
-                    $dir = $parts[3] ?? '';
+                if ($action === 'files.isDirectory') {
+                    return is_dir($values[0]) ? FakeProcess::ok() : FakeProcess::failed();
+                }
+
+                if ($action === 'files.listNames') {
+                    $dir = $values[0];
                     $entries = [];
                     if (is_dir($dir)) {
                         foreach (scandir($dir) ?: [] as $entry) {
@@ -417,38 +317,18 @@ class DindCopyVolumesTest extends TestCase
                     return FakeProcess::ok(implode("\n", $entries));
                 }
 
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'find') {
-                    $entries = is_dir($parts[2] ?? '') ? array_diff(scandir($parts[2]) ?: [], ['.', '..']) : [];
+                if ($action === 'files.firstEntry') {
+                    $entries = is_dir($values[0]) ? array_diff(scandir($values[0]) ?: [], ['.', '..']) : [];
 
-                    return FakeProcess::ok($entries === [] ? '' : $parts[2] . '/' . reset($entries) . "\n");
+                    return FakeProcess::ok($entries === [] ? '' : $values[0] . '/' . reset($entries) . "\n");
                 }
 
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'mkdir') {
-                    $target = end($parts) ?: '';
-                    if (!is_dir($target)) {
-                        mkdir($target, 0777, true);
-                    }
-                }
-
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'rsync') {
-                    $this->test->logProcess('rsync-volume');
-                    $this->simulateRsync($parts);
-                }
-
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'mv') {
-                    $from = $parts[2] ?? '';
-                    $to = $parts[3] ?? '';
-                    if (is_dir($from)) {
-                        if (!is_dir(dirname($to))) {
-                            mkdir(dirname($to), 0777, true);
+                if ($action === 'files.makeDirectories') {
+                    foreach ($values as $target) {
+                        if (!is_dir($target)) {
+                            mkdir($target, 0777, true);
                         }
-                        rename($from, $to);
                     }
-                }
-
-                if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'rm') {
-                    $target = end($parts) ?: '';
-                    $this->removeTree($target);
                 }
 
                 return FakeProcess::ok();
@@ -461,79 +341,18 @@ class DindCopyVolumesTest extends TestCase
                 }
 
                 $parts = is_array($cmd) ? $cmd : (preg_split('/\s+/', (string) $cmd) ?: []);
-                if (str_contains(implode(' ', $parts), 'docker inspect')) {
-                    $this->test->logProcess('docker inspect');
+                $action = LocalRoot::action($parts);
+                if ($action !== null && str_starts_with($action, 'account-docker.')) {
+                    $this->test->logProcess($action);
+                    $inspected = $this->test->innerInspect ?? throw new \RuntimeException('inner daemon unreachable');
 
-                    return $this->test->innerInspect ?? throw new \RuntimeException('inner daemon unreachable');
+                    return (string) json_encode($action === 'account-docker.listContainers'
+                        ? array_map(static fn (array $container): array => ['Id' => $container['Id']], $inspected)
+                        : $inspected);
                 }
                 $this->runProcess($parts, $env, $timeout);
 
                 return '';
-            }
-
-            /**
-             * @param list<string> $parts
-             */
-            private function simulateRsync(array $parts): void
-            {
-                $src = '';
-                $dest = '';
-                foreach ($parts as $i => $part) {
-                    if ($part === '--delete') {
-                        continue;
-                    }
-                    if (str_ends_with($part, '/')) {
-                        if ($src === '') {
-                            $src = rtrim($part, '/');
-                        } else {
-                            $dest = rtrim($part, '/');
-                        }
-                    }
-                }
-                if ($src === '' || $dest === '') {
-                    return;
-                }
-                if (!is_dir($dest)) {
-                    mkdir($dest, 0777, true);
-                }
-                $this->copyDir($src, $dest);
-            }
-
-            private function copyDir(string $src, string $dest): void
-            {
-                foreach (scandir($src) ?: [] as $entry) {
-                    if ($entry === '.' || $entry === '..') {
-                        continue;
-                    }
-                    $from = $src . '/' . $entry;
-                    $to = $dest . '/' . $entry;
-                    if (is_dir($from)) {
-                        if (!is_dir($to)) {
-                            mkdir($to, 0777, true);
-                        }
-                        $this->copyDir($from, $to);
-                    } else {
-                        copy($from, $to);
-                    }
-                }
-            }
-
-            private function removeTree(string $path): void
-            {
-                if (!file_exists($path)) {
-                    return;
-                }
-                if (is_dir($path)) {
-                    foreach (scandir($path) ?: [] as $entry) {
-                        if ($entry === '.' || $entry === '..') {
-                            continue;
-                        }
-                        $this->removeTree($path . '/' . $entry);
-                    }
-                    rmdir($path);
-                } else {
-                    unlink($path);
-                }
             }
         };
     }

@@ -8,7 +8,6 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\GenerationSweep;
-use Symfony\Component\Process\Process;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\Git\FakesGitHost;
 
@@ -43,14 +42,44 @@ class CheckoutAsideSettleTest extends DeployHookTestCase
         $this->assertTrue($aside->moveAside(['app-1'], copyBack: false));
         $state = new GenerationState('alice');
         $state->put(GenerationState::CHECKOUT, ['owner' => ['pid' => 999999, 'start' => null, 'at' => time()]] + $state->get(GenerationState::CHECKOUT));
-        $this->respond('{{.State.Running}}', 0, "gone\n");
+        $this->respondToContainers(['app-1'], 0, '[null]');
         $before = count($this->calls());
 
         $this->assertSame(['alice: checkout restored'], GenerationSweep::run());
 
         $after = array_slice($this->calls(), $before);
-        $this->assertContains('mv -T ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath(), $after);
-        $this->assertNotContains('rm -rf ' . $aside->asidePath(), $after);
+        $this->assertSame([self::containersAsked(['app-1'])], self::containerQuestions($after));
+        $this->assertContains('mv -T -- ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath(), $after);
+        $this->assertNotContains('rm -rf -- ' . $aside->asidePath(), $after);
+    }
+
+    /** An aside directory on an account with no state file at all: the sweep still finds it and puts it back. */
+    public function test_the_sweep_puts_back_an_aside_no_state_file_names(): void
+    {
+        $runtime = $this->runtime();
+        $aside = (new CheckoutAside($runtime))->asidePath();
+        $this->respond('-name .project-prev', 0, $runtime->homeDirPath() . "\n");
+        $this->respond('test -d ' . $aside, 0);
+        $this->respond('test -d ' . $runtime->userAppDirPath(), 1);
+
+        $this->assertSame(['alice: checkout restored'], GenerationSweep::run());
+        $this->assertTrue($this->called('mv -T -- ' . $aside . ' ' . $runtime->userAppDirPath()));
+        $this->assertSame([], self::containerQuestions($this->calls()));
+    }
+
+    /** Beside a checkout that holds files the unrecorded tree stays where it is, and the sweep says nothing. */
+    public function test_the_sweep_leaves_an_unrecorded_aside_beside_a_full_checkout(): void
+    {
+        $runtime = $this->runtime();
+        $aside = (new CheckoutAside($runtime))->asidePath();
+        $this->respond('-name .project-prev', 0, $runtime->homeDirPath() . "\n");
+        $this->respond('test -d ' . $aside, 0);
+        $this->respond('ls -1A -- ' . $runtime->userAppDirPath(), 0, "index.php\n");
+
+        $this->assertSame([], GenerationSweep::run());
+        $this->assertFalse($this->called('mv -T -- ' . $aside));
+        $this->assertFalse($this->called('rm -rf -- ' . $aside));
+        $this->assertSame([], self::containerQuestions($this->calls()));
     }
 
     /** A succeeded deploy that left no ~/project does not delete the tree aside either. */
@@ -61,7 +90,8 @@ class CheckoutAsideSettleTest extends DeployHookTestCase
         $this->assertTrue($aside->moveAside(['app-1'], copyBack: false));
 
         $this->assertSame('restored', $aside->settle(true));
-        $this->assertTrue($this->called('mv -T ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath()));
+        $this->assertTrue($this->called('mv -T -- ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath()));
+        $this->assertSame([], self::containerQuestions($this->calls()));
     }
 
     /**
@@ -81,12 +111,14 @@ class CheckoutAsideSettleTest extends DeployHookTestCase
             'owner' => ['pid' => 999999, 'start' => null, 'at' => time()],
         ]);
         $this->respond('test -d ' . $aside->asidePath(), 0, '');
-        $this->respond('{{.State.Running}}', 0, "false\n");
+        $this->respondToContainers(['app-1'], 0, '[{"State":{"Running":false}}]');
 
         $this->assertSame('restored', $aside->settle(false));
 
-        $this->assertTrue($this->called('mv -T ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath()));
-        $this->assertFalse($this->called('rm -rf ' . $aside->asidePath()));
+        $this->assertSame([self::containersAsked(['app-1'])], self::containerQuestions($this->calls()));
+
+        $this->assertTrue($this->called('mv -T -- ' . $aside->asidePath() . ' ' . $runtime->userAppDirPath()));
+        $this->assertFalse($this->called('rm -rf -- ' . $aside->asidePath()));
     }
 
     /** A dockerd that cannot be asked is not "every container stopped": nothing is touched. */
@@ -95,11 +127,12 @@ class CheckoutAsideSettleTest extends DeployHookTestCase
         $runtime = $this->runtime();
         $aside = new CheckoutAside($runtime);
         $this->assertTrue($aside->moveAside(['app-1'], copyBack: true));
-        $this->respond('{{.State.Running}}', 1, "docker is not answering\n");
+        $this->respondToContainers(['app-1'], 69, "the Docker daemon of container alice is not running\n");
         $before = count($this->calls());
 
         $this->assertNull($aside->settle());
 
+        $this->assertSame([self::containersAsked(['app-1'])], self::containerQuestions(array_slice($this->calls(), $before)));
         $touched = array_filter(
             array_slice($this->calls(), $before),
             static fn (string $call): bool => str_starts_with($call, 'rm ') || str_starts_with($call, 'mv '),
@@ -108,31 +141,39 @@ class CheckoutAsideSettleTest extends DeployHookTestCase
         $this->assertTrue($aside->restorable());
     }
 
-    /** The inspect script itself: a daemon not up yet fails the question rather than answering "gone". */
-    public function test_the_running_check_fails_while_dockerd_is_not_up(): void
+    /** A daemon not up yet fails the question rather than answering "gone". */
+    public function test_the_running_check_is_unknown_while_dockerd_is_not_up(): void
     {
-        $this->assertSame([1, ''], $this->runningCheck('exit 1'));
-        $this->assertSame([0, "gone\n"], $this->runningCheck('[ "$1" = version ] && exit 0; exit 1'));
-        $this->assertSame([0, "true\n"], $this->runningCheck('[ "$1" = version ] && exit 0; echo true'));
+        $this->respondToContainers(['app-1'], 69, "the Docker daemon of container alice is not running\n");
+        $this->assertNull(CheckoutAside::allRunning($this->runtime(), ['app-1']));
+        $this->assertSame([self::containersAsked(['app-1'])], self::containerQuestions($this->calls()));
     }
 
-    /** @return array{0: ?int, 1: string} the script's exit code and output with this `docker` on PATH */
-    private function runningCheck(string $docker): array
+    /**
+     * Answers only the question about $ids, so a question about other containers gets no answer.
+     *
+     * @param  list<string>  $ids
+     */
+    private function respondToContainers(array $ids, int $code, string $output): void
     {
-        $bin = sys_get_temp_dir() . '/pa-docker-' . bin2hex(random_bytes(4));
-        mkdir($bin);
-        file_put_contents("{$bin}/docker", "#!/bin/sh\n{$docker}\n");
-        chmod("{$bin}/docker", 0755);
-        try {
-            $script = (new \ReflectionClassConstant(CheckoutAside::class, 'RUNNING_SCRIPT'))->getValue();
-            $process = new Process(['bash', '-c', $script, 'running', 'app-1'], null, ['PATH' => $bin . ':/usr/bin:/bin']);
-            $process->run();
+        $this->respond(self::containersAsked($ids), $code, $output);
+    }
 
-            return [$process->getExitCode(), $process->getOutput()];
-        } finally {
-            unlink("{$bin}/docker");
-            rmdir($bin);
-        }
+    /** @param  list<string>  $ids */
+    private static function containersAsked(array $ids): string
+    {
+        return 'pa-root account-docker.containers -- alice ' . implode(' ', $ids);
+    }
+
+    /**
+     * Every question about containers among $calls, as asked.
+     *
+     * @param  list<string>  $calls
+     * @return list<string>
+     */
+    private static function containerQuestions(array $calls): array
+    {
+        return array_values(array_filter($calls, static fn (string $call): bool => str_contains($call, 'account-docker.containers')));
     }
 
     private function runtime(): Dind

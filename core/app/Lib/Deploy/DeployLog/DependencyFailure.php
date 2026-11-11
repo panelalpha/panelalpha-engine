@@ -3,16 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * When `docker compose up` gives up on a service the application depends on,
- * it says only that: `dependency failed to start: container
- * project-limbas_pgsql-1 is unhealthy`. The reason is in that container's own
- * output (for example postgres 18 refusing its legacy data mount), which the
- * engine collects into the deploy log but never reported as the failure.
- *
- * This names the containers compose gave up on, and picks the line of their
- * output that says why, so it can lead the failure.
- *
- * No Laravel dependencies — unit-testable.
+ * Names the containers `docker compose up` gave up on as dependencies and picks the line of their output that
+ * says why, which compose itself never reports. No Laravel dependencies.
  */
 final class DependencyFailure
 {
@@ -61,9 +53,8 @@ final class DependencyFailure
     }
 
     /**
-     * The part of a container's output that says why: from the first line
-     * that announces an error, in its last WINDOW lines. The last few lines
-     * when none does. Compose's `name  | ` and docker's timestamps are dropped.
+     * The part of a container's output that says why: from the first error line in its last WINDOW lines, else
+     * the last few lines, without compose's `name  | ` prefix and docker's timestamps.
      */
     public static function cause(string $logs): string
     {
@@ -86,15 +77,14 @@ final class DependencyFailure
     }
 
     /**
-     * What the newest failing health probe printed, from `docker inspect` of
-     * `.State.Health` as JSON: the reason an unhealthy service gives, which its
-     * own output often lacks (a database that started fine but refuses the
-     * probe's login). Empty when there is no failing probe to quote.
+     * What the newest failing health probe printed, from a container's `State.Health`, which often gives the
+     * reason the service's own output lacks; empty when no probe failed.
+     *
+     * @param  array<string, mixed>|null  $health
      */
-    public static function probe(string $healthJson): string
+    public static function probe(?array $health): string
     {
-        $health = json_decode($healthJson, true);
-        $log = is_array($health) && is_array($health['Log'] ?? null) ? $health['Log'] : [];
+        $log = is_array($health['Log'] ?? null) ? $health['Log'] : [];
         foreach (array_reverse($log) as $entry) {
             $output = is_array($entry) ? trim((string) ($entry['Output'] ?? '')) : '';
             if (($entry['ExitCode'] ?? 0) !== 0 && $output !== '') {
@@ -106,9 +96,8 @@ final class DependencyFailure
     }
 
     /**
-     * The line that leads the failure output for one failed dependency: its
-     * name and state, what its health check said, then what it printed,
-     * folded onto the one line.
+     * The line leading the failure output for one failed dependency: its name and state, what its health
+     * check said, then what it printed, folded onto one line.
      */
     public static function describe(string $name, string $state, string $cause, string $probe = ''): string
     {

@@ -7,11 +7,12 @@ use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The host PHP build is a container on the *host* daemon with a customer's
- * repository mounted into it, so the hardening in this argv is the boundary,
- * not decoration.
+ * repository mounted into it, so what this request mounts and the user it runs
+ * as are the boundary, and the broker adds the rest of the sandbox.
  */
 class DindHostBuilderPhpTest extends TestCase
 {
@@ -22,27 +23,28 @@ class DindHostBuilderPhpTest extends TestCase
         return new EngineAccount('acme', '/home/acme', '1001:1001');
     }
 
-    private function argv(string $appRoot = ''): array
+    /** @return array<string, mixed> */
+    private function build(string $appRoot = '', bool $withCache = true, ?string $manifest = null): array
     {
-        return (new DindHostBuilder())->phpBuildArgv(
+        return LocalRoot::build((new DindHostBuilder)->phpBuildArgv(
             $this->account(),
             self::IMAGE,
             'composer install --no-dev',
-            $appRoot
-        );
+            $appRoot,
+            $withCache,
+            $manifest
+        ));
     }
 
     public function test_it_runs_as_the_account_and_gives_up_every_privilege(): void
     {
-        $argv = $this->argv();
-        $line = implode(' ', $argv);
+        $request = (new DindHostBuilder)->phpBuildArgv($this->account(), self::IMAGE, 'composer install --no-dev');
+        $build = LocalRoot::build($request);
 
-        $this->assertStringContainsString('--user 1001:1001', $line);
-        $this->assertStringContainsString('--security-opt no-new-privileges', $line);
-        $this->assertStringContainsString('--cap-drop ALL', $line);
-        $this->assertStringContainsString('--memory', $line);
-        $this->assertStringContainsString('--pids-limit', $line);
-        $this->assertNotContains('--privileged', $argv);
+        $this->assertSame('1001:1001', $build['user']);
+        $this->assertSame('2g', $build['memory']);
+        $this->assertSame([], LocalRoot::plain($request));
+        $this->assertNotContains('--privileged', LocalRoot::values($request));
     }
 
     /**
@@ -53,31 +55,29 @@ class DindHostBuilderPhpTest extends TestCase
      */
     public function test_it_builds_in_the_runtime_image(): void
     {
-        $this->assertContains(self::IMAGE, $this->argv());
+        $this->assertSame(self::IMAGE, $this->build()['image']);
     }
 
     public function test_it_mounts_the_project_and_the_accounts_composer_cache(): void
     {
-        $line = implode(' ', $this->argv());
-
-        $this->assertStringContainsString('/home/acme/project:/app', $line);
-        $this->assertStringContainsString(
-            PhpHostBuild::cacheDirFor('acme') . ':' . PhpBaseImage::COMPOSER_CACHE_DIR,
-            $line
+        $this->assertContains('/home/acme/project:/app', $this->build()['mounts']);
+        $this->assertContains(
+            PhpHostBuild::cacheDirFor('acme').':'.PhpBaseImage::COMPOSER_CACHE_DIR,
+            $this->build()['mounts']
         );
     }
 
     public function test_it_works_where_the_manifest_says_the_application_is(): void
     {
-        $this->assertContains('/app', $this->argv());
-        $this->assertContains('/app/phpBB', $this->argv('phpBB'));
+        $this->assertSame('/app', $this->build()['workdir']);
+        $this->assertSame('/app/phpBB', $this->build('phpBB')['workdir']);
     }
 
     public function test_a_project_directory_that_is_not_the_accounts_own_is_refused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        (new DindHostBuilder())->phpBuildArgv(
+        (new DindHostBuilder)->phpBuildArgv(
             new EngineAccount('acme', '/srv/elsewhere', '1001:1001'),
             self::IMAGE,
             'composer install'
@@ -88,14 +88,14 @@ class DindHostBuilderPhpTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        (new DindHostBuilder())->phpBuildArgv($this->account(), 'php; rm -rf /', 'composer install');
+        (new DindHostBuilder)->phpBuildArgv($this->account(), 'php; rm -rf /', 'composer install');
     }
 
     public function test_a_build_with_nothing_to_run_is_refused_rather_than_run_empty(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        (new DindHostBuilder())->phpBuildArgv($this->account(), self::IMAGE, '   ');
+        (new DindHostBuilder)->phpBuildArgv($this->account(), self::IMAGE, '   ');
     }
 
     /**
@@ -104,16 +104,15 @@ class DindHostBuilderPhpTest extends TestCase
      */
     public function test_it_does_not_rely_on_the_images_entrypoint(): void
     {
-        $argv = $this->argv();
-        $i = array_search('--entrypoint', $argv, true);
+        $request = (new DindHostBuilder)->phpBuildArgv($this->account(), self::IMAGE, 'composer install --no-dev');
 
-        $this->assertNotFalse($i);
-        $this->assertSame('sh', $argv[$i + 1]);
+        $this->assertSame('docker.phpBuild', LocalRoot::action($request));
+        $this->assertSame([], LocalRoot::plain($request));
     }
 
     public function test_the_composer_cache_directory_is_created_for_the_account(): void
     {
-        $line = implode(' ', (new DindHostBuilder())->prepareCacheArgv($this->account()));
+        $line = implode(' ', LocalRoot::plain((new DindHostBuilder)->prepareCacheArgv($this->account())));
 
         $this->assertStringContainsString(PhpHostBuild::cacheDirFor('acme'), $line);
         $this->assertStringContainsString('1001:1001', $line);
@@ -127,26 +126,14 @@ class DindHostBuilderPhpTest extends TestCase
      */
     public function test_a_runtime_manifest_is_exported_to_the_build_container(): void
     {
-        $argv = (new DindHostBuilder())->phpBuildArgv(
-            $this->account(),
-            self::IMAGE,
-            'composer install --no-dev',
-            '',
-            true,
-            PhpHostBuild::RUNTIME_MANIFEST_FILE
-        );
+        $environment = $this->build('', true, PhpHostBuild::RUNTIME_MANIFEST_FILE)['environment'];
 
-        $this->assertContains(
-            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
-            $argv
-        );
+        $this->assertSame(PhpHostBuild::RUNTIME_MANIFEST_FILE, $environment[PhpHostBuild::MANIFEST_ENV] ?? null);
     }
 
     public function test_without_a_runtime_manifest_the_build_reads_the_project_itself(): void
     {
-        $line = implode(' ', $this->argv());
-
-        $this->assertStringNotContainsString(PhpHostBuild::MANIFEST_ENV . '=', $line);
+        $this->assertArrayNotHasKey(PhpHostBuild::MANIFEST_ENV, $this->build()['environment']);
     }
 
     /**
@@ -157,20 +144,13 @@ class DindHostBuilderPhpTest extends TestCase
      */
     public function test_without_a_cache_the_mount_goes_too(): void
     {
-        $argv = (new DindHostBuilder())->phpBuildArgv(
-            $this->account(),
-            self::IMAGE,
-            'composer install',
-            '',
-            false
-        );
-        $line = implode(' ', $argv);
+        $build = $this->build('', false);
 
-        $this->assertStringNotContainsString(PhpHostBuild::cacheDirFor('acme'), $line);
-        $this->assertStringContainsString('/home/acme/project:/app', $line);
-        $this->assertStringNotContainsString(
-            'COMPOSER_CACHE_DIR=' . PhpBaseImage::COMPOSER_CACHE_DIR,
-            $line,
+        $this->assertNotContains(PhpHostBuild::cacheDirFor('acme').':'.PhpBaseImage::COMPOSER_CACHE_DIR, $build['mounts']);
+        $this->assertContains('/home/acme/project:/app', $build['mounts']);
+        $this->assertNotSame(
+            PhpBaseImage::COMPOSER_CACHE_DIR,
+            $build['environment']['COMPOSER_CACHE_DIR'] ?? null,
             'composer must not be pointed at a cache directory that is not mounted'
         );
     }

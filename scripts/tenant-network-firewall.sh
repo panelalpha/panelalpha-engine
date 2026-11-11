@@ -6,7 +6,7 @@
 # with a privileged container of their own. Here they get their own bridge, and
 # the policy lives in the host's netfilter, out of the tenant's reach:
 #   - account to account: dropped (enable_icc=false, and again below),
-#   - to the shared services on this bridge: sites-db 3306 and the two
+#   - to the shared services on this bridge: sites-db 3306 and the image
 #     registries 5000 only, at addresses pinned in docker-compose.yml,
 #   - the engine's own API on :2011, for the projects the engine allowed,
 #     named in config/tenant-api-access, and for no one else,
@@ -20,9 +20,15 @@
 # enable_icc=false makes Docker load br_netfilter, without which traffic
 # between two ports of one bridge never reaches iptables at all.
 #
-# Usage: tenant-network-firewall.sh [--create [--restart-docker]]
-# Idempotent. Run at core start (a reboot empties iptables) and by the engine
+# Usage: tenant-network-firewall.sh [--create [--restart-docker]] [--ports-on-stdin]
+#        tenant-network-firewall.sh --prefix
+# Idempotent. Run at root broker start (a reboot empties iptables) and by the engine
 # before an account starts. ufw reloads only its own chains, so it leaves these.
+#
+# --ports-on-stdin rebinds the ports from the broker's `subnet`, `member` and `port` lines; without
+# it the binding stays and only the rules around it are replaced, so unbound ports stay closed.
+#
+# --prefix prints the prefix --create would pick, from `network <cidr>` lines on stdin.
 #
 # --create makes the network when it is missing, on the first /16 of
 # 10.200-10.219 that nothing on the host uses (routes, addresses, Docker
@@ -31,17 +37,10 @@
 # refused if it overlaps. --restart-docker is for the installers only: it
 # restarts Docker once when a firewall flush (moving a host off CSF) left it
 # unable to create networks.
-# Core runs this script too, and restarting Docker there would stop core.
+# The root broker runs this script too, and restarting Docker there would stop it.
 #
-# A reboot starts the kernel with none of this, and Docker starts the accounts
-# at the same moment as core, which applied it about 6 s later: accounts ran
-# unfiltered and unbound until then. Two systemd units close that, installed by
-# --install-units (the installers run it):
-#   panelalpha-tenant-guard  before Docker: --boot puts the chains in place from
-#                            TENANT_NETWORK_PREFIX and an empty binding, so every
-#                            port of the bridge carries nothing until it is bound;
-#   panelalpha-tenant-bind   after every Docker start: binds the ports at once.
-# Core's entrypoint and tenant-network service still apply it as before.
+# panelalpha-tenant-guard (--install-units) runs --boot before every Docker start, all ports unbound;
+# the root broker's tenant-network service then binds them.
 
 # iptables-legacy gives up at once ("Another app is currently holding the
 # xtables lock") while Docker, ufw or fail2ban is changing rules; -w waits for
@@ -52,17 +51,24 @@ CREATE=0
 RESTART=0
 BOOT=0
 UNITS=0
+PORTS_ON_STDIN=0
+PREFIX=0
 for arg in "$@"; do
     case "$arg" in
     --create) CREATE=1 ;;
     --restart-docker) RESTART=1 ;;
     --boot) BOOT=1 ;;
     --install-units) UNITS=1 ;;
+    --ports-on-stdin) PORTS_ON_STDIN=1 ;;
+    --prefix) PREFIX=1 ;;
     esac
 done
 
 NET=pash-tenants
 BRIDGE=br-pa-tenants
+# What the root broker writes with --ports-on-stdin or --prefix; empty without them.
+network_lines=
+{ [ "$PORTS_ON_STDIN" = 1 ] || [ "$PREFIX" = 1 ]; } && network_lines=$(cat)
 ENV_FILE="${PA_ENV_FILE:-/opt/panelalpha/shared-hosting/.env}"
 # The engine writes the projects it allowed to call its API, one name per
 # line; a missing or empty file admits none.
@@ -77,6 +83,10 @@ used_networks() {
     ip -4 route show 2>/dev/null |
         awk '$1 ~ /^(blackhole|unreachable|prohibit|throw)$/ { print $2; next } { print $1 }'
     ip -4 -o addr show 2>/dev/null | awk '{ print $4 }'
+    if [ "$PREFIX" = 1 ]; then
+        printf '%s\n' "$network_lines" | awk '$1 == "network" { print $2 }'
+        return
+    fi
     docker network ls -q 2>/dev/null |
         xargs -r docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | tr ' ' '\n'
 }
@@ -148,6 +158,7 @@ install_units() {
 Description=PanelAlpha: hosting accounts' network closed until its ports are bound
 After=local-fs.target ufw.service
 Before=docker.service
+PartOf=docker.service
 
 [Service]
 Type=oneshot
@@ -157,27 +168,29 @@ ExecStart=/bin/sh $self --boot
 [Install]
 WantedBy=docker.service multi-user.target
 EOF
-    cat >"$dir/panelalpha-tenant-bind.service" <<EOF
-# Written by the PanelAlpha engine (scripts/tenant-network-firewall.sh).
-[Unit]
-Description=PanelAlpha: bind the hosting accounts' network ports once Docker is up
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh $self
-
-[Install]
-WantedBy=docker.service
-EOF
+    remove_bind_unit "$dir"
     systemctl daemon-reload &&
-        systemctl enable panelalpha-tenant-guard.service panelalpha-tenant-bind.service >/dev/null 2>&1 ||
-        { echo "tenant-network-firewall: could not enable the boot units" >&2; return 1; }
-    echo "tenant-network-firewall: boot units installed"
+        systemctl enable panelalpha-tenant-guard.service >/dev/null 2>&1 ||
+        { echo "tenant-network-firewall: could not enable the boot unit" >&2; return 1; }
+    echo "tenant-network-firewall: boot unit installed"
+}
+
+# panelalpha-tenant-bind runs this without the broker's lines, dropping the engine port's rule.
+remove_bind_unit() {
+    [ -e "$1/panelalpha-tenant-bind.service" ] || return 0
+    systemctl disable panelalpha-tenant-bind.service >/dev/null 2>&1 || true
+    rm -f "$1/panelalpha-tenant-bind.service"
+    echo "tenant-network-firewall: panelalpha-tenant-bind.service removed"
 }
 if [ "$UNITS" = 1 ]; then
     install_units || exit 1
+    exit 0
+fi
+
+if [ "$PREFIX" = 1 ]; then
+    prefix=$(choose_prefix) || exit 1
+    record_prefix "$prefix" || exit 1
+    echo "$prefix"
     exit 0
 fi
 
@@ -212,15 +225,17 @@ elif [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
     echo "tenant-network-firewall: created $NET on $prefix.0.0/16"
 fi
 if [ "$BOOT" != 1 ]; then
-    docker network inspect "$NET" >/dev/null 2>&1 || {
-        echo "tenant-network-firewall: no docker network $NET" >&2
-        exit 1
-    }
-
     # The addresses come from the network that exists, not from .env: a prefix
     # edited after the network was made would otherwise allow addresses sites-db
     # does not have, and every account would lose its database without a word.
-    SUBNET=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" | awk '{print $1}')
+    SUBNET=$(printf '%s\n' "$network_lines" | awk '$1 == "subnet" { print $2; exit }')
+    if [ -z "$SUBNET" ]; then
+        docker network inspect "$NET" >/dev/null 2>&1 || {
+            echo "tenant-network-firewall: no docker network $NET" >&2
+            exit 1
+        }
+        SUBNET=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" | awk '{print $1}')
+    fi
     actual=$(echo "$SUBNET" | cut -d. -f1-2)
     case "$SUBNET" in
     *.0.0/16) ;;
@@ -239,27 +254,17 @@ fi
 SITES_DB="$prefix.0.2"
 CACHE_REGISTRY="$prefix.0.3"
 REGISTRY_PROXY="$prefix.0.4"
-
-# "name ip" per running member of the network. A stopped container is not a
-# member, so it gets no rule; Docker attaches the rest on its own too.
-member_addresses() {
-    docker network inspect "$NET" -f '{{range .Containers}}{{.Name}} {{.MacAddress}} {{.IPv4Address}}{{"\n"}}{{end}}' |
-        while read -r name mac ip; do
-            [ -n "$name" ] && [ -n "$ip" ] || continue
-            echo "$name ${ip%/*}"
-        done
-}
+GHCR_PROXY="$prefix.0.6"
 
 # The engine's API port, for the accounts the engine allowed. Judged before
 # the private ranges are refused, and by the address Docker gave the container
-# on this bridge: an account cannot announce another's. At boot nothing runs
-# and Docker is not up, so no rule is emitted then.
+# on this bridge: an account cannot announce another's. None with --boot.
 api_access_rules() {
     [ "$BOOT" = 1 ] && return 0
     [ -f "$API_ACCESS_FILE" ] || return 0
     allowed=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$API_ACCESS_FILE" 2>/dev/null | grep -v '^$')
     [ -n "$allowed" ] || return 0
-    member_addresses | while read -r name ip; do
+    printf '%s\n' "$network_lines" | awk '$1 == "member" { print $2, $3 }' | while read -r name ip; do
         echo "$allowed" | grep -qxF "$name" || continue
         echo "-A PA-TENANT-NET -i $BRIDGE -s $ip/32 -p tcp -m conntrack --ctstate DNAT --ctorigdstport 2011 -j ACCEPT"
     done
@@ -279,6 +284,7 @@ flock 9
     echo "-A PA-TENANT-NET -o $BRIDGE -d $SITES_DB/32 -p tcp --dport 3306 -j ACCEPT"
     echo "-A PA-TENANT-NET -o $BRIDGE -d $CACHE_REGISTRY/32 -p tcp --dport 5000 -j ACCEPT"
     echo "-A PA-TENANT-NET -o $BRIDGE -d $REGISTRY_PROXY/32 -p tcp --dport 5000 -j ACCEPT"
+    echo "-A PA-TENANT-NET -o $BRIDGE -d $GHCR_PROXY/32 -p tcp --dport 5000 -j ACCEPT"
     echo "-A PA-TENANT-NET -o $BRIDGE -j DROP"
     api_access_rules
     for cidr in $REFUSED; do
@@ -321,33 +327,24 @@ iptables -t nat -C POSTROUTING -s "$SUBNET" ! -o "$BRIDGE" -j MASQUERADE 2>/dev/
 # before it is switched, and accepts ARP and IPv4 only when the port, the
 # frame's MAC and the sender address are the triple Docker attached; anything
 # else from a port, IPv6 included, is dropped. Frames the host sends do not
-# pass this hook. A container not bound yet is cut off, never let through;
-# core's tenant-network service binds a newly attached one within moments.
-port_bindings() { # "veth mac ip" per running member of the network
-    docker network inspect "$NET" -f '{{range .Containers}}{{.Name}} {{.MacAddress}} {{.IPv4Address}}{{"\n"}}{{end}}' |
-        while read -r name mac ip; do
-            [ -n "$name" ] && [ -n "$mac" ] || continue
-            pid=$(docker inspect -f '{{.State.Pid}}' "$name" 2>/dev/null)
-            [ -n "$pid" ] && [ "$pid" != 0 ] || continue
-            # The container's end names its peer's index on the host: eth0@if977.
-            peer=$(nsenter -t "$pid" -n ip -o link 2>/dev/null |
-                awk -v m="$mac" 'index($0, m) { split($2, a, "@if"); sub(":", "", a[2]); print a[2]; exit }')
-            [ -n "$peer" ] || continue
-            veth=$(ip -o link 2>/dev/null | awk -F': ' -v i="$peer" '$1 == i { split($2, a, "@"); print a[1]; exit }')
-            [ -n "$veth" ] && echo "$veth $mac ${ip%/*}"
-        done
-}
-
+# pass this hook. A container not bound yet is cut off until the broker binds it.
 if command -v nft >/dev/null 2>&1; then
-    # At boot nothing is bound yet: an empty binding cuts every port off.
+    # Only the broker's lines replace the sets; any other run flushes the rules and keeps them.
     bindings=
-    [ "$BOOT" = 1 ] || bindings=$(port_bindings)
+    if [ "$PORTS_ON_STDIN" = 1 ] && [ "$BOOT" != 1 ]; then
+        bindings=$(printf '%s\n' "$network_lines" | awk '$1 == "port" { print $2, $3, $4 }')
+        replace='delete table bridge pa_tenants'
+        bound="$(echo "$bindings" | grep -c .) port(s) bound"
+    else
+        replace='flush table bridge pa_tenants'
+        bound='its port bindings kept'
+    fi
     arp=$(echo "$bindings" | awk 'NF == 3 { printf "%s\"%s\" . %s . %s . %s", s, $1, $2, $2, $3; s = ", " }')
     ipv4=$(echo "$bindings" | awk 'NF == 3 { printf "%s\"%s\" . %s . %s", s, $1, $2, $3; s = ", " }')
-    # Created and replaced in one transaction: never absent, never half-filled.
+    # Created and refilled in one transaction: never absent, never half-filled.
     {
         echo 'add table bridge pa_tenants'
-        echo 'delete table bridge pa_tenants'
+        echo "$replace"
         echo 'table bridge pa_tenants {'
         echo '    set arp_ok {'
         echo '        type ifname . ether_addr . ether_addr . ipv4_addr'
@@ -366,14 +363,13 @@ if command -v nft >/dev/null 2>&1; then
         echo '    }'
         echo '}'
     } | nft -f - || exit 1
-    bound=$(echo "$bindings" | grep -c .)
 else
     echo "tenant-network-firewall: nft is missing; ports are not bound to their addresses (install nftables)" >&2
-    bound=none
+    bound='none port(s) bound'
 fi
 
 if [ "$BOOT" = 1 ]; then
     echo "tenant-network-firewall: $BRIDGE ($SUBNET) closed until its ports are bound"
     exit 0
 fi
-echo "tenant-network-firewall: $NET ($BRIDGE, $SUBNET) applied, $bound port(s) bound"
+echo "tenant-network-firewall: $NET ($BRIDGE, $SUBNET) applied, $bound"
