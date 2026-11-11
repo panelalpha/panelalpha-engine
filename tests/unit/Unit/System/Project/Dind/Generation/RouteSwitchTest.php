@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind\Generation;
 
+use App\Lib\Project\PublicRouting\PublicPortRules;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\System;
@@ -205,6 +206,20 @@ class RouteSwitchTest extends TestCase
         $this->assertSame(3000, ProxyRule::find($generated)->upstream_port, 'the engine routes its own');
         $this->assertSame(1, $this->fullRebuilds);
         $this->assertSame(1, $this->reloads);
+    }
+
+    /** A rule `public_ports:` made names its own port: the app moving elsewhere leaves it there. */
+    public function test_a_declared_public_port_does_not_follow_the_app(): void
+    {
+        $declared = $this->operatorRule('acme', 'tcp', 25692, 3000);
+        ProxyRule::query()->whereKey($declared)->update(['metadata' => json_encode(['source' => PublicPortRules::SOURCE, 'to' => 3000])]);
+        $hand = $this->operatorRule('acme', 'tcp', 25691, 3000);
+
+        $switch = new RouteSwitch($this->system(), 'acme');
+
+        $this->assertSame([$hand], array_column($switch->handRulesTo(3000), 'id'));
+        $this->assertSame([$hand], $switch->follow(3000, 8080));
+        $this->assertSame(3000, ProxyRule::find($declared)->upstream_port);
     }
 
     public function test_following_only_switched_off_rules_reloads_nothing(): void

@@ -4,6 +4,8 @@ namespace Tests\Unit\Domains;
 
 use App\Lib\Domains\CopyDomain;
 use App\Lib\Domains\DomainAllocator;
+use App\Lib\Project\PublicRouting\HostDomain;
+use App\Lib\Project\PublicRouting\PublicRoutingGrants;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\Tunnel;
@@ -62,10 +64,36 @@ class CopyDomainTest extends TestCase
         $copy = CopyDomain::forCopy('shop-565d.panelalpha.online', null);
 
         $this->assertNotNull($copy);
-        $this->assertFalse($copy->isTaken());
+        $this->assertNull($copy->refusal('shop1234'));
         $this->assertSame([], $this->allocator->asked);
         $this->assertSame('shop1234-9f0e.panelalpha.online', $copy->claim('shop1234'));
         $this->assertSame(['shop1234'], $this->allocator->asked);
+    }
+
+    public function test_a_requested_name_already_on_the_engine_is_refused(): void
+    {
+        $this->makeMainDomain($this->makeUser('shop', ['template' => 'dind'], 'shop.example.com'), 'shop.example.com');
+
+        $this->assertSame(
+            ['code' => 'domain_taken', 'message' => 'Domain already exists.'],
+            CopyDomain::forCopy('live.example.com', 'www.shop.example.com')?->refusal('shopcopy'),
+        );
+    }
+
+    public function test_the_servers_own_name_needs_the_copys_host_domain_permission(): void
+    {
+        Setting::setRuntimeSettings(['license_key' => 'K', PublicRoutingGrants::SETTING => '', 'cert_domain' => 'host.example.test']);
+        $copy = CopyDomain::forCopy('shop.example.com', 'www.host.example.test');
+        $this->assertNotNull($copy);
+
+        $this->assertSame(HostDomain::CLAIM_REFUSED, $copy->refusal('shopcopy')['code'] ?? null);
+        $this->assertSame(HostDomain::claimRefusal('shopcopy', 'host.example.test'), $copy->refusal('shopcopy'));
+
+        (new PublicRoutingGrants)->allow('shop', [PublicRoutingGrants::HOST_DOMAIN]);
+        $this->assertNotNull($copy->refusal('shopcopy'), 'the source\'s permission is not the copy\'s');
+
+        (new PublicRoutingGrants)->allow('shopcopy', [PublicRoutingGrants::HOST_DOMAIN]);
+        $this->assertNull($copy->refusal('shopcopy'));
     }
 
     public function test_the_copy_records_where_its_name_came_from_and_the_proxy_registration(): void

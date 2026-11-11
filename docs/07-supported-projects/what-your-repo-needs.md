@@ -89,7 +89,7 @@ git:
     - vendor/shared-lib
 ```
 
-An empty list fetches none. Without this setting, every submodule is fetched. A private submodule needs a git token that can read it: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting).
+An empty list fetches none. Without this setting, every submodule is fetched. The file's other settings: [panelalpha.yaml](panelalpha-yaml.md). A private submodule needs a git token that can read it: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting).
 
 ## Troubleshooting
 
@@ -102,7 +102,7 @@ Something in your repository is not a browser file, so the HTML rule would not c
 **It says `compose`, but that file is only for local development.**
 Docker Compose is checked near the top and almost always wins. Rename or remove the file, or expect the engine to run it. A named application the engine already knows can win instead.
 
-**It says `railpack` on a PHP application.**
+**It says `fallback` on a PHP application.**
 There is no `composer.json` at the top level, probably because your PHP application is in a subfolder. Fix the layout before deploying again.
 
 **It says `fallback` and I do not know why.**

@@ -94,7 +94,7 @@ The engine already sends HTTP and HTTPS for your project hostnames to the right 
 List the proxy rules on this engine.
 ```
 
-Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
+Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall). An application that needs a port of its own says so in its `panelalpha.yaml`: [Ports and the server's name an application asks for](#ports-and-the-servers-name-an-application-asks-for).
 
 Two rules cannot serve the same hostname on the same port, and two TCP or UDP rules cannot listen on the same address and port: the second one is refused, also when it was saved switched off and is switched on later. A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
 
@@ -102,9 +102,65 @@ On port 443 a rule named after a container project's domain is served with that 
 
 A rule named after a domain is served by that domain's own site, which takes it only under the domain's name and only in a container project; it then serves the domain's aliases too. A rule named after an alias, or after a domain or alias of a traditional PHP project, is refused, whoever owns it: that site already answers for the name, so the rule would never be served.
 
+## Ports and the server's name an application asks for
+
+An application can say in its `panelalpha.yaml` that it needs more than a hostname: a TCP or UDP port on the server (a game server, MQTT, SMTP), or the server's own name instead of a name of its own (a control panel that should answer on the address the server is known by).
+
+```yaml
+domain: host               # the server's own name; leave it out for a name of the project's own
+public_ports:
+  - { listen: 8081, to: 3000, transport: tcp }
+  - { listen: 27015, transport: udp }     # to defaults to listen, transport to tcp
+```
+
+`listen` is the port on the server. `to` is the port the application listens on in its project. `port:` is unchanged: it is still where the project's hostname sends HTTP. Ports 80 and 443 and the engine's own ports cannot be listed. The file's other settings: [panelalpha.yaml](../07-supported-projects/panelalpha-yaml.md).
+
+Nothing happens until you allow it, because whoever writes the repository would otherwise be opening ports on your server:
+
+```bash
+pae system:public-routing:allow <project> --ports --host-domain
+```
+
+- **Ports** open at once, as proxy rules belonging to the project, and the firewall opens with them. Removing a line from the file closes its port on the next deploy. A port another project or a service on the server already uses is skipped, with a warning in the deploy log, and the deploy carries on.
+- **The server's own name** is the one the engine's certificate is issued for (`cert_domain`). The first deploy allowed to makes it the project's main domain, served with that certificate, and keeps the name the project had. That happens once: afterwards the project's domains are its own to change ([moving to another domain](#moving-a-project-to-another-domain-or-https-port)), and no later deploy moves it back, whether the file still asks or not. A project whose permission you take back leaves the name at once, back on the name it had. Only one project can hold the server's name, and without the permission no project can take it through the API either, as a main domain, an addon or an alias. An engine with no name of its own (installed without `--domain`) has none to give.
+- `pae system:public-routing:deny <project>` takes both back at once. `pae system:public-routing:list` shows who is allowed what, and what each project's last deploy applied.
+
+The project's `public_routing` says the same once a deploy has read the file: what it asks for, what you allowed, and each port's state, `open`, `refused` or `not_allowed`, with the reason.
+
+A project on the server's name shares cookies with the engine's own `:2011`, since cookies ignore ports. Allow it only for an application you trust as much as the engine.
+
+## Moving a project to another domain or HTTPS port
+
+Every domain of a container project answers with its application, not only the main one. The main domain is the address the application is told (`PA_PUBLIC_URL`). Moving to another name takes three steps, and the old address keeps working until the last one:
+
+1. **Add** the new domain and request its certificate.
+2. **Make it the main domain.** The old main domain becomes an addon domain and keeps answering. The project is redeployed so the application is told its new address.
+3. **Delete** the old domain. Its name is free for another project.
+
+```text
+Make shop.example.com the main domain of shop. Once https://shop.example.com/
+works, delete shop.panelalpha.online.
+```
+
+Ports work the same way. A domain of a container project answers HTTPS on 443 unless you give it other ports: add the port, make it the domain's main port, then remove 443 if it should stop answering there.
+
+```bash
+pae project:domain:https-ports shop.example.com --project=shop --ports=443,8443
+pae project:domain:https-ports shop.example.com --project=shop --main=8443
+pae project:domain:https-ports shop.example.com --project=shop --ports=8443
+```
+
+- The main domain's main port is part of the address the application is told: `PA_PUBLIC_URL` becomes `https://shop.example.com:8443`, and `PA_PUBLIC_HOST` `shop.example.com:8443`, as a browser sends it. Changing it redeploys the project.
+- A port other than 443 needs the operator's permission (`pae system:public-routing:allow <project> --ports`). The firewall opens with the port and closes when no domain uses it any more. Taking the permission back puts every domain of the project on 443 again.
+- Projects share a port by name, as they share 443. A port a proxy rule or another service on the server uses is refused.
+- Once 443 is not one of a domain's ports, plain HTTP on port 80 redirects to the main port.
+- A name never answers for two projects on two ports: cookies ignore ports, so the two would share them. To give a name to another project, the first one leaves it completely.
+
 ## Removing and renaming a domain
 
-A project's main domain cannot be deleted. To change it, ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+
+Deleting a domain keeps its files. Its folder (`~/<domain>`) and its document root stay in the project home, because they may hold the site's files or be shared with another domain. The answer lists them in `files_kept`. Delete them with the file tools or over SFTP when you no longer need them.
 
 ## Mail from a domain
 

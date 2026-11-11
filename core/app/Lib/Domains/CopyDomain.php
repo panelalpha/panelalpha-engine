@@ -4,20 +4,15 @@ namespace App\Lib\Domains;
 
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Helper;
+use App\Lib\Project\PublicRouting\HostDomain;
 use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
- * The name a staging copy or a clone is created under.
- *
- * Without one asked for, a copy is named `staging.` in front of its source's
- * name. Not below panelalpha.online: that zone is the proxy's and its
- * certificate covers one label, so the copy could not be opened over HTTPS.
- * A copy of a project there gets a name of its own from
- * {@see DomainAllocator}, the way a new project does. That name is bought,
- * so it is only allocated by {@see claim()}, once every local check passed.
+ * The name a copy is created under: `staging.` before its source's, or, below panelalpha.online (whose
+ * certificate covers one label), a name {@see claim()} buys from {@see DomainAllocator} once local checks pass.
  */
 final class CopyDomain
 {
@@ -42,10 +37,22 @@ final class CopyDomain
         return $name === null ? null : new self($name);
     }
 
-    /** A name still to be allocated is not: the allocator only offers free ones. */
-    public function isTaken(): bool
+    /**
+     * Why the copy may not take its name, or null: a name already on the engine, or the server's own that
+     * $destUsername may not hold. A name still to be allocated is neither: the allocator only offers free ones.
+     *
+     * @return ?array{code: string, message: string}
+     */
+    public function refusal(string $destUsername): ?array
     {
-        return $this->name !== null && Domain::domainOrAliasExists($this->name);
+        if ($this->name === null) {
+            return null;
+        }
+        if (Domain::domainOrAliasExists($this->name)) {
+            return ['code' => 'domain_taken', 'message' => 'Domain already exists.'];
+        }
+
+        return HostDomain::claimRefusal($destUsername, $this->name);
     }
 
     /** The copy's name, allocating it now when it has to be bought. */
