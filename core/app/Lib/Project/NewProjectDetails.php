@@ -2,16 +2,14 @@
 
 namespace App\Lib\Project;
 
+use App\Lib\Git\DeployKey;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
 
 /**
- * The `details` blob a freshly created project starts life with.
- *
- * The resource limits come from {@see ResourceLimit}, so adding one does not
- * mean remembering to list it here as well -- including the asymmetry where
- * disk_space_limit defaults to -1 and every other limit to null.
+ * The `details` blob a freshly created project starts life with. Its limits come from {@see ResourceLimit}, so a new one
+ * need not be listed here, nor the asymmetry of disk_space_limit defaulting to -1 and every other limit to null.
  */
 final class NewProjectDetails
 {
@@ -54,6 +52,9 @@ final class NewProjectDetails
         foreach (self::SOURCE as $key) {
             $details[$key] = $params[$key] ?? null;
         }
+        if (is_array($params[DeployKey::DETAIL] ?? null)) {
+            $details[DeployKey::DETAIL] = $params[DeployKey::DETAIL];
+        }
 
         $details['env_vars'] = $envVars;
         $details['domain'] = $domainDetails;
@@ -62,13 +63,8 @@ final class NewProjectDetails
     }
 
     /**
-     * The same blob for a clone or a staging mirror, carried over from the
-     * project being copied rather than from a request.
-     *
-     * Not a copy of build(): the source keys are the stored ones, the
-     * dedicated-address flags are always off (a copy gets its own address or
-     * none), and the git branch and token arrive through
-     * {@see User::copiedDeploySnapshot()} instead.
+     * The blob for a clone or staging mirror, from the copied project: its stored keys, dedicated-address flags off (a copy
+     * gets its own address or none), and the git branch and token via {@see User::copiedDeploySnapshot()} instead.
      *
      * @param  array<string, mixed>  $source  the copied project's details
      * @return array<string, mixed>

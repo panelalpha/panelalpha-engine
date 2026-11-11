@@ -10,14 +10,12 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Creates a paste slot, and is the only thing that does -- the API and the
- * console both mint, and must not drift on what a new entry is.
- *
- * The raw ref (the paste URL's token) is returned here once and never stored.
+ * Creates a paste slot, and is the only thing that does: the API and the console both mint, and must not drift on what
+ * a new entry is. The raw ref (the paste URL's token) is returned here once and never stored.
  */
 class SecretMinter
 {
-    /** Bytes of the ref, which doubles as the form URL token. */
+    /** Bytes of the ref, which doubles as the form URL token: browser-URL entropy, as this string is the capability. */
     private const REF_BYTES = 48;
 
     /** Shorter than this and the secret could expire before anyone pastes it. */
@@ -43,17 +41,9 @@ class SecretMinter
         ?string $project = null,
         ?int $expiresIn = null
     ): array {
-        if ($expiresIn !== null && $expiresIn < self::MIN_EXPIRY_SECONDS) {
-            throw ValidationException::withMessages([
-                'expires_in' => 'A secret must live at least '.self::MIN_EXPIRY_SECONDS.' seconds.',
-            ]);
-        }
-        $project = self::trimmedOrNull($project);
-        if ($project !== null) {
-            self::assertProject($project, $scope);
-        }
+        self::assertExpiry($expiresIn);
+        $project = self::ownerOf($project, $scope);
         $verifyWith = PasteCheck::prepare($type, $verifyWith);
-        // Browser-URL entropy: this string is the capability.
         $ref = Str::random(self::REF_BYTES);
 
         $entry = SecretVaultEntry::create([
@@ -68,6 +58,31 @@ class SecretMinter
         ]);
 
         return [$entry, $ref];
+    }
+
+    /** @throws ValidationException when the secret could expire before anyone uses it */
+    public static function assertExpiry(?int $expiresIn): void
+    {
+        if ($expiresIn !== null && $expiresIn < self::MIN_EXPIRY_SECONDS) {
+            throw ValidationException::withMessages([
+                'expires_in' => 'A secret must live at least '.self::MIN_EXPIRY_SECONDS.' seconds.',
+            ]);
+        }
+    }
+
+    /**
+     * A new entry's owner from the start, trimmed; null lets the first project that reads it own it.
+     *
+     * @throws ValidationException
+     */
+    public static function ownerOf(?string $project, string $scope): ?string
+    {
+        $project = self::trimmedOrNull($project);
+        if ($project !== null) {
+            self::assertProject($project, $scope);
+        }
+
+        return $project;
     }
 
     /**

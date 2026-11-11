@@ -2,9 +2,8 @@
 
 namespace App\Mcp\Tools\Api;
 
-use App\Lib\Http\BoundedDownload;
+use App\Lib\Http\GuardedDownload;
 use App\Lib\Http\OutboundUrl;
-use Illuminate\Http\Client\Response;
 use Illuminate\Http\UploadedFile;
 use InvalidArgumentException;
 use RuntimeException;
@@ -147,48 +146,7 @@ final class UploadArguments
     /** Redirects are followed by hand so every hop passes the outbound guard. */
     private static function download(string $url, string $into): void
     {
-        $current = $url;
-        $bounded = new BoundedDownload(self::MAX_URL_BYTES);
-
-        for ($hop = 0; $hop <= OutboundUrl::MAX_REDIRECTS; $hop++) {
-            OutboundUrl::assertAllowed($current);
-
-            $response = $bounded->fetch($current, $into, OutboundUrl::pin($current));
-
-            if ($response->redirect()) {
-                $current = self::redirectTarget($current, $response);
-
-                continue;
-            }
-
-            self::assertDownloaded($response, $current, $into);
-
-            return;
-        }
-
-        throw new RuntimeException("Downloading {$url} followed more than " . OutboundUrl::MAX_REDIRECTS . ' redirects.');
-    }
-
-    private static function redirectTarget(string $current, Response $response): string
-    {
-        $location = (string) $response->header('Location');
-        if ($location === '') {
-            throw new RuntimeException("Downloading {$current} answered HTTP {$response->status()} with no Location.");
-        }
-
-        return OutboundUrl::absoluteUrl($current, $location);
-    }
-
-    private static function assertDownloaded(Response $response, string $current, string $into): void
-    {
-        if (!$response->successful()) {
-            throw new RuntimeException("Downloading {$current} answered HTTP {$response->status()}.");
-        }
-
-        clearstatcache(true, $into);
-        if ((int) filesize($into) > self::MAX_URL_BYTES) {
-            throw new InvalidArgumentException("The file at {$current} is larger than the " . (self::MAX_URL_BYTES / 1048576) . " MB limit.");
-        }
+        GuardedDownload::fetch($url, $into, self::MAX_URL_BYTES);
     }
 
     private static function nameFromUrl(string $url): ?string

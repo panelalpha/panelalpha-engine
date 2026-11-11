@@ -12,8 +12,8 @@ class DomainVisitorsBreakdownCommand extends UsageCommand
                             {project : Project username}
                             {domain : Domain hostname}
                             {dimension : pages, countries, continents, regions, referrers, os, browsers, or status_codes}
-                            {--start= : Range start (Y-m-d)}
-                            {--end= : Range end (Y-m-d)}';
+                            {--start= : Range start (Y-m-d, required)}
+                            {--end= : Range end (Y-m-d, required)}';
 
     protected $description = 'Show a visitor breakdown for a domain';
 

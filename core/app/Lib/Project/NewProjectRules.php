@@ -17,16 +17,14 @@ use App\Rules\UnlimitedOrAtLeastZero;
 use App\System\Project\Git\Ref as GitRef;
 
 /**
- * What a project create accepts: the input it rewrites before validating, and
- * the rules it validates against. POST /users, POST /projects and the CLI all
- * read them from here.
+ * What a project create accepts: the input it rewrites before validating, and the rules it validates against, read by
+ * POST /users, POST /projects and the CLI alike.
  */
 final class NewProjectRules
 {
     /**
-     * The fields to overwrite before validation, and what the caller called
-     * the project name. A missing `memory_limit` becomes the default, since every
-     * project has one, and a schemeless `git_repo` (`github.com/owner/repo`) is accepted.
+     * The fields to overwrite before validation, and what the caller called the project name. A missing `memory_limit`
+     * becomes the default, since every project has one; a schemeless `git_repo` (`github.com/owner/repo`) is accepted.
      *
      * @param  array<string, mixed>  $input
      * @return array{0: array<string, mixed>, 1: string}
@@ -94,16 +92,16 @@ final class NewProjectRules
     }
 
     /**
-     * Some fields are checked for shape only: `stages` against the manifest grammar by
-     * DeployPlanInput, `recipe` against the recipe registry, and whether the remote has
-     * `git_branch` by ProjectCreator's repository probe, the one check that leaves the host.
+     * Some fields are checked for shape only: `stages` against the manifest grammar by DeployPlanInput, `recipe` against the
+     * recipe registry, and `git_branch` by ProjectCreator's repository probe, the one check that leaves the host.
      *
      * @param  string  $nameField  what the caller called the project name
      * @param  mixed  $domain  the normalised `domain` field
      * @param  bool  $container  whether the create makes a container project ({@see createsContainer()})
+     * @param  bool  $sshWithKey  the create carries a deploy key, so `git_repo` may be an SSH remote
      * @return array<string, mixed>
      */
-    public static function rules(string $nameField, mixed $domain, bool $container): array
+    public static function rules(string $nameField, mixed $domain, bool $container, bool $sshWithKey = false): array
     {
         return [
             'username' => self::nameRules($nameField),
@@ -134,7 +132,7 @@ final class NewProjectRules
                 'in:'.implode(',', DomainPlan::TUNNELS),
                 self::onlineTunnelServesTheDomain($domain),
             ],
-            'git_repo' => ['nullable', ...self::gitRepositoryRules()],
+            'git_repo' => ['nullable', ...self::gitRepositoryRules($sshWithKey)],
             'git_branch' => self::gitBranchRules(),
             'git_token' => self::gitTokenRules(),
             ...self::envVarRules(),
@@ -157,14 +155,58 @@ final class NewProjectRules
     }
 
     /**
+     * The keys a flat create body takes: every rule, and `name` for `username`.
+     *
+     * @return list<string>
+     */
+    public static function flatKeys(): array
+    {
+        return [...array_keys(self::rules('username', null, false)), 'name'];
+    }
+
+    /**
+     * What each field holds, said in a refusal so a caller can fix the value
+     * without reading the docs.
+     *
+     * @return array<string, array{expected: string, examples?: list<string>}>
+     */
+    public static function expectations(): array
+    {
+        $count = static fn (string $what, string $example): array => [
+            'expected' => $what,
+            'examples' => [$example],
+        ];
+
+        return [
+            'username' => ['expected' => ProjectName::EXPECTED, 'examples' => ProjectName::EXAMPLES],
+            'domain' => ['expected' => 'a hostname, lowercase, without scheme or path', 'examples' => ['shop.example.com']],
+            'domain_redirect_url' => ['expected' => 'an absolute URL', 'examples' => ['https://example.com/']],
+            'email' => ['expected' => 'an email address', 'examples' => ['ops@example.com']],
+            'disk_space_limit' => $count('an integer number of MB, -1 for unlimited', '10240'),
+            'memory_limit' => $count('an integer number of MB, '.ProjectMemory::MIN_MB.' or more, '.ProjectMemory::CONTAINER_MIN_MB
+                .' or more for a container project; omitted, the server default', '512'),
+            'cpu_limit' => $count('a number of CPU cores, fractions allowed, -1 for unlimited', '1.5'),
+            'bandwidth_limit' => $count('an integer number of MB a month, -1 for unlimited', '100000'),
+            'inodes_limit' => $count('an integer, -1 for unlimited', '500000'),
+            'tunnel' => ['expected' => 'one of: '.implode(', ', DomainPlan::TUNNELS), 'examples' => DomainPlan::TUNNELS],
+            'git_branch' => ['expected' => 'the name of a branch or tag in the repository', 'examples' => ['main', 'v1.2.0']],
+            'env_vars' => ['expected' => 'an object of KEY: "value" strings, at most 200', 'examples' => ['{"APP_ENV": "production"}']],
+            'password' => ['expected' => 'a string of 1-255 characters'],
+            'recipe' => ['expected' => 'a recipe name, at most 64 characters'],
+            'template' => ['expected' => 'a template name; dind for a git_repo', 'examples' => ['dind']],
+        ];
+    }
+
+    /**
      * The repository URL grammar, without the `nullable` or `required` the
-     * caller decides: a create may omit it, an attach may not.
+     * caller decides: a create may omit it, an attach may not. An SSH remote
+     * passes only when a deploy key comes with it.
      *
      * @return array<int, mixed>
      */
-    public static function gitRepositoryRules(): array
+    public static function gitRepositoryRules(bool $sshWithKey = false): array
     {
-        return ['string', 'max:'.GitRepoInput::MAX_LENGTH, new GitRepositoryUrl];
+        return ['string', 'max:'.GitRepoInput::MAX_LENGTH, new GitRepositoryUrl(false, $sshWithKey)];
     }
 
     /**
@@ -197,6 +239,37 @@ final class NewProjectRules
         return [
             'env_vars' => ['array', 'nullable', 'max:200', new EnvVarKeysNotReserved],
             'env_vars.*' => 'string|nullable|max:8192',
+        ];
+    }
+
+    /**
+     * A git source given to a project that exists: the repository required,
+     * and the build options of the deploy it starts.
+     *
+     * @param  bool  $sshWithKey  a deploy key comes with it, so `git_repo` may be an SSH remote
+     * @return array<string, mixed>
+     */
+    public static function attachRules(bool $sshWithKey = false): array
+    {
+        return [
+            'git_repo' => ['required', ...self::gitRepositoryRules($sshWithKey)],
+            'git_branch' => self::gitBranchRules(),
+            'git_token' => self::gitTokenRules(),
+            ...self::buildRules(),
+        ];
+    }
+
+    /**
+     * What a deploy of a project that exists takes beside its source.
+     *
+     * @return array<string, mixed>
+     */
+    public static function buildRules(): array
+    {
+        return [
+            ...self::envVarRules(),
+            'stages' => 'array|nullable',
+            'recipe' => 'string|nullable|max:64',
         ];
     }
 

@@ -6,9 +6,8 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
- * A project create as {@see ProjectCreator} takes it: the validated fields,
- * plus the raw values the create reads itself -- vault references are resolved
- * only once the name is known, and `stages`/`recipe` have a grammar of their own.
+ * A project create as {@see ProjectCreator} takes it: the validated fields plus raw values it reads itself, since vault
+ * references resolve only once the name is known. `deployKey` is the `vault:` reference an SSH remote clones with.
  */
 final class NewProjectInput
 {
@@ -23,6 +22,7 @@ final class NewProjectInput
         public readonly mixed $envVars = null,
         public readonly mixed $stages = null,
         public readonly mixed $recipe = null,
+        public readonly ?string $deployKey = null,
     ) {}
 
     /**

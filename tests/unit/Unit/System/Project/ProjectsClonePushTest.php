@@ -52,7 +52,7 @@ class ProjectsClonePushTest extends TestCase
     public function test_production_clone_staging_and_push_callers_use_system_projects(): void
     {
         $workerPaths = [
-            'Http/Controllers/UserController.php',
+            'Lib/Project/ProjectCopier.php',
             'Jobs/CreateStaging.php',
             'Jobs/PushState.php',
             'Console/Commands/Projects/ProjectStagingCommand.php',
@@ -67,7 +67,7 @@ class ProjectsClonePushTest extends TestCase
             $this->assertStringContainsString('projects()->', $source, $path);
         }
 
-        $this->assertStringContainsString('projects()->clone(', file_get_contents($this->coreAppRoot.'/Http/Controllers/UserController.php'));
+        $this->assertStringContainsString('projects()->clone(', file_get_contents($this->coreAppRoot.'/Lib/Project/ProjectCopier.php'));
         $this->assertStringContainsString('projects()->copy(', file_get_contents($this->coreAppRoot.'/Jobs/CreateStaging.php'));
         $this->assertStringContainsString('projects()->pushToApp(', file_get_contents($this->coreAppRoot.'/Jobs/PushState.php'));
 

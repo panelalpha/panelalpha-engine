@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\BuildsNewProjectInput;
 use App\Http\Requests\Concerns\ReportsProblems;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Project\NewProjectRules;
@@ -13,6 +14,7 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class ProjectSourceAttachRequest extends FormRequest
 {
+    use BuildsNewProjectInput;
     use ReportsProblems;
 
     public function authorize(): bool
@@ -30,14 +32,7 @@ class ProjectSourceAttachRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
-            'git_repo' => ['required', ...NewProjectRules::gitRepositoryRules()],
-            'git_branch' => NewProjectRules::gitBranchRules(),
-            'git_token' => NewProjectRules::gitTokenRules(),
-            ...NewProjectRules::envVarRules(),
-            'stages' => 'array|nullable',
-            'recipe' => 'string|nullable|max:64',
-        ];
+        return NewProjectRules::attachRules();
     }
 
     protected function expectations(): array

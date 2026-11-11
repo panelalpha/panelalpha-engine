@@ -54,23 +54,38 @@ A project stores the token it was given. Deleting a vault entry does not take it
 
 ## A deploy key instead of a token
 
-A deploy key gives the engine read access to one repository and nothing else. Ask for one:
+A deploy key gives the engine read access to one repository and nothing else, over SSH. Ask for a new project with one:
+
+```text
+Deploy git@github.com:acme/shop.git, branch main, as the project shop.
+Use a deploy key.
+```
+
+The assistant creates the key first and shows you its public half, a line that starts with `ssh-ed25519`. Add that line to the repository as a read-only deploy key (on GitHub: **Settings > Deploy keys**), then tell the assistant you are done. It creates the project with the key in one step: the engine reads the repository with the key before anything is created, so a key that is not on the repository yet is refused and nothing is left behind. Later pulls and rebuilds use the same key. The private half is stored encrypted and never leaves the engine.
+
+The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. The server must be on a public address, like any repository the engine fetches from: see `host_refused` under Troubleshooting below. If the server's key changes later, the connection is refused; create a new key with the server named again.
+
+A project that already exists can get a key of its own too:
 
 ```text
 Create a deploy key for the project shop and connect git@github.com:acme/shop.git, branch main.
 ```
 
-The assistant creates the project's key and shows you its public half, a line that starts with `ssh-ed25519`. Add that line to the repository as a read-only deploy key (on GitHub: **Settings > Deploy keys**), then tell the assistant you are done. The engine connects the repository over SSH and deploys it. Later pulls and rebuilds use the same key. The private half is stored encrypted and never leaves the engine.
-
-The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. The server must be on a public address, like any repository the engine fetches from: see `host_refused` under Troubleshooting below. If the server's key changes later, the connection is refused; delete the deploy key and create it again to trust the new one.
-
 ## A zip of files, not a repository
 
 ```text
-Upload this archive into the project and deploy it: /path/to/app.zip
+Deploy this archive as a new project: /path/to/app.zip
 ```
 
-Use this when the code is not in git. After the first deploy, updating that project is a rebuild of the files already on the VPS, unless you upload a new archive.
+```text
+Deploy https://example.com/releases/app.tar.gz as the project shop.
+```
+
+The archive is uploaded to the engine first, or downloaded from its address, and the project is created and deployed from it in one step. A .zip, .tar.gz or .tgz works; a single top-level folder is unwrapped. Use this when the code is not in git. After the first deploy, updating that project is a rebuild of the files already on the VPS, unless you give it a new archive:
+
+```text
+Deploy /path/to/app-v2.zip into the project shop.
+```
 
 ## After the project is connected
 
@@ -104,7 +119,7 @@ A project created without a repository, for example one set up first and pointed
 Connect https://github.com/org/app to the project shop and deploy it.
 ```
 
-This works only for a project that runs in its own container and has not run an application yet. A project that already has a repository is refused. So is a classic hosting project, which cannot be converted. A private repository needs a token, as above.
+This works only for a project that runs in its own container and has not run an application yet. A project that already has a repository is refused. So is a classic hosting project, which cannot be converted. A private repository needs a token or a deploy key, as above.
 
 ## Look at branches and tags first
 
@@ -161,7 +176,7 @@ Check https://github.com/FreshRSS/FreshRSS without deploying it. What stack,
 which branch, which port?
 ```
 
-Mode: read. Tools: `source_inspect`. Check: the answer names a stack, a branch and the way it was read (`tree` or `clone`). No project exists afterwards (`project_list` does not show a new one). No `.env` values appear, only names.
+Mode: read. Tools: `source_inspect`. Check: the answer names a stack, a branch and the way it was read (`partial`, `tree` or `clone`). No project exists afterwards (`project_list` does not show a new one). No `.env` values appear, only names.
 
 **List branches and tags**
 
@@ -265,7 +280,7 @@ Mode: read. Tools: `app_health_check`. Check: the answer says the application it
 Upload /path/to/app.zip into project tzip and deploy it.
 ```
 
-Mode: modify. Tools: `file_upload`, `project_deploy_archive`, `task_get`. Check: a single top-level folder in the zip is unwrapped, the deploy completes, and a second request while it runs is refused with a pointer to the running task.
+Mode: modify. Tools: `upload_create`, `project_source_set` (or `file_upload` and `project_deploy_archive`), `task_get`. Check: a single top-level folder in the zip is unwrapped, the deploy completes, and a second request while it runs is refused with a pointer to the running task.
 
 **Attach a repository later**
 
@@ -274,7 +289,7 @@ Create the project tlater without a repository. Then connect
 https://github.com/usememos/memos to it and deploy it.
 ```
 
-Mode: modify. Tools: `project_create`, `project_source_attach`, `task_get`. Check: the attach answers with a task id, the deploy completes, and attaching a second repository to the same project is refused.
+Mode: modify. Tools: `project_create`, `project_source_set`, `task_get`. Check: the attach answers with a task id, the deploy completes, and attaching a second repository to the same project is refused.
 
 **Do not deploy twice**
 
@@ -343,6 +358,22 @@ branch main. Then remove the key.
 ```
 
 Mode: full. Tools: `git_deploy_key_create`, `git_connect`, `git_deploy_key_delete`. Check: only the public half is shown, and it starts with `ssh-ed25519`. Asking again returns the same key. After the delete, SSH remotes stop authenticating.
+
+**A new project from an SSH remote**
+
+```text
+Deploy git@github.com:acme/shop.git as the project tssh, with a deploy key.
+```
+
+Mode: modify. Tools: `vault_deploy_key_create`, `project_create`, `task_get`. Check: the public key is shown before the project exists, a create before the key is on the repository is refused with nothing created, and the create after it deploys.
+
+**A new project from an archive**
+
+```text
+Deploy https://github.com/usememos/memos/archive/refs/heads/main.zip as the project tarch.
+```
+
+Mode: modify. Tools: `project_create`, `task_get`. Check: one task creates and deploys it, and `project_get` shows source type archive.
 
 **A deploy that fails**
 

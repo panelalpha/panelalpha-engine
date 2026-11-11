@@ -49,9 +49,14 @@ return [
     'POST /projects/{username}/deploy-archive' => 'project_deploy_archive',
     'POST /projects/{username}/rebuild' => 'project_rebuild',
     'POST /projects/{username}/source' => 'project_source_attach',
+    // The typed source of POST /projects, set on a project that exists.
+    'PUT /projects/{username}/source' => 'project_source_set',
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
     'PUT /projects/{username}/password' => 'project_password_set',
+    'GET /projects/{username}/overlay' => 'project_overlay_get',
+    'PUT /projects/{username}/overlay' => 'project_overlay_set',
+    'DELETE /projects/{username}/overlay' => 'project_overlay_delete',
     'DELETE /projects/{username}/password' => 'project_password_unset',
     'GET /projects/{username}/usage' => 'project_usage',
     'GET /projects/{username}/metrics/history' => 'project_metrics_history',
@@ -320,6 +325,13 @@ return [
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
     'GET /vault/config' => 'vault_config_get',
+    // An SSH deploy key the vault generates, for a create with an SSH remote.
+    'POST /vault/deploy-keys' => 'vault_deploy_key_create',
+
+    // Archives uploaded before their project exists
+    'POST /uploads' => 'upload_create',
+    'GET /uploads/{id}' => 'upload_get',
+    'DELETE /uploads/{id}' => 'upload_delete',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`
@@ -332,10 +344,23 @@ return [
     'PUT /system/api-access/{project}' => 'system_api_access_allow',
     'POST /system/api-access/{project}/rotate' => 'system_api_access_rotate',
     'DELETE /system/api-access/{project}' => 'system_api_access_deny',
+    // Cache registry base images: the operator's own, and the engine's catalogue (listed only).
+    'GET /system/images' => 'system_image_list',
+    'POST /system/images' => 'system_image_create',
+    'GET /system/images/{id}' => 'system_image_get',
+    'PUT /system/images/{id}' => 'system_image_update',
+    'POST /system/images/{id}/refresh' => 'system_image_refresh',
+    'DELETE /system/images/{id}' => 'system_image_delete',
+    'GET /system/build-caches' => 'system_build_cache_list',
+    'POST /system/build-caches' => 'system_build_cache_build',
+    'DELETE /system/build-caches' => 'system_build_cache_remove',
     'PUT /system/update' => 'system_update',
     'PUT /system/change-webserver' => 'system_webserver_change',
     'PUT /system/webserver-config' => 'system_webserver_config_set',
     'PUT /system/reset-webserver-panel-password' => 'system_webserver_password_reset',
+    'GET /system/overlay' => 'system_overlay_get',
+    'PUT /system/overlay' => 'system_overlay_set',
+    'DELETE /system/overlay' => 'system_overlay_delete',
     'GET /system/ssl-config' => 'system_ssl_config_get',
     'PUT /system/ssl-config' => 'system_ssl_config_set',
     'PUT /system/engine-certificate' => 'system_engine_cert_request',

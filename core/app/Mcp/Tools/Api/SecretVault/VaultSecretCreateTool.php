@@ -57,7 +57,10 @@ class VaultSecretCreateTool extends ApiTool
             'expires_in' => $schema->integer()->min(60)->description('Seconds until the secret expires. After that it is refused and deleted, with no one having to remove it. Omitted, it never expires. A project that already used the secret keeps the copy it stored.'),
             'project' => $schema->string()->description('Only with `scope: project`: the project that owns the secret from the start, so only that project can read it. The project need not exist yet. Omitted, the first project that reads the secret owns it. Example: shop.'),
             'purpose' => $schema->string()->max(255)->description('What this secret is for, in your words -- "deploy key for the shop repo", "Cloudflare token for the staging zone". Shown on the paste form, so the person handing over a credential can see why, and returned by `list`. Several entries share one `type`, and the secret can never be read back, so this is what tells them apart later when deciding which to delete. Example: Deploy key for the shop repo.'),
-            'verify_with' => $schema->object()->description('What the pasted secret is checked against before it is saved. `git_token`: `repo_url`, the HTTPS repository the token must be able to read. `cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must see. A refused token is not stored and the form asks again; an unreachable host saves it unchecked.'),
+            'verify_with' => $schema->object(fn ($schema): array => [
+                'repo_url' => $schema->string()->description('Example: https://github.com/acme/shop.'),
+                'hostname' => $schema->string()->description('Example: shop.example.com.'),
+            ])->description('What the pasted secret is checked against before it is saved. `git_token`: `repo_url`, the HTTPS repository the token must be able to read. `cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must see. A refused token is not stored and the form asks again; an unreachable host saves it unchecked.'),
         ];
     }
 }

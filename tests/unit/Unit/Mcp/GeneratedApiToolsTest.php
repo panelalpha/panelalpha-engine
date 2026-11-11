@@ -180,22 +180,54 @@ class GeneratedApiToolsTest extends TestCase
     }
 
     /**
-     * A project an agent creates is an app, so it gets dind without asking;
-     * REST callers keep classic hosting as the default. From `x-mcp-default`.
+     * The global overlay's body is documented inline, so the tool takes `html` and `position`.
      */
-    public function test_project_create_sends_dind_when_the_template_is_omitted(): void
+    public function test_the_system_overlay_tool_takes_the_body_the_endpoint_requires(): void
+    {
+        $tool = new \App\Mcp\Tools\Api\System\SystemOverlaySetTool();
+        $schema = $tool->toArray()['inputSchema'];
+
+        $this->assertSame(['html', 'position'], array_keys((array)($schema['properties'] ?? [])));
+        $this->assertSame(['html'], $schema['required'] ?? null);
+        $this->assertSame(['html', 'position'], $this->invoke($tool, 'bodyParams'));
+    }
+
+    /**
+     * Nested objects included and nothing defaulted: an empty project is a container unless `runtime` says otherwise.
+     */
+    public function test_project_create_takes_the_typed_body(): void
     {
         $tool = new \App\Mcp\Tools\Api\Projects\ProjectCreateTool();
+        $properties = $tool->toArray()['inputSchema']['properties'];
 
-        $this->assertSame('dind', $this->invoke($tool, 'apiInput', ['name' => 'shop'])['template'] ?? null);
+        $this->assertArrayNotHasKey('template', $properties);
+        $this->assertArrayNotHasKey('git_repo', $properties);
+        $this->assertSame('object', $properties['source']['type']);
+        $this->assertSame(['type'], $properties['source']['required'] ?? null);
         $this->assertSame(
-            'default',
-            $this->invoke($tool, 'apiInput', ['name' => 'shop', 'template' => 'default'])['template'] ?? null
+            ['type', 'url', 'branch', 'auth', 'upload_id', 'path', 'from', 'copy_databases', 'title', 'admin', 'locale', 'version'],
+            array_keys($properties['source']['properties']),
         );
-        $this->assertStringContainsString(
-            'sends dind when it is omitted',
-            (string)($tool->toArray()['inputSchema']['properties']['template']['description'] ?? '')
+        $this->assertSame(['type', 'token', 'key'], array_keys($properties['source']['properties']['auth']['properties']));
+        $this->assertSame(['name', 'tunnel', 'redirect_url'], array_keys($properties['domain']['properties']));
+        $this->assertSame([], $this->invoke($tool, 'apiInput', ['name' => 'shop'])['runtime'] ?? []);
+        $this->assertSame(
+            ['type' => 'git', 'url' => 'https://github.com/acme/shop'],
+            $this->invoke($tool, 'apiInput', ['source' => ['type' => 'git', 'url' => 'https://github.com/acme/shop']])['source'] ?? null
         );
+    }
+
+    /** An array of objects says the keys each item takes, so a model sends `name` where the API requires it. */
+    public function test_project_push_names_the_keys_of_each_table(): void
+    {
+        $tables = (new \App\Mcp\Tools\Api\Projects\ProjectPushTool())->toArray()['inputSchema']['properties']['tables'];
+
+        $this->assertSame('array', $tables['type']);
+        $this->assertSame('object', $tables['items']['type']);
+        $this->assertSame(['database', 'name'], array_keys($tables['items']['properties']));
+        $this->assertSame(['database', 'name'], $tables['items']['required']);
+        $this->assertStringContainsString('`database`', $tables['description']);
+        $this->assertStringContainsString('`name`', $tables['description']);
     }
 
     /**

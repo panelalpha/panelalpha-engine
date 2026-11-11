@@ -17,9 +17,13 @@ use App\Http\Controllers\SitePasswordGateController;
 use App\Http\Controllers\SourceInspectionController;
 use App\Http\Controllers\SourceRefsController;
 use App\Http\Controllers\SystemApiAccessController;
+use App\Http\Controllers\SystemBuildCacheController;
 use App\Http\Controllers\SystemController;
+use App\Http\Controllers\SystemImageController;
+use App\Http\Controllers\SystemOverlayController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TokenController;
+use App\Http\Controllers\UploadController;
 use App\Http\Controllers\User\AppCredentialsController;
 use App\Http\Controllers\User\AppHealthController;
 use App\Http\Controllers\User\AppUserController;
@@ -43,8 +47,10 @@ use App\Http\Controllers\User\Mysql\UserController as MysqlUserController;
 use App\Http\Controllers\User\MysqlController;
 use App\Http\Controllers\User\PhpController as UserPhpController;
 use App\Http\Controllers\User\ProjectMetricsController;
+use App\Http\Controllers\User\ProjectOverlayController;
 use App\Http\Controllers\User\ProjectPasswordController;
 use App\Http\Controllers\User\ProjectSettingController;
+use App\Http\Controllers\User\ProjectSourceController;
 use App\Http\Controllers\User\ProxyRuleController;
 use App\Http\Controllers\User\SftpAccountController;
 use App\Http\Controllers\User\SshController;
@@ -125,6 +131,11 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
 Route::get('/vault/config', [SecretVaultController::class, 'config']);
 Route::get('/vault/secrets', [SecretVaultController::class, 'index']);
 Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
+Route::post('/vault/deploy-keys', [SecretVaultController::class, 'storeDeployKey']);
+
+Route::post('/uploads', [UploadController::class, 'store']);
+Route::get('/uploads/{id}', [UploadController::class, 'show']);
+Route::delete('/uploads/{id}', [UploadController::class, 'destroy']);
 // `{ref}` is `vault:<key>`.
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
@@ -147,10 +158,10 @@ Route::get('/wordpress/migrations/plugin-package/download', [WordpressMigrationC
     ->name(MigratorPluginPackage::ROUTE)
     ->withoutMiddleware('auth:api')
     ->middleware(['signed', 'throttle:plugin-package-download']);
-Route::get('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'show']);
-Route::post('/wordpress/migrations/{id}/resume', [WordpressMigrationController::class, 'resume']);
-Route::post('/wordpress/migrations/{id}/cancel', [WordpressMigrationController::class, 'cancel']);
-Route::delete('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'destroy']);
+Route::get('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'show'])->whereNumber('id');
+Route::post('/wordpress/migrations/{id}/resume', [WordpressMigrationController::class, 'resume'])->whereNumber('id');
+Route::post('/wordpress/migrations/{id}/cancel', [WordpressMigrationController::class, 'cancel'])->whereNumber('id');
+Route::delete('/wordpress/migrations/{id}', [WordpressMigrationController::class, 'destroy'])->whereNumber('id');
 
 /*
  * Project routes.
@@ -175,6 +186,7 @@ $projectRoutes = function (): void {
     Route::post('/verify-new-username', [UserController::class, 'verifyNewUsername']);
     Route::post('/{username}/rebuild', [UserController::class, 'rebuild']);
     Route::post('/{username}/source', [UserController::class, 'attachSource']);
+    Route::put('/{username}/source', [ProjectSourceController::class, 'update']);
     Route::post('/{username}/deploy-archive', [UserController::class, 'deployArchive']);
     Route::post('/{username}/clone', [UserController::class, 'clone']);
     Route::post('/{username}/staging', [StagingController::class, 'staging']);
@@ -186,6 +198,9 @@ $projectRoutes = function (): void {
     Route::put('/{username}/unsuspend', [UserController::class, 'unsuspend']);
     Route::put('/{username}/password', [ProjectPasswordController::class, 'update']);
     Route::delete('/{username}/password', [ProjectPasswordController::class, 'destroy']);
+    Route::get('/{username}/overlay', [ProjectOverlayController::class, 'show']);
+    Route::put('/{username}/overlay', [ProjectOverlayController::class, 'update']);
+    Route::delete('/{username}/overlay', [ProjectOverlayController::class, 'destroy']);
     Route::delete('/{username}', [UserController::class, 'destroy']);
 
     Route::get('/{username}/env-vars', [EnvVarsController::class, 'index']);
@@ -502,6 +517,15 @@ Route::get('/system/api-access', [SystemApiAccessController::class, 'index']);
 Route::put('/system/api-access/{project}', [SystemApiAccessController::class, 'update']);
 Route::post('/system/api-access/{project}/rotate', [SystemApiAccessController::class, 'rotate']);
 Route::delete('/system/api-access/{project}', [SystemApiAccessController::class, 'destroy']);
+Route::get('/system/images', [SystemImageController::class, 'index']);
+Route::post('/system/images', [SystemImageController::class, 'store']);
+Route::get('/system/images/{id}', [SystemImageController::class, 'show'])->whereNumber('id');
+Route::put('/system/images/{id}', [SystemImageController::class, 'update'])->whereNumber('id');
+Route::post('/system/images/{id}/refresh', [SystemImageController::class, 'refresh'])->whereNumber('id');
+Route::delete('/system/images/{id}', [SystemImageController::class, 'destroy'])->whereNumber('id');
+Route::get('/system/build-caches', [SystemBuildCacheController::class, 'index']);
+Route::post('/system/build-caches', [SystemBuildCacheController::class, 'store']);
+Route::delete('/system/build-caches', [SystemBuildCacheController::class, 'destroy']);
 Route::get('/system/ssl-config', [SystemController::class, 'getSslConfig']);
 Route::put('/system/ssl-config', [SystemController::class, 'updateSslConfig']);
 Route::put('/system/engine-certificate', [SystemController::class, 'requestEngineCertificate']);
@@ -510,6 +534,9 @@ Route::put('/system/update', [SystemController::class, 'update']);
 Route::put('/system/change-webserver', [SystemController::class, 'changeWebserver']);
 Route::put('/system/reset-webserver-panel-password', [SystemController::class, 'resetWebserverPanelPassword']);
 Route::put('/system/webserver-config', [SystemController::class, 'updateWebserverConfig']);
+Route::get('/system/overlay', [SystemOverlayController::class, 'show']);
+Route::put('/system/overlay', [SystemOverlayController::class, 'update']);
+Route::delete('/system/overlay', [SystemOverlayController::class, 'destroy']);
 Route::get('/system/exim-config', [SystemController::class, 'getEximConfig']);
 Route::put('/system/exim-config', [SystemController::class, 'updateEximConfig']);
 Route::post('/system/exim-send-test-email', [SystemController::class, 'sendTestEmail']);

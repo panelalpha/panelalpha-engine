@@ -63,7 +63,8 @@ class ProjectSourceAttachHttpTest extends TestCase
                 ?string $token,
                 string $tokenField = 'git_token',
                 ?string $branch = null,
-                string $branchField = 'git_branch'
+                string $branchField = 'git_branch',
+                ?array $deployKey = null,
             ): ?array {
                 return null;
             }

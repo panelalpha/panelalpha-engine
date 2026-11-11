@@ -154,10 +154,51 @@ class TaskPrunerTest extends SqliteTaskTestCase
         $this->assertSame(2, TaskLog::count());
     }
 
-    public function test_rejects_non_positive_limits(): void
+    public function test_rejects_a_negative_keep(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        TaskPruner::prune(keepDeploy: 0);
+        TaskPruner::prune(keepDeploy: -1);
+    }
+
+    public function test_rejects_a_non_positive_line_cap(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        TaskPruner::prune(maxLines: 0);
+    }
+
+    public function test_a_keep_of_zero_removes_every_finished_task_of_one_project(): void
+    {
+        $this->terminalTask(DeployProject::class, 'gone');
+        $this->terminalTask(CreateBackup::class, 'gone');
+        $queued = Task::start(jobType: DeployProject::class, queue: 'default', username: 'gone');
+        $bob = $this->terminalTask(DeployProject::class, 'bob')->id;
+
+        $this->artisan('task:prune', ['--project' => 'gone', '--keep' => 0, '--keep-other' => 0])->assertExitCode(0);
+
+        $this->assertSame([$queued->id], Task::query()->where('username', 'gone')->pluck('id')->all());
+        $this->assertNotNull(Task::find($bob));
+    }
+
+    public function test_the_command_refuses_a_keep_that_is_not_a_number(): void
+    {
+        $this->terminalTask(DeployProject::class, 'alice');
+        $this->terminalTask(CreateBackup::class, 'alice');
+
+        $refusals = [
+            ['--keep' => 'abc'],
+            ['--keep' => ''],
+            ['--keep' => null],
+            ['--keep-other' => 'x'],
+            ['--max-lines' => '5abc'],
+        ];
+        foreach ($refusals as $options) {
+            $name = substr((string) array_key_first($options), 2);
+            $this->artisan('task:prune', $options)
+                ->expectsOutputToContain("{$name} must be an integer")
+                ->assertExitCode(1);
+        }
+
+        $this->assertSame(2, Task::count());
     }
 
     public function test_artisan_command_prunes(): void

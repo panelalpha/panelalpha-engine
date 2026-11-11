@@ -9,11 +9,8 @@ use Illuminate\Database\Eloquent\Builder;
 use InvalidArgumentException;
 
 /**
- * Retention for Task handles and their poll-buffer lines.
- *
- * The file deploy log is the archive ({@see DeployLogArchive}).
- * This keeps a bounded set of terminal Tasks so GET /tasks/{id} still answers
- * for recent jobs, and drops `dim` (subprocess spam) once the job is finished.
+ * Retention for Task handles and their poll-buffer lines; the file deploy log is the archive ({@see DeployLogArchive}).
+ * Keeps a bounded set of terminal Tasks so GET /tasks/{id} answers for recent jobs, and drops `dim` lines once finished.
  */
 final class TaskPruner
 {
@@ -35,8 +32,8 @@ final class TaskPruner
         int $maxLines = self::MAX_LINES,
         bool $dryRun = false,
     ): array {
-        self::assertPositive('keep', $keepDeploy);
-        self::assertPositive('keep-other', $keepOther);
+        self::assertNotNegative('keep', $keepDeploy);
+        self::assertNotNegative('keep-other', $keepOther);
         self::assertPositive('max-lines', $maxLines);
 
         $oldIds = self::oldTaskIds($username, $keepDeploy, $keepOther);
@@ -74,6 +71,24 @@ final class TaskPruner
             ->orderBy('id')
             ->get(['id', 'log']);
 
+        $deleteIds = self::idsToDelete($rows, $maxLines);
+        if ($deleteIds === [] || $dryRun) {
+            return count($deleteIds);
+        }
+
+        foreach (array_chunk($deleteIds, 500) as $chunk) {
+            TaskLog::query()->whereIn('id', $chunk)->delete();
+        }
+
+        return count($deleteIds);
+    }
+
+    /**
+     * @param  iterable<TaskLog>  $rows
+     * @return list<int>
+     */
+    private static function idsToDelete(iterable $rows, int $maxLines): array
+    {
         $dimIds = [];
         $keptIds = [];
         foreach ($rows as $row) {
@@ -90,16 +105,7 @@ final class TaskPruner
             $overflowIds = array_slice($keptIds, 0, $overflow);
         }
 
-        $deleteIds = array_values(array_unique(array_merge($dimIds, $overflowIds)));
-        if ($deleteIds === [] || $dryRun) {
-            return count($deleteIds);
-        }
-
-        foreach (array_chunk($deleteIds, 500) as $chunk) {
-            TaskLog::query()->whereIn('id', $chunk)->delete();
-        }
-
-        return count($deleteIds);
+        return array_values(array_unique(array_merge($dimIds, $overflowIds)));
     }
 
     /**
@@ -118,20 +124,22 @@ final class TaskPruner
     }
 
     /**
+     * Paged rather than a cursor: a cursor pins SQLite's read snapshot for the
+     * whole sweep, and the trims then fail with SQLITE_BUSY_SNAPSHOT.
+     *
      * @param  list<int>  $excludeIds
      */
     private static function trimRemaining(?string $username, int $maxLines, bool $dryRun, array $excludeIds): int
     {
         $query = Task::query()
-            ->whereIn('status', Task::TERMINAL_STATUSES)
-            ->orderBy('id');
+            ->whereIn('status', Task::TERMINAL_STATUSES);
         self::scopeUsername($query, $username);
         if ($excludeIds !== []) {
             $query->whereNotIn('id', $excludeIds);
         }
 
         $trimmed = 0;
-        foreach ($query->cursor() as $task) {
+        foreach ($query->lazyById() as $task) {
             $trimmed += self::trimTask($task, $maxLines, $dryRun);
         }
 
@@ -193,11 +201,11 @@ final class TaskPruner
         $query->where('username', $username);
     }
 
+    /** A failed deploy's copied tail stays: its deploy log is gone. */
     private static function isDim(string $raw): bool
     {
         $decoded = json_decode($raw, true);
 
-        // A failed deploy's copied tail stays: its deploy log is gone.
         return is_array($decoded)
             && ($decoded['level'] ?? null) === self::DIM_LEVEL
             && ! DeployLogTail::isKept($decoded);
@@ -207,6 +215,14 @@ final class TaskPruner
     {
         if ($value < 1) {
             throw new InvalidArgumentException($name.' must be >= 1');
+        }
+    }
+
+    /** A keep of 0 keeps none, which is how the tasks a deleted project leaves behind are removed. */
+    private static function assertNotNegative(string $name, int $value): void
+    {
+        if ($value < 0) {
+            throw new InvalidArgumentException($name.' must be >= 0');
         }
     }
 }
