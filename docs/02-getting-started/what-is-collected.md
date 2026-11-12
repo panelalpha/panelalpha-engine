@@ -46,13 +46,17 @@ Your VPS is identified by a fingerprint rather than by name: the engine combines
 
 The installer also gives the engine a random ID, `APP_UID` in `.env-core`. It is sent in the `X-Engine-App-UID` header with every report and every request to PanelAlpha Connect, so both can tell one installation from another. It is not derived from anything on the machine. A value that is already set is never replaced, so you can choose it before installing.
 
-A report contains what kind of application it was, how long things took, and the project's limits. It also includes the **public website names** the project answers on, such as `shop.example.com`. Those names leave your VPS in readable form. They are the addresses a visitor types, and they are how a report says which site it is about. A failed or partial deploy also includes which stage failed and the end of the deploy log, with sensitive values removed. A successful deploy is reported without that log.
+A report contains what kind of application it was, how long things took, and the project's limits. It also includes the **public website names** the project answers on, such as `shop.example.com` or `blog-4f2a.panelalpha.online`. Those names leave your VPS in readable form, exactly as a visitor types them. They are how a report says which site it is about. A name the engine gave the project contains the project's name, and some contain the server's address too, such as `blog.203-0-113-7.panelalpha.direct`.
+
+Everywhere else in the report, such as a deploy log line, an error message or a certificate's issuer, three parts of a name are replaced: the project's name by `<account>`, an IP address the name spells by `<ip>`, and the server's own name, the one the engine's certificate is issued for, by `<server>`. For a project named `blog`, a log line quoting `blog.203-0-113-7.panelalpha.direct` says `<account>.<ip>.panelalpha.direct`.
+
+A failed or partial deploy also includes which stage failed and the end of the deploy log, with sensitive values removed. A successful deploy is reported without that log.
 
 **None of this is sent:**
 
-- Project names, replaced with `<account>`
+- Project names outside the website names above, replaced with `<account>`
 - Tokens, passwords, secrets, and email addresses found in logs
-- Your VPS's own IP address or hostname in readable form
+- Your VPS's own IP address or hostname in readable form, outside the website names above
 - Private repository names, which are hashed
 - Filenames from your projects
 - Your source code

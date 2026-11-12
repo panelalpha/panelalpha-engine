@@ -74,6 +74,15 @@ class ReadsPackageFilesTest extends TestCase
         );
     }
 
+    public function test_a_single_object_is_one_entry_read_by_its_named_key(): void
+    {
+        $this->assertSame(
+            ['Jane'],
+            $this->reader::stringList(['name' => 'Jane', 'email' => 'jane@acme.test', 'url' => 'https://acme.test'])
+        );
+        $this->assertSame([], $this->reader::stringList(['email' => 'jane@acme.test', 'url' => 'https://acme.test']));
+    }
+
     public function test_a_mixed_list_takes_what_it_can(): void
     {
         $this->assertSame(

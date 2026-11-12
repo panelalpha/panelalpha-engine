@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\DeployLog;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * One deploy log line as it looks on a terminal: elapsed time since the deploy
- * started, then the message, coloured by level. Shared by `project:create`,
- * which watches the deploy it is running, and `project:deploy:log --follow`,
- * which watches one somebody else started -- the two must not drift apart.
- *
- * The tags are Symfony's, rendered by whichever output the caller writes to.
+ * One deploy log line on a terminal: elapsed time, then the message coloured by level in Symfony tags.
+ * Shared by `project:create` and `project:deploy:log --follow`, so the two cannot drift apart.
  */
 final class DeployLineFormat
 {
@@ -31,7 +27,8 @@ final class DeployLineFormat
     ];
 
     /**
-     * Null when the line is not to be shown at this verbosity.
+     * Null when the line is not to be shown at this verbosity. A stage's opening line becomes its heading and its
+     * "finished" twin is dropped, matched on text so that a log read back from disk looks the same.
      *
      * @param  array{ts?: int, level?: string, msg?: string}  $line
      */
@@ -47,11 +44,6 @@ final class DeployLineFormat
             return null;
         }
 
-        // The logger brackets every stage with two bookkeeping lines. The
-        // opening one becomes the heading; its "finished" twin says nothing
-        // the next heading does not. Done here rather than from the stream's
-        // own `stage` frames, because a log read back from disk has only
-        // these -- and the two views have to look the same.
         $at = (int) ($line['ts'] ?? 0);
         if (preg_match("/^Stage '.*' finished$/", $message) === 1) {
             return null;
@@ -80,7 +72,7 @@ final class DeployLineFormat
         );
     }
 
-    /** m:ss since the deploy started; a deploy with no start time gets --:--. */
+    /** m:ss since the deploy started, minutes padded to three; `  -:--` with no start time or for a line before it. */
     public static function elapsed(int $at, int $startedAt): string
     {
         if ($startedAt <= 0 || $at < $startedAt) {

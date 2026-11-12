@@ -5,7 +5,9 @@ namespace Tests\Unit\Deploy\Telemetry;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\Metadata\Framework;
 use App\Lib\Deploy\Telemetry\DeployReport;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 class DeployReportTest extends TestCase
 {
@@ -96,12 +98,7 @@ class DeployReportTest extends TestCase
     }
 
     /**
-     * The operator's requirement: an event names the application it is about.
-     *
-     * The address is the real hostname, in the clear — it is what a visitor
-     * types, and a report that says an application is degraded without saying
-     * where to look sends support back to the panel to find out. The account
-     * name is still a hash everywhere else in the same report.
+     * A customer's domain arrives in the clear, as support has to look there; an engine-made name arrives as it is.
      */
     public function test_the_domain_block_names_the_real_hostnames(): void
     {
@@ -136,6 +133,97 @@ class DeployReportTest extends TestCase
 
         $this->assertSame('shop.acme.com', $report['domain']['primary']);
         $this->assertArrayNotHasKey('source', $report['domain']);
+    }
+
+    /**
+     * Monitoring links the application by its hostnames, so they arrive as they are and no other field names either.
+     */
+    #[DataProvider('tiers')]
+    public function test_only_the_hostnames_carry_the_project_name_or_the_servers_address(int $tier): void
+    {
+        $address = TestNetwork::private(25);
+        $dashed = str_replace('.', '-', $address);
+        $direct = self::USERNAME . ".{$dashed}.panelalpha.direct";
+
+        $report = DeployReport::build($this->input([
+            'tier' => $tier,
+            'outcome' => DeployReport::OUTCOME_PARTIAL,
+            'signal' => 'public_url_unresolvable',
+            'error' => "The application is deployed but not reachable from the internet: {$direct} resolves to this host's private address.",
+            'domains' => [
+                ['domain' => $direct, 'primary' => true, 'type' => 'main'],
+                ['domain' => self::USERNAME . '-4f2a.panelalpha.online', 'tunnel' => 'panelalpha'],
+                ['domain' => self::USERNAME . ".{$address}.nip.io", 'alias' => true],
+                ['domain' => self::USERNAME . '.sites.example.com', 'type' => 'addon'],
+                ['domain' => 'shop.example.com', 'type' => 'addon'],
+            ],
+            'details' => [
+                'domain' => [
+                    'source' => 'panelalpha_direct',
+                    'publicly_resolvable' => false,
+                    'fallback_reason' => "panelalpha_online: {$direct} could not be registered",
+                ],
+                'ssl' => ['status' => 'self_signed', 'issuer' => $direct],
+            ],
+            'server_names' => [$dashed . '.panelalpha.direct', $address],
+            'log_tail' => ["Health check https://{$direct}/ answered 502", "connect to {$address} port 443 failed"],
+        ]));
+
+        $json = (string) json_encode(self::withoutHostnames($report), JSON_UNESCAPED_SLASHES);
+        foreach ([self::USERNAME, $address, $dashed] as $leak) {
+            $this->assertStringNotContainsString($leak, $json, "{$leak} leaked at tier {$tier}");
+        }
+        $this->assertSame($direct, $report['domain']['primary']);
+        $this->assertSame([
+            ['domain' => $direct, 'type' => 'main'],
+            ['domain' => self::USERNAME . '-4f2a.panelalpha.online', 'tunnel' => 'panelalpha'],
+            ['domain' => self::USERNAME . ".{$address}.nip.io", 'alias' => true],
+            ['domain' => self::USERNAME . '.sites.example.com', 'type' => 'addon'],
+            ['domain' => 'shop.example.com', 'type' => 'addon'],
+        ], $report['domain']['names']);
+        $this->assertSame('<account>.<ip>.panelalpha.direct', $report['domain']['ssl_issuer']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $report
+     * @return array<string, mixed>
+     */
+    private static function withoutHostnames(array $report): array
+    {
+        unset($report['domain']['primary'], $report['domain']['names']);
+
+        return $report;
+    }
+
+    /**
+     * @return array<string, array{int}>
+     */
+    public static function tiers(): array
+    {
+        return [
+            'metadata' => [DeployReport::TIER_METADATA],
+            'repository' => [DeployReport::TIER_REPO],
+            'log' => [DeployReport::TIER_LOG],
+        ];
+    }
+
+    /**
+     * A project name under the server's certificate name goes from every field but the hostnames, repositories too.
+     */
+    public function test_only_a_name_under_the_servers_own_name_names_the_server(): void
+    {
+        $report = DeployReport::build($this->input([
+            'tier' => DeployReport::TIER_LOG,
+            'domains' => [['domain' => self::USERNAME . '.panel.example.com', 'primary' => true, 'type' => 'main']],
+            'server_names' => ['panel.example.com', TestNetwork::public(7)],
+            'repo_url' => 'https://git.panel.example.com/team/site.git',
+            'log_tail' => ['Cloning https://git.panel.example.com/team/site.git'],
+        ]));
+
+        $this->assertStringNotContainsString('panel.example.com', (string) json_encode(self::withoutHostnames($report)));
+        $this->assertSame(self::USERNAME . '.panel.example.com', $report['domain']['primary']);
+        $this->assertSame('git.<server>', $report['repo']['host']);
+        $this->assertSame('team/site', $report['repo']['path']);
     }
 
     public function test_the_names_list_is_bounded_and_shape_checked(): void
@@ -240,6 +328,31 @@ class DeployReportTest extends TestCase
             $report['failure']['signature']
         );
         $this->assertStringNotContainsString('Pulling fs layer', $report['failure']['signature']);
+    }
+
+    public function test_a_build_step_no_rule_names_is_signed_by_what_it_printed_last(): void
+    {
+        $failure = DeployReport::build($this->input([
+            'error' => \Tests\Unit\Deploy\DeployLog\BuildStepOutputTest::ASTRO_BUILD_FAILURE,
+        ]))['failure'];
+
+        $this->assertSame('build-step-failed', $failure['rule']);
+        $this->assertStringContainsString('[InvalidComponentArgs] Invalid arguments passed to <Layout> component.', $failure['signature']);
+        $this->assertStringContainsString('did not complete successfully: exit code: 1', $failure['signature']);
+    }
+
+    public function test_build_steps_failing_for_different_reasons_do_not_share_a_fingerprint(): void
+    {
+        $step = static fn (string $said): string => "#7 [2/3] RUN ./build.sh\n#7 0.302 {$said}\n"
+            . "#7 ERROR: process \"/bin/sh -c ./build.sh\" did not complete successfully: exit code: 2\n"
+            . 'failed to solve: process "/bin/sh -c ./build.sh" did not complete successfully: exit code: 2';
+
+        $missing = DeployReport::build($this->input(['error' => $step('Could not open config/app.yml')]));
+        $again = DeployReport::build($this->input(['error' => str_replace('0.302', '9.871', $step('Could not open config/app.yml'))]));
+        $other = DeployReport::build($this->input(['error' => $step('Unsupported locale: pl_PL')]));
+
+        $this->assertSame($missing['fingerprint'], $again['fingerprint']);
+        $this->assertNotSame($missing['fingerprint'], $other['fingerprint']);
     }
 
     /**

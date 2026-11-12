@@ -9,20 +9,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Drain the spool to the ingest endpoint.
- *
- * Runs from the scheduler, never from a deploy. Everything about it is built
- * for an endpoint that may be unreachable for a week: reports are only removed
- * once the server has said what it did with them, failures back off, and a
- * report that has failed {@see Spool::MAX_ATTEMPTS} times is dropped rather
- * than retried into the heat death of the universe.
- *
- * The one distinction worth being careful about is 4xx versus 5xx. A 5xx or a
- * timeout is "come back later", so the batch is kept. A 4xx other than 408/429
- * means the server has looked at the payload and refused it, and sending the
- * same bytes again tomorrow will get the same answer — so the batch is dropped
- * and the reason is logged. Retrying a permanent rejection forever is how a
- * spool fills a disk.
+ * Drains the spool to the ingest from the scheduler: a report goes once the server says what it did with it, and
+ * after {@see Spool::MAX_ATTEMPTS} failures. A 5xx or timeout keeps a batch; a refusing 4xx drops it, logged.
  */
 class TelemetryShipper
 {
@@ -40,6 +28,9 @@ class TelemetryShipper
     }
 
     /**
+     * `pending` is read again after every spool change, so it is what is left.
+     * No install id sends nothing: an empty id would merge this install with every one that cannot probe itself.
+     *
      * @return array{
      *   status: string, sent: int, rejected: int, kept: int, dropped: int,
      *   bundles_sent: int, bundles_failed: int, pending: int, message: ?string
@@ -47,33 +38,17 @@ class TelemetryShipper
      */
     public function ship(?int $batch = null): array
     {
-        $result = [
-            'status' => 'ok',
-            'sent' => 0,
-            'rejected' => 0,
-            'kept' => 0,
-            'dropped' => 0,
-            'bundles_sent' => 0,
-            'bundles_failed' => 0,
-            'pending' => 0,
-            'message' => null,
-        ];
+        $result = self::emptyResult();
 
         if (! Telemetry::enabled()) {
             return ['status' => 'disabled'] + $result;
         }
 
         $spool = Telemetry::spool();
-        // What is queued right now. Every path that goes on to change the
-        // spool takes this again before returning: an operator reading
-        // "sent 1 (queue: 1)" after a successful ship has been told the
-        // report is still waiting, which is the opposite of what happened.
         $result['pending'] = $spool->stats()['count'];
 
         $installId = Telemetry::installId();
         if ($installId === '') {
-            // Sending under an empty id would merge this install with every
-            // other one that cannot probe its own machine.
             return ['status' => 'no-install-id'] + $result;
         }
 
@@ -87,19 +62,43 @@ class TelemetryShipper
             return ['status' => 'empty'] + $result;
         }
 
-        // The shared event envelope, same shape the panel emits and the
-        // monitoring ingest accepts: {events: [{type, occurred_at, payload}]}.
-        // Each event is self-describing because the receiver stores them one
-        // row at a time -- so the install identity rides inside every payload
-        // rather than once at the batch level, where it would be lost on
-        // storage. The local log leaves it out: the file is already on the box
-        // whose identity it would be repeating.
+        return $this->deliver($spool, $items, $endpoint, $installId, $result);
+    }
+
+    /**
+     * @return array{
+     *   status: string, sent: int, rejected: int, kept: int, dropped: int,
+     *   bundles_sent: int, bundles_failed: int, pending: int, message: ?string
+     * }
+     */
+    private static function emptyResult(): array
+    {
+        return [
+            'status' => 'ok',
+            'sent' => 0,
+            'rejected' => 0,
+            'kept' => 0,
+            'dropped' => 0,
+            'bundles_sent' => 0,
+            'bundles_failed' => 0,
+            'pending' => 0,
+            'message' => null,
+        ];
+    }
+
+    /**
+     * POST `{events: [...]}`, the install identity inside every payload, as the receiver stores events one row at a
+     * time. A send nothing answered says nothing about the reports, so it spends no attempts: {@see Spool::recordDeferral}.
+     *
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function deliver(Spool $spool, array $items, string $endpoint, string $installId, array $result): array
+    {
         try {
             $response = $this->post($endpoint, ['events' => $this->events($items, $installId)]);
         } catch (\Throwable $e) {
-            // Nothing answered -- DNS, a closed socket, an ingest that is not
-            // serving yet. That says nothing about the reports, so it must not
-            // spend their attempts: {@see Spool::recordDeferral}.
             $this->defer($spool, $items, $result);
             $result['status'] = 'unreachable';
             $result['message'] = $e->getMessage();
@@ -108,14 +107,25 @@ class TelemetryShipper
             return $result;
         }
 
+        return $this->settleResponse($spool, $items, $response, $result);
+    }
+
+    /**
+     * 404/405/408/429 are "later"; every other 4xx is "no", and retrying it fills the spool with something
+     * already refused.
+     *
+     * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function settleResponse(Spool $spool, array $items, Response $response, array $result): array
+    {
         $status = $response->status();
 
         if ($status >= 200 && $status < 300) {
             return $this->settle($spool, $items, $response->json(), $result);
         }
 
-        // 404/405/408/429 are "later"; every other 4xx is "no", and retrying it
-        // fills the spool with something already refused.
         if ($this->isPermanentRejection($status)) {
             return $this->drop($spool, $items, $result, $status, $response->body());
         }
@@ -129,11 +139,8 @@ class TelemetryShipper
     }
 
     /**
-     * Send one failed deploy's report straight away and return the fix
-     * monitoring has for it, if any.
-     *
-     * `sent` false means the report still has to go through the spool: nothing
-     * answered in time, or the server did not take it.
+     * Send one failed deploy's report straight away and return monitoring's fix for it, if any; `sent` false
+     * means it still has to go through the spool.
      *
      * @param  array<string, mixed>  $report
      * @return array{sent: bool, problem: ?array<string, ?string>}
@@ -173,9 +180,8 @@ class TelemetryShipper
     }
 
     /**
-     * The fix monitoring sent for the one event in a batch: `results[].problem`
-     * at index 0, for this fingerprint. Remote text shown to users and agents,
-     * so only known fields, strings only, capped, no control characters.
+     * The fix for the batch's one event (`results[].problem` at index 0, for this fingerprint): known string fields,
+     * capped, no control characters, as users read it. Null when it has neither a title nor a fix.
      *
      * @return array<string, ?string>|null
      */
@@ -199,7 +205,6 @@ class TelemetryShipper
                     : null;
             }
 
-            // Neither a title nor a fix tells nobody anything.
             return $problem['title'] === null && $problem['body_fix'] === null ? null : $problem;
         }
 
@@ -227,6 +232,8 @@ class TelemetryShipper
     }
 
     /**
+     * Connecting never takes longer than the whole timeout, nor more than ten seconds.
+     *
      * @param  array<string, mixed>  $payload
      */
     private function post(string $endpoint, array $payload, ?int $timeout = null): Response
@@ -239,25 +246,13 @@ class TelemetryShipper
             'User-Agent' => $this->userAgent(),
         ] + $this->authHeader() + PanelAlpha::identityHeaders())
             ->timeout($timeout)
-            // Never longer than the whole budget, and never more than ten
-            // seconds waiting on a socket that is not going to open.
             ->connectTimeout(min(10, $timeout))
             ->post($endpoint, $payload);
     }
 
     /**
-     * A status that means this payload will never be accepted.
-     *
-     * 4xx normally means the server read the payload and refused it, so
-     * sending the same bytes tomorrow earns the same answer. Four of them mean
-     * something else and must not cost the reports:
-     *
-     *   408, 429  "later" in as many words
-     *   404, 405  there is no ingest at this URL *yet*. A host serving the rest
-     *             of its API while the reports route is still being built
-     *             answers exactly this, and it says nothing about the payload.
-     *             Dropping there would empty every spool in the fleet on the
-     *             first cron run after the ingest becomes reachable.
+     * A 4xx, which means this payload will never be accepted, except 408 and 429 ("later") and 404 and 405: no ingest
+     * at this URL yet, and dropping on those would empty every spool in the fleet before the ingest is reachable.
      */
     private function isPermanentRejection(int $status): bool
     {
@@ -287,11 +282,8 @@ class TelemetryShipper
     }
 
     /**
-     * Apply the server's per-report verdict.
-     *
-     * A server that answers with nothing useful is taken at its word: 2xx with
-     * no body means it accepted the batch, so the batch is cleared. Holding
-     * reports the server has already stored would double-count every failure.
+     * Apply the server's per-report verdict. A 2xx naming no accepted ids accepted the whole batch:
+     * holding reports it has stored would double-count every failure.
      *
      * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
      * @param  array<string, mixed>  $result
@@ -309,7 +301,6 @@ class TelemetryShipper
                 continue;
             }
 
-            // A server that names no accepted ids has accepted the batch.
             if ($accepted !== null && ! in_array($item['id'], $accepted, true)) {
                 $this->retryOrDrop($spool, $item['path'], $result);
 
@@ -333,13 +324,8 @@ class TelemetryShipper
     }
 
     /**
-     * The server's per-report answer, as far as it gave one.
-     *
-     * Every field is optional and every field is untrusted: this is a response
-     * from somewhere else, so anything that is not a scalar id is dropped
-     * rather than coerced. `accepted` stays null when the server did not name
-     * any, which is how "it took the batch" is told apart from "it took none
-     * of them".
+     * The server's per-report answer, untrusted, so anything but a scalar id is dropped. `accepted` stays null when
+     * the server named none, telling "it took the batch" apart from "it took none of them".
      *
      * @return array{accepted: ?list<string>, rejected: list<string>, wanted: list<string>}
      */
@@ -374,12 +360,8 @@ class TelemetryShipper
     }
 
     /**
-     * Send this report's source bundle, if the server asked for it.
-     *
-     * True when there was nothing to send or the send worked — in both cases
-     * the report itself is done. False means the bundle upload failed, and the
-     * report is held so the next run can offer it again: the server asked for
-     * the source and has not got it.
+     * Send this report's source bundle if the server asked for it. False means the upload failed, so the report
+     * is held for the next run to offer again; true means the report is done.
      *
      * @param  array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}  $item
      * @param  list<string>  $wanted
@@ -403,10 +385,8 @@ class TelemetryShipper
     }
 
     /**
-     * Hold a report for another attempt, or give up on it.
-     *
-     * The spool decides: it counts attempts and stops at its own limit, so a
-     * report that can never be delivered does not sit in the outbox forever.
+     * Hold a report for another attempt, or give up on it: the spool counts attempts and stops at its own limit,
+     * so an undeliverable report does not sit in the outbox forever.
      *
      * @param  array<string, mixed>  $result
      */
@@ -422,16 +402,13 @@ class TelemetryShipper
     }
 
     /**
-     * Upload one source bundle to `{endpoint}/{reportId}/source`.
-     *
-     * Sent raw as application/zip rather than multipart: there is exactly one
-     * part, the report id is already in the path, and streaming a 25 MB file
-     * through a multipart encoder buys nothing.
+     * Upload one source bundle raw as application/zip to `{endpoint}/{reportId}/source`: one part, the id already in
+     * the path. True when nothing is left to send, a missing file included, so the report is not held for it.
      */
     private function uploadBundle(string $reportId, string $bundlePath): bool
     {
         if (! is_file($bundlePath)) {
-            return true; // nothing to send; do not hold the report for it
+            return true;
         }
 
         $endpoint = rtrim(Telemetry::endpoint(), '/')
@@ -443,14 +420,7 @@ class TelemetryShipper
         }
 
         try {
-            $response = Http::withHeaders([
-                'Content-Type' => 'application/zip',
-                'User-Agent' => $this->userAgent(),
-                'Content-Length' => (string) filesize($bundlePath),
-            ] + PanelAlpha::identityHeaders())
-                ->timeout((int) config('telemetry.source_bundle.upload_timeout', 120))
-                ->withBody($handle, 'application/zip')
-                ->post($endpoint);
+            $response = $this->postBundle($endpoint, $handle, $bundlePath);
         } catch (\Throwable $e) {
             Log::debug("Telemetry source bundle upload failed for {$reportId}: ".$e->getMessage());
 
@@ -461,13 +431,34 @@ class TelemetryShipper
             }
         }
 
-        $status = $response->status();
+        return $this->bundleAnswered($reportId, $response->status());
+    }
+
+    /**
+     * @param  resource  $handle
+     */
+    private function postBundle(string $endpoint, $handle, string $bundlePath): Response
+    {
+        return Http::withHeaders([
+            'Content-Type' => 'application/zip',
+            'User-Agent' => $this->userAgent(),
+            'Content-Length' => (string) filesize($bundlePath),
+        ] + $this->authHeader() + PanelAlpha::identityHeaders())
+            ->timeout((int) config('telemetry.source_bundle.upload_timeout', 120))
+            ->withBody($handle, 'application/zip')
+            ->post($endpoint);
+    }
+
+    /**
+     * A 2xx, or a 4xx but 408 and 429, is final. Unlike a batch, 404 and 405 are too: the server has just asked for
+     * this source, so they mean it does not know the report, and dropping someone's source early is the safe side.
+     */
+    private function bundleAnswered(string $reportId, int $status): bool
+    {
         if ($status >= 200 && $status < 300) {
             return true;
         }
 
-        // Same rule as the report batch: a 4xx is the server's final answer, so
-        // stop trying rather than holding a copy of someone's source forever.
         if ($status >= 400 && $status < 500 && $status !== 408 && $status !== 429) {
             Log::warning("Telemetry source bundle refused for {$reportId}: HTTP {$status}");
 
@@ -489,13 +480,8 @@ class TelemetryShipper
     }
 
     /**
-     * Hold a batch the ingest never saw.
-     *
-     * Kept like a 5xx, but without the give-up counter: a report is only
-     * abandoned once a server has looked at it and kept saying no. An engine
-     * whose ingest does not resolve is otherwise the worst case there is -- it
-     * would lose every report it has inside a couple of hours, which is
-     * exactly when the operator most wants them.
+     * Hold a batch the ingest never saw, kept like a 5xx without the give-up counter: a report is abandoned only
+     * once a server has looked at it and kept saying no.
      *
      * @param  list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}>  $items
      * @param  array<string, mixed>  $result
@@ -516,12 +502,8 @@ class TelemetryShipper
     }
 
     /**
-     * Credential for the ingest, when one is configured.
-     *
-     * The engine holds no licence key -- unlike the panel, which authenticates
-     * to monitoring with one. Sending nothing is therefore the normal case, and
-     * this exists so that an ingest which later wants a credential is a config
-     * change rather than a code change.
+     * Credential for the ingest, when one is configured. The engine holds no licence key, so none is the normal case,
+     * and an ingest that later wants one is a config change.
      *
      * @return array<string, string>
      */

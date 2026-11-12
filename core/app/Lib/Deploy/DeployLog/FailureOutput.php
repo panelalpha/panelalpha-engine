@@ -3,13 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * The part of a failed build's output that says why: the first announcing line
- * in the last attempt the build made, followed by what it said next.
- *
- * Handing the whole stderr to {@see DeployFailureExplainer}, whose rules match
- * anywhere in it, let the first recognisable line win: galette, glpi and
- * octobercms were each reported by an `npm warn deprecated` line while the
- * build had died elsewhere. This only decides which text the explainer is given.
+ * The part of a failed build's output that says why: the first announcing line in the build's last attempt, and what followed.
+ * Only decides what {@see DeployFailureExplainer} is given: its rules match anywhere, so the whole stderr let a stray warning win.
  */
 final class FailureOutput
 {
@@ -22,14 +17,7 @@ final class FailureOutput
     /** How much of the failing region to keep. */
     private const CONTEXT = 12;
 
-    /** How much to keep when nothing announced itself. */
-    private const FALLBACK = 6;
-
-    /**
-     * How much of a failed build step's own output to keep. publify's
-     * `Unable to find libclang` sat 46 lines above `#11 ERROR:`, under
-     * Bundler's backtrace.
-     */
+    /** How much of a failed build step's own output to keep: a cause can sit dozens of lines up, under a backtrace. */
     private const STEP_LINES = 60;
 
     /**
@@ -38,133 +26,93 @@ final class FailureOutput
      */
     private const MEMORY_EXHAUSTED = '/(?:ResourceExhausted:|did not complete successfully:)[^\n]*cannot allocate memory/';
 
-    /** BuildKit's `#<step> <seconds> ` in front of a step's output line. */
-    private const STEP_PREFIX = '/^#\d+ \d+(?:\.\d+)? /';
+    /** BuildKit's `#<step> <seconds> ` in front of a step's output line, or all of an empty one. */
+    private const STEP_PREFIX = '/^#\d+ \d+(?:\.\d+)?(?: |$)/';
+
+    /** How many of a failed step's last lines tell a failure no rule names apart. */
+    private const STEP_TAIL = 6;
 
     /**
-     * A line that says "this is where it died", anchored so that the same
-     * words inside prose cannot match.
+     * A line that says "this is where it died", anchored so prose cannot match: `ERR!` is pnpm, `error:` python or a shell, `ERROR`/`FATAL`
+     * webpack or gradle; Maven only by goal and summary lines (all carry a bracket), Go by `.go:` or the last wrapped `imports`, tar's owner refusal before Flutter's advice.
      */
     private const CAUSE = [
-        '/^#\d+ ERROR:/',                       // BuildKit's own error line
-        // tar restoring an owner the account's id range cannot hold; Flutter
-        // prints its network advice after it.
+        '/^#\d+ ERROR:/',
         '/Cannot change ownership to uid \d+, gid \d+: Invalid argument/',
-        '/^failed to solve:/',                    // ...and the summary that names it
-        '/^Error response from daemon:/',         // the daemon refusing to run a container
-        // `runc run failed:` is a RUN step that could not start (minthcm).
+        '/^failed to solve:/',
+        '/^Error response from daemon:/',
         '/^runc (?:create|run) failed:/',
-        // apt's own error lines (`E: Failed to fetch ... 404`), above the step's `#N ERROR:`.
-        // The account's apt-lists denial is no finding (see NOISE).
         '/^E: (?!List directory \/var\/lib\/apt\/lists\/partial is missing)/',
-        '/^npm error (?!npm error)/',            // npm's own error block
+        '/^npm error (?!npm error)/',
         '/^npm ERR!/',
         '/^gyp ERR!/',
-        '/^\s*error Command failed/i',           // yarn
-        '/^ERR!/',                               // pnpm
-        '/^\s*error:/i',                         // python, shell
-        '/^(?:ERROR|FATAL)(?:\s|:)/',            // webpack, gradle
-        // Maven prefixes every line with a bracket, so a blanket /^\[ERROR\]/
-        // would also match its per-goal detail; the goal line names the plugin
-        // and the module, and is the one a reader needs.
+        '/^\s*error Command failed/i',
+        '/^ERR!/',
+        '/^\s*error:/i',
+        '/^(?:ERROR|FATAL)(?:\s|:)/',
         '/^\[ERROR\]\s+Failed to execute goal/',
         '/^\[ERROR\]\s+(?:BUILD FAILURE|Failed to read|Non-resolvable|Internal error)/',
-        // Go's compiler: nothing here matched a Go failure, so the report led
-        // with whatever came first, e.g. "Loaded base image golang:1.25-alpine
-        // from host cache". `.go:` is unambiguous.
-        '/^[\w.\/@-]+\.go:\d+:\d+:/',           // internal/thumb/vips_init.go:18:32: undefined: ...
+        '/^[\w.\/@-]+\.go:\d+:\d+:/',
         '/^package [\w.\/-]+: build constraints exclude all Go files/',
-        // Go wraps a long import chain, so the reason lands on the last
-        // indented `imports` line, not the `package` line above it.
         '/^\s+imports [\w.\/-]+\S*: (?:build constraints|no required module|cannot find)/',
-        // A repo with no buildable package at all -- lura is a framework.
         '/^no Go files in \//',
-        // The toolchain refusing go.mod's version (GOTOOLCHAIN=local in the official image).
         '/^go: go\.mod requires go >= /',
         '/^error: cannot find module providing package /',
-        '/^FAILURE: Build failed/',              // Gradle's own banner
-        '/^\* What went wrong:/',                // ...and the section naming the task
-        '/^failed to pull /',                    // compose: an image it cannot fetch
-        '/^unable to get image /',               // compose: an image reference it refuses
-        '/^service "[^"]+" has neither /',       // compose: an invalid project
-        '/^dependency failed to start:/',         // compose: a depends_on that never came up
+        '/^FAILURE: Build failed/',
+        '/^\* What went wrong:/',
+        '/^failed to pull /',
+        '/^unable to get image /',
+        '/^service "[^"]+" has neither /',
+        '/^dependency failed to start:/',
         '/^service "[^"]+" didn\'t complete successfully/',
         '/^gyp: /',
         '/^\s*PHP Fatal error:/i',
         '/^Traceback \(most recent call last\)/',
-        // Ruby's require of a gem the bundle does not have; its backtrace follows.
         '/^LoadError: cannot load such file -- /',
-        '/^fatal:/',                             // git
+        '/^fatal:/',
         '/^(?:Memory cgroup )?[Oo]ut of memory\b/',
         '/^Killed\b/',
     ];
 
     /**
-     * Benign lines that must never become the headline. npm's `warn` is
-     * advisory -- it installs the package anyway -- and BuildKit's progress and
-     * webpack's per-module lines are the bulk of any build. npm's error object
-     * is not here: `code:` in it is often the useful part.
+     * Benign lines that must never lead: advisory warnings (npm's installs anyway), progress, banners, permission notices a host build expects, and
+     * a Makefile's `git describe` without a .git. Never `#N ERROR`, npm's error object, `level=error`, Maven's `[ERROR]`, another `mkdir` or `ERROR:`, or real git failures.
      */
     private const NOISE = [
         '/^npm warn\b/i',
         '/^npm notice\b/i',
         '/^warning\s/i',
-        // The JVM prints this on stderr for every process it starts, and the
-        // engine sets JAVA_TOOL_OPTIONS itself when it sizes a build heap.
         '/^Picked up (?:JAVA_TOOL_OPTIONS|_JAVA_OPTIONS)/',
-        // Docker compose logs in logfmt, so its level is a field rather than a
-        // prefix: `time="..." level=warning msg="..."`. Those are notices about
-        // its own interpolation (`service "foodsoft" has neither an image nor a
-        // build context specified` is the line after). `level=error` and
-        // `level=fatal` are kept.
         '/^time="[^"]*" level=(?:debug|info|warning)\b/',
-        // BuildKit's progress and layer headers. `#N ERROR` is NOT here: it is
-        // BuildKit's own error line and usually the only one naming the cause.
         '/^#\d+ (?:DONE|CACHED)\b/',
-        '/^#\d+ \[[^\]]*\]\s/',                  // BuildKit layer headers
-        '/^<s> /',                               // webpack progress rewrites
-        '/^\[\d+\.\d+s\]\s*$/',                  // bare timings
-        // Maven's `[INFO]` chatter is never the failure. Only the bracket is
-        // dropped, so `[ERROR] Failed to execute goal ...` still leads.
+        '/^#\d+ \[[^\]]*\]\s/',
+        '/^<s> /',
+        '/^\[\d+\.\d+s\]\s*$/',
         '/^\[INFO\]/',
-        // The `maven:` image's entrypoint tries to create /root before Maven
-        // runs; the engine compiles Java on the host as the account, and the
-        // real failure is thousands of lines later. A `mkdir` naming anything
-        // else is still a finding.
-        // coreutils quotes it with ‘’, three bytes each, which a bare `.`
-        // never matched: the real line was never dropped.
         '/^mkdir: cannot create directory (?:\'|"|‘)\/root(?:\'|"|’):/',
-        // `apk add` runs as the account, not root, so this is ignored -- a Go
-        // host compile wraps it in `|| true`. `ERROR:` on another subject is
-        // still a finding.
+        '/^mkdir: Permission denied$/',
+        '/^Can not write to \S+\/copy_reference_file\.log\. Wrong volume permissions\? Carrying on \.\.\.$/',
         '/^ERROR: Unable to open log: Permission denied$/',
-        // `docker compose up`'s progress: an image, network, volume or
-        // container changing state, and the per-layer pull lines. On a stack
-        // pulling several images this is hundreds of lines and it was the
-        // whole reported "reason" for rero-ils. A line saying `Error`
-        // matches neither and is kept.
         '/^\s*(?:Image|Network|Volume|Container)\s+\S+\s+(?:Pulling|Pulled|Building|Built|Creating|Created'
             .'|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
             .'|Skipped)(?:\s+[\d.]+s)?\s*$/',
         '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
             .'|Extracting|Pull complete|Already exists)\b/',
-        // `docker run`'s own pull of an image it does not have yet, which a
-        // host build prints on stderr ahead of anything the build says.
         '/^Unable to find image \'[^\']+\' locally$/',
         '/^[\w.-]+: Pulling from [\w.\/:-]+$/',
         '/^[0-9a-f]{12}: (?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
             .'|Extracting|Pull complete|Already exists)\b/',
         '/^Digest: sha256:[0-9a-f]{64}$/',
         '/^Status: (?:Downloaded newer image|Image is up to date) for \S+$/',
-        // The same for `apt-get update`, best effort in the Rust host compile
-        // (`|| true`): the account cannot write the apt lists.
         '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
-        // A Makefile's `git describe` in a build context with no .git (ntfy). Real
-        // git failures (`fatal: repository ... not found`) still lead.
         '/^(?:#\d+ \d+(?:\.\d+)? )?fatal: not a git repository\b/',
         '/^\s*$/',
     ];
 
+    /**
+     * The region of $output to explain. When nothing announces a cause (Composer's `Your requirements could not be resolved` does
+     * not), the whole window is returned: bounded to WINDOW non-noise lines, it keeps whatever the explainer can recognise.
+     */
     public static function select(string $output): string
     {
         $lines = preg_split('/\r?\n/', $output) ?: [];
@@ -183,33 +131,34 @@ final class FailureOutput
                 return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
             }
         }
-        $offset = count($lines) - count($window);
-        foreach ($window as $i => $line) {
-            // A build step's own output carries BuildKit's `#13 249.2 ` prefix.
-            $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
-            foreach (self::CAUSE as $pattern) {
-                if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
-                    $start = self::npmBlockStart($lines, $offset + $i);
 
-                    return self::stepCause($lines, $offset + $i)
-                        ?? trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
-                }
-            }
-        }
-
-        // Nothing announced itself, so there is no failing line to centre on.
-        // Composer's `Your requirements could not be resolved` / `Problem 1`
-        // matches no CAUSE pattern and is followed by boilerplate .ini advice,
-        // so the whole window is returned -- it is already bounded to WINDOW
-        // non-noise lines, and keeps whatever the explainer can recognise.
-        return trim(implode("\n", $window));
+        return self::causeRegion($lines, $window) ?? trim(implode("\n", $window));
     }
 
     /**
-     * The output without its progress and advisory lines, for a failure no
-     * explainer rule matched. A host build's stderr starts with docker's image
-     * pull, which was reported as the reason. Nothing else is dropped: the
-     * text may be a sentence the engine already made.
+     * The region around the first line in $window that announces a cause, a step's output matched without its BuildKit prefix.
+     *
+     * @param  list<string>  $lines
+     * @param  list<string>  $window
+     */
+    private static function causeRegion(array $lines, array $window): ?string
+    {
+        $offset = count($lines) - count($window);
+        foreach ($window as $i => $line) {
+            if (self::isCause($line)) {
+                $start = self::npmBlockStart($lines, $offset + $i);
+
+                return self::stepCause($lines, $offset + $i)
+                    ?? trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The output without its progress and advisory lines, for a failure no rule matched: a host build's stderr opens with docker's
+     * image pull. Nothing else is dropped, as the text may be a sentence the engine already made.
      */
     public static function withoutNoise(string $output): string
     {
@@ -220,13 +169,8 @@ final class FailureOutput
     }
 
     /**
-     * What the failed BuildKit step printed, from `docker compose up --build`'s
-     * stdout: the `#N` lines of the first step that reported `#N ERROR:`.
-     *
-     * Compose writes the build progress to stdout and only the `failed to
-     * solve` summary to stderr, so the explainer saw "exit code: 101" and never
-     * the `error: could not compile` or `pattern ...: no matching files found`
-     * above it.
+     * The `#N` lines of the first step that reported `#N ERROR:` in `docker compose up --build`'s stdout: Compose writes the build
+     * progress there and only the `failed to solve` summary to stderr, so the explainer saw an exit code and never the cause.
      */
     public static function failedBuildStep(string $stdout): string
     {
@@ -251,11 +195,23 @@ final class FailureOutput
     }
 
     /**
-     * The text a failed build process is reported by: its stderr, unless that
-     * is nothing but noise. The maven image's `mkdir: cannot create directory
-     * '/root'` and the JVM's JAVA_TOOL_OPTIONS banner go to stderr while Maven
-     * prints `[ERROR] ... release version 25 not supported` to stdout, and the
-     * banner was reported as the reason.
+     * The last lines a failed BuildKit step printed above its bare failure lines, without prefixes: where the cause is
+     * when no rule names it. Empty without a failed step.
+     */
+    public static function failedStepTail(string $output): string
+    {
+        $own = preg_split('/\r?\n/', self::failedBuildStep($output)) ?: [];
+        $printed = array_filter(
+            array_map(static fn (string $l): string => (string) preg_replace(self::STEP_PREFIX, '', $l), $own),
+            static fn (string $l): bool => ! self::isNoise($l) && ! self::isCause($l)
+        );
+
+        return trim(implode("\n", array_slice($printed, -self::STEP_TAIL)));
+    }
+
+    /**
+     * The text a failed build process is reported by: its stderr, unless that is nothing but noise, as with Maven, whose image and
+     * JVM banners go to stderr while its `[ERROR]` lines go to stdout.
      */
     public static function fromStreams(string $stderr, string $stdout): string
     {
@@ -270,13 +226,8 @@ final class FailureOutput
     }
 
     /**
-     * When BuildKit's `#N ERROR:` is the first line that announced itself, the
-     * cause is in what step N printed above it, which no CAUSE pattern knows:
-     * yum's `Could not resolve host: mirrorlist.centos.org` (flexisip), a
-     * bindgen panic under a Bundler backtrace (publify). The region starting
-     * at `#N ERROR:` only reaches the generic exit code, so it is centred on
-     * the step's own line an explainer rule recognises instead. Null when
-     * none does: the old region stands.
+     * When `#N ERROR:` leads, the cause is in what step N printed above it, which no CAUSE pattern knows: the region starts at the
+     * shortest tail of the step an explainer rule still recognises, or null, leaving the region at `#N ERROR:`.
      *
      * @param  list<string>  $lines
      */
@@ -294,7 +245,6 @@ final class FailureOutput
             return null;
         }
 
-        // The shortest tail of the step that still reads as that rule starts at its line.
         for ($k = count($own) - 1; $k >= 0; $k--) {
             $tail = array_slice($own, $k);
             if ((DeployFailureExplainer::match(implode("\n", $tail))['rule'] ?? null) !== $rule) {
@@ -309,9 +259,8 @@ final class FailureOutput
     }
 
     /**
-     * Where the `npm error` block holding line $at begins. npm 11 prints a
-     * command's whole usage after EUSAGE, longer than WINDOW, so the window
-     * opened mid-block and `npm error code` and its reason were cut off.
+     * Where the `npm error` block holding line $at begins: npm 11 prints a command's whole usage after EUSAGE, longer than WINDOW,
+     * which cut off `npm error code` and its reason.
      *
      * @param  list<string>  $lines
      */
@@ -328,6 +277,20 @@ final class FailureOutput
         return $at;
     }
 
+    /** A build step's own output carries BuildKit's `#13 249.2 ` prefix, so the bare line is matched too. */
+    private static function isCause(string $line): bool
+    {
+        $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
+        foreach (self::CAUSE as $pattern) {
+            if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** A `mkdir` of /root matches coreutils' ‘’ quotes too, three bytes each, which a bare `.` never matched. */
     private static function isNoise(string $line): bool
     {
         foreach (self::NOISE as $pattern) {

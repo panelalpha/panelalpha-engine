@@ -227,7 +227,8 @@ class HealthTelemetryTest extends TestCase
     /**
      * A health finding is the one event about an application nobody is
      * watching deploy, so the name it is served under is the first thing a
-     * reader wants and the last thing that was there.
+     * reader wants and the last thing that was there: the customer's own
+     * domain as typed, the engine's as it made it.
      */
     public function test_a_health_finding_names_the_application_it_is_about(): void
     {
@@ -243,12 +244,12 @@ class HealthTelemetryTest extends TestCase
             'error' => '',
             'signal' => 'health-placeholder',
             'domains' => [
-                ['domain' => 'shop.acme.com', 'primary' => true, 'type' => 'main'],
+                ['domain' => 'store.acme.com', 'primary' => true, 'type' => 'main'],
                 ['domain' => 'shop-4f2a.panelalpha.online', 'tunnel' => 'panelalpha'],
             ],
         ]);
 
-        $this->assertSame('shop.acme.com', $report['domain']['primary']);
+        $this->assertSame('store.acme.com', $report['domain']['primary']);
         $this->assertSame('shop-4f2a.panelalpha.online', $report['domain']['names'][1]['domain']);
     }
 }

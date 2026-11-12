@@ -2,9 +2,13 @@
 
 namespace Tests\Unit\Deploy\Telemetry;
 
+use App\Lib\Deploy\Platform\Metadata\AppPackage;
+use App\Lib\Deploy\Telemetry\AppFacts;
 use App\Lib\Deploy\Telemetry\BugReport;
 use App\Lib\Deploy\Telemetry\DeployReport;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\TestNetwork;
 
 /**
  * A bug report is the one payload here whose body a person wrote, which makes
@@ -63,16 +67,13 @@ class BugReportTest extends TestCase
     }
 
     /**
-     * A bug report is about one application, and the reporter is usually
-     * looking straight at it. The address is the first thing a reader wants,
-     * and it arrives in the clear — the same real hostnames a deploy report
-     * carries, built by the same method so the two cannot drift.
+     * A customer's domain arrives in the clear, built as a deploy report builds it; the engine's names as they are.
      */
     public function test_it_names_the_application_the_report_is_about(): void
     {
         $report = $this->build([
             'domains' => [
-                ['domain' => 'shop.acme.com', 'primary' => true, 'type' => 'main'],
+                ['domain' => 'store.acme.com', 'primary' => true, 'type' => 'main'],
                 ['domain' => 'shop-4f2a.panelalpha.online', 'tunnel' => 'panelalpha'],
             ],
             'details' => [
@@ -81,11 +82,45 @@ class BugReportTest extends TestCase
             ],
         ]);
 
-        $this->assertSame('shop.acme.com', $report['domain']['primary']);
-        $this->assertSame('shop.acme.com', $report['domain']['names'][0]['domain']);
+        $this->assertSame('store.acme.com', $report['domain']['primary']);
+        $this->assertSame('store.acme.com', $report['domain']['names'][0]['domain']);
+        $this->assertSame('shop-4f2a.panelalpha.online', $report['domain']['names'][1]['domain']);
         $this->assertSame('panelalpha', $report['domain']['names'][1]['tunnel']);
         // The categories still travel beside the names.
         $this->assertSame('panelalpha_online', $report['domain']['source']);
+    }
+
+    /**
+     * The reporter pastes the name they see and the health evidence quotes it, so it goes wherever it turns up.
+     */
+    public function test_no_field_but_the_hostnames_names_the_project_or_the_server(): void
+    {
+        $address = TestNetwork::private(25);
+        $dashed = str_replace('.', '-', $address);
+        $direct = "shop.{$dashed}.panelalpha.direct";
+
+        $report = $this->build([
+            'title' => "{$direct} answers 502",
+            'description' => "Opening https://shop.panel.example.com/ shows the placeholder, and so does {$address}.",
+            'domains' => [
+                ['domain' => $direct, 'primary' => true, 'type' => 'main'],
+                ['domain' => 'shop.panel.example.com', 'alias' => true],
+                ['domain' => 'store.acme.com', 'type' => 'addon'],
+            ],
+            'health' => ['domain' => ['verdict' => 'serves_other', 'domain' => $direct]],
+            'server_names' => ['panel.example.com', $address],
+        ]);
+
+        $withoutHostnames = $report;
+        unset($withoutHostnames['domain']['primary'], $withoutHostnames['domain']['names']);
+        $json = (string) json_encode($withoutHostnames, JSON_UNESCAPED_SLASHES);
+        foreach (['shop', $address, $dashed, 'panel.example.com'] as $leak) {
+            $this->assertStringNotContainsString($leak, $json);
+        }
+        $this->assertSame($direct, $report['domain']['primary']);
+        $this->assertSame('shop.panel.example.com', $report['domain']['names'][1]['domain']);
+        $this->assertSame('store.acme.com', $report['domain']['names'][2]['domain']);
+        $this->assertSame('<account>.<ip>.panelalpha.direct', $report['app']['health']['domain']['domain']);
     }
 
     public function test_a_bug_report_with_no_domains_carries_no_domain_block(): void
@@ -431,6 +466,41 @@ class BugReportTest extends TestCase
             $this->build($input)['app']['inspect']['metadata']['name'],
             $this->build($input)['app']['inspect']['metadata']['name']
         );
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function privatePackageNames(): array
+    {
+        return [
+            'a name unlike the account' => ['shop', 'acme-storefront'],
+            'the account name itself' => ['storefront', 'storefront'],
+            'the account name under a scope' => ['storefront', '@acme/storefront'],
+        ];
+    }
+
+    #[DataProvider('privatePackageNames')]
+    public function test_a_private_package_name_is_hashed_as_the_deploy_report_hashes_it(
+        string $username,
+        string $name
+    ): void {
+        $package = new AppPackage(
+            ecosystem: 'node',
+            file: 'package.json',
+            name: $name,
+            nameSource: 'package.json name'
+        );
+        $deploy = AppFacts::build([$package], DeployReport::TIER_REPO, true, str_repeat('a', 32));
+
+        $metadata = $this->build([
+            'username' => $username,
+            'repo_private' => true,
+            'inspect' => ['metadata' => ['name' => $name, 'packages' => [$package->toArray()]]],
+        ])['app']['inspect']['metadata'];
+
+        $this->assertSame($deploy['name_hash'], $metadata['name']);
+        $this->assertSame($deploy['name_hash'], $metadata['packages'][0]['name']);
     }
 
     public function test_evidence_too_large_to_send_is_declared_rather_than_truncated(): void

@@ -9,19 +9,15 @@ use App\Lib\Deploy\Platform\PlatformCandidates;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\Domain;
+use App\Models\Setting;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The facts a report is made of, each gathered so that its absence costs
- * nothing.
- *
- * Telemetry runs at the end of a deploy that may have failed *because*
- * something is wrong, and the account it describes is often deleted moments
- * later: the database may be unreachable, the log file gone, the home
- * directory already rolled back. A report missing one field is worth writing;
- * no report at all is not.
+ * The facts a report is made of, each gathered so that its absence costs nothing: the account may be rolled back
+ * moments later, and a report missing one field is worth writing where no report at all is not.
  */
 final class TelemetryFields
 {
@@ -79,14 +75,8 @@ final class TelemetryFields
     }
 
     /**
-     * The repository this project deploys from.
-     *
-     * The account record first, because that is the URL a deploy was *asked*
-     * for. Where there is none, the checkout is asked instead: a site
-     * connected through `POST /git/connect` and an archive that turned out to
-     * carry a `.git` both deploy from a repository the account record has
-     * never heard of, and reporting nothing for them put every failure they
-     * caused into the "no repository" bucket.
+     * The repository this project deploys from: the URL the account record asked for, else the checkout's remote,
+     * as a `POST /git/connect` site or an archive carrying a `.git` deploys from one the record never heard of.
      */
     public function repoUrl(): ?string
     {
@@ -115,16 +105,8 @@ final class TelemetryFields
     }
 
     /**
-     * Whether the repository is the customer's to keep private.
-     *
-     * A stored token is the first answer and always was: the engine was given
-     * a credential, so the repository needs one. The URL itself is the second,
-     * and it is the one that was missing. Anything that is not plain HTTPS
-     * without embedded credentials — an `ssh://`, a `git@host:owner/repo`, a
-     * URL with a password in it — cannot be cloned by a stranger, so it is not
-     * public, and naming its path in the clear because no token happened to be
-     * stored on the account was a disclosure this class could always have
-     * avoided. A remote read off the disk is judged by exactly the same rule.
+     * Whether the repository is the customer's to keep private: a stored token says so, and so does any URL that
+     * is not plain HTTPS without credentials, as a stranger could not clone it.
      */
     public function repoIsPrivate(): bool
     {
@@ -164,12 +146,8 @@ final class TelemetryFields
     }
 
     /**
-     * The commonest account has no repository at all, and answering that must
-     * not cost a process: an archive upload would otherwise pay for a git it
-     * was always going to fail. Only a directory that exists and either hides
-     * its contents from us or has a `.git` in it is worth asking git about --
-     * `.git` is a file rather than a directory in a worktree, so its kind is
-     * not checked, only its presence.
+     * Git is asked only about a directory that hides its contents or holds a `.git` (a file in a worktree), so the
+     * commonest account, with no repository, costs no process.
      *
      * @return array<string, mixed>
      */
@@ -180,16 +158,12 @@ final class TelemetryFields
             return ['present' => false];
         }
 
-        return CheckoutFacts::read($dir, self::gitRunner());
+        return CheckoutFacts::read($dir, $this->gitRunner());
     }
 
     /**
-     * A credential stored against the checkout rather than against the account.
-     *
-     * `git_repo`/`git_token` is how a project *created* from a repository
-     * remembers one; `site_git` is how one connected to a repository
-     * afterwards does. Both mean the same thing here — somebody had to
-     * authenticate — and only the first was ever consulted.
+     * A credential stored against the checkout (`site_git`, from connecting a repository afterwards) rather than
+     * against the account; both mean somebody had to authenticate.
      */
     private function siteToken(): ?string
     {
@@ -199,21 +173,24 @@ final class TelemetryFields
     }
 
     /**
-     * Runs one git command against a checkout owned by somebody else.
-     *
-     * `sudo` because core runs as www-data and the tree belongs to the account
-     * user; a failure is a null rather than an exception, because a report
-     * that lost one field is worth more than no report at all.
+     * Runs a {@see CheckoutFacts} git argv as the account. Null on failure or for an account without a uid and gid.
      *
      * @return callable(list<string>): ?string
      */
-    private static function gitRunner(): callable
+    private function gitRunner(): callable
     {
         $system = new System;
+        $ids = self::safely(fn (): ?array => $this->user?->linuxIds(), null);
 
-        return static function (array $argv) use ($system): ?string {
+        return static function (array $argv) use ($system, $ids): ?string {
+            $at = array_search('-C', $argv, true);
+            if ($ids === null || ! is_int($at) || ! isset($argv[$at + 1])) {
+                return null;
+            }
             try {
-                return $system->exec(['sudo', ...$argv], [], self::GIT_TIMEOUT);
+                $git = Privileged::account()->gitOnAccountCheckout($ids[0], $ids[1], $argv[$at + 1], array_slice($argv, $at + 2));
+
+                return $system->exec($git, [], self::GIT_TIMEOUT);
             } catch (\Throwable $e) {
                 return null;
             }
@@ -255,19 +232,8 @@ final class TelemetryFields
     }
 
     /**
-     * The recipes that could have deployed this project, best first — ids
-     * only, because the label and priority are facts about the engine that
-     * every install already knows.
-     *
-     * The counterpart to the recipe the deploy actually used. On its own,
-     * "laravel failed" says nothing about whether a better recipe existed;
-     * next to `["dockerfile", "laravel", "railpack"]` it says the project
-     * shipped a Dockerfile the engine outranked, which is the same question
-     * `detection-railpack` answers one rung lower and the reason that signal
-     * exists.
-     *
-     * Read off the tree at the moment of the event, like everything else here:
-     * a rolled-back deploy takes the files that decided the answer with it.
+     * The recipe ids that could have deployed this project, best first, read off the tree at the event: next to the
+     * one used, they say whether a better recipe existed, such as a Dockerfile the engine outranked.
      *
      * @return list<string>
      */
@@ -281,11 +247,8 @@ final class TelemetryFields
     }
 
     /**
-     * What the package files say this application is, primary ecosystem first.
-     *
-     * The same readers detection itself used, so a report describes the
-     * project the deploy actually saw. {@see AppFacts} decides which parts of
-     * that may be transmitted; this only gathers.
+     * What the package files say this application is, primary ecosystem first, by detection's own readers.
+     * {@see AppFacts} decides which parts may be transmitted; this only gathers.
      *
      * @param  ?string  $runtime  the ecosystem the deploy chose to build, when known
      * @return list<AppPackage>
@@ -308,25 +271,8 @@ final class TelemetryFields
     }
 
     /**
-     * The hostnames this project answers on, primary first.
-     *
-     * Requested by the operator: an event names the application, and until now
-     * it never named the address that application is served at. Support work
-     * starts by opening the site, and a report that cannot say which site it
-     * is about sends somebody back to the panel to look it up.
-     *
-     * Three sources, because the same project is reachable under more than
-     * one name and each answers a different question: the account's own
-     * `domain`, the `domains` rows (addon and subdomain names, each carrying
-     * its `aliases`), and the tunnel hostnames attached to those domains --
-     * the public name the WithoutDNS proxy registered, which is the one a
-     * visitor actually types.
-     *
-     * These are the *real* hostnames, deliberately not redacted. The account
-     * name travels as a hash everywhere else in a report and still does; a
-     * hostname is the application's public address and the whole point of
-     * sending it. Only the main domain is marked, so a reader can tell the
-     * site from the `www.` alias beside it.
+     * The real hostnames this project answers on, unredacted: the account's domain first, marked primary and main,
+     * then each `domains` row with its tunnels and aliases, capped last so a long alias list never drops the primary.
      *
      * @return list<array{domain: string, primary?: true, type?: string, alias?: true, tunnel?: string}>
      */
@@ -337,25 +283,8 @@ final class TelemetryFields
         }
 
         $found = [];
-        $add = function (string $name, array $facts) use (&$found): void {
-            $name = self::normalizeHostname($name);
-            if ($name === '') {
-                return;
-            }
-
-            // First writer wins, and the main domain is written first: a name
-            // that is both the account's domain and a `domains` row keeps the
-            // primary marking rather than being demoted by the second read.
-            if (! isset($found[$name])) {
-                $found[$name] = ['domain' => $name] + $facts;
-            }
-        };
-
-        $add((string) self::safely(fn (): string => (string) $this->user->domain, ''), [
+        self::addHostname($found, (string) self::safely(fn (): string => (string) $this->user->domain, ''), [
             'primary' => true,
-            // The type is stated rather than left to be inferred from
-            // `primary`: a reader that wants "the main names" should not have
-            // to know that the account column is the main one.
             'type' => 'main',
         ]);
 
@@ -364,37 +293,79 @@ final class TelemetryFields
                 continue;
             }
 
-            $facts = [];
-            $type = self::safely(fn (): string => (string) $domain->type, '');
-            if ($type !== '') {
-                $facts['type'] = $type;
-            }
-
-            $add((string) $domain->domain, $facts);
-
-            foreach (self::tunnelHostnames($domain) as $hostname => $provider) {
-                $add($hostname, $provider === '' ? [] : ['tunnel' => $provider]);
-            }
-
-            foreach (self::safely(fn (): array => $domain->getAliases(), []) as $alias) {
-                if (is_string($alias)) {
-                    $add($alias, ['alias' => true]);
-                }
-            }
+            self::addDomainHostnames($found, $domain);
         }
 
-        // The cap is applied last, after the primary has had its chance to be
-        // in the list at all -- it is written first, so it is never the entry
-        // a long alias list pushes out.
         return array_slice(array_values($found), 0, DeployReport::MAX_NAMES);
     }
 
     /**
-     * The public hostnames a domain's tunnels registered.
+     * The name the engine's certificate is issued for and the IPv4 it records: what {@see ServerNames} keeps out of
+     * a report.
      *
-     * Read through the relation rather than the `tunnels` table so a domain
-     * whose rows are missing costs nothing: this runs while a deploy is
-     * finishing and cannot fail it.
+     * @return list<string>
+     */
+    public function serverNames(): array
+    {
+        $names = [];
+        foreach (['cert_domain', 'default_ipv4'] as $setting) {
+            $value = self::safely(fn (): mixed => Setting::get($setting), null);
+            if (is_string($value) && trim($value) !== '') {
+                $names[] = trim($value);
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * A `domains` row's own name with its type, then its tunnel hostnames, then its aliases.
+     *
+     * @param  array<string, array<string, mixed>>  $found
+     */
+    private static function addDomainHostnames(array &$found, Domain $domain): void
+    {
+        $facts = [];
+        $type = self::safely(fn (): string => (string) $domain->type, '');
+        if ($type !== '') {
+            $facts['type'] = $type;
+        }
+
+        self::addHostname($found, (string) $domain->domain, $facts);
+
+        foreach (self::tunnelHostnames($domain) as $hostname => $provider) {
+            self::addHostname($found, $hostname, $provider === '' ? [] : ['tunnel' => $provider]);
+        }
+
+        foreach (self::safely(fn (): array => $domain->getAliases(), []) as $alias) {
+            if (is_string($alias)) {
+                self::addHostname($found, $alias, ['alias' => true]);
+            }
+        }
+    }
+
+    /**
+     * First writer wins, and the main domain is written first, so a name that is also a `domains` row
+     * keeps its primary marking.
+     *
+     * @param  array<string, array<string, mixed>>  $found
+     * @param  array<string, mixed>  $facts
+     */
+    private static function addHostname(array &$found, string $name, array $facts): void
+    {
+        $name = self::normalizeHostname($name);
+        if ($name === '') {
+            return;
+        }
+
+        if (! isset($found[$name])) {
+            $found[$name] = ['domain' => $name] + $facts;
+        }
+    }
+
+    /**
+     * The public hostnames a domain's tunnels registered, read through the relation so a domain whose rows
+     * are missing costs nothing.
      *
      * @return array<string, string> hostname => provider, provider '' when unnamed
      */
@@ -414,16 +385,8 @@ final class TelemetryFields
     }
 
     /**
-     * A hostname as it is compared: lowercase, no trailing dot, no scheme and
-     * no path, and refused outright when it is not a name at all.
-     *
-     * Not a validator. This only has to stop the report carrying a blank
-     * entry or a credential somebody pasted into a domain row — a domain named
-     * `https://acme:ghp_token@shop.acme.com/` is a `domains` row somebody
-     * typed into, and the report must not relay the credential in it.
-     *
-     * Public so the rule can be read and tested without an account, the same
-     * reason `isPrivateRepo()` is.
+     * A hostname as compared: lowercase, no trailing dot, scheme or path; '' when it is not a name, or holds
+     * anything outside a hostname's alphabet, so a credential pasted into a domain row is never relayed.
      */
     public static function normalizeHostname(string $name): string
     {
@@ -436,11 +399,6 @@ final class TelemetryFields
             return '';
         }
 
-        // Anything outside a hostname's alphabet is not one. Over-strict on
-        // purpose, because the alternative is relaying whatever somebody
-        // pasted into a domain row: an underscore is legal in some zones and a
-        // colon never is, and a name this refuses is a name to look at rather
-        // than a name to send.
         return preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', $name) === 1 ? $name : '';
     }
 

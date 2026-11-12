@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\Redactor;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TestNetwork;
 
@@ -98,6 +99,35 @@ class RedactorTest extends TestCase
         $this->assertStringContainsString(TestNetwork::ANY . ':3000', Redactor::line('listening on ' . TestNetwork::ANY . ':3000'));
         $this->assertStringContainsString(TestNetwork::LOOPBACK, Redactor::line('proxy to ' . TestNetwork::LOOPBACK . ':8080'));
         $this->assertStringContainsString(TestNetwork::container(2), Redactor::line('container ip ' . TestNetwork::container(2)));
+    }
+
+    /**
+     * A name under an address zone spells the server's address, private or
+     * not, and the dashed form is the one every `.panelalpha.direct` name uses.
+     */
+    public function test_masks_an_address_a_hostname_spells_whatever_its_range(): void
+    {
+        $private = TestNetwork::private(25);
+        $public = TestNetwork::public(7);
+        $line = Redactor::line(
+            'https://app.' . str_replace('.', '-', $private) . '.panelalpha.direct answered 502, '
+            . 'app.' . $private . '.nip.io did not, app-' . str_replace('.', '-', $public) . '.sslip.io timed out'
+        );
+
+        foreach ([$private, $public] as $address) {
+            $this->assertStringNotContainsString($address, $line);
+            $this->assertStringNotContainsString(str_replace('.', '-', $address), $line);
+        }
+        $this->assertStringContainsString('https://app.<ip>.panelalpha.direct answered', $line);
+        $this->assertStringContainsString('app.<ip>.nip.io did not', $line);
+        $this->assertStringContainsString('app-<ip>.sslip.io timed out', $line);
+    }
+
+    public function test_a_dashed_run_that_spells_no_address_is_left_alone(): void
+    {
+        $line = 'built 2026-11-11-1200, chunk 300-1-1-1, step 1-2-3-4-5, listening on ' . TestNetwork::private(25) . ':3000';
+
+        $this->assertSame($line, Redactor::line($line));
     }
 
     public function test_does_not_mistake_a_version_string_for_an_ip(): void
@@ -228,5 +258,40 @@ class RedactorTest extends TestCase
         // amputate it.
         $this->assertGreaterThan(Redactor::MAX_LINE_BYTES, strlen($prose));
         $this->assertStringContainsString("\n\n", $prose);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function longUnbrokenValues(): array
+    {
+        return [
+            'an unbroken token' => [str_repeat('a', 70000)],
+            'a run of secret words' => [str_repeat('token', 800)],
+            'a run of spaces' => [str_repeat(' ', 70000)],
+            'a run of tabs and newlines' => [str_repeat("\t\n", 35000)],
+        ];
+    }
+
+    #[DataProvider('longUnbrokenValues')]
+    public function test_a_long_unbroken_value_is_redacted_in_one_pass(string $value): void
+    {
+        $started = microtime(true);
+        Redactor::line($value);
+
+        $this->assertLessThan(0.25, microtime(true) - $started);
+    }
+
+    public function test_a_value_the_patterns_give_up_on_is_masked_whole_not_emptied(): void
+    {
+        $limit = (string) ini_get('pcre.backtrack_limit');
+        ini_set('pcre.backtrack_limit', '1');
+        try {
+            $line = Redactor::line('DB_PASSWORD=hunter2 while connecting');
+        } finally {
+            ini_set('pcre.backtrack_limit', $limit);
+        }
+
+        $this->assertSame(Redactor::MASK, $line);
     }
 }

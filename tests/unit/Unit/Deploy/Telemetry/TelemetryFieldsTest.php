@@ -3,6 +3,8 @@
 namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\TelemetryFields;
+use App\Models\Setting;
+use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
@@ -158,6 +160,20 @@ class TelemetryFieldsTest extends TestCase
      * hostname, and the answer is to drop the entry rather than to mask it:
      * a half-redacted name is not an address anybody can open.
      */
+    public function test_the_server_is_named_by_its_certificate_name_and_its_address(): void
+    {
+        Setting::setRuntimeSettings(['cert_domain' => ' panel.example.com ', 'default_ipv4' => TestNetwork::public(7)]);
+
+        try {
+            $this->assertSame(['panel.example.com', TestNetwork::public(7)], (new TelemetryFields('nobody'))->serverNames());
+
+            Setting::setRuntimeSettings(['cert_domain' => '', 'default_ipv4' => '']);
+            $this->assertSame([], (new TelemetryFields('nobody'))->serverNames());
+        } finally {
+            Setting::clearRuntimeSettings();
+        }
+    }
+
     public function test_a_hostname_is_reduced_to_a_bare_name_or_refused(): void
     {
         $this->assertSame('shop.acme.com', TelemetryFields::normalizeHostname('  Shop.ACME.com.  '));

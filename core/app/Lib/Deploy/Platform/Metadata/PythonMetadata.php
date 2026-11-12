@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Python identity from pyproject.toml only — of the five places this ecosystem
- * keeps metadata it is the one declarative document with a schema. Both PEP 621's
- * `[project]` and Poetry's `[tool.poetry]` are read; versions are never resolved.
+ * Python identity from pyproject.toml, the one declarative metadata document with a schema: PEP 621's `[project]`
+ * or Poetry's `[tool.poetry]`, versions never resolved.
  */
 final class PythonMetadata implements PackageMetadata
 {
@@ -38,6 +37,7 @@ final class PythonMetadata implements PackageMetadata
         return 'python';
     }
 
+    /** A pyproject.toml holding only build-system and tool config says the project is Python, not which project. */
     public function read(ProjectContext $context): ?AppPackage
     {
         $toml = $context->contents(self::FILE);
@@ -49,8 +49,6 @@ final class PythonMetadata implements PackageMetadata
         $poetry = self::tomlSection($toml, 'tool.poetry');
         $section = $project ?? $poetry;
         if ($section === null) {
-            // A pyproject.toml holding only build-system and tool config says the project
-            // is Python but not which project.
             return null;
         }
 
@@ -69,27 +67,24 @@ final class PythonMetadata implements PackageMetadata
             authors: self::authors($section),
             keywords: self::tomlList($section, 'keywords'),
             entrypoints: self::scriptNames($toml),
-            frameworks: self::matchFrameworks(
-                self::FRAMEWORKS,
-                $this->constraintsFrom($toml, $section, $project !== null),
-                [],
-                self::FILE
-            ),
-            // PEP 621 spells it `requires-python`; Poetry keeps it as an
-            // ordinary `python` dependency. Both mean the interpreter.
+            frameworks: $this->frameworks($toml, $section, $project !== null),
             platform: self::interpreter($toml, $section)
         );
     }
 
+    /** @return list<Framework> */
+    private function frameworks(string $toml, string $section, bool $pep621): array
+    {
+        return self::matchFrameworks(self::FRAMEWORKS, $this->constraintsFrom($toml, $section, $pep621), [], self::FILE);
+    }
+
     /**
-     * The interpreter this project asks for, under either spelling.
+     * The interpreter: PEP 621's `requires-python` on the project, or Poetry's `python` dependency in its own table.
      *
      * @return array<string, string>
      */
     private static function interpreter(string $toml, string $section): array
     {
-        // PEP 621 states it on the project itself; Poetry lists it among the
-        // dependencies, in its own table, so the whole document is consulted.
         $requires = self::tomlString($section, 'requires-python');
 
         if ($requires === null) {
@@ -101,28 +96,46 @@ final class PythonMetadata implements PackageMetadata
     }
 
     /**
-     * Declared dependencies, from whichever of the two spellings is in use:
-     * PEP 621 writes a list of requirement strings (`django>=5.0`), Poetry a
-     * table of `name = constraint`. Names are normalised the way the packaging
-     * spec does, so `Django` and `django` compare as one thing.
+     * Declared dependencies, from PEP 621's requirement strings or Poetry's table, names normalised so `Django`
+     * and `django` compare as one.
      *
      * @return array<string, string>
      */
     private function constraintsFrom(string $toml, string $section, bool $pep621): array
     {
         if ($pep621) {
-            $constraints = [];
-            foreach (self::tomlList($section, 'dependencies') as $requirement) {
-                if (preg_match('/^\s*([A-Za-z0-9._-]+)\s*(.*)$/', $requirement, $matches) !== 1) {
-                    continue;
-                }
-                $name = self::normalize($matches[1]);
-                $constraints[$name] = self::text(trim($matches[2], " \t()")) ?? '*';
-            }
-
-            return $constraints;
+            return self::requirementConstraints($section);
         }
 
+        return self::poetryConstraints($toml);
+    }
+
+    /**
+     * PEP 621: a list of requirement strings, `django>=5.0`.
+     *
+     * @return array<string, string>
+     */
+    private static function requirementConstraints(string $section): array
+    {
+        $constraints = [];
+        foreach (self::tomlList($section, 'dependencies') as $requirement) {
+            if (preg_match('/^\s*([A-Za-z0-9._-]+)\s*(.*)$/', $requirement, $matches) !== 1) {
+                continue;
+            }
+            $name = self::normalize($matches[1]);
+            $constraints[$name] = self::text(trim($matches[2], " \t()")) ?? '*';
+        }
+
+        return $constraints;
+    }
+
+    /**
+     * Poetry: a `name = constraint` table, the interpreter left out.
+     *
+     * @return array<string, string>
+     */
+    private static function poetryConstraints(string $toml): array
+    {
         $dependencies = self::tomlSection($toml, 'tool.poetry.dependencies');
         if ($dependencies === null) {
             return [];
@@ -135,11 +148,24 @@ final class PythonMetadata implements PackageMetadata
                 if ($name === 'python') {
                     continue;
                 }
-                $constraints[$name] = self::text(trim($match[2], " \t\"'")) ?? '*';
+                $constraints[$name] = self::poetryConstraint($match[2]);
             }
         }
 
         return $constraints;
+    }
+
+    /** A constraint string, or an inline table's `version`; a table with none (git, path) is `*`. */
+    private static function poetryConstraint(string $value): string
+    {
+        $value = trim($value);
+        if (str_starts_with($value, '{')) {
+            $value = preg_match('/version[ \t]*=[ \t]*["\'](.*?)["\']/', $value, $version) === 1
+                ? $version[1]
+                : '*';
+        }
+
+        return self::text(trim($value, " \t\"'")) ?? '*';
     }
 
     /** PEP 503 name normalisation: `Flask_Login` and `flask-login` are one package. */
