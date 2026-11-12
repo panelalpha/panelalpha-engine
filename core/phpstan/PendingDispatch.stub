@@ -1,0 +1,12 @@
+<?php
+
+namespace Illuminate\Foundation\Bus;
+
+/**
+ * PendingDispatch::__call() passes the call on to the job and returns the pending dispatch.
+ *
+ * @method $this attachTask(object $task)
+ */
+class PendingDispatch
+{
+}

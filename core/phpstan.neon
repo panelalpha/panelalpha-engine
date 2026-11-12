@@ -1,0 +1,13 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    phpVersion: 80400
+    paths:
+        - app
+    excludePaths:
+        - app/Mcp/Tools/Api
+    stubFiles:
+        - phpstan/PendingDispatch.stub

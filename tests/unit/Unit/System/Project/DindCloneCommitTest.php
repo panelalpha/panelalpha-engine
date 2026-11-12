@@ -8,6 +8,7 @@ use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
@@ -130,6 +131,15 @@ class DindCloneCommitTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 return '';
+            }
+
+            /** No file the account could hold is there. */
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $missing = new Process(['php', '-r', 'exit(1);']);
+                $missing->run();
+
+                return $missing;
             }
         };
 

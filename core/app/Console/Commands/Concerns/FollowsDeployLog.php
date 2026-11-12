@@ -54,7 +54,7 @@ trait FollowsDeployLog
     protected function deployOutput(): OutputInterface
     {
         $out = $this->output->getOutput();
-        $json = $this->hasOption('json') && $this->option('json');
+        $json = (bool) $this->option('json');
 
         return $json && $out instanceof ConsoleOutputInterface ? $out->getErrorOutput() : $out;
     }
