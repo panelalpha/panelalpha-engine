@@ -4,16 +4,22 @@ namespace App\Console\Commands\Users;
 
 use App\Console\Commands\Concerns\FollowsDeployLog;
 use App\Console\Commands\Concerns\ParsesEnvVarOptions;
+use App\Console\Commands\Concerns\PrintsFindings;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Http\Resources\UserResource;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Hints\FindingPresenter;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
+use App\Lib\Project\PublicRouting\ProjectPublicRouting;
+use App\Lib\Project\PublicRouting\PublicRoutingGrants;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\User;
+use App\System\Project\Settings;
 use Illuminate\Console\Command;
 use Illuminate\Validation\ValidationException;
 
@@ -32,6 +38,7 @@ class Create extends Command
 {
     use FollowsDeployLog;
     use ParsesEnvVarOptions;
+    use PrintsFindings;
 
     /** The plural spellings the other project commands answer to. */
     protected $aliases = ['projects:create', 'users:create'];
@@ -46,6 +53,7 @@ class Create extends Command
                             {--template= : Project template; dind when a repository is given}
                             {--recipe= : Deploy with this recipe instead of the detected one}
                             {--env-var=* : KEY=VALUE environment override, repeatable}
+                            {--full-privileges : Trust the application with this engine: an Engine API token for every project, the server\'s own name and public ports, and protection from API tokens once it is live}
                             {--quiet-deploy : Do not print the deploy log while it runs}
                             {--json : Print the created project as JSON instead of a summary}';
 
@@ -74,6 +82,13 @@ class Create extends Command
             $params['git_repo'] = GitRepoInput::expandShorthand($repo, self::shorthandHost());
         }
 
+        $fullPrivileges = (bool) $this->option('full-privileges');
+        if ($fullPrivileges && ! isset($params['git_repo']) && ($params['template'] ?? null) !== 'dind') {
+            $this->error('--full-privileges needs a container project: give --repo, or --template=dind.');
+
+            return 1;
+        }
+
         $envVars = $this->envVarOptions();
         if ($envVars === null) {
             return 1;
@@ -91,6 +106,9 @@ class Create extends Command
                 ? "Creating a project for {$params['git_repo']} — this takes a few minutes."
                 : 'Creating a project — this takes a few minutes.');
         }
+        if ($fullPrivileges) {
+            $this->grantFullPrivileges($user);
+        }
 
         // The deploy runs inside this process, and DeployLogStream is
         // process-local, so the command can subscribe to the same lines the
@@ -101,7 +119,7 @@ class Create extends Command
         try {
             $creator->deploy($user, $creator->startDeployLog($user));
         } catch (ValidationException|DeployAlreadyRunningException|DockerErrorException $e) {
-            $this->warnAboutRepository($creator);
+            $this->warnAboutRepository($creator, $user->username);
             // The hint first: the console renderer prints the reason after it.
             $this->pointAtDeployLog($params);
 
@@ -110,7 +128,32 @@ class Create extends Command
             $this->stopFollowingDeployLog();
         }
 
+        if ($fullPrivileges) {
+            $this->protect($user);
+        }
+
         return $this->report($this->created($user, $creator), $creator);
+    }
+
+    /**
+     * `system:api-access:allow --scope=all` and `system:public-routing:allow --host-domain --ports`, before the first
+     * deploy so it already carries both. No apply is queued, which would race the deploy for its lock.
+     */
+    private function grantFullPrivileges(User $user): void
+    {
+        app(ApiAccess::class)->allow($user, ApiAccess::SCOPE_ALL, false, deliver: false);
+        app(ProjectPublicRouting::class)->allow($user, [PublicRoutingGrants::PORTS, PublicRoutingGrants::HOST_DOMAIN]);
+        $this->deployOutput()->writeln(
+            "Allowed {$user->username} to use the Engine API for every project, and to take the server's own name and public ports."
+        );
+    }
+
+    /** `project:settings:set protected on`, once the application is live: no API or MCP token may then delete, stop or redeploy it. */
+    private function protect(User $user): void
+    {
+        $user->refresh();
+        $result = $user->project()->settings()->set(Settings::KEY_PROTECTED, User::PROTECTED_ON);
+        $this->deployOutput()->writeln((string) ($result['message'] ?? "Project {$user->username} is protected."));
     }
 
     /** The created project as POST /users answers it, `inspection` included. */
@@ -119,7 +162,7 @@ class Create extends Command
         $response = (new UserResource($user))->response();
         $payload = $response->getData(true);
         if (is_array($payload) && is_array($payload['data'] ?? null)) {
-            $payload['data']['inspection'] = $creator->inspection()?->toResponse();
+            $payload['data']['inspection'] = FindingPresenter::inspection($creator->inspection()?->toResponse(), $user->username);
             $response->setData($payload);
         }
 
@@ -127,7 +170,7 @@ class Create extends Command
     }
 
     /** What the inspection before the clone found, when it may not deploy. */
-    private function warnAboutRepository(ProjectCreator $creator): void
+    private function warnAboutRepository(ProjectCreator $creator, string $username): void
     {
         $warning = $creator->inspection()?->warning();
         if ($warning === null) {
@@ -138,6 +181,7 @@ class Create extends Command
             $this->deployOutput()->writeln($warning);
         } else {
             $this->warn($warning);
+            $this->printCliHints(FindingPresenter::present([$creator->inspection()->finding()], $username)[0]['hints'] ?? []);
         }
     }
 
@@ -190,20 +234,29 @@ class Create extends Command
         if ($domain !== '') {
             $this->info('Live at '.$this->url($domain));
         }
-        $this->warnAboutRepository($creator);
+        $this->warnAboutRepository($creator, $username);
 
-        // Said here rather than left to be discovered in a browser: a host with
-        // no license or no public address lands the project on a name that
-        // resolves nowhere, and the deploy itself succeeded all the same.
-        $user = User::findByUsername($username);
-        if ($user !== null && $domain !== '') {
-            $details = $user->getDetails();
-            foreach ([...PublicUrl::warnings($domain, $details), ...PublicUrl::notices($domain, $details)] as $warning) {
-                $this->warn($warning);
-            }
-        }
+        $this->warnAboutPublicUrl($username, $domain);
 
         return 0;
+    }
+
+    /**
+     * Said here rather than left to be discovered in a browser: a host with no license or no public address lands the
+     * project on a name that resolves nowhere, and the deploy itself succeeded all the same.
+     */
+    private function warnAboutPublicUrl(string $username, string $domain): void
+    {
+        $user = User::findByUsername($username);
+        if ($user === null || $domain === '') {
+            return;
+        }
+
+        $details = $user->getDetails();
+        $this->printFindings(PublicUrl::warnings($domain, $details), $username);
+        foreach (PublicUrl::notices($domain, $details) as $notice) {
+            $this->warn($notice);
+        }
     }
 
     /** The scheme the project's own domain is served on. */

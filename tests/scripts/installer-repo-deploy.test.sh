@@ -121,6 +121,7 @@ STUB_BIN="${WORK_DIR}/bin"
 mkdir -p "$STUB_BIN"
 cat >"${STUB_BIN}/docker" <<STUB
 #!/bin/bash
+printf '%s\n' "\$*" >"${WORK_DIR}/docker-args"
 if [ "\${STUB_FAIL:-0}" = 1 ]; then
     # The hint on stdout; the deploy log and then the reason on stderr, last.
     echo 'Deploy log: pae project:deploy:list'
@@ -190,6 +191,62 @@ case "$reported" in
 *'pae project:create --repo n8n-io/n8n'*) pass 'failure names the retry' ;;
 *) fail 'failure names the retry' 'the retry command' "$reported" ;;
 esac
+
+case "$(cat "${WORK_DIR}/docker-args")" in
+*--full-privileges*) fail 'no --full-privileges by default' 'no flag' "$(cat "${WORK_DIR}/docker-args")" ;;
+*) pass 'no --full-privileges by default' ;;
+esac
+
+# --full-privileges reaches project:create, and the retry names it too.
+DEPLOY_FULL_PRIVILEGES=1
+DEPLOY_FAILED=0
+deploy_repository >/dev/null 2>&1
+case "$(cat "${WORK_DIR}/docker-args")" in
+*'project:create --repo=https://github.com/n8n-io/n8n --json --full-privileges') pass 'full privileges reach project:create' ;;
+*) fail 'full privileges reach project:create' '… --full-privileges' "$(cat "${WORK_DIR}/docker-args")" ;;
+esac
+expect 'retry names full privileges' 'pae project:create --repo n8n-io/n8n --full-privileges' "$(deploy_retry_command)"
+DEPLOY_FULL_PRIVILEGES=0
+
+# --env-var pairs and the panel's admin + Hub code reach project:create.
+DEPLOY_ENV_VARS=('FOO=bar baz' 'EMPTY=')
+PANEL_ADMIN_EMAIL='ada@example.com'
+PANEL_ADMIN_PASSWORD=''
+PANEL_HUB_CODE='WDJB-MJHT'
+DEPLOY_FAILED=0
+deploy_repository >/dev/null 2>&1
+args=$(cat "${WORK_DIR}/docker-args")
+case "$args" in
+*'--env-var=FOO=bar baz --env-var=EMPTY= --env-var=PANELALPHA_USER_EMAIL=ada@example.com --env-var=PANELALPHA_USER_PASSWORD='*) pass 'env vars and the panel admin reach project:create' ;;
+*) fail 'env vars and the panel admin reach project:create' '--env-var=… in order' "$args" ;;
+esac
+case "$args" in
+*'--env-var=PANELALPHA_HUB_CODE=WDJB-MJHT'*) pass 'the hub code goes to the panel' ;;
+*) fail 'the hub code goes to the panel' 'PANELALPHA_HUB_CODE' "$args" ;;
+esac
+if [[ "$PANEL_ADMIN_PASSWORD" =~ ^[A-Za-z0-9]{8}-[A-Za-z0-9]{8}$ ]] && [[ "$PANEL_ADMIN_PASSWORD" =~ [A-Z] ]] \
+    && [[ "$PANEL_ADMIN_PASSWORD" =~ [a-z] ]] && [[ "$PANEL_ADMIN_PASSWORD" =~ [0-9] ]]; then
+    pass 'the admin password meets the panel policy'
+else
+    fail 'the admin password meets the panel policy' 'Aa1 + a dash, 17 chars' "$PANEL_ADMIN_PASSWORD"
+fi
+reported=$(report_deployed_project 2>&1)
+case "$reported" in
+*"Log in as: ada@example.com    password: ${PANEL_ADMIN_PASSWORD}"*) pass 'the outro shows the panel login' ;;
+*) fail 'the outro shows the panel login' 'Log in as: …' "$reported" ;;
+esac
+case "$reported" in
+*'connects to PanelAlpha Hub on its first start'*) pass 'the outro says the panel connects to the Hub' ;;
+*) fail 'the outro says the panel connects to the Hub' 'connects to PanelAlpha Hub' "$reported" ;;
+esac
+case "$reported" in
+*WDJB-MJHT*) fail 'the outro never shows the hub code' 'no code' "$reported" ;;
+*) pass 'the outro never shows the hub code' ;;
+esac
+DEPLOY_ENV_VARS=()
+PANEL_ADMIN_EMAIL=''
+PANEL_ADMIN_PASSWORD=''
+PANEL_HUB_CODE=''
 
 # ---- site password helpers -------------------------------------------------
 
