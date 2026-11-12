@@ -11,7 +11,6 @@ use App\Lib\Limits\ResourceLimit;
 use App\Models\SftpAccount;
 use App\Models\User;
 use App\System;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -60,7 +59,7 @@ class SftpAccountController extends Controller
                     property: 'sftp_username',
                     type: 'string',
                     example: 'johndoe_backup',
-                    description: 'Name of the SFTP account. Must start with "<project username>_". Also accepted as `username`; documented under this name because `username` is already this route\'s path parameter.'
+                    description: 'Name of the SFTP account: "<project username>_<name>", or just "<name>", which gets the prefix added. At most 32 characters with the prefix. Also accepted as `username`; documented under this name because `username` is already this route\'s path parameter.'
                 ),
                 new OA\Property(
                     property: 'auth_method',
@@ -69,7 +68,7 @@ class SftpAccountController extends Controller
                     description: 'Comma-separated list of "password" and/or "public_key". Each method listed requires its credential below.'
                 ),
                 new OA\Property(property: 'password', type: 'string', format: 'password', nullable: true, description: 'Required when auth_method includes "password". Minimum 8 characters.'),
-                new OA\Property(property: 'public_key', type: 'string', nullable: true, description: 'Required when auth_method includes "public_key".'),
+                new OA\Property(property: 'public_key', type: 'string', nullable: true, description: 'Required when auth_method includes "public_key". One line of an OpenSSH .pub file: ssh-ed25519, ecdsa-sha2-nistp256/384/521 (or their security-key forms), or ssh-rsa of at least 2048 bits. DSA keys are refused.'),
             ],
         )),
         responses: [
@@ -81,7 +80,7 @@ class SftpAccountController extends Controller
      * @param  string  $username
      * @return SftpAccountResource
      */
-    public function store($username, SftpAccountStoreRequest $request)
+    public function store($username, SftpAccountStoreRequest $request, System $system)
     {
         /** @var ?User */
         $user = User::query()->withCount('sftpAccounts')->where('username', $username)->first();
@@ -102,8 +101,9 @@ class SftpAccountController extends Controller
          * }
          */
         $params = $request->validated();
+        $params['username'] = $user->qualifySftpAccount($params['username']);
 
-        $this->assertAccountNameFree($user, $params['username']);
+        $this->assertAccountNameFree($params['username']);
 
         $this->authMethods($params);
 
@@ -119,7 +119,7 @@ class SftpAccountController extends Controller
             'public_key' => $params['public_key'] ?? null,
         ]);
 
-        (new System)->sftp()->rebuildSftpAccounts();
+        $system->sftp()->rebuildSftpAccounts();
 
         return new SftpAccountResource($sftpAccount);
     }
@@ -131,7 +131,7 @@ class SftpAccountController extends Controller
         tags: ['SFTP Accounts'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, description: 'The SFTP account name, with or without its "<project username>_" prefix.', schema: new OA\Schema(type: 'string')),
         ],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['auth_method'],
@@ -143,7 +143,7 @@ class SftpAccountController extends Controller
                     description: 'Comma-separated list of "password" and/or "public_key". Each method listed requires its credential below; a method left out is turned off.'
                 ),
                 new OA\Property(property: 'password', type: 'string', format: 'password', nullable: true),
-                new OA\Property(property: 'public_key', type: 'string', nullable: true),
+                new OA\Property(property: 'public_key', type: 'string', nullable: true, description: 'One line of an OpenSSH .pub file: ssh-ed25519, ecdsa-sha2-nistp256/384/521 (or their security-key forms), or ssh-rsa of at least 2048 bits. DSA keys are refused.'),
             ],
         )),
         responses: [
@@ -194,7 +194,7 @@ class SftpAccountController extends Controller
         tags: ['SFTP Accounts'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, description: 'The SFTP account name, with or without its "<project username>_" prefix.', schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'SFTP account deleted', content: new OA\JsonContent(ref: '#/components/schemas/SftpAccount')),
@@ -227,7 +227,7 @@ class SftpAccountController extends Controller
         tags: ['SFTP Accounts'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'sftpUser', in: 'path', required: true, description: 'The SFTP account name, with or without its "<project username>_" prefix.', schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Sessions ended', content: new OA\JsonContent(
@@ -286,7 +286,7 @@ class SftpAccountController extends Controller
         /** @var ?SftpAccount */
         $sftpAccount = SftpAccount::query()
             ->where('user_id', $user->id)
-            ->where('username', $sftpUsername)
+            ->where('username', $user->qualifySftpAccount($sftpUsername))
             ->first();
 
         if (! $sftpAccount) {
@@ -310,21 +310,12 @@ class SftpAccountController extends Controller
     }
 
     /**
-     * An account name is the project's username, an underscore and a non-empty suffix, and is unique on the host.
+     * An account name is unique on the host.
      *
      * @throws ValidationException
      */
-    private function assertAccountNameFree(User $user, string $name): void
+    private function assertAccountNameFree(string $name): void
     {
-        if (
-            ! Str::startsWith($name, $user->username.'_')
-            || ! Str::after($name, $user->username.'_')
-        ) {
-            throw ValidationException::withMessages([
-                'username' => 'Username must start with '.$user->username.'_',
-            ]);
-        }
-
         if (SftpAccount::query()->where('username', $name)->exists()) {
             throw ValidationException::withMessages([
                 'username' => 'Username not available',

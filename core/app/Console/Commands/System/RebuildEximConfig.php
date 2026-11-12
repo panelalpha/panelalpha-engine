@@ -4,6 +4,7 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use Illuminate\Console\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Throwable;
 
 class RebuildEximConfig extends Command
@@ -18,7 +19,7 @@ class RebuildEximConfig extends Command
 
     /**
      * Any failure leaves the listen/relay addresses stale, so it exits non-zero
-     * for the caller (bootstrap-from-source.sh) to see.
+     * and says why on stderr for the caller (bootstrap-from-source.sh) to see.
      */
     public function handle(): int
     {
@@ -30,7 +31,7 @@ class RebuildEximConfig extends Command
                 $system->exim()->rebuildEximConfig();
             }
         } catch (Throwable $e) {
-            $this->error($e->getMessage());
+            $this->getOutput()->getErrorStyle()->writeln('<error>'.OutputFormatter::escape($e->getMessage()).'</error>');
 
             return self::FAILURE;
         }

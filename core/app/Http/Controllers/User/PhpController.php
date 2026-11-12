@@ -40,7 +40,7 @@ class PhpController extends Controller
         $data = (new CustomIniSettings($system))->get($user, $params['php_version']);
 
         return new JsonResponse([
-            'data' => $data,
+            'data' => $data === [] ? new \stdClass : $data,
         ]);
     }
 

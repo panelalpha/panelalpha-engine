@@ -2,12 +2,18 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReportsProblems;
 use App\Http\Requests\Concerns\ResolvesVaultFields;
+use App\Models\SftpAccount;
+use App\Models\User;
 use App\Rules\SshPublicKey;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Validator;
 
 class SftpAccountStoreRequest extends FormRequest
 {
+    use ReportsProblems;
     use ResolvesVaultFields;
 
     /**
@@ -31,18 +37,43 @@ class SftpAccountStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'username' => 'string|required|max:32|regex:/^[a-zA-Z0-9_]+$/D',
+            'username' => 'string|required|max:'.SftpAccount::MAX_USERNAME_LENGTH.'|regex:/^[a-zA-Z0-9_]+$/D',
             'auth_method' => 'string|required',
             'password' => 'string|nullable|min:8|max:255',
             'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey],
         ];
     }
 
+    /** The name once the project's prefix is on it; an unknown project is left to the controller's 404. */
+    public function after(): array
+    {
+        return [$this->checkQualifiedName(...)];
+    }
+
+    private function checkQualifiedName(Validator $validator): void
+    {
+        $project = User::findByUsername((string) $this->route('username'));
+        if ($validator->errors()->isNotEmpty() || $project === null) {
+            return;
+        }
+
+        $prefix = $project->username.'_';
+        $name = $project->qualifySftpAccount((string) $this->input('username'));
+        if (! Str::after($name, $prefix)) {
+            $validator->errors()->add('username', 'Username needs a name after '.$prefix);
+        } elseif (strlen($name) > SftpAccount::MAX_USERNAME_LENGTH) {
+            $validator->errors()->add(
+                'username',
+                'Username cannot be longer than '.SftpAccount::MAX_USERNAME_LENGTH.' characters with its '.$prefix.' prefix.',
+            );
+        }
+    }
+
     public function messages(): array
     {
         return [
             'username.regex' => 'Username can only contain letters, numbers, and underscores.',
-            'username.max' => 'Username cannot be longer than 32 characters.',
+            'username.max' => 'Username cannot be longer than '.SftpAccount::MAX_USERNAME_LENGTH.' characters.',
             'password.min' => 'Password must be at least 8 characters long.',
             'password.max' => 'Password cannot be longer than 255 characters.',
             'public_key.max' => 'Public key is too large (maximum 4096 characters).',

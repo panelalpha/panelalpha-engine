@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
@@ -14,6 +15,11 @@ use Symfony\Component\Process\Process;
  */
 class AppManager
 {
+    /** Frozen at deploy: false when the project has an app config that is written for another stack than it ran. */
+    public const DETAIL_APP_CONFIG_FITS = 'deploy_app_config_fits';
+
+    private const UNSUPPORTED = 'App management is not supported for this application';
+
     /** @var list<string>|null the script's `info` answer, read once per manager. */
     private ?array $advertised = null;
 
@@ -37,9 +43,19 @@ class AppManager
         return json_decode($this->run('users:add', $login, $email, $password, $role), true) ?? [];
     }
 
-    public function deleteUser(string $userId): void
+    /**
+     * Delete an app user, handing `$reassign` their content; omitted, the app picks a default.
+     */
+    public function deleteUser(string $userId, ?string $reassign = null): void
     {
-        $this->run('users:delete', $userId);
+        $this->assertUserExists($userId);
+
+        $args = [$userId];
+        if ($reassign !== null && $reassign !== '') {
+            $args[] = $reassign;
+        }
+
+        $this->run('users:delete', ...$args);
     }
 
     public function resetUserPassword(string $userId, string $password): void
@@ -84,6 +100,20 @@ class AppManager
         return json_decode($this->run('roles:list'), true) ?? [];
     }
 
+    /**
+     * An app deletes an unknown id as if it had removed a user, so the id is checked against the
+     * list first and a missing one is a 404 rather than a delete that removed nothing.
+     */
+    private function assertUserExists(string $userId): void
+    {
+        $ids = array_map('strval', array_column($this->listUsers(), 'id'));
+        if (in_array($userId, $ids, true)) {
+            return;
+        }
+
+        throw new NotFoundException("App user '{$userId}' not found.");
+    }
+
     private function scriptPath(): string
     {
         return $this->dind->userAppDirPath().'/'.AppConfig::APP_SCRIPT;
@@ -111,6 +141,7 @@ class AppManager
      */
     private function run(string ...$args): string
     {
+        $this->refuseOnAnotherStack();
         if ($args !== []) {
             $this->refuseUnsupported($args[0]);
         }
@@ -191,6 +222,17 @@ class AppManager
         return array_is_list($info) && array_filter($info, 'is_string') === $info ? $info : [];
     }
 
+    /**
+     * The app script names the services of the stack its app config is written for, which a deploy pinned to another
+     * recipe does not run, so on that stack no app script is run, not even one an earlier deploy left.
+     */
+    private function refuseOnAnotherStack(): void
+    {
+        if (($this->dind->userModel()->getDetails()[self::DETAIL_APP_CONFIG_FITS] ?? null) === false) {
+            throw new \Exception(self::UNSUPPORTED);
+        }
+    }
+
     /** Refuse a `users:*`, `install` or `roles:list` command the script's `info` does not list. */
     private function refuseUnsupported(string $command): void
     {
@@ -246,7 +288,7 @@ class AppManager
             ->appConfig($this->dind->userModel()->getGitRepo())
             ?->appScript();
         if ($script === null) {
-            throw new \Exception('App management is not supported for this application');
+            throw new \Exception(self::UNSUPPORTED);
         }
         $this->dind->system()->filesystem()->writeFileReplacingPath(
             $scriptPath,

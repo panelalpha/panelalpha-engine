@@ -3,16 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named auto-update resource for a PHP hosting WordPress install.
- *
- * One read and one write over three fields: core (off|on|minor), plugins
- * (off|on), themes (off|on). Core maps to the WP_AUTO_UPDATE_CORE constant
- * (false|true, written raw, or the string 'minor'). Plugins and themes map to
- * enabling or disabling auto-updates across that type via `plugin|theme
- * auto-updates enable|disable --all`. The read also reports each plugin and
- * theme, since the aggregate cannot show a partly enabled type. A write sets
- * only the fields it is given and succeeds once every item has the requested
- * state, even when WP-CLI exits non-zero because some already had it.
+ * Auto-updates of core (WP_AUTO_UPDATE_CORE: off|on|minor), plugins and themes (`auto-updates enable|disable --all`).
+ * The read lists every plugin and theme too, since the aggregate cannot show a partly enabled type.
  */
 final class AutoUpdate
 {
@@ -69,11 +61,14 @@ final class AutoUpdate
         return $written;
     }
 
-    /** An undefined constant reads as minor: WordPress defaults to minor-only core updates. */
+    /**
+     * An undefined constant reads as minor: WordPress defaults to minor-only core updates. Read as JSON, since WP-CLI
+     * otherwise echoes a false constant as an empty line, which would read as minor too.
+     */
     private function readCore(): string
     {
         $result = $this->cli->run(
-            ['config', 'get', self::CORE_CONSTANT, '--type=constant'],
+            ['config', 'get', self::CORE_CONSTANT, '--type=constant', '--format=json'],
         );
 
         if (($result['exit_code'] ?? 1) !== 0) {

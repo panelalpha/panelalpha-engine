@@ -4,6 +4,9 @@ namespace App\System\Project;
 
 use App\Lib\Project\CustomIniSettings;
 use App\Models\Domain;
+use App\System;
+use App\System\Privileged;
+use App\System\Privileged\AccountFiles;
 use App\System\Project as UserProject;
 use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use App\System\Project\PhpHosting\PhpHandlerNotRunning;
@@ -33,14 +36,13 @@ class Php
             return [];
         }
 
-        $parsed = @parse_ini_file($iniFile);
-        if ($parsed === false) {
-            throw ValidationException::withMessages([
-                'settings' => 'The custom PHP INI file is not valid INI.',
-            ]);
+        $contents = @file_get_contents($iniFile);
+        $directives = is_string($contents) ? self::directivesAsWritten($contents) : null;
+        if ($directives === null) {
+            throw self::invalidSettings('The custom PHP INI file is not valid INI.');
         }
 
-        return $parsed;
+        return $directives;
     }
 
     /**
@@ -94,40 +96,71 @@ class Php
         }
 
         if ($settings === []) {
-            if ($system->fileExists($path)) {
-                $system->exec(['sudo', 'rm', '-f', $path]);
-            }
+            $this->removeDirectivesFile($system, $path);
 
             return;
         }
 
+        $this->installDirectivesFile($this->encodedDirectives($settings), $path);
+    }
+
+    private function removeDirectivesFile(System $system, string $path): void
+    {
+        if (! $system->fileExists($path)) {
+            return;
+        }
+        $system->exec($this->isInTheHomeItself($path)
+            ? Privileged::files()->removeIfExists($path)
+            : $this->accountFiles()->removeIfExists($path));
+    }
+
+    /**
+     * @param  array<string, string>  $settings
+     */
+    private function encodedDirectives(array $settings): string
+    {
         try {
-            $contents = $this->encodeIniMap($settings);
+            return $this->encodeIniMap($settings);
         } catch (\InvalidArgumentException $e) {
             throw self::invalidSettings($e->getMessage());
         }
-        $this->installDirectivesFile($contents, $path);
     }
 
-    /** Staged in a temp file the engine can write, then copied in with sudo and owned by the account. */
+    /** Written as the account, so a planted link reaches only the account's own files. */
     private function installDirectivesFile(string $contents, string $path): void
     {
+        if ($this->isInTheHomeItself($path)) {
+            $this->project->system()->filesystem()->writeFileReplacingPath($path, $contents, $this->accountOwner(), '644');
+
+            return;
+        }
+        $accountFiles = $this->accountFiles();
         $temporary = tempnam(sys_get_temp_dir(), 'pa-ini-');
         if ($temporary === false || file_put_contents($temporary, $contents) === false) {
             throw self::invalidSettings('Could not write domain PHP directives.');
         }
 
-        $system = $this->project->system();
         try {
-            $system->exec(['sudo', 'cp', $temporary, $path]);
-            $chown = $this->project->model()->getChownString();
-            if ($chown !== null) {
-                $system->exec(['sudo', 'chown', $chown, $path]);
-            }
-            $system->exec(['sudo', 'chmod', '644', $path]);
+            $this->project->system()->exec($accountFiles->writeFrom($temporary, $path, '644'));
         } finally {
             @unlink($temporary);
         }
+    }
+
+    /** The home is root's, so only root can write a document root there. */
+    private function isInTheHomeItself(string $path): bool
+    {
+        return dirname($path) === rtrim($this->project->homeDirPath(), '/');
+    }
+
+    private function accountFiles(): AccountFiles
+    {
+        return Privileged::accountFiles(...$this->project->model()->linuxIds());
+    }
+
+    private function accountOwner(): string
+    {
+        return implode(':', $this->project->model()->linuxIds());
     }
 
     private static function invalidSettings(string $message): ValidationException
@@ -145,6 +178,8 @@ class Php
     }
 
     /**
+     * Each value is written as given, so a line is refused when PHP would not read it back the same.
+     *
      * @param  array<string, string>  $settings
      */
     private function encodeIniMap(array $settings): string
@@ -154,11 +189,11 @@ class Php
             if (! is_string($key) || $key === '' || strpbrk($key, "\r\n=") !== false || ! is_string($value)) {
                 throw new \InvalidArgumentException('Invalid directive name.');
             }
-            $lines .= $key.'='.$value."\n";
-        }
-
-        if ($this->parseIniMap($lines) !== $settings) {
-            throw new \InvalidArgumentException('Invalid INI.');
+            $line = $key.'='.$value;
+            if (self::directivesAsWritten($line) !== [$key => $value]) {
+                throw new \InvalidArgumentException("Invalid INI: PHP would not read \"{$line}\" as written.");
+            }
+            $lines .= $line."\n";
         }
 
         return $lines;
@@ -175,17 +210,47 @@ class Php
             return [];
         }
 
-        set_error_handler(static fn (): bool => true);
-        try {
-            $parsed = parse_ini_string($contents, true, INI_SCANNER_NORMAL);
-        } finally {
-            restore_error_handler();
-        }
-
-        if (! is_array($parsed)) {
+        $directives = self::directivesAsWritten($contents);
+        if ($directives === null) {
             throw new \InvalidArgumentException('Directive file is not valid INI.');
         }
 
+        return $directives;
+    }
+
+    /**
+     * The values as written, since PHP reads `Off` as "" and `E_ALL` as a number; null for text PHP itself cannot read,
+     * which would stop it reading the whole file.
+     *
+     * @return array<string, string>|null
+     */
+    private static function directivesAsWritten(string $contents): ?array
+    {
+        $written = self::parsedIni($contents, INI_SCANNER_RAW);
+        if ($written === false || self::parsedIni($contents, INI_SCANNER_NORMAL) === false) {
+            return null;
+        }
+
+        return self::flatDirectives($written);
+    }
+
+    /** @return array<mixed>|false */
+    private static function parsedIni(string $contents, int $scannerMode): array|false
+    {
+        set_error_handler(static fn (): bool => true);
+        try {
+            return parse_ini_string($contents, true, $scannerMode);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    /**
+     * @param  array<mixed>  $parsed
+     * @return array<string, string>
+     */
+    private static function flatDirectives(array $parsed): array
+    {
         $flat = [];
         foreach ($parsed as $key => $value) {
             if (is_array($value)) {

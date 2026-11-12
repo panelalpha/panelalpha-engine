@@ -14,6 +14,7 @@
         Require all granted
     </Directory>
     <FilesMatch "\.php$">
+        CGIPassAuth On
         SetHandler "proxy:unix:/run/php/php{{ $php_version }}-fpm.sock|fcgi://localhost"
     </FilesMatch>
 </VirtualHost>
@@ -39,6 +40,7 @@
             Require all granted
         </Directory>
         <FilesMatch "\.php$">
+            CGIPassAuth On
             SetHandler "proxy:unix:/run/php/php{{ $php_version }}-fpm.sock|fcgi://localhost"
         </FilesMatch>
     </VirtualHost>

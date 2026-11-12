@@ -2,12 +2,14 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReportsProblems;
 use App\Http\Requests\Concerns\ResolvesVaultFields;
 use App\Rules\SshPublicKey;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SftpAccountUpdateRequest extends FormRequest
 {
+    use ReportsProblems;
     use ResolvesVaultFields;
 
     protected function prepareForValidation(): void

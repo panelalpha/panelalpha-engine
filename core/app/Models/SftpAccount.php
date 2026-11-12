@@ -25,6 +25,9 @@ class SftpAccount extends Model
 {
     use HasDetails, HasFactory;
 
+    /** The longest login name the sftp container's useradd accepts. */
+    public const MAX_USERNAME_LENGTH = 32;
+
     protected $fillable = [
         'user_id',
         'username',
