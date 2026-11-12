@@ -17,7 +17,8 @@ SECRET=/account/.panelalpha/wetty/terminal-password
 
 # The one login. Created at the account's own uid and gid, so everything the
 # customer touches in this terminal is owned by them exactly as it is over
-# SFTP, and so nothing here can write a file their own account cannot read.
+# SFTP, and so nothing here can write a file their own account cannot read. Its
+# home is /account, the customer's checkout (~/project), not the whole home.
 addgroup -g "$PA_GID" "$PA_ACCOUNT" 2>/dev/null || true
 adduser -D -H -u "$PA_UID" -G "$PA_ACCOUNT" -h /account -s /bin/bash "$PA_ACCOUNT" 2>/dev/null || true
 

@@ -15,18 +15,18 @@ services:
       - /home/{{ $user }}/:/var/www/
       - ./log:/var/log
       - ./crontabs/www-data:/var/spool/cron/crontabs/{{ $user }}
-      - ./msmtp/msmtprc:/etc/msmtprc
+      - ./msmtp/msmtprc:/etc/msmtprc:ro
       - ./services/:/etc/s6/account/:ro
-      - ./entrypoint-init.d/:/entrypoint-init.d/
-      - ./php/ext/:/etc/php/ext/
+      - ./entrypoint-init.d/:/entrypoint-init.d/:ro
+      - ./php/ext/:/etc/php/ext/:ro
 @foreach ($php_versions as $php_version)
-      - ./php/{{ $php_version }}/default.ini:/etc/php/{{ $php_version }}/fpm/conf.d/90-panelalpha-default.ini
-      - ./php/{{ $php_version }}/custom.ini:/etc/php/{{ $php_version }}/fpm/conf.d/91-panelalpha-custom.ini
-      - ./php/{{ $php_version }}/ioncube.ini:/etc/php/{{ $php_version }}/fpm/conf.d/00-ioncube.ini
-      - ./php/{{ $php_version }}/default.ini:/etc/php/{{ $php_version }}/cli/conf.d/90-panelalpha-default.ini
-      - ./php/{{ $php_version }}/custom.ini:/etc/php/{{ $php_version }}/cli/conf.d/91-panelalpha-custom.ini
-      - ./php/{{ $php_version }}/ioncube.ini:/etc/php/{{ $php_version }}/cli/conf.d/00-ioncube.ini
-      - ./php/{{ $php_version }}/fpm/pool.d/:/etc/php/{{ $php_version }}/fpm/pool.d/
+      - ./php/{{ $php_version }}/default.ini:/etc/php/{{ $php_version }}/fpm/conf.d/90-panelalpha-default.ini:ro
+      - ./php/{{ $php_version }}/custom.ini:/etc/php/{{ $php_version }}/fpm/conf.d/91-panelalpha-custom.ini:ro
+      - ./php/{{ $php_version }}/ioncube.ini:/etc/php/{{ $php_version }}/fpm/conf.d/00-ioncube.ini:ro
+      - ./php/{{ $php_version }}/default.ini:/etc/php/{{ $php_version }}/cli/conf.d/90-panelalpha-default.ini:ro
+      - ./php/{{ $php_version }}/custom.ini:/etc/php/{{ $php_version }}/cli/conf.d/91-panelalpha-custom.ini:ro
+      - ./php/{{ $php_version }}/ioncube.ini:/etc/php/{{ $php_version }}/cli/conf.d/00-ioncube.ini:ro
+      - ./php/{{ $php_version }}/fpm/pool.d/:/etc/php/{{ $php_version }}/fpm/pool.d/:ro
 @endforeach
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}

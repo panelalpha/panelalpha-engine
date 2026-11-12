@@ -88,10 +88,10 @@ services:
     env_file:
       - ../.panelalpha/wetty/identity.env
     volumes:
-      # The account's home, which is the whole point: this is the customer's
-      # own files and nothing else. Relative paths resolve against
-      # --project-directory, which is ~/project, so `..` is the home.
-      - ../:/account
+      # Never `../`: this sshd runs as root, and a bind of the whole home would
+      # hand it ~/docker (MountSourcePolicy refuses one).
+      - ../project:/account
+      - ../.panelalpha/wetty:/account/.panelalpha/wetty
     networks:
       # Only this one, and it is `internal: true`. Measured from inside an
       # account: a container on an ordinary network can open TCP to the host's

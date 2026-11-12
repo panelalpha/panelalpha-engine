@@ -58,6 +58,8 @@ When it finishes, it prints the web address of your new site (it starts with `ht
 | `--git-token TOKEN` | Access token that lets the installer read a private repository. Without it, a private or missing repository is refused before the install starts. |
 | `--password PASS` | Site password for the new project. |
 | `--no-password` | Do not set a site password on the project. |
+| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end; `--hub-code` goes to the panel, which connects itself to PanelAlpha Hub on its first start (the engine is not connected). No site password is set unless you pass `--password`. Give it only to an application you trust with the whole server. |
+| `--env-var KEY=VALUE` | An environment variable for the project. Repeat it for more. The value is never printed. |
 
 If the deploy fails, the engine is still installed and usable. The installer prints what went wrong. Deploy again from the VPS:
 
@@ -212,7 +214,10 @@ The installer has a handful more, for testing and for support to point you at. S
 The engine itself is up. Read the message at the end of the install, or run `pae project:create --repo …` again with the same URL. For a private repository, include `--git-token`. If the deploy finished but the application does not look right, ask your assistant to read the deploy log, or see [Reading errors](reading-errors.md).
 
 **The installer warned that project disk limits will not be enforced.**
-The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It adds a quota option to that disk's line in `/etc/fstab`, and keeps a copy of the old file next to it. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
+The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It does this with its own service, `panelalpha-quota`, which turns quota back on at every boot before Docker starts the projects and keeps the limits already set; `/etc/fstab` is not changed, and a quota option an older version added there is left as it is. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
+
+**The project homes are mounted `nosuid,nodev`.**
+The installer mounts `/home` with those two options, so a file a project leaves in its home can never run as a privileged program or act as a device on the server. Applications in projects are not affected. It does this with its own service, `panelalpha-home-mounts`, which runs at every boot before Docker starts the projects; `/etc/fstab` is not changed. When `/home` is a folder on the system disk, the service mounts it onto itself with the two options; when it is a disk of its own, the service remounts that disk with them. `systemctl status panelalpha-home-mounts` shows whether it worked. The uninstaller removes the service.
 
 **A container project's disk limit and its own Docker storage.**
 Disk quota counts the files a project writes as its own user. The images and build layers of a container project are written by its own Docker, which quota does not count. The engine covers that during a deploy instead: it measures every 15 seconds, and stops the deploy when the project passes its disk limit or the server falls below `DEPLOY_HOST_MIN_FREE` (3G by default). It then clears the project's unused Docker storage. A running application that grows its own data after the deploy is still bounded only by quota.

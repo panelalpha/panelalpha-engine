@@ -413,6 +413,14 @@ remove_docker_network() {
     systemctl daemon-reload >/dev/null 2>&1 || true
 }
 
+# The homes' nosuid,nodev mount (harden-home-mounts.sh) and their quota
+# (configure-quota.sh) are gone from the next boot on; the live ones are left to it.
+remove_boot_units() {
+    systemctl disable panelalpha-home-mounts.service panelalpha-quota.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/panelalpha-home-mounts.service /etc/systemd/system/panelalpha-quota.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
 restore_systemd_resolved_if_requested() {
     if [ "$RESTORE_SYSTEMD_RESOLVED" != 1 ]; then
         return 0
@@ -511,6 +519,7 @@ echo_info "Starting PanelAlpha engine uninstall..."
 
 uninstall_engine_stack
 remove_docker_network
+remove_boot_units
 clean_engine_sidecars
 restore_systemd_resolved_if_requested
 purge_panelalpha_images_if_requested
