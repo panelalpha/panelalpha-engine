@@ -78,6 +78,9 @@ The update failed or you already had the newest version. The log is in `/opt/pan
 **The update stopped with `Failed to fetch`, followed by an address.**
 The updater downloads only over `https` and stops if it cannot, including after a redirect to a plain `http` address. The engine on this VPS was not replaced. Check that the VPS can reach `get.panelalpha.com` over HTTPS, then run the update again.
 
+**The update stopped with `does not match its signature`, or with `Failed to fetch` an address ending in `.sig`.**
+An update started from the engine (through the API or your assistant) checks the installer it downloads against the release-signing key this engine version carries, and runs nothing that does not match. The engine on this VPS was not replaced. Do not work around it: contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
+
 **The update stopped while downloading the new version.**
 You will see `Could not clone`, followed by the address it tried. The engine on this VPS was not replaced. Run the update again. If it stops at the same point, contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
 

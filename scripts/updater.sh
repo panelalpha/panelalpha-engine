@@ -10,6 +10,9 @@ set -euo pipefail
 GET_BASE="${PANELALPHA_GET_BASE:-https://get.panelalpha.com}"
 GET_BASE="${GET_BASE%/}"
 
+# Trusted release-signing public keys, one PEM per file; once one is shipped every download is verified.
+KEY_DIR="${PANELALPHA_RELEASE_KEY_DIR:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/release-keys}"
+
 # Exits with an error unless the flag <name> still has a value after it.
 require_value() { # <args left> <name>
     [[ $1 -ge 2 ]] || {
@@ -65,8 +68,7 @@ parse_args() {
     done
 }
 
-# HTTPS only, redirects included: what is fetched here runs as root. Nothing
-# checks a signature yet, so TLS to get.panelalpha.com is all that vouches for it.
+# HTTPS only, redirects included: what is fetched here runs as root.
 fetch() { curl -fsSL --proto '=https' --max-time 60 -o "$1" "$2"; }
 
 # Fetches ${GET_BASE}/<page> into <dir>/<page>, or says so and exits.
@@ -77,12 +79,42 @@ fetch_or_exit() { # <dir> <page>
     }
 }
 
+has_release_keys() { compgen -G "$KEY_DIR/*.pem" >/dev/null; }
+
+# Whether a pinned key verifies <file>.sig, an `openssl dgst -sha256 -sign` signature.
+signed_by_a_release_key() { # <file>
+    local key
+    for key in "$KEY_DIR"/*.pem; do
+        openssl dgst -sha256 -verify "$key" -signature "$1.sig" "$1" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+# Fails closed once a key is pinned: no signature, no openssl or a bad one stops the update.
+verify_download() { # <dir> <page>
+    if ! has_release_keys; then
+        echo "[WARN] No release-signing key is pinned in ${KEY_DIR}; ${GET_BASE}/$2 is not verified." >&2
+        return 0
+    fi
+    command -v openssl >/dev/null || {
+        echo "[ERROR] openssl is needed to verify ${GET_BASE}/$2; nothing was run." >&2
+        exit 1
+    }
+    fetch_or_exit "$1" "$2.sig"
+    signed_by_a_release_key "$1/$2" || {
+        echo "[ERROR] ${GET_BASE}/$2 does not match its signature; nothing was run." >&2
+        exit 1
+    }
+}
+
 # Into a private directory, so nobody else's get.sh can be the one beside the
 # bootstrap, which runs it; otherwise it would fetch get.sh over a curl that
-# follows a redirect to plain http. A failed fetch stops the update.
+# follows a redirect to plain http. A failed fetch or check stops the update.
 download_installer() { # <dir>
     fetch_or_exit "$1" engine
     fetch_or_exit "$1" get.sh
+    verify_download "$1" engine
+    verify_download "$1" get.sh
 }
 
 # Always non-interactive: the API and at(1) have no TTY. get-engine sets

@@ -55,6 +55,9 @@ EXCLUDES=(
     # so that it applies.
     docker-compose.override.yml
     config/logrotate config/exim config/modsecurity config/sftp config/pure-ftpd
+    # The projects allowed to reach the Engine API, written by `pae system:api-access:allow`
+    # and read by the tenant firewall the bootstrap applies.
+    config/tenant-api-access
     # The same five names exist under core/ on an installed host -- a stale
     # duplicate of the directory above, which nothing mounts today (the sftp and
     # ftp containers bind `config/sftp` and `config/pure-ftpd`, one level up).
@@ -73,6 +76,8 @@ EXCLUDES=(
 )
 
 RSYNC_ARGS=(-az --delete --human-readable --info=stats1)
+# As a clone by root leaves it: owned by root, writable by no one else.
+RSYNC_ARGS+=(--chown=root:root --chmod=go-w)
 # The template is source, and would otherwise match tests/api/env/.env.* below.
 RSYNC_ARGS+=(--include /tests/api/env/.env.example)
 for e in "${EXCLUDES[@]}"; do RSYNC_ARGS+=(--exclude "/$e"); done

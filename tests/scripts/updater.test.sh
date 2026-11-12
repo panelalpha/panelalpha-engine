@@ -73,14 +73,16 @@ EOF
 chmod +x "$TMP/bin/curl"
 
 # mktemp honours TMPDIR, so anything the updater or the bootstrap leaves
-# behind lands here.
+# behind lands here. KEYS is the pinned key directory; none by default.
+mkdir -p "$TMP/nokeys"
 run() {
     local name="$1"
     shift
     mkdir -p "$TMP/run-$name" "$TMP/state-$name"
     rm -f "$TMP/args"
-    PATH="$TMP/bin:$PATH" TMPDIR="$TMP/run-$name" FAKE_SITE="$TMP/site" FAKE_STATE="$TMP/state-$name" \
-        FAKE_ARGS="$TMP/args" bash "$SCRIPT_DIR/updater.sh" "$@" >/dev/null 2>"$TMP/stderr-$name"
+    PATH="$TMP/bin:$PATH" TMPDIR="$TMP/run-$name" FAKE_SITE="${SITE:-$TMP/site}" FAKE_STATE="$TMP/state-$name" \
+        FAKE_ARGS="$TMP/args" PANELALPHA_RELEASE_KEY_DIR="${KEYS:-$TMP/nokeys}" \
+        bash "$SCRIPT_DIR/updater.sh" "$@" >/dev/null 2>"$TMP/stderr-$name"
 }
 left() { find "$TMP/run-$1" -mindepth 1 | wc -l; }
 
@@ -119,6 +121,57 @@ done
 
 run packagehost -f --package-host example.com --background
 check "--package-host with a value is accepted and dropped" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
+
+check "with no key pinned it says the download is not verified" "yes" \
+    "$(grep -q 'No release-signing key is pinned' "$TMP/stderr-ok" && echo yes || echo no)"
+
+# A signed site: the release key signs both files, as CI is to publish them.
+keypair() { # <name>
+    openssl ecparam -name prime256v1 -genkey -noout -out "$TMP/$1.key" 2>/dev/null
+    openssl ec -in "$TMP/$1.key" -pubout -out "$TMP/$1.pem" 2>/dev/null
+}
+sign_site() { # <site dir> <key name>
+    local page
+    for page in engine get.sh; do
+        openssl dgst -sha256 -sign "$TMP/$2.key" -out "$1/$page.sig" "$1/$page"
+    done
+}
+keypair release
+keypair next
+keypair stranger
+mkdir -p "$TMP/keys" "$TMP/rotating" "$TMP/signed"
+cp "$TMP/release.pem" "$TMP/keys/"
+cp "$TMP/release.pem" "$TMP/next.pem" "$TMP/rotating/"
+cp "$TMP/site/engine" "$TMP/site/get.sh" "$TMP/signed/"
+sign_site "$TMP/signed" release
+
+SITE="$TMP/signed" KEYS="$TMP/keys" run signed -f --background
+check "a signed update exits 0" "0" "$?"
+check "a signed update runs the installer" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
+check "a signed update leaves nothing behind" "0" "$(left signed)"
+
+cp "$TMP/signed/get.sh" "$TMP/signed/get.sh.orig"
+echo 'touch "$FAKE_ARGS.forged"' >>"$TMP/signed/get.sh"
+SITE="$TMP/signed" KEYS="$TMP/keys" run forged -f --background
+check "a get.sh that does not match its signature exits 1" "1" "$?"
+check "and runs no installer" "absent" "$([[ -e "$TMP/args" || -e "$TMP/args.forged" ]] && echo ran || echo absent)"
+check "and says why" "yes" "$(grep -q 'does not match its signature' "$TMP/stderr-forged" && echo yes || echo no)"
+check "and leaves nothing" "0" "$(left forged)"
+mv "$TMP/signed/get.sh.orig" "$TMP/signed/get.sh"
+
+rm "$TMP/signed/engine.sig"
+SITE="$TMP/signed" KEYS="$TMP/keys" run unsigned -f --background
+check "a missing signature exits 1 once a key is pinned" "1" "$?"
+check "and runs no installer" "absent" "$([[ -e "$TMP/args" ]] && echo ran || echo absent)"
+
+sign_site "$TMP/signed" stranger
+SITE="$TMP/signed" KEYS="$TMP/keys" run stranger -f --background
+check "a signature by a key that is not pinned exits 1" "1" "$?"
+check "and runs no installer" "absent" "$([[ -e "$TMP/args" ]] && echo ran || echo absent)"
+
+sign_site "$TMP/signed" next
+SITE="$TMP/signed" KEYS="$TMP/rotating" run rotated -f --background
+check "the next key pinned beside the current one verifies" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
 
 # Every fetch refuses anything but https, a redirect included.
 cat >"$TMP/bin/curl" <<'EOF'

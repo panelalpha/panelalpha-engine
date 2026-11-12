@@ -6,6 +6,7 @@ use App\Lib\Helpers\Config;
 use App\Models\Domain;
 use App\Models\User;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use App\System\Project\Domain as ProjectDomain;
 use Illuminate\Support\Str;
 
@@ -75,23 +76,15 @@ abstract class AbstractWebserver implements WebserverInterface
         ];
     }
 
+    /** @return array{ssl_cert_file: string, ssl_cert_key_file: string} */
     protected function getSslCertVars(): array
     {
-        $projectDir = $this->system->engineDirPath();
-        $default = [
-            'ssl_cert_file' => $projectDir.'/crt/server.cert',
-            'ssl_cert_key_file' => $projectDir.'/crt/server.key',
-        ];
+        return $this->defaultServerCertificate()->templateVars();
+    }
 
-        $leIpCertDir = '/etc/letsencrypt/live/panelalpha-engine-ip-cert';
-        if (! file_exists($leIpCertDir.'/fullchain.pem') || ! file_exists($leIpCertDir.'/privkey.pem')) {
-            return $default;
-        }
-
-        return [
-            'ssl_cert_file' => $leIpCertDir.'/fullchain.pem',
-            'ssl_cert_key_file' => $leIpCertDir.'/privkey.pem',
-        ];
+    protected function defaultServerCertificate(): DefaultServerCertificate
+    {
+        return new DefaultServerCertificate($this->system);
     }
 
     /**
@@ -114,7 +107,7 @@ abstract class AbstractWebserver implements WebserverInterface
             return false;
         }
 
-        $process = $this->system->runProcess(['sudo', 'ls', '-1A', $dir]);
+        $process = $this->system->runProcess(Privileged::files()->listAllNames($dir));
         if ($process->getExitCode() !== 0) {
             return false;
         }
@@ -133,6 +126,14 @@ abstract class AbstractWebserver implements WebserverInterface
      */
     protected function getAppProxyVars(): array
     {
+        return [...self::clientAreaProxyVars(), ...self::adminAreaProxyVars(), ...self::websocketProxyVars()];
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function clientAreaProxyVars(): array
+    {
         $caPort = Config::getIntValue('env.APP_LITE_CA_PORT');
         $caServerName = '_';
         $caDomain = Config::getStringValue('env.APP_LITE_CA_DOMAIN');
@@ -142,6 +143,21 @@ abstract class AbstractWebserver implements WebserverInterface
         $caEnabled = $caPort || $caDomain;
         $caProxyHost = Config::getStringValue('env.APP_LITE_PROXY_CA_HOST');
         $caProxyPort = Config::getIntValue('env.APP_LITE_PROXY_CA_PORT');
+
+        return [
+            'client_area' => (string) $caEnabled,
+            'ca_port' => (string) $caPort,
+            'ca_server_name' => $caServerName,
+            'ca_proxy_host' => (string) $caProxyHost,
+            'ca_proxy_port' => (string) $caProxyPort,
+        ];
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function adminAreaProxyVars(): array
+    {
         $aaPort = Config::getIntValue('env.APP_LITE_AA_PORT');
         $aaServerName = '_';
         $aaDomain = Config::getStringValue('env.APP_LITE_AA_DOMAIN');
@@ -151,16 +167,20 @@ abstract class AbstractWebserver implements WebserverInterface
         $aaEnabled = $aaPort || $aaDomain;
 
         return [
-            'client_area' => (string) $caEnabled,
-            'ca_port' => (string) $caPort,
-            'ca_server_name' => $caServerName,
-            'ca_proxy_host' => (string) $caProxyHost,
-            'ca_proxy_port' => (string) $caProxyPort,
             'admin_area' => (string) $aaEnabled,
             'aa_port' => (string) $aaPort,
             'aa_server_name' => $aaServerName,
             'aa_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_AA_HOST'),
             'aa_proxy_port' => (string) Config::getIntValue('env.APP_LITE_PROXY_AA_PORT'),
+        ];
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function websocketProxyVars(): array
+    {
+        return [
             'ws_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_WS_HOST'),
             'ws_proxy_port' => (string) Config::getIntValue('env.APP_LITE_PROXY_WS_PORT'),
             'ws_rewrite_proxy_host' => (string) Config::getStringValue('env.APP_LITE_PROXY_WS_REWRITE_HOST'),
@@ -169,17 +189,8 @@ abstract class AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * The addresses every generated config listens on.
-     *
-     * Seeded with the engine's own addresses rather than built purely from the
-     * user table: a fresh install has no users, so a user-derived list is
-     * empty and the templates fall back to a wildcard `listen 80`. The first
-     * project then makes the same addresses appear -- a user without a
-     * dedicated IP resolves to exactly these -- and nginx cannot move from a
-     * wildcard socket to an address-specific one on a reload (EADDRINUSE
-     * against its own listener), so the reload is aborted and every vhost
-     * silently stays unloaded. Declaring them from the start means the bind
-     * set never changes and there is nothing to rebind.
+     * The addresses every generated config listens on, seeded with the engine's own so a fresh install never
+     * listens on a wildcard: nginx cannot rebind from one to an address on reload, and every vhost stays unloaded.
      */
     public function getAllIpsVars(): array
     {
@@ -211,16 +222,10 @@ abstract class AbstractWebserver implements WebserverInterface
         throw new \Exception('Unsupported config entry for current webserver');
     }
 
-    public function exec(string $command): void
+    /** $command is a shell line for sites-http's own shell, never the host's. */
+    protected function reloadNginx(): void
     {
-        $composeFile = $this->system->composeFilePath();
-        $this->system->exec("sudo docker compose -f {$composeFile} exec -T sites-http {$command}");
-    }
-
-    public function runProcess(string $command): void
-    {
-        $composeFile = $this->system->composeFilePath();
-        $this->system->runProcess("sudo docker compose -f {$composeFile} exec -T sites-http {$command}");
+        $this->system->exec(Privileged::engineServices($this->system->composeFilePath())->nginxReload());
     }
 
     public function logsDirPath(): string
@@ -251,9 +256,8 @@ abstract class AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Whether applying new address-specific listen directives requires a full
-     * webserver container restart instead of a graceful reload.
-     * Nginx variants override this; others never need IP listener rebind.
+     * Whether new address-specific listen directives need a container restart rather than a graceful reload;
+     * only the nginx variants override this.
      */
     public function needsIpListenerRebind(): bool
     {
@@ -284,11 +288,8 @@ abstract class AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Every webserver writes one vhost per domain; how it writes it is the
-     * only part that differs. Declared here rather than left to each subclass
-     * because {@see rebuildDomainConfigs()} calls it, and because Apache once
-     * made it private — which is why the loop below could not be shared and
-     * two subclasses kept identical copies of it instead.
+     * Every webserver writes one vhost per domain, each its own way; declared here because
+     * {@see rebuildDomainConfigs()} calls it.
      */
     public function createDomainConfig(Domain $domain): void
     {
@@ -296,10 +297,8 @@ abstract class AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Write the vhost for every domain, defaulting to all of them.
-     *
-     * The tail every rebuildConfig() shares. The LiteSpeed pair do not use it:
-     * they regenerate one whole config file rather than a file per domain.
+     * Write the vhost for every domain, defaulting to all of them: the tail every rebuildConfig() shares except
+     * the LiteSpeed pair's, which regenerate one whole config file.
      *
      * @param  ?array<Domain>  $domains
      */
@@ -313,11 +312,8 @@ abstract class AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Remove per-domain vhosts whose domain is no longer in the database.
-     *
-     * `$liveDomains` is the database answer, injectable so the rule can be
-     * tested without one -- production passes `Domain::getAll()`, which is
-     * exactly what the loop below does with the default.
+     * Remove per-domain vhosts whose domain is not in the database; `$liveDomains` stands in for
+     * `Domain::getAll()` so the rule can be tested without one.
      *
      * @param  ?list<string>  $liveDomains  the domains still in the database
      * @return list<string> the domain names pruned
@@ -329,20 +325,11 @@ abstract class AbstractWebserver implements WebserverInterface
             return [];
         }
 
-        $known = [];
-        foreach ($liveDomains ?? array_map(
-            static fn (Domain $d): string => (string) $d->domain,
-            Domain::getAll()
-        ) as $name) {
-            $known[(string) $name] = true;
-        }
-
+        $known = self::knownDomains($liveDomains);
         $pruned = [];
         foreach (glob($dir.'/*.conf') ?: [] as $file) {
             $name = basename($file, '.conf');
-            if ($name === '' || $name === 'app-lite' || str_starts_with($name, 'proxy-rule-')
-                || $name === 'stream' || $name === 'nginx'
-            ) {
+            if (self::isEngineConfig($name)) {
                 continue;
             }
             if (! isset($known[$name])) {
@@ -352,6 +339,29 @@ abstract class AbstractWebserver implements WebserverInterface
         }
 
         return $pruned;
+    }
+
+    /**
+     * @param  ?list<string>  $liveDomains
+     * @return array<string, true>
+     */
+    private static function knownDomains(?array $liveDomains): array
+    {
+        $known = [];
+        foreach ($liveDomains ?? array_map(
+            static fn (Domain $d): string => (string) $d->domain,
+            Domain::getAll()
+        ) as $name) {
+            $known[(string) $name] = true;
+        }
+
+        return $known;
+    }
+
+    private static function isEngineConfig(string $name): bool
+    {
+        return $name === '' || $name === 'app-lite' || str_starts_with($name, 'proxy-rule-')
+            || $name === 'stream' || $name === 'nginx';
     }
 
     /**
@@ -376,7 +386,7 @@ abstract class AbstractWebserver implements WebserverInterface
     {
         $slug = $this->getDetails()['slug'];
         $dir = $this->system->engineDirPath()."/webserver-logs/{$slug}";
-        $this->system->runProcess(['sudo', 'rm', '-rf', "{$dir}/{$domainName}"]);
+        $this->system->runProcess(Privileged::files()->removeTree("{$dir}/{$domainName}"));
     }
 
     public function deleteDomainsLogsDirs(array $domainNames): void

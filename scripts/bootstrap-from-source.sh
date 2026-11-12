@@ -98,6 +98,7 @@ install_missing_tools() {
     command -v curl >/dev/null || MISSING+=(curl)
     command -v rsync >/dev/null || MISSING+=(rsync)
     command -v ipcalc >/dev/null || MISSING+=(ipcalc)
+    command -v jq >/dev/null || MISSING+=(jq)
     command -v nft >/dev/null || MISSING+=(nftables)
     command -v at >/dev/null || MISSING+=(at)
     [ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
@@ -218,6 +219,8 @@ prepare_env_files() {
     cp -n .env.example .env
     cp -n .env-core.example .env-core
     bash scripts/secure-env-core.sh "$PWD/.env-core"
+    # retired settings
+    sed -i '/^PRIVILEGED_\(BROKER_AREAS\|TRANSPORT\)=/d' .env-core
     grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
         sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
     set_app_url
@@ -262,7 +265,7 @@ seed_config_dirs() {
     cp -Rn templates/config/sftp/. config/sftp/
     cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
     cp -Rn templates/config/logrotate/. config/logrotate/
-    cp templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf config/logrotate/
+    cp templates/config/logrotate/{apache,apache-users,nginx,nginx-proxy,php}.conf config/logrotate/
     cp -Rn templates/config/exim/. config/exim/
     bash scripts/seed-modsecurity.sh "$PWD"
 }
@@ -294,7 +297,7 @@ generate_self_signed_cert() {
 }
 
 # The Cloudflare list is nginx's trusted proxies (harmless offline);
-# pash-tenants is the accounts' network, closed from boot until core binds it.
+# pash-tenants stays closed after each Docker start until the root broker binds it.
 prepare_networks() {
     bash scripts/update-cloudflare-ips.sh || warn "Could not refresh the Cloudflare IP list"
 
@@ -302,10 +305,9 @@ prepare_networks() {
         step "Creating pash-default-network"
         bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
     }
-    DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
-        || warn "Could not create the tenant network"
+    apply_tenant_network_firewall
     bash scripts/tenant-network-firewall.sh --install-units \
-        || warn "Could not install the tenant network's boot units"
+        || warn "Could not install the tenant network's boot unit"
 }
 
 # The upload excludes core/vendor, so a redeploy that brings a new composer.lock
@@ -396,21 +398,41 @@ free_dns_proxy_port() {
     report_dns_port_holder
 }
 
-# A prefetch that keeps "not found" noise out of the startup step, as core's tag
-# is pushed only at release; `up` builds on its own, so nothing here is fatal.
+# installer.sh's own: the image a service runs and the hash of its sources.
+import_engine_image_functions() {
+    local fn
+    for fn in engine_image_dockerfile engine_image_inputs engine_image_sources engine_image_built_from engine_service_image; do
+        source <(sed -n "/^${fn}() {/,/^}\$/p" scripts/installer.sh)
+    done
+}
+
+# An image counts only when its label holds this tree's source hash: host copy, published, else built.
 ensure_service_image() { # <service>
+    local image sources
     docker compose config --services 2>/dev/null | grep -qx "$1" || {
         warn "No compose service '$1' — skipping its image"
         return 0
     }
-    docker compose pull --quiet "$1" >/dev/null 2>&1 && return 0
-    warn "No published image for '$1' — building from dockerfiles/Dockerfile-core"
-    docker compose build "$1" || warn "Could not build '$1'; 'up' will try again"
+    if ! image=$(engine_service_image "$1" docker compose) ||
+        ! sources=$(engine_image_sources dockerfiles "$(engine_image_dockerfile "$1")"); then
+        echo "Could not read the $1 image or its sources from this tree." >&2
+        exit 1
+    fi
+    engine_image_built_from "$image" "$sources" && return 0
+    docker compose pull --quiet --ignore-pull-failures "$1" >/dev/null 2>&1 || true
+    engine_image_built_from "$image" "$sources" && return 0
+    warn "No '$1' image built from this tree — building it"
+    docker compose build --build-arg "PANELALPHA_SOURCES=${sources}" "$1" || {
+        echo "Could not build the $1 image from this tree." >&2
+        exit 1
+    }
 }
 
 ensure_core_images() {
     step "Ensuring the core images exist"
+    import_engine_image_functions
     ensure_service_image core
+    ensure_service_image root-broker
 }
 
 # Installing Sysbox restarts Docker and brings the stack up, so it runs once the
@@ -439,11 +461,24 @@ harden_host() {
     bash scripts/firewall.sh --install || warn "Firewall setup failed"
     service docker restart || warn "Could not restart Docker"
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
-    bash scripts/tenant-network-firewall.sh --create --restart-docker || warn "Could not apply the tenant network firewall"
+    apply_tenant_network_firewall
 }
 
-# As installer.sh: quota enforces project disk limits, lxcfs gives each account
-# its own /proc, and path-attached AppArmor profiles would confine tenant binaries.
+# Only the root broker binds pash-tenants; an empty or missing network is made and closed here.
+apply_tenant_network_firewall() {
+    # A missing network prints an empty line.
+    local on_network
+    on_network=$(docker network inspect -f '{{len .Containers}}' pash-tenants 2>/dev/null | tr -d '[:space:]') || true
+    if [ "${on_network:-0}" = 0 ]; then
+        DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
+            || warn "Could not create the tenant network"
+    elif [ -z "$(docker compose ps -q --status running root-broker 2>/dev/null)" ] ||
+        ! docker compose exec -T root-broker pa-broker --host host.applyTenantNetworkFirewall -- </dev/null; then
+        warn "The accounts' network keeps the firewall in force until the new root broker applies it"
+    fi
+}
+
+# As installer.sh: quota, nosuid,nodev homes, lxcfs /proc, no path-attached AppArmor.
 configure_account_isolation() {
     if [ "$QUOTA" = 1 ]; then
         step "Turning on filesystem quota for /home"
@@ -451,6 +486,9 @@ configure_account_isolation() {
     else
         warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
     fi
+
+    step "Mounting the account homes nosuid,nodev"
+    bash scripts/harden-home-mounts.sh || warn "Could not mount the account homes nosuid,nodev"
 
     step "Setting up lxcfs"
     bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
@@ -480,6 +518,12 @@ wait_for_database() {
     done
 }
 
+# The upload skips core/bootstrap/cache; the app cache stays, it holds scheduler locks.
+clear_cached_bootstrap_files() {
+    step "Clearing the cached bootstrap files"
+    core_artisan optimize:clear --except=cache
+}
+
 # Moving accounts is live, as in installer.sh, and never fails the bootstrap.
 update_core_state() {
     step "Running migrations"
@@ -488,8 +532,14 @@ update_core_state() {
     step "Moving accounts onto the tenant network"
     core_artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
 
+    step "Putting stored CPU limits on the accounts"
+    core_artisan project:cpu-limit:apply --all || warn "Some accounts take their CPU limit only when their container is next recreated"
+
     step "Pointing Exim at this host's Docker addresses"
     core_artisan system:exim:rebuild --networks || warn "Exim's listen addresses could not be updated"
+
+    step "Removing the NAT maps an earlier discovery stored for Docker's bridges"
+    core_artisan system:nat:prune || warn "The NAT maps of Docker's bridges could not be removed"
 }
 
 IP_WAS_SET=0
@@ -626,6 +676,7 @@ harden_host
 configure_account_isolation
 start_stack
 wait_for_database
+clear_cached_bootstrap_files
 update_core_state
 record_host_addresses
 render_webserver_config
