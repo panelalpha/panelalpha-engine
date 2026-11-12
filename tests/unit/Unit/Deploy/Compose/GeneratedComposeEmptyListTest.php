@@ -59,4 +59,38 @@ class GeneratedComposeEmptyListTest extends TestCase
         $this->assertArrayHasKey('db_data', Yaml::parse($yaml)['volumes']);
         $this->assertNull(Yaml::parse($yaml)['volumes']['db_data']);
     }
+
+    /**
+     * Kept sidecars that mount no named volume (php-rdkafka's kafka and zookeeper) leave the decision an empty
+     * `volumes`, which Compose rejects as `volumes must be a mapping` when it reaches the file as `volumes: []`.
+     */
+    public function test_a_framework_file_with_no_volumes_declares_none(): void
+    {
+        $yaml = DeployCompose::framework([
+            'runtime' => 'go',
+            'strategy' => 'go',
+            'image' => 'golang:1.24',
+            'env' => ['PORT' => '8080'],
+            'sidecars' => [
+                'kafka' => ['image' => 'wurstmeister/kafka:latest', 'depends_on' => ['zookeeper']],
+                'zookeeper' => ['image' => 'wurstmeister/zookeeper:latest'],
+            ],
+            'volumes' => [],
+            'depends_on' => ['kafka', 'zookeeper'],
+        ], 8080);
+
+        $this->assertStringNotContainsString("\nvolumes:", $yaml);
+        $this->assertArrayNotHasKey('volumes', Yaml::parse($yaml));
+    }
+
+    public function test_a_dockerfile_file_with_no_volumes_declares_none(): void
+    {
+        $yaml = DeployCompose::dockerfile('Dockerfile', 8080, [
+            'sidecars' => ['postgres' => ['image' => 'postgres:16-alpine']],
+            'volumes' => [],
+        ]);
+
+        $this->assertStringNotContainsString("\nvolumes:", $yaml);
+        $this->assertArrayNotHasKey('volumes', Yaml::parse($yaml));
+    }
 }

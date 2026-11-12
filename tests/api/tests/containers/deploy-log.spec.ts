@@ -11,6 +11,13 @@ test.describe('deploy log', () => {
     expect([403, 404], 'the deploy log is refused').toContain(response.status);
   });
 
+  test('a non-DinD user cannot list its deploys or read one either', async ({ api, setupUser }) => {
+    const listed = await api.listDeploysRaw(setupUser.username);
+    expect([403, 404], 'the deploy history is refused, not an empty list').toContain(listed.status);
+    const read = await api.readDeployLogRaw(setupUser.username, '20000101-000000-000000');
+    expect([403, 404], 'a kept deploy log is refused').toContain(read.status);
+  });
+
   test('cancelling when nothing is running returns 409 for a DinD user', async ({
     api,
     sharedEmptyDind,
@@ -65,6 +72,35 @@ test.describe('deploy log', () => {
       });
     });
 
+    test('one page of the history is the newest deploys, with the meta other lists have', async ({
+      api,
+      setupDindUser,
+    }) => {
+      const allRaw = await api.listDeploysRaw(setupDindUser.username);
+      await expectStatus(allRaw, 200);
+      const all = validateParsedApiResponse(allRaw.body, deployHistoryListResponseSchema);
+      expect(
+        (allRaw.body as { meta?: unknown }).meta,
+        'an unpaged list keeps its old shape'
+      ).toBeUndefined();
+
+      const pageRaw = await api.listDeploysRaw(setupDindUser.username, { per_page: 1 });
+      await expectStatus(pageRaw, 200);
+      const page = validateParsedApiResponse(pageRaw.body, deployHistoryListResponseSchema);
+      expect(
+        page.data.map((item) => item.id),
+        'the first page holds the newest deploy'
+      ).toEqual(all.data.slice(0, 1).map((item) => item.id));
+      expect((pageRaw.body as { meta?: unknown }).meta, 'the page says where it is').toMatchObject({
+        current_page: 1,
+        per_page: 1,
+        total: all.data.length,
+      });
+
+      const refused = await api.listDeploysRaw(setupDindUser.username, { per_page: 0 });
+      await expectStatus(refused, 422);
+    });
+
     test('the newest deploy of the history reads by id in the shape of deploy-log', async ({
       api,
       setupDindUser,
@@ -97,18 +133,6 @@ test.describe('deploy log', () => {
 
     test('an unknown deploy id answers 404', async ({ api, setupDindUser }) => {
       await expectStatus(await api.readDeployLogRaw(setupDindUser.username, UNKNOWN_DEPLOY), 404);
-    });
-
-    test('a non-DinD project answers its history without a DinD check', async ({
-      api,
-      setupUser,
-    }) => {
-      // Unlike deploy-log, the history endpoints do not require DinD: they read the log files.
-      const listedRaw = await api.listDeploysRaw(setupUser.username);
-      await expectStatus(listedRaw, 200);
-      validateParsedApiResponse(listedRaw.body, deployHistoryListResponseSchema);
-
-      await expectStatus(await api.readDeployLogRaw(setupUser.username, UNKNOWN_DEPLOY), 404);
     });
   });
 });

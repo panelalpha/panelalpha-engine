@@ -7,10 +7,12 @@ use App\Exceptions\ProblemException;
 use App\Exceptions\TaskCancelledException;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployRequest;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Project\Create\CreateFollowUp;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Task\DeployLogTail;
 use App\Lib\Task\TaskLogSink;
@@ -40,10 +42,14 @@ class DeployProject implements ShouldQueue
     /** The project's row; null on a job queued before it was recorded. */
     public ?int $userId = null;
 
+    /** What a typed create does after the account's own deploy ({@see CreateFollowUp::toArray()}); null for a flat create. */
+    public ?array $followUp = null;
+
     /**
      * @param  array<string, list<array<string, mixed>>>|null  $stages
      * @param  ?array<string, mixed>  $inspection  what the create's inspection
      *                                             found, written under the log's first line
+     * @param  ?array<string, mixed>  $followUp
      */
     public function __construct(
         public string $username,
@@ -51,8 +57,10 @@ class DeployProject implements ShouldQueue
         public ?string $recipe = null,
         public ?array $inspection = null,
         ?int $userId = null,
+        ?array $followUp = null,
     ) {
         $this->userId = $userId;
+        $this->followUp = $followUp;
         $this->onQueue('default');
     }
 
@@ -67,7 +75,7 @@ class DeployProject implements ShouldQueue
 
             try {
                 $logger = $this->startDeployLog($user);
-                $this->recordDeployId($logger);
+                DeployRequest::recordTask($logger, $this->task());
                 $this->deploy($user, $logger, $sink);
 
                 $user->refresh();
@@ -128,20 +136,6 @@ class DeployProject implements ShouldQueue
     }
 
     /**
-     * The deploy this task runs, so the reconciler, a cancel and an API client
-     * can tie the create to its log as they do a rebuild.
-     */
-    private function recordDeployId(?DeployLogger $logger): void
-    {
-        $task = $this->task();
-        if ($task === null || $logger === null) {
-            return;
-        }
-        $task->details = array_merge($task->details ?? [], ['deploy_id' => $logger->getDeployId()]);
-        $task->save();
-    }
-
-    /**
      * A failed pipeline has already rolled the account back and deleted the
      * deploy log, so the log's tail is kept on the task and only the message is raised.
      */
@@ -155,6 +149,7 @@ class DeployProject implements ShouldQueue
 
         try {
             $this->runDeployment($user, $logger, $keepTail);
+            CreateFollowUp::fromArray($this->followUp)?->run($user->refresh(), $logger, fn (string $line) => $this->logTask($line));
         } catch (ValidationException $e) {
             if ($this->isCancellation($e)) {
                 throw new TaskCancelledException;

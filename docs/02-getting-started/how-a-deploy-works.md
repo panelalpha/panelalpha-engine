@@ -60,11 +60,11 @@ The version already online keeps serving while a rebuild runs. The new version s
 Cancel the deploy that is running on this project.
 ```
 
-A cancel ends the deploy at any step, including the final check. It never takes down a version that was already online. A cancelled rebuild removes only what it started itself, and a project that was stopped before stays stopped. When the engine could not read what was running as the rebuild started, the cancel removes nothing, since what the rebuild started may be what serves the site.
+A cancel ends the deploy at any step, including the final check. It never takes down a version that was already online. A cancelled rebuild removes only what it started itself, and a project that was stopped before stays stopped. When the engine could not read what was running as the rebuild started, the cancel removes nothing, since what the rebuild started may be what serves the site. The project keeps the deployment status of the version still online; only the deploy's own log says it was cancelled. A cancelled first deploy, with nothing online yet, counts as failed.
 
 ## Past deploys
 
-The engine keeps the log of the last 10 deploys of each project, a limit the server operator can change with `DEPLOY_LOG_KEEP` in `/opt/panelalpha/shared-hosting/.env-core`. Older ones are deleted when a new deploy starts.
+The engine keeps the log of the last 10 deploys of each project, a limit the server operator can change with `DEPLOY_LOG_KEEP` in `/opt/panelalpha/shared-hosting/.env-core`. Older ones are deleted when a new deploy starts, except the newest install: the deploy that first set the project up stays, however many deploys followed it.
 
 ```text
 List the recent deploys of this project and show the log of the last failed one.

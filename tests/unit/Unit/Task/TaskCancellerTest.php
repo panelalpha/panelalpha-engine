@@ -76,6 +76,26 @@ class TaskCancellerTest extends SqliteTaskTestCase
     }
 
     /**
+     * A task read as queued and taken by a worker before the cancel is applied
+     * must keep the worker's row: marking it cancelled would hide the job's outcome.
+     */
+    public function test_a_cancel_of_a_stale_queued_copy_loses_to_a_worker_that_took_it(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $cancelCopy = Task::findOrFail($task->id);
+        $task->markRunning('h-1');
+
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldNotReceive('kill');
+
+        $result = (new TaskCanceller($killer))->cancel($cancelCopy);
+
+        $this->assertFalse($result['cancelled']);
+        $this->assertSame(Task::STATUS_RUNNING, $cancelCopy->refresh()->status);
+        $this->assertNull($cancelCopy->cancelled_at);
+    }
+
+    /**
      * engine#793: a running backup/restore/staging job sets no pid and checks
      * for cancellation nowhere, so it cannot be stopped. Marking it cancelled
      * answered 200 while nothing was killed and the job ran to the end.
@@ -130,20 +150,55 @@ class TaskCancellerTest extends SqliteTaskTestCase
     /** A deploy the task API cancels leaves what it started behind unless its app stack is torn down. */
     public function test_cancelling_a_running_deploy_tears_down_its_half_started_app(): void
     {
-        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $this->username());
-        $task->markRunning('h-1');
-        $task->setPid(4242, '99');
-        $killer = Mockery::mock(ProcessTreeKiller::class);
-        $killer->shouldReceive('kill')->once()->with(4242);
+        $username = $this->username();
+        $deploy = DeployLogger::start($username);
+        $task = $this->runningDeployTask($username, ['deploy_id' => $deploy->getDeployId()]);
         $torn = [];
-        $canceller = new TaskCanceller($killer, fn () => true, function (Task $cancelled) use (&$torn): void {
-            $torn[] = $cancelled->id;
-        });
 
-        $result = $canceller->cancel($task);
+        $result = $this->tearingDownCanceller($torn)->cancel($task);
 
         $this->assertTrue($result['cancelled']);
         $this->assertSame([$task->id], $torn);
+        $this->assertSame(DeployLogger::STATUS_CANCELLED, DeployLogger::readLatestFor($username)['status']);
+        $deploy->finish(DeployLogger::STATUS_CANCELLED);
+    }
+
+    /** Between its start and its log, or after its log finished: no deploy of its own is stopped, so the live app is not touched. */
+    public function test_cancelling_a_running_deploy_task_without_a_running_log_tears_down_nothing(): void
+    {
+        $username = $this->username();
+        $finished = DeployLogger::start($username);
+        $task = $this->runningDeployTask($username, ['deploy_id' => $finished->getDeployId()]);
+        $finished->finish(DeployLogger::STATUS_SUCCESS);
+        $torn = [];
+
+        $result = $this->tearingDownCanceller($torn)->cancel($task);
+
+        $this->assertTrue($result['cancelled']);
+        $this->assertSame([], $torn);
+    }
+
+    /** @param array<string, string> $details */
+    private function runningDeployTask(string $username, array $details): Task
+    {
+        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $username);
+        $task->markRunning('h-1');
+        $task->setPid(4242, '99');
+        $task->details = $details;
+        $task->save();
+
+        return $task;
+    }
+
+    /** @param list<int> $torn */
+    private function tearingDownCanceller(array &$torn): TaskCanceller
+    {
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldReceive('kill')->once()->with(4242);
+
+        return new TaskCanceller($killer, fn () => true, function (Task $cancelled) use (&$torn): void {
+            $torn[] = $cancelled->id;
+        });
     }
 
     /** A queued deploy started nothing, so cancelling it tears nothing down. */

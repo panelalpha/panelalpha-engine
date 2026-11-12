@@ -129,6 +129,25 @@ class ComposeEnvironmentTest extends TestCase
         $this->assertSame('8000', $environment['PORT'], 'the engine still names the port it publishes');
     }
 
+    public function test_a_dollar_in_an_account_value_is_kept_literal_by_compose(): void
+    {
+        $yaml = DeployCompose::framework(
+            ComposeEnvironment::layer(
+                ['runtime' => 'php', 'image' => 'php:8.4-apache', 'env' => ['TZ' => '${TZ:-UTC}']],
+                [],
+                ['DB_PASSWORD' => 'pa$word', 'DSN' => 'mysql://u:${x}@db/app']
+            ),
+            8000,
+            'https://phpapp.example.test'
+        );
+
+        $environment = Yaml::parse($yaml)['services']['app']['environment'];
+
+        $this->assertSame('pa$$word', $environment['DB_PASSWORD']);
+        $this->assertSame('mysql://u:$${x}@db/app', $environment['DSN']);
+        $this->assertSame('${TZ:-UTC}', $environment['TZ'], 'what the platform generated is not the account\'s to escape');
+    }
+
     /**
      * A recipe's `${PA_PUBLIC_HOST}` reached the generated compose
      * literally and Compose interpolated it to ''.

@@ -8,6 +8,7 @@ use App\Lib\Deploy\DeployLog\DeployFinishLine;
 use App\Lib\Deploy\DeployLog\DeployHistory;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
+use App\Lib\Deploy\DeployLog\DeployRequest;
 use App\Lib\Deploy\DeployLog\DeployStartLine;
 use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Models\DeployHook;
@@ -231,6 +232,40 @@ class DeployHistoryTest extends TestCase
         $this->assertNull($entry['trigger']);
         $this->assertNull($entry['action']);
         $this->assertNull($entry['task_id']);
+    }
+
+    public function test_trigger_action_and_task_are_read_from_the_log_once_the_task_is_gone(): void
+    {
+        $this->oldDeploy('20260101-000000-aaaaaa', [
+            'Deploy started (source: dind template)',
+            'Deploy requested (trigger: api, action: deploy, task: 41)',
+            'Deploy requested (trigger: mcp, action: deploy_archive, task: 42)',
+        ], DeployLogger::STATUS_SUCCESS);
+
+        $entry = DeployHistory::find($this->user, '20260101-000000-aaaaaa');
+
+        $this->assertSame(['mcp', 'deploy_archive', 42], [$entry['trigger'], $entry['action'], $entry['task_id']]);
+    }
+
+    public function test_a_deploy_run_without_a_task_names_who_asked_for_it(): void
+    {
+        LogStorage::ensureDirectory(DeployLogPaths::userDir($this->user->username));
+        $logger = DeployLogger::forDeploy($this->user->username, '20260101-000000-aaaaaa');
+        DeployRequest::record($logger, 'rebuild');
+
+        $entry = DeployHistory::find($this->user, '20260101-000000-aaaaaa');
+
+        $this->assertSame(['cli', 'rebuild', null], [$entry['trigger'], $entry['action'], $entry['task_id']]);
+    }
+
+    public function test_a_live_task_still_wins_over_the_log(): void
+    {
+        $this->oldDeploy('20260101-000000-aaaaaa', ['Deploy requested (trigger: api, action: deploy, task: 41)'], DeployLogger::STATUS_SUCCESS);
+        $upload = $this->task(RebuildProject::class, ['action' => 'deploy_archive', 'trigger' => 'mcp', 'deploy_id' => '20260101-000000-aaaaaa']);
+
+        $entry = DeployHistory::find($this->user, '20260101-000000-aaaaaa');
+
+        $this->assertSame(['mcp', 'deploy_archive', $upload->id], [$entry['trigger'], $entry['action'], $entry['task_id']]);
     }
 
     public function test_a_hook_deploy_is_triggered_by_the_hook_and_names_the_delivered_commit(): void

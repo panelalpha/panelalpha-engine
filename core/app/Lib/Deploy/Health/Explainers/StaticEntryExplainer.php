@@ -9,19 +9,8 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Why a static site's `/` did not answer with a page.
- *
- * Three shapes, and they need different sentences. The site may have an entry
- * document that is simply gone -- the common one, and the only one where
- * naming the other pages that *are* still there tells the owner what
- * happened. It may have pages but nothing that could be an entry, which is a
- * missing index rather than a missing file. Or it may have no documents at
- * all, which is an upload that did not arrive.
- *
- * Reuses the finders detection itself uses {@see StaticEntry}, {@see HtmlSite},
- * so the entry this names is the entry the next deploy would pick -- an
- * explanation that disagreed with the deploy it describes would send someone
- * looking for the wrong file.
+ * Why a static site's `/` did not answer with a page: no documents, an entry the deploy is not pointed at, or an entry
+ * that is gone. Uses detection's own finders ({@see StaticEntry}, {@see HtmlSite}), so it names the file the next deploy would pick.
  */
 final class StaticEntryExplainer implements Explainer
 {
@@ -55,8 +44,6 @@ final class StaticEntryExplainer implements Explainer
             ];
         }
 
-        // Documents exist and no entry could be chosen: the deployed config
-        // names a file that has since gone.
         return [
             'detail' => self::listing($documents).' still in ~/project, but the document the '
                 .'deployed site is served from is not.',
@@ -89,7 +76,7 @@ final class StaticEntryExplainer implements Explainer
     private static function documents(string $projectDir): array
     {
         $found = [];
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($projectDir) as $entry) {
             if (preg_match('/\.html?$/i', $entry) === 1 && is_file($projectDir.'/'.$entry)) {
                 $found[] = $entry;
             }

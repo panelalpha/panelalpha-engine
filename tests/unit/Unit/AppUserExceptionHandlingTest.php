@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Exceptions\NotFoundException;
 use App\Http\Controllers\User\AppUserController;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -37,6 +38,19 @@ class AppUserExceptionHandlingTest extends TestCase
         } catch (HttpResponseException $caught) {
             $this->assertSame($original, $caught);
             $this->assertSame(403, $caught->getResponse()->getStatusCode());
+        }
+    }
+
+    public function test_a_not_found_passes_through_with_its_own_message(): void
+    {
+        $original = new NotFoundException("App user '999' not found.");
+
+        try {
+            $this->rethrow($original);
+            $this->fail('Expected NotFoundException');
+        } catch (NotFoundException $caught) {
+            $this->assertSame($original, $caught);
+            $this->assertSame("App user '999' not found.", $caught->getMessage());
         }
     }
 

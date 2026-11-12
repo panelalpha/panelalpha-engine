@@ -6,11 +6,11 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
+use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * The pages the engine drops into an empty ~/project. Detection is
- * title-based, so they must carry these titles verbatim -- that is how the
- * engine's own placeholder is told apart from a real index.html.
+ * The pages the engine drops into an empty ~/project. Detection is title-based, so they must carry these titles
+ * verbatim: that is how the engine's own placeholder is told apart from a real index.html.
  */
 final class PlaceholderPage
 {
@@ -46,10 +46,8 @@ final class PlaceholderPage
     }
 
     /**
-     * The placeholder index in $projectDir, once the project has outgrown it.
-     * Ingesting a source removes it (clone starts empty, archive rsyncs with
-     * --delete); files written in one at a time are never ingested. Null while
-     * the directory holds only the engine's own scaffolding.
+     * The placeholder index in $projectDir once files written in one at a time outgrew it (ingesting a source already
+     * removes it), or null while the directory holds only the engine's own scaffolding.
      */
     public static function supersededIndex(string $projectDir): ?string
     {
@@ -60,7 +58,7 @@ final class PlaceholderPage
             return null;
         }
 
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($projectDir) as $entry) {
             if (str_starts_with($entry, '.')) {
                 continue;
             }
@@ -73,10 +71,8 @@ final class PlaceholderPage
     }
 
     /**
-     * Files the engine put in ~/project itself. Public so this class does not
-     * delete a welcome page from an otherwise empty account, and so HtmlSite
-     * does not read the engine's own compose file and nginx config as the
-     * user's application.
+     * Files the engine put in ~/project itself: public so this class keeps a welcome page in an otherwise empty account,
+     * and so HtmlSite does not read the engine's own compose file and nginx config as the user's application.
      */
     public static function isScaffolding(string $dir, string $entry): bool
     {

@@ -635,7 +635,7 @@ public function test_connect_when_origin_mismatches_throws_422(): void
         $this->assertNull($site['token']);
     }
 
-public function test_pull_ff_refused_by_git_never_runs_the_destructive_restore(): void
+public function test_pull_ff_refused_by_git_never_restores_the_backup(): void
     {
         $model = $this->connectedUser();
         $runner = new FakeGitRunner();
@@ -652,10 +652,8 @@ public function test_pull_ff_refused_by_git_never_runs_the_destructive_restore()
             $this->assertStringContainsString('merge --ff-only', $e->getMessage());
         }
 
-        // A refused merge --ff-only changes nothing, so restoring the backup
-        // (reset --hard + clean -fd) could only destroy what git had spared.
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
-        $this->assertFalse($this->commandsContain($joined, 'reset --hard'));
+        $this->assertFalse($this->commandsContain($joined, ' reset '));
         $this->assertFalse($this->commandsContain($joined, 'clean -fd'));
     }
 
@@ -710,10 +708,15 @@ public function test_pull_ff_refused_by_git_never_runs_the_destructive_restore()
 
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
         $mergeIndex = $this->commandIndexContaining($joined, 'merge origin/main');
-        $restoreIndex = $this->commandIndexContaining($joined, 'reset --hard refs/panelalpha/backup');
+        $workTreeIndex = $this->commandIndexContaining($joined, 'reset --keep abc123');
+        $headIndex = $this->commandIndexContaining($joined, 'reset --quiet abc123');
         $this->assertNotFalse($mergeIndex);
-        $this->assertNotFalse($restoreIndex);
-        $this->assertLessThan($restoreIndex, $mergeIndex);
+        $this->assertNotFalse($workTreeIndex);
+        $this->assertNotFalse($headIndex);
+        $this->assertLessThan($workTreeIndex, $mergeIndex);
+        $this->assertLessThan($headIndex, $workTreeIndex);
+        $this->assertFalse($this->commandsContain($joined, 'reset --hard'));
+        $this->assertFalse($this->commandsContain($joined, 'clean -fd'));
     }
 
 public function test_change_branch_when_dirty_throws_without_reset(): void
@@ -807,6 +810,113 @@ public function test_push_on_deploy_managed_path_is_refused(): void
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
         $this->assertTrue($this->commandsContain($joined, 'reset --hard HEAD'));
         $this->assertTrue($this->commandsContain($joined, 'clean -fd'));
+    }
+
+    /**
+     * The checkout is a depth-1 clone, so the parent a revert names is not in it. The ref is fetched
+     * before the checkout is reset, and only the ref: the rest of the history stays out.
+     */
+    public function test_revert_to_a_commit_the_shallow_clone_lacks_fetches_it_first(): void
+    {
+        $parent = str_repeat('a1b2c3d4', 5);
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout([
+            'rev-parse --is-shallow-repository' => "true\n",
+            "fetch --depth=1 origin {$parent}" => '',
+        ]);
+        $haveParent = false;
+        $commands = [];
+        $execute = function (array $argv, ?string $token, int $timeout = 600) use ($runner, $parent, &$haveParent, &$commands): string {
+            $joined = implode(' ', $argv);
+            $commands[] = $joined;
+            if (str_contains($joined, "{$parent}^{commit}")) {
+                if (! $haveParent) {
+                    throw new GitException('fatal: bad object '.$parent, 400);
+                }
+
+                return $parent."\n";
+            }
+            if (str_contains($joined, "fetch --depth=1 origin {$parent}")) {
+                $haveParent = true;
+
+                return '';
+            }
+
+            return $runner->run($argv, $token, $timeout);
+        };
+        $git = $this->testable($this->deployManagedUser(), 'project', $execute);
+
+        $git->revert($parent);
+
+        $this->assertTrue($haveParent, 'the parent commit was fetched');
+        $this->assertTrue($this->commandsContain($commands, "fetch --depth=1 origin {$parent}"));
+        $this->assertTrue($this->commandsContain($commands, "reset --hard {$parent}"));
+        $this->assertFalse($this->commandsContain($commands, '--unshallow'), 'the whole history was not needed');
+    }
+
+    /** A host that refuses a fetch by an unadvertised commit still reaches it on the whole branch history. */
+    public function test_a_shallow_fetch_of_the_ref_falls_back_to_the_whole_history(): void
+    {
+        $parent = str_repeat('beef1234', 5);
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout([
+            'rev-parse --is-shallow-repository' => "true\n",
+            'fetch --unshallow --tags origin' => '',
+        ]);
+        $runner->failIfContains = ["fetch --depth=1 origin {$parent}"];
+        $haveParent = false;
+        $commands = [];
+        $execute = function (array $argv, ?string $token, int $timeout = 600) use ($runner, $parent, &$haveParent, &$commands): string {
+            $joined = implode(' ', $argv);
+            $commands[] = $joined;
+            if (str_contains($joined, "{$parent}^{commit}")) {
+                if (! $haveParent) {
+                    throw new GitException('fatal: bad object '.$parent, 400);
+                }
+
+                return $parent."\n";
+            }
+            if (str_contains($joined, 'fetch --unshallow --tags origin')) {
+                $haveParent = true;
+
+                return '';
+            }
+
+            return $runner->run($argv, $token, $timeout);
+        };
+        $git = $this->testable($this->deployManagedUser(), 'project', $execute);
+
+        $git->assertRevertable($parent);
+
+        $this->assertTrue($haveParent);
+        $this->assertTrue($this->commandsContain($commands, '--unshallow'));
+    }
+
+    /** A commit the clone does not hold and the remote cannot supply is still the documented 422. */
+    public function test_revert_to_a_ref_both_the_checkout_and_the_remote_lack_is_refused(): void
+    {
+        $missing = str_repeat('deadbeef', 5);
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout([
+            'rev-parse --is-shallow-repository' => "true\n",
+        ]);
+        $runner->failIfContains = ["{$missing}^{commit}", "fetch --depth=1 origin {$missing}"];
+        $commands = [];
+        $execute = function (array $argv, ?string $token, int $timeout = 600) use ($runner, &$commands): string {
+            $commands[] = implode(' ', $argv);
+
+            return $runner->run($argv, $token, $timeout);
+        };
+        $git = $this->testable($this->deployManagedUser(), 'project', $execute);
+
+        try {
+            $git->assertRevertable($missing);
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('git_ref_not_found', $e->problemCode);
+            $this->assertSame("No commit named '{$missing}' in this checkout.", $e->getMessage());
+        }
     }
 
 public function test_clone_shallow_omits_branch_when_null(): void

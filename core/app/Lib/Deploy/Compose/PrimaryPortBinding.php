@@ -6,13 +6,8 @@ use App\Lib\Deploy\Port\ComposePortScan;
 use App\Lib\Deploy\Port\PortMapping;
 
 /**
- * Publishes the detected primary port on a service that only `expose:`s it.
- *
- * The DinD proxy routes the domain to the account container on the detected
- * primary port, but an `expose:`-only service binds nothing to that netns, so
- * the domain 502s. Adding `ports: "<primary>:<primary>"` makes the account
- * container bind the port the proxy already targets. Left alone when a service
- * already publishes the port, so nothing is double-published.
+ * Publishes the detected primary port on a service that only `expose:`s it, which binds nothing the DinD
+ * proxy can reach; left alone when a service already publishes it.
  */
 final class PrimaryPortBinding
 {
@@ -28,15 +23,10 @@ final class PrimaryPortBinding
             return ['compose' => $compose, 'published' => null];
         }
 
-        // Already bound to the account container's netns by some service: the
-        // proxy reaches the app, nothing to add.
-        foreach ($services as $service) {
-            if (is_array($service) && self::publishesToHost($service, $primary)) {
-                return ['compose' => $compose, 'published' => null];
-            }
+        if (self::isPublishedByAny($services, $primary)) {
+            return ['compose' => $compose, 'published' => null];
         }
 
-        // Publish it on the service that only exposes it.
         foreach ($services as $name => $service) {
             if (! is_array($service) || ! self::offers($service, $primary)) {
                 continue;
@@ -49,6 +39,22 @@ final class PrimaryPortBinding
         }
 
         return ['compose' => $compose, 'published' => null];
+    }
+
+    /**
+     * Already bound to the account container's netns by some service: the proxy reaches the app.
+     *
+     * @param  array<array-key, mixed>  $services
+     */
+    private static function isPublishedByAny(array $services, int $primary): bool
+    {
+        foreach ($services as $service) {
+            if (is_array($service) && self::publishesToHost($service, $primary)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -66,6 +72,30 @@ final class PrimaryPortBinding
         }
 
         return false;
+    }
+
+    /**
+     * The services that offer the detected primary port, which is where the account's own environment belongs.
+     *
+     * @param  array<string, mixed>  $compose
+     * @return list<string>
+     */
+    public static function appServices(array $compose): array
+    {
+        $primary = ComposePortScan::ofParsed($compose)['primary'] ?? null;
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+        if ($primary === null) {
+            return [];
+        }
+
+        $owners = [];
+        foreach ($services as $name => $service) {
+            if (is_array($service) && self::offers($service, $primary)) {
+                $owners[] = (string) $name;
+            }
+        }
+
+        return $owners;
     }
 
     /**

@@ -2,15 +2,19 @@
 
 namespace App\Lib\Deploy\DeployLog;
 
+use App\Lib\Findings\Finding;
 use App\Lib\Task\TaskTrigger;
 use App\Models\HookDelivery;
 use App\Models\Task;
 use App\Models\User;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
 
 /**
  * The deploys a project still has a log of, read from the logs themselves
- * and from the tasks and hook deliveries that name them.
+ * and from the tasks and hook deliveries that name them; a task's trigger,
+ * action and id come from the log once the task is pruned.
  */
 final class DeployHistory
 {
@@ -25,6 +29,19 @@ final class DeployHistory
     public static function of(User $user): array
     {
         return self::entries($user, self::ids($user->username));
+    }
+
+    /**
+     * One page of the kept deploys, newest first: only the logs on it are read.
+     *
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public static function page(User $user, int $page, int $perPage): LengthAwarePaginator
+    {
+        $ids = self::ids($user->username);
+        $entries = self::entries($user, array_slice($ids, ($page - 1) * $perPage, $perPage));
+
+        return new LengthAwarePaginator($entries, count($ids), $perPage, $page, ['path' => Paginator::resolveCurrentPath()]);
     }
 
     /**
@@ -86,6 +103,7 @@ final class DeployHistory
         $reader = new DeployLogReader((new DeployLogPaths($username))->log($id));
         $head = $reader->head(DeployStartLine::HEAD);
         $start = DeployStartLine::read($head);
+        $requested = DeployStartLine::request($head);
         $outcome = ($latest['id'] ?? null) === $id ? self::latestOutcome($latest) : self::loggedOutcome($reader, $head);
 
         return [
@@ -94,22 +112,24 @@ final class DeployHistory
             'kind' => $start['kind'],
             'source' => $start['source'],
             'branch' => $start['branch'] ?? $delivery?->branch,
-            'commit' => $start['commit'] ?? self::taskText($task, 'commit') ?? $delivery?->commit,
-            'trigger' => self::trigger($start['source'], $task, $delivery),
-            'action' => self::taskText($task, 'action'),
-            'task_id' => $task?->id,
+            'commit' => $start['commit'] ?? $task?->detailText('commit') ?? $delivery?->commit,
+            'trigger' => self::trigger($start['source'], $task?->detailText('trigger') ?? $requested['trigger'], $delivery),
+            'action' => $task?->detailText('action') ?? $requested['action'],
+            'task_id' => $task->id ?? $requested['task_id'],
         ];
     }
 
     /**
      * @param  array<string, mixed>  $latest
-     * @return array{status: string, error: ?string, started_at: ?int, finished_at: ?int}
+     * @return array{status: string, error: ?string, warnings: list<array<string, mixed>>, failure: ?array<string, mixed>, started_at: ?int, finished_at: ?int}
      */
     private static function latestOutcome(array $latest): array
     {
         return [
             'status' => is_string($latest['status'] ?? null) ? $latest['status'] : DeployLogger::STATUS_RUNNING,
-            'error' => is_string($latest['error'] ?? null) ? $latest['error'] : null,
+            'error' => DeployStatus::errorOf($latest),
+            'warnings' => Finding::storable(DeployStatus::warningsOf($latest)),
+            'failure' => DeployStatus::failureOf($latest)?->toArray(),
             'started_at' => isset($latest['started_at']) ? (int) $latest['started_at'] : null,
             'finished_at' => isset($latest['finished_at']) ? (int) $latest['finished_at'] : null,
         ];
@@ -117,7 +137,7 @@ final class DeployHistory
 
     /**
      * @param  list<array{ts: int, stage: ?string, level: string, msg: string}>  $head
-     * @return array{status: string, error: ?string, started_at: ?int, finished_at: ?int}
+     * @return array{status: string, error: ?string, warnings: list<array<string, mixed>>, failure: ?array<string, mixed>, started_at: ?int, finished_at: ?int}
      */
     private static function loggedOutcome(DeployLogReader $reader, array $head): array
     {
@@ -126,25 +146,20 @@ final class DeployHistory
         return [
             'status' => $finish['status'] ?? self::STATUS_UNKNOWN,
             'error' => $finish['error'] ?? null,
+            'warnings' => Finding::storable($finish['warnings'] ?? []),
+            'failure' => ($finish['status'] ?? null) === DeployLogger::STATUS_FAILED ? Finding::fromStored($finish['error'] ?? null)?->toArray() : null,
             'started_at' => isset($head[0]) ? $head[0]['ts'] : null,
             'finished_at' => $finish['ts'] ?? null,
         ];
     }
 
-    private static function trigger(?string $source, ?Task $task, ?HookDelivery $delivery): ?string
+    private static function trigger(?string $source, ?string $requested, ?HookDelivery $delivery): ?string
     {
         if ($delivery !== null || $source === TaskTrigger::HOOK) {
             return TaskTrigger::HOOK;
         }
 
-        return self::taskText($task, 'trigger');
-    }
-
-    private static function taskText(?Task $task, string $key): ?string
-    {
-        $value = $task?->details[$key] ?? null;
-
-        return is_string($value) && $value !== '' ? $value : null;
+        return $requested;
     }
 
     /**

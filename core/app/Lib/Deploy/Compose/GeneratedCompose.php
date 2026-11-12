@@ -14,9 +14,8 @@ final class GeneratedCompose
     public const APP_SERVICE = 'app';
 
     /**
-     * The image the application service runs, read back out of a file this class
-     * produced. Null for anything unparseable, without an app service, or for a
-     * service that builds: its `image:` is a local tag no registry has.
+     * The image the application service runs, read back out of a file this class produced. Null for anything unparseable,
+     * without an app service, or for a service that builds: its `image:` is a local tag no registry has.
      */
     public static function appImage(string $yaml): ?string
     {
@@ -37,11 +36,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The label key every generated service carries, and the marker
-     * {@see ComposeFileInspector} recognises a generated file by.
-     *
-     * The value says which generator wrote it — 'railpack', 'dockerfile',
-     * 'framework-db'.
+     * The label key every generated service carries, and the marker {@see ComposeFileInspector} recognises a generated
+     * file by; the value says which generator wrote it.
      */
     public const LABEL = 'panelalpha.generated';
 
@@ -62,7 +58,8 @@ final class GeneratedCompose
 
     /**
      * The whole file: the app service, the decision's sidecars and its volumes.
-     * Empty arrays are dumped as `[]` (`entrypoint: []`), since Compose rejects `{}`.
+     * Empty arrays are dumped as `[]` (`entrypoint: []`), since Compose rejects `{}`;
+     * no volumes at all leaves the key out, since a top-level `volumes: []` is rejected too.
      *
      * @param  array<string, mixed>  $appService
      * @param  array<string, mixed>  $decision
@@ -72,7 +69,7 @@ final class GeneratedCompose
         $sidecars = self::sidecars($decision);
         $compose = ['services' => [self::APP_SERVICE => self::appService($appService, $decision, $sidecars)] + $sidecars];
         $volumes = $decision['volumes'] ?? null;
-        if (is_array($volumes)) {
+        if (is_array($volumes) && $volumes !== []) {
             $compose['volumes'] = self::volumeDefinitions($volumes);
         }
 
@@ -80,9 +77,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The app service with the restart policy and log rotation every generator needs
-     * (Docker's default `no` keeps an app down after a reboot), the aliases of the
-     * service it replaced, and long-form `depends_on` on its sidecars.
+     * The app service with the restart policy and log rotation every generator needs (Docker's default `no` keeps an app
+     * down after a reboot), the aliases of the service it replaced, and long-form `depends_on` on its sidecars.
      *
      * @param  array<string, mixed>  $appService
      * @param  array<string, mixed>  $decision
@@ -102,9 +98,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The names the project's kept services reached the dropped app service by, as
-     * network aliases: a proxy naming it in its own nginx config would otherwise
-     * fail with `host not found in upstream`. {@see ServiceAliases}
+     * The names the project's kept services reached the dropped app service by, as network aliases: a proxy naming it in
+     * its own nginx config would otherwise fail with `host not found in upstream`. {@see ServiceAliases}
      *
      * @param  array<string, mixed>  $appService
      * @param  array<string, mixed>  $decision
@@ -143,10 +138,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The project's `persist-paths` as named volumes on the app service, so
-     * what the app writes there outlives a rebuild, which replaces the
-     * checkout a recipe bind-mounts. Mounted over that bind; a path something
-     * already mounts is left alone. Unchanged when there is nothing to add.
+     * The project's `persist-paths` as named volumes over the bind mount, so what the app writes there outlives a rebuild,
+     * which replaces the checkout; a path something already mounts is left alone. Unchanged when there is nothing to add.
      *
      * @param  list<string>  $paths
      */
@@ -221,12 +214,8 @@ final class GeneratedCompose
     }
 
     /**
-     * One more service per Procfile process besides `web`, each the app
-     * service running the process's command in a shell: the same image or
-     * build, env, volumes and dependencies, no ports. `release` is a one-shot behind a
-     * profile, so `up` leaves it to the run before it. A name the file
-     * already uses is skipped, and an app served by stock nginx gets none:
-     * there is no runtime in it to run them. Unchanged when there are none.
+     * One more service per Procfile process besides `web`: the app service without ports, running the command in a shell;
+     * `release` is a one-shot behind a profile `up` leaves to the run before it. A used name is skipped; stock nginx gets none.
      *
      * @param  array<string, string>  $processes  name => command
      */
@@ -255,9 +244,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The app service without what belongs to the app alone. A service that builds
-     * loses its `image:` and gets its own cached build, since the app's tag does not
-     * exist yet when `run` asks for the release.
+     * The app service without what belongs to the app alone. A service that builds loses its `image:` and gets its own
+     * cached build, since the app's tag does not exist yet when `run` asks for the release.
      *
      * @param  array<string, mixed>  $app
      * @return array<string, mixed>
@@ -322,9 +310,8 @@ final class GeneratedCompose
     }
 
     /**
-     * One name per path, in the order given. A path folding onto a slug already
-     * used (`/app/Uploads` after `/app/uploads`) gets a short hash appended, so
-     * it does not share that volume; the first keeps the plain name.
+     * One name per path, in the order given. A path folding onto a slug already used (`/app/Uploads` after `/app/uploads`)
+     * gets a short hash appended, so it does not share that volume; the first keeps the plain name.
      *
      * @param  list<string>  $paths
      * @param  list<string>  $reserved  names another source (a Dockerfile `VOLUME`) already uses
@@ -347,9 +334,8 @@ final class GeneratedCompose
     }
 
     /**
-     * The long form, so the app waits for a sidecar that can say it is ready.
-     * The short form only waits for the container to start, and an app that
-     * migrates on boot then races its own database.
+     * The long form, so the app waits for a sidecar that can say it is ready: the short form only waits for the container
+     * to start, and an app that migrates on boot then races its own database.
      *
      * @param  list<mixed>  $names
      * @param  array<string, array<string, mixed>>  $sidecars

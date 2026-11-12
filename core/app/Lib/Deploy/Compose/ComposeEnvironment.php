@@ -5,55 +5,30 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Project\ApiAccess;
 
 /**
- * The environment a generated service runs with, in the order its layers
- * outrank one another.
- *
- * Compose gives `environment:` precedence over `env_file:`, so every variable
- * a strategy names here is one the account cannot correct in the `.env` it was
- * given — `env_vars` wrote `APP_ENV=prod` into the file and the container kept
- * running with the `APP_ENV=production` the PHP platform ships, which is
- * Laravel's value and the one Symfony refuses to boot on.
- *
- * Everything a strategy generates is therefore a default. The project's
- * app config may restate it, and what the account set outranks both — which is
- * what `env_vars` has claimed to do since it was added, and what the copy in
- * `.env` already did.
- *
- * Two groups stay the engine's own, because the engine reads them back and a
- * mismatch fails quietly. `PA_*` are the generated entrypoint's own
- * variables: `PA_DOCROOT` is the Apache document root, `PA_DEPLOY_PHASE`
- * decides install from upgrade. `HOST`, `HOSTNAME` and `PORT` name the port
- * compose publishes and the health check probes — an account that moved those
- * would get a container nothing can reach and a log that never says why.
- *
- * The API address, token and CA the engine hands an allowed project are
- * reserved too ({@see ApiAccess}) and written last, so whichever route the
- * project's configuration takes, the engine's own values are the ones that
- * reach the container.
- *
- * No Laravel dependencies — unit-testable.
+ * The environment a generated service runs with, in the order its layers outrank one another: a strategy's values are
+ * defaults, the app config restates them and the account outranks both, except what {@see isReserved()}. No Laravel dependencies.
  */
 final class ComposeEnvironment
 {
-    /** The generated entrypoint's own variables. */
+    /** The generated entrypoint's own variables (`PA_DOCROOT`, `PA_DEPLOY_PHASE`): the engine reads them back. */
     public const RESERVED_PREFIX = 'PA_';
 
     /**
-     * A stable secret per account, for an app that would otherwise derive one
-     * from its install path: every account's app is at `/app`, so a salt or
-     * session name taken from `__DIR__` is the same on every tenant.
+     * A stable secret per account, for an app that would derive one from its install path: every account's app is at `/app`,
+     * so a salt or session name taken from `__DIR__` is the same on every tenant.
      */
     public const INSTANCE_SECRET = 'PA_INSTANCE_SECRET';
 
     /**
-     * Where the application is published and probed.
+     * Where the application is published and probed: an account that moved these would get a container nothing reaches.
      *
      * @var list<string>
      */
     public const RESERVED = ['HOST', 'HOSTNAME', 'PORT'];
 
     /**
-     * Fold what the app config and the account declared onto a decision's `env`.
+     * Fold the app config and the account's values onto a decision's `env`, since `environment:` outranks `env_file:`.
+     * An empty account value keeps what shipped; account values are literal, so their `$` is doubled for Compose.
      *
      * @param  array<string, mixed>  $decision
      * @param  array<string, string>  $appConfig  the project's `panelalpha.yaml`
@@ -64,13 +39,10 @@ final class ComposeEnvironment
     {
         $overrides = array_merge(
             self::overridable(ComposeValues::stringMap($appConfig)),
-            // An empty field means "keep what the project shipped", not "set
-            // this to nothing" — the rule ProjectEnvironment already applies
-            // to the same values on their way into .env.
-            self::overridable(array_filter(
+            self::overridable(self::escapedForCompose(array_filter(
                 ComposeValues::stringMap($account),
                 static fn (string $value): bool => $value !== ''
-            ))
+            )))
         );
 
         if ($overrides === []) {
@@ -103,9 +75,8 @@ final class ComposeEnvironment
     }
 
     /**
-     * The engine's own API address, token and CA for an allowed project. A
-     * generated compose file is interpolated by Compose, so a `$` in a value is
-     * doubled, which is how Compose is told to keep it.
+     * The engine's own API address, token and CA ({@see ApiAccess}), reserved and written last so they reach the container.
+     * A `$` is doubled, which is how Compose is told to keep it.
      *
      * @param  array<string, mixed>  $decision
      * @param  array<string, string>  $values
@@ -138,9 +109,8 @@ final class ComposeEnvironment
     }
 
     /**
-     * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` in the decision's env resolved,
-     * as the compose strategy does for its own file. Written into the
-     * generated compose as-is, Compose would interpolate them to ''.
+     * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` in the decision's env resolved, as the compose strategy does for its own file;
+     * written as-is, Compose would interpolate them to ''.
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>

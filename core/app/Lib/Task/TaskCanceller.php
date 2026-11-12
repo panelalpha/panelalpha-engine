@@ -28,8 +28,8 @@ class TaskCanceller
     }
 
     /**
-     * Marks the task cancelled and stops its process, when it has one. A task the worker
-     * finished since it was read cannot be marked, and is answered like a terminal one.
+     * Marks the task cancelled and stops its process, when it has one. A task the worker finished or took since it
+     * was read is answered like a terminal one.
      *
      * @return array{cancelled: bool, message?: string}
      */
@@ -45,16 +45,18 @@ class TaskCanceller
             return self::refused('This task is already running and cannot be stopped; wait for it to finish.');
         }
 
-        if (! $task->markCancelled()) {
+        $cancelled = $wasRunning ? $task->markCancelled() : $this->cancelQueued($task);
+        if (! $cancelled) {
             return self::refused('Task cannot be cancelled');
         }
 
-        $pid = $this->deployPid($task, $wasRunning) ?? $this->ownPid($task);
+        $deploy = $this->cancelOwnDeploy($task, $wasRunning);
+        $pid = $deploy['pid'] ?? $this->ownPid($task);
         if (is_int($pid) && $pid > 0) {
             $this->killer->kill($pid);
         }
 
-        if ($wasRunning && $task->isDeploy()) {
+        if ($deploy['cancelled'] ?? false) {
             ($this->cancelDeploy)($task);
         }
 
@@ -96,18 +98,19 @@ class TaskCanceller
     }
 
     /**
-     * The pid of the deploy this task is running, from its log: only the streaming deploy
-     * writes `tasks.pid`. Not corroborated with `pid_start_time`, which a running deploy has
-     * not recorded. A queued task runs none, and the account's latest log may be another's.
+     * Cancels the deploy this task runs, by its log, and names the pid that log streams, as only that deploy writes
+     * `tasks.pid`. Null when it runs none: a queued task, or the latest log is another's or not running.
+     *
+     * @return ?array{cancelled: bool, pid: ?int}
      */
-    private function deployPid(Task $task, bool $wasRunning): ?int
+    private function cancelOwnDeploy(Task $task, bool $wasRunning): ?array
     {
         $log = $wasRunning ? TaskReconciler::deployLogOf($task) : null;
         if ($log === null || ($log['status'] ?? null) !== DeployLogger::STATUS_RUNNING) {
             return null;
         }
 
-        return DeployLogger::requestCancel((string) $task->username)['pid'];
+        return DeployLogger::requestCancel((string) $task->username);
     }
 
     /** The task's own pid, while its recorded start time still matches, so a reused pid is never signalled. */
@@ -121,9 +124,8 @@ class TaskCanceller
     }
 
     /**
-     * Cancel a task only while it is still queued. Its job then exits before
-     * doing anything ({@see AttachTask::runTask()}), so
-     * there is no process to stop. False when a worker took it first.
+     * Cancel a task only while it is still queued: its job then exits before doing anything ({@see AttachTask::runTask()}),
+     * so there is no process to stop. False when a worker took it first.
      */
     public function cancelQueued(Task $task): bool
     {

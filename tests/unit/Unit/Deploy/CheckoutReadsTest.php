@@ -17,6 +17,8 @@ use Tests\TestCase;
 class CheckoutReadsTest extends TestCase
 {
     private const ENGINE_FILE_READERS = [
+        'CacheManager/BuildCacheProducer.php',
+        'CacheManager/CacheRegistryLock.php',
         'CacheManager/ImageCatalog.php',
         'DeployLog/DeployLock.php',
         'DeployLog/DeployLogReader.php',

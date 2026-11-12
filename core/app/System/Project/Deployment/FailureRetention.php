@@ -32,15 +32,19 @@ final class FailureRetention
     private static function failedDetails(ModelsUser $user, string $message): array
     {
         $details = ['error' => $message, 'deployment_status' => 'failed'];
-        if (in_array($user->getDeploymentStatus(), ['success', 'partial'], true)) {
+        if (self::lastDeployServed($user)) {
             $details['deployed_before'] = true;
         }
 
         return $details;
     }
 
+    /** A cancelled redeploy leaves the version that served before it, so the status it had stands. */
     public static function retainAfterDeployCancelled(ModelsUser $user, string $message): void
     {
+        if (self::lastDeployServed($user) || $user->hasDeployedBefore()) {
+            return;
+        }
         try {
             $user->setDetails(self::failedDetails($user, $message));
             $user->save();
@@ -49,5 +53,10 @@ final class FailureRetention
                 "Failed to persist deploy cancellation state for {$user->username}: {$e->getMessage()}",
             );
         }
+    }
+
+    private static function lastDeployServed(ModelsUser $user): bool
+    {
+        return in_array($user->getDeploymentStatus(), ['success', 'partial'], true);
     }
 }

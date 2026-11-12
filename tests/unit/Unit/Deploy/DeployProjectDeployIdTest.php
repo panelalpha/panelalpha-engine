@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy;
 
 use App\Jobs\DeployProject;
+use App\Lib\Deploy\DeployLog\DeployHistory;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Task;
 use App\Models\User;
@@ -69,6 +70,19 @@ class DeployProjectDeployIdTest extends TestCase
         $this->assertSame($seen['logger'], $seen['task'], 'the id is on the task before the pipeline runs');
         $this->assertSame($seen['logger'], $task->refresh()->details['deploy_id']);
         $this->assertSame(DeployLogger::readLatestFor($this->name)['id'], $task->details['deploy_id'], 'the log deploy-log serves');
+    }
+
+    public function test_who_asked_for_the_create_outlives_its_task(): void
+    {
+        $user = $this->makeUser($this->name, ['template' => 'dind']);
+        $task = Task::start(jobType: DeployProject::class, queue: 'default', username: $this->name, details: ['action' => 'deploy', 'trigger' => 'mcp']);
+
+        $this->job($user, new \ArrayObject())->attachTask($task)->handle();
+        $deploy = $task->refresh()->details['deploy_id'];
+        $task->delete();
+
+        $entry = DeployHistory::find($user, $deploy);
+        $this->assertSame(['mcp', 'deploy', $task->id], [$entry['trigger'], $entry['action'], $entry['task_id']]);
     }
 
     public function test_a_create_without_a_deploy_log_names_no_deploy(): void
