@@ -1,0 +1,49 @@
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.crt"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.crt"]
+run ["/usr/local/lib/panelalpha/pa-root","files.findInDirectoryIgnoringCase","--","/opt/engine/users/alice/ssl-certs","alice.test.crt"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.key"]
+run ["/usr/local/lib/panelalpha/pa-root","files.findInDirectoryIgnoringCase","--","/opt/engine/users/alice/ssl-certs","alice.test.key"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.ca"]
+run ["/usr/local/lib/panelalpha/pa-root","files.findInDirectoryIgnoringCase","--","/opt/engine/users/alice/ssl-certs","alice.test.ca"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.pem"]
+run ["/usr/local/lib/panelalpha/pa-root","files.findInDirectoryIgnoringCase","--","/opt/engine/users/alice/ssl-certs","alice.test.pem"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.crt"]
+put /opt/engine/webserver-config/apache/vhosts/alice.test.conf -
+<VirtualHost  198.51.100.10:80   [2001:db8::7]:80 >
+    ServerName alice.test
+            ServerAlias www.alice.test
+        ServerAdmin webmaster@localhost
+    DocumentRoot /home/alice/alice.test/public_html
+    ErrorLog /opt/panelalpha/shared-hosting/webserver-logs/apache/alice.test/error.log
+    CustomLog /opt/panelalpha/shared-hosting/webserver-logs/apache/alice.test/access.log combined
+    RewriteEngine On
+    SetEnvIfExpr "%{QUERY_STRING} =~ /pmassotoken=/" pmapass=1
+    SetEnvIfExpr "%{HTTP_COOKIE} =~ /PMASignonSession/" pmapass=1
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+    RewriteRule ^ /phpmyadmin/ [R=301,L]
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+    RewriteCond %{ENV:pmapass} =1
+    RewriteRule ^/phpmyadmin/(.*)$ http://phpmyadmin-users.shared-hosting.palocal/$1 [P,L]
+    <Directory /home/alice/alice.test/public_html>
+        DirectoryIndex index.php index.html
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    Alias /alice-error-pages /opt/panelalpha/shared-hosting/webserver-config/error-pages
+    <Directory /opt/panelalpha/shared-hosting/webserver-config/error-pages>
+        Require all granted
+    </Directory>
+    ErrorDocument 403 /alice-error-pages/403.html
+    ErrorDocument 404 /alice-error-pages/404.html
+    ErrorDocument 500 /alice-error-pages/500.html
+    ErrorDocument 502 /alice-error-pages/502.html
+    ErrorDocument 503 /alice-error-pages/503.html
+    <FilesMatch "\.php$">
+        CGIPassAuth On
+        SetHandler "proxy:fcgi://alice:9082"
+    </FilesMatch>
+</VirtualHost>
+
+<<< end of /opt/engine/webserver-config/apache/vhosts/alice.test.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/apache/alice.test"]

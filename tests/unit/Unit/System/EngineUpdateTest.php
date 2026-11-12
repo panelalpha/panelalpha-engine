@@ -8,6 +8,7 @@ use App\System\Filesystem;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 
 /**
  * Starting the engine updater and reading back what the last run did. It was
@@ -19,9 +20,27 @@ class EngineUpdateTest extends TestCase
     private const KEPT_IN_PLACEHOLDER = ' > ' . EngineUpdate::LOGS_DIR . '/tmp/stdout 2> ' . EngineUpdate::LOGS_DIR . '/tmp/stderr'
         . ' || echo $? > ' . EngineUpdate::LOGS_DIR . '/tmp/exit_code';
 
+    private string $engineDir = '';
+
+    /** The broker checks that the engine directory exists. */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->engineDir = sys_get_temp_dir() . '/pa-engine-update-' . bin2hex(random_bytes(6));
+        mkdir($this->engineDir, 0755);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->engineDir]));
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('PA_ROOT_LOCAL_ROOTS');
+        rmdir($this->engineDir);
+        parent::tearDown();
+    }
+
     private function system(FakeUpdateFilesystem $fs, int $exitCode = 0): FakeUpdateSystem
     {
-        return new FakeUpdateSystem($fs, $exitCode);
+        return new FakeUpdateSystem($fs, $this->engineDir, $exitCode);
     }
 
     /**
@@ -32,9 +51,11 @@ class EngineUpdateTest extends TestCase
      */
     private function payload(array $argv): string
     {
-        $this->assertSame(['sudo', 'nsenter', '--target', '1', '--all', 'bash', '-c'], array_slice($argv, 0, 7));
+        $this->assertSame([LocalRoot::CLIENT, '--host'], array_slice($argv, 0, 2));
+        $plain = LocalRoot::plain($argv);
+        $this->assertSame(['bash', '-c'], array_slice($plain, 0, 2));
 
-        return $argv[7];
+        return $plain[2];
     }
 
     public function test_no_latest_directory_means_there_has_never_been_a_run(): void
@@ -215,7 +236,8 @@ class EngineUpdateTest extends TestCase
 
         $this->assertCount(3, $system->commands);
         $tmp = EngineUpdate::LOGS_DIR . '/tmp';
-        $this->assertSame("printf %s 'boom' > {$tmp}/stderr && echo 3 > {$tmp}/exit_code", $this->payload($system->commands[2]));
+        $this->assertSame("printf %s \"\$1\" > {$tmp}/stderr && echo \"\$2\" > {$tmp}/exit_code", $this->payload($system->commands[2]));
+        $this->assertSame(['bash', 'boom', '3'], array_slice(LocalRoot::plain($system->commands[2]), 3));
     }
 
     public function test_a_placeholder_that_never_became_a_run_is_failed(): void
@@ -352,7 +374,19 @@ class EngineUpdateTest extends TestCase
         $system = $this->system($fs);
 
         $this->assertTrue((new EngineUpdate($system))->isRunning());
-        $this->assertSame(['sudo', 'nsenter', '--target', '1', '--all', 'kill', '-0', '4321'], $system->commands[0]);
+        $this->assertSame([LocalRoot::CLIENT, '--host', 'host.processExists', '--', '4321'], $system->commands[0]);
+        $this->assertSame(['kill', '-0', '--', '4321'], LocalRoot::plain($system->commands[0]));
+    }
+
+    /** An older engine seeded its placeholder with pid 2, which is the host's kthreadd and always answers kill -0. */
+    public function test_a_placeholder_seeded_by_an_older_engine_is_not_running(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = ["{$dir}/pid" => "2\n"];
+
+        $this->assertFalse((new EngineUpdate($this->system($fs)))->isRunning());
     }
 
     public function test_a_failed_start_is_reported_with_its_exit_code(): void
@@ -423,8 +457,14 @@ final class FakeUpdateSystem extends System
 
     public function __construct(
         private FakeUpdateFilesystem $fs,
+        private string $engineDir,
         private int $exitCode = 0,
     ) {
+    }
+
+    public function engineDirPath(): string
+    {
+        return $this->engineDir;
     }
 
     public function filesystem(): Filesystem

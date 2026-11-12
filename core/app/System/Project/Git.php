@@ -4,20 +4,20 @@ namespace App\System\Project;
 
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use App\System\Project as UserProject;
 use App\System\Project\Git\Path as GitPath;
 use App\System\Project\Git\WorkTree;
 
 /**
- * The panel API's view of a project's git checkout. Everything it can do lives
- * in {@see WorkTree}; this decides which directory is the work tree and how a
- * command reaches the account -- through the DinD shell when there is one,
- * otherwise `sudo -u` on the host.
+ * The panel API's view of a project's git checkout, done by {@see WorkTree}: this picks the work tree and
+ * runs commands through the DinD shell when there is one, otherwise as the account on the host.
  */
 class Git extends WorkTree
 {
     protected UserProject $project;
 
+    /** Without a path, the DinD app directory, or what the main domain serves: the rule WP-CLI uses. */
     public function __construct(UserProject $project, ?string $path = null)
     {
         $this->project = $project;
@@ -29,7 +29,6 @@ class Git extends WorkTree
             if ($runtime instanceof Dind) {
                 $this->absolutePath = $runtime->userAppDirPath();
             } else {
-                // What the site serves, the same rule WP-CLI uses.
                 $main = $project->model()->getMainDomain();
                 $this->absolutePath = $home.($main?->getDocumentRoot() ?? '/public_html');
             }
@@ -62,7 +61,7 @@ class Git extends WorkTree
             return $runtime->shell()->execAsUser($cmd, [], $timeout);
         }
 
-        return $this->project->system()->execOnHost(['sudo', '-u', $this->user()->username, ...$cmd]);
+        return $this->project->system()->exec(Privileged::account()->gitOnHost($this->user()->username, $cmd));
     }
 
     protected function runQuietCommand(array $cmd, int $timeout): string

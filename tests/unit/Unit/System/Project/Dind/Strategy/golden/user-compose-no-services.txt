@@ -1,0 +1,10 @@
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root account.removeIfExists -- 1001 1001 {dir}/docker-compose.panelalpha.client-override.yml
+
+
+[1 log lines] write {dir}/docker-compose.panelalpha.yml chown=1001:1001 mode=600
+x-anchors: &a
+  image: nginx
+
+
+== log
+#0 info: Starting stage: running

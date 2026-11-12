@@ -8,6 +8,8 @@ use App\System\Filesystem;
 use App\System\Project;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 
 /**
  * Linux isolation owned by Project (formerly Account).
@@ -178,7 +180,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $line = is_array($cmd) ? implode(' ', LocalRoot::plain($cmd)) : $cmd;
                 if (str_contains($line, 'rm -rf') && str_contains($line, '/home/')) {
                     $this->journal[] = 'rm-home';
                     $this->simulateRmRf($line);
@@ -193,6 +195,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (str_contains($line, 'userdel')) {
                     $this->journal[] = 'userdel';
@@ -203,7 +206,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $line = is_array($cmd) ? implode(' ', LocalRoot::plain($cmd)) : $cmd;
                 if (str_contains($line, 'rsync') && str_contains($line, '--exclude=docker/')) {
                     $this->journal[] = 'rsync-home-dind';
                     $this->simulateRsync($line);
@@ -253,6 +256,8 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return $this->runProcess($cmd, $env);
             }
 
@@ -284,7 +289,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             private function simulateRsync(string $line): void
             {
-                if (! preg_match('/rsync -a --delete(?: --exclude=docker\/)? (.+) (.+)$/', $line, $m)) {
+                if (! preg_match('/rsync -a --delete(?: --exclude=docker\/)?(?: --)? (.+) (.+)$/', $line, $m)) {
                     return;
                 }
                 $src = rtrim(trim($m[1]), '/');
@@ -318,7 +323,7 @@ class ProjectLinuxLifecycleTest extends TestCase
 
             private function simulateRmRf(string $line): void
             {
-                if (! preg_match('/rm -rf (.+)$/', $line, $m)) {
+                if (! preg_match('/rm -rf (?:-- )?(.+)$/', $line, $m)) {
                     return;
                 }
                 $path = trim($m[1]);

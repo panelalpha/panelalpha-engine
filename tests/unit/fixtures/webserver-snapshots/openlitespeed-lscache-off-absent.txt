@@ -1,0 +1,2 @@
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/data/lscache"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:www-data","/opt/engine/data/lscache"]

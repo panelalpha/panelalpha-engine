@@ -7,7 +7,7 @@ use App\System as EngineSystem;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\CredentialFiles;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -56,8 +56,8 @@ class ProjectGitCredentialSweepTest extends TestCase
         $this->assertFileDoesNotExist($key);
         $this->assertFileDoesNotExist($knownHosts);
         $this->assertNotEmpty(
-            array_filter($system->commands, fn (array $c): bool => array_slice($c, 0, 2) === ['sudo', 'rm']),
-            'the sweep removes leftovers with sudo, as the cleanup does: the home is root-owned'
+            array_filter($system->commands, fn (array $c): bool => LocalRoot::isRequest($c) && LocalRoot::plain($c)[0] === 'rm'),
+            'the sweep removes leftovers as root, as the cleanup does: the home is root-owned'
         );
     }
 
@@ -192,12 +192,13 @@ final class SweepRecordingSystem extends EngineSystem
     {
         $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
         $this->commands[] = $argv;
+        $plain = LocalRoot::plain($argv);
 
-        if (array_slice($argv, 0, 2) === ['sudo', 'find']) {
-            return $this->find($argv);
+        if (($plain[0] ?? '') === 'find') {
+            return $this->find($plain);
         }
-        if (($argv[0] ?? '') === 'rm' || array_slice($argv, 0, 2) === ['sudo', 'rm']) {
-            @unlink((string) end($argv));
+        if (($plain[0] ?? '') === 'rm') {
+            @unlink((string) end($plain));
         }
 
         return '';
@@ -208,7 +209,7 @@ final class SweepRecordingSystem extends EngineSystem
      */
     private function find(array $argv): string
     {
-        $root = rtrim((string) ($argv[2] ?? ''), '/');
+        $root = rtrim((string) ($argv[1] ?? ''), '/');
         $maxDepth = null;
         $minutes = 0;
         foreach ($argv as $i => $arg) {
@@ -253,13 +254,14 @@ final class AskPassFailingSystem extends EngineSystem
 
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
     {
-        $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
-        $step = $argv[1] ?? '';
+        $request = is_array($cmd) ? array_values($cmd) : [$cmd];
+        $argv = LocalRoot::plain($request);
+        $step = LocalRoot::isRequest($request) ? $argv[0] : '';
         if ($step === 'install') {
             $this->installArgv = $argv;
         }
         if ($step === $this->failingStep) {
-            throw new \RuntimeException("sudo {$step} failed");
+            throw new \RuntimeException("{$step} failed");
         }
         match ($step) {
             'install' => copy($argv[4], $argv[5]),

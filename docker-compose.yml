@@ -12,15 +12,15 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.2.0-20261028
+    image: ghcr.io/panelalpha/engine-core:v2.3.0-20261105
     pull_policy: missing
     restart: always
     post_start:
       - command: php artisan system:database:test --retries=10
       - command: php artisan system:ip:sync --skip-errors
     hostname: core.shared-hosting.palocal
-    privileged: true
-    pid: host
+    depends_on:
+      - root-broker
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -36,12 +36,10 @@ services:
       - ./config/core/php.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha.ini
       - ./config/core/php-fpm-pool.conf:/etc/php/8.4/fpm/pool.d/zz-docker.conf
       - ./config/core/services:/etc/s6/core:ro
-      - ./config/logrotate:/etc/logrotate.d
-      - ./data/logrotate:/var/lib/logrotate
       - ./logs/core/nginx:/var/log/nginx
       - core-storage:/var/www/html/storage
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/docker:/var/lib/docker
+      - root-broker-socket:/run/panelalpha
+      - core-exchange:/var/lib/panelalpha
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/lib/letsencrypt:/var/lib/letsencrypt
       - /opt/panelalpha:/opt/panelalpha
@@ -68,6 +66,38 @@ services:
       - "FIREWALL_PROVIDER=${FIREWALL_PROVIDER:-ufw}"
     mem_limit: ${MEM_LIMIT_CORE:-6G}
     memswap_limit: ${MEMSWAP_LIMIT_CORE:-0}
+  # Core's only way to root, on core's image.
+  root-broker:
+    build:
+      context: ./dockerfiles
+      dockerfile: Dockerfile-root-broker
+    image: ghcr.io/panelalpha/engine-root-broker:v2.3.0-20261105
+    pull_policy: missing
+    restart: always
+    privileged: true
+    pid: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # at core's paths
+      - ./core/resources/sources:/var/www/html/resources/sources:ro
+      - ./tests/coverage:/var/www/tests/coverage
+      - core-storage:/var/www/html/storage
+      - root-broker-socket:/run/panelalpha
+      - core-exchange:/var/lib/panelalpha
+      - ./config/root-broker/services:/etc/s6/root-broker:ro
+      - ./config/logrotate:/etc/logrotate.d
+      - ./data/logrotate:/var/lib/logrotate
+      - ./dockerfiles/entrypoint-root-broker.sh:/entrypoint.sh
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/lib/letsencrypt:/var/lib/letsencrypt
+      - /opt/panelalpha:/opt/panelalpha
+      - /home:/home
+      - /var/tmp/panelalpha-backup:/var/tmp/panelalpha-backup
+    command: bash /entrypoint.sh
+    mem_limit: ${MEM_LIMIT_ROOT_BROKER:-4G}
+    memswap_limit: ${MEMSWAP_LIMIT_ROOT_BROKER:-0}
   mail:
     profiles: ["mail", "full"]
     build:
@@ -75,6 +105,8 @@ services:
       dockerfile: Dockerfile-exim
     image: ghcr.io/panelalpha/engine-exim:v2.2.0-20261028
     pull_policy: missing
+    # The entrypoint shell ignores SIGTERM as PID 1.
+    init: true
     restart: always
     hostname: exim.shared-hosting.palocal
     network_mode: host
@@ -115,13 +147,17 @@ services:
       dockerfile: Dockerfile-metrics
     image: ghcr.io/panelalpha/engine-metrics:v2.2.0-20261028
     pull_policy: missing
-    volumes_from:
+    # Python ignores SIGTERM as PID 1.
+    init: true
+    depends_on:
       - core
     restart: always
     network_mode: host
     privileged: true
     volumes:
       - "./scripts/server_metrics.py:/scripts/server_metrics.py"
+      - core-storage:/var/www/html/storage
+      - /home:/home:ro
     environment:
       - "DB_CONNECTION=${CORE_DB_CONNECTION:-sqlite}"
       - "DB_DATABASE=${CORE_DB_DATABASE:-/var/www/html/storage/database/core.sqlite}"
@@ -388,6 +424,30 @@ services:
         gw_priority: 1
       tenants:
         ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.4
+  # Anonymous ghcr.io pass-through; the seed pulls through it and retags, not a mirror.
+  ghcr-proxy:
+    profiles: ["registry-proxy", "full"]
+    image: registry:3.1.1
+    pull_policy: missing
+    container_name: panelalpha-ghcr-proxy
+    restart: unless-stopped
+    environment:
+      REGISTRY_HTTP_DEBUG_ADDR: ""
+      REGISTRY_PROXY_REMOTEURL: https://ghcr.io
+      REGISTRY_PROXY_TTL: ${GHCR_PROXY_TTL:-24h}
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
+      REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
+      GOGC: ${REGISTRY_GOGC:-50}
+    volumes:
+      - ghcr-proxy-data:/var/lib/registry
+    mem_limit: ${MEM_LIMIT_GHCR_PROXY:-512m}
+    memswap_limit: ${MEMSWAP_LIMIT_GHCR_PROXY:-0}
+    networks:
+      default:
+        gw_priority: 1
+      tenants:
+        ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.6
   lighthouse:
     profiles: ["lighthouse", "full"]
     build:
@@ -405,9 +465,12 @@ services:
 volumes:
   cache-registry-data: {}
   core-storage: {}
+  core-exchange: {}
+  root-broker-socket: {}
   database-core-data: {}
   database-users-data: {}
   registry-proxy-data: {}
+  ghcr-proxy-data: {}
 networks:
   default:
     name: pash-default-network

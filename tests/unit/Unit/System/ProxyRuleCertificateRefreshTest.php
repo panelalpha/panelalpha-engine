@@ -11,6 +11,7 @@ use App\System\Services\Webserver\ProxyRuleCertificate;
 use App\System\Services\Webserver\RoutingCompiler;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Ssl\TestCertificates;
@@ -46,6 +47,7 @@ class ProxyRuleCertificateRefreshTest extends TestCase
         $this->dir = sys_get_temp_dir().'/pa-proxy-rule-refresh-'.bin2hex(random_bytes(4));
         $this->live = $this->dir.'/letsencrypt/live';
         mkdir($this->live, 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['engine' => $this->dir, 'letsencrypt' => $this->dir.'/letsencrypt']));
         $this->commands = new \ArrayObject;
         $this->authority = TestCertificates::authority();
         file_put_contents($this->dir.'/ca.pem', $this->authority['cert']);
@@ -64,6 +66,7 @@ class ProxyRuleCertificateRefreshTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         exec('rm -rf '.escapeshellarg($this->dir));
         parent::tearDown();
     }
@@ -172,7 +175,7 @@ class ProxyRuleCertificateRefreshTest extends TestCase
     private function reloaded(): bool
     {
         foreach ($this->commands as $command) {
-            if (str_contains($command, '/etc/init.d/nginx reload')) {
+            if (str_contains($command, 'compose.nginxReload')) {
                 return true;
             }
         }
@@ -185,7 +188,7 @@ class ProxyRuleCertificateRefreshTest extends TestCase
         return (string) file_get_contents($this->dir.self::VHOST);
     }
 
-    /** The engine under a temp dir on nginx-proxy, running what it would run with sudo as the test's own user, docker excepted. */
+    /** The engine under a temp dir on nginx-proxy, running what it would ask the root broker for as the test's own user, docker excepted. */
     private function system(): System
     {
         return new class($this->dir, $this->commands) extends System
@@ -211,12 +214,16 @@ class ProxyRuleCertificateRefreshTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $argv = is_array($cmd) ? array_values($cmd) : [];
+                $planned = LocalRoot::plain($argv);
+                $line = is_array($cmd) ? implode(' ', $planned ?: $argv) : $cmd;
                 $this->commands[] = $line;
+                $roots = ['PA_ROOT_LOCAL_ROOTS' => (string) getenv('PA_ROOT_LOCAL_ROOTS')];
                 $process = match (true) {
+                    $argv !== [] && LocalRoot::isNative($argv) => new Process(['true']),
                     str_contains($line, 'docker') || str_contains($line, 'init.d') => new Process(['true']),
-                    is_array($cmd) => new Process(array_values(array_filter($cmd, static fn (string $part): bool => $part !== 'sudo'))),
-                    default => Process::fromShellCommandline((string) preg_replace('/^sudo /', '', $cmd)),
+                    is_array($cmd) => new Process(LocalRoot::argv($cmd), null, $roots),
+                    default => Process::fromShellCommandline(LocalRoot::line($cmd), null, $roots),
                 };
                 $process->run();
 

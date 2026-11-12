@@ -7,10 +7,13 @@ use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
 use App\System\Services\Webserver;
+use Tests\Support\AccountFileOwner;
 use Tests\TestCase;
 
 class PhpErrorLogListingTest extends TestCase
 {
+    use AccountFileOwner;
+
     public function test_the_all_webservers_listing_offers_the_php_error_log(): void
     {
         $system = $this->system();
@@ -30,7 +33,7 @@ class PhpErrorLogListingTest extends TestCase
         $system = $this->system();
         $this->writeOwnedLog($this->logPath($system), "one\n");
 
-        $names = array_column($this->domain($system)->listLogFiles(), 'file');
+        $names = array_column($this->domain($system, self::accountUid())->listLogFiles(), 'file');
 
         $this->assertNotContains('php_error.log', $names);
     }
@@ -61,17 +64,16 @@ class PhpErrorLogListingTest extends TestCase
         $system = $this->system();
         $path = $this->logPath($system);
         $this->writeOwnedLog($path, "one\n");
-        chown($path, posix_getuid());
 
-        $this->assertNull($this->entry($system));
+        $this->assertNull($this->entry($system, self::accountUid() + 1));
     }
 
     /**
      * @return array{file: string, path: string, mtime: int, size: int}|null
      */
-    private function entry(System $system): ?array
+    private function entry(System $system, ?int $uid = null): ?array
     {
-        foreach ($this->domain($system)->listWebserverLogFiles() as $file) {
+        foreach ($this->domain($system, $uid ?? self::accountUid())->listWebserverLogFiles() as $file) {
             if ($file['file'] === 'php_error.log') {
                 return $file;
             }
@@ -91,15 +93,14 @@ class PhpErrorLogListingTest extends TestCase
             mkdir(dirname($path), 0777, true);
         }
         file_put_contents($path, $contents);
-        chown($path, 1001);
-        chgrp($path, 1001);
+        self::ownByAccount($path);
     }
 
-    private function domain(System $system): Project\Domain
+    private function domain(System $system, int $uid): Project\Domain
     {
         $user = new ModelsUser();
         $user->username = 'alice';
-        $user->setDetails(['template' => 'default', 'UID' => 1001, 'GID' => 1001]);
+        $user->setDetails(['template' => 'default', 'UID' => $uid, 'GID' => self::accountGid()]);
         $model = new DomainModel();
         $model->domain = 'a.test';
 

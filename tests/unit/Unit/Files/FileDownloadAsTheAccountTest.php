@@ -8,20 +8,29 @@ use App\Models\User;
 use App\System;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
- * A download is read by a helper started through sudo. As root it read
- * anything under the home, ~/docker included, which only root may enter. It
- * runs as the account now: what the account can read downloads, nothing else.
- *
- * Real end to end, with only `sudo` shimmed to run its command as is; setpriv
- * then really drops to uid 1001. That needs root and util-linux setpriv
- * (BusyBox's has no --reuid): in composer:2, `apk add --no-cache setpriv`.
+ * The download helper runs as the account, so only what the account can read
+ * downloads. Needs root and util-linux setpriv (`apk add --no-cache setpriv`).
  */
 class FileDownloadAsTheAccountTest extends TestCase
 {
     private const UID = 1001;
+
+    /** pa-root that runs an account action as the uid and gid it is given. */
+    private const BROKER = <<<'PHP'
+        #!/usr/bin/env php
+        <?php
+        $args = array_slice($argv, 1);
+        $values = array_slice($args, (int) array_search('--', $args, true) + 1);
+        $plan = json_decode((string) shell_exec('PA_ROOT_LOCAL=plan ' . implode(' ', array_map('escapeshellarg', [getenv('PA_ROOT_LOCAL_CLIENT'), ...$args]))), true);
+        $account = str_starts_with((string) $args[0], 'account.') && ctype_digit((string) ($values[0] ?? '')) && ctype_digit((string) ($values[1] ?? ''));
+        $prefix = $account ? ['setpriv', '--reuid', $values[0], '--regid', $values[1], '--clear-groups'] : [];
+        $process = proc_open([...$prefix, ...$plan['argv']], [STDIN, STDOUT, STDERR], $pipes);
+        exit(proc_close($process));
+        PHP;
 
     private ?string $tmpRoot = null;
 
@@ -50,9 +59,10 @@ class FileDownloadAsTheAccountTest extends TestCase
         chown($home . '/priv', self::UID);
         chown($home . '/priv/secret.txt', self::UID);
         mkdir($this->tmpRoot . '/bin');
-        file_put_contents($this->tmpRoot . '/bin/sudo', "#!/bin/sh\nexec \"\$@\"\n");
-        chmod($this->tmpRoot . '/bin/sudo', 0755);
-        $this->setEnv('PATH', $this->tmpRoot . '/bin:' . (string) getenv('PATH'));
+        file_put_contents($this->tmpRoot . '/bin/pa-root', self::BROKER);
+        chmod($this->tmpRoot . '/bin/pa-root', 0755);
+        $this->setEnv('PA_ROOT_LOCAL_CLIENT', LocalRoot::client());
+        LocalRoot::answerWith($this->tmpRoot . '/bin/pa-root');
 
         config([
             'database.default' => 'sqlite',
@@ -80,8 +90,8 @@ class FileDownloadAsTheAccountTest extends TestCase
             }
         });
         $this->withoutMiddleware(Authenticate::class);
-        if (in_array('sudophp', stream_get_wrappers(), true)) {
-            stream_wrapper_unregister('sudophp');
+        if (in_array('rootfile', stream_get_wrappers(), true)) {
+            stream_wrapper_unregister('rootfile');
         }
         FileStreamWrapper::register();
     }
@@ -94,7 +104,8 @@ class FileDownloadAsTheAccountTest extends TestCase
 
             return;
         }
-        FileStreamWrapper::confineTo(null, ['sudo']);
+        FileStreamWrapper::unconfine();
+        LocalRoot::answerByBroker();
         foreach ($this->savedEnv as $key => $value) {
             if ($value === false) {
                 putenv($key);
@@ -124,11 +135,11 @@ class FileDownloadAsTheAccountTest extends TestCase
             ->assertJson(['message' => 'Invalid path']);
 
         // Behind the account's own test -f: the helper itself refuses it as the account.
-        FileStreamWrapper::confineTo($this->tmpRoot . '/home/alice', ['setpriv', '--reuid', (string) self::UID, '--regid', (string) self::UID, '--clear-groups']);
-        $this->assertFalse(is_file('sudophp://' . $this->tmpRoot . '/home/alice/docker/blob'));
-        $this->assertFalse(@fopen('sudophp://' . $this->tmpRoot . '/home/alice/docker/blob', 'r'));
-        FileStreamWrapper::confineTo($this->tmpRoot . '/home/alice', []);
-        $this->assertTrue(is_file('sudophp://' . $this->tmpRoot . '/home/alice/docker/blob'), 'as root the helper reads it');
+        FileStreamWrapper::confineToAccount($this->tmpRoot . '/home/alice', self::UID, self::UID);
+        $this->assertFalse(is_file('rootfile://' . $this->tmpRoot . '/home/alice/docker/blob'));
+        $this->assertFalse(@fopen('rootfile://' . $this->tmpRoot . '/home/alice/docker/blob', 'r'));
+        FileStreamWrapper::unconfine();
+        $this->assertFalse(is_file('rootfile://' . $this->tmpRoot . '/home/alice/docker/blob'), 'unconfined, nothing reads it');
     }
 
     private function download(string $path): string

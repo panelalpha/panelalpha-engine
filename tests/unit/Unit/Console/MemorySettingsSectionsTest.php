@@ -13,6 +13,8 @@ use ReflectionMethod;
 use ReflectionProperty;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /** `pae configure sites-db`, against a fake engine dir and host. */
@@ -61,9 +63,9 @@ class MemorySettingsSectionsTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = implode(' ', (array) $cmd);
-                $this->ran[] = $line;
-                if (str_contains($line, ' exec -T sites-db ')) {
+                $argv = is_array($cmd) ? array_values($cmd) : [];
+                $this->ran[] = is_array($cmd) ? implode(' ', LocalRoot::plain($argv) ?: $argv) : $cmd;
+                if (LocalRoot::action($argv) === 'compose.sitesDbCacheSizes') {
                     return $this->mariadb ?? throw new RuntimeException('service "sites-db" is not running');
                 }
 
@@ -72,11 +74,14 @@ class MemorySettingsSectionsTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return $this->exec($cmd, $env);
             }
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
                 $this->ran[] = implode(' ', (array) $cmd);
                 $process = Process::fromShellCommandline('true');
                 $process->run();
@@ -115,7 +120,7 @@ class MemorySettingsSectionsTest extends TestCase
 
         $this->assertSame(['changed' => ['SITES_DB_INNODB_BUFFER_POOL_SIZE'], 'recreated' => true], $result);
         $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\n", file_get_contents($this->dir . '/.env'));
-        $this->assertContains("sudo docker compose --project-directory {$this->dir} up -d --no-deps sites-db", $system->ran);
+        $this->assertContains("docker compose --project-directory {$this->dir} up -d --no-deps -- sites-db", $system->ran);
     }
 
     /** A stopped sites-db is not started just to change its caches. */

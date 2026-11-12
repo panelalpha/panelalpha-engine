@@ -3,11 +3,15 @@
 namespace Tests\Unit\Git;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\User;
+use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\GenerationSweep;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 
 /**
@@ -23,11 +27,15 @@ class BranchChangeSweepTest extends DeployHookTestCase
 
     private const GONE = ['pid' => 999999, 'start' => null];
 
+    private System $system;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->fakeGitHost();
         $this->withRepository();
+        $this->system = $this->brokerOnTheFakeHost($this->shim . '/sudo');
+        $this->app->instance(System::class, $this->system);
     }
 
     protected function tearDown(): void
@@ -43,7 +51,7 @@ class BranchChangeSweepTest extends DeployHookTestCase
     {
         $logger = DeployLogger::start('alice');
         (new CheckoutAside($this->runtime($user)))->moveAside(['app-1'], copyBack: true);
-        $user->project()->git('project')->changeBranch('dev');
+        $user->project($this->system)->git('project')->changeBranch('dev');
         $this->assertSame('dev', $user->refresh()->getGitBranch(), 'recorded before the rebuild');
 
         $state = new GenerationState('alice');
@@ -55,10 +63,44 @@ class BranchChangeSweepTest extends DeployHookTestCase
 
     private function runtime(User $user): Dind
     {
-        $runtime = $user->project()->runtime();
+        $runtime = $user->project($this->system)->runtime();
         $this->assertInstanceOf(Dind::class, $runtime);
 
         return $runtime;
+    }
+
+    private function brokerOnTheFakeHost(string $root): System
+    {
+        return new class ($root) extends System {
+            public function __construct(private string $root)
+            {
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return parent::runProcess($this->onTheFakeHost($cmd), $env, $timeout);
+            }
+
+            public function runProcessWithCallbacks(
+                string|array $cmd,
+                array $env = [],
+                int $timeout = 600,
+                ?callable $onStart = null,
+                ?callable $onOutput = null,
+                ?StepWatchdog $watchdog = null
+            ): Process {
+                return parent::runProcessWithCallbacks($this->onTheFakeHost($cmd), $env, $timeout, $onStart, $onOutput, $watchdog);
+            }
+
+            /**
+             * @param  string|list<string>  $cmd
+             * @return string|list<string>
+             */
+            private function onTheFakeHost(string|array $cmd): string|array
+            {
+                return is_array($cmd) && LocalRoot::isRequest($cmd) ? [$this->root, ...LocalRoot::plain($cmd)] : $cmd;
+            }
+        };
     }
 
     /** What the sweep, in its own process, reads. */
@@ -70,13 +112,13 @@ class BranchChangeSweepTest extends DeployHookTestCase
     public function test_the_sweep_puts_the_previous_checkout_back_and_its_branch_with_it(): void
     {
         $user = $this->user('main');
-        $this->respond('{{.State.Running}}', 0, "true\n");
+        $this->respond('account-docker.containers', 0, '[{"State":{"Running":true}}]');
         $this->diedDuringTheRebuild($user);
 
         $this->assertSame(['checkout restored'], $this->sweep());
 
         $aside = (new CheckoutAside($this->runtime($user)))->asidePath();
-        $this->assertTrue($this->called("mv -T {$aside} "), implode("\n", $this->calls()));
+        $this->assertTrue($this->called("mv -T -- {$aside} "), implode("\n", $this->calls()));
         $user->refresh();
         $this->assertSame('main', $user->getGitBranch());
         $this->assertSame('main', $user->getSiteGit('project')['branch']);
@@ -93,7 +135,7 @@ class BranchChangeSweepTest extends DeployHookTestCase
         $user = $this->user('main', ['site_git' => ['project' => [
             'repo_url' => 'https://github.com/octocat/Hello-World.git', 'branch' => 'main', 'token' => 'ghp_kept',
         ]]]);
-        $this->respond('{{.State.Running}}', 0, "true\n");
+        $this->respond('account-docker.containers', 0, '[{"State":{"Running":true}}]');
         $this->diedDuringTheRebuild($user);
 
         $this->sweep();
@@ -107,7 +149,7 @@ class BranchChangeSweepTest extends DeployHookTestCase
     public function test_a_new_version_that_replaced_the_previous_one_keeps_the_new_branch(): void
     {
         $user = $this->user('main');
-        $this->respond('{{.State.Running}}', 0, "gone\n");
+        $this->respond('account-docker.containers', 0, '[null]');
         $this->diedDuringTheRebuild($user);
 
         $this->assertSame(['checkout removed'], $this->sweep());
@@ -134,7 +176,7 @@ class BranchChangeSweepTest extends DeployHookTestCase
     public function test_a_tree_put_back_after_a_pull_leaves_the_records_alone(): void
     {
         $user = $this->user('main');
-        $this->respond('{{.State.Running}}', 0, "true\n");
+        $this->respond('account-docker.containers', 0, '[{"State":{"Running":true}}]');
         $runtime = $this->runtime($user);
         (new CheckoutAside($runtime))->moveAside(['app-1'], copyBack: true);
         $elsewhere = User::query()->where('username', 'alice')->firstOrFail();

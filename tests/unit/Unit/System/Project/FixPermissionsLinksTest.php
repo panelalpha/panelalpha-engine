@@ -7,6 +7,7 @@ use App\System;
 use App\System\Project;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -46,7 +47,7 @@ class FixPermissionsLinksTest extends TestCase
 
         $commands = $this->fixPermissions(['UID' => 1001, 'GID' => 1001]);
 
-        $this->assertNotContains('sudo chmod 700 '.$this->home.'/.panelalpha', $commands);
+        $this->assertNotContains('chmod -- 700 '.$this->home.'/.panelalpha', $commands);
     }
 
     public function test_a_real_panelalpha_directory_is_still_locked_down(): void
@@ -55,7 +56,7 @@ class FixPermissionsLinksTest extends TestCase
 
         $commands = $this->fixPermissions(['UID' => 1001, 'GID' => 1001]);
 
-        $this->assertContains('sudo chmod 700 '.$this->home.'/.panelalpha', $commands);
+        $this->assertContains('chmod -- 700 '.$this->home.'/.panelalpha', $commands);
     }
 
     public function test_a_container_accounts_linked_docker_directory_is_never_chowned(): void
@@ -64,7 +65,7 @@ class FixPermissionsLinksTest extends TestCase
 
         $commands = $this->fixPermissions(['UID' => 1001, 'GID' => 1001, 'template' => 'dind']);
 
-        $this->assertNotContains('sudo chown root:root '.$this->home.'/docker', $commands);
+        $this->assertNotContains('chown -- root:root '.$this->home.'/docker', $commands);
     }
 
     public function test_a_linked_lscache_directory_is_never_chowned(): void
@@ -74,7 +75,7 @@ class FixPermissionsLinksTest extends TestCase
 
         $commands = $this->fixPermissions(['UID' => 1001, 'GID' => 1001], 'live.example.test');
 
-        $this->assertNotContains('sudo chown -R nobody:1001 '.$this->home.'/live.example.test/.lscache', $commands);
+        $this->assertNotContains('chown -R -- nobody:1001 '.$this->home.'/live.example.test/.lscache', $commands);
     }
 
     /**
@@ -90,9 +91,9 @@ class FixPermissionsLinksTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $argv = is_array($cmd) ? LocalRoot::plain($cmd) : [$cmd];
                 $this->record[] = implode(' ', $argv);
-                $process = new Process(array_slice($argv, 0, 2) === ['sudo', 'test'] ? array_slice($argv, 1) : ['true']);
+                $process = new Process(($argv[0] ?? '') === 'test' ? $argv : ['true']);
                 $process->run();
 
                 return $process;

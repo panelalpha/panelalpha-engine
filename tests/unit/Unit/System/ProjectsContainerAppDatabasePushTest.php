@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Facade;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\Dind\RecordingAppMysql;
 
@@ -68,7 +69,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         $this->assertSame('1001:1001', Yaml::parseFile($this->root.'/live/project/'.EngineArtifacts::RUN_COMPOSE)['services']['app']['user']);
         $this->assertStringContainsString("app:x:1001:1001:app:/app:/usr/sbin/nologin\n", (string) file_get_contents($this->root.'/live/project/'.EngineArtifacts::RUN_PASSWD));
         $this->assertSame("root:x:0:\napp:x:1001:\n", file_get_contents($this->root.'/live/project/'.EngineArtifacts::RUN_GROUP));
-        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+        $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
         $this->assertSame('completed', User::findByUsernameOrFail('live')->getDetails()['async_status']['push'] ?? null);
     }
 
@@ -87,7 +88,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
             ['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app', 'restore live_app from live_app.sql.gz'],
             $this->mysql->log
         );
-        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+        $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
     }
 
     public function test_a_cleanup_failure_after_the_push_committed_keeps_the_database_it_created(): void
@@ -118,7 +119,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
         $result = (new Projects($this->system(failRemoving: $this->root.'/live/.pre-push')))->pushToApp('stg', 'live');
 
         $this->assertSame(['dump live_app', 'drop live_app', 'create live_app', 'copy stg_app to live_app'], $this->mysql->log);
-        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+        $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
         $this->assertSame('pushed', Yaml::parseFile($this->root.'/live/project/'.EngineArtifacts::RUN_COMPOSE)['services']['app']['environment']['MARKER']);
         $this->assertCount(1, $result->warnings);
         $this->assertSame('completed', User::findByUsernameOrFail('live')->getDetails()['async_status']['push'] ?? null);
@@ -192,7 +193,7 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
 
         $this->assertSame([], $this->mysql->log);
         $this->assertSame($before, $live->refresh()->getDetails());
-        $this->assertDirectoryDoesNotExist($this->root.'/live/.pre-push-db');
+        $this->assertDirectoryDoesNotExist($this->root.'/rollbacks/live');
     }
 
     public function test_a_database_only_push_keeps_the_targets_deploy_settings(): void
@@ -326,6 +327,11 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
                 private ?string $failRemoving,
             ) {}
 
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
+
             public function project(User $model): Project
             {
                 return new class($this, $model, $this->root.'/'.$model->username, $this->failStart) extends Project
@@ -381,15 +387,16 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
              */
             private function apply(array $argv): Process
             {
+                $argv = LocalRoot::plain($argv);
                 $path = (string) end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => new PushAppDatabaseProcess(is_dir($path) ? 0 : 1),
-                    ['sudo', 'test', '-e'] => new PushAppDatabaseProcess(file_exists($path) ? 0 : 1),
-                    ['sudo', 'test', '-f'] => new PushAppDatabaseProcess(is_file($path) ? 0 : 1),
-                    ['sudo', 'test', '-L'] => new PushAppDatabaseProcess(is_link($path) ? 0 : 1),
-                    ['sudo', 'ls', '-A'] => new PushAppDatabaseProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
-                    ['sudo', 'df', '-P'] => new PushAppDatabaseProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => new PushAppDatabaseProcess(is_dir($path) ? 0 : 1),
+                    ['test', '-e'] => new PushAppDatabaseProcess(file_exists($path) ? 0 : 1),
+                    ['test', '-f'] => new PushAppDatabaseProcess(is_file($path) ? 0 : 1),
+                    ['test', '-L'] => new PushAppDatabaseProcess(is_link($path) ? 0 : 1),
+                    ['ls', '-A'], ['ls', '-1A'] => new PushAppDatabaseProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
+                    ['df', '-P'] => new PushAppDatabaseProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
                     default => new PushAppDatabaseProcess($this->change($argv)),
                 };
             }
@@ -399,11 +406,11 @@ class ProjectsContainerAppDatabasePushTest extends TestCase
              */
             private function change(array $argv): int
             {
-                $args = array_values(array_filter(array_slice($argv, 2), static fn (string $a): bool => ! str_starts_with($a, '-')));
-                if (($argv[1] ?? '') === 'rm' && in_array($this->failRemoving, $args, true)) {
+                $args = array_values(array_filter(array_slice($argv, 1), static fn (string $a): bool => ! str_starts_with($a, '-')));
+                if (($argv[0] ?? '') === 'rm' && in_array($this->failRemoving, $args, true)) {
                     return 1;
                 }
-                match ($argv[1] ?? '') {
+                match ($argv[0] ?? '') {
                     'mkdir' => is_dir($args[0]) || mkdir($args[0], 0777, true),
                     'rm' => array_map(static fn (string $p) => exec('rm -rf '.escapeshellarg($p)), $args),
                     'rmdir' => rmdir($args[0]),

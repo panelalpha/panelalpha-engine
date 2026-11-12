@@ -8,6 +8,7 @@ use App\System;
 use App\System\Network;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\HostCommand;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
@@ -95,6 +96,7 @@ class IpSubnetRouteVerificationTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
                 $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
                 $this->commands[] = $argv;
                 $joined = implode(' ', $argv);

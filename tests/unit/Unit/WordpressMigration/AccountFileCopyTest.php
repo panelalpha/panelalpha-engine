@@ -7,6 +7,7 @@ use Exception;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\Support\LocalRoot;
 
 /**
  * AccountFileCopy writes under a home as the account, never through a
@@ -29,14 +30,14 @@ class AccountFileCopyTest extends TestCase
     {
         parent::setUp();
         $this->root = sys_get_temp_dir().'/account-file-copy-'.bin2hex(random_bytes(6));
-        $this->home = $this->root.'/home/alice';
+        $this->home = $this->root.'/home/'.posix_getuid();
         $this->victim = $this->root.'/home/bob/public_html';
         mkdir($this->home, 0755, true);
         mkdir($this->victim, 0750, true);
         chmod($this->victim, 0750);
         file_put_contents($this->victim.'/index.php', 'bob');
         $this->account = posix_getuid().':'.posix_getgid();
-        $this->system = new LocallyRunSystem;
+        $this->system = new LocallyRunSystem($this->root.'/home');
     }
 
     protected function tearDown(): void
@@ -141,10 +142,12 @@ class AccountFileCopyTest extends TestCase
         $this->assertSame('0700', $this->mode($this->home.'/.panelalpha'));
         $root = $this->system->callsAs('root');
         $this->assertCount(1, $root);
-        $this->assertSame(['sudo', 'sh', '-c'], array_slice($root[0], 0, 3));
-        $this->assertSame(['sh', $this->home.'/.panelalpha', '0700', $this->account], array_slice($root[0], 4));
-        $this->assertStringContainsString('chown -h "$3"', $root[0][3]);
-        $this->assertStringNotContainsString('chmod', $root[0][3]);
+        $this->assertSame('scripts.makeHomeEntry', LocalRoot::action($root[0]));
+        $command = $this->planned($root[0]);
+        $this->assertSame(['sh', '-c'], array_slice($command, 0, 2));
+        $this->assertSame(['sh', $this->home.'/.panelalpha', '0700', $this->account], array_slice($command, 3));
+        $this->assertStringContainsString('chown -h "$3"', $command[2]);
+        $this->assertStringNotContainsString('chmod', $command[2]);
     }
 
     public function test_ensure_directory_refuses_a_symlinked_home_entry(): void
@@ -248,7 +251,21 @@ class AccountFileCopyTest extends TestCase
     /** @return list<string> the path each root command was given */
     private function rootPaths(): array
     {
-        return array_map(static fn (array $argv): string => $argv[5], $this->system->callsAs('root'));
+        return array_map(static fn (array $argv): string => LocalRoot::values($argv)[0], $this->system->callsAs('root'));
+    }
+
+    /**
+     * @param  list<string>  $request
+     * @return list<string>
+     */
+    private function planned(array $request): array
+    {
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['homes' => $this->root.'/home']));
+        try {
+            return LocalRoot::plain($request);
+        } finally {
+            putenv('PA_ROOT_LOCAL_ROOTS');
+        }
     }
 
     private function expectRefusal(callable $action): void

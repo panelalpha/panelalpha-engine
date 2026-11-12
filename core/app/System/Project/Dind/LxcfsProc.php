@@ -3,13 +3,14 @@
 namespace App\System\Project\Dind;
 
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\Scripts\HostReadings;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The host's lxcfs files bound over the account's /proc, and over the /proc of
- * every container the account runs, so memory, CPUs and load read as their own.
- * Nothing is mounted when lxcfs is not running.
+ * The host's lxcfs files bound over the /proc of the account and every container it runs, so memory, CPUs and load
+ * read as their own; nothing is mounted when lxcfs is not running.
  */
 final class LxcfsProc
 {
@@ -37,17 +38,15 @@ final class LxcfsProc
     }
 
     /**
-     * The files the containers inside the account can bind: the account
-     * template mounts {@see PROC_DIR} at the same path, but an account created
-     * before that, or while lxcfs was down, has none, and a missing bind
-     * source would fail the deploy.
+     * The files the account's containers can bind from {@see PROC_DIR}: an account created before the template
+     * mounted it, or while lxcfs was down, has none, and a missing bind source would fail the deploy.
      *
      * @return list<string>
      */
     public static function inAccount(DindProject $dind): array
     {
         try {
-            $output = $dind->shell()->execQuiet(['sh', '-c', self::listScript()], [], 30);
+            $output = $dind->shell()->execQuiet(['sh', '-c', (new HostReadings)->lxcfsFiles()], [], 30);
         } catch (\Throwable) {
             return [];
         }
@@ -56,11 +55,6 @@ final class LxcfsProc
             array_values(array_intersect(self::FILES, preg_split('/\s+/', trim($output)) ?: [])),
             AccountRuntime::isSysbox()
         );
-    }
-
-    private static function listScript(): string
-    {
-        return 'for f in '.implode(' ', self::FILES).'; do [ -f '.self::PROC_DIR.'/$f ] && echo "$f"; done; true';
     }
 
     /**
@@ -72,7 +66,7 @@ final class LxcfsProc
     public static function present(System $system): array
     {
         try {
-            $output = $system->execOnHost(['sh', '-c', self::listScript()]);
+            $output = $system->exec(Privileged::host()->lxcfsFiles());
         } catch (\Throwable $e) {
             Log::warning('Could not look for lxcfs on the host; the account sees the host\'s /proc: '.$e->getMessage());
 

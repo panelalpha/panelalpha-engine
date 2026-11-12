@@ -2,16 +2,14 @@
 
 namespace App\System\Project\Dind\Services;
 
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\TenantEgressGuard;
 use LogicException;
 
 /**
- * supervisord, which accounts rendered before s6 still run: their project dir
- * has `supervisord.conf` and a `supervisord.conf.d/` of programs. The template
- * no longer ships these, so this class carries the programs the engine writes
- * at runtime. Such an account moves to s6 when it is next rendered from the
- * template, which removes this layout ({@see removeLayout()}).
+ * supervisord, still run by accounts rendered before s6 (`supervisord.conf` and `supervisord.conf.d/`); this class
+ * carries the programs the engine writes, until the next render moves the account to s6 ({@see removeLayout()}).
  */
 final class SupervisordServiceManager implements ServiceManager
 {
@@ -32,7 +30,7 @@ final class SupervisordServiceManager implements ServiceManager
     public static function removeLayout(Dind $project): void
     {
         foreach (self::LAYOUT as $path) {
-            $project->system()->exec(['sudo', 'rm', '-rf', $project->projectDirPath().'/'.$path]);
+            $project->system()->exec(Privileged::files()->removeTree($project->projectDirPath().'/'.$path));
         }
     }
 
@@ -40,7 +38,7 @@ final class SupervisordServiceManager implements ServiceManager
     {
         $system = $this->project->system();
         $dir = $this->project->projectDirPath().'/supervisord.conf.d';
-        $system->runProcess(['sudo', 'mkdir', '-p', $dir]);
+        $system->runProcess(Privileged::files()->makeDirectories($dir));
         $system->filesystem()->filePutContents(
             $dir.'/'.$service.'.conf',
             self::programConf($service, $enabled, $env),

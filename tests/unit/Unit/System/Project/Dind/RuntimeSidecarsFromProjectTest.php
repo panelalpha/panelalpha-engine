@@ -81,7 +81,7 @@ class RuntimeSidecarsFromProjectTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
+                if (preg_match('/^sudo cp -- (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
                 }
 

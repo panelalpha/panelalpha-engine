@@ -1,0 +1,9 @@
+put /opt/engine/webserver-config/litespeed/serial.no.tmp 994:994
+NEW-SERIAL
+<<< end of /opt/engine/webserver-config/litespeed/serial.no.tmp
+exec ["/usr/local/lib/panelalpha/pa-root","docker.checkLiteSpeedSerial","--","0","/opt/engine/webserver-config/litespeed/serial.no.tmp"]
+ls /opt/engine/webserver-config/litespeed
+put /opt/engine/webserver-config/litespeed/serial.no 994:994
+NEW-SERIAL
+<<< end of /opt/engine/webserver-config/litespeed/serial.no
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","restart"]

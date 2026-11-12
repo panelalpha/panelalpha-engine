@@ -6,11 +6,12 @@ use App\Http\Middleware\Authenticate;
 use App\Mcp\Tools\Api\Files\FileDeleteTool;
 use App\Models\User;
 use App\System;
-use App\System\Project\FileManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Mcp\Request;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -73,6 +74,23 @@ class FileRemoveHttpTest extends TestCase
     public function test_a_directory_with_recursive_is_removed_with_rm_r(): void
     {
         $this->deleteJson('/api/projects/alice/files/remove?path=dir&recursive=1')->assertOk();
+
+        $this->assertSame(['rm', '-f', '-r', $this->tmpRoot . '/home/alice/dir'], $this->rmCall());
+    }
+
+    /** A query string carries a boolean as text: `recursive=false` is read as false, not as a non-empty string. */
+    public function test_recursive_false_keeps_a_directory_as_leaving_it_out_does(): void
+    {
+        $this->deleteJson('/api/projects/alice/files/remove?path=dir&recursive=false')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('recursive');
+
+        $this->assertSame(['confine', 'entry-type'], $this->ran());
+    }
+
+    public function test_recursive_true_removes_a_directory_with_rm_r(): void
+    {
+        $this->deleteJson('/api/projects/alice/files/remove?path=dir&recursive=true')->assertOk();
 
         $this->assertSame(['rm', '-f', '-r', $this->tmpRoot . '/home/alice/dir'], $this->rmCall());
     }
@@ -145,23 +163,24 @@ class FileRemoveHttpTest extends TestCase
         $this->assertSame(['rm', '-f', '-r', $this->tmpRoot . '/home/alice/dir'], $this->rmCall());
     }
 
-    /** @return list<string> the rm argv, without the setpriv prefix */
+    /** @return list<string> the rm the broker runs as the account */
     private function rmCall(): array
     {
         // The confinement check runs first, then what is there is asked, then rm.
         $this->assertSame(['confine', 'entry-type', 'rm'], $this->ran());
-        $argv = $this->system->processJournal[2];
+        $request = $this->system->processJournal[2];
+        $this->assertSame('account.removeEntry', LocalRoot::action($request));
 
-        return array_values(array_slice($argv, (int) array_search('rm', $argv, true)));
+        return LocalRoot::plain($request);
     }
 
     /** @return list<string> */
     private function ran(): array
     {
-        return array_map(fn (array $argv): string => match (true) {
-            in_array(FileManager::CONFINE_SCRIPT, $argv, true) => 'confine',
-            in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true) => 'entry-type',
-            default => (string) ($argv[7] ?? $argv[0]),
+        return array_map(fn (array $request): string => match (true) {
+            in_array(BrokerScripts::confine(), LocalRoot::plain($request), true) => 'confine',
+            in_array(BrokerScripts::entryType(), LocalRoot::plain($request), true) => 'entry-type',
+            default => (string) LocalRoot::plain($request)[0],
         }, $this->system->processJournal);
     }
 
@@ -188,13 +207,13 @@ class FileRemoveHttpTest extends TestCase
                 return $this->root . '/home';
             }
 
-            /** Runs as this process, setpriv dropped; rm is only recorded. */
+            /** Runs what the broker would, as this process; rm is only recorded. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->processJournal[] = is_array($cmd) ? $cmd : [$cmd];
-                $argv = array_slice((array) $cmd, 7);
+                $argv = LocalRoot::plain((array) $cmd);
                 $seen = $this->accountSees[rtrim((string) end($argv), '/')] ?? null;
-                if ($seen !== null && in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true)) {
+                if ($seen !== null && in_array(BrokerScripts::entryType(), $argv, true)) {
                     $argv = ['echo', $seen];
                 } elseif (($argv[0] ?? '') === 'rm') {
                     $argv = ['true'];

@@ -5,14 +5,16 @@ namespace Tests\Unit\System;
 use App\Models\User;
 use App\System;
 use App\System\Project;
-use App\System\Projects;
 use App\System\Project\Dind\CopyVolumes;
+use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -57,7 +59,7 @@ class ProjectsPushFileRollbackTest extends TestCase
         $this->pushFails('start exploded');
 
         $this->assertLiveHomeIsUntouched();
-        $this->assertSame([['live_wp', $this->live('.pre-push-db') . '/live_wp.sql.gz']], $this->record->restores);
+        $this->assertSame([['live_wp', $this->root . '/rollbacks/live/live_wp.sql.gz']], $this->record->restores);
         $this->assertSame('start exploded', User::findByUsernameOrFail('live')->getDetails()['error'] ?? null);
     }
 
@@ -98,8 +100,8 @@ class ProjectsPushFileRollbackTest extends TestCase
     public function test_a_failure_while_moving_the_home_aside_restores_it(): void
     {
         $this->record->failCommand = fn (array $argv): bool => $argv[0] === 'mv'
-            && str_ends_with($argv[1], '/live.example.test')
-            && str_ends_with($argv[2], '/.pre-push/');
+            && str_ends_with($argv[2], '/live.example.test')
+            && str_ends_with($argv[3], '/.pre-push/');
 
         $this->pushFails("Failed to move 'live.example.test' aside before push swap");
 
@@ -109,8 +111,8 @@ class ProjectsPushFileRollbackTest extends TestCase
     public function test_a_failure_while_moving_the_incoming_in_restores_the_home(): void
     {
         $this->record->failCommand = fn (array $argv): bool => $argv[0] === 'mv'
-            && str_contains($argv[1], '/.incoming/')
-            && str_ends_with($argv[1], '/live.example.test');
+            && str_contains($argv[2], '/.incoming/')
+            && str_ends_with($argv[2], '/live.example.test');
 
         $this->pushFails("Failed to move incoming 'live.example.test' into target home");
 
@@ -121,7 +123,7 @@ class ProjectsPushFileRollbackTest extends TestCase
     {
         $this->record->failStartTimes = 1;
         $this->record->failCommand = fn (array $argv): bool => $argv[0] === 'mv'
-            && str_contains($argv[1], '/.pre-push/');
+            && str_contains($argv[2], '/.pre-push/');
 
         $e = $this->pushFails('start exploded');
 
@@ -165,7 +167,7 @@ class ProjectsPushFileRollbackTest extends TestCase
     {
         $this->assertFileDoesNotExist($this->live('.pre-push'));
         $this->assertFileDoesNotExist($this->live('.incoming'));
-        $this->assertFileDoesNotExist($this->live('.pre-push-db'));
+        $this->assertFileDoesNotExist($this->root . '/rollbacks/live');
     }
 
     private function push(): void
@@ -232,6 +234,11 @@ class ProjectsPushFileRollbackTest extends TestCase
             {
             }
 
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
+
             public function project(User $model): Project
             {
                 return new class ($this->root . '/' . $model->username, $this->record, $model) extends Project {
@@ -280,10 +287,11 @@ class ProjectsPushFileRollbackTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = array_values(array_filter(
-                    is_array($cmd) ? $cmd : [$cmd],
-                    static fn (string $part): bool => $part !== 'sudo',
-                ));
+                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                if (LocalRoot::isNative($argv)) {
+                    return $this->finished(LocalRoot::argv($argv));
+                }
+                $argv = LocalRoot::plain($argv);
 
                 if ($this->record->failCommand !== null && ($this->record->failCommand)($argv)) {
                     return $this->finished(['false']);
@@ -329,7 +337,11 @@ class PushFileRollbackMysql extends Mysql
         $this->record->restores[] = [$name, $sqlGzPath];
     }
 
-    public function runSitesDbScript(string $script, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
+    {
+    }
+
+    public function dropTableInSitesDb(string $database, string $table): void
     {
     }
 

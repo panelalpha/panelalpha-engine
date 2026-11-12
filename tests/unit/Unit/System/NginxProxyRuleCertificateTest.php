@@ -9,6 +9,7 @@ use App\System\Services\Webserver\ProxyRuleCertificate;
 use App\System\Services\Webserver\ProxyRuleServerName;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 use Tests\Unit\Ssl\TestCertificates;
@@ -212,7 +213,7 @@ class NginxProxyRuleCertificateTest extends TestCase
         return $files;
     }
 
-    /** The engine under a temp dir, running what it would run with sudo as the test's own user. */
+    /** The engine under a temp dir, running what it would ask the root broker for as the test's own user. */
     private function system(): System
     {
         return new class($this->dir) extends System
@@ -227,8 +228,8 @@ class NginxProxyRuleCertificateTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $process = is_array($cmd)
-                    ? new Process(array_values(array_filter($cmd, static fn (string $part): bool => $part !== 'sudo')))
-                    : Process::fromShellCommandline((string) preg_replace('/^sudo /', '', $cmd));
+                    ? new Process(LocalRoot::argv($cmd))
+                    : Process::fromShellCommandline(LocalRoot::line($cmd));
                 $process->run();
 
                 return $process;

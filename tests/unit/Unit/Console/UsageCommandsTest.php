@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
@@ -69,7 +70,7 @@ class UsageCommandsTest extends TestCase
 
         (require database_path('migrations/2026_10_07_000000_create_project_disk_usage_table.php'))->up();
 
-        $this->statistics = new FakeStatistics();
+        $this->statistics = new FakeStatistics;
         $this->statistics->domainSeries = [
             'example.com' => ['2026-09-01' => 1000, '2026-09-02' => 2500],
             'other.com' => ['2026-09-01' => 500],
@@ -83,12 +84,12 @@ class UsageCommandsTest extends TestCase
         $this->statistics->breakdowns['example.com:pages'] = [['label' => '/', 'visits' => 20]];
         $this->app->instance(Statistics::class, $this->statistics);
 
-        // FileManager::diskUsage() runs `sudo setpriv ... du`; answer it from a shim.
-        $this->shimDir = sys_get_temp_dir() . '/usage-cmd-shim-' . bin2hex(random_bytes(4));
+        LocalRoot::answerLocally();
+        $this->shimDir = sys_get_temp_dir().'/usage-cmd-shim-'.bin2hex(random_bytes(4));
         mkdir($this->shimDir);
         $this->path = getenv('PATH');
-        putenv('PATH=' . $this->shimDir . ':' . $this->path);
-        $this->shimSudo("printf '42\\t/home/alice\\n'");
+        $this->setPath($this->shimDir.':'.$this->path);
+        $this->shimDu("printf '42\\t/home/alice\\n'");
 
         $user = User::query()->create([
             'username' => 'alice',
@@ -103,8 +104,9 @@ class UsageCommandsTest extends TestCase
 
     protected function tearDown(): void
     {
-        putenv('PATH=' . $this->path);
-        @unlink($this->shimDir . '/sudo');
+        LocalRoot::answerByBroker();
+        $this->setPath((string) $this->path);
+        @unlink($this->shimDir.'/du');
         @rmdir($this->shimDir);
         parent::tearDown();
     }
@@ -112,9 +114,9 @@ class UsageCommandsTest extends TestCase
     public function test_project_usage(): void
     {
         $this->assertCommand(0, '{"storage":{"usage":42,"maximum":null},"logs":{"usage":0,"maximum":null},"docker":{"usage":null,"maximum":null},"bandwidth":{"usage":4000,"maximum":10485760},'
-            . '"addon_domains":{"usage":1,"maximum":null},"subdomains":{"usage":0,"maximum":null},'
-            . '"ftp_accounts":{"usage":0,"maximum":null},"sftp_accounts":{"usage":0,"maximum":null},'
-            . '"mysql_databases":{"usage":1,"maximum":null}}', 'project:usage', ['project' => 'alice']);
+            .'"addon_domains":{"usage":1,"maximum":null},"subdomains":{"usage":0,"maximum":null},'
+            .'"ftp_accounts":{"usage":0,"maximum":null},"sftp_accounts":{"usage":0,"maximum":null},'
+            .'"mysql_databases":{"usage":1,"maximum":null}}', 'project:usage', ['project' => 'alice']);
     }
 
     public function test_project_usage_unknown_project(): void
@@ -124,7 +126,7 @@ class UsageCommandsTest extends TestCase
 
     public function test_project_usage_engine_failure_is_not_caught(): void
     {
-        $this->shimSudo("echo 'du: cannot access' >&2; exit 2");
+        $this->shimDu("echo 'du: cannot access' >&2; exit 2");
 
         try {
             Artisan::call('project:usage', ['project' => 'alice']);
@@ -140,7 +142,7 @@ class UsageCommandsTest extends TestCase
         $args = ['project' => 'alice', '--start' => '2026-09-01', '--end' => '2026-09-30'];
         $this->assertCommand(0, '{"2026-09-01":1500,"2026-09-02":2500}', 'project:bandwidth', $args);
         $this->assertCommand(0, '{"2026-09-01":4000}', 'project:bandwidth', $args + ['--group-by' => 'month']);
-        $this->assertCommand(0, '[]', 'project:bandwidth', ['project' => 'alice', '--start' => '2025-01-01', '--end' => '2025-01-02']);
+        $this->assertCommand(0, '{}', 'project:bandwidth', ['project' => 'alice', '--start' => '2025-01-01', '--end' => '2025-01-02']);
     }
 
     public function test_project_bandwidth_validation_and_not_found(): void
@@ -204,6 +206,16 @@ class UsageCommandsTest extends TestCase
         );
     }
 
+    public function test_the_help_says_the_range_is_required(): void
+    {
+        foreach (['project:bandwidth', 'project:domain:bandwidth', 'project:domain:visitors', 'project:domain:visitors-breakdown'] as $command) {
+            $definition = Artisan::all()[$command]->getDefinition();
+            foreach (['start', 'end'] as $option) {
+                $this->assertStringEndsWith('(Y-m-d, required)', $definition->getOption($option)->getDescription(), "{$command} --{$option}");
+            }
+        }
+    }
+
     public function test_no_output_mentions_http(): void
     {
         $runs = [
@@ -245,6 +257,10 @@ class UsageCommandsTest extends TestCase
 
         $r = $this->get("/api/projects/alice/bandwidth?{$range}&group_by=month");
         $this->assertSame('{"2026-09-01":4000}', $r->getContent());
+        $r = $this->get('/api/projects/alice/bandwidth?start=2025-01-01&end=2025-01-02&group_by=day');
+        $this->assertSame('{}', $r->getContent());
+        Artisan::call('project:bandwidth', ['project' => 'alice', '--start' => '2025-01-01', '--end' => '2025-01-02']);
+        $this->assertSame('{}', Artisan::output());
         $r = $this->get("/api/projects/alice/domains/example.com/bandwidth?{$range}&group_by=day");
         $this->assertSame('{"2026-09-01":1000,"2026-09-02":2500}', $r->getContent());
         $r = $this->get("/api/projects/alice/domains/example.com/visitors/pages?{$range}");
@@ -252,7 +268,7 @@ class UsageCommandsTest extends TestCase
         $r = $this->get("/api/projects/alice/domains/nope.com/visitors?{$range}");
         $this->assertSame(404, $r->getStatusCode());
         $this->assertSame('{"message":"Not found"}', $r->getContent());
-        $r = $this->get("/api/projects/nobody/usage");
+        $r = $this->get('/api/projects/nobody/usage');
         $this->assertSame('{"message":"Project not found"}', $r->getContent());
         $r = $this->getJson('/api/projects/alice/bandwidth');
         $this->assertSame(422, $r->getStatusCode());
@@ -273,9 +289,17 @@ class UsageCommandsTest extends TestCase
         $this->assertSame($output, $this->failureOf($command, $args), $command);
     }
 
-    private function shimSudo(string $body): void
+    /** Symfony Process builds the child's environment from $_ENV and $_SERVER too. */
+    private function setPath(string $path): void
     {
-        file_put_contents($this->shimDir . '/sudo', "#!/bin/sh\n{$body}\n");
-        chmod($this->shimDir . '/sudo', 0755);
+        putenv('PATH='.$path);
+        $_ENV['PATH'] = $path;
+        $_SERVER['PATH'] = $path;
+    }
+
+    private function shimDu(string $body): void
+    {
+        file_put_contents($this->shimDir.'/du', "#!/bin/sh\n{$body}\n");
+        chmod($this->shimDir.'/du', 0755);
     }
 }

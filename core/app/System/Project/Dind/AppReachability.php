@@ -3,14 +3,12 @@
 namespace App\System\Project\Dind;
 
 use App\Models\User;
+use App\System\Privileged;
 use App\System\Project\Dind;
 
 /**
- * The second of {@see AppHealth}'s two questions: can anyone reach the
- * application? The same request through the webserver, from the host, with
- * the project's own Host header, compared with what the application answers
- * itself. A red answer means the routing is broken while the application is
- * fine.
+ * {@see AppHealth}'s second question, can anyone reach the app: the request through the webserver with the
+ * project's Host header, compared with what the app answers itself. Red means routing broke, not the app.
  */
 final class AppReachability
 {
@@ -32,16 +30,8 @@ final class AppReachability
     public function __construct(private readonly Dind $dind) {}
 
     /**
-     * Ask the question a visitor asks: does this project's domain serve this
-     * project's application?
-     *
-     * Compared by content, not by status code. The outage this exists for
-     * answered 200 through the proxy and 200 in the container while serving a
-     * different customer's site -- statuses matched, and only the bytes told
-     * them apart. A hash of the first 2KB is enough to separate two documents
-     * without carrying either of them back.
-     *
-     * Never throws: a check that cannot run reports that it could not.
+     * Does this project's domain serve this project's app? Compared by a hash of the first 2KB, since a
+     * domain serving another customer's site answered 200 at both ends. Never throws.
      *
      * @param  list<array<string, mixed>>  $ports  as {@see check()} produced them
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
@@ -56,6 +46,9 @@ final class AppReachability
     }
 
     /**
+     * Skipped, not unreachable, when no port served a page, which report() said already. The edge is asked
+     * at the address the vhost listens on, where a visitor arrives: under NAT the local one.
+     *
      * @param  list<array<string, mixed>>  $ports
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
@@ -69,13 +62,9 @@ final class AppReachability
 
         $served = self::firstAnsweringPort($ports);
         if ($served === null) {
-            // No port served a page (silent, or a 5xx), which report() has
-            // already said. Saying "unreachable" here would blame the proxy for the app.
             return self::skipped($domain, 'no port served a page, so there is nothing to compare');
         }
 
-        // The address the vhost listens on, which is the address a visitor
-        // arrives at -- and under NAT the local one, not the public one.
         $ip = User::defaultBindIpAddresses()['ipv4'][0] ?? '127.0.0.1';
 
         $app = self::parseFingerprint($this->dind->shell()->execQuiet(
@@ -86,8 +75,8 @@ final class AppReachability
 
         return self::awaitRoute(
             $domain,
-            fn (): array => self::parseFingerprint($this->dind->system()->execOnHost(
-                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout, $main->sslEnabled())],
+            fn (): array => self::parseFingerprint($this->dind->system()->exec(
+                Privileged::host()->edgeProbe($domain, $ip, $timeout, $main->sslEnabled()),
             )),
             $app
         );
@@ -97,8 +86,8 @@ final class AppReachability
     public const EDGE_RETRY_DELAYS = [1, 2, 4, 8, 15];
 
     /**
-     * Probe the edge and compare, re-probing while it looks unrouted: the
-     * webserver reload the deploy just issued may not have taken effect yet.
+     * Probe the edge and compare, re-probing while it looks unrouted: the webserver reload the deploy just
+     * issued may not have taken effect yet.
      *
      * @param  callable(): array{code: int, hash: string, default404: bool}  $probeEdge
      * @param  array{code: int, hash: string, default404: bool}  $app
@@ -167,12 +156,22 @@ final class AppReachability
             ];
         }
 
-        // The bodies differ because the application canonicalises: probed on
-        // 127.0.0.1 it redirects to the address it was installed under, and
-        // through the domain it serves the page. That is WordPress on every
-        // site, and it is the healthy shape -- the request that matters
-        // succeeded. Comparing content is still what catches a domain serving
-        // somebody else's application, which answers 200 at both ends.
+        return self::localRedirectVerdict($domain, $edge, $app)
+            ?? self::httpsUpgradeVerdict($domain, $edge)
+            ?? self::statusOnlyVerdict($domain, $edge, $app)
+            ?? self::differsVerdict($domain, $edge);
+    }
+
+    /**
+     * Probed on 127.0.0.1 the app redirects to the address it was installed under, through the domain it
+     * serves the page: WordPress everywhere, and healthy.
+     *
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @param  array{code: int, hash: string, default404: bool}  $app
+     * @return ?array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function localRedirectVerdict(string $domain, array $edge, array $app): ?array
+    {
         if ($edge['code'] >= 200 && $edge['code'] < 300 && $app['code'] >= 300 && $app['code'] < 400) {
             return [
                 'verdict' => self::OK,
@@ -182,10 +181,18 @@ final class AppReachability
             ];
         }
 
-        // The mirror image: the vhost forwards a plain-http request as
-        // `X-Forwarded-Proto: http`, and an app that knows its https URL
-        // (OpenCloud's 308) upgrades it. Visitors arrive over https and are
-        // served, so an upgrade to this same address is the healthy answer.
+        return null;
+    }
+
+    /**
+     * The vhost forwards plain http as `X-Forwarded-Proto: http`, and an app that knows its https URL
+     * (OpenCloud's 308) upgrades it to this same address, where visitors arrive: healthy.
+     *
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @return ?array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function httpsUpgradeVerdict(string $domain, array $edge): ?array
+    {
         if ($edge['code'] >= 300 && $edge['code'] < 400 && self::upgradesToHttps($domain, (string) ($edge['location'] ?? ''))) {
             return [
                 'verdict' => self::OK,
@@ -195,11 +202,19 @@ final class AppReachability
             ];
         }
 
-        // The application does not reproduce its own bytes, so a difference
-        // between it and the edge says nothing. Comparing what is left --
-        // the status code -- still catches the domain that answers with
-        // somebody else's error page, and stops reporting every CSRF-token
-        // application on the host as unreachable.
+        return null;
+    }
+
+    /**
+     * An app that does not reproduce its own bytes is compared by status alone, which still catches somebody
+     * else's error page without calling every CSRF-token app unreachable.
+     *
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @param  array{code: int, hash: string, default404: bool}  $app
+     * @return ?array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function statusOnlyVerdict(string $domain, array $edge, array $app): ?array
+    {
         if (! self::bodyIsReproducible($app) && $edge['code'] === $app['code']) {
             return [
                 'verdict' => self::OK,
@@ -209,9 +224,18 @@ final class AppReachability
             ];
         }
 
-        // Deliberately not called "another project's site": an application
-        // that varies by Host -- a framework redirecting to its configured
-        // APP_URL -- lands here too, and is not broken.
+        return null;
+    }
+
+    /**
+     * Not called "another project's site": an app that varies by Host, such as a framework redirecting to
+     * its APP_URL, lands here too and is not broken.
+     *
+     * @param  array{code: int, hash: string, default404: bool}  $edge
+     * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function differsVerdict(string $domain, array $edge): array
+    {
         return [
             'verdict' => self::DIFFERS,
             'domain' => $domain,
@@ -256,68 +280,13 @@ final class AppReachability
     }
 
     /**
-     * Fetch through the webserver as a visitor would, from the host.
-     *
-     * No DNS: the Host header carries the name and the address is the one the
-     * vhost binds, so the check works for a domain whose DNS has not been
-     * pointed here yet -- which is most of them, most of the time.
-     *
-     * Over https when the domain has TLS, as visitors arrive: over http the
-     * vhost forwards `X-Forwarded-Proto: http`, and an app that insists on a
-     * secure request answers that with a 500 nobody visiting ever gets. Plain
-     * http only when nothing answered on https.
-     */
-    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5, bool $https = false): string
-    {
-        $timeout = max(1, $timeout);
-        $domain = escapeshellarg($domain);
-        $ip = escapeshellarg($ip);
-        $secure = $https ? 1 : 0;
-
-        return <<<SH
-set -u
-host={$domain}
-addr={$ip}
-f=\$(mktemp)
-scheme=http
-out=000
-if [ {$secure} = 1 ]; then
-  out=\$(curl -sS -k -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' --resolve "\$host:443:\$addr" "https://\$host/" 2>/dev/null) || out=000
-  [ "\${out%% *}" = 000 ] || scheme=https
-fi
-if [ "\$scheme" = http ]; then
-  out=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || out=000
-fi
-code=\${out%% *}
-location=\$(printf '%s' "\${out#* }" | tr -d '\t\r\n')
-[ "\$location" = "\$out" ] && location=
-marker=no
-if [ "\$code" = "404" ] && grep -q 'Page Not Found' "\$f" && grep -q 'error-page' "\$f"; then marker=yes; fi
-printf '%s\t%s\t%s\t\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker" "\$location" "\$scheme"
-rm -f "\$f"
-exit 0
-SH;
-    }
-
-    /**
-     * The same fetch against the application itself, for the comparison --
-     * twice, so the caller can tell whether this application's body is stable
-     * enough to compare at all.
-     *
-     * Nextcloud, ownCloud and every framework with CSRF protection stamp a
-     * fresh token into each response, so two identical requests a millisecond
-     * apart already differ. Hashing one of them and comparing it to the edge
-     * declared healthy sites unreachable. Fetching twice answers that without
-     * having to guess at token formats: if the application cannot reproduce
-     * its own bytes, neither can the edge, and the body is not evidence.
+     * The same fetch against the app itself, twice, since CSRF tokens make bodies differ; with the visitor
+     * headers the vhost forwards and the edge's Host, or an app needing them answers 403 or 500.
      */
     public static function appProbeScript(string $scheme, int $port, int $timeout = 5, ?string $domain = null): string
     {
         $timeout = max(1, $timeout);
         $scheme = $scheme === 'https' ? 'https' : 'http';
-        // The headers the vhost forwards for a visitor on https, as the health
-        // probe sends them: an app that needs them answers 403 or 500 without.
-        // Same Host as the edge fetch, so an app that echoes it into the page still matches.
         $host = AppHealth::visitorHeaders($domain !== '' ? $domain : null);
 
         return <<<SH
@@ -336,6 +305,8 @@ SH;
     }
 
     /**
+     * `hash2`, a second identical fetch, comes from the app probe only; `location` and `scheme` from the edge probe only.
+     *
      * @return array{code: int, hash: string, default404: bool, hash2: string, location: string, scheme: string}
      */
     public static function parseFingerprint(string $raw): array
@@ -346,23 +317,15 @@ SH;
             'code' => (int) ($parts[0] ?? '0'),
             'hash' => trim($parts[1] ?? ''),
             'default404' => trim($parts[2] ?? 'no') === 'yes',
-            // Only the application probe sends this: the hash of a second,
-            // identical fetch. Empty from the edge probe, which fetches once.
             'hash2' => trim($parts[3] ?? ''),
-            // Only the edge probe sends this: where a redirect pointed.
             'location' => trim($parts[4] ?? ''),
-            // Only the edge probe sends this: which scheme it answered on.
             'scheme' => trim($parts[5] ?? ''),
         ];
     }
 
     /**
-     * Whether this application reproduces its own bytes between two identical
-     * requests. When it does not -- a CSRF token, a nonce, a timestamp -- the
-     * body cannot be used as evidence about the edge.
-     *
-     * Absent means not measured, which reads as reproducible: a probe that
-     * did not ask the question must not weaken the comparison.
+     * Whether the app reproduces its own bytes between two identical requests; unknown reads as
+     * reproducible, so a probe that did not ask cannot weaken the comparison.
      *
      * @param  array<string, mixed>  $app
      */

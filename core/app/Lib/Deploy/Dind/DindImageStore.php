@@ -4,11 +4,14 @@ namespace App\Lib\Deploy\Dind;
 
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\PublishedBaseImage;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\ImageStore;
 use App\Lib\Deploy\Template\Template;
+use App\System\Privileged;
+use App\System\Privileged\RootAccountDockerLines;
+use App\System\Privileged\Scripts\ImagePipelines;
 use App\System\Project\Dind;
-use App\System\Project\Dind\AccountTemplate;
 
 /**
  * Gets images into an account's nested Docker daemon, through registries only.
@@ -62,12 +65,16 @@ final class DindImageStore implements ImageStore
     /** What {@see loadFromHostCommand()} says when a registry is down, so callers can tell. */
     public const REGISTRY_DOWN = 'panelalpha-cache-registry or its writer is not running';
 
-    /**
-     * Pushes hold this shared; prewarm's tag deletion and garbage-collect hold it
-     * exclusive, since a GC during an upload deletes the upload's layers. In /tmp
-     * of the core container, where both run, and opened read-only by either user.
-     */
-    public const PUSH_LOCK = '/tmp/panelalpha-cache-registry.lock';
+    /** Pushes hold it shared, garbage-collect exclusive; the root broker makes it beside its socket. */
+    public const PUSH_LOCK = '/run/panelalpha/cache-registry.lock';
+
+    /** {@see PUSH_LOCK}, or where PA_PUSH_LOCK puts it for the tests and the dind-test harness. */
+    public static function pushLock(): string
+    {
+        $override = getenv('PA_PUSH_LOCK');
+
+        return is_string($override) && $override !== '' ? $override : self::PUSH_LOCK;
+    }
 
     /** Where registry 3.x reads its config, which garbage-collect is given. */
     private const REGISTRY_CONFIG = '/etc/distribution/config.yml';
@@ -76,38 +83,58 @@ final class DindImageStore implements ImageStore
     public const PROXY_REGISTRY = 'panelalpha-registry-proxy:5000';
 
     /**
-     * `docker build -` takes the Dockerfile on stdin, which is all a base image
-     * needs — nothing is COPYed in. Idempotent, so safe to call per deploy.
-     *
-     * buildx attaches provenance and SBOM manifests by default, turning the
-     * result into an OCI index that `docker load` in an account cannot import;
-     * suppressing them is what makes the image seedable. The retry without the
-     * flags covers hosts that only have the classic builder. $rebuild is
-     * prewarm's weekly refresh: same tag, fresh upstream layers.
+     * ghcr.io pull-through cache, as an account (and core) address it. Docker mirrors only Docker Hub, so the seed
+     * ladder pulls by this name and restores the plain one ({@see pullThroughRungs()}).
+     */
+    public const GHCR_PROXY_CONTAINER = 'panelalpha-ghcr-proxy';
+
+    public const GHCR_PROXY_REGISTRY = self::GHCR_PROXY_CONTAINER.':5000';
+
+    /** Upstream registry host => the container caching it for every account. */
+    private const PULL_THROUGH = ['ghcr.io' => self::GHCR_PROXY_CONTAINER];
+
+    /**
+     * The host's daemon builds the Dockerfile alone, with no provenance or SBOM, so an account can pull the image.
+     * Idempotent, so safe per deploy; $rebuild is prewarm's weekly refresh: same tag, fresh upstream layers.
      */
     public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string
     {
-        $img = escapeshellarg($tag);
-        $doc = escapeshellarg($dockerfile);
-        $build = "printf '%s' {$doc} | sudo docker build".($pull ? ' --pull' : '');
-        $always = "{$build} --provenance=false --sbom=false -t {$img} - || {$build} -t {$img} -";
+        return (new ImagePipelines)->hostBuild($tag, $dockerfile, PublishedBaseImage::ref($tag), $rebuild, $pull);
+    }
 
-        return $rebuild ? $always : "sudo docker image inspect {$img} >/dev/null 2>&1 || { {$always}; }";
+    /**
+     * {@see hostBuildCommand()} as root, for a deploy that waits for it.
+     *
+     * @return list<string>
+     */
+    public function hostBuildArgv(string $tag, string $dockerfile, bool $pull = true): array
+    {
+        return Privileged::scripts()->buildImageOnHost($tag, $dockerfile, PublishedBaseImage::ref($tag), $pull);
+    }
+
+    /**
+     * {@see hostBuildCommand()} as root and detached, for a deploy that does not wait.
+     *
+     * @return list<string>
+     */
+    public function hostBuildInBackgroundArgv(string $tag, string $dockerfile): array
+    {
+        return Privileged::scripts()->buildImageOnHostInBackground($tag, $dockerfile, PublishedBaseImage::ref($tag));
+    }
+
+    /**
+     * Pull $published and name it $tag, but only when its label holds the hash of $dockerfile: a copy built from
+     * other code is removed again and the caller builds.
+     */
+    public function hostPullPublishedCommand(string $tag, string $published, string $dockerfile): string
+    {
+        return (new ImagePipelines)->hostPullPublished($tag, $published, $dockerfile);
     }
 
     /** Push a host image to the cache registry under its own name. */
     public function hostPublishCommand(string $image): string
     {
-        return self::sharedLock($this->pushCommand($image));
-    }
-
-    /** The tag-and-push half of {@see hostPublishCommand()}. */
-    private function pushCommand(string $image): string
-    {
-        $img = escapeshellarg($image);
-        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
-
-        return "sudo docker tag {$img} {$pushRef} && sudo docker push -q {$pushRef} >/dev/null";
+        return (new ImagePipelines)->hostPublish($image);
     }
 
     /**
@@ -120,16 +147,20 @@ final class DindImageStore implements ImageStore
      */
     public function hostRebuildCommand(string $image, string $dockerfile): string
     {
-        $img = escapeshellarg($image);
-        $has = "sudo docker image inspect -- {$img} >/dev/null 2>&1";
-        $lock = escapeshellarg(self::buildLockPath($image));
-
-        return "( touch {$lock} 2>/dev/null; exec 8<{$lock} && flock -x 8"
-            ." && if ! {$has}; then { {$this->hostBuildCommand($image, $dockerfile)}; }"
-            ." && {$this->hostPublishCommand($image)}; fi )";
+        return (new ImagePipelines)->hostRebuild($image, $dockerfile, PublishedBaseImage::ref($image));
     }
 
-    /** One lock file per image, beside {@see PUSH_LOCK} in /tmp of the core container. */
+    /**
+     * {@see hostRebuildCommand()} as root.
+     *
+     * @return list<string>
+     */
+    public function hostRebuildArgv(string $image, string $dockerfile): array
+    {
+        return Privileged::scripts()->rebuildImageOnHost($image, $dockerfile, PublishedBaseImage::ref($image));
+    }
+
+    /** One lock file per image, in core's /tmp, where every build runs. */
     public static function buildLockPath(string $image): string
     {
         return '/tmp/panelalpha-base-build-'.sha1($image).'.lock';
@@ -143,10 +174,7 @@ final class DindImageStore implements ImageStore
      */
     public static function garbageCollectArgv(): array
     {
-        return [
-            'sudo', 'docker', 'exec', self::CACHE_REGISTRY_WRITER_CONTAINER,
-            'registry', 'garbage-collect', '--delete-untagged', self::REGISTRY_CONFIG,
-        ];
+        return Privileged::docker()->registryGarbageCollect(self::CACHE_REGISTRY_WRITER_CONTAINER, self::REGISTRY_CONFIG);
     }
 
     /**
@@ -157,21 +185,17 @@ final class DindImageStore implements ImageStore
      */
     public function loadFromHostCommand(EngineAccount $account, string $image): string
     {
-        $img = escapeshellarg($image);
-        $exec = $this->accountExec($account);
-        $pushRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
-        $pullRef = escapeshellarg(self::CACHE_REGISTRY.'/'.$image);
+        return (new ImagePipelines)->loadFromHost($account->username, $image);
+    }
 
-        $attempt = "sudo docker tag {$img} {$pushRef}"
-            ." && sudo docker push -q {$pushRef} >/dev/null"
-            ." && {$exec} docker pull -q {$pullRef} >/dev/null"
-            ." && {$exec} docker tag {$pullRef} {$img}"
-            ." && { {$exec} docker image rm {$pullRef} >/dev/null 2>&1 || true; }";
-
-        $running = $this->bothRegistriesRunning();
-
-        return "{ {$running} || { echo '".self::REGISTRY_DOWN."' >&2; false; }; }"
-            .' && '.self::sharedLock("{ {$attempt}; } || { sleep 2; {$attempt}; }");
+    /**
+     * {@see loadFromHostCommand()} as root.
+     *
+     * @return list<string>
+     */
+    public function loadFromHostArgv(EngineAccount $account, string $image): array
+    {
+        return Privileged::scripts()->loadImageFromHost($account->username, $image);
     }
 
     /** What {@see seedCommand()} says when neither the cache registry nor the host has $ours. */
@@ -184,13 +208,14 @@ final class DindImageStore implements ImageStore
      *   1. the account already has it: nothing to do, nothing printed;
      *   2. the cache registry has it;
      *   3. $ours: the host built it: push, then 2. Nowhere else has it;
-     *   4. otherwise the account pulls it from its own registry, Docker Hub
+     *   4. a public image on a registry the engine caches (ghcr.io): through its pull-through cache;
+     *   5. otherwise the account pulls it from its own registry, Docker Hub
      *      through registry-proxy. A public image never goes through the
      *      host's copy, which is the one that can be incomplete.
      *
      * Fails with the last step's error when none of them worked.
      *
-     * $private skips 2 and 3: an image the project logs in for is pulled
+     * $private skips 2 to 4: an image the project logs in for is pulled
      * straight into the account, so it never lands in a registry every other
      * account reads. $dockerConfig is the client config holding that login.
      */
@@ -203,19 +228,61 @@ final class DindImageStore implements ImageStore
     ): string {
         $image = ImageTransfer::preferDigest($image);
         $img = escapeshellarg($image);
-        $exec = $this->accountExec($account);
         if ($private) {
-            $config = $dockerConfig === null ? '' : ' --config '.escapeshellarg($dockerConfig);
-
-            return self::seedLadder($exec, $img, self::accountPullRung($exec, $img, $config));
+            return $this->seedLadder($account, $image, $this->loggedInPullRung($account, $image, $dockerConfig));
         }
 
-        return self::seedLadder(
-            $exec,
-            $img,
+        $rest = $ours
+            ? [$this->builtOnHostRungs($account, $image, $img)]
+            : [...$this->pullThroughRungs($account, $image, $img), $this->accountPullRung($account, $image)];
+
+        return $this->seedLadder(
+            $account,
+            $image,
             self::cacheRegistryRung($this->fromCacheRegistry($account, $image), $img),
-            $ours ? $this->builtOnHostRungs($account, $image, $img) : self::accountPullRung($exec, $img),
+            ...$rest,
         );
+    }
+
+    public function operatorSeedCommand(EngineAccount $account, string $image): string
+    {
+        $img = escapeshellarg($image);
+
+        return 'if '.$this->fromCacheRegistry($account, $image).'; then'
+            ." printf 'Pulled base image %s from the cache registry\\n' {$img};"
+            ." elif {$this->accountHas($account, $image)}; then"
+            ." printf 'Kept base image %s already in the account: the cache registry did not have it\\n' {$img};"
+            ." else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+    }
+
+    /**
+     * $image as its registry's pull-through cache serves it (`panelalpha-ghcr-proxy:5000/<path>:<tag>`), or null
+     * when the engine caches no registry it lives on.
+     */
+    public static function pullThroughRef(string $image): ?string
+    {
+        $slash = strpos($image, '/');
+        $container = $slash === false ? null : (self::PULL_THROUGH[substr($image, 0, $slash)] ?? null);
+
+        return $container === null ? null : $container.':5000'.substr($image, $slash);
+    }
+
+    /**
+     * The rung that pulls $image through its registry's pull-through cache and restores the plain name. An uncached
+     * registry, a stopped cache or a digest reference falls through to the account's own pull.
+     *
+     * @return list<string>
+     */
+    private function pullThroughRungs(EngineAccount $account, string $image, string $img): array
+    {
+        $ref = self::pullThroughRef($image);
+        if ($ref === null) {
+            return [];
+        }
+        $container = explode(':', $ref, 2)[0];
+        $pull = "{$this->registryRunning($container)} && {$this->pullAndRename($account, $ref, $image)}";
+
+        return [self::rung($pull, 'Pulled base image %s through the pull-through cache', $img)];
     }
 
     /**
@@ -224,7 +291,9 @@ final class DindImageStore implements ImageStore
      */
     private function builtOnHostRungs(EngineAccount $account, string $image, string $img): string
     {
-        return " elif ! sudo docker image inspect -- {$img} >/dev/null 2>&1; then"
+        $hostHas = Privileged::dockerLines()->inspectImage($image);
+
+        return " elif ! {$hostHas} >/dev/null 2>&1; then"
             ." printf '%s\\n' '".self::NOT_BUILT_HERE."' >&2; false;"
             .self::throughHostRung("{ {$this->loadFromHostCommand($account, $image)}; }", $img);
     }
@@ -242,16 +311,15 @@ final class DindImageStore implements ImageStore
     {
         $image = ImageTransfer::preferDigest($image);
         $img = escapeshellarg($image);
-        $exec = $this->accountExec($account);
         $fromCache = $this->fromCacheRegistry($account, $image);
-        $fromHost = self::hostCopyCommand($image, $img)." && { {$this->loadFromHostCommand($account, $image)}; }";
+        $fromHost = self::hostCopyCommand($image)." && { {$this->loadFromHostCommand($account, $image)}; }";
 
-        return self::seedLadder(
-            $exec,
-            $img,
+        return $this->seedLadder(
+            $account,
+            $image,
             self::cacheRegistryRung($fromCache, $img),
             self::throughHostRung($fromHost, $img),
-            self::accountPullRung($exec, $img),
+            $this->accountPullRung($account, $image),
         );
     }
 
@@ -266,11 +334,11 @@ final class DindImageStore implements ImageStore
     public function refreshCommand(EngineAccount $account, string $image): string
     {
         $img = escapeshellarg($image);
-        $exec = $this->accountExec($account);
-        $id = "{$exec} docker image inspect -f '{{.Id}}' -- {$img} 2>/dev/null";
+        $docker = $this->accountDocker($account);
+        $inspect = $docker->images($image).' 2>/dev/null';
 
-        return "before=\$({$id}); {$exec} docker pull -q {$img} >/dev/null"
-            ." && if [ \"\$({$id})\" = \"\$before\" ]; then printf 'Base image %s is current\\n' {$img};"
+        return "before=\$({$inspect}); {$docker->pull($image)} >/dev/null"
+            ." && if [ \"\$({$inspect})\" = \"\$before\" ]; then printf 'Base image %s is current\\n' {$img};"
             ." else printf 'Updated base image %s\\n' {$img}; fi";
     }
 
@@ -284,23 +352,24 @@ final class DindImageStore implements ImageStore
     }
 
     /** The host's copy of $image, pulled when missing; a mutable tag is re-pulled first. */
-    private static function hostCopyCommand(string $image, string $img): string
+    private static function hostCopyCommand(string $image): string
     {
-        $hostHas = "sudo docker image inspect -- {$img} >/dev/null 2>&1";
-        $hostPull = "sudo docker pull -q {$img} >/dev/null 2>&1";
+        $docker = Privileged::dockerLines();
+        $hostHas = $docker->inspectImage($image).' >/dev/null 2>&1';
+        $hostPull = $docker->pullQuietly($image).' >/dev/null 2>&1';
 
         return self::isMutableTag($image) ? "{ {$hostPull} || {$hostHas}; }" : "{ {$hostHas} || {$hostPull}; }";
     }
 
     /**
-     * Nothing to do when the account already has $img, else the first rung
+     * Nothing to do when the account already has $image, else the first rung
      * that works, else a failure saying so on stderr.
      */
-    private static function seedLadder(string $exec, string $img, string ...$rungs): string
+    private function seedLadder(EngineAccount $account, string $image, string ...$rungs): string
     {
-        return "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
+        return "if {$this->accountHas($account, $image)}; then :;"
             .implode('', $rungs)
-            ." else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+            ." else printf 'Could not get %s into the account\\n' ".escapeshellarg($image).' >&2; false; fi';
     }
 
     /** One `elif` of {@see seedLadder()}: when $condition succeeds, print $message for $img. */
@@ -319,23 +388,43 @@ final class DindImageStore implements ImageStore
         return self::rung($fromHost, 'Loaded base image %s from the host through the cache registry', $img);
     }
 
-    /** The account pulls $img from its own registry; $clientFlags go before `pull`. */
-    private static function accountPullRung(string $exec, string $img, string $clientFlags = ''): string
+    /** The account pulls $image from its own registry. */
+    private function accountPullRung(EngineAccount $account, string $image): string
     {
-        return self::rung("{$exec} docker{$clientFlags} pull -q {$img} >/dev/null", 'Pulled base image %s', $img);
+        return self::pullRung($this->accountDocker($account)->pull($image), $image);
+    }
+
+    /** {@see accountPullRung()} with the project's login in $dockerConfig, which the broker sends with the pull. */
+    private function loggedInPullRung(EngineAccount $account, string $image, ?string $dockerConfig): string
+    {
+        return self::pullRung($this->accountDocker($account)->pull($image, $dockerConfig), $image);
+    }
+
+    private static function pullRung(string $pull, string $image): string
+    {
+        return self::rung("{$pull} >/dev/null", 'Pulled base image %s', escapeshellarg($image));
     }
 
     /** The account pulls $image from the cache registry and restores its plain name. */
     private function fromCacheRegistry(EngineAccount $account, string $image): string
     {
-        $img = escapeshellarg($image);
-        $exec = $this->accountExec($account);
-        $cacheRef = escapeshellarg(self::CACHE_REGISTRY.'/'.$image);
+        return "{$this->registryRunning()} && {$this->pullAndRename($account, self::CACHE_REGISTRY.'/'.$image, $image)}";
+    }
 
-        return "{$this->registryRunning()}"
-            ." && {$exec} docker pull -q {$cacheRef} >/dev/null 2>&1"
-            ." && {$exec} docker tag {$cacheRef} {$img}"
-            ." && { {$exec} docker image rm {$cacheRef} >/dev/null 2>&1 || true; }";
+    /** The account pulls $ref quietly, names it $image, and drops the $ref tag. */
+    private function pullAndRename(EngineAccount $account, string $ref, string $image): string
+    {
+        $docker = $this->accountDocker($account);
+
+        return $docker->pull($ref).' >/dev/null 2>&1'
+            .' && '.$docker->tag($ref, $image)
+            .' && { '.$docker->removeImage($ref).' >/dev/null 2>&1 || true; }';
+    }
+
+    /** A tag held without its config counts as missing. */
+    private function accountHas(EngineAccount $account, string $image): string
+    {
+        return $this->accountDocker($account)->hasImage($image).' >/dev/null 2>&1';
     }
 
     /** No tag or `latest`: what it names moves, unlike a dated tag or a digest. */
@@ -378,107 +467,25 @@ final class DindImageStore implements ImageStore
         ]);
     }
 
-    /** Run $command holding {@see PUSH_LOCK} shared, so it never overlaps a garbage-collect. */
-    private static function sharedLock(string $command): string
-    {
-        $lock = escapeshellarg(self::PUSH_LOCK);
-
-        return "( touch {$lock} 2>/dev/null; exec 9<{$lock} && flock -s 9 && { {$command}; } )";
-    }
-
-    private function bothRegistriesRunning(): string
-    {
-        return $this->registryRunning().' && '.$this->registryRunning(self::CACHE_REGISTRY_WRITER_CONTAINER);
-    }
-
     /** Asked of the daemon, which answers the same from core and from the host. */
     private function registryRunning(string $container = self::CACHE_REGISTRY_CONTAINER): string
     {
-        return 'sudo docker inspect -f "{{.State.Running}}" '.$container
-            .' 2>/dev/null | grep -qx true';
+        return Privileged::dockerLines()->isRunning($container).' 2>/dev/null | grep -qx true';
     }
 
-    private function accountExec(EngineAccount $account): string
+    private function accountDocker(EngineAccount $account): RootAccountDockerLines
     {
-        $file = escapeshellarg($account->controlFileOrFail());
-
-        return "sudo docker compose -f {$file} exec -T ".DindEngine::SERVICE;
+        return Privileged::accountDockerLines($account->username);
     }
 
     /**
-     * @return list<string>
-     */
-    public function listImagesArgv(): array
-    {
-        return ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}'];
-    }
-
-    /**
-     * `history` reads the config, so a tag held without one (a multi-platform
-     * image held incompletely) counts as missing; `images -q` and `inspect` both answer for it.
-     *
-     * @return list<string>
-     */
-    public function imageIdArgv(string $image): array
-    {
-        return ['docker', 'image', 'history', '-q', '--', $image];
-    }
-
-    /**
-     * On the host: the account's own container, so a registry refresh can
-     * tell a daemon.json that is bind-mounted from one an old init script
-     * still writes by hand. {@see AccountTemplate::daemonJson()}
-     * is only mounted into accounts created after it shipped.
-     *
-     * @return list<string>
-     */
-    public function hostAccountMountsArgv(EngineAccount $account): array
-    {
-        return ['sudo', 'docker', 'inspect', '--format', '{{json .Mounts}}', '--', $account->username];
-    }
-
-    /**
-     * On the host: every process the account's container runs, with the PID
-     * as the host sees it. The account is its own PID namespace, so that PID
-     * -- not the one `docker compose exec` would show -- is the one a signal
-     * sent from the host can reach.
-     *
-     * @return list<string>
-     */
-    public function hostAccountProcessesArgv(EngineAccount $account): array
-    {
-        return ['sudo', 'docker', 'top', $account->username, '-eo', 'pid,comm'];
-    }
-
-    /**
-     * No sudo: this one goes through System::execOnHost(), which already
-     * enters the host namespace as root -- where that PID exists, unlike the
-     * core container's own PID namespace.
-     *
-     * @return list<string>
-     */
-    public function hostSignalDockerdArgv(int $pid): array
-    {
-        return ['kill', '-HUP', (string) $pid];
-    }
-
-    /**
-     * @return list<string>
-     */
-    public function imageExposedPortsArgv(string $image): array
-    {
-        return ['docker', 'image', 'inspect', $image, '--format', '{{json .Config.ExposedPorts}}'];
-    }
-
-    /**
-     * No sudo: this one goes through System::execOnHost(), which already
-     * enters the host namespace as root.
+     * With the host's own docker, in its namespaces.
      *
      * @return list<string>
      */
     public function hostImageInspectArgv(string $image): array
     {
-        return ['docker', 'image', 'inspect', '--', $image];
+        return Privileged::probes()->hostImage($image);
     }
 
     /**
@@ -486,15 +493,12 @@ final class DindImageStore implements ImageStore
      */
     public function hostImageExposedPortsArgv(string $image): array
     {
-        return [
-            'sudo', 'docker', 'image', 'inspect', '--format', '{{json .Config.ExposedPorts}}', '--', $image,
-        ];
+        return Privileged::docker()->imageExposedPorts($image);
     }
 
     /**
-     * Pulls one of ours from the loopback writer the host pushes to and tags
-     * it back to the plain name the build asks for; a public image is left for
-     * docker to pull.
+     * Pulls one of our images from the loopback writer under the plain name the build asks for.
+     * `['true']` for a public or unsafe ref, which docker pulls itself or not at all.
      *
      * @return list<string>
      */
@@ -504,24 +508,12 @@ final class DindImageStore implements ImageStore
             return ['true'];
         }
 
-        $img = escapeshellarg($image);
-        $pullRef = escapeshellarg(self::HOST_CACHE_REGISTRY.'/'.$image);
-        $running = $this->bothRegistriesRunning();
-
-        return [
-            'sh', '-c',
-            "docker image inspect -- {$img} >/dev/null 2>&1 && exit 0; "
-            ."if {$running}; then "
-            ."docker pull -q {$pullRef} >/dev/null && docker tag {$pullRef} {$img} && exit 0; "
-            .'fi; exit 0',
-        ];
+        return Privileged::host()->ensureOwnImage($image);
     }
 
     /**
-     * A host build runs a public image by its plain name and never pulls it
-     * again, so the host's copy is whatever was pulled first. Re-pull it,
-     * through registry-proxy where the host mirrors Docker Hub. Never fatal:
-     * a failed pull keeps that copy.
+     * Re-pulls a public image through registry-proxy, since a host build never pulls it again.
+     * A failed pull keeps the old copy. `['true']` when there is nothing to do.
      *
      * @return list<string>
      */
@@ -531,6 +523,6 @@ final class DindImageStore implements ImageStore
             return ['true'];
         }
 
-        return ['sh', '-c', 'docker pull -q '.escapeshellarg($image).' >/dev/null 2>&1; exit 0'];
+        return Privileged::host()->refreshPublicImage($image);
     }
 }

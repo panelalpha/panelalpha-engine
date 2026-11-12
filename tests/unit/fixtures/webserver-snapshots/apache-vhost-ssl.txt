@@ -1,0 +1,96 @@
+run ["test","-e","/opt/engine/users/bob/ssl-certs/bob.test.crt"]
+put /opt/engine/webserver-config/apache/vhosts/bob.test.conf -
+<VirtualHost  198.51.100.10:80   [2001:db8::7]:80 >
+    ServerName bob.test
+        ServerAdmin webmaster@localhost
+    DocumentRoot /home/bob/bob.test/web
+    ErrorLog /opt/panelalpha/shared-hosting/webserver-logs/apache/bob.test/error.log
+    CustomLog /opt/panelalpha/shared-hosting/webserver-logs/apache/bob.test/access.log combined
+    RewriteEngine On
+    SetEnvIfExpr "%{QUERY_STRING} =~ /pmassotoken=/" pmapass=1
+    SetEnvIfExpr "%{HTTP_COOKIE} =~ /PMASignonSession/" pmapass=1
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+    RewriteRule ^ /phpmyadmin/ [R=301,L]
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+    RewriteCond %{ENV:pmapass} =1
+    RewriteRule ^/phpmyadmin/(.*)$ http://phpmyadmin-users.shared-hosting.palocal/$1 [P,L]
+    <Directory /home/bob/bob.test/web>
+        DirectoryIndex index.php index.html
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    Alias /bob-error-pages /opt/panelalpha/shared-hosting/webserver-config/error-pages
+    <Directory /opt/panelalpha/shared-hosting/webserver-config/error-pages>
+        Require all granted
+    </Directory>
+    ErrorDocument 403 /bob-error-pages/403.html
+    ErrorDocument 404 /bob-error-pages/404.html
+    ErrorDocument 500 /bob-error-pages/500.html
+    ErrorDocument 502 /bob-error-pages/502.html
+    ErrorDocument 503 /bob-error-pages/503.html
+    <FilesMatch "\.php$">
+        CGIPassAuth On
+        SetHandler "proxy:fcgi://bob:9074"
+    </FilesMatch>
+    <Directory /opt/panelalpha/shared-hosting/webserver-config/document-root>
+        Require all granted
+        Options -Indexes
+    </Directory>
+    DocumentRoot /opt/panelalpha/shared-hosting/webserver-config/document-root
+    ErrorDocument 503 /account-suspended.html
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/account-suspended\.html$
+        RewriteRule ^ - [R=503,L]
+</VirtualHost>
+<VirtualHost  198.51.100.10:443   [2001:db8::7]:443 >
+    ServerName bob.test
+        ServerAdmin webmaster@localhost
+    DocumentRoot /home/bob/bob.test/web
+    ErrorLog /opt/panelalpha/shared-hosting/webserver-logs/apache/bob.test/error.log
+    CustomLog /opt/panelalpha/shared-hosting/webserver-logs/apache/bob.test/access.log combined
+    SSLEngine on
+    SSLVerifyClient none
+    SSLCertificateFile /opt/engine/users/bob/ssl-certs/bob.test.crt
+    SSLCertificateKeyFile /opt/engine/users/bob/ssl-certs/bob.test.key
+    SSLCertificateChainFile /opt/engine/users/bob/ssl-certs/bob.test.ca
+    RewriteEngine On
+    SetEnvIfExpr "%{QUERY_STRING} =~ /pmassotoken=/" pmapass=1
+    SetEnvIfExpr "%{HTTP_COOKIE} =~ /PMASignonSession/" pmapass=1
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+    RewriteRule ^ /phpmyadmin/ [R=301,L]
+    RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+    RewriteCond %{ENV:pmapass} =1
+    RewriteRule ^/phpmyadmin/(.*)$ http://phpmyadmin-users.shared-hosting.palocal/$1 [P,L]
+    <Directory /home/bob/bob.test/web>
+        DirectoryIndex index.php index.html
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    Alias /bob-error-pages /opt/panelalpha/shared-hosting/webserver-config/error-pages
+    <Directory /opt/panelalpha/shared-hosting/webserver-config/error-pages>
+        Require all granted
+    </Directory>
+    ErrorDocument 403 /bob-error-pages/403.html
+    ErrorDocument 404 /bob-error-pages/404.html
+    ErrorDocument 500 /bob-error-pages/500.html
+    ErrorDocument 502 /bob-error-pages/502.html
+    ErrorDocument 503 /bob-error-pages/503.html
+    <FilesMatch "\.php$">
+        CGIPassAuth On
+        SetHandler "proxy:fcgi://bob:9074"
+    </FilesMatch>
+    <Directory /opt/panelalpha/shared-hosting/webserver-config/document-root>
+        Require all granted
+        Options -Indexes
+    </Directory>
+    DocumentRoot /opt/panelalpha/shared-hosting/webserver-config/document-root
+    ErrorDocument 503 /account-suspended.html
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/account-suspended\.html$
+    RewriteRule ^ - [R=503,L]
+</VirtualHost>
+
+<<< end of /opt/engine/webserver-config/apache/vhosts/bob.test.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/apache/bob.test"]

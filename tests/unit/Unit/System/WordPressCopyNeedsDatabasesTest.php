@@ -10,6 +10,7 @@ use App\System\Projects;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class WordPressCopyNeedsDatabasesTest extends TestCase
@@ -107,7 +108,7 @@ class WordPressCopyNeedsDatabasesTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $argv = is_array($cmd) ? $cmd : [$cmd];
-                if (array_slice($argv, 0, 3) === ['sudo', 'test', '-e']) {
+                if (LocalRoot::isRequest($argv) && array_slice(LocalRoot::plain($argv), 0, 2) === ['test', '-e']) {
                     return $this->wordPress && str_ends_with((string) end($argv), '/wp-config.php')
                         ? FakeProcess::ok()
                         : FakeProcess::failed();

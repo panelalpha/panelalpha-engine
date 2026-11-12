@@ -5,14 +5,19 @@ namespace Tests\Unit\Http;
 use App\Http\Middleware\Authenticate;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\AccountFileOwner;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class PhpErrorLogHttpTest extends TestCase
 {
+    use AccountFileOwner;
+
     private string $root;
 
     /** @var list<list<string>> */
@@ -55,9 +60,10 @@ class PhpErrorLogHttpTest extends TestCase
             {
                 $this->test->commands[] = (array) $cmd;
                 $output = '';
-                if (is_array($cmd) && in_array('setpriv', $cmd, true)) {
-                    $content = file((string) $cmd[11], FILE_IGNORE_NEW_LINES);
-                    $output = implode("\n", array_slice($content === false ? [] : $content, -(int) $cmd[12]));
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'account.lastLinesOfLog') {
+                    [, , $path, $lines] = LocalRoot::values($cmd);
+                    $content = file($path, FILE_IGNORE_NEW_LINES);
+                    $output = implode("\n", array_slice($content === false ? [] : $content, -(int) $lines));
                 }
 
                 return new class ($output) extends Process {
@@ -86,7 +92,7 @@ class PhpErrorLogHttpTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->test->commands[] = (array) $cmd;
-                if (is_array($cmd) && str_contains(implode(' ', $cmd), "'logs'")) {
+                if (is_array($cmd) && in_array('logs', LocalRoot::composeCommand($cmd), true)) {
                     return "app-1  | [11-Oct-2026 10:00:01 UTC] PHP Warning:  from the app\n";
                 }
 
@@ -179,7 +185,7 @@ class PhpErrorLogHttpTest extends TestCase
 
         $this->getJson('/api/projects/alice/php/error-log?since=1h30m')->assertOk();
 
-        $this->assertStringContainsString("'--since=2026-10-11T11:00:00+00:00'", implode(' ', end($this->commands)));
+        $this->assertStringContainsString("'--since=2026-10-11T11:00:00+00:00'", $this->lastClientLine());
     }
 
     public function test_a_since_that_is_neither_a_date_nor_a_duration_says_what_is_taken(): void
@@ -232,9 +238,8 @@ class PhpErrorLogHttpTest extends TestCase
 
     public function test_a_log_owned_by_another_user_is_never_read(): void
     {
-        $this->account();
+        $this->account(uid: self::accountUid() + 1);
         $this->writeLog("someone else's\n");
-        chown($this->logPath(), posix_getuid());
 
         $this->getJson('/api/projects/alice/php/error-log')
             ->assertOk()
@@ -284,7 +289,7 @@ class PhpErrorLogHttpTest extends TestCase
         $response->assertJsonPath('data.mtime', null);
         $response->assertJsonPath('data.truncated', false);
         $response->assertJsonPath('data.lines', ['app-1  | [11-Oct-2026 10:00:01 UTC] PHP Warning:  from the app']);
-        $this->assertStringContainsString("'logs' '--tail=50'", implode(' ', end($this->commands)));
+        $this->assertStringContainsString("'logs' '--tail=50'", $this->lastClientLine());
     }
 
     public function test_the_dind_logs_come_from_the_service_publishing_the_app_port(): void
@@ -297,7 +302,7 @@ class PhpErrorLogHttpTest extends TestCase
 
         $this->getJson('/api/projects/alice/php/error-log?lines=5')->assertOk();
 
-        $this->assertStringContainsString("'logs' '--tail=5' '--no-color' '--' 'web'", implode(' ', end($this->commands)));
+        $this->assertStringContainsString("'logs' '--tail=5' '--no-color' '--' 'web'", $this->lastClientLine());
     }
 
     public function test_a_dind_project_without_a_recorded_port_falls_back_to_the_first_service(): void
@@ -307,7 +312,13 @@ class PhpErrorLogHttpTest extends TestCase
 
         $this->getJson('/api/projects/alice/php/error-log?lines=5')->assertOk();
 
-        $this->assertStringContainsString("'logs' '--tail=5' '--no-color' '--' 'web'", implode(' ', end($this->commands)));
+        $this->assertStringContainsString("'logs' '--tail=5' '--no-color' '--' 'web'", $this->lastClientLine());
+    }
+
+    /** The last docker client line run for the account, quoted as a shell reads it. */
+    private function lastClientLine(): string
+    {
+        return LocalRoot::composeLine(end($this->commands));
     }
 
     private function dindCompose(string $yaml): void
@@ -316,13 +327,13 @@ class PhpErrorLogHttpTest extends TestCase
         file_put_contents($this->root . '/home/alice/project/docker-compose.panelalpha.yml', $yaml);
     }
 
-    private function account(string $template = 'default'): User
+    private function account(string $template = 'default', ?int $uid = null): User
     {
         /** @var User $user */
         $user = User::make([
             'username' => 'alice',
             'domain' => 'alice.test',
-            'details' => ['template' => $template, 'UID' => 1001, 'GID' => 1001],
+            'details' => ['template' => $template, 'UID' => $uid ?? self::accountUid(), 'GID' => self::accountGid()],
         ]);
         $user->save();
 
@@ -348,18 +359,12 @@ class PhpErrorLogHttpTest extends TestCase
     private function writeLog(string $contents): void
     {
         file_put_contents($this->logPath(), $contents);
-        chown($this->logPath(), 1001);
-        chgrp($this->logPath(), 1001);
+        self::ownByAccount($this->logPath());
     }
 
-    /** The account-read argv: setpriv, then `sh -c <script> sh <path> <lines>`. */
+    /** The account-read request: the log's last lines, read as the account. */
     private function assertAccountTail(int $index, string $path, string $lines): void
     {
-        $command = $this->commands[$index];
-        $this->assertSame(['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'], array_slice($command, 0, 7));
-        $this->assertSame(['sh', '-c'], array_slice($command, 7, 2));
-        $this->assertSame('sh', $command[10]);
-        $this->assertSame($path, $command[11]);
-        $this->assertSame($lines, $command[12]);
+        $this->assertSame(Privileged::account()->lastLinesOfLog(self::accountUid(), self::accountGid(), $path, (int) $lines), $this->commands[$index]);
     }
 }

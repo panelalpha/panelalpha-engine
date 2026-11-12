@@ -1,0 +1,5 @@
+#!/bin/sh
+# Re-applies the tenant firewall whenever a container joins or leaves pash-tenants, and in full every minute.
+PYTHONPATH=/usr/local/lib/panelalpha
+export PYTHONPATH
+exec python3 -m rootbroker.tenantports --serve

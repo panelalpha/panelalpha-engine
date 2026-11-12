@@ -3,21 +3,13 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Dind\RegistryAuth;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The project's `registry-auth` logins, present in the account only while a
- * deploy pulls and builds.
- *
- * They go into a Docker client config in a directory of its own, named at
- * random in the root-owned home, and every `docker` the deploy runs is
- * pointed at it (`DOCKER_CONFIG` or `--config`). Nothing of the account's
- * own ~/.docker is touched, and the directory is removed when the deploy
- * step ends, whatever its outcome.
- *
- * Never fails a deploy: a login that cannot be written leaves the pull
- * anonymous, and the registry's own 401 is then the error.
+ * The project's `registry-auth` logins, in a randomly named Docker config dir only while a deploy step runs (~/.docker
+ * is untouched); never fails a deploy: a login that cannot be written leaves the pull anonymous, so the 401 is the error.
  */
 final class RegistryLogin
 {
@@ -84,21 +76,30 @@ final class RegistryLogin
         $user = $this->project->userModel();
         $chown = $user->getChownString() ?: $this->project->username();
         $dir = rtrim($this->project->homeDirPath(), '/').'/.panelalpha-registry-'.bin2hex(random_bytes(8));
+        if (! $this->writeLogins($auth, $dir, $chown)) {
+            return;
+        }
+
+        $this->configDir = $dir;
+        $this->project->shell()->logger()?->info('Using registry logins for: '.implode(', ', $auth->hosts()));
+    }
+
+    private function writeLogins(RegistryAuth $auth, string $dir, string $chown): bool
+    {
         try {
             $system = $this->project->system();
             $system->filesystem()->makeDirWithParents($dir, $chown);
-            $system->exec(['sudo', 'chmod', '700', $dir]);
+            $system->exec(Privileged::accountFiles(...$this->project->userModel()->linuxIds())->changeMode('700', $dir));
             $system->filesystem()->writeFileReplacingPath($dir.'/config.json', $auth->dockerConfigJson(), $chown, '600');
         } catch (\Throwable $e) {
             Log::warning("Could not write registry logins for {$this->project->username()}: ".$e->getMessage());
             $this->project->shell()->logger()?->warn('Could not use the registry-auth logins; pulling anonymously');
             $this->remove($dir);
 
-            return;
+            return false;
         }
 
-        $this->configDir = $dir;
-        $this->project->shell()->logger()?->info('Using registry logins for: '.implode(', ', $auth->hosts()));
+        return true;
     }
 
     private function close(): void
@@ -112,7 +113,7 @@ final class RegistryLogin
     private function remove(string $dir): void
     {
         try {
-            $this->project->system()->exec(['sudo', 'rm', '-rf', '--', $dir]);
+            $this->project->system()->exec(Privileged::files()->removeTree($dir));
         } catch (\Throwable $e) {
             Log::warning("Could not remove registry logins {$dir}: ".$e->getMessage());
         }

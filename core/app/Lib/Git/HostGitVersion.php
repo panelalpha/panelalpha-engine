@@ -4,16 +4,13 @@ namespace App\Lib\Git;
 
 use App\Lib\Net\EgressRefusedException;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * The git on the host, where traditional PHP hosting runs its git commands.
- *
- * Those commands are pinned to the address the egress guard checked with
- * `http.curloptResolve`, which git before 2.37 ignores without an error, so
- * a name that rebinds between the check and the fetch would get through.
- * The version is read once and cached; an upgrade is seen within the hour.
+ * The host's git, which PHP hosting pins to the checked address with `http.curloptResolve`: git before 2.37 ignores
+ * it silently, so a rebinding name would get through. The version is cached; an upgrade is seen within the hour.
  */
 final class HostGitVersion
 {
@@ -82,7 +79,7 @@ final class HostGitVersion
     private function probe(): ?string
     {
         try {
-            return self::parse(($this->runOnHost)(['git', '--version']));
+            return self::parse(($this->runOnHost)(Privileged::probes()->gitVersion()));
         } catch (\Throwable) {
             return null;
         }

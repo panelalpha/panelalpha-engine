@@ -6,6 +6,7 @@ use App\System;
 use App\System\Filesystem;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 
 class FilesystemAssertFreeSpaceTest extends TestCase
 {
@@ -60,6 +61,7 @@ class FilesystemAssertFreeSpaceTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $key = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (!array_key_exists($key, $this->dfOutputs)) {
                     throw new \RuntimeException('Unexpected execOnHost: ' . $key);

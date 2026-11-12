@@ -2,10 +2,12 @@
 
 namespace Tests\Unit\Git;
 
+use Tests\Support\LocalRoot;
+use Tests\Support\PlainCommandBroker;
+
 /**
- * Every host command the git layer runs starts with `sudo` (or `docker` /
- * `nsenter`), so a shim first on PATH answers them from a rule table: the
- * real engine code runs end to end and nothing reaches the host.
+ * A fake broker and a PATH shim answer every host command the git layer runs from
+ * a rule table, so the real code runs end to end and nothing reaches the host.
  */
 trait FakesGitHost
 {
@@ -40,9 +42,9 @@ trait FakesGitHost
                 [ "$s" = P ] && exit 0
                 case "$3" in */.project-prev|*/.project-failed) exit 1;; esac
                 exit 0;;
-              "rm -rf "*) printf 'A  %s\n' "$3" >> "$d/fs";;
-              "mv -T "*) printf 'A  %s\nP  %s\n' "$3" "$4" >> "$d/fs";;
-              "cp -a -T "*) printf 'P  %s\n' "$5" >> "$d/fs";;
+              "rm -rf -- "*) printf 'A  %s\n' "$4" >> "$d/fs";;
+              "mv -T -- "*) printf 'A  %s\nP  %s\n' "$4" "$5" >> "$d/fs";;
+              "cp -a -T -- "*) printf 'P  %s\n' "$6" >> "$d/fs";;
             esac
             exit 0
             SH;
@@ -50,6 +52,7 @@ trait FakesGitHost
             file_put_contents("{$this->shim}/{$bin}", $script);
             chmod("{$this->shim}/{$bin}", 0755);
         }
+        PlainCommandBroker::install($this->shim, "{$this->shim}/sudo");
         touch("{$this->shim}/rules");
         touch("{$this->shim}/calls.log");
 
@@ -59,6 +62,7 @@ trait FakesGitHost
 
     private function restoreHost(): void
     {
+        LocalRoot::answerByBroker();
         if ($this->oldPath !== false) {
             $this->setPath($this->oldPath);
         }

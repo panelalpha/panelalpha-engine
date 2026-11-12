@@ -2,14 +2,15 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Lib\Deploy\CacheManager\NodeBuildImage;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Inner\HostCommands;
 use App\System\Project\Dind\Inner\SharedBaseImages;
-use App\Lib\Deploy\CacheManager\NodeBuildImage;
-use App\Lib\Deploy\Dind\DindImageStore;
+use App\System\Project\Dind\InnerDocker;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -88,8 +89,7 @@ class HostCompileJavaNodeTest extends TestCase
 
         $this->assertSame(NodeBuildImage::tag('gradle:9-jdk25', 'node:20-bookworm-slim'), $tag);
         $this->assertCount(1, $commands->built);
-        $this->assertStringContainsString('docker build', $commands->built[0]);
-        $this->assertStringContainsString((string) $tag, $commands->built[0]);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' lines.buildFromStdin -- '.$tag.' ', $commands->built[0]);
         $this->assertStringContainsString('COPY --from=node /usr/local/bin/', $commands->built[0]);
     }
 
@@ -128,11 +128,11 @@ class HostCompileJavaNodeTest extends TestCase
         $inner = $this->createStub(InnerDocker::class);
         $host = $this->createStub(HostCommands::class);
         $host->method('cancellable')->willReturnCallback(
-            function (array|string $cmd) use ($commands, $buildFails): void {
+            function (array $argv) use ($commands, $buildFails): void {
                 if ($buildFails) {
                     throw new \Exception('exec /bin/sh: exec format error');
                 }
-                $commands->built[] = (string) $cmd;
+                $commands->built[] = implode(' ', $argv);
             }
         );
         $inner->method('host')->willReturn($host);

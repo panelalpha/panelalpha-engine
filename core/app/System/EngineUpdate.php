@@ -6,13 +6,8 @@ use App\System as EngineSystem;
 use Symfony\Component\Process\Process;
 
 /**
- * Updating the engine itself: starting `updater.sh`, and reading back what the
- * last run did.
- *
- * The updater runs detached through `at`, so nothing here waits for it. What it
- * leaves behind is a directory of small files -- pid, exit code, the two output
- * streams, the versions -- symlinked to as `latest`, and reading those is the
- * only way to report progress.
+ * Updating the engine: starting `updater.sh` detached through `at`, so nothing here waits for it, and reading back the
+ * small files it leaves under `latest` (pid, exit code, output, versions), the only way to report progress.
  */
 final class EngineUpdate
 {
@@ -29,6 +24,9 @@ final class EngineUpdate
 
     /** After this a placeholder is a run that never started; a real one replaces it within seconds. */
     public const PENDING_GRACE_SECONDS = 300;
+
+    /** The pid older engines seeded their placeholder with: the host's kthreadd, always alive and never an updater. */
+    private const LEGACY_PLACEHOLDER_PID = '2';
 
     public function __construct(private readonly EngineSystem $system) {}
 
@@ -128,9 +126,8 @@ final class EngineUpdate
     }
 
     /**
-     * Leave a `latest` directory behind so {@see isRunning()} has something to
-     * read before the script itself writes one, then start the updater in the
-     * background.
+     * Leave a `latest` directory behind so {@see isRunning()} has something to read before the script itself
+     * writes one, then start the updater in the background.
      */
     public function run(?string $licenseKey = null): void
     {
@@ -142,7 +139,7 @@ final class EngineUpdate
     private function enqueueUpdater(?string $licenseKey): void
     {
         $process = $this->system->runProcess(
-            self::onHost('echo '.escapeshellarg($this->updaterJob($licenseKey)).' | at now')
+            Privileged::host()->enqueueEngineUpdate($this->system->engineDirPath(), $licenseKey)
         );
 
         if ($process->getExitCode() !== 0) {
@@ -155,39 +152,18 @@ final class EngineUpdate
         }
     }
 
-    /**
-     * The updater's output, and its exit code when it fails, go to the placeholder: until the
-     * installer writes its own run, nothing else records why an update never started.
-     */
-    private function updaterJob(?string $licenseKey): string
-    {
-        $updater = 'bash '.escapeshellarg($this->system->engineDirPath().'/updater.sh').' -f --background';
-        if (! empty($licenseKey)) {
-            $updater .= ' '.escapeshellarg($licenseKey);
-        }
-        $tmp = self::LOGS_DIR.'/tmp';
-
-        return "{$updater} > {$tmp}/stdout 2> {$tmp}/stderr || echo \$? > {$tmp}/exit_code";
-    }
-
     /** Point `latest` at an empty `tmp` run holding only the enqueue time, until the updater writes its own. */
     private function seedPendingPlaceholder(): void
     {
-        $logs = self::LOGS_DIR;
-        $this->system->runProcess(self::onHost(
-            "mkdir -p {$logs}/tmp && date +%s > {$logs}/tmp/".self::PENDING_FILE
-            ." && rm -f {$logs}/tmp/pid {$logs}/tmp/exit_code {$logs}/tmp/stdout {$logs}/tmp/stderr"
-            ." && ln -sfn {$logs}/tmp {$logs}/latest"
-        ));
+        $this->system->runProcess(Privileged::host()->seedEngineUpdatePlaceholder());
     }
 
     /** A job `at` refused never runs, so the placeholder records the refusal as a failed run. */
     private function failPlaceholder(Process $process): void
     {
-        $tmp = self::LOGS_DIR.'/tmp';
-        $this->system->runProcess(self::onHost(
-            'printf %s '.escapeshellarg($process->getErrorOutput() ?: $process->getOutput())." > {$tmp}/stderr"
-            .' && echo '.(int) $process->getExitCode()." > {$tmp}/exit_code"
+        $this->system->runProcess(Privileged::host()->recordEngineUpdateRefusal(
+            $process->getErrorOutput() ?: $process->getOutput(),
+            (int) $process->getExitCode(),
         ));
     }
 
@@ -210,11 +186,11 @@ final class EngineUpdate
         }
 
         $pid = trim((string) $fs->cat("{$dir}/pid"));
-        if (! ctype_digit($pid)) {
+        if (! ctype_digit($pid) || (int) $pid < 1 || $pid === self::LEGACY_PLACEHOLDER_PID) {
             return false;
         }
 
-        return $this->system->runProcess(self::onHost(['kill', '-0', $pid]))->getExitCode() === 0;
+        return $this->system->runProcess(Privileged::host()->processExists((int) $pid))->getExitCode() === 0;
     }
 
     /** Seconds since the placeholder was seeded; an unreadable timestamp must not block an update. */
@@ -225,22 +201,6 @@ final class EngineUpdate
         }
 
         return max(0, time() - (int) $started);
-    }
-
-    /**
-     * The updater lives outside this container, so every command enters the
-     * host's namespaces first.
-     *
-     * @param  string|list<string>  $command
-     * @return list<string>
-     */
-    private static function onHost(string|array $command): array
-    {
-        $argv = ['sudo', 'nsenter', '--target', '1', '--all'];
-
-        return is_array($command)
-            ? [...$argv, ...$command]
-            : [...$argv, 'bash', '-c', $command];
     }
 
     /** Terminal colour codes are noise in a JSON field. */

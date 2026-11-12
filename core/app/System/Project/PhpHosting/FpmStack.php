@@ -49,21 +49,14 @@ final class FpmStack implements PhpStack
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void {}
 
+    /** A restart prints only the stray master it had to stop, and that is logged. */
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void
     {
-        $process = $this->system->runProcess([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $project->composeFilePath(),
-            'exec',
-            '-T',
-            'php',
+        $process = $this->system->runProcess($project->execArgv([
             'bash',
             '-c',
             self::restartScript($project->services(), $phpVersion),
-        ]);
+        ]));
         if ($process->getExitCode() === self::EXIT_NOT_MANAGED) {
             throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not a service of {$project->username()}");
         }
@@ -71,7 +64,6 @@ final class FpmStack implements PhpStack
             $message = trim($process->getErrorOutput() ?: $process->getOutput());
             throw new \RuntimeException("Could not restart php-fpm{$phpVersion}: {$message}");
         }
-        // A restart prints only the stray master it had to stop.
         $output = $process->isStarted() ? trim($process->getOutput()) : '';
         if ($output !== '') {
             Log::warning("{$project->username()}: {$output}");

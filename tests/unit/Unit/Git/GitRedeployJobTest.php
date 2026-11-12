@@ -9,14 +9,21 @@ use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
+use App\Lib\Deploy\DeployLog\StepWatchdog;
+use App\Lib\DeployHook\DeployHooks;
+use App\Lib\Git\GitActions;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Models\Task;
 use App\Models\TaskLog;
+use App\Models\User;
+use App\System;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Git\CheckoutRedeploy;
 use Mockery;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 
 /**
@@ -33,11 +40,15 @@ class GitRedeployJobTest extends DeployHookTestCase
 
     private RecordingCheckoutRedeploy $redeploy;
 
+    private System $system;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->fakeGitHost();
         $this->withRepository();
+        $this->system = $this->brokerOnTheFakeHost($this->shim . '/sudo');
+        $this->app->instance(GitActions::class, $this->gitActionsOnTheFakeHost($this->system));
         $this->respond("'rev-parse' 'HEAD'", 0, self::HEAD . "\n");
         $this->useRedeploy(new RecordingCheckoutRedeploy());
     }
@@ -59,7 +70,13 @@ class GitRedeployJobTest extends DeployHookTestCase
     /** The previous version's container still runs: a settle puts its tree back. */
     private function previousStillRuns(): void
     {
-        $this->respond('{{.State.Running}}', 0, "true\n");
+        $this->respond('account-docker.containers', 0, '[{"State":{"Running":true}}]');
+    }
+
+    /** The previous version's container is gone: a settle removes its tree. */
+    private function previousIsGone(): void
+    {
+        $this->respond('account-docker.containers', 0, '[null]');
     }
 
     /**
@@ -110,13 +127,14 @@ class GitRedeployJobTest extends DeployHookTestCase
     public function test_a_pull_changes_the_checkout_then_rebuilds_and_completes_the_task(): void
     {
         $this->user('main');
+        $this->previousIsGone();
 
         $task = $this->runJob(ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'force']);
 
         $this->assertSame(Task::STATUS_COMPLETED, $task->status, json_encode($task->details));
         $this->assertTrue($this->called("'reset' '--hard' 'origin/main'"));
         // The deploy, and its lock, were open before the checkout was touched, and closed before the settle.
-        $this->assertSame(['aside:locked', 'rebuild:git:' . self::HEAD, 'settle:checkout removed'], $this->redeploy->events);
+        $this->assertSame(['start:locked', 'aside:locked', 'rebuild:git:' . self::HEAD, 'settle:checkout removed'], $this->redeploy->events);
         $this->assertSame(self::HEAD, $task->details['commit']);
         $this->assertSame('deploy', $task->details['checkout']['managed_by']);
         $this->assertSame('success', $task->details['deployment_status']);
@@ -125,6 +143,45 @@ class GitRedeployJobTest extends DeployHookTestCase
         $this->assertDeployClosed(DeployLogger::STATUS_SUCCESS);
         $logged = TaskLog::query()->where('task_id', $task->id)->pluck('log')->implode("\n");
         $this->assertStringContainsString('Pulling the connected branch (force) before the rebuild', $logged);
+    }
+
+    /**
+     * Git runs in the account's container: a start that fails ends the change there, the task failing with the
+     * start's own error, the deploy closed and nothing in the checkout touched.
+     */
+    public function test_a_start_that_fails_fails_the_task_with_its_error_and_runs_no_git(): void
+    {
+        $this->user('main');
+        $this->redeploy->startFails = static function (?DeployLogger $logger): never {
+            $logger?->finish(DeployLogger::STATUS_FAILED, 'The sysbox runtime is not running on the engine host (sysbox-fs failed)');
+            throw ProblemException::deploy('sysbox-not-running', 'The sysbox runtime is not running on the engine host (sysbox-fs failed)', 'preparing');
+        };
+
+        $task = $this->runJob(ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'force']);
+
+        $this->assertSame(Task::STATUS_FAILED, $task->status);
+        $this->assertSame('sysbox-not-running', $task->details['problems'][0]['code'], json_encode($task->details));
+        $this->assertSame('The sysbox runtime is not running on the engine host (sysbox-fs failed)', $task->details['error']);
+        $this->assertSame(['start:locked'], $this->redeploy->events);
+        $this->assertFalse($this->called("'rev-parse'"), 'git ran in an account that did not start');
+        $this->assertNothingAside();
+        $this->assertDeployClosed(DeployLogger::STATUS_FAILED);
+    }
+
+    /** A start that throws without finishing the deploy still leaves it closed, with the start named as the cause. */
+    public function test_a_start_that_throws_unfinished_closes_the_deploy(): void
+    {
+        $this->user('main');
+        $this->redeploy->startFails = static function (): never {
+            throw new \RuntimeException('/run/sysbox/sysfs.sock: no such file or directory');
+        };
+
+        $task = $this->runJob(ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'force']);
+
+        $this->assertSame(Task::STATUS_FAILED, $task->status);
+        $this->assertDeployClosed(DeployLogger::STATUS_FAILED);
+        $this->assertStringStartsWith('Could not start the account: /run/sysbox/sysfs.sock', (string) DeployLogger::readLatestFor('alice')['error']);
+        $this->assertFalse($this->called("'rev-parse'"));
     }
 
     public function test_a_branch_change_and_a_revert_run_their_own_git_commands(): void
@@ -213,6 +270,7 @@ class GitRedeployJobTest extends DeployHookTestCase
     public function test_a_failed_branch_change_that_kept_the_new_checkout_keeps_its_records(): void
     {
         $user = $this->user('main');
+        $this->previousIsGone();
         $this->useRedeploy($this->failingRebuild());
 
         $task = $this->runJob(ProjectRebuild::CHANGE_BRANCH, ['path' => 'project', 'branch' => 'dev']);
@@ -292,6 +350,32 @@ class GitRedeployJobTest extends DeployHookTestCase
         $this->assertFalse($this->called("'reset'"), 'the checkout was not touched');
     }
 
+    /** A CLI restore or a delete holds the lock with no task; the refusal says which. */
+    public function test_a_manual_pull_refused_while_a_restore_or_delete_holds_the_lock_names_it(): void
+    {
+        $user = $this->user('main');
+        $expected = [
+            DeployLock::HOLDER_RESTORE => "A restore of project 'alice' is running; try again when it has finished.",
+            DeployLock::HOLDER_DELETE => "Project 'alice' is being deleted; try again when it has finished.",
+        ];
+        foreach ($expected as $holder => $message) {
+            $lock = DeployLock::acquireFor('alice', $holder);
+
+            try {
+                app(\App\Lib\Git\GitActions::class)->pull($user, ['path' => 'project', 'strategy' => 'force']);
+                $this->fail("the manual pull was not refused during a {$holder}");
+            } catch (\App\System\Project\Git\Exception $e) {
+                $this->assertSame(409, $e->httpStatus);
+                $this->assertSame($message, $e->getMessage());
+                $this->assertNull($e->taskId);
+            } finally {
+                $lock->release();
+            }
+        }
+
+        $this->assertFalse($this->called("'reset'"), 'the checkout was not touched');
+    }
+
     /** Git refused the change in the worker: nothing is rebuilt, and the deploy it opened is closed before the settle. */
     public function test_a_change_git_refuses_fails_the_task_and_closes_its_deploy(): void
     {
@@ -304,7 +388,7 @@ class GitRedeployJobTest extends DeployHookTestCase
         $this->assertSame(Task::STATUS_FAILED, $task->status);
         $this->assertSame('Working tree is dirty.', $task->details['error']);
         $this->assertSame('git', $task->details['problems'][0]['field']);
-        $this->assertSame(['aside:locked', 'settle:checkout restored'], $this->redeploy->events);
+        $this->assertSame(['start:locked', 'aside:locked', 'settle:checkout restored'], $this->redeploy->events);
         $this->assertFalse($this->called("'checkout' '-B'"));
         $this->assertDeployClosed(DeployLogger::STATUS_FAILED);
         $this->assertSame('Could not change the checkout: Working tree is dirty.', DeployLogger::readLatestFor('alice')['error']);
@@ -337,7 +421,7 @@ class GitRedeployJobTest extends DeployHookTestCase
 
         $task = $this->runJob(ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'ff']);
 
-        $this->assertSame(['aside:locked', 'settle:checkout restored'], $this->redeploy->events);
+        $this->assertSame(['start:locked', 'aside:locked', 'settle:checkout restored'], $this->redeploy->events);
         $this->assertNothingAside();
         $this->assertDeployClosed(DeployLogger::STATUS_CANCELLED);
         $this->assertSame(Task::STATUS_CANCELLED, $task->status);
@@ -354,7 +438,7 @@ class GitRedeployJobTest extends DeployHookTestCase
         $task = $this->runJob(ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'ff']);
 
         $this->assertTrue($this->called("'fetch'"));
-        $this->assertSame(['aside:locked', 'settle:checkout restored'], $this->redeploy->events);
+        $this->assertSame(['start:locked', 'aside:locked', 'settle:checkout restored'], $this->redeploy->events);
         $this->assertNothingAside();
         $this->assertDeployClosed(DeployLogger::STATUS_CANCELLED);
         $this->assertSame(Task::STATUS_CANCELLED, $task->status);
@@ -395,7 +479,7 @@ class GitRedeployJobTest extends DeployHookTestCase
         $this->assertSame('main', $user->getGitBranch());
         $this->assertArrayNotHasKey('project', $user->getDetails()['site_git'] ?? []);
         $this->assertDeployClosed(DeployLogger::STATUS_CANCELLED);
-        $this->assertSame(self::HEAD, $user->project()->git('project')->readHeadCommit(), 'a finished cancelled deploy no longer stops git');
+        $this->assertSame(self::HEAD, $user->project($this->system)->git('project')->readHeadCommit(), 'a finished cancelled deploy no longer stops git');
     }
 
     private function cancelledRebuild(): RecordingCheckoutRedeploy
@@ -407,6 +491,73 @@ class GitRedeployJobTest extends DeployHookTestCase
             $logger->finish(DeployLogger::STATUS_CANCELLED, 'Deployment cancelled by user');
             throw ProblemException::deploy('deploy_cancelled', 'Deployment cancelled by user', 'running');
         });
+    }
+
+    private function brokerOnTheFakeHost(string $root): System
+    {
+        return new class ($root) extends System {
+            public function __construct(private string $root)
+            {
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return parent::runProcess($this->onTheFakeHost($cmd), $env, $timeout);
+            }
+
+            public function runProcessWithCallbacks(
+                string|array $cmd,
+                array $env = [],
+                int $timeout = 600,
+                ?callable $onStart = null,
+                ?callable $onOutput = null,
+                ?StepWatchdog $watchdog = null
+            ): Process {
+                return parent::runProcessWithCallbacks($this->onTheFakeHost($cmd), $env, $timeout, $onStart, $onOutput, $watchdog);
+            }
+
+            /**
+             * @param  string|list<string>  $cmd
+             * @return string|list<string>
+             */
+            private function onTheFakeHost(string|array $cmd): string|array
+            {
+                return is_array($cmd) && LocalRoot::isRequest($cmd) ? [$this->root, ...LocalRoot::plain($cmd)] : $cmd;
+            }
+        };
+    }
+
+    /** The job's own System cannot reach the fake host, so GitActions gets $system. */
+    private function gitActionsOnTheFakeHost(System $system): GitActions
+    {
+        return new class ($this->app->make(DeployHooks::class), $system) extends GitActions {
+            public function __construct(DeployHooks $hooks, private System $system)
+            {
+                parent::__construct($hooks);
+            }
+
+            public function onCheckout(User $user, ?string $path, callable $work): mixed
+            {
+                $onTheFakeHost = new class () extends User {
+                    public static ?System $host = null;
+
+                    protected $table = 'users';
+
+                    public function project(?System $system = null): System\Project
+                    {
+                        return parent::project($system ?? self::$host);
+                    }
+                };
+                $onTheFakeHost::$host = $this->system;
+                $onTheFakeHost->setRawAttributes($user->getAttributes(), true);
+                $onTheFakeHost->exists = true;
+                try {
+                    return parent::onCheckout($onTheFakeHost, $path, $work);
+                } finally {
+                    $user->setRawAttributes($onTheFakeHost->getAttributes(), true);
+                }
+            }
+        };
     }
 
     /** Commands matching `$needle` flip latest.json to cancelled while they run, as requestCancel() does. */

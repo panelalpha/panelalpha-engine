@@ -1,0 +1,11 @@
+#!/usr/bin/python3 -I
+"""The root broker's server, run as root by core's s6 (see rootbroker.server)."""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from rootbroker.server import main  # noqa: E402
+
+main()

@@ -12,6 +12,7 @@ use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
@@ -68,9 +69,8 @@ class UserComposeBuildContextTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->written[$m[2]] = (string) file_get_contents($m[1]);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.copy' && is_file(LocalRoot::values($cmd)[0])) {
+                    $this->written[LocalRoot::values($cmd)[1]] = (string) file_get_contents(LocalRoot::values($cmd)[0]);
                 }
                 $this->renameStaged($cmd);
 

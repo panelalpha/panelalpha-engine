@@ -5,6 +5,8 @@ namespace Tests\Unit\System;
 use App\System;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 
 class UsernameOccupancyTest extends TestCase
 {
@@ -74,10 +76,8 @@ class UsernameOccupancyTest extends TestCase
         };
 
         $this->assertFalse($system->isUsernameAvailable('alice'));
-        $this->assertSame(
-            ['sudo', 'docker', 'ps', '-a', '--filter', 'name=^/alice$', '--format', '{{.Names}}'],
-            $system->ran[0]
-        );
+        $this->assertSame('docker.containerNamed', LocalRoot::action($system->ran[0]));
+        $this->assertSame(['alice'], LocalRoot::values($system->ran[0]));
     }
 
     public function test_a_name_no_container_has_is_not_taken(): void
@@ -90,6 +90,35 @@ class UsernameOccupancyTest extends TestCase
         };
 
         $this->assertFalse($system->isContainerNameTaken('alice'));
+    }
+
+    /** A host the broker cannot enter answered nothing, so the name is not known to be free. */
+    public function test_a_host_namespace_refusal_is_not_a_free_name(): void
+    {
+        $system = new class extends System {
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return FakeProcess::failed('pa-root: cannot enter the host\'s namespaces: Operation not permitted');
+            }
+        };
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('pa-root: cannot enter the host\'s namespaces: Operation not permitted');
+        $system->isUsernameAvailable('alice');
+    }
+
+    /** `id -u` saying there is no such user is an answer, not a broken hop. */
+    public function test_id_saying_the_user_does_not_exist_is_a_free_name(): void
+    {
+        $system = new class extends System {
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return FakeProcess::failed("id: 'alice': no such user");
+            }
+        };
+
+        $this->assertFalse($system->isUidExists('alice'));
+        $this->assertTrue($system->isUsernameAvailable('alice'));
     }
 
     /** A process that already ran and printed $stdout, without running anything. */

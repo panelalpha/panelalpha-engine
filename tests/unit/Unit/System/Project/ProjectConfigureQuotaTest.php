@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 
 /**
  * With quota off on the host filesystem setquota fails, and its exit code
@@ -124,6 +125,7 @@ class ProjectConfigureQuotaTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
                 $this->argv = (array) $cmd;
 
                 return new class ($this->exitCode, $this->stderr) extends Process {

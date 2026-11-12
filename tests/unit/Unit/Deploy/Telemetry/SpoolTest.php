@@ -4,13 +4,14 @@ namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\Spool;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 use Tests\Support\RecordingRunner;
 
 class SpoolTest extends TestCase
 {
     private string $dir;
 
-    /** The chown the spool does is faked: a test must not run sudo. */
+    /** The chown the spool does is faked: a test must not run it as root. */
     private RecordingRunner $processes;
 
     protected function setUp(): void
@@ -353,7 +354,7 @@ class SpoolTest extends TestCase
     {
         $paths = [];
         foreach ($this->processes->commands as $cmd) {
-            if (is_array($cmd) && ($cmd[1] ?? '') === 'chown') {
+            if (is_array($cmd) && LocalRoot::action($cmd) === 'files.changeOwnerRecursively') {
                 $paths[] = (string) end($cmd);
             }
         }
@@ -391,7 +392,7 @@ class SpoolTest extends TestCase
 
         $chowned = [];
         foreach ($runner->commands as $cmd) {
-            if (is_array($cmd) && ($cmd[1] ?? '') === 'chown') {
+            if (is_array($cmd) && LocalRoot::action($cmd) === 'files.changeOwnerRecursively') {
                 $chowned[] = (string) end($cmd);
             }
         }
@@ -415,8 +416,8 @@ class SpoolTest extends TestCase
 
         $this->assertNotSame([], $this->processes->commands, 'the fake saw the chown');
         foreach ($this->processes->commands as $cmd) {
-            $this->assertSame('sudo', $cmd[0] ?? null, 'only the ownership fix shells out');
-            $this->assertSame('chown', $cmd[1] ?? null);
+            $this->assertSame('files.changeOwnerRecursively', LocalRoot::action($cmd), 'only the ownership fix shells out');
+            $this->assertSame('www-data:www-data', LocalRoot::values($cmd)[0]);
         }
     }
 }

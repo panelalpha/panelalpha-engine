@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Platform\AppConfig\AppConfigSource;
 use App\System;
+use App\System\Privileged;
 
 /**
  * Reads app config descriptors through {@see System}, which is what can reach an
@@ -41,7 +42,7 @@ final class SystemAppConfigSource implements AppConfigSource
         }
 
         try {
-            $output = $this->system->exec(['sudo', 'find', $dir, '-type', 'f', '-printf', '%P\n']);
+            $output = $this->system->exec(Privileged::files()->relativeFilePaths($dir));
         } catch (\Throwable) {
             return [];
         }

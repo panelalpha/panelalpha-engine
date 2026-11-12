@@ -5,35 +5,14 @@ namespace App\System\Services;
 use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\Setting;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Blade;
+use Symfony\Component\Process\Process;
 
 class Exim
 {
     /** Docker's stock docker0 address; used only when the bridge cannot be inspected. */
     public const FALLBACK_BRIDGE_GATEWAY = '172.17.0.1';
-
-    /**
-     * `service exim4 restart`, plus stopping every `exim4 -bd` the init script
-     * missed: a daemon still retrying a bind has written no pid file, kept
-     * 127.0.0.1:25, and left the new one waiting minutes for the port.
-     */
-    public const RESTART_SCRIPT = <<<'SH'
-        service exim4 stop || true
-        daemons() {
-            for p in /proc/[0-9]*; do
-                [ "$(cat "$p/comm" 2>/dev/null)" = exim4 ] || continue
-                case " $(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
-                    *" -bd"*) echo "${p#/proc/}" ;;
-                esac
-            done
-        }
-        left=$(daemons)
-        [ -n "$left" ] && kill $left 2>/dev/null
-        for _ in $(seq 20); do [ -z "$(daemons)" ] && break; sleep 0.5; done
-        left=$(daemons)
-        [ -n "$left" ] && kill -9 $left 2>/dev/null
-        service exim4 start
-        SH;
 
     public function __construct(
         private EngineSystem $system,
@@ -43,11 +22,41 @@ class Exim
     {
         $config = $this->eximConfig();
 
-        // update-exim4.conf.conf
+        $this->writeUpdateConf($config);
+        $this->writePasswdClient($config);
+        $this->writeRewriteConf($config);
+        $this->writeTransportConf($config);
+
+        $this->applyConfig();
+    }
+
+    /**
+     * @param  array<string, string>  $config
+     */
+    private function writeUpdateConf(array $config): void
+    {
         $updateConfPath = $this->system->engineDirPath().'/config/exim/update-exim4.conf.conf';
         $updateConfTemplatePath = $this->system->engineDirPath().'/templates/config/exim-update-conf.blade.php';
         $updateConfTemplate = $this->system->filesystem()->fileGetContents($updateConfTemplatePath);
 
+        [$type, $smarthost] = $this->smarthostRoute($config);
+
+        $templateVars = [
+            'dc_readhost' => $config['sender_domain'],
+            'dc_eximconfig_configtype' => $type,
+            'dc_smarthost' => $smarthost,
+            ...$this->networkSettings(),
+        ];
+        $updateConf = Blade::render($updateConfTemplate, $templateVars);
+        $this->writeConfigFile($updateConfPath, $updateConf);
+    }
+
+    /**
+     * @param  array<string, string>  $config
+     * @return array{0: string, 1: string}
+     */
+    private function smarthostRoute(array $config): array
+    {
         $type = 'internet';
         $smarthost = '';
         switch ($config['smarthost_provider']) {
@@ -69,20 +78,34 @@ class Exim
                 break;
         }
 
-        $templateVars = [
-            'dc_readhost' => $config['sender_domain'],
-            'dc_eximconfig_configtype' => $type,
-            'dc_smarthost' => $smarthost,
-            ...$this->networkSettings(),
-        ];
-        $updateConf = Blade::render($updateConfTemplate, $templateVars);
-        $this->writeConfigFile($updateConfPath, $updateConf);
+        return [$type, $smarthost];
+    }
 
-        // passwd.client
+    /**
+     * @param  array<string, string>  $config
+     */
+    private function writePasswdClient(array $config): void
+    {
         $passwdPath = $this->system->engineDirPath().'/config/exim/passwd.client';
         $passwdTemplatePath = $this->system->engineDirPath().'/templates/config/exim-passwd.blade.php';
         $passwdTemplate = $this->system->filesystem()->fileGetContents($passwdTemplatePath);
 
+        [$username, $password] = $this->smarthostLogin($config);
+
+        $templateVars = [
+            'username' => $username,
+            'password' => $password,
+        ];
+        $passwd = Blade::render($passwdTemplate, $templateVars);
+        $this->writeConfigFile($passwdPath, $passwd);
+    }
+
+    /**
+     * @param  array<string, string>  $config
+     * @return array{0: string, 1: string}
+     */
+    private function smarthostLogin(array $config): array
+    {
         $username = '';
         $password = '';
         switch ($config['smarthost_provider']) {
@@ -104,14 +127,14 @@ class Exim
                 break;
         }
 
-        $templateVars = [
-            'username' => $username,
-            'password' => $password,
-        ];
-        $passwd = Blade::render($passwdTemplate, $templateVars);
-        $this->writeConfigFile($passwdPath, $passwd);
+        return [$username, $password];
+    }
 
-        // rewrite.conf
+    /**
+     * @param  array<string, string>  $config
+     */
+    private function writeRewriteConf(array $config): void
+    {
         $rewritePath = $this->system->engineDirPath().'/config/exim/rewrite.conf';
         $rewriteTemplatePath = $this->system->engineDirPath().'/templates/config/exim-rewrite.blade.php';
         $rewriteTemplate = $this->system->filesystem()->fileGetContents($rewriteTemplatePath);
@@ -121,7 +144,13 @@ class Exim
         ];
         $rewrite = Blade::render($rewriteTemplate, $templateVars);
         $this->writeConfigFile($rewritePath, $rewrite);
+    }
 
+    /**
+     * @param  array<string, string>  $config
+     */
+    private function writeTransportConf(array $config): void
+    {
         $transportPath = $this->system->engineDirPath().'/config/exim/transport.conf';
         $transportTemplatePath = $this->system->engineDirPath().'/templates/config/exim-transport.blade.php';
         $transportTemplate = $this->system->filesystem()->fileGetContents($transportTemplatePath);
@@ -131,14 +160,11 @@ class Exim
         ];
         $transport = Blade::render($transportTemplate, $templateVars);
         $this->writeConfigFile($transportPath, $transport);
-
-        $this->applyConfig();
     }
 
     /**
-     * `dc_smarthost` for one host: `<host>::<port>`. Exim reads it as a
-     * colon-separated list, so an IPv6 address goes in brackets with its
-     * colons doubled; written plain, `2001:db8::25` became host `2001`.
+     * `dc_smarthost` for one host: `<host>::<port>`. Exim reads it as a colon-separated list, so an IPv6
+     * address goes in brackets with its colons doubled; written plain, `2001:db8::25` became host `2001`.
      */
     public static function smarthost(string $host, string $port): string
     {
@@ -200,10 +226,7 @@ class Exim
      */
     protected function networkAddresses(string $network): array
     {
-        $process = $this->system->runProcess([
-            'sudo', 'docker', 'network', 'inspect', $network,
-            '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{"\n"}}{{end}}',
-        ], [], 30);
+        $process = $this->system->runProcess(Privileged::docker()->networkSubnetsAndGateways($network), [], 30);
         if ($process->getExitCode() !== 0) {
             return [];
         }
@@ -245,65 +268,34 @@ class Exim
         $this->system->filesystem()->filePutContents($path, $contents);
     }
 
+    /**
+     * A reload only signals a running daemon; one that abandoned a bind it could not make stays down,
+     * so it is started afresh.
+     */
     private function applyConfig(): void
     {
-        $this->system->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'exec',
-            'mail',
-            'update-exim4.conf',
-        ]);
-
-        $this->system->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'exec',
-            'mail',
-            // A reload only signals a running daemon; one that abandoned a
-            // bind it could not make stays down, so start it afresh.
-            'sh',
-            '-c',
-            self::RESTART_SCRIPT,
-        ]);
+        $mail = Privileged::engineServices($this->system->composeFilePath());
+        $this->system->exec($mail->eximUpdateConfig());
+        $this->system->exec($mail->eximRestart());
     }
 
+    /**
+     * The address is checked as it goes into the To: header; the From: domain is reserved (RFC 2606), owned by no one.
+     * A null envelope sender means a failed test bounces nowhere, and exim never rewrites an empty sender into From:.
+     */
     public function sendTestEmail(string $email): array
     {
-        // Interpolated into the To: header below.
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
             throw new \InvalidArgumentException('Invalid test email address.');
         }
 
-        // example.invalid is reserved (RFC 2606), so no third party owns it.
-        $message = ''
-            ."From: PanelAlpha Engine <noreply@example.invalid>\n"
-            ."To: {$email}\n"
-            ."Subject: Test email from PanelAlpha Engine\n\n"
-            ."This is a test email sent from PanelAlpha Engine.\n";
+        $process = $this->system->runProcess(Privileged::engineServices($this->system->composeFilePath())->eximSendTestEmail($email));
 
-        $to = escapeshellarg($email);
-        $process = $this->system->runProcess([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'exec',
-            'mail',
-            'bash',
-            '-c',
-            // Null envelope sender: a failed test generates no bounce, and exim
-            // never rewrites an empty sender into the From: address.
-            'echo '.escapeshellarg($message)." | exim4 -v -odf -f '<>' $to",
-        ]);
+        return $this->testEmailResult($process);
+    }
 
+    private function testEmailResult(Process $process): array
+    {
         $stdout = $process->getOutput();
         $stderr = $process->getErrorOutput();
         $exitCode = $process->getExitCode();
@@ -317,9 +309,8 @@ class Exim
     }
 
     /**
-     * What happened to the message, read from the log lines `exim -v` prints.
-     * Exit code 0 only says exim accepted it: a deferral (`==`) leaves it on
-     * the queue for a retry, and a bounce (`**`) exits 0 as well.
+     * What happened to the message, read from the log lines `exim -v` prints. Exit code 0 only says exim
+     * accepted it: a deferral (`==`) leaves it on the queue for a retry, and a bounce (`**`) exits 0 as well.
      *
      * @return array{status: string, delivered: bool, reason: ?string}
      */

@@ -3,13 +3,12 @@
 namespace App\System\Project\PhpHosting;
 
 use App\Lib\Project\PhpErrorLog;
+use App\System\Privileged;
 use App\System\Project\PhpHosting;
 
 /**
- * Every installed PHP version of a project logs its errors into the project's
- * own `log/php`. New projects copy the templates with those lines already;
- * this is what writes them into an existing project and makes the directory
- * the account's worker can write to, and keeps a start-up warning out of it.
+ * Makes every installed PHP version of an existing project log into its own `log/php`, as new projects' templates do,
+ * in a directory the account's worker can write to, and keeps a start-up warning out of it.
  */
 final class PhpErrorLogConfig
 {
@@ -40,17 +39,6 @@ final class PhpErrorLogConfig
         'catch_workers_output' => 'catch_workers_output = yes',
         'decorate_workers_output' => 'decorate_workers_output = no',
     ];
-
-    /**
-     * Run as the account: `$1` the file, `$2` its uid:gid. A link is unlinked,
-     * anything but a regular file is left alone, and a file someone else owns
-     * is replaced by an account-owned copy, since the account cannot chown it.
-     */
-    private const ENSURE_FILE_SCRIPT = 'f=$1; if [ -L "$f" ]; then rm -f -- "$f" || exit 1; fi; '
-        .'if [ -e "$f" ] && [ ! -f "$f" ]; then exit 0; fi; '
-        .'if [ -f "$f" ] && [ "$(stat -c %u:%g -- "$f")" != "$2" ]; then '
-        .'t=$(mktemp -- "$f.XXXXXX") || exit 1; cat -- "$f" > "$t" 2>/dev/null; mv -f -- "$t" "$f" || exit 1; fi; '
-        .'touch -- "$f" && chmod 664 -- "$f"';
 
     public function apply(PhpHosting $project): void
     {
@@ -106,27 +94,23 @@ final class PhpErrorLogConfig
     }
 
     /**
-     * The whole project directory is owned by www-data, and the FPM workers
-     * run as the account, so the log directory is handed to the account. Root
-     * only names `log/php` itself, an entry of the engine-owned `log` that the
-     * account cannot rename or replace, never anything inside it.
+     * The project directory is www-data's but FPM workers run as the account, so the log directory is handed to it.
+     * Root names only `log/php`, an engine-owned `log` entry the account cannot rename or replace, never what it holds.
      */
     private function ensureLogDir(PhpHosting $project, string $dir): void
     {
         $system = $project->system();
-        $system->exec(['sudo', 'mkdir', '-p', $dir]);
+        $system->exec(Privileged::files()->makeDirectories($dir));
         $owner = $project->userModel()->getChownString();
         if ($owner !== null) {
-            $system->exec(['sudo', 'chown', $owner, $dir]);
+            $system->exec(Privileged::files()->changeOwner($owner, $dir));
         }
-        $system->exec(['sudo', 'chmod', '755', $dir]);
+        $system->exec(Privileged::files()->changeMode('755', $dir));
     }
 
     /**
-     * FPM's master creates the file as root, which the account's worker cannot
-     * append to and the API must refuse to read. Everything happens as the
-     * account, inside a directory it can rewrite at any moment, so a link it
-     * swaps in only ever reaches what it could already touch itself.
+     * FPM's master creates it as root, which the worker cannot append to and the API must refuse to read. It all runs
+     * as the account in a directory it can rewrite at any time, so a link it swaps in reaches only what it could itself.
      */
     private function ensureLogFile(PhpHosting $project, string $dir): void
     {
@@ -136,7 +120,7 @@ final class PhpErrorLogConfig
         }
 
         $file = $dir.'/'.PhpErrorLog::FILE_NAME;
-        $account = $project->project()->fileManager();
-        $project->system()->exec($account->asAccount(['sh', '-c', self::ENSURE_FILE_SCRIPT, 'sh', $file, $owner]));
+        [$uid, $gid] = $project->project()->fileManager()->accountIds();
+        $project->system()->exec(Privileged::account()->ensureLogFile($uid, $gid, $file, $owner));
     }
 }

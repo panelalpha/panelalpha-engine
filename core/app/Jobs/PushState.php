@@ -6,6 +6,7 @@ use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind\CopyVolumes;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -110,7 +111,7 @@ class PushState implements ShouldQueue
     {
         try {
             $home = rtrim($system->project($to)->homeDirPath(), '/');
-            $system->runProcess(['sudo', 'rm', '-rf', $home.'/.incoming']);
+            $system->runProcess(Privileged::files()->removeTree($home.'/.incoming'));
         } catch (\Throwable $cleanup) {
             Log::warning('PushState failed cleanup could not remove .incoming', [
                 'target' => $this->toUsername,

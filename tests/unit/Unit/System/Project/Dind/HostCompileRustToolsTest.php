@@ -8,9 +8,10 @@ use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Inner\HostCommands;
 use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -120,7 +121,7 @@ class HostCompileRustToolsTest extends TestCase
 
         $this->assertSame(RustBuildToolsImage::tag('rust:1-bookworm', ['cmake']), $tag);
         $this->assertCount(1, $commands->built);
-        $this->assertStringContainsString('docker build --pull', $commands->built[0]);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' lines.buildFromStdin -- '.$tag.' pull', $commands->built[0]);
         $this->assertStringContainsString('apt-get install -y --no-install-recommends cmake', $commands->built[0]);
     }
 
@@ -187,11 +188,11 @@ class HostCompileRustToolsTest extends TestCase
         $inner = $this->createStub(InnerDocker::class);
         $host = $this->createStub(HostCommands::class);
         $host->method('cancellable')->willReturnCallback(
-            function (array|string $cmd) use ($commands, $buildFails): void {
+            function (array $argv) use ($commands, $buildFails): void {
                 if ($buildFails) {
                     throw new \Exception('E: Unable to locate package cmake');
                 }
-                $commands->built[] = (string) $cmd;
+                $commands->built[] = implode(' ', $argv);
             }
         );
         $inner->method('host')->willReturn($host);

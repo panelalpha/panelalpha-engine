@@ -2,15 +2,13 @@
 
 namespace App\System\Project\PhpHosting\Services;
 
+use App\System\Privileged;
+use App\System\Privileged\Arguments;
 use App\System\Project\PhpHosting;
 
 /**
- * The entrypoint runner, which accounts rendered before s6 still run: the
- * entrypoint starts redis and cron as system services, runs the init scripts,
- * then `entrypoint-runner.sh` starts each `entrypoint.d/<name>.sh` in the
- * background and tracks it by the PID it wrote. The template no longer ships
- * the runner; such an account moves to s6 when it is next rendered, which
- * removes this layout ({@see removeLayout()}).
+ * The pre-s6 entrypoint runner: `entrypoint-runner.sh` starts each `entrypoint.d/<name>.sh` and tracks the PID it wrote.
+ * The template ships s6; an account still on this layout moves to s6 when next rendered ({@see removeLayout()}).
  */
 final class RunnerServiceManager implements ServiceManager
 {
@@ -25,7 +23,7 @@ final class RunnerServiceManager implements ServiceManager
     public static function removeLayout(PhpHosting $project): void
     {
         foreach (self::LAYOUT as $path) {
-            $project->system()->exec(['sudo', 'rm', '-rf', $project->project()->projectDirPath().'/'.$path]);
+            $project->system()->exec(Privileged::files()->removeTree($project->project()->projectDirPath().'/'.$path));
         }
     }
 
@@ -44,7 +42,9 @@ final class RunnerServiceManager implements ServiceManager
     {
         $system = $this->project->system();
         $dir = $system->projectDirPath($this->project->username()).'/entrypoint.d';
-        $system->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");
+        if ($system->runProcess(Privileged::files()->makeDirectories($dir))->isSuccessful()) {
+            $system->runProcess(Privileged::fileLines()->removeScriptsIfAny($dir));
+        }
         foreach ($services as $service) {
             if ($service->daemonStart !== []) {
                 continue;
@@ -55,16 +55,12 @@ final class RunnerServiceManager implements ServiceManager
 
     public function sync(): void
     {
-        $this->project->system()->runProcess(
-            "sudo docker compose -f {$this->project->composeFilePath()} exec -T php bash ".self::RUNNER.' sync --all'
-        );
+        $this->project->system()->runProcess($this->project->execArgv(['bash', self::RUNNER, 'sync', '--all']));
     }
 
     public function reload(string $service): void
     {
-        $this->project->system()->exec(
-            "sudo docker compose -f {$this->project->composeFilePath()} exec -T php service {$service} restart"
-        );
+        $this->project->system()->exec($this->project->execArgv(['service', Arguments::name($service), 'restart']));
     }
 
     public function restartArgv(string $service): array
@@ -73,12 +69,8 @@ final class RunnerServiceManager implements ServiceManager
     }
 
     /**
-     * The runner only kills the PID it wrote itself. `service phpX-fpm restart`
-     * left a daemonised master it never saw holding the socket, so the fresh
-     * `-F` instance died on "Another FPM instance seems to already listen" and
-     * the old master kept the old php.ini. Nothing starts one that way any more;
-     * a master still running after the runner's stop is that leftover, so it is
-     * stopped by process title (these images write no FPM pid file).
+     * The runner kills only the PID it wrote; an FPM master still alive after its stop (one a `service phpX-fpm restart`
+     * started) is stopped by title, as there is no FPM pid file.
      */
     public function restartScript(string $service, string $mainProcess): string
     {

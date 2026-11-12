@@ -54,34 +54,7 @@ final class PhpRuntime
      */
     public function runWpCli(array $args): array
     {
-        $wpPath = null;
-        foreach ($args as $arg) {
-            if (Str::startsWith($arg, '--path=')) {
-                $wpPath = Str::after($arg, '--path=');
-            }
-        }
-
-        $user = $this->project->userModel();
-        $uid = $user->getUid();
-        $gid = $user->getGid();
-        $command = [
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->project->composeFilePath(),
-            'exec',
-            '-u',
-            "{$uid}:{$gid}",
-            '-T',
-            $this->project->defaultServiceName(),
-            $this->phpBinaryPath($wpPath),
-            '-d',
-            'memory_limit='.$this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
-            '/opt/wp-cli.phar',
-            '--exec='.MustUsePlugin::MEND_ON_LOAD,
-            ...$args,
-        ];
+        $command = $this->wpCliCommand($args);
 
         $process = $this->project->system()->runProcess($command);
         $exitCode = $process->getExitCode();
@@ -94,6 +67,43 @@ final class PhpRuntime
             'stderr' => $process->getErrorOutput(),
             'exit_code' => $exitCode,
         ];
+    }
+
+    /**
+     * WP-CLI as the account, on the PHP of the domain its last `--path=` names.
+     *
+     * @param  list<string>  $args
+     * @return list<string>
+     */
+    private function wpCliCommand(array $args): array
+    {
+        $wpPath = $this->wpPathArgument($args);
+
+        $user = $this->project->userModel();
+        $uid = $user->getUid();
+        $gid = $user->getGid();
+
+        return $this->project->execArgv([
+            $this->phpBinaryPath($wpPath),
+            '-d',
+            'memory_limit='.$this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
+            '/opt/wp-cli.phar',
+            '--exec='.MustUsePlugin::MEND_ON_LOAD,
+            ...$args,
+        ], "{$uid}:{$gid}");
+    }
+
+    /** @param  list<string>  $args */
+    private function wpPathArgument(array $args): ?string
+    {
+        $wpPath = null;
+        foreach ($args as $arg) {
+            if (Str::startsWith($arg, '--path=')) {
+                $wpPath = Str::after($arg, '--path=');
+            }
+        }
+
+        return $wpPath;
     }
 
     public function phpBinaryPath(?string $wpPath = null): string

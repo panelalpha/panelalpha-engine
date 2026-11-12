@@ -13,6 +13,8 @@ use Symfony\Component\Process\Process;
  */
 final class FakeProcess extends Process
 {
+    private const ANSWERED = ['files.isFile', 'files.isDirectory', 'files.exists', 'files.existingRealPaths'];
+
     private function __construct(
         private readonly int $code,
         private readonly string $stdout,
@@ -37,32 +39,28 @@ final class FakeProcess extends Process
     }
 
     /**
-     * What a host would answer, for a test that must not run the command.
-     *
-     * `sudo test -f|-d PATH` is answered from the real filesystem, because
-     * callers branch on its exit code and a blanket success would tell them
-     * every file exists; `sudo realpath -e -- PATH…` too, because callers
-     * compare the paths it resolves (a path the fixture tree lacks answers as
-     * written). Everything else simply succeeds: a test asserting on what was
-     * run reads the recorded command, not the result.
+     * What a host would answer: a root `test -f|-d|-e` or `realpath -e` is read
+     * from the real filesystem, and everything else succeeds.
      *
      * @param string|list<string> $cmd
      */
     public static function forCommand(string|array $cmd): self
     {
-        $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
-
-        if (array_slice($argv, 0, 4) === ['sudo', 'realpath', '-e', '--']) {
-            return self::realPaths(array_slice($argv, 4));
+        if (! is_array($cmd) || ! in_array(LocalRoot::action($cmd), self::ANSWERED, true)) {
+            return self::ok();
         }
-        if (($argv[0] ?? '') !== 'sudo' || ($argv[1] ?? '') !== 'test') {
+        if (LocalRoot::action($cmd) === 'files.existingRealPaths') {
+            return self::realPaths(LocalRoot::values($cmd));
+        }
+        $argv = LocalRoot::plain($cmd);
+        if (($argv[0] ?? '') !== 'test') {
             return self::ok();
         }
 
-        $exists = match ($argv[2] ?? '') {
-            '-f' => is_file($argv[3] ?? ''),
-            '-d' => is_dir($argv[3] ?? ''),
-            '-e' => file_exists($argv[3] ?? ''),
+        $exists = match ($argv[1] ?? '') {
+            '-f' => is_file($argv[2] ?? ''),
+            '-d' => is_dir($argv[2] ?? ''),
+            '-e' => file_exists($argv[2] ?? ''),
             default => false,
         };
 

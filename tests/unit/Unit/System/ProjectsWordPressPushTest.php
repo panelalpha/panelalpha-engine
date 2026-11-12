@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project;
 use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Dind\HeldImage;
@@ -11,11 +12,13 @@ use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Projects;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Tables;
 use Mockery;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\PhpHosting\WordPress\FakeWordPressSite;
 
@@ -52,10 +55,7 @@ class ProjectsWordPressPushTest extends TestCase
         $this->projects(['live' => $live, 'stg' => $staging])->pushToApp('stg', 'live');
 
         $config = '/shop.example/public_html/wp-config.php';
-        $keep = [
-            'sudo', 'setpriv', '--reuid', '2001', '--regid', '2002', '--clear-groups',
-            'cp', '-P', '--remove-destination', "{$this->root}/live/.pre-push{$config}", "{$this->root}/live{$config}",
-        ];
+        $keep = Privileged::account()->copyReplacingAsAccount(2001, 2002, "{$this->root}/live/.pre-push{$config}", "{$this->root}/live{$config}");
         $this->assertContains($keep, $this->commands);
         $this->assertGreaterThan(
             array_search(['fixPermissions'], $this->commands, true),
@@ -201,6 +201,11 @@ class ProjectsWordPressPushTest extends TestCase
             /** @param list<list<string>> $commands */
             public function __construct(private string $root, private array &$commands) {}
 
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
+
             public function project(User $model): Project
             {
                 return new class($this->root.'/'.$model->username, $this->commands) extends Project
@@ -256,7 +261,9 @@ class ProjectsWordPressPushTest extends TestCase
 
                     public function dumpToGzip(string $name, string $dest, ?string $table = null): void {}
 
-                    public function runSitesDbScript(string $script, string $failurePrefix): void {}
+                    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void {}
+
+                    public function dropTableInSitesDb(string $database, string $table): void {}
 
                     public function tables(): Tables
                     {
@@ -280,11 +287,12 @@ class ProjectsWordPressPushTest extends TestCase
             {
                 $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
                 $this->commands[] = $argv;
-                $path = (string) end($argv);
-                $code = match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => is_dir($path) ? 0 : 1,
-                    ['sudo', 'test', '-e'] => file_exists($path) ? 0 : 1,
-                    ['sudo', 'test', '-L'] => is_link($path) ? 0 : 1,
+                $plain = is_array($cmd) && LocalRoot::isRequest($argv) ? LocalRoot::plain($argv) : $argv;
+                $path = (string) end($plain);
+                $code = match (array_slice($plain, 0, 2)) {
+                    ['test', '-d'] => is_dir($path) ? 0 : 1,
+                    ['test', '-e'] => file_exists($path) ? 0 : 1,
+                    ['test', '-L'] => is_link($path) ? 0 : 1,
                     default => 0,
                 };
 

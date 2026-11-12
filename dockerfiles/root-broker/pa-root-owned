@@ -1,0 +1,25 @@
+#!/bin/sh
+# Succeeds when each absolute path, and every directory on the way to it, is root's, no symlink and writable by no
+# one else.
+for path in "$@"; do
+    case $path in
+    /*) current=$path ;;
+    *)
+        echo "pa-root-owned: '$path' is not an absolute path" >&2
+        exit 1
+        ;;
+    esac
+    while :; do
+        if [ -L "$current" ]; then
+            echo "pa-root-owned: '$current' is a symlink" >&2
+            exit 1
+        fi
+        owner=$(stat -c %u -- "$current") && mode=$(stat -c %a -- "$current") || exit 1
+        if [ "$owner" != 0 ] || [ $((0$mode & 022)) -ne 0 ]; then
+            echo "pa-root-owned: '$current' could be written by someone other than root" >&2
+            exit 1
+        fi
+        [ "$current" = / ] && break
+        current=$(dirname -- "$current")
+    done
+done

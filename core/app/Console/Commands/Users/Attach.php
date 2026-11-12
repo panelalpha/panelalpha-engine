@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Users;
 
 use App\Models\User;
+use App\System\Privileged;
 use Illuminate\Console\Command;
 
 class Attach extends Command
@@ -54,27 +55,13 @@ class Attach extends Command
 
         $runAs = $this->option('u');
 
-        $cmd = ['sudo', 'docker', 'compose', '-f', $composeFile, 'exec'];
-
-        if (is_string($runAs) && $runAs !== '') {
-            $cmd[] = '-u';
-            $cmd[] = $runAs;
-            $cmd[] = '-w';
-            $cmd[] = $workDir;
-            $cmd[] = $serviceName;
-            $cmd[] = 'bash';
-        } else {
+        if (! is_string($runAs) || $runAs === '') {
             $uid = $user->getUid();
             $gid = $user->getGid();
-            if ($uid !== null && $gid !== null) {
-                $cmd[] = '-u';
-                $cmd[] = "{$uid}:{$gid}";
-            }
-            $cmd[] = '-w';
-            $cmd[] = $workDir;
-            $cmd[] = $serviceName;
-            $cmd[] = 'bash';
+            $runAs = $uid !== null && $gid !== null ? "{$uid}:{$gid}" : null;
         }
+
+        $cmd = Privileged::compose($composeFile)->execWithTty($serviceName, ['bash'], user: $runAs, workDir: $workDir);
 
         $this->line("Attaching to <info>{$serviceName}</info> for user <info>{$username}</info> (workdir: {$workDir})...");
 

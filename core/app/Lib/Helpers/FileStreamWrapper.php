@@ -2,6 +2,8 @@
 
 namespace App\Lib\Helpers;
 
+use App\System\Privileged;
+
 class FileStreamWrapper
 {
     /**
@@ -13,19 +15,17 @@ class FileStreamWrapper
     public $context;
 
     /**
-     * The directory every stream opened through this wrapper must resolve
-     * into, symlinks followed. Null means unconfined. Process-wide because
-     * BinaryFileResponse opens the file itself, without a stream context.
+     * The directory every stream must resolve into, a symlink followed only while it stays inside. Process-wide
+     * because BinaryFileResponse opens the file itself, without a stream context.
      */
     private static ?string $root = null;
 
     /**
-     * What the helper runs under. confineTo() sets the account's setpriv
-     * prefix, so a read sees only what the account itself can.
+     * The helper's command prefix from confineToAccount(); without it no stream opens.
      *
-     * @var list<string>
+     * @var list<string>|null
      */
-    private static array $runAs = ['sudo'];
+    private static ?array $command = null;
 
     /**
      * @var resource|false|null
@@ -39,32 +39,42 @@ class FileStreamWrapper
 
     public static function register(): void
     {
-        if (! in_array('sudophp', stream_get_wrappers())) {
-            stream_wrapper_register('sudophp', __CLASS__);
+        if (! in_array('rootfile', stream_get_wrappers())) {
+            stream_wrapper_register('rootfile', __CLASS__);
         }
     }
 
     /**
-     * Refuse any path whose real path (checked by the helper, so planted symlinks count) is not under
-     * $root. $runAs is the helper's command prefix, required so reading as root is never a default.
-     *
-     * @param  list<string>  $runAs
+     * Refuse a path that resolves outside $root, symlinks included, and read as the account $uid:$gid.
      */
-    public static function confineTo(?string $root, array $runAs): void
+    public static function confineToAccount(string $root, int $uid, int $gid): void
     {
-        self::$root = $root === null ? null : rtrim($root, '/');
-        self::$runAs = $runAs;
+        self::$root = rtrim($root, '/');
+        self::$command = Privileged::account()->fileStream($uid, $gid);
+    }
+
+    public static function unconfine(): void
+    {
+        self::$root = null;
+        self::$command = null;
     }
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool
     {
+        $command = $this->helperCommand();
+        if ($command === null) {
+            trigger_error('rootfile stream refused: no account to read as', E_USER_WARNING);
+
+            return false;
+        }
+
         $desc = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $this->proc = proc_open($this->helperArgv($mode, $path), $desc, $this->pipes);
+        $this->proc = proc_open($this->helperArgv($command, $mode, $path), $desc, $this->pipes);
         if (! is_resource($this->proc)) {
             return false;
         }
@@ -78,19 +88,13 @@ class FileStreamWrapper
         return true;
     }
 
-    /** @return list<string> */
-    private function helperArgv(string $mode, string $path): array
+    /**
+     * @param  list<string>  $command
+     * @return list<string>
+     */
+    private function helperArgv(array $command, string $mode, string $path): array
     {
-        $cmd = [
-            ...$this->helperCommand(),
-            $mode,
-            preg_replace('#^sudophp://#', '', $path),
-        ];
-        if (self::$root !== null) {
-            $cmd[] = self::$root;
-        }
-
-        return $cmd;
+        return [...$command, $mode, preg_replace('#^rootfile://#', '', $path), (string) self::$root];
     }
 
     private function abandonWithWarning(): void
@@ -98,7 +102,7 @@ class FileStreamWrapper
         $error = stream_get_contents($this->pipes[2]);
         $this->cleanup();
         trigger_error(
-            'sudophp stream failed: '.trim($error),
+            'rootfile stream failed: '.trim($error),
             E_USER_WARNING
         );
     }
@@ -243,9 +247,9 @@ class FileStreamWrapper
         return false;
     }
 
-    /** @return list<string> */
-    protected function helperCommand(): array
+    /** @return list<string>|null */
+    protected function helperCommand(): ?array
     {
-        return [...self::$runAs, 'php', __DIR__.'/file_stream.php'];
+        return self::$command;
     }
 }

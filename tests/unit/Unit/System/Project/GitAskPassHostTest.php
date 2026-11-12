@@ -7,6 +7,7 @@ use App\System as EngineSystem;
 use App\System\Project\Git as ProjectGit;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * The token helper a work tree installs answers only its checkout's remote
@@ -110,8 +111,9 @@ final class AskPassCapturingSystem extends EngineSystem
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
     {
         $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
-        if (($argv[1] ?? '') === 'install' && str_contains((string) ($argv[5] ?? ''), 'askpass')) {
-            $this->script = (string) file_get_contents($argv[4]);
+        [, $from, $to] = LocalRoot::action($argv) === 'files.install' ? LocalRoot::values($argv) : [null, null, ''];
+        if (str_contains((string) $to, 'askpass')) {
+            $this->script = (string) file_get_contents($from);
         }
 
         return '';

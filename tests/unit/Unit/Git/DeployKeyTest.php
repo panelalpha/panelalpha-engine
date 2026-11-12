@@ -44,13 +44,22 @@ class DeployKeyTest extends DeployHookTestCase
         ];
     }
 
+    public static function setUpBeforeClass(): void
+    {
+        parent::setUpBeforeClass();
+
+        if (trim((string) shell_exec('command -v ssh-keygen')) === '') {
+            self::markTestSkipped('ssh-keygen is not installed here.');
+        }
+        if (posix_getpwuid(posix_geteuid()) === false) {
+            self::markTestSkipped('ssh-keygen needs a passwd entry for uid ' . posix_geteuid() . '.');
+        }
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        if (trim((string) shell_exec('command -v ssh-keygen')) === '') {
-            $this->markTestSkipped('ssh-keygen is not installed here.');
-        }
         $this->withoutMiddleware();
         config(['app.debug' => false]);
         $this->fakeGitHost();
@@ -286,7 +295,7 @@ class DeployKeyTest extends DeployHookTestCase
 
         $message = (string) $response->json('problems.0.message');
         $this->assertStringContainsString('This project has no deploy key', $message);
-        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $message);
+        $this->assertSame(['create_deploy_key', 'connect_repository'], array_values(array_unique(array_column($response->json('problems.0.hints'), 'action'))));
         $this->assertStringNotContainsString('does not match the one pinned', $message);
         $this->assertFalse($this->called('GIT_SSH_COMMAND'));
     }

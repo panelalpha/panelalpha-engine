@@ -4,14 +4,12 @@ namespace Tests\Unit\Helpers;
 
 use App\Lib\Helpers\FileStreamWrapper;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 use Tests\Unit\Files\UnprivilegedFileStreamWrapper;
 
 /**
- * The file download helper runs as root and follows symlinks. Given a root
- * directory it must refuse anything that resolves outside it, however the
- * path was spelled.
- *
- * The helper is exercised directly (no sudo) so this runs anywhere.
+ * The file download helper follows symlinks only while they stay inside its
+ * root, however the path was spelled; it runs through pa-root-local.
  */
 class FileStreamConfinementTest extends TestCase
 {
@@ -81,17 +79,24 @@ class FileStreamConfinementTest extends TestCase
     /** Leaving out who reads must not mean root. */
     public function test_confining_names_who_the_helper_runs_as(): void
     {
-        $runAs = (new \ReflectionMethod(FileStreamWrapper::class, 'confineTo'))->getParameters()[1];
-
-        $this->assertFalse($runAs->isOptional());
+        $this->assertFalse(method_exists(FileStreamWrapper::class, 'confineTo'));
+        $this->assertSame(['root', 'uid', 'gid'], array_map(
+            static fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+            (new \ReflectionMethod(FileStreamWrapper::class, 'confineToAccount'))->getParameters(),
+        ));
     }
 
-    public function test_is_unconfined_without_a_root(): void
+    public function test_nothing_opens_before_the_stream_is_confined_to_an_account(): void
     {
-        [$code, $out] = $this->open($this->dir . '/home/acme/shadow-link', root: null);
+        UnprivilegedFileStreamWrapper::install();
 
-        $this->assertSame(0, $code);
-        $this->assertSame('root:*:', $out);
+        try {
+            $this->assertFalse(@fopen('rootfile://' . $this->dir . '/home/acme/public_html/index.php', 'r'));
+            $this->assertFalse(is_file('rootfile://' . $this->dir . '/home/acme/public_html/index.php'));
+            $this->assertSame(0, UnprivilegedFileStreamWrapper::$helperStarts);
+        } finally {
+            UnprivilegedFileStreamWrapper::uninstall();
+        }
     }
 
     /** The engine's PHP user cannot see into a directory only the account can enter; the helper can. */
@@ -99,15 +104,15 @@ class FileStreamConfinementTest extends TestCase
     {
         $root = $this->dir . '/home/acme';
         UnprivilegedFileStreamWrapper::install();
-        FileStreamWrapper::confineTo($root, []);
+        FileStreamWrapper::confineToAccount($root, 1000, 1000);
         clearstatcache();
 
         try {
-            $this->assertTrue(is_file('sudophp://' . $root . '/public_html/index.php'));
-            $this->assertSame(5, filesize('sudophp://' . $root . '/own-link'));
-            $this->assertFalse(is_file('sudophp://' . $root . '/shadow-link'));
-            $this->assertFalse(file_exists('sudophp://' . $root . '/victim-link/secret.txt'));
-            $this->assertFalse(file_exists('sudophp://' . $root . '/../victim/secret.txt'));
+            $this->assertTrue(is_file('rootfile://' . $root . '/public_html/index.php'));
+            $this->assertSame(5, filesize('rootfile://' . $root . '/own-link'));
+            $this->assertFalse(is_file('rootfile://' . $root . '/shadow-link'));
+            $this->assertFalse(file_exists('rootfile://' . $root . '/victim-link/secret.txt'));
+            $this->assertFalse(file_exists('rootfile://' . $root . '/../victim/secret.txt'));
             $this->assertSame(5, UnprivilegedFileStreamWrapper::$helperStarts, 'every answer came from the helper');
         } finally {
             UnprivilegedFileStreamWrapper::uninstall();
@@ -119,14 +124,9 @@ class FileStreamConfinementTest extends TestCase
      *
      * @return array{int, string, string} exit code, file contents, stderr
      */
-    private function open(string $path, ?string $root = 'default'): array
+    private function open(string $path): array
     {
-        $cmd = [PHP_BINARY, dirname(__DIR__, 4) . '/core/app/Lib/Helpers/file_stream.php', 'r', $path];
-        if ($root === 'default') {
-            $cmd[] = $this->dir . '/home/acme';
-        } elseif ($root !== null) {
-            $cmd[] = $root;
-        }
+        $cmd = [LocalRoot::client(), 'account.fileStream', '--', '1000', '1000', 'r', $path, $this->dir . '/home/acme'];
 
         $proc = proc_open($cmd, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
         $this->assertIsResource($proc);

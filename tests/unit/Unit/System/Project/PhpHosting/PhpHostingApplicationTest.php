@@ -5,15 +5,17 @@ namespace Tests\Unit\System\Project\PhpHosting;
 use App\Models\Domain;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind\App as DindApp;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
 use App\System\Project\PhpHosting\Services\RunnerServiceManager;
+use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Services\Webserver;
 use Mockery;
 use PHPUnit\Framework\TestCase;
-use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
+use Tests\Support\LocalRoot;
 
 class PhpHostingApplicationTest extends TestCase
 {
@@ -84,24 +86,16 @@ class PhpHostingApplicationTest extends TestCase
 
         $this->assertCount(1, $system->processJournal);
         $this->assertSame(
-            [
-                'sudo',
-                'docker',
-                'compose',
-                '-f',
-                $project->composeFilePath(),
-                'exec',
-                '-T',
-                'php',
+            Privileged::accountContainer('alice')->exec([
                 'bash',
                 '-c',
                 FpmStack::restartScript(new RunnerServiceManager($project), '8.1'),
-            ],
+            ]),
             $system->processJournal[0]
         );
     }
 
-    public function test_run_wp_cli_builds_compose_exec_command(): void
+    public function test_run_wp_cli_execs_in_the_php_container_as_the_account(): void
     {
         $system = $this->system();
         $user = $this->userModel();
@@ -115,14 +109,16 @@ class PhpHostingApplicationTest extends TestCase
 
         $this->assertSame(0, $result['exit_code']);
         $this->assertSame('wp-out', $result['stdout']);
-        $command = $system->processJournal[0];
-        $this->assertSame('/usr/bin/php8.3', $command[10]);
-        $this->assertSame('-d', $command[11]);
-        $this->assertSame('memory_limit=384M', $command[12]);
-        $this->assertSame('/opt/wp-cli.phar', $command[13]);
-        $this->assertSame('--exec='.MustUsePlugin::MEND_ON_LOAD, $command[14], 'an old must-use plugin is mended first');
-        $this->assertSame('plugin', $command[15]);
-        $this->assertSame('list', $command[16]);
+        $this->assertSame('account-container.exec', LocalRoot::action($system->processJournal[0]));
+        $command = LocalRoot::values($system->processJournal[0]);
+        $this->assertSame(['alice', '1001:1001', '', '0'], array_slice($command, 0, 4));
+        $this->assertSame('/usr/bin/php8.3', $command[4]);
+        $this->assertSame('-d', $command[5]);
+        $this->assertSame('memory_limit=384M', $command[6]);
+        $this->assertSame('/opt/wp-cli.phar', $command[7]);
+        $this->assertSame('--exec='.MustUsePlugin::MEND_ON_LOAD, $command[8], 'an old must-use plugin is mended first');
+        $this->assertSame('plugin', $command[9]);
+        $this->assertSame('list', $command[10]);
     }
 
     /** A --path that names a subdirectory of a document root still picks that domain's PHP. */

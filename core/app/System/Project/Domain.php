@@ -17,6 +17,9 @@ use App\Models\ProxyRule;
 use App\Models\Setting;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\AccountFiles;
+use App\System\Privileged\Exchange;
 use App\System\Project as UserProject;
 use App\System\Services\Webserver\NginxProxy;
 use App\System\Services\Webserver\WebserverInterface;
@@ -25,6 +28,9 @@ use Illuminate\Support\Str;
 
 class Domain implements IssuableDomain
 {
+    /** OpenSSL refuses a longer subject CN (RFC 5280's ub-common-name). */
+    private const COMMON_NAME_MAX = 64;
+
     public function __construct(
         private readonly UserProject $project,
         private readonly DomainModel $model,
@@ -48,6 +54,7 @@ class Domain implements IssuableDomain
             }
 
             $this->createDomainRootDir();
+            $this->routeToApp();
 
             $this->project->createDomainConfig($this->model);
             $this->project->reloadWebserver();
@@ -58,6 +65,19 @@ class Domain implements IssuableDomain
         } catch (\Exception $e) {
             $this->deleteAfterFailedCreate();
             throw $e;
+        }
+    }
+
+    /** A container project's new domain answers with the app, on the port its other domains are served from. */
+    private function routeToApp(): void
+    {
+        $user = $this->userModel();
+        if ($user->getTemplate() !== 'dind') {
+            return;
+        }
+        $upstream = ProxyRule::generatedUpstreamOf($user->username);
+        if ($upstream !== null) {
+            ProxyRule::ensureGeneratedHttpPair($user->username, $this->model->domain, $upstream['port'], $upstream['protocol']);
         }
     }
 
@@ -92,7 +112,19 @@ class Domain implements IssuableDomain
         $this->project->deleteDomainConfig($this->model->domain);
         $this->project->reloadWebserver();
 
+        $this->deleteCertificates();
         (new HttpAcmeChallengeStore($this->system()))->deleteDomainDir($this->model->domain);
+    }
+
+    /** The vhosts are gone, so the certificate material the engine installed for this name has no reader left. */
+    private function deleteCertificates(): void
+    {
+        $this->system()->exec(Privileged::files()->removeIfExists(
+            $this->certFile('crt'),
+            $this->certFile('key'),
+            $this->certFile('ca'),
+            $this->certFile('pem'),
+        ));
     }
 
     private function tearDownTunnel(): void
@@ -131,43 +163,49 @@ class Domain implements IssuableDomain
 
     public function createDomainRootDir(): void
     {
-        $user = $this->userModel();
-        $owner = "{$user->getUid()}:{$user->getGid()}";
+        [$uid, $gid] = $this->userModel()->linuxIds();
 
         $system = $this->system();
         $home = $system->projectHomeDirPath($this->project->username());
         $domainDir = $home.'/'.$this->model->domain;
         $domainRootDir = $home.$this->model->getDocumentRoot();
 
-        $this->makeOwnedDir($domainDir, $owner);
+        $this->makeAccountDir($home, $domainDir, $uid, $gid);
 
         $documentRootMissing = ! $system->filesystem()->isDir($domainRootDir);
-        $this->makeOwnedDir($domainRootDir, $owner);
+        $this->makeAccountDir($home, $domainRootDir, $uid, $gid);
 
         if ($documentRootMissing) {
-            $this->fillDocumentRootFromTemplate($domainRootDir, $owner);
+            $this->fillDocumentRootFromTemplate($domainRootDir, Privileged::accountFiles($uid, $gid));
         }
     }
 
-    private function makeOwnedDir(string $dir, string $owner): void
+    /**
+     * Root makes only the entry in the root-owned home and the account the rest, so a planted link reaches only its files.
+     */
+    private function makeAccountDir(string $home, string $dir, int $uid, int $gid): void
     {
-        $this->system()->exec(['sudo', 'mkdir', '-p', $dir]);
-        $this->system()->exec(['sudo', 'chown', $owner, $dir]);
+        $entry = HomeEntry::under($home, substr($dir, strlen($home)));
+        if ($entry === null) {
+            return;
+        }
+        $this->system()->exec(Privileged::scripts()->makeHomeEntry($entry, '0755', $uid.':'.$gid));
+        $this->system()->exec(Privileged::accountFiles($uid, $gid)->makeDirectories($dir));
     }
 
-    private function fillDocumentRootFromTemplate(string $domainRootDir, string $owner): void
+    private function fillDocumentRootFromTemplate(string $domainRootDir, AccountFiles $account): void
     {
         $templateVars = [
             'user' => $this->userModel()->username,
             'domain' => $this->model->domain,
         ];
-        $this->system()->filesystem()->makeDirFromTemplate(
+        $this->system()->filesystem()->makeDirFromTemplateAsAccount(
+            $account,
             $domainRootDir,
             $this->documentRootTemplateDir(),
             $templateVars,
-            $owner
         );
-        $this->system()->exec(['sudo', 'chmod', '-R', 'ugo-rwx,u+rwX,go+rX', $domainRootDir]);
+        $this->system()->exec($account->changeModeRecursively('ugo-rwx,u+rwX,go+rX', $domainRootDir));
     }
 
     /** The project template's `public_html`, or the engine's default site when it ships none. */
@@ -215,14 +253,14 @@ class Domain implements IssuableDomain
         $pemFile = $this->certFile('pem');
         $keyFile = $this->certFile('key');
 
-        $system->exec(['sudo', 'mkdir', '-p', $certDir]);
-        $system->exec(['sudo', 'cp', $serverCertFile, $certFile]);
-        $system->exec(['sudo', 'cp', $serverCertFile, $caFile]);
-        $system->exec(['sudo', 'cp', $serverCertFile, $pemFile]);
-        $system->exec(['sudo', 'cp', $serverKeyFile, $keyFile]);
-        $system->exec(['sudo', 'chmod', '600', $keyFile]);
-        $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
-        $system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $certDir]);
+        $system->exec(Privileged::files()->makeDirectories($certDir));
+        $system->exec(Privileged::files()->copy($serverCertFile, $certFile));
+        $system->exec(Privileged::files()->copy($serverCertFile, $caFile));
+        $system->exec(Privileged::files()->copy($serverCertFile, $pemFile));
+        $system->exec(Privileged::files()->copy($serverKeyFile, $keyFile));
+        $system->exec(Privileged::files()->changeMode('600', $keyFile));
+        $system->exec(Privileged::files()->changeMode('a+r', $certFile, $caFile, $pemFile));
+        $system->exec(Privileged::files()->changeOwnerRecursively('www-data:www-data', $certDir));
     }
 
     public function generateSelfSignedCertificate(): void
@@ -233,31 +271,31 @@ class Domain implements IssuableDomain
         $caFile = $this->certFile('ca');
         $pemFile = $this->certFile('pem');
 
-        $this->system()->exec(['sudo', 'mkdir', '-p', $certDir]);
+        $this->system()->exec(Privileged::files()->makeDirectories($certDir));
         $this->system()->exec($this->selfSignCommand($keyFile, $certFile));
-        $this->system()->exec(['sudo', 'chmod', '600', $certFile]);
-        $this->system()->exec(['sudo', 'cp', $certFile, $caFile]);
-        $this->system()->exec(['sudo', 'cp', $certFile, $pemFile]);
-        $this->system()->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
+        $this->system()->exec(Privileged::files()->changeMode('600', $certFile));
+        $this->system()->exec(Privileged::files()->copy($certFile, $caFile));
+        $this->system()->exec(Privileged::files()->copy($certFile, $pemFile));
+        $this->system()->exec(Privileged::files()->changeMode('a+r', $certFile, $caFile, $pemFile));
     }
 
     /**
+     * The name is in subjectAltName, which clients match and which has no length
+     * limit; it is the CN too only when it fits there.
+     *
      * @return list<string>
      */
     private function selfSignCommand(string $keyFile, string $certFile): array
     {
-        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org/CN='.$this->model->domain;
+        return Privileged::account()->selfSignedCertificate($keyFile, $certFile, $this->selfSignSubject(), $this->model->domain);
+    }
 
-        return [
-            'sudo', 'openssl', 'req', '-x509',
-            '-newkey', 'rsa:4096',
-            '-keyout', $keyFile,
-            '-out', $certFile,
-            '-sha256',
-            '-days', '365',
-            '-nodes',
-            '-subj', $subject,
-        ];
+    private function selfSignSubject(): string
+    {
+        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org';
+        $name = $this->model->domain;
+
+        return strlen($name) <= self::COMMON_NAME_MAX ? $subject.'/CN='.$name : $subject;
     }
 
     public function hasSslCertificate(): bool
@@ -345,22 +383,22 @@ class Domain implements IssuableDomain
         $pemFile = $this->certFile('pem');
 
         $system = $this->system();
-        $system->exec(['sudo', 'mkdir', '-p', $this->certDir()]);
+        $system->exec(Privileged::files()->makeDirectories($this->certDir()));
 
         $this->installCertFile(trim($cert).PHP_EOL, $certFile);
         $this->installCertFile(trim($key).PHP_EOL, $keyFile);
         $this->installCertFile(trim($ca).PHP_EOL, $caFile);
         $this->installCertFile(trim($cert).PHP_EOL.trim($ca).PHP_EOL, $pemFile);
-        $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
-        $system->exec(['sudo', 'chmod', '600', $keyFile]);
+        $system->exec(Privileged::files()->changeMode('a+r', $certFile, $caFile, $pemFile));
+        $system->exec(Privileged::files()->changeMode('600', $keyFile));
     }
 
-    /** Stages the contents in a temp file the engine can write, then copies it in with sudo. */
+    /** Stages the contents in a temp file the engine can write, then copies it in as root. */
     private function installCertFile(string $contents, string $target): void
     {
-        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
+        $tmpFile = Exchange::file('tmp_');
         file_put_contents($tmpFile, $contents);
-        $this->system()->exec(['sudo', 'cp', $tmpFile, $target]);
+        $this->system()->exec(Privileged::files()->copy($tmpFile, $target));
         unlink($tmpFile);
     }
 
@@ -510,7 +548,7 @@ class Domain implements IssuableDomain
     public function deleteApacheConfig(): void
     {
         $domainConfigFile = "{$this->projectDirPath()}/apache-sites/{$this->model->domain}.conf";
-        $this->system()->exec(['sudo', 'rm', $domainConfigFile]);
+        $this->system()->exec(Privileged::files()->remove($domainConfigFile));
     }
 
     public function deleteNginxConfig(): void
@@ -581,7 +619,7 @@ class Domain implements IssuableDomain
             return;
         }
 
-        $process = $this->system()->runProcess(['sudo', 'find', $certDir, '-maxdepth', '1', '-iname', $fileName]);
+        $process = $this->system()->runProcess(Privileged::files()->findInDirectoryIgnoringCase($certDir, $fileName));
         if ($process->getExitCode() !== 0) {
             return;
         }
@@ -592,7 +630,7 @@ class Domain implements IssuableDomain
         }
 
         try {
-            $this->system()->exec(['sudo', 'mv', $found, $expected]);
+            $this->system()->exec(Privileged::files()->move($found, $expected));
         } catch (\Exception) {
         }
     }

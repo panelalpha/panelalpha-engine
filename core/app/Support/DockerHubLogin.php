@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\System;
+use App\System\Privileged;
 use GuzzleHttp\Client;
 
 /**
@@ -148,7 +149,7 @@ final class DockerHubLogin
     {
         try {
             $env = (string) $this->system->exec(
-                ['sudo', 'docker', 'inspect', '-f', '{{if .State.Running}}{{range .Config.Env}}{{println .}}{{end}}{{end}}', self::CONTAINER],
+                Privileged::docker()->runningEnvironment(self::CONTAINER),
                 [],
                 30
             );
@@ -176,7 +177,7 @@ final class DockerHubLogin
     {
         try {
             $mirrors = (string) $this->system->exec(
-                ['sudo', 'docker', 'info', '--format', '{{json .RegistryConfig.Mirrors}}'],
+                Privileged::docker()->registryMirrors(),
                 [],
                 30
             );
@@ -239,7 +240,7 @@ final class DockerHubLogin
         }
 
         $this->system->exec(
-            ['sudo', 'docker', 'compose', '--project-directory', $dir, 'up', '-d', '--no-deps', 'registry-proxy'],
+            Privileged::engineCompose($dir)->upWithoutDependencies('registry-proxy'),
             [],
             300
         );

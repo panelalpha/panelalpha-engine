@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands\Testing;
 
-use App\Models\Setting;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\App;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -16,7 +16,6 @@ use SebastianBergmann\CodeCoverage\Filter;
 use SebastianBergmann\CodeCoverage\Report\Html\Facade as HtmlReport;
 use SebastianBergmann\CodeCoverage\StaticAnalysis\FileAnalyser;
 use SebastianBergmann\CodeCoverage\StaticAnalysis\ParsingSourceAnalyser;
-use Symfony\Component\Process\Process;
 
 class Coverage extends Command
 {
@@ -24,9 +23,6 @@ class Coverage extends Command
                             {--start-recording : Enable coverage recording}
                             {--stop-recording : Stop coverage recording}
                             {--generate-html-report : Generate merged HTML report}
-                            {--serve-html-report : Serve generated HTML report}
-                            {--host= : Host to serve the report on}
-                            {--port= : Port to serve the report on}
                             {--cleanup : Remove all temporary files related to the API token}
                             {--api-token-id=}';
 
@@ -45,7 +41,6 @@ class Coverage extends Command
         ! empty($this->option('start-recording')) && $argc++;
         ! empty($this->option('stop-recording')) && $argc++;
         ! empty($this->option('generate-html-report')) && $argc++;
-        ! empty($this->option('serve-html-report')) && $argc++;
         ! empty($this->option('cleanup')) && $argc++;
 
         if ($argc === 0) {
@@ -83,16 +78,16 @@ class Coverage extends Command
         $system = new System;
 
         if ($this->option('start-recording')) {
-            $system->exec(['sudo', 'mkdir', '-p', $dir.'/dumps']);
-            $system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $dir.'/dumps']);
-            $system->exec(['sudo', 'touch', $dir.'/recording']);
+            $system->exec(Privileged::files()->makeDirectories($dir.'/dumps'));
+            $system->exec(Privileged::files()->changeOwnerRecursively('www-data:www-data', $dir.'/dumps'));
+            $system->exec(Privileged::files()->touch($dir.'/recording'));
             $this->info("Started coverage recording for token {$tokenId}");
 
             return 0;
         }
 
         if ($this->option('stop-recording')) {
-            $system->exec(['sudo', 'rm', '-rf', $dir.'/recording']);
+            $system->exec(Privileged::files()->removeTree($dir.'/recording'));
             $this->info("Stopped coverage recording for token {$tokenId}");
 
             return 0;
@@ -100,58 +95,13 @@ class Coverage extends Command
 
         if ($this->option('generate-html-report')) {
             $this->generateHtmlReport($dir);
-            $this->info("HTML report generated for token {$tokenId}");
+            $this->info("HTML report generated for token {$tokenId}: ".config('testing.coverage_host_dir')."/{$tokenId}/html-report/index.html on the host");
 
             return 0;
         }
 
-        if ($this->option('serve-html-report')) {
-            if (! is_file($dir.'/html-report/index.html')) {
-                $this->error('HTML report is not yet generated');
-
-                return 1;
-            }
-
-            $host = $this->option('host') ?? Setting::get('default_ipv4');
-            assert(is_string($host));
-            $port = $this->option('port') ?? '8000';
-            assert(is_string($port));
-
-            $this->info("Serving HTML coverage report at http://{$host}:{$port} ...");
-            $process = new Process([
-                'sudo',
-                'nsenter',
-                '--target',
-                '1',
-                '--all',
-                'docker',
-                'run',
-                '--rm',
-                '-it',
-                '--network',
-                'host',
-                '-v',
-                config('testing.coverage_host_dir')."/{$tokenId}/html-report:/report",
-                'php:8.3',
-                'php',
-                '-S',
-                "{$host}:{$port}",
-                '-t',
-                '/report',
-            ]);
-
-            $process->setTty(true);
-            $process->setTimeout(null);
-            $process->run(function (string $type, string $buffer) {
-                echo $buffer;
-            });
-
-            // block until Ctrl+C:
-            $process->wait();
-        }
-
         if ($this->option('cleanup')) {
-            $system->exec(['sudo', 'rm', '-rf', $dir]);
+            $system->exec(Privileged::files()->removeTree($dir));
             $this->info("Removed files related to token {$tokenId}");
 
             return 0;

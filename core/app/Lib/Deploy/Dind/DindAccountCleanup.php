@@ -11,20 +11,25 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\ProjectCache;
 use App\Lib\Deploy\SafeName;
+use App\System\Privileged;
+use App\System\Privileged\Arguments;
+use App\System\Privileged\InvalidArgument;
 
 /**
- * Reclaim Docker-related disk when a DinD account is removed: host build cache,
- * legacy pa-nm-* volume and ~/docker, via nsenter pid 1, keeping what a sibling
- * account's compose file still declares.
+ * Reclaim Docker-related disk when a DinD account is removed (host build cache, legacy pa-nm-* volume,
+ * ~/docker) in the host's namespaces, keeping what a sibling account's compose file still declares.
  */
 class DindAccountCleanup
 {
     /**
+     * The requests that reclaim an account's Docker disk: its volume and sidecar images through the host's
+     * daemon, then its caches and ~/docker on disk.
+     *
      * @param  list<string>  $sidecarRefs  host images this account pulled that
      *                                     are safe to remove (already filtered)
-     * @return list<string>
+     * @return list<list<string>>
      */
-    public static function hostCleanupArgv(
+    public static function hostCleanupArgvs(
         string $username,
         string $homeDir,
         array $sidecarRefs = []
@@ -34,48 +39,50 @@ class DindAccountCleanup
             throw new \InvalidArgumentException('Refusing Docker cleanup outside /home/{user}');
         }
 
-        $volume = HostNodeBuild::nodeModulesVolumeName($username);
-        // One directory holds every cache this project accumulated; a new cache
-        // type is a name in ProjectCache::NAMES.
-        $projectCache = ProjectCache::dirFor($username);
-        $dockerDir = rtrim($homeDir, '/').'/docker';
-
-        // Pre-project-scoped directories, for an account deleted before it
-        // redeployed onto the current layout.
-        $legacy = array_map('escapeshellarg', ProjectCache::legacyDirsFor($username));
-
-        $script = 'docker volume rm -f '.escapeshellarg($volume).' 2>/dev/null || true; '
-            .'rm -rf '.escapeshellarg($projectCache)
-            .' '.implode(' ', $legacy)
-            .' '.escapeshellarg($dockerDir);
-
-        $rmi = [];
-        foreach ($sidecarRefs as $ref) {
-            if (is_string($ref) && ImageTransfer::isSafeImageRef($ref)) {
-                $rmi[] = escapeshellarg($ref);
-            }
-        }
-        // No -f: the daemon decides whether a stopped container still holds it.
-        if ($rmi !== []) {
-            $script .= '; docker rmi '.implode(' ', $rmi).' 2>/dev/null || true';
-        }
-
         return [
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-            'sh',
-            '-c',
-            $script,
+            Privileged::host()->removeAccountDockerStore(
+                HostNodeBuild::nodeModulesVolumeName($username),
+                self::safeImageRefs($sidecarRefs),
+            ),
+            Privileged::host()->removeAccountDockerFiles(
+                ProjectCache::dirFor($username),
+                ProjectCache::legacyDirsFor($username),
+                rtrim($homeDir, '/').'/docker',
+            ),
         ];
     }
 
     /**
-     * Every `image:` line the *other* accounts declare, so their shared host
-     * cache entry survives this deletion. Grep, not a YAML parse: this is a
-     * keep-list, where a stray match only skips an `rmi`.
+     * @param  list<string>  $refs
+     * @return list<string>
+     */
+    private static function safeImageRefs(array $refs): array
+    {
+        $safe = [];
+        foreach ($refs as $ref) {
+            if (is_string($ref) && ImageTransfer::isSafeImageRef($ref) && self::isRootImageArgument($ref)) {
+                $safe[] = $ref;
+            }
+        }
+
+        return $safe;
+    }
+
+    /** An uppercase repository is skipped, since the gateway refuses it. */
+    private static function isRootImageArgument(string $ref): bool
+    {
+        try {
+            Arguments::image($ref);
+
+            return true;
+        } catch (InvalidArgument) {
+            return false;
+        }
+    }
+
+    /**
+     * Every `image:` line the other accounts declare, so their shared host cache entry survives this
+     * deletion. Grep, not a YAML parse: in a keep-list a stray match only skips an `rmi`.
      *
      * @return list<string>
      */
@@ -89,31 +96,23 @@ class DindAccountCleanup
             throw new \InvalidArgumentException('Refusing to scan an unexpected home root');
         }
 
-        // The client's own candidate names (their compose file, still read for
-        // its `image:` lines by a compose-strategy project) plus the engine's
-        // reserved run-file names — a recipe deploy's images live only under
-        // the latter, never under a name the client would recognise.
-        $names = [
+        return Privileged::scripts()->composeImageLines($base, $excludeUsername, self::composeFileNames());
+    }
+
+    /**
+     * The client's own compose file names plus the engine's reserved run-file names, under which alone
+     * a recipe deploy's images live.
+     *
+     * @return list<string>
+     */
+    private static function composeFileNames(): array
+    {
+        return [
             ...ComposeFileInspector::COMPOSE_FILE_CANDIDATES,
             EngineArtifacts::RUN_COMPOSE,
             EngineArtifacts::RUN_COMPOSE_OVERRIDE,
             EngineArtifacts::RUN_CLIENT_OVERRIDE,
             EngineArtifacts::APP_CONFIG_COMPOSE,
-        ];
-        $globs = [];
-        foreach ($names as $candidate) {
-            $globs[] = escapeshellarg($base).'/*/project/'.$candidate;
-        }
-
-        return [
-            'sudo',
-            'sh',
-            '-c',
-            'for f in '.implode(' ', $globs).'; do '
-                .'case "$f" in '.escapeshellarg($base.'/'.$excludeUsername).'/*) continue ;; esac; '
-                .'[ -f "$f" ] || continue; '
-                .'grep -hE \'^[[:space:]]*image:[[:space:]]*[^[:space:]]\' "$f"; '
-                .'done 2>/dev/null || true',
         ];
     }
 
@@ -156,9 +155,8 @@ class DindAccountCleanup
     }
 
     /**
-     * Host images this account pulled as sidecars, excluding the prewarm
-     * catalog, PanelAlpha engine/app images, and anything a host container or
-     * another account's compose file still declares.
+     * Host images this account pulled as sidecars, except the prewarm catalog, PanelAlpha's own images,
+     * and anything a host container or another account's compose file still declares.
      *
      * @param  list<string>  $accountImageRefs
      * @param  list<string>  $stillNeeded
@@ -192,10 +190,8 @@ class DindAccountCleanup
     }
 
     /**
-     * Images that are host infrastructure, not this account's: the
-     * engine's published set, and everything it builds. Protected even when no
-     * account references them, since nothing publishes these and a rebuild
-     * costs 30-150s; their lifecycle is HostPrewarmPlan's, not teardown's.
+     * Host infrastructure, not this account's: the engine's published set and everything it builds, kept
+     * even unreferenced, as their lifecycle is HostPrewarmPlan's, not teardown's.
      */
     private static function isHostInfrastructure(string $ref): bool
     {
@@ -204,13 +200,13 @@ class DindAccountCleanup
     }
 
     /**
+     * Everything the caching system might have put on the host, not just the account-seed set.
+     *
      * @return array<string, true>
      */
     private static function protectedHostImages(): array
     {
         $refs = [];
-        // Everything the caching system might have put on the host, not just
-        // the account-seed set.
         foreach (ImageCatalog::all() as $seed) {
             $refs[$seed] = true;
         }

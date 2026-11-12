@@ -106,12 +106,12 @@ class FilesystemAccountHomeParentDirTest extends TestCase
 
     public function test_a_symlinked_directory_outside_the_homes_is_not_checked(): void
     {
-        mkdir($this->root.'/engine/real', 0777, true);
-        symlink($this->root.'/engine/real', $this->root.'/engine/current');
+        mkdir($this->root.'/users/alice/real', 0777, true);
+        symlink($this->root.'/users/alice/real', $this->root.'/users/alice/current');
 
-        $this->filesystem()->writeFileReplacingPath($this->root.'/engine/current/daemon.json', '{}');
+        $this->filesystem()->writeFileReplacingPath($this->root.'/users/alice/current/daemon.json', '{}');
 
-        $this->assertSame('{}', file_get_contents($this->root.'/engine/real/daemon.json'));
+        $this->assertSame('{}', file_get_contents($this->root.'/users/alice/real/daemon.json'));
     }
 
     private function assertRefused(string $path): void
@@ -124,7 +124,8 @@ class FilesystemAccountHomeParentDirTest extends TestCase
         }
         $this->assertSame("DB_PASSWORD=bob\n", file_get_contents($this->other.'/.env'));
         $this->assertSame(['.', '..', '.env'], scandir($this->other));
-        $this->assertSame(['.', '..'], scandir($this->homes.'/'.Filesystem::WRITE_STAGE_NAME));
+        $stage = $this->homes.'/'.Filesystem::WRITE_STAGE_NAME;
+        $this->assertSame([], is_dir($stage) ? array_values(array_diff(scandir($stage) ?: [], ['.', '..'])) : [], 'nothing staged is left behind');
     }
 
     private function filesystem(): Filesystem

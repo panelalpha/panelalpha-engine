@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use ReflectionClass;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -39,6 +40,7 @@ class PhpSettingsCommandsTest extends TestCase
         parent::setUp();
 
         $this->tmpRoot = sys_get_temp_dir() . '/pa-php-cli-' . bin2hex(random_bytes(4));
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot . '/engine', 'homes' => $this->tmpRoot . '/home']));
         mkdir($this->tmpRoot . '/engine/templates/user/default/project/php', 0777, true);
         file_put_contents(
             $this->tmpRoot . '/engine/templates/user/default/project/php/versions-available',
@@ -69,6 +71,7 @@ class PhpSettingsCommandsTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->setCurrentWebserver(null);
         Schema::dropIfExists('admins');
         Schema::dropIfExists('domains');
@@ -192,7 +195,7 @@ class PhpSettingsCommandsTest extends TestCase
         ]);
 
         $this->makeDocumentRoot('a.example');
-        $this->assertFails("Invalid INI.\n", 'domain:php-directives:set', [
+        $this->assertFails("Invalid INI: PHP would not read \"memory_limit=256M; dropped\" as written.\n", 'domain:php-directives:set', [
             'domain' => 'a.example', '--settings' => '{"memory_limit":"256M; dropped"}',
         ]);
         $this->assertFileDoesNotExist($this->userIni('a.example'));
@@ -325,7 +328,7 @@ class PhpSettingsCommandsTest extends TestCase
         $this->assertFails("Invalid value\n", 'project:php-directives:set', [
             'username' => 'alice', 'version' => '5.6', '--settings' => '{"memory_limit":"64M"}',
         ]);
-        $this->assertFails("Could not set php.ini directives. Invalid INI.\n", 'project:php-directives:set', [
+        $this->assertFails("Could not set php.ini directives. Invalid INI: PHP would not read \"memory_limit=256M; no\" as written.\n", 'project:php-directives:set', [
             'username' => 'alice', 'version' => '8.2', '--settings' => '{"memory_limit":"256M; no"}',
         ]);
         $this->assertCommand(1, "--settings values must be strings.\n", 'project:php-directives:set', [
@@ -511,11 +514,13 @@ class PhpSettingsCommandsTest extends TestCase
                 $this->processJournal[] = $args;
                 // A failing command changes nothing.
                 $applies = $this->failWith === null && is_array($cmd);
-                if ($applies && ($cmd[1] ?? null) === 'cp' && isset($cmd[2], $cmd[3])) {
-                    copy($cmd[2], $cmd[3]);
+                $request = $applies ? array_search(LocalRoot::CLIENT, $args, true) : false;
+                $command = $request === false ? [] : LocalRoot::plain(array_slice($args, $request));
+                if ($applies && ($args[0] ?? null) === 'bash' && ($command[0] ?? null) === 'sh' && isset($args[4])) {
+                    copy($args[4], $command[4]);
                 }
-                if ($applies && ($cmd[1] ?? null) === 'rm') {
-                    $path = $cmd[array_key_last($cmd)];
+                if ($applies && ($command[0] ?? null) === 'rm') {
+                    $path = $command[array_key_last($command)];
                     if (is_string($path) && is_file($path)) {
                         unlink($path);
                     }

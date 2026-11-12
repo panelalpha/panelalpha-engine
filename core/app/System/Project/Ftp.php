@@ -3,6 +3,8 @@
 namespace App\System\Project;
 
 use App\Exceptions\DockerErrorException;
+use App\System\Privileged;
+use App\System\Privileged\InvalidArgument;
 use App\System\Project as UserProject;
 use App\System\Services\PureFtpd;
 use Illuminate\Support\Facades\File;
@@ -42,9 +44,8 @@ class Ftp
     }
 
     /**
-     * The FTP container mounts every home, so the account is chrooted into
-     * this path: `..` or a symlink out of the home would be another tenant's.
-     * The stat cache is cleared first: in PHP-FPM a directory since swapped for a link would still resolve as the directory.
+     * The FTP container mounts every home, so `..` or a symlink out of this path would be another tenant's. The stat
+     * cache is cleared first: in PHP-FPM a directory since swapped for a link would still resolve as the directory.
      */
     public static function staysInside(string $home, string $directory, string $hostPath): bool
     {
@@ -73,7 +74,7 @@ class Ftp
         }
 
         $pureFtpd->usermodQuota($ftpUser, $quota);
-        $pureFtpd->exec(['pure-pw', 'mkdb']);
+        $pureFtpd->makeDatabase();
     }
 
     /**
@@ -126,15 +127,47 @@ class Ftp
      */
     public function diskUsage(string $directory): string
     {
-        $hostPath = $this->project->homeDirPath().'/'.ltrim($directory, '/');
+        $home = rtrim($this->project->homeDirPath(), '/');
+        $relative = ltrim($directory, '/');
+        $hostPath = $home.'/'.$relative;
+        [$uid, $gid] = $this->project->model()->linuxIds();
+        $account = Privileged::accountFiles($uid, $gid);
         $system = $this->project->system();
         if (! $system->filesystem()->directoryExists($hostPath)) {
-            $system->runProcess(['sudo', 'mkdir', '-p', $hostPath]);
+            $this->makeMissingDirectory($home, $relative, $hostPath, $uid, $gid);
 
             return '0';
         }
-        $result = $system->exec(['sudo', 'du', '-shm', $hostPath]);
+        $result = $system->exec($account->diskUsageInMegabytes($hostPath, ...$this->innerDaemonData($home)));
 
         return Str::before($result, "\t");
+    }
+
+    /**
+     * A DinD account's ~/docker is its inner daemon's data root; on PHP hosting it is the customer's own content.
+     *
+     * @return list<string>
+     */
+    private function innerDaemonData(string $home): array
+    {
+        return $this->project->runsInDind() ? [$home.'/docker'] : [];
+    }
+
+    /**
+     * Best effort. Root makes only the entry in the root-owned home and the account the rest, so the FTP user can write.
+     */
+    private function makeMissingDirectory(string $home, string $relative, string $hostPath, int $uid, int $gid): void
+    {
+        $system = $this->project->system();
+        $entry = HomeEntry::under($home, $relative);
+        if ($entry === null) {
+            return;
+        }
+        try {
+            $system->runProcess(Privileged::scripts()->makeHomeEntry($entry, '0755', $uid.':'.$gid));
+        } catch (InvalidArgument) {
+            return;
+        }
+        $system->runProcess(Privileged::accountFiles($uid, $gid)->makeDirectories($hostPath));
     }
 }

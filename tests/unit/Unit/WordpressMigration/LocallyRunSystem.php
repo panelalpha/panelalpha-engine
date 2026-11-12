@@ -4,22 +4,24 @@ namespace Tests\Unit\WordpressMigration;
 
 use App\System;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
- * Runs every command for real as the test user, with `sudo` and the
- * account's `sudo setpriv ...` prefix dropped, and records who each one
- * would have run as in production: root, the account, or the engine.
+ * Runs every command for real as the test user, broker requests through pa-root-local, and
+ * records who each one would have run as in production: root, the account, or the engine.
  */
 final class LocallyRunSystem extends System
 {
     /** @var list<array{as: string, argv: list<string>}> */
     public array $calls = [];
 
+    public function __construct(private string $homes) {}
+
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
         $argv = array_values((array) $cmd);
         $this->calls[] = ['as' => $this->runsAs($argv), 'argv' => $argv];
-        $process = new Process($this->withoutPrivilegeChange($argv));
+        $process = new Process($this->locally($argv), null, ['PA_ROOT_LOCAL_ROOTS' => json_encode(['homes' => $this->homes])]);
         $process->run();
 
         return $process;
@@ -34,29 +36,38 @@ final class LocallyRunSystem extends System
         ));
     }
 
+    /**
+     * The broker request in $argv, direct or fed on stdin.
+     *
+     * @param  list<string>  $argv
+     * @return ?list<string>
+     */
+    public static function request(array $argv): ?array
+    {
+        $at = array_search(LocalRoot::CLIENT, $argv, true);
+
+        return $at === false ? null : array_slice($argv, $at);
+    }
+
     /** @param list<string> $argv */
     private function runsAs(array $argv): string
     {
-        if (in_array('setpriv', $argv, true)) {
-            return 'account';
+        $request = self::request($argv);
+        if ($request === null) {
+            return 'engine';
         }
 
-        return $argv[0] === 'sudo' ? 'root' : 'engine';
+        return str_starts_with((string) LocalRoot::action($request), 'account.') ? 'account' : 'root';
     }
 
     /**
      * @param  list<string>  $argv
      * @return list<string>
      */
-    private function withoutPrivilegeChange(array $argv): array
+    private function locally(array $argv): array
     {
-        $setpriv = array_search('setpriv', $argv, true);
-        if ($setpriv !== false) {
-            array_splice($argv, $setpriv - 1, 7);
-        } elseif ($argv[0] === 'sudo') {
-            array_shift($argv);
-        }
+        $at = array_search(LocalRoot::CLIENT, $argv, true);
 
-        return array_values($argv);
+        return $at === false ? $argv : [...array_slice($argv, 0, $at), ...LocalRoot::argv(array_slice($argv, $at))];
     }
 }

@@ -7,6 +7,7 @@ use App\System\Filesystem;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class ChangeWebserverWebserverTest extends TestCase
 {
@@ -17,10 +18,14 @@ class ChangeWebserverWebserverTest extends TestCase
         parent::setUp();
         $this->logRoot = sys_get_temp_dir() . '/pa-change-ws-' . bin2hex(random_bytes(4));
         mkdir($this->logRoot, 0777, true);
+        mkdir($this->engineDir(), 0755);
+        chmod($this->engineDir(), 0755);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->engineDir()]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->logRoot);
         parent::tearDown();
     }
@@ -78,12 +83,21 @@ class ChangeWebserverWebserverTest extends TestCase
 
     public function test_run_change_webserver_script_without_serial(): void
     {
-        $system = new class extends System {
+        $system = new class ($this->engineDir()) extends System {
             public ?array $lastCommand = null;
+
+            public function __construct(private string $engineDir)
+            {
+            }
+
+            public function engineDirPath(): string
+            {
+                return $this->engineDir;
+            }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->lastCommand = is_array($cmd) ? $cmd : [$cmd];
+                $this->lastCommand = LocalRoot::plain(is_array($cmd) ? $cmd : [$cmd]);
                 $process = Process::fromShellCommandline('true');
                 $process->run();
 
@@ -111,12 +125,21 @@ class ChangeWebserverWebserverTest extends TestCase
 
     public function test_run_change_webserver_script_with_serial(): void
     {
-        $system = new class extends System {
+        $system = new class ($this->engineDir()) extends System {
             public ?array $lastCommand = null;
+
+            public function __construct(private string $engineDir)
+            {
+            }
+
+            public function engineDirPath(): string
+            {
+                return $this->engineDir;
+            }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->lastCommand = is_array($cmd) ? $cmd : [$cmd];
+                $this->lastCommand = LocalRoot::plain(is_array($cmd) ? $cmd : [$cmd]);
                 $process = Process::fromShellCommandline('true');
                 $process->run();
 
@@ -274,6 +297,11 @@ class ChangeWebserverWebserverTest extends TestCase
                 return $process;
             }
         };
+    }
+
+    private function engineDir(): string
+    {
+        return $this->logRoot . '/engine';
     }
 
     private function removeTree(string $dir): void

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Console;
 
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Artisan;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
@@ -53,7 +54,7 @@ class PhpConfigRefreshCommandTest extends TestCase
             $this->projectFile('alice', '8.3', 'fpm/pool.d/www.conf')
         );
         $this->assertContains(
-            ['sudo', 'chown', '1001:1001', $this->root . '/engine/users/alice/log/php'],
+            Privileged::files()->changeOwner('1001:1001', $this->root . '/engine/users/alice/log/php'),
             $this->system()->commands
         );
     }

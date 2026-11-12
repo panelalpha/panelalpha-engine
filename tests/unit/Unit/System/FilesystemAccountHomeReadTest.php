@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Filesystem;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
 
@@ -46,8 +47,10 @@ class FilesystemAccountHomeReadTest extends TestCase
         file_put_contents($this->homes.'/alice/project/.env', "A=1\n");
 
         $this->assertSame("A=1\n", $this->filesystem()->fileGetContents($this->homes.'/alice/project/.env'));
-        $this->assertSame(['sudo', 'python3', '-I'], array_slice($this->readCommand(), 0, 3));
-        $this->assertSame(['read', $this->homes.'/alice', $this->homes.'/alice/project/.env'], array_slice($this->readCommand(), 4));
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'account.readInHome', '--', $this->homes.'/alice', $this->homes.'/alice/project/.env'],
+            $this->readCommand()
+        );
     }
 
     /**
@@ -62,7 +65,7 @@ class FilesystemAccountHomeReadTest extends TestCase
 
         foreach ($this->commands as $argv) {
             $this->assertSame([], preg_grep('/^of=/', $argv), implode(' ', $argv));
-            $this->assertNotSame('cp', $argv[1] ?? null, implode(' ', $argv));
+            $this->assertNotSame('files.copy', LocalRoot::action($argv), implode(' ', $argv));
         }
     }
 
@@ -116,7 +119,7 @@ class FilesystemAccountHomeReadTest extends TestCase
         file_put_contents($this->root.'/engine.json', '{}');
 
         $this->assertSame('{}', $this->filesystem()->fileGetContents($this->root.'/engine.json'));
-        $this->assertSame('cp', $this->readCommand()[1]);
+        $this->assertSame('files.copy', LocalRoot::action($this->readCommand()));
     }
 
     private function assertRefused(string $path): void
@@ -143,7 +146,7 @@ class FilesystemAccountHomeReadTest extends TestCase
     private function readCommandOrNull(): ?array
     {
         foreach ($this->commands as $argv) {
-            if (($argv[1] ?? '') === 'cp' || ($argv[4] ?? '') === 'read') {
+            if (in_array(LocalRoot::action($argv), ['files.copy', 'account.readInHome'], true)) {
                 return $argv;
             }
         }

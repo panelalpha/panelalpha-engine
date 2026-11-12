@@ -3,16 +3,13 @@
 namespace App\Lib\Deploy\DeployLog;
 
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
- * Writing under storage/logs/deploy, including when the directory belongs to
- * somebody else.
- *
- * The engine runs as both www-data and root depending on how it was entered,
- * so every write retries once after a chown — the same pattern
- * CustomRotatingFileHandler uses.
+ * Writes under storage/logs/deploy, retrying once after a chown when the directory belongs to someone else,
+ * since the engine runs as both www-data and root (as CustomRotatingFileHandler does).
  */
 final class LogStorage
 {
@@ -83,9 +80,8 @@ final class LogStorage
     }
 
     /**
-     * A write fails for many reasons. When the disk is actually full, say so
-     * in the exception, so {@see DeployFailureExplainer} can turn it into a
-     * sentence the customer can act on.
+     * The hint a failed write's exception carries: it says when the disk is full, so
+     * {@see DeployFailureExplainer} can turn it into a sentence the customer can act on.
      */
     private static function writeFailureHint(string $path): string
     {
@@ -106,7 +102,7 @@ final class LogStorage
         }
 
         try {
-            (new System)->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
+            (new System)->runProcess(Privileged::files()->changeOwnerRecursively(self::OWNER, $path));
         } catch (\Throwable $e) {
             Log::warning('DeployLogger: could not fix ownership', [
                 'path' => $path,

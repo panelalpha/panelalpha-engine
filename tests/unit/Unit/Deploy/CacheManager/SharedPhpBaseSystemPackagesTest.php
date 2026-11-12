@@ -148,9 +148,10 @@ class SharedPhpBaseSystemPackagesTest extends TestCase
     private function bases(): SharedBaseImages
     {
         $store = $this->createStub(ImageStore::class);
-        $store->method('hostBuildCommand')->willReturnCallback(fn (string $tag): string => 'build ' . $tag);
-        $store->method('loadFromHostCommand')->willReturnCallback(
-            fn (EngineAccount $account, string $tag): string => 'load ' . $tag
+        $store->method('hostBuildArgv')->willReturnCallback(fn (string $tag): array => ['build', $tag]);
+        $store->method('hostBuildInBackgroundArgv')->willReturnCallback(fn (string $tag): array => ['build', $tag]);
+        $store->method('loadFromHostArgv')->willReturnCallback(
+            fn (EngineAccount $account, string $tag): array => ['load', $tag]
         );
         $store->method('hostImageInspectArgv')->willReturnCallback(fn (string $image): array => ['inspect', $image]);
 
@@ -158,11 +159,11 @@ class SharedPhpBaseSystemPackagesTest extends TestCase
         $seeding->method('hasImage')->willReturnCallback(fn (string $image): bool => in_array($image, $this->inAccount, true));
 
         $host = $this->createStub(HostCommands::class);
-        $host->method('inBackground')->willReturnCallback(function (string $script): void {
-            $this->background[] = $script;
+        $host->method('inBackground')->willReturnCallback(function (array $argv): void {
+            $this->background[] = implode(' ', $argv);
         });
-        $host->method('cancellable')->willReturnCallback(function (array|string $cmd): void {
-            $cmd = (string) $cmd;
+        $host->method('cancellable')->willReturnCallback(function (array $argv): void {
+            $cmd = implode(' ', $argv);
             if ($this->buildFails && str_starts_with($cmd, 'build ')) {
                 throw new \RuntimeException('E: Unable to locate package ffmpeg');
             }

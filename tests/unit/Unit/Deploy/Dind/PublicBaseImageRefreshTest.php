@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Dind;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\EngineAccount;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * `node:22-bookworm-slim` moves with every Node patch release. An account or a
@@ -29,13 +30,11 @@ class PublicBaseImageRefreshTest extends TestCase
 
     public function test_the_account_pulls_again_and_says_whether_it_changed(): void
     {
-        $account = new EngineAccount('demo', '/home/demo', '33:33', '/users/demo/docker-compose.yml');
+        $account = new EngineAccount('demo', '/home/demo', '33:33');
         $script = (new DindImageStore())->refreshCommand($account, self::NODE);
-        $img = escapeshellarg(self::NODE);
-
-        $this->assertStringContainsString("docker pull -q {$img}", $script);
         // Through the account's own daemon, which mirrors Docker Hub via registry-proxy.
-        $this->assertStringContainsString("exec -T dind docker pull", $script);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' account-docker.pull -- demo '.self::NODE, $script);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' account-docker.images -- demo '.self::NODE, $script);
         $this->assertStringNotContainsString(DindImageStore::CACHE_REGISTRY, $script);
         $this->assertStringContainsString('Updated base image', $script);
         $this->assertStringContainsString('is current', $script);
@@ -45,9 +44,8 @@ class PublicBaseImageRefreshTest extends TestCase
     {
         $argv = (new DindImageStore())->hostRefreshImageArgv(self::NODE);
 
-        $this->assertSame('sh', $argv[0]);
-        $this->assertStringContainsString('docker pull -q ' . escapeshellarg(self::NODE), $argv[2]);
-        $this->assertStringEndsWith('exit 0', $argv[2]);
+        $this->assertSame([LocalRoot::CLIENT, '--host', 'host.refreshPublicImage', '--', self::NODE], $argv);
+        $this->assertSame([], LocalRoot::plain($argv));
     }
 
     public function test_the_host_leaves_ours_alone(): void

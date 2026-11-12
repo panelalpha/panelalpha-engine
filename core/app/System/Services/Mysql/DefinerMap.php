@@ -5,23 +5,14 @@ namespace App\System\Services\Mysql;
 use App\Models\User;
 
 /**
- * Who owns the routines, triggers, views and events a copy recreates. The copy
- * imports as root, so a dump without its DEFINER, or with root's, recreates
- * every object running with root's privileges. Every DEFINER is rewritten
- * instead: a source project user becomes the destination user it maps to when
- * the destination owns that user, and anything else becomes an account under
- * the destination prefix that the MySQL name grammar cannot create, so the
- * object exists but can never run.
+ * The DEFINER of every routine, trigger, view and event a root-run import recreates: a mapped source user becomes the
+ * destination's, anything else an uncreatable account under the destination prefix, so it never runs as root.
  */
 final class DefinerMap
 {
-    private const string HOST = '%';
-
     private const string ORPHAN = 'no.definer';
 
     private const string NAME_GRAMMAR = '/^[A-Za-z0-9_-]+$/D';
-
-    private const string ANY_DEFINER = 'DEFINER=`\([^`]\|``\)*`\(@`\([^`]\|``\)*`\)\{0,1\}';
 
     /**
      * @param  array<string, string>  $accounts  source user => destination user
@@ -89,32 +80,6 @@ final class DefinerMap
     public function accounts(): array
     {
         return $this->accounts;
-    }
-
-    /**
-     * sed expressions, applied in order after any other rewrite. A mapped
-     * definer is parked behind a newline, which no input line can hold, so the
-     * catch-all that follows cannot touch it; every other DEFINER, whatever
-     * its quoting, becomes the orphan.
-     *
-     * @return list<string>
-     */
-    public function sedExpressions(): array
-    {
-        $expressions = [];
-        foreach ($this->accounts as $from => $to) {
-            $expressions[] = 's/DEFINER='.self::account($from).'/DEFINER\n'.self::account($to).'/g';
-        }
-
-        $expressions[] = 's/'.self::ANY_DEFINER.'/DEFINER='.self::account($this->orphan).'/g';
-        $expressions[] = 's/DEFINER\n/DEFINER=/g';
-
-        return $expressions;
-    }
-
-    private static function account(string $user): string
-    {
-        return '`'.$user.'`@`'.self::HOST.'`';
     }
 
     private static function orphanFor(string $prefix): string

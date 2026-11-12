@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""pa-root without the broker or root, for the engine's tests and the dind-test harness. Never shipped.
+
+    pa-root-local [--host] [--env NAME]... AREA.ACTION -- VALUE...
+
+Checks the request against the broker's action table, then runs its command as the caller with paths as given. An
+account's daemon is asked through the account container's own docker CLI.
+PA_ROOT_LOCAL=plan prints the command as JSON instead; PA_ROOT_LOCAL=check does so once each path is below a root its
+action allows, as the broker refuses one first. PA_ROOT_LOCAL_ROOTS (JSON) moves the roots, PA_EXCHANGE_DIR and
+PA_PUSH_LOCK the exchange directory and the push lock.
+"""
+
+import dataclasses
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
+
+from rootbroker import accountdaemon, accounts, client, composefiles, hostdaemon, paths, protocol, sandbox  # noqa: E402
+from rootbroker.actions import ROOTS, Policy, account, registry, rootscripts, sequence  # noqa: E402
+from rootbroker.channel import Channel  # noqa: E402
+from rootbroker.output import Sent  # noqa: E402
+from rootbroker.refused import Refused  # noqa: E402
+
+
+class LocalAccounts:
+    """Any account the request names, with its home directly below the homes root."""
+
+    def __init__(self, homes):
+        self.homes = homes
+
+    def by_ids(self, uid, gid):
+        return accounts.Account(str(uid), int(uid), int(gid), os.path.join(self.homes, str(uid)), '/bin/sh')
+
+    def by_name(self, name):
+        return accounts.Account(name, os.getuid(), os.getgid(), os.path.join(self.homes, name), '/bin/sh')
+
+
+def dial_stdio(name):
+    """The account's daemon through `docker system dial-stdio` in its container, which the caller's docker reaches."""
+    def dial():
+        ours, theirs = socket.socketpair()
+        subprocess.Popen(['docker', 'exec', '-i', name, 'docker', 'system', 'dial-stdio'], stdin=theirs, stdout=theirs,
+                         stderr=subprocess.DEVNULL)
+        theirs.close()
+        return ours
+    return dial
+
+
+def daemon_of_caller(account, accounts_directory):
+    return accountdaemon.Daemon(account.name, dial=dial_stdio(account.name))
+
+
+def callers_socket():
+    """The caller's own daemon, at DOCKER_HOST when that is a unix socket."""
+    host = os.environ.get('DOCKER_HOST', '')
+    return host[len('unix://'):] if host.startswith('unix://') else '/var/run/docker.sock'
+
+
+def container_of_caller(account, accounts_directory):
+    """The account's container on the caller's own daemon."""
+    return accountdaemon.Daemon(account.name, address=callers_socket())
+
+
+def as_given(placement, path, *rest):
+    return path
+
+
+def below_its_roots(placement, path, mode, roots, *rest):
+    paths.root_of(path, roots)
+    return path
+
+
+def given_path(path, *rest):
+    return path
+
+
+def as_caller():
+    account.FILE_STREAM = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'pa-file-stream')
+    rootscripts.PUSH_LOCK = os.environ.get('PA_PUSH_LOCK') or rootscripts.PUSH_LOCK
+    paths.place = below_its_roots if os.environ.get('PA_ROOT_LOCAL') == 'check' else as_given
+    Policy.check_no_links = lambda policy, path, roots: None
+    composefiles.place_file = lambda placement, path, policy, words=(): ['-f', path]
+    composefiles.place_engine_directory = lambda placement, path, policy, words=(): path
+    sequence.check_mount_source = given_path
+    accountdaemon.open_daemon = daemon_of_caller
+    accountdaemon.open_container = container_of_caller
+    hostdaemon.SOCKET = callers_socket()
+    sandbox.CONFINED = False
+    sandbox.RUN = os.environ.get('TMPDIR') or '/tmp'
+
+
+def exchange():
+    directory = os.environ.get('PA_EXCHANGE_DIR', '').rstrip('/')
+    return {'exchange': directory} if directory else {}
+
+
+def policy():
+    roots = {**ROOTS, **exchange(), **json.loads(os.environ.get('PA_ROOT_LOCAL_ROOTS', '{}'))}
+    owners = {0, 33, os.getuid()}
+    return Policy(roots, accounts_db=LocalAccounts(roots['homes']), become=lambda account, own_groups=False: None,
+                  owners=owners, host_root='', script_owners=owners)
+
+
+def planned(argv):
+    host, _, passing, name, values = client.parse(argv)
+    action = registry().get(name)
+    if action is None:
+        raise Refused(f'there is no action {name!r}')
+    plan = action.plan(action.check(values), policy(), host)
+    passed = {variable: os.environ[variable] for variable in passing if variable in os.environ}
+    return dataclasses.replace(plan, passed=passed)
+
+
+class Output(Sent):
+    """A native action's output on our own stdout and stderr, and our stdin as the broker's client frames."""
+
+    def __init__(self, passed):
+        conn, self.ours = socket.socketpair()
+        super().__init__(Channel(conn), passed)
+        threading.Thread(target=stdin_frames, args=(self.ours,), daemon=True).start()
+
+    def stdout(self, data):
+        client.write_all(1, data)
+
+    def stderr(self, data):
+        client.write_all(2, data)
+
+
+def stdin_frames(conn):
+    """Our stdin, framed as the client sends it, until its end; the socket stays open, as the client's does."""
+    while True:
+        data = os.read(0, protocol.CHUNK)
+        if not data:
+            break
+        conn.sendall(protocol.frame(protocol.STDIN, data))
+    conn.sendall(protocol.frame(protocol.STDIN_END))
+
+
+def run(plan):
+    if plan.native is not None:
+        return plan.native(Output(plan.passed))
+    try:
+        os.execvp(plan.argv[0], plan.argv)
+    except FileNotFoundError:
+        print(f'pa-root-local: {plan.argv[0]}: command not found', file=sys.stderr)
+        return 127
+
+
+def main(argv):
+    as_caller()
+    try:
+        plan = planned(argv)
+    except client.Usage as e:
+        print(e, file=sys.stderr)
+        return client.EXIT_USAGE
+    except Refused as e:
+        print(f'pa-root-local: refused: {e}', file=sys.stderr)
+        return protocol.EXIT_REFUSED
+    if os.environ.get('PA_ROOT_LOCAL') in ('plan', 'check'):
+        print(json.dumps({'argv': plan.argv, 'native': plan.native is not None, 'detach': plan.detach}))
+        return 0
+    return run(plan)
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

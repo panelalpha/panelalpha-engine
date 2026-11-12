@@ -6,6 +6,7 @@
 # failures still reach storage/logs.
 cd /var/www/html || exit 1
 exec env HOME=/var/www USER=www-data s6-setuidgid www-data sh -c '
+until php artisan migrate:status --pending=1 >/dev/null 2>&1; do sleep 5; done
 while :; do
     (php artisan schedule:run >/dev/null 2>&1 &)
     sleep $((60 - $(date +%S | sed "s/^0//")))

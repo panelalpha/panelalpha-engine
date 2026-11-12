@@ -5,10 +5,11 @@ namespace Tests\Unit\Files;
 use App\Http\Middleware\Authenticate;
 use App\Models\User;
 use App\System;
-use App\System\Project\FileManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -81,17 +82,23 @@ class FileStatHttpTest extends TestCase
             ->assertJson(['message' => 'Invalid path']);
 
         $this->assertCount(2, $this->system->processJournal);
-        $this->assertContains(FileManager::CONFINE_SCRIPT, $this->system->processJournal[0]);
-        $this->assertContains(FileManager::ENTRY_TYPE_SCRIPT, $this->system->processJournal[1]);
+        $this->assertContains(BrokerScripts::confine(), $this->system->processJournal[0]);
+        $this->assertContains(BrokerScripts::entryType(), $this->system->processJournal[1]);
     }
 
     public function test_stat_and_exists_through_a_link_out_of_the_home_are_refused(): void
     {
         foreach (['bob/theirs.txt', 'bob/nothing.txt', 'dangling-out'] as $path) {
             foreach (['stat', 'exists'] as $endpoint) {
-                $this->getJson("/api/projects/alice/files/{$endpoint}?path={$path}")
-                    ->assertStatus(400)
-                    ->assertJsonPath('message', "Refusing {$this->tmpRoot}/home/alice/{$path}: it resolves outside the project home\n (exit code 3)");
+                $response = $this->getJson("/api/projects/alice/files/{$endpoint}?path={$path}")
+                    ->assertStatus(422)
+                    ->assertJsonPath('problems.0.field', 'path')
+                    ->assertJsonPath('problems.0.code', 'outside_home');
+
+                $this->assertSame(
+                    "Refusing {$this->tmpRoot}/home/alice/{$path}: it resolves outside the project home",
+                    $response->json('message'),
+                );
             }
         }
     }
@@ -146,17 +153,17 @@ class FileStatHttpTest extends TestCase
                 return $this->root . '/home';
             }
 
-            /** Runs as this process, setpriv dropped. */
+            /** Runs as this process, without becoming the account. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->processJournal[] = is_array($cmd) ? $cmd : [$cmd];
-                $argv = array_slice((array) $cmd, 7);
+                $argv = is_array($cmd) ? LocalRoot::plain($cmd) : [$cmd];
+                $this->processJournal[] = $argv;
                 $path = rtrim((string) end($argv), '/');
                 if (($argv[0] ?? '') === 'find' && isset($argv[1])) {
                     $path = rtrim((string) $argv[1], '/');
                 }
                 if (isset($this->accountSees[$path])) {
-                    $argv = in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true)
+                    $argv = in_array(BrokerScripts::entryType(), $argv, true)
                         ? ['echo', $this->accountSees[$path]]
                         : ['sh', '-c', 'printf %s "$1" | base64 -d', 'sh', base64_encode(implode("\0", [basename($path), 'f', '7', '2', '644', '1001', '1001', '', 'f']) . "\0")];
                 }

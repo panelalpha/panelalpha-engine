@@ -6,30 +6,8 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Source\GitUrl;
 
 /**
- * What the checkout on disk says about the repository it came from.
- *
- * Until this existed a report could only repeat what the *account record*
- * remembered: the `git_repo` a project was created with, and the commit the
- * deploy pipeline happened to freeze next to it. That covers exactly one
- * case -- a project created from a git URL by this engine -- and says nothing
- * about the two that break most often: an archive upload that turns out to
- * carry a `.git`, and a site connected to a remote after the fact through
- * `POST /git/connect`. Both deploy from a repository and both reported
- * `{"present": false}`, so every failure they caused was filed under "no
- * repository" and became uncountable.
- *
- * So this reads the tree instead of the record. The facts are the ones that
- * change what a build does -- where it came from, what is checked out,
- * whether the clone is shallow, whether there are submodules or LFS pointers
- * to resolve -- and nothing else: no file names, no author, no message, no
- * diff. {@see DeployReport::repo()} decides which of them may be transmitted
- * at which tier, the same split {@see AppFacts} makes for package metadata.
- *
- * Every read is best-effort. This runs at the end of a deploy that may have
- * failed halfway through a clone, against a directory that is about to be
- * rolled back; a fact that cannot be read is absent, never an exception.
- *
- * No Laravel dependencies -- unit-testable with any runner.
+ * What the checkout on disk, not the account record, says about its repository: only facts that change a build.
+ * {@see DeployReport::repo()} decides what is sent; a fact that cannot be read is absent, never an exception.
  */
 final class CheckoutFacts
 {
@@ -42,9 +20,7 @@ final class CheckoutFacts
     /**
      * Read one checkout.
      *
-     * @param  callable(list<string>): ?string  $run  runs a git argv and returns
-     *                                                its stdout, or null when the command failed. Injected rather than
-     *                                                called directly so this class stays free of the process layer.
+     * @param  callable(list<string>): ?string  $run  runs a git argv and returns its stdout, or null when it failed
      * @return array{
      *   present: bool,
      *   remote?: ?string,
@@ -64,14 +40,7 @@ final class CheckoutFacts
             return ['present' => false];
         }
 
-        $git = static function (array $args) use ($run, $dir): ?string {
-            // safe.directory because the tree belongs to the account user and
-            // this does not run as them; -C rather than a chdir so nothing
-            // about the caller's working directory matters.
-            $out = $run(['git', '-c', 'safe.directory='.$dir, '-C', $dir, ...$args]);
-
-            return is_string($out) ? trim($out) : null;
-        };
+        $git = self::gitIn($dir, $run);
 
         if ($git(['rev-parse', '--is-inside-work-tree']) !== 'true') {
             return ['present' => false];
@@ -94,13 +63,23 @@ final class CheckoutFacts
     }
 
     /**
-     * The remote, with any embedded credential stripped.
+     * safe.directory, as the tree's top directory may not be the runner's own.
      *
-     * A checkout this engine cloned keeps a clean URL in `.git/config`,
-     * because it clones through GIT_ASKPASS rather than by writing the token
-     * into the remote. A repository somebody uploaded may well have
-     * `https://user:token@host/...` written into it, and that string must not
-     * survive being read.
+     * @param  callable(list<string>): ?string  $run
+     * @return \Closure(list<string>): ?string
+     */
+    private static function gitIn(string $dir, callable $run): \Closure
+    {
+        return static function (array $args) use ($run, $dir): ?string {
+            $out = $run(['git', '-c', 'safe.directory='.$dir, '-C', $dir, ...$args]);
+
+            return is_string($out) ? trim($out) : null;
+        };
+    }
+
+    /**
+     * The remote, with any embedded credential stripped: an uploaded repository may have
+     * `https://user:token@host/...` written into it, and that string must not survive being read.
      *
      * @param  callable(list<string>): ?string  $git
      */
@@ -115,11 +94,8 @@ final class CheckoutFacts
     }
 
     /**
-     * HEAD's commit and the second it was committed.
-     *
-     * One call for both: they are read together everywhere they are used, and
-     * an unborn HEAD -- a `git init` no deploy ever committed into -- fails
-     * the whole command rather than half of it.
+     * HEAD's commit and the second it was committed, in one call: an unborn HEAD (a `git init` nothing
+     * was committed into) fails the whole command rather than half of it.
      *
      * @param  callable(list<string>): ?string  $git
      * @return array{0: ?string, 1: ?int}
@@ -135,11 +111,8 @@ final class CheckoutFacts
     }
 
     /**
-     * The checked-out branch, or null when HEAD is detached.
-     *
-     * A deploy that resolved a tag or a commit rather than a branch is the
-     * detached case, and it is worth telling apart from a branch nobody could
-     * read: the first is normal, the second means the checkout is broken.
+     * The checked-out branch, or null when HEAD is detached, as a deploy of a tag or a commit is; `detached`
+     * tells that normal case apart from a branch nobody could read.
      *
      * @param  callable(list<string>): ?string  $git
      */
@@ -156,12 +129,8 @@ final class CheckoutFacts
     }
 
     /**
-     * Whether the tree resolves anything through git-lfs.
-     *
-     * Read from `.gitattributes` rather than by asking git, because the answer
-     * is wanted precisely when lfs is *not* installed -- a clone whose large
-     * files arrived as 130-byte pointer stubs builds, deploys and serves
-     * broken assets, and nothing else in a report explains it.
+     * Whether the tree resolves anything through git-lfs, read from `.gitattributes`: the answer matters when lfs
+     * is not installed, and a clone of 130-byte pointer stubs serves broken assets nothing else explains.
      */
     private static function usesLfs(string $path): bool
     {

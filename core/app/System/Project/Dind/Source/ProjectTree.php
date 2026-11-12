@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Source;
 
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -38,18 +39,14 @@ final class ProjectTree
             throw new \InvalidArgumentException('Refusing to clean staging outside a home directory.');
         }
 
-        $this->project->system()->exec([
-            'sudo', 'find', $home,
-            '-mindepth', '1', '-maxdepth', '1', '-name', '.project-next*',
-            '-exec', 'rm', '-rf', '{}', '+',
-        ], [], 120);
+        $this->project->system()->exec(Privileged::files()->removeEntriesNamed($home, '.project-next*'), [], 120);
     }
 
     public function removeStaging(string $stagingDir): void
     {
         self::assertStagingDir($stagingDir);
 
-        $this->project->system()->exec(['sudo', 'rm', '-rf', $stagingDir], [], 120);
+        $this->project->system()->exec(Privileged::files()->removeTree($stagingDir), [], 120);
     }
 
     public function moveStagingInto(string $stagingDir, string $projectDir): void
@@ -59,12 +56,8 @@ final class ProjectTree
             throw new \InvalidArgumentException('Refusing to move into a path outside ~/project.');
         }
 
-        $this->project->system()->exec([
-            'sudo', 'find', $stagingDir,
-            '-mindepth', '1', '-maxdepth', '1',
-            '-exec', 'mv', '-t', $projectDir, '{}', '+',
-        ], [], 120);
-        $this->project->system()->exec(['sudo', 'rmdir', $stagingDir], [], 120);
+        $this->project->system()->exec(Privileged::files()->moveEntriesInto($stagingDir, $projectDir), [], 120);
+        $this->project->system()->exec(Privileged::files()->removeEmptyDirectory($stagingDir), [], 120);
     }
 
     private static function assertStagingDir(string $stagingDir): void
@@ -83,10 +76,6 @@ final class ProjectTree
             throw new \InvalidArgumentException('Refusing to clear a path outside ~/project.');
         }
 
-        $this->project->system()->exec([
-            'sudo', 'find', $projectDir,
-            '-mindepth', '1', '-maxdepth', '1',
-            '-exec', 'rm', '-rf', '{}', '+',
-        ], [], 120);
+        $this->project->system()->exec(Privileged::files()->emptyDirectory($projectDir), [], 120);
     }
 }

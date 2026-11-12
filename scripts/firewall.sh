@@ -6,7 +6,7 @@
 #
 #   firewall.sh --install     set up, migrating a host off CSF; run by the installers
 #   firewall.sh --apply       re-apply what lives outside the provider's own rules
-#                             (core runs this when it starts)
+#                             (the root broker runs this when it starts)
 #   firewall.sh --fail2ban    re-apply the login bans' settings (the trusted list)
 #   firewall.sh --unhook      remove the engine's hooks, leave the firewall on
 #                             (uninstalling the engine)
@@ -28,6 +28,12 @@ configured_provider() {
 }
 
 provider=$(configured_provider)
+case "$provider" in
+*[!a-z0-9_-]*)
+    echo "firewall: '$provider' is not a provider name" >&2
+    exit 1
+    ;;
+esac
 script="$(cd "$(dirname "$0")" && pwd)/firewall/$provider.sh"
 if [ ! -f "$script" ]; then
     echo "firewall: no provider script for '$provider' ($script)" >&2

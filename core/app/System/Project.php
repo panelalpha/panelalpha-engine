@@ -2,11 +2,14 @@
 
 namespace App\System;
 
+use App\Exceptions\ProblemException;
 use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Domains\HttpsPorts;
+use App\Lib\Domains\HttpsPortsChange;
 use App\Lib\Project\ApiAccess;
 use App\Models\Backup as BackupRecord;
 use App\Models\Domain as DomainModel;
@@ -32,6 +35,7 @@ use App\System\Project\PhpHosting;
 use App\System\Project\Runtime;
 use App\System\Project\Settings;
 use App\System\Project\Sftp;
+use App\System\Project\Snapshots;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 
@@ -157,6 +161,11 @@ class Project
         return new Backup($this, $record);
     }
 
+    public function snapshots(): Snapshots
+    {
+        return Snapshots::of($this);
+    }
+
     public function domain(DomainModel $domainModel): DomainProject
     {
         return new DomainProject($this, $domainModel);
@@ -167,12 +176,9 @@ class Project
         return $this->fileManager()->resolvePath($path);
     }
 
-    /** A dind account has no `php` service and never reads this crontab. */
     public function reloadCron(): void
     {
-        if ($this->runtime instanceof PhpHosting) {
-            $this->runtime->reloadCron();
-        }
+        $this->runtime->reloadCron();
     }
 
     /**
@@ -338,8 +344,12 @@ class Project
     private function deleteDomains(ModelsUser $user): void
     {
         $domainNames = $user->domains->pluck('domain')->all();
+        $closesPorts = $user->domains->contains(static fn (DomainModel $domain): bool => HttpsPorts::hasExtra($domain));
         $user->domains()->delete();
         $this->system->webserver()->deleteDomainsConfigs($domainNames);
+        if ($closesPorts) {
+            app(HttpsPortsChange::class)->listenersChanged();
+        }
         $this->forgetDomainsStatistics($domainNames);
         if (! config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
             $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
@@ -375,10 +385,8 @@ class Project
     }
 
     /**
-     * SFTP logins live in one host-wide logins.conf, rebuilt without these rows so none stays valid for the
-     * next account given this uid and home. Best-effort: a host without the sftp profile must still delete.
-     * Runs before the OS user and the home are removed: open sessions end first and cannot log in again, so
-     * none keeps writing into the home while it is removed.
+     * Rebuilds the host-wide logins.conf without these rows, so none is valid for the next account given this uid and
+     * home. Best-effort for a host without the sftp profile; runs before the user and home go, so no session writes in.
      */
     private function deleteSftpLogins(ModelsUser $user): void
     {
@@ -440,10 +448,14 @@ class Project
     {
         $user = $this->model;
         if ($user->stagingUser()->exists()) {
-            throw new \Exception(
-                "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. Delete the staging project first."
-            );
+            throw ProblemException::conflict('project', 'staging', self::stagingRefusal($user));
         }
+    }
+
+    private static function stagingRefusal(ModelsUser $user): string
+    {
+        return "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. "
+            .'Delete the staging project first.';
     }
 
     /**
@@ -747,21 +759,23 @@ class Project
     public function copyVolumeDataFrom(self $source): int
     {
         $volumes = $this->copyVolumesForClone();
-        if ($volumes === null) {
+        $from = $source->copyVolumesForClone();
+        if ($volumes === null || $from === null) {
             return 0;
         }
 
-        return $volumes->copyVolumeDataFrom($source->homeDirPath());
+        return $volumes->copyVolumeDataFrom($from);
     }
 
     public function copyVolumeDataToIncoming(self $source): int
     {
         $volumes = $this->copyVolumesForClone();
-        if ($volumes === null) {
+        $from = $source->copyVolumesForClone();
+        if ($volumes === null || $from === null) {
             return 0;
         }
 
-        return $volumes->copyVolumeDataToIncoming($source->homeDirPath());
+        return $volumes->copyVolumeDataToIncoming($from);
     }
 
     /**
@@ -851,9 +865,8 @@ class Project
     }
 
     /**
-     * The image this project's account has under the tag a copied Railpack run
-     * file at $path names, held aside before {@see provideCopiedImages()}
-     * builds it again; null when there is none.
+     * The image this project's account has under the tag a copied Railpack run file at $path names, held aside before
+     * {@see provideCopiedImages()} builds it again; null when there is none.
      */
     public function holdCopiedImage(string $path): ?HeldImage
     {
@@ -873,9 +886,10 @@ class Project
         $src = rtrim($source->homeDirPath(), '/').'/';
         $dest = rtrim($this->homeDirPath(), '/').'/';
 
-        $excludes = $this->isDindTemplate() ? ['--exclude=docker/'] : [];
         $this->runCopyProcess(
-            ['sudo', 'rsync', '-a', '--delete', ...$excludes, $src, $dest],
+            $this->isDindTemplate()
+                ? Privileged::files()->mirrorExcluding($src, $dest, ['docker/'])
+                : Privileged::files()->mirror($src, $dest),
             'Failed to rsync home directory from source',
             $sourceRunning ? [self::RSYNC_VANISHED_FILES] : [],
         );
@@ -895,14 +909,13 @@ class Project
             if (! is_dir($srcDir)) {
                 continue;
             }
-            $this->runCopyProcess([
-                'sudo', 'rsync', '-a', '--delete',
-                rtrim($srcDir, '/').'/',
-                rtrim($destDir, '/').'/',
-            ], "Failed to rsync project config '{$subdir}' from source");
+            $this->runCopyProcess(
+                Privileged::files()->mirror($srcDir, $destDir),
+                "Failed to rsync project config '{$subdir}' from source"
+            );
         }
 
-        $this->system->runProcess(['sudo', 'chown', '-R', 'www-data:www-data', $destProject]);
+        $this->system->runProcess(Privileged::files()->changeOwnerRecursively('www-data:www-data', $destProject));
     }
 
     public function createDirectories(): void
@@ -950,16 +963,7 @@ class Project
      */
     public function createLinuxUser(): array
     {
-        $this->system->execOnHost([
-            'useradd',
-            '-M',
-            '-d',
-            $this->homeDirPath(),
-            '-s',
-            '/usr/sbin/nologin',
-            '-U',
-            $this->username(),
-        ]);
+        $this->system->execOnHost(Privileged::users()->create($this->username(), $this->homeDirPath()));
 
         return $this->readLinuxIdentity();
     }
@@ -970,8 +974,8 @@ class Project
     public function readLinuxIdentity(): array
     {
         return [
-            'UID' => (int) $this->system->execOnHost(['id', '-u', $this->username()]),
-            'GID' => (int) $this->system->execOnHost(['id', '-g', $this->username()]),
+            'UID' => (int) $this->system->execOnHost(Privileged::users()->uid($this->username())),
+            'GID' => (int) $this->system->execOnHost(Privileged::users()->gid($this->username())),
         ];
     }
 
@@ -985,16 +989,7 @@ class Project
         $limitInodes = self::positiveOrZero($this->model->getInodesLimit());
 
         $mountPoint = $this->system->filesystem()->getHomeFilesystemMountPoint();
-        $process = $this->system->runProcessOnHost([
-            'setquota',
-            '-u',
-            $this->username(),
-            (string) $limitBlocks,
-            (string) $limitBlocks,
-            (string) $limitInodes,
-            (string) $limitInodes,
-            $mountPoint,
-        ]);
+        $process = $this->system->runProcessOnHost(Privileged::users()->setQuota($this->username(), $limitBlocks, $limitInodes, $mountPoint));
 
         $unlimitedNeedsNoQuota = $limitBlocks === 0 && $limitInodes === 0;
         if ($process->getExitCode() === 0 || $unlimitedNeedsNoQuota) {
@@ -1040,15 +1035,14 @@ class Project
         foreach (self::pathAndAncestorsTopDown($home) as $dir) {
             $this->secureRootOwnedDirectory($dir);
         }
-        $this->chownTree($home, $uid, $gid, 1);
+        $this->chownTree($home, $uid, $gid);
         $this->restoreProtectedDirectories($home);
         $this->chownLscacheDirectories($home, $uid);
     }
 
     /**
-     * Hands a staged copy of the home to the account under the home's own rules: its
-     * contents go to the account, the directory itself stays root-owned like the home
-     * root, so the account can use the copy but cannot add or swap its top-level entries.
+     * Hands a staged home copy to the account under the home's own rules: its contents go to the account, the directory
+     * stays root-owned like the home root, so the account uses the copy but cannot add or swap its top-level entries.
      */
     public function handStagedHomeToAccount(string $stagedHome): void
     {
@@ -1059,7 +1053,7 @@ class Project
         $stagedHome = rtrim($stagedHome, '/');
 
         $this->secureRootOwnedDirectory($stagedHome);
-        $this->chownTree($stagedHome, $ids[0], $ids[1], 1);
+        $this->chownTree($stagedHome, $ids[0], $ids[1]);
         $this->restoreProtectedDirectories($stagedHome);
     }
 
@@ -1101,50 +1095,29 @@ class Project
             throw new \RuntimeException("Directory does not exist: $dir");
         }
         if ($info['uid'] !== 0 || $info['gid'] !== 0) {
-            $this->system->runProcess(sprintf(
-                'sudo chown root:root %s',
-                escapeshellarg($dir)
-            ));
+            $this->system->runProcess(Privileged::files()->changeOwner('root:root', $dir));
         }
         if (($info['mode'] & 022) !== 0) {
-            $this->system->runProcess(sprintf(
-                'sudo chmod 755 %s',
-                escapeshellarg($dir)
-            ));
+            $this->system->runProcess(Privileged::files()->changeMode('755', $dir));
         }
     }
 
     /**
-     * A dind account's `docker/` tree is the inner daemon's and is left alone.
-     * A push's rollback dumps in .pre-push-db belong to the engine process alone:
-     * the account must neither read nor rewrite what the engine replays into its
-     * databases, and the worker must still read them when a push fails.
+     * Leaves a dind account's `docker/` to the inner daemon.
      */
-    private function chownTree(string $root, int $uid, int $gid, int $minDepth): void
+    private function chownTree(string $root, int $uid, int $gid): void
     {
-        $excludeArgs = sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$root}/.pre-push-db"));
-        if ($this->isDindTemplate()) {
-            $excludeArgs .= sprintf(' -not \( -path %s -prune \)', escapeshellarg("{$root}/docker/*"));
-        }
-
-        $this->system->runProcess(sprintf(
-            'sudo find %s -mindepth %d%s -exec chown -h %d:%d {} +',
-            escapeshellarg($root),
-            $minDepth,
-            $excludeArgs,
-            $uid,
-            $gid
-        ));
+        $this->system->runProcess(Privileged::files()->handTreeToAccount($root, $uid, $gid, $this->isDindTemplate()));
     }
 
     private function restoreProtectedDirectories(string $home): void
     {
         $dockerDir = "{$home}/docker";
         if ($this->isDindTemplate() && $this->isRealDirectory($dockerDir)) {
-            $this->system->runProcess("sudo chown root:root {$dockerDir}");
+            $this->system->runProcess(Privileged::files()->changeOwner('root:root', $dockerDir));
         }
         if ($this->isRealDirectory("{$home}/.panelalpha")) {
-            $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
+            $this->system->runProcess(Privileged::files()->changeMode('700', "{$home}/.panelalpha"));
         }
     }
 
@@ -1153,7 +1126,7 @@ class Project
         foreach ($this->model->getDomains() as $domain) {
             $lscacheDir = $home.'/'.$domain->domain.'/.lscache';
             if ($this->isRealDirectory($lscacheDir)) {
-                $this->system->runProcess(['sudo', 'chown', '-R', 'nobody:'.$uid, $lscacheDir]);
+                $this->system->runProcess(Privileged::files()->changeOwnerRecursively('nobody:'.$uid, $lscacheDir));
             }
         }
     }
@@ -1207,36 +1180,42 @@ class Project
     private function createHomeDirectory(): void
     {
         $home = $this->homeDirPath();
-        $this->system->exec(['sudo', 'mkdir', '-p', $home]);
-        $this->system->exec(['sudo', 'chown', 'root:root', $home]);
-        $this->system->exec(['sudo', 'mkdir', '-p', "{$home}/.panelalpha"]);
-        $this->system->exec(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
-        $this->system->exec(['sudo', 'mkdir', '-p', "{$home}/.wp-cli"]);
+        $files = Privileged::files();
+        $this->system->exec($files->makeDirectories($home));
+        $this->system->exec($files->changeOwner('root:root', $home));
+        $this->system->exec($files->makeDirectories("{$home}/.panelalpha"));
+        $this->system->exec($files->changeMode('700', "{$home}/.panelalpha"));
+        $this->createWpCliHome($home);
+    }
+
+    /** WP-CLI on classic hosting runs as the tenant, who cannot create it in a root-owned home; containers run it with HOME=/tmp. */
+    private function createWpCliHome(string $home): void
+    {
+        if ($this->runtime instanceof PhpHosting) {
+            $this->system->exec(Privileged::files()->makeDirectories("{$home}/.wp-cli"));
+        }
     }
 
     private function createEngineDirectory(): void
     {
         $dir = $this->projectDirPath();
-        $this->system->exec(['sudo', 'mkdir', '-p', $dir]);
-        $this->system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $dir]);
+        $this->system->exec(Privileged::files()->makeDirectories($dir));
+        $this->system->exec(Privileged::files()->changeOwnerRecursively('www-data:www-data', $dir));
     }
 
     private function deleteLinuxUser(): void
     {
-        $this->system->execOnHost([
-            'userdel',
-            $this->username(),
-        ]);
+        $this->system->execOnHost(Privileged::users()->delete($this->username()));
     }
 
     private function deleteHomeDirectory(): void
     {
-        $this->system->exec(['sudo', 'rm', '-rf', $this->homeDirPath()]);
+        $this->system->exec(Privileged::files()->removeTree($this->homeDirPath()));
     }
 
     private function deleteEngineDirectory(): void
     {
-        $this->system->exec(['sudo', 'rm', '-rf', $this->projectDirPath()]);
+        $this->system->exec(Privileged::files()->removeTree($this->projectDirPath()));
     }
 
     private function requireDindRuntime(): Dind

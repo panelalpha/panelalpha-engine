@@ -1,0 +1,17 @@
+put /opt/engine/webserver-config/litespeed/serial.no.tmp 994:994
+NEW-SERIAL
+<<< end of /opt/engine/webserver-config/litespeed/serial.no.tmp
+exec ["/usr/local/lib/panelalpha/pa-root","docker.checkLiteSpeedSerial","--","0","/opt/engine/webserver-config/litespeed/serial.no.tmp"]
+ls /opt/engine/webserver-config/litespeed
+run ["/usr/local/lib/panelalpha/pa-root","files.move","--","/opt/engine/webserver-config/litespeed/serial.no","/opt/engine/webserver-config/litespeed/serial.no.bak{time}"]
+run ["/usr/local/lib/panelalpha/pa-root","files.move","--","/opt/engine/webserver-config/litespeed/license.key","/opt/engine/webserver-config/litespeed/license.key.bak{time}"]
+run ["/usr/local/lib/panelalpha/pa-root","files.move","--","/opt/engine/webserver-config/litespeed/trial.key","/opt/engine/webserver-config/litespeed/trial.key.bak{time}"]
+put /opt/engine/webserver-config/litespeed/serial.no 994:994
+NEW-SERIAL
+<<< end of /opt/engine/webserver-config/litespeed/serial.no
+exec ["/usr/local/lib/panelalpha/pa-root","compose.litespeedConfigTest","--","/opt/engine/docker-compose.yml"]
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","restart"]
+ls /opt/engine/webserver-config/litespeed
+run ["/usr/local/lib/panelalpha/pa-root","files.remove","--","/opt/engine/webserver-config/litespeed/serial.no.bak102"]
+run ["/usr/local/lib/panelalpha/pa-root","files.remove","--","/opt/engine/webserver-config/litespeed/serial.no.bak101"]
+run ["/usr/local/lib/panelalpha/pa-root","files.remove","--","/opt/engine/webserver-config/litespeed/serial.no.bak100"]

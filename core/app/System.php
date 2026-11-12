@@ -10,6 +10,7 @@ use App\System\EngineUpdate;
 use App\System\Filesystem;
 use App\System\HostProcess;
 use App\System\Network;
+use App\System\Privileged;
 use App\System\ProcessRunner;
 use App\System\Project as SystemProject;
 use App\System\Projects;
@@ -39,6 +40,15 @@ class System implements ProcessRunner
     public function engineDirPath(): string
     {
         return EnginePaths::ENGINE_DIR;
+    }
+
+    /**
+     * A push's rollback dumps, replayed as the sites database's root: in core's own storage, which no account's
+     * container mounts, never in the target's home.
+     */
+    public function pushRollbacksDirPath(): string
+    {
+        return storage_path('push-rollback');
     }
 
     /** Built from this instance's roots, so a subclass's override still wins. */
@@ -268,28 +278,31 @@ class System implements ProcessRunner
      */
     public function isContainerNameTaken(string $name): bool
     {
-        $result = $this->runProcess([
-            'sudo', 'docker', 'ps', '-a', '--filter', 'name=^/'.preg_quote($name, null).'$', '--format', '{{.Names}}',
-        ]);
+        $result = $this->runProcess(Privileged::docker()->containerNamed($name));
 
         return $result->isSuccessful() && trim($result->getOutput()) !== '';
     }
 
+    /**
+     * Whether the host has that user. A host the broker cannot enter raises instead of answering no.
+     *
+     * @throws Exception
+     */
     public function isUidExists(string $username): bool
     {
-        $result = $this->runProcessOnHost([
-            'id',
-            '-u',
-            $username,
-        ]);
+        $result = $this->runProcessOnHost(Privileged::users()->uid($username));
+
+        $error = $result->getErrorOutput() ?: $result->getOutput();
+        if (! $result->isSuccessful() && Privileged::hostNamespacesUnavailable($error)) {
+            throw new Exception($error);
+        }
 
         return $result->getExitCode() === 0;
     }
 
     public function isComposeServiceRunning(string $service): bool
     {
-        $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
-        $services = explode("\n", trim($this->exec($command)));
+        $services = explode("\n", trim($this->exec(Privileged::engineServices($this->composeFilePath())->runningServices())));
 
         return in_array($service, $services);
     }
@@ -315,13 +328,15 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces ({@see Privileged::onHost()}).
+     *
+     * @param  list<string>  $cmd
      *
      * @throws DockerErrorException
      */
-    public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
+    public function execOnHost(array $cmd, array $env = [], int $timeout = 600): string
     {
-        return $this->exec(HostProcess::onHost($cmd), $env, $timeout);
+        return $this->exec(Privileged::onHost($cmd), $env, $timeout);
     }
 
     /**
@@ -347,11 +362,13 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces ({@see Privileged::onHost()}).
+     *
+     * @param  list<string>  $cmd
      */
-    public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
+    public function runProcessOnHost(array $cmd, array $env = [], int $timeout = 600): Process
     {
-        return $this->runProcess(HostProcess::onHost($cmd), $env, $timeout);
+        return $this->runProcess(Privileged::onHost($cmd), $env, $timeout);
     }
 
     public function update(): EngineUpdate

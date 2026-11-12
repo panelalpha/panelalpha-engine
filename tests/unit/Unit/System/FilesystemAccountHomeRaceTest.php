@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Filesystem;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
@@ -92,17 +93,6 @@ class FilesystemAccountHomeRaceTest extends TestCase
     }
 
     /** The directory holding the homes is the host's: a link there is followed, as before. */
-    public function test_the_homes_directory_itself_may_be_a_link(): void
-    {
-        symlink($this->homes, $this->root.'/homes-link');
-        $alice = $this->root.'/homes-link/alice/project';
-        $filesystem = $this->filesystem(swap: false, homes: $this->root.'/homes-link');
-
-        $filesystem->writeFileReplacingPath($alice.'/server/.env', "A=linked\n", '1000:1000', '600');
-
-        $this->assertSame("A=linked\n", $filesystem->fileGetContents($alice.'/server/.env'));
-    }
-
     private function assertBobUntouched(): void
     {
         $this->assertSame("DB_PASSWORD=bob-secret\n", file_get_contents($this->bob.'/.env'));
@@ -117,9 +107,9 @@ class FilesystemAccountHomeRaceTest extends TestCase
         symlink($this->bob, $this->alice.'/server');
     }
 
-    private function filesystem(bool $swap = true, ?string $homes = null): Filesystem
+    private function filesystem(bool $swap = true): Filesystem
     {
-        $homes ??= $this->homes;
+        $homes = $this->homes;
         $local = new LocalHostSystem($this->root, $homes);
         $beforeLastStep = $swap ? fn () => $this->swapServerForALinkToBob() : null;
 
@@ -154,7 +144,7 @@ class FilesystemAccountHomeRaceTest extends TestCase
             private function swapBefore(array $argv): void
             {
                 $renamesIntoTheHome = str_starts_with(StagedRename::of($argv)[1] ?? '', $this->homes.'/alice/');
-                $reads = in_array($argv[1] ?? '', ['dd', 'cat'], true) || ($argv[4] ?? '') === 'read';
+                $reads = LocalRoot::action($argv) === 'account.readInHome';
                 if ($this->beforeLastStep !== null && ($renamesIntoTheHome || $reads)) {
                     ($this->beforeLastStep)();
                     $this->beforeLastStep = null;

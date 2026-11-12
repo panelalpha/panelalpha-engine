@@ -9,6 +9,8 @@ use App\System\Project;
 use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -94,11 +96,7 @@ class FileManagerAsksAsTheAccountTest extends TestCase
 
         $this->assertSame(['confine', 'entry-type', 'find', 'confine', 'entry-type', 'rm'], $this->ran());
         foreach ($this->commands as $argv) {
-            $this->assertSame(
-                ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'],
-                array_slice($argv, 0, 7),
-                'not run as the account: ' . implode(' ', $argv)
-            );
+            $this->assertAsTheAccount($argv);
         }
     }
 
@@ -181,10 +179,8 @@ class FileManagerAsksAsTheAccountTest extends TestCase
         $this->assertNull($files->resolvedFile($this->homeDir . '/dangling.zip'));
         $this->assertNull($files->resolvedFile($this->homeDir . '/nothing.zip'));
         foreach ($this->commands as $argv) {
-            $this->assertSame(
-                ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT],
-                array_slice($argv, 0, 10)
-            );
+            $this->assertAsTheAccount($argv);
+            $this->assertSame(['sh', '-c', BrokerScripts::resolvedFile()], array_slice(LocalRoot::plain($argv), 0, 3));
         }
     }
 
@@ -230,15 +226,22 @@ class FileManagerAsksAsTheAccountTest extends TestCase
         }
     }
 
+    /** @param list<string> $argv */
+    private function assertAsTheAccount(array $argv): void
+    {
+        $this->assertStringStartsWith('account.', (string) LocalRoot::action($argv), 'not run as the account: ' . implode(' ', $argv));
+        $this->assertSame(['1001', '1001'], array_slice(LocalRoot::values($argv), 0, 2), 'not run as the account: ' . implode(' ', $argv));
+    }
+
     /** @return list<string> what ran, in order */
     private function ran(): array
     {
         return array_map(function (array $argv): string {
-            $argv = array_slice($argv, 7);
+            $argv = LocalRoot::plain($argv);
 
             return match (true) {
-                in_array(FileManager::CONFINE_SCRIPT, $argv, true) => 'confine',
-                in_array(FileManager::ENTRY_TYPE_SCRIPT, $argv, true) => 'entry-type',
+                in_array(BrokerScripts::confine(), $argv, true) => 'confine',
+                in_array(BrokerScripts::entryType(), $argv, true) => 'entry-type',
                 default => $argv[0],
             };
         }, $this->commands);
@@ -285,7 +288,7 @@ class FileManagerAsksAsTheAccountTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = (array) $cmd;
-                $argv = array_slice((array) $cmd, 7);
+                $argv = LocalRoot::plain((array) $cmd);
                 $path = (string) end($argv);
                 if (($argv[0] ?? '') === 'find' && isset($argv[1])) {
                     $path = $argv[1];
@@ -293,7 +296,7 @@ class FileManagerAsksAsTheAccountTest extends TestCase
                 $key = rtrim($path, '/');
                 if (isset($this->accountOnly[$key])) {
                     // What the account answers for a path the engine cannot enter.
-                    $argv = in_array(FileManager::ENTRY_TYPE_SCRIPT, (array) $cmd, true)
+                    $argv = in_array(BrokerScripts::entryType(), $argv, true)
                         ? ['printf', '%s', $this->accountOnly[$key] . "\n"]
                         : ['sh', '-c', 'printf %s "$1" | base64 -d', 'sh', base64_encode(implode("\0", [basename($key), 'f', '7', '2', '644', '1001', '1001', '', 'f']) . "\0")];
                 }

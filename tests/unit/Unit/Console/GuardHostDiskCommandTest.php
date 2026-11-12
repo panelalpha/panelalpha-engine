@@ -9,6 +9,9 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use ReflectionMethod;
+use Tests\Support\HostCommand;
+use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -17,6 +20,8 @@ use Tests\TestCase;
  */
 class GuardHostDiskCommandTest extends TestCase
 {
+    use InMemoryDatabase;
+
     private const G = 1073741824;
 
     private string $storage;
@@ -24,6 +29,7 @@ class GuardHostDiskCommandTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->bootInMemoryDatabase();
         $this->storage = sys_get_temp_dir() . '/pa-disk-guard-' . bin2hex(random_bytes(4));
         mkdir($this->storage . '/logs/deploy', 0777, true);
         mkdir($this->storage . '/app', 0777, true);
@@ -43,21 +49,26 @@ class GuardHostDiskCommandTest extends TestCase
 
         Artisan::call('system:disk:guard');
 
-        $this->assertSame([['sudo', 'docker', 'buildx', 'prune', '-af', '--max-used-space', (string) (10 * self::G)]], $host->calls);
+        $this->assertSame([[LocalRoot::CLIENT, 'docker.pruneBuildCacheAbove', '--', (string) (10 * self::G)]], $host->calls);
+        $this->assertSame([(string) (10 * self::G)], LocalRoot::values($host->calls[0]));
         $this->assertStringContainsString('nothing to do', Artisan::output());
     }
 
     public function test_low_disk_prunes_build_cache_to_the_target_and_stops_there(): void
     {
-        $host = $this->host(free: 5 * self::G, frees: ['--min-free-space' => 12 * self::G]);
+        $host = $this->host(free: 5 * self::G, frees: ['docker.pruneBuildCacheUntilFree' => 12 * self::G]);
 
         Artisan::call('system:disk:guard');
 
-        $this->assertContains(['sudo', 'docker', 'buildx', 'prune', '-af', '--min-free-space', (string) (15 * self::G)], $host->calls);
+        $this->assertContains(
+            [LocalRoot::CLIENT, 'docker.pruneBuildCacheUntilFree', '--', (string) (15 * self::G)],
+            $host->calls
+        );
         $this->assertFalse($host->listedImages(), 'images are left alone once the cache freed enough');
         $this->assertSame(17 * self::G, $host->free);
     }
 
+    /** With nothing to free, each age pass lists once: 6h, 3h, 1.5h, 45m, 22.5m and any age. */
     public function test_disk_still_low_after_the_cache_falls_back_to_images_and_says_so(): void
     {
         Log::spy();
@@ -66,6 +77,7 @@ class GuardHostDiskCommandTest extends TestCase
         Artisan::call('system:disk:guard');
 
         $this->assertTrue($host->listedImages());
+        $this->assertSame(6, $host->imageListings());
         Log::shouldHaveReceived('log')->withArgs(
             static fn (string $level, string $message): bool
                 => $level === 'error' && str_contains($message, 'held by images in use')
@@ -133,7 +145,7 @@ class GuardHostDiskCommandTest extends TestCase
             /** @var list<list<string>> */
             public array $calls = [];
 
-            /** @param array<string, int> $frees */
+            /** @param array<string, int> $frees build cache prune action => bytes it frees */
             public function __construct(public int $free, private array $frees)
             {
             }
@@ -142,8 +154,9 @@ class GuardHostDiskCommandTest extends TestCase
             {
                 $argv = array_values((array) $cmd);
                 $this->calls[] = $argv;
-                if (array_slice($argv, 0, 4) === ['sudo', 'docker', 'buildx', 'prune']) {
-                    $freed = $this->frees[$argv[5] ?? ''] ?? 0;
+                $action = (string) (LocalRoot::isRequest($argv) ? LocalRoot::action($argv) : '');
+                if (str_starts_with($action, 'docker.pruneBuildCache')) {
+                    $freed = $this->frees[$action] ?? 0;
                     $this->free += $freed;
 
                     return "Total:\t" . round($freed / 1073741824, 1) . 'GB';
@@ -154,6 +167,7 @@ class GuardHostDiskCommandTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $path = is_array($cmd) ? (string) end($cmd) : '';
                 $size = 100 * 1048576;
 
@@ -161,15 +175,26 @@ class GuardHostDiskCommandTest extends TestCase
                     . "/dev/sda1 {$size} 1 " . intdiv($this->free, 1024) . " 50% {$path}\n";
             }
 
+            /** @return list<string> */
+            public function actions(): array
+            {
+                return array_values(array_map(
+                    static fn (array $argv): string => (string) LocalRoot::action($argv),
+                    array_filter($this->calls, static fn (array $argv): bool => LocalRoot::isRequest($argv))
+                ));
+            }
+
+            public function imageListings(): int
+            {
+                return count(array_filter(
+                    $this->actions(),
+                    static fn (string $action): bool => $action === 'docker.imageNamesWithSizes'
+                ));
+            }
+
             public function listedImages(): bool
             {
-                foreach ($this->calls as $argv) {
-                    if (array_slice($argv, 0, 3) === ['sudo', 'docker', 'images']) {
-                        return true;
-                    }
-                }
-
-                return false;
+                return $this->imageListings() > 0;
             }
         };
         $this->app->instance(System::class, $host);

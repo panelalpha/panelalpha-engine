@@ -4,15 +4,12 @@ namespace App\Lib\Deploy\Platform\Runtime\Php;
 
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\System\Privileged;
 use Illuminate\Contracts\Cache\Repository;
 
 /**
- * /etc/passwd and /etc/group for a PHP app on our shared base image, with an
- * `app` entry for the account uid the container runs as.
- *
- * Without one, posix_getpwuid() returns false and apps that resolve their
- * process user by name (Passbolt) die. The image's own files are read on the
- * host once per tag; an image that is not ours is left alone.
+ * /etc/passwd and /etc/group with an `app` entry for the account uid, or posix_getpwuid() fails (Passbolt dies).
+ * The image's own files are read on the host once per tag; an image that is not ours is left alone.
  */
 final class AccountUserFiles
 {
@@ -80,6 +77,8 @@ final class AccountUserFiles
     }
 
     /**
+     * An image with no root line is not one we can extend safely.
+     *
      * @return array{passwd: string, group: string}|null
      */
     private function imageFiles(string $image): ?array
@@ -98,7 +97,6 @@ final class AccountUserFiles
         } catch (\Exception $e) {
             return null;
         }
-        // An image with no root line is not one we can extend safely.
         if (! self::hasId($files['passwd'], 0) || ! self::hasId($files['group'], 0)) {
             return null;
         }
@@ -107,13 +105,10 @@ final class AccountUserFiles
         return $files;
     }
 
+    /** `--pull never`: only the host's own copy of our image is read, never a registry's. */
     private function cat(string $image, string $path): string
     {
-        // --pull never: only the host's own copy of our image is read, never a registry's.
-        return ($this->runOnHost)([
-            'sudo', 'docker', 'run', '--rm', '--pull', 'never', '--network', 'none',
-            '--entrypoint', 'cat', $image, $path,
-        ]);
+        return ($this->runOnHost)(Privileged::docker()->readFileFromImage($image, $path));
     }
 
     private static function hasId(string $file, int $id): bool

@@ -11,14 +11,14 @@ use App\System\Projects;
 use Illuminate\Support\Facades\Facade;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
  * A container push gets the images the pushed run file names (a Railpack
  * build, a base image transfer) from a first copy of the source's home taken
  * while both apps still run; they are stopped only for the copy that has to be
- * consistent. The file and volume commands run for real in a scratch
- * directory; the account's inner compose and the image work are recorded.
+ * consistent.
  */
 class ProjectsContainerPushImagesTest extends TestCase
 {
@@ -43,10 +43,12 @@ class ProjectsContainerPushImagesTest extends TestCase
         $stg = $this->containerProject('stg', 2002);
         $stg->staging = $live->id;
         $stg->save();
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['homes' => $this->root]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         exec('rm -rf '.escapeshellarg($this->root));
         parent::tearDown();
     }
@@ -173,18 +175,22 @@ class ProjectsContainerPushImagesTest extends TestCase
              */
             private function apply(array $argv): Process
             {
-                if (in_array('dind', $argv, true)) {
-                    return $this->innerCompose($argv);
+                $argv = LocalRoot::checked($argv);
+                if (LocalRoot::composeCommand($argv) !== []) {
+                    return $this->compose(LocalRoot::values($argv)[0], LocalRoot::composeCommand($argv));
+                }
+                if (array_slice($argv, 0, 2) === ['pa-root', 'account-docker.listVolumes']) {
+                    return new ContainerPushImagesProcess(0, '[]');
                 }
                 $path = (string) end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => new ContainerPushImagesProcess(is_dir($path) ? 0 : 1),
-                    ['sudo', 'test', '-e'] => new ContainerPushImagesProcess(file_exists($path) ? 0 : 1),
-                    ['sudo', 'test', '-f'] => new ContainerPushImagesProcess(is_file($path) ? 0 : 1),
-                    ['sudo', 'test', '-L'] => new ContainerPushImagesProcess(is_link($path) ? 0 : 1),
-                    ['sudo', 'ls', '-A'], ['sudo', 'ls', '-1'] => new ContainerPushImagesProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
-                    ['sudo', 'df', '-P'] => new ContainerPushImagesProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => new ContainerPushImagesProcess(is_dir($path) ? 0 : 1),
+                    ['test', '-e'] => new ContainerPushImagesProcess(file_exists($path) ? 0 : 1),
+                    ['test', '-f'] => new ContainerPushImagesProcess(is_file($path) ? 0 : 1),
+                    ['test', '-L'] => new ContainerPushImagesProcess(is_link($path) ? 0 : 1),
+                    ['ls', '-A'], ['ls', '-1A'], ['ls', '-1'] => new ContainerPushImagesProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
+                    ['df', '-P'] => new ContainerPushImagesProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
                     default => new ContainerPushImagesProcess($this->change($argv)),
                 };
             }
@@ -192,11 +198,9 @@ class ProjectsContainerPushImagesTest extends TestCase
             /**
              * @param  list<string>  $argv
              */
-            private function innerCompose(array $argv): Process
+            private function compose(string $username, array $argv): Process
             {
-                $inner = (string) end($argv);
-                $username = $argv[array_search('/bin/bash', $argv, true) + 1] ?? '';
-                if (str_contains($inner, "'stop'")) {
+                if (in_array('stop', $argv, true)) {
                     $this->record->events[] = "stop {$username}";
                 }
 
@@ -208,11 +212,11 @@ class ProjectsContainerPushImagesTest extends TestCase
              */
             private function change(array $argv): int
             {
-                $args = array_values(array_filter(array_slice($argv, 2), static fn (string $a): bool => ! str_starts_with($a, '-')));
-                if (($argv[1] ?? '') === 'rsync' && str_ends_with($args[1], '/.incoming/')) {
+                $args = array_values(array_filter(array_slice($argv, 1), static fn (string $a): bool => ! str_starts_with($a, '-')));
+                if (($argv[0] ?? '') === 'rsync' && str_ends_with($args[1], '/.incoming/')) {
                     return $this->rsyncHome($argv, $args[0], $args[1]);
                 }
-                match ($argv[1] ?? '') {
+                match ($argv[0] ?? '') {
                     'mkdir' => is_dir($args[0]) || mkdir($args[0], 0777, true),
                     'rm' => array_map(static fn (string $p) => exec('rm -rf '.escapeshellarg($p)), $args),
                     'rmdir' => rmdir($args[0]),

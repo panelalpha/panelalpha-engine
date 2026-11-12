@@ -3,32 +3,37 @@
 namespace Tests\Unit\Files;
 
 use App\Lib\Helpers\FileStreamWrapper;
+use Tests\Support\LocalRoot;
 
-/** sudophp:// with its helper run as this process instead of through sudo; counts the helper starts. */
+/** rootfile:// with its helper run by pa-root-local as this process instead of the root broker; counts the helper starts. */
 class UnprivilegedFileStreamWrapper extends FileStreamWrapper
 {
     public static int $helperStarts = 0;
 
     public static function install(): void
     {
-        if (in_array('sudophp', stream_get_wrappers(), true)) {
-            stream_wrapper_unregister('sudophp');
+        if (in_array('rootfile', stream_get_wrappers(), true)) {
+            stream_wrapper_unregister('rootfile');
         }
-        stream_wrapper_register('sudophp', self::class);
+        stream_wrapper_register('rootfile', self::class);
         self::$helperStarts = 0;
     }
 
     public static function uninstall(): void
     {
-        stream_wrapper_unregister('sudophp');
-        FileStreamWrapper::confineTo(null, ['sudo']);
+        stream_wrapper_unregister('rootfile');
+        FileStreamWrapper::unconfine();
     }
 
-    /** @return list<string> */
-    protected function helperCommand(): array
+    /** @return list<string>|null */
+    protected function helperCommand(): ?array
     {
+        $command = parent::helperCommand();
+        if ($command === null) {
+            return null;
+        }
         self::$helperStarts++;
 
-        return [PHP_BINARY, dirname(__DIR__, 4) . '/core/app/Lib/Helpers/file_stream.php'];
+        return LocalRoot::argv($command);
     }
 }

@@ -3,11 +3,11 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Template\Template;
+use App\System\Privileged;
 
 /**
- * Serving a host-compiled JS server out of stock Node: Nitro (Nuxt, TanStack
- * Start) compiles to `.output/server` with dependencies inlined, and the serve
- * script starts whichever entry exists on disk.
+ * Serving a host-compiled JS server out of stock Node: Nitro (Nuxt, TanStack Start) compiles to
+ * `.output/server` with dependencies inlined, and the serve script starts whichever entry exists.
  */
 class StandaloneNodeServe
 {
@@ -75,12 +75,7 @@ class StandaloneNodeServe
      */
     public static function nestedEntriesArgv(string $projectDir): array
     {
-        return [
-            'sudo', 'find', rtrim($projectDir, '/'), '-maxdepth', (string) self::NESTED_MAX_DEPTH,
-            '(', '-name', 'node_modules', '-o', '-name', '.git', ')', '-prune', '-o',
-            '-type', 'f', '(', '-path', '*/.output/server/index.mjs', '-o', '-path', '*/.output/server/index.js', ')',
-            '-print',
-        ];
+        return Privileged::files()->nitroServerEntries($projectDir, self::NESTED_MAX_DEPTH);
     }
 
     /**

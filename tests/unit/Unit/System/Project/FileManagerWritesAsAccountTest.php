@@ -10,6 +10,7 @@ use App\System\Project;
 use App\System\Project\FileManager;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -106,8 +107,10 @@ class FileManagerWritesAsAccountTest extends TestCase
                 try {
                     $call();
                     $this->fail("{$what} was not refused");
-                } catch (\Exception $e) {
+                } catch (ProblemException $e) {
+                    $this->assertSame('outside_home', $e->problems[0]['code'], $what);
                     $this->assertStringContainsString('resolves outside the project home', $e->getMessage(), $what);
+                    $this->assertStringNotContainsString('exit code', $e->getMessage(), $what);
                 }
             }
 
@@ -223,12 +226,17 @@ class FileManagerWritesAsAccountTest extends TestCase
     {
         $this->assertNotSame([], $this->commands);
         foreach ($this->commands as $argv) {
-            $this->assertSame(
-                ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'],
-                array_slice($argv, 0, 7),
-                'ran as root: ' . implode(' ', $argv)
-            );
+            $this->assertTrue(self::asTheAccount($argv), 'ran as root: ' . implode(' ', $argv));
         }
+    }
+
+    /**
+     * @param list<string> $argv
+     */
+    public static function asTheAccount(array $argv): bool
+    {
+        return str_starts_with((string) LocalRoot::action($argv), 'account.')
+            && array_slice(LocalRoot::values($argv), 0, 2) === ['1001', '1001'];
     }
 
     private function files(): FileManager
@@ -283,12 +291,12 @@ class FileManagerWritesAsAccountTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->commands[] = is_array($cmd) ? $cmd : [$cmd];
-                $argv = is_array($cmd) && ($cmd[1] ?? '') === 'setpriv' ? array_slice($cmd, 7) : (array) $cmd;
-                if (($argv[0] ?? '') === 'sudo') {
+                $argv = (array) $cmd;
+                $this->commands[] = $argv;
+                if (LocalRoot::isRequest($argv) && ! FileManagerWritesAsAccountTest::asTheAccount($argv)) {
                     throw new \RuntimeException('root process: ' . implode(' ', $argv));
                 }
-                $process = new Process($argv);
+                $process = new Process(LocalRoot::plain($argv));
                 $process->run();
 
                 return $process;

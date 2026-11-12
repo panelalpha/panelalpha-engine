@@ -6,6 +6,8 @@ use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\Arguments;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting\EnvironmentSetup;
 use App\System\Project\PhpHosting\FpmApacheStack;
@@ -98,18 +100,17 @@ class PhpHosting implements Runtime
         (new EnvironmentSetup)->createFromTemplate($this, $this->stack());
     }
 
+    /** The firewall goes on again after `up`: the account's bridge port carries nothing until it is bound. */
     public function start(): void
     {
         $this->prepareTenantNetwork();
-        $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} up -d --remove-orphans");
-        // The account's bridge port carries nothing until it is bound.
+        $this->system()->exec(Privileged::compose($this->composeFilePath())->up());
         $this->prepareTenantNetwork();
     }
 
     /**
-     * The account runs on pash-tenants, which compose cannot start
-     * without and whose firewall a reboot drops. A failure is a warning: with no
-     * rules, enable_icc still keeps the network's members apart.
+     * The pash-tenants firewall, which compose needs and a reboot drops. A failure is only a warning:
+     * with no rules, enable_icc still keeps the network's members apart.
      */
     private function prepareTenantNetwork(): void
     {
@@ -122,14 +123,14 @@ class PhpHosting implements Runtime
 
     public function stop(): void
     {
-        $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} down");
+        $this->system()->exec(Privileged::compose($this->composeFilePath())->down());
     }
 
     public function remove(): void
     {
         if ($this->exists()) {
             $this->system()->runProcess(
-                "sudo docker compose -f {$this->composeFilePath()} down -v --remove-orphans"
+                Privileged::compose($this->composeFilePath())->downWithVolumes()
             );
         }
     }
@@ -141,7 +142,7 @@ class PhpHosting implements Runtime
 
     public function isRunning(): bool
     {
-        $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
+        $command = Privileged::compose($this->composeFilePath())->runningServices();
         $result = trim($this->system()->exec($command));
 
         return $result !== '';
@@ -149,7 +150,7 @@ class PhpHosting implements Runtime
 
     public function build(): void
     {
-        $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} build");
+        $this->system()->exec(Privileged::compose($this->composeFilePath())->build());
     }
 
     public function buildIfMissing(): void
@@ -164,17 +165,16 @@ class PhpHosting implements Runtime
                 && is_array($parsed['services']['php'])
                 && is_string($parsed['services']['php']['image'])
             ) {
-                $image = $parsed['services']['php']['image'];
+                $image = Arguments::image($parsed['services']['php']['image']);
             }
         } catch (\Exception $e) {
         }
-        $imageEscaped = escapeshellarg($image);
-        $pathEscaped = escapeshellarg($this->composeFilePath());
         if ($image) {
+            $compose = Privileged::composeLines($this->composeFilePath());
             $this->system()->exec(
-                "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
-                    ." || sudo docker compose -f {$pathEscaped} pull"
-                    ." || sudo docker compose -f {$pathEscaped} build"
+                Privileged::dockerLines()->inspectImage($image).' >/dev/null 2>&1'
+                    ." || {$compose->pull()}"
+                    ." || {$compose->build()}"
             );
 
             return;
@@ -245,14 +245,14 @@ class PhpHosting implements Runtime
     }
 
     /**
-     * Run $command in the account's php service.
+     * $command in the account's php container, as $user (`uid:gid`) when given, through the host daemon's Engine API.
      *
      * @param  list<string>  $command
      * @return list<string>
      */
-    public function execArgv(array $command): array
+    public function execArgv(array $command, string $user = ''): array
     {
-        return ['sudo', 'docker', 'compose', '-f', $this->composeFilePath(), 'exec', '-T', $this->defaultServiceName(), ...$command];
+        return Privileged::accountContainer($this->username())->exec($command, $user);
     }
 
     public function reloadApache(): void

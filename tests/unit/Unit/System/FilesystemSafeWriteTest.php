@@ -2,12 +2,13 @@
 
 namespace Tests\Unit\System;
 
-use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\System\Filesystem;
 use App\System\ProcessRunner;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\Unit\System\Project\LocalHostSystem;
 
 /**
@@ -64,7 +65,6 @@ class FilesystemSafeWriteTest extends TestCase
 
             public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
             {
-                // As a failing `sudo cp`/`chown` does after the temp file is staged.
                 $this->staged = $source;
 
                 throw new \RuntimeException('sudo step failed');
@@ -89,13 +89,15 @@ class FilesystemSafeWriteTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $this->staged = is_array($cmd) ? (string) ($cmd[2] ?? '') : null;
+                $this->staged = is_array($cmd) ? (string) (LocalRoot::values($cmd)[0] ?? '') : null;
 
                 throw new \RuntimeException('sudo cp failed');
             }
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
@@ -106,6 +108,8 @@ class FilesystemSafeWriteTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return new Process(['true']);
             }
 
@@ -211,16 +215,17 @@ class FilesystemSafeWriteTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
+            /** Answers `test -d` for real, so makeDirWithParents() does not loop forever. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->calls[] = $cmd;
-                $argv = is_array($cmd) ? $cmd : [];
-                // Answer `sudo test -d` for real so makeDirWithParents() does
-                // not loop forever over a fake "no directory exists anywhere".
-                $exit = ($argv[1] ?? null) === 'test' && ($argv[2] ?? null) === '-d' && is_dir($argv[3] ?? '') ? 0 : 1;
+                $argv = is_array($cmd) ? LocalRoot::plain($cmd) : [];
+                $exit = ($argv[0] ?? null) === 'test' && ($argv[1] ?? null) === '-d' && is_dir($argv[2] ?? '') ? 0 : 1;
 
                 return new class ($exit) extends Process {
                     public function __construct(private int $code)
@@ -237,6 +242,8 @@ class FilesystemSafeWriteTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return new Process(['true']);
             }
 
@@ -256,10 +263,12 @@ class FilesystemSafeWriteTest extends TestCase
 
         $last = end($calls);
         $this->assertIsArray($last);
-        $this->assertSame('sudo', $last[0]);
-        $this->assertSame('mv', $last[1]);
-        $this->assertSame('-T', $last[2]);
-        $this->assertSame($this->dir . '/useradd.sh', $last[4], 'renames onto the real target name, not a derived one');
-        $this->assertStringStartsWith($this->dir . '/useradd.sh.tmp-', (string) $last[3], 'the temp name sits next to the target, same directory');
+        $this->assertSame('files.rename', LocalRoot::action($last));
+        $mv = LocalRoot::plain($last);
+        $this->assertSame('mv', $mv[0]);
+        $this->assertSame('-T', $mv[1]);
+        $this->assertSame('--', $mv[2]);
+        $this->assertSame($this->dir . '/useradd.sh', $mv[4], 'renames onto the real target name, not a derived one');
+        $this->assertStringStartsWith($this->dir . '/useradd.sh.tmp-', (string) $mv[3], 'the temp name sits next to the target, same directory');
     }
 }

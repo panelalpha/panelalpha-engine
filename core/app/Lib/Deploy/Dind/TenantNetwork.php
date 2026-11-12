@@ -2,19 +2,12 @@
 
 namespace App\Lib\Deploy\Dind;
 
+use App\System\Privileged;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * The Docker network DinD accounts run on.
- *
- * Accounts used to share pash-default-network with core, SFTP and phpMyAdmin,
- * filtered only from inside the account, where the tenant holds the inner
- * Docker socket and can undo it. On this network accounts cannot reach each
- * other (enable_icc=false) and scripts/tenant-network-firewall.sh holds them,
- * from the host, to sites-db and the two registries, which docker-compose.yml
- * attaches at fixed addresses.
- *
- * Laravel-free and argv only, like {@see BuildNetwork}.
+ * The Docker network DinD accounts run on, held from the host, where a tenant cannot undo it: no account reaches another
+ * (enable_icc=false), and the firewall script allows only sites-db and the two registries. Laravel-free, like {@see BuildNetwork}.
  */
 final class TenantNetwork
 {
@@ -22,8 +15,6 @@ final class TenantNetwork
 
     /** The network the account template used before; accounts not yet moved are still on it. */
     public const LEGACY_NAME = 'pash-default-network';
-
-    public const FIREWALL_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh';
 
     /**
      * The projects the engine allowed to call its API on :2011, one name per
@@ -41,15 +32,14 @@ final class TenantNetwork
     private const SITES_DB_HOST = 2;
 
     /**
-     * Creates the network when it is missing and applies its firewall, from
-     * the host namespace. Idempotent; run before every account start, because
-     * a reboot drops the rules.
+     * Creates the network when it is missing and applies its firewall, from the host namespace. Idempotent; run before
+     * every account start, because a reboot drops the rules.
      *
      * @return list<string>
      */
     public static function firewallArgv(): array
     {
-        return ['sudo', 'nsenter', '--target', '1', '--all', 'sh', self::FIREWALL_SCRIPT, '--create'];
+        return Privileged::host()->applyTenantNetworkFirewall();
     }
 
     /** Whether an account's connection to this IPv4 address is refused by the firewall. */
@@ -62,13 +52,12 @@ final class TenantNetwork
     /** @return list<string> */
     public static function accountNetworksArgv(string $account): array
     {
-        return ['sudo', 'docker', 'inspect', '--format', '{{json .NetworkSettings.Networks}}', $account];
+        return Privileged::docker()->containerNetworks($account);
     }
 
     /**
-     * An account's compose file with its network renamed to this one, and
-     * nothing else changed. Every account template, old ones included, names
-     * the network once, as the external default.
+     * An account's compose file with its network renamed to this one, and nothing else changed. Every account template,
+     * old ones included, names the network once, as the external default.
      */
     public static function composeOnTenantNetwork(string $yaml): string
     {

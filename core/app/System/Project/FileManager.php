@@ -8,6 +8,9 @@ use App\Lib\Deploy\Source\ArchiveSafety;
 use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\Lib\Deploy\Source\UploadedArchive;
 use App\Lib\Http\OutboundUrl;
+use App\System\Privileged;
+use App\System\Privileged\AccountFileManager;
+use App\System\Privileged\Exchange;
 use App\System\Project as UserProject;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
@@ -36,54 +39,8 @@ class FileManager
     /** curl's exit code for --max-filesize, hit before the transfer or part way through it. */
     private const CURL_FILE_TOO_LARGE = 63;
 
-    /** `sh -c` body for assertInsideHome(): $1 the home, then F:<path> / E:<entry>. */
-    public const CONFINE_SCRIPT = 'home=$(realpath -- "$1") || exit 1; shift; for p; do case "$p" in '
-        .'F:*) r=$(realpath -m -- "${p#F:}") ;; '
-        .'*) q=${p#E:}; q=${q%/}; r=$(realpath -m -- "$(dirname -- "$q")")/$(basename -- "$q") ;; esac; '
-        .'case "$r" in "$home"|"$home"/*) ;; '
-        .'*) echo "Refusing ${p#?:}: it resolves outside the project home" >&2; exit 3 ;; esac; done';
-
-    /** `sh -c` body for entryType(): $1 the path, $2 the same without its trailing slash. */
-    public const ENTRY_TYPE_SCRIPT = 'if [ ! -e "$1" ]; then if [ -L "$1" ]; then echo dangling; else echo missing; fi; '
-        .'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
-        .'else echo file; fi';
-
-    /** `sh -c` body for resolvedFile(): $1 the path. */
-    public const RESOLVED_FILE_SCRIPT = '[ -f "$1" ] && realpath -e -- "$1"';
-
-    /** One find row per entry: name, type, size, mtime, mode, uid, gid, link target, target type. */
-    private const ENTRY_FIELDS = '%f\0%y\0%s\0%T@\0%m\0%U\0%G\0%l\0%Y\0';
-
-    /** The confinement script's exit code for a path that resolves outside the home. */
+    /** The confinement and move scripts' exit code for a path that resolves outside the home. */
     private const CONFINE_OUTSIDE_EXIT_CODE = 3;
-
-    /**
-     * `sh -c` body for moveUnpackedInto(): $1 the unpacked directory, $2 the home, $3 the destination.
-     * The destination is entered once and checked by its real path; every rename is relative to it.
-     */
-    private const MOVE_UNPACKED_SCRIPT = 'src=$1; home=$(realpath -- "$2") || exit 1; '
-        .'mkdir -p -- "$3" && cd -- "$3" || exit 1; case $(pwd -P) in "$home"|"$home"/*) ;; '
-        .'*) echo "Refusing $3: it resolves outside the project home" >&2; exit 3 ;; esac; [ -w . ] || exit 6; '
-        .'set --; for e in "$src"/* "$src"/.[!.]* "$src"/..?*; do '
-        .'if [ -e "$e" ] || [ -L "$e" ]; then set -- "$@" "${e##*/}"; fi; done; '
-        .'taken=0; for n; do if [ -e "./$n" ] || [ -L "./$n" ]; then printf \'%s\\0\' "$n"; taken=1; fi; done; '
-        .'[ "$taken" = 0 ] || exit 4; '
-        .'for n; do mv --update=none-fail -T -- "$src/$n" "./$n" || { printf \'%s\\0\' "$n"; exit 5; }; done';
-
-    /**
-     * `sh -c` body for writeAsUser(): $1 the staged source, $2 the target. The target's folder is created when
-     * missing; unless the target is a file the account can already write, a folder it cannot write to is refused.
-     */
-    private const WRITE_AS_USER_SCRIPT = 'dir=$(dirname -- "$2"); mkdir -p -- "$dir" 2>/dev/null; '
-        .'[ -w "$2" ] || { [ -d "$dir" ] && [ -w "$dir" ]; } || exit 6; cat -- "$1" > "$2" && chmod 644 -- "$2"';
-
-    /**
-     * `sh -c` body for mkdir(): $1 the directory, then mkdir's own arguments. A missing directory is refused,
-     * that folder printed, when the nearest folder above it that exists is not one the account can write to.
-     */
-    private const MKDIR_SCRIPT = 'p=${1%/}; shift; if [ ! -e "$p" ]; then d=$(dirname -- "$p"); '
-        .'while [ ! -e "$d" ]; do d=$(dirname -- "$d"); done; [ -d "$d" ] && [ -w "$d" ] || { printf %s "$d"; exit 6; }; fi; '
-        .'exec mkdir "$@"';
 
     /** The write and mkdir scripts' exit code for a folder the account cannot write to. */
     private const WRITE_UNWRITABLE_EXIT_CODE = 6;
@@ -97,8 +54,11 @@ class FileManager
      */
     private const MOVE_RACED_EXIT_CODE = 5;
 
-    /** The move script's exit code for a destination the account cannot write to. */
+    /** The move script's exit code for a destination, or the folder it would be made in, the account cannot write to; it prints that folder. */
     private const MOVE_READ_ONLY_EXIT_CODE = 6;
+
+    /** What unzip unpacks, by the archive's name, case aside: `.tar.gz` ahead of `.gz`, which it ends in too. */
+    private const UNZIP_FORMATS = ['.zip' => 'zip', '.tar.gz' => 'tar', '.tgz' => 'tar', '.gz' => 'gz'];
 
     /** Names a refusal shows of the entries the destination already holds. */
     private const TAKEN_NAMES_SHOWN = 10;
@@ -170,10 +130,7 @@ class FileManager
     public function putContents(string $path, string $contents): void
     {
         $path = $this->resolvePath($path);
-        $staged = tempnam(sys_get_temp_dir(), 'pa-put-');
-        if ($staged === false) {
-            throw new \RuntimeException('Cannot stage the file contents');
-        }
+        $staged = Exchange::file('pa-put-');
         try {
             file_put_contents($staged, $contents);
             $this->writeAsUser($staged, $path);
@@ -186,8 +143,7 @@ class FileManager
     {
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$path]);
-        $options = $parents ? ['-p', '--'] : ['--'];
-        $process = $this->runOnCore(['sh', '-c', self::MKDIR_SCRIPT, 'sh', $path, ...$options, $path]);
+        $process = $this->runAsAccount($this->commands()->makeFolder($path, $parents));
         if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
             throw $this->unwritableFolder($process->getOutput());
         }
@@ -205,17 +161,36 @@ class FileManager
 
     /**
      * Copy an engine-side file to $target as the account, creating its parent directories. The source
-     * is made readable for that: it is in the engine's own temp directory, which no account can reach.
+     * is made readable for that: it is in the exchange directory, which no account can list.
      */
     private function writeAsUser(string $source, string $target): void
     {
+        if (! Exchange::holds($source)) {
+            $this->writeStagedAsUser($source, $target);
+
+            return;
+        }
         $this->assertInsideHome([$target]);
         @chmod($source, 0644);
-        $process = $this->runOnCore(['sh', '-c', self::WRITE_AS_USER_SCRIPT, 'sh', $source, $target]);
+        $process = $this->runAsAccount($this->commands()->writeCopy($source, $target));
         if ($process->getExitCode() === self::WRITE_UNWRITABLE_EXIT_CODE) {
             throw $this->unwritableFolder(dirname($target));
         }
         $this->assertSucceeded($process);
+    }
+
+    /** Only the exchange directory is the root broker's too. */
+    private function writeStagedAsUser(string $source, string $target): void
+    {
+        $staged = Exchange::file('pa-put-');
+        try {
+            if (! @copy($source, $staged)) {
+                throw new \RuntimeException('Cannot stage the file contents');
+            }
+            $this->writeAsUser($staged, $target);
+        } finally {
+            @unlink($staged);
+        }
     }
 
     private function unwritableFolder(string $dir): ProblemException
@@ -232,7 +207,7 @@ class FileManager
     {
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$path]);
-        $process = $this->runOnCore(['test', '-e', $path]);
+        $process = $this->runAsAccount($this->commands()->exists($path));
 
         return $process->getExitCode() === 0;
     }
@@ -243,14 +218,29 @@ class FileManager
      */
     public function isFile(string $path): bool
     {
+        try {
+            return $this->isInsideHomeFile($path);
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * {@see isFile()}, refusing a path outside the home instead of answering "no file": a caller about to read
+     * the file says why it cannot rather than claiming there is none.
+     */
+    public function isInsideHomeFile(string $path): bool
+    {
         $path = $this->resolvePath($path);
         try {
             $this->assertInsideHome([$path]);
+        } catch (ProblemException $e) {
+            throw $e;
         } catch (\Exception) {
             return false;
         }
 
-        return $this->runOnCore(['test', '-f', $path])->getExitCode() === 0;
+        return $this->runAsAccount($this->commands()->isFile($path))->getExitCode() === 0;
     }
 
     /**
@@ -259,7 +249,7 @@ class FileManager
      */
     public function resolvedFile(string $path): ?string
     {
-        $process = $this->runOnCore(['sh', '-c', self::RESOLVED_FILE_SCRIPT, 'sh', $path]);
+        $process = $this->runAsAccount($this->commands()->resolvedFile($path));
         $target = rtrim($process->getOutput(), "\n");
 
         return $process->getExitCode() === 0 && $target !== '' ? $target : null;
@@ -279,7 +269,7 @@ class FileManager
         }
 
         $directory = rtrim($path, '/');
-        $process = $this->runOnCore(['find', $directory, '-maxdepth', '0', '-printf', self::ENTRY_FIELDS]);
+        $process = $this->runAsAccount($this->commands()->entryFields($directory));
         $this->assertSucceeded($process);
         $fields = $this->entryFields($process->getOutput());
 
@@ -294,12 +284,10 @@ class FileManager
     public function list(string $path, bool $showHidden = true, int $limit = self::LIST_DEFAULT_LIMIT): array
     {
         $path = $this->resolvePath($path);
-        $this->assertInsideHomeForList($path);
+        $this->assertFieldInsideHome('path', $path);
         $this->assertListable($path);
 
-        $entries = $this->readEntries($path, $showHidden);
-        $total = count($entries);
-        $entries = array_slice($this->sortEntries($entries), 0, $limit);
+        [$total, $entries] = $this->readPage($path, $showHidden, $limit);
         $this->flagSubdirectories($path, $entries);
 
         return [
@@ -323,44 +311,30 @@ class FileManager
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * The first $limit entries, directories first and then names in byte order, and how many there are.
+     * A directory may hold millions, so the account sorts them and PHP never holds more than the page.
+     *
+     * @return array{0: int, 1: list<array<string, mixed>>}
      */
-    private function readEntries(string $path, bool $showHidden): array
+    private function readPage(string $path, bool $showHidden, int $limit): array
     {
         $directory = rtrim($path, '/');
-        $process = $this->runOnCore([
-            'find', $directory.'/', '-mindepth', '1', '-maxdepth', '1', '-printf', self::ENTRY_FIELDS,
-        ]);
+        $process = $this->runAsAccount($this->commands()->listPage($directory.'/', $limit, $showHidden));
         $output = $process->getOutput();
         if ($process->getExitCode() !== 0 && $output === '') {
             throw new NotFoundException("No such file or directory: {$path}");
         }
-
-        $entries = [];
-        foreach ($this->entryFields($output) as $fields) {
-            if ($showHidden || ! Str::startsWith($fields[0], '.')) {
-                $entries[] = $this->entryFromFields($directory.'/'.$fields[0], $fields);
-            }
+        if ($output === '') {
+            return [0, []];
         }
 
-        return $entries;
-    }
+        [$total, $rows] = explode("\0", $output, 2);
+        $entries = array_map(
+            fn (array $fields): array => $this->entryFromFields($directory.'/'.$fields[0], $fields),
+            $this->entryFields($rows),
+        );
 
-    /**
-     * Directories first, then names in byte order; find returns the readdir order.
-     *
-     * @param  list<array<string, mixed>>  $entries
-     * @return list<array<string, mixed>>
-     */
-    private function sortEntries(array $entries): array
-    {
-        usort($entries, function (array $a, array $b): int {
-            $byKind = ($a['type'] === 'dir' ? 0 : 1) <=> ($b['type'] === 'dir' ? 0 : 1);
-
-            return $byKind !== 0 ? $byKind : strcmp($a['name'], $b['name']);
-        });
-
-        return $entries;
+        return [(int) $total, $entries];
     }
 
     /**
@@ -371,7 +345,7 @@ class FileManager
         $fields = explode("\0", $output);
         array_pop($fields);
 
-        return array_chunk($fields, substr_count(self::ENTRY_FIELDS, '\0'));
+        return array_chunk($fields, substr_count(AccountFileManager::ENTRY_FIELDS, '\0'));
     }
 
     /**
@@ -447,9 +421,7 @@ class FileManager
      */
     private function subdirectoryParents(string $path): array
     {
-        $process = $this->runOnCore([
-            'find', rtrim($path, '/').'/', '-mindepth', '2', '-maxdepth', '2', '-type', 'd', '-printf', '%h\0',
-        ]);
+        $process = $this->runAsAccount($this->commands()->subdirectoryParents(rtrim($path, '/').'/'));
         $parents = [];
         foreach (explode("\0", $process->getOutput()) as $parent) {
             if ($parent !== '') {
@@ -465,11 +437,7 @@ class FileManager
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
         $this->assertInsideHome([$destPath], [$sourcePath]);
-        $this->assertSucceeded($this->runOnCore([
-            'mv',
-            $sourcePath,
-            $destPath,
-        ]));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->moveEntry($sourcePath, $destPath)));
     }
 
     public function cp(string $sourcePath, string $destPath): void
@@ -477,12 +445,7 @@ class FileManager
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
         $this->assertInsideHome([$destPath], [$sourcePath]);
-        $this->assertSucceeded($this->runOnCore([
-            'cp',
-            '-a',
-            $sourcePath,
-            $destPath,
-        ]));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->copyEntry($sourcePath, $destPath)));
     }
 
     public function zip(
@@ -497,52 +460,36 @@ class FileManager
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$zipPath, $path]);
 
-        $workdir = null;
+        $command = $this->commands()->zip($zipPath, $path, $compressionLevel, $fromDate);
         if ($skipParents) {
             $workdir = dirname($path);
-            $path = basename($path);
             if (! $this->isDirectory($workdir)) {
                 throw new \Exception('Invalid path');
             }
+            $command = $this->commands()->zipFrom($workdir, $zipPath, basename($path), $compressionLevel, $fromDate);
         }
 
         $allowed = $ignoreEmpty ? [0, ...self::ZIP_EMPTY_EXIT_CODES] : [0];
-        $this->assertSucceeded(
-            $this->runOnCore($this->zipCommand($zipPath, $path, $compressionLevel, $fromDate), $workdir),
-            $allowed,
-        );
+        $this->assertSucceeded($this->runAsAccount($command), $allowed);
     }
 
     /**
-     * @return list<string>
+     * Extract a .zip, .tar.gz or .tgz, or .gz into $path: checked on a root-owned read-only copy and unpacked where no account
+     * reaches, so no planted link is written through, then each top-level entry is renamed into $path, which must not hold it yet.
+     *
+     * @return list<string> what unzip warned about and extracted past, such as backslashes it read as folder separators
      */
-    private function zipCommand(string $zipPath, string $path, ?int $compressionLevel, ?string $fromDate): array
-    {
-        $recurse = $compressionLevel === null ? '-r' : '-r'.$compressionLevel;
-        $command = ['zip', $recurse];
-        if (is_string($fromDate) && $fromDate !== '') {
-            $command[] = '--from-date';
-            $command[] = $fromDate;
-        }
-        $command[] = $zipPath;
-        $command[] = $path;
-
-        return $command;
-    }
-
-    /**
-     * Extract a .zip, .tar.gz or .gz into $path. The archive is checked on a root-owned read-only copy and
-     * unpacked into a fresh directory no account can reach, so no link the account planted is written through;
-     * each unpacked top-level entry is then renamed into $path, which must not hold it yet.
-     */
-    public function unzip(string $zipPath, string $path): void
+    public function unzip(string $zipPath, string $path): array
     {
         $zipPath = $this->resolvePath($zipPath);
         $path = $this->resolvePath($path);
         $filename = basename($zipPath);
-        $isZip = Str::endsWith($filename, '.zip');
-        $isTar = ! $isZip && Str::endsWith($filename, '.tar.gz');
-        $this->assertInsideHome([$zipPath, $path]);
+        $this->assertFieldInsideHome('zip_path', $zipPath);
+        $this->assertFieldInsideHome('path', $path);
+        $this->assertArchiveExists($zipPath);
+        $format = self::unzipFormat($filename);
+        $isZip = $format === 'zip';
+        $isTar = $format === 'tar';
 
         $this->sweepStaleUnzipStages();
         $stageDir = $this->unzipStageRoot().'/'.bin2hex(random_bytes(8));
@@ -552,11 +499,40 @@ class FileManager
             $this->stageReadOnlyCopy($zipPath, $stageDir, $staged);
             $this->assertArchiveIsSafe($zipPath, $staged, $isZip, $isTar);
             $this->makeUnpackDirectory($unpacked);
-            $this->assertSucceeded($this->unpack($staged, $unpacked, $isZip, $isTar));
+            $warnings = $this->unpack($zipPath, $staged, $unpacked, $isZip, $isTar);
             $this->moveUnpackedInto($unpacked, $path);
             $this->removeUnpackedGzip($zipPath, $path, $isZip || $isTar);
+
+            return $warnings;
         } finally {
-            $this->project->system()->runProcess(['sudo', 'rm', '-rf', $stageDir]);
+            $this->project->system()->runProcess(Privileged::files()->removeTree($stageDir));
+        }
+    }
+
+    /**
+     * The format the archive's name says; any other name is refused, as the archive deploy refuses one, rather than handed to gzip.
+     *
+     * @return 'zip'|'tar'|'gz'
+     *
+     * @throws ValidationException
+     */
+    private static function unzipFormat(string $filename): string
+    {
+        $name = strtolower($filename);
+        foreach (self::UNZIP_FORMATS as $suffix => $format) {
+            if (str_ends_with($name, $suffix)) {
+                return $format;
+            }
+        }
+
+        throw ValidationException::withMessages(['zip_path' => 'Unsupported archive format, expected .zip, .tar.gz, .tgz or .gz']);
+    }
+
+    /** A regular file, links followed, as the account that stages it sees it. */
+    private function assertArchiveExists(string $zipPath): void
+    {
+        if ($this->resolvedFile($zipPath) === null) {
+            throw ProblemException::one('zip_path', 'not_found', 'Archive not found: '.$this->homeRelativePath($zipPath));
         }
     }
 
@@ -568,10 +544,7 @@ class FileManager
     /** Best effort: a killed request skips its `finally`, and nothing else removes what it unpacked. */
     private function sweepStaleUnzipStages(): void
     {
-        $this->project->system()->runProcess([
-            'sudo', 'find', $this->unzipStageRoot(), '-mindepth', '1', '-maxdepth', '1',
-            '-mmin', '+'.self::UNZIP_STALE_MINUTES, '-exec', 'rm', '-rf', '--', '{}', '+',
-        ]);
+        $this->project->system()->runProcess(Privileged::files()->removeEntriesOlderThan($this->unzipStageRoot(), self::UNZIP_STALE_MINUTES));
     }
 
     /**
@@ -581,15 +554,12 @@ class FileManager
     private function stageReadOnlyCopy(string $zipPath, string $stageDir, string $staged): void
     {
         $system = $this->project->system();
-        $system->exec(['sudo', 'mkdir', '-p', $stageDir]);
-        $system->exec(['sudo', 'chown', implode(':', $this->accountIds()), $stageDir]);
-        $this->assertSucceeded($this->runOnCore([
-            'sh', '-c', '[ -f "$1" ] || { echo "Not a regular file: $1" >&2; exit 1; }; cat -- "$1" > "$2"',
-            'sh', $zipPath, $staged,
-        ]));
-        $system->exec(['sudo', 'chown', 'root:root', $stageDir, $staged]);
-        $system->exec(['sudo', 'chmod', '0755', $stageDir]);
-        $system->exec(['sudo', 'chmod', '0444', $staged]);
+        $system->exec(Privileged::files()->makeDirectories($stageDir));
+        $system->exec(Privileged::files()->changeOwner(implode(':', $this->accountIds()), $stageDir));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->copyArchiveToStage($zipPath, $staged)));
+        $system->exec(Privileged::files()->changeOwner('root:root', $stageDir, $staged));
+        $system->exec(Privileged::files()->changeMode('0755', $stageDir));
+        $system->exec(Privileged::files()->changeMode('0444', $staged));
     }
 
     /**
@@ -601,13 +571,23 @@ class FileManager
     {
         $system = $this->project->system();
         try {
-            ArchiveUnpackedSize::assertWithin($staged, $isZip, $this->unzipMaxBytes);
             if ($isZip || $isTar) {
                 UploadedArchive::confined($zipPath, $isZip)
                     ->assertSafeContents($staged, fn (array $argv): string => $system->exec($argv, [], 120));
             }
+            self::assertUnpackedSizeWithin($zipPath, $staged, $isZip, $this->unzipMaxBytes);
         } catch (\InvalidArgumentException|\RuntimeException $e) {
             throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
+        }
+    }
+
+    /** After the listing, as an archive deploy checks it, so an archive unzip cannot read is named by the listing's own error. */
+    private static function assertUnpackedSizeWithin(string $zipPath, string $staged, bool $isZip, int $maxBytes): void
+    {
+        try {
+            ArchiveUnpackedSize::assertWithin($staged, $isZip, $maxBytes);
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException('Could not read '.basename($zipPath).': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -615,23 +595,49 @@ class FileManager
     private function makeUnpackDirectory(string $unpacked): void
     {
         $system = $this->project->system();
-        $system->exec(['sudo', 'mkdir', $unpacked]);
-        $system->exec(['sudo', 'chown', implode(':', $this->accountIds()), $unpacked]);
+        $system->exec(Privileged::files()->makeDirectory($unpacked));
+        $system->exec(Privileged::files()->changeOwner(implode(':', $this->accountIds()), $unpacked));
+    }
+
+    /**
+     * unzip's warning exit is an extraction it finished, which the broker answers as 0; any other exit fails.
+     *
+     * @return list<string> unzip's warnings, naming the archive by its own name rather than its staged copy
+     */
+    private function unpack(string $zipPath, string $staged, string $unpacked, bool $isZip, bool $isTar): array
+    {
+        $archive = UploadedArchive::confined($zipPath, $isZip);
+        $extraction = $this->extract($staged, $unpacked, $isZip, $isTar);
+        $this->assertUnpacked($archive, $extraction, $staged);
+
+        return $archive->extractionWarnings($extraction, $staged);
+    }
+
+    /**
+     * An archive its extractor could not unpack is refused like one the checks refuse, by its own name rather than its staged copy.
+     *
+     * @throws ValidationException
+     */
+    private function assertUnpacked(UploadedArchive $archive, Process $extraction, string $staged): void
+    {
+        try {
+            $archive->assertExtracted($extraction, $staged);
+        } catch (\RuntimeException $e) {
+            throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
+        }
     }
 
     /** A plain .gz unpacks to its own name without the `.gz`. */
-    private function unpack(string $staged, string $unpacked, bool $isZip, bool $isTar): Process
+    private function extract(string $staged, string $unpacked, bool $isZip, bool $isTar): Process
     {
         if ($isZip) {
-            return $this->runOnCore(UploadedArchive::unzipCommand('-o', $staged, '-d', $unpacked));
+            return $this->runAsAccount($this->commands()->unzipInto($staged, $unpacked));
         }
         if ($isTar) {
-            return $this->runOnCore(['tar', '-zxvf', $staged, '-C', $unpacked]);
+            return $this->runAsAccount($this->commands()->untarInto($staged, $unpacked));
         }
 
-        return $this->runOnCore([
-            'sh', '-c', 'gzip -dc -- "$1" > "$2"', 'sh', $staged, $unpacked.'/'.Str::beforeLast(basename($staged), '.gz'),
-        ]);
+        return $this->runAsAccount($this->commands()->gunzipTo($staged, $unpacked.'/'.substr(basename($staged), 0, -strlen('.gz'))));
     }
 
     /**
@@ -640,17 +646,23 @@ class FileManager
      */
     private function moveUnpackedInto(string $unpacked, string $path): void
     {
-        $process = $this->runOnCore(['sh', '-c', self::MOVE_UNPACKED_SCRIPT, 'sh', $unpacked, $this->homeDirPath(), $path]);
-        if ($process->getExitCode() === self::MOVE_TAKEN_EXIT_CODE) {
-            throw $this->destinationTaken($path, explode("\0", rtrim($process->getOutput(), "\0")));
-        }
-        if ($process->getExitCode() === self::MOVE_RACED_EXIT_CODE) {
-            throw $this->destinationTakenDuringMove($path, rtrim($process->getOutput(), "\0"));
-        }
-        if ($process->getExitCode() === self::MOVE_READ_ONLY_EXIT_CODE) {
-            throw ValidationException::withMessages(['path' => $this->homeRelativePath($path).' is not writable.']);
+        $process = $this->runAsAccount($this->commands()->moveUnpackedInto($unpacked, $this->homeDirPath(), $path));
+        $refusal = $this->moveRefusal($process, $path);
+        if ($refusal !== null) {
+            throw $refusal;
         }
         $this->assertSucceeded($process);
+    }
+
+    private function moveRefusal(Process $move, string $path): ?ProblemException
+    {
+        return match ($move->getExitCode()) {
+            self::MOVE_TAKEN_EXIT_CODE => $this->destinationTaken($path, explode("\0", rtrim($move->getOutput(), "\0"))),
+            self::MOVE_RACED_EXIT_CODE => $this->destinationTakenDuringMove($path, rtrim($move->getOutput(), "\0")),
+            self::MOVE_READ_ONLY_EXIT_CODE => $this->unwritableFolder($move->getOutput()),
+            self::CONFINE_OUTSIDE_EXIT_CODE => $this->outsideHome('path', $move),
+            default => null,
+        };
     }
 
     private function destinationTakenDuringMove(string $path, string $name): ProblemException
@@ -681,7 +693,7 @@ class FileManager
     private function removeUnpackedGzip(string $zipPath, string $path, bool $isArchive): void
     {
         if (! $isArchive && $zipPath === rtrim($path, '/').'/'.basename($zipPath)) {
-            $this->runOnCore(['rm', '-f', $zipPath]);
+            $this->runAsAccount($this->commands()->removeEntry($zipPath, false));
         }
     }
 
@@ -694,13 +706,8 @@ class FileManager
         $path = $this->resolvePath($path);
         $this->assertInsideHome([], [$path]);
         $this->assertRemovable($path, $recursive);
-        $command = ['rm', '-f'];
-        if ($recursive) {
-            $command[] = '-r';
-        }
-        $command[] = $path;
 
-        $this->assertSucceeded($this->runOnCore($command));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->removeEntry($path, $recursive)));
     }
 
     /** rm -f is silent about a missing path, and answers a bare "Is a directory" without -r. */
@@ -721,7 +728,7 @@ class FileManager
     public function diskUsage(string $directory = '/'): int
     {
         $path = $this->resolvePath($directory);
-        $process = $this->runOnCore(['du', '-shm', '--exclude='.$this->dockerDataRoot(), $path]);
+        $process = $this->runAsAccount($this->commands()->diskUsageExcluding($path, $this->dockerDataRoot()));
         $this->assertSucceeded($process);
         $mb = Str::before($process->getOutput(), "\t");
 
@@ -729,16 +736,13 @@ class FileManager
     }
 
     /**
-     * Bytes the inner Docker's json-file container logs take, rotated files included; 0 before
-     * the containers directory exists. They sit in ~/docker, which diskUsage() leaves out but
-     * the quota does not; root-owned, so read as root, and find follows no link.
+     * Bytes the inner Docker's json-file container logs take, rotated ones included; 0 before the containers directory
+     * exists. Their ~/docker counts for the quota but not diskUsage(); root-owned, so read as root, following no link.
      */
     public function containerLogBytes(): int
     {
         $dir = $this->dockerDataRoot().'/containers';
-        $process = $this->project->system()->runProcess([
-            'sudo', 'find', $dir, '-mindepth', '2', '-maxdepth', '2', '-type', 'f', '-name', '*-json.log*', '-printf', '%s\n',
-        ]);
+        $process = $this->project->system()->runProcess(Privileged::files()->containerLogSizes($dir));
         $bytes = 0;
         foreach (explode("\n", $process->getOutput()) as $line) {
             if (ctype_digit($line)) {
@@ -767,22 +771,7 @@ class FileManager
             throw new \Exception('Destination directory does not exist');
         }
 
-        $this->assertSucceeded($this->runOnCore([
-            'find',
-            $sourceDir,
-            '-mindepth',
-            '1',
-            '-maxdepth',
-            '1',
-            '-exec',
-            'mv',
-            $override ? '--force' : '--no-clobber',
-            '-t',
-            $destDir,
-            '--',
-            '{}',
-            '+',
-        ]));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->moveEntriesInto($sourceDir, $destDir, $override)));
     }
 
     /**
@@ -807,9 +796,9 @@ class FileManager
         $partial = $dir.'/.pa-fetch-'.bin2hex(random_bytes(6)).'.part';
         try {
             $this->download($url, $partial);
-            $this->assertSucceeded($this->runOnCore(['mv', '-fT', '--', $partial, $dir.'/'.$filename]));
+            $this->assertSucceeded($this->runAsAccount($this->commands()->renameOver($partial, $dir.'/'.$filename)));
         } finally {
-            $this->runOnCore(['rm', '-f', '--', $partial]);
+            $this->runAsAccount($this->commands()->removeFile($partial));
         }
     }
 
@@ -833,7 +822,7 @@ class FileManager
         for ($hop = 0; $hop <= OutboundUrl::MAX_REDIRECTS; $hop++) {
             $this->assertOutboundAllowed($current);
 
-            $process = $this->runOnCore($this->downloadCommand($current, $destination));
+            $process = $this->runAsAccount($this->commands()->download($current, $destination, $this->fetchMaxBytes, $this->outboundPin($current)));
             $status = (int) trim($process->getOutput());
 
             if ($this->isRedirect($status)) {
@@ -848,22 +837,6 @@ class FileManager
         }
 
         throw new \Exception("Fetching {$url} followed more than ".OutboundUrl::MAX_REDIRECTS.' redirects');
-    }
-
-    /**
-     * Since curl 8.4 --max-filesize also stops a transfer with no Content-Length once it grows past the limit.
-     *
-     * @return list<string>
-     */
-    private function downloadCommand(string $url, string $destination): array
-    {
-        return $this->pinnedCurl([
-            'curl',
-            '-fsS',
-            '--max-filesize', (string) $this->fetchMaxBytes,
-            '-o', $destination,
-            '-w', '%{http_code}',
-        ], $url);
     }
 
     /** A 3xx is not an error to curl -f. */
@@ -906,32 +879,11 @@ class FileManager
     }
 
     /**
-     * $curl for $url, connected to the address that was checked so a second
-     * lookup cannot point it elsewhere.
-     *
-     * @param  list<string>  $curl
-     * @return list<string>
+     * Asks curl for a redirect's Location without a body, pinned to the address that was checked.
      */
-    private function pinnedCurl(array $curl, string $url): array
-    {
-        $pin = $this->outboundPin($url);
-        if ($pin !== null) {
-            array_push($curl, '--resolve', $pin);
-        }
-        $curl[] = $url;
-
-        return $curl;
-    }
-
-    /** Ask curl for the Location of a redirect without writing a body. */
     private function redirectLocation(string $url): ?string
     {
-        $location = trim($this->runOnCore($this->pinnedCurl([
-            'curl',
-            '-sS',
-            '-o', '/dev/null',
-            '-w', '%{redirect_url}',
-        ], $url))->getOutput());
+        $location = trim($this->runAsAccount($this->commands()->redirectLocation($url, $this->outboundPin($url)))->getOutput());
 
         return $location === '' ? null : $location;
     }
@@ -944,80 +896,57 @@ class FileManager
 
         $path = $this->resolvePath($path);
         $this->assertInsideHome([$path]);
-        $this->assertSucceeded($this->runOnCore(['chmod', $mode, $path]));
+        $this->assertSucceeded($this->runAsAccount($this->commands()->setMode($path, $mode)));
     }
 
     /**
-     * Run a file command in the core container, as the project user.
+     * As the project user by uid and gid, since its passwd entry is not in the core container.
      *
-     * The account is named by uid and gid. Its passwd entry lives on the
-     * machine, so `sudo -u` cannot see it from this container. `setpriv`
-     * drops to the ids directly, the same way archive extraction does.
-     *
-     * @param  list<string>  $command
+     * @param  list<string>  $argv
      */
-    private function runOnCore(array $command, ?string $workdir = null): Process
+    private function runAsAccount(array $argv): Process
     {
-        if ($workdir !== null) {
-            $command = ['env', '--chdir='.$workdir, ...$command];
-        }
+        return $this->project->system()->runProcess($argv);
+    }
 
-        return $this->project->system()->runProcess($this->asAccount($command));
+    private function commands(): AccountFileManager
+    {
+        return Privileged::accountFileManager(...$this->accountIds());
+    }
+
+    /** @return array{0: int, 1: int} the uid and gid file commands run as */
+    public function accountIds(): array
+    {
+        return $this->project->model()->linuxIds();
     }
 
     /**
-     * $command run as the account, by uid and gid.
-     *
-     * @param  list<string>  $command
-     * @return list<string>
-     */
-    public function asAccount(array $command): array
-    {
-        [$uid, $gid] = $this->accountIds();
-
-        return [
-            'sudo',
-            'setpriv',
-            '--reuid',
-            $uid,
-            '--regid',
-            $gid,
-            '--clear-groups',
-            ...$command,
-        ];
-    }
-
-    /** @return array{0: string, 1: string} the uid and gid file commands run as */
-    private function accountIds(): array
-    {
-        $model = $this->project->model();
-
-        return array_map('strval', $model->linuxIds());
-    }
-
-    /**
-     * Refuse a path that leaves the home once symlinks are followed. The
-     * commands run as the account, but in the engine's container: a link the
-     * account planted (`~/x -> /tmp/x`) would take a write anywhere that uid can
-     * write there. Checked as the account, so the check sees what it sees.
+     * Refuse a path that leaves the home once links are followed: commands run as the account but in the engine's
+     * container, where a planted link would take a write anywhere the uid can write; checked as the account, as it sees.
      *
      * @param  list<string>  $paths  every symlink followed, the last one too
      * @param  list<string>  $entries  the last component is the entry itself
      *                                 (what rm removes, what mv and cp take)
      */
-    private function assertInsideHome(array $paths, array $entries = []): void
+    private function assertInsideHome(array $paths, array $entries = [], string $field = 'path'): void
     {
-        $this->assertSucceeded($this->confine($paths, $entries));
-    }
-
-    /** A listing through a link out of the home is a refusal the caller can act on, not a bad request. */
-    private function assertInsideHomeForList(string $path): void
-    {
-        $process = $this->confine([$path]);
+        $process = $this->confine($paths, $entries);
         if ($process->getExitCode() === self::CONFINE_OUTSIDE_EXIT_CODE) {
-            throw ProblemException::one('path', 'outside_home', trim($process->getErrorOutput()));
+            throw $this->outsideHome($field, $process);
         }
         $this->assertSucceeded($process);
+    }
+
+    /** A path through a link out of the home is a refusal on the field that named it, not a bad request. */
+    private function assertFieldInsideHome(string $field, string $path): void
+    {
+        $this->assertInsideHome([$path], [], $field);
+    }
+
+    /** What the script that refused the path said of it. */
+    private function outsideHome(string $field, Process $refusal): ProblemException
+    {
+        return ProblemException::one($field, 'outside_home', trim($refusal->getErrorOutput()));
     }
 
     /**
@@ -1031,9 +960,7 @@ class FileManager
             ...array_map(fn (string $p): string => 'E:'.$p, $entries),
         ];
 
-        return $this->runOnCore([
-            'sh', '-c', self::CONFINE_SCRIPT, 'sh', $this->homeDirPath(), ...$args,
-        ]);
+        return $this->runAsAccount($this->commands()->confine($this->homeDirPath(), $args));
     }
 
     /**
@@ -1044,7 +971,7 @@ class FileManager
      */
     private function entryType(string $path): string
     {
-        $process = $this->runOnCore(['sh', '-c', self::ENTRY_TYPE_SCRIPT, 'sh', $path, rtrim($path, '/')]);
+        $process = $this->runAsAccount($this->commands()->entryType($path));
         $this->assertSucceeded($process);
         $type = trim($process->getOutput());
 

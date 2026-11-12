@@ -2,16 +2,11 @@
 
 namespace App\Lib\Deploy\Source;
 
+use App\System\Privileged\AccountFiles;
+
 /**
- * Locate the project root inside an extracted archive.
- *
- * If the extract directory contains exactly one subdirectory (and no files),
- * that subdirectory is the project root — the usual "zip of a folder" case.
- * Otherwise the extract directory itself is the root (flat archive).
- *
- * The directory is listed with {@see topLevelArgv()} rather than read here:
- * archives are extracted under the account's private ~/.panelalpha, which
- * core's PHP process cannot read. No Laravel dependencies.
+ * Locates the project root in an extracted archive: its only subdirectory when it holds nothing else, else itself.
+ * Listed as the account via {@see topLevelArgv()}, since core cannot read ~/.panelalpha. No Laravel dependencies.
  */
 class ProjectArchive
 {
@@ -21,9 +16,9 @@ class ProjectArchive
      *
      * @return list<string>
      */
-    public static function topLevelArgv(string $dir): array
+    public static function topLevelArgv(AccountFiles $account, string $dir): array
     {
-        return ['sudo', 'find', $dir, '-mindepth', '1', '-maxdepth', '1', '-printf', '%y %f\0'];
+        return $account->listEntryTypes($dir);
     }
 
     /**

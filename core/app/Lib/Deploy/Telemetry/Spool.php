@@ -4,17 +4,12 @@ namespace App\Lib\Deploy\Telemetry;
 
 use App\Lib\Deploy\DeployLog\LogStorage;
 use App\System;
+use App\System\Privileged;
 use App\System\ProcessRunner;
 
 /**
- * The outbox: reports written during a deploy and sent later by `telemetry:ship`,
- * so a deploy request (`QUEUE_CONNECTION` is `sync`) never waits on the network.
- * A failed deploy's report is sent at once ({@see TelemetryShipper::sendNow()})
- * and lands here only when that send does not get through.
- *
- * Every method swallows its own errors and reports failure by return value: a
- * full disk is exactly when deploys fail. Cron ships as www-data, so every mkdir
- * and write chowns to www-data, as {@see LogStorage} does.
+ * The outbox `telemetry:ship` sends later, so a deploy request (`QUEUE_CONNECTION` is `sync`) never waits on the network; each method reports failure
+ * by return value (a full disk is when deploys fail) and chowns to www-data for cron, as {@see LogStorage} does.
  */
 class Spool
 {
@@ -77,8 +72,8 @@ class Spool
     }
 
     /**
-     * Queue a report. Returns the file path, or null when it could not be
-     * written.
+     * Queue a report: the file path, or null when it could not be written. A failed deploy's report lands
+     * here only when {@see TelemetryShipper::sendNow()} did not get through.
      *
      * @param  array<string, mixed>  $report
      */
@@ -263,9 +258,8 @@ class Spool
     }
 
     /**
-     * Record a send that never reached an ingest: backed off like a failure but
-     * not counted against {@see self::MAX_ATTEMPTS}, which are for payloads a
-     * server refused. {@see self::MAX_FILES} still bounds the spool.
+     * Record a send that never reached an ingest: backed off like a failure, but not counted against
+     * {@see self::MAX_ATTEMPTS}, which are for payloads a server refused; {@see self::MAX_FILES} still bounds it.
      */
     public function recordDeferral(string $path): void
     {
@@ -448,8 +442,8 @@ class Spool
     }
 
     /**
-     * Best-effort chown to www-data: when it fails (no sudo rule, no Laravel app)
-     * cron just cannot see the file, the same as not trying.
+     * Best-effort chown to www-data. If it fails (no root broker, no Laravel app),
+     * cron cannot see the file, the same as not trying.
      */
     private function fixOwnership(string $path): void
     {
@@ -458,7 +452,7 @@ class Spool
         }
 
         try {
-            $this->processes()->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
+            $this->processes()->runProcess(Privileged::files()->changeOwnerRecursively(self::OWNER, $path));
         } catch (\Throwable) {
         }
     }

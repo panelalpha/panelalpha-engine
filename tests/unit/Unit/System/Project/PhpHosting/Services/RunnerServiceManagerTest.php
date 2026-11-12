@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project\PhpHosting\Services;
 use App\Models\Domain;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmApacheStack;
@@ -15,6 +16,7 @@ use App\System\Project\PhpHosting\Services\ServiceManager;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class RunnerServiceManagerTest extends TestCase
 {
@@ -71,11 +73,11 @@ class RunnerServiceManagerTest extends TestCase
         $project->reloadCron();
         (new LiteSpeedStack($system, $project->userModel()))->restartPhpHandler($project, '8.4');
 
-        $compose = $project->composeFilePath();
+        $container = Privileged::accountContainer($project->username());
         $this->assertSame([
-            "sudo docker compose -f {$compose} exec -T php bash /entrypoint-runner.sh sync --all",
-            "sudo docker compose -f {$compose} exec -T php service cron restart",
-            ['sudo', 'docker', 'compose', '-f', $compose, 'exec', '-T', 'php', 'bash', '/entrypoint-runner.sh', 'restart', 'lsphp84'],
+            $container->exec(['bash', '/entrypoint-runner.sh', 'sync', '--all']),
+            $container->exec(['service', 'cron', 'restart']),
+            $container->exec(['bash', '/entrypoint-runner.sh', 'restart', 'lsphp84']),
         ], $system->journal);
     }
 
@@ -150,7 +152,7 @@ class RunnerServiceManagerTest extends TestCase
         return $runtime;
     }
 
-    /** Runs file commands for real, without sudo; records docker commands and skips them. */
+    /** Runs file commands for real, without the broker; records compose commands and skips them. */
     private function system(): System
     {
         return new class ($this->root) extends System {
@@ -178,15 +180,16 @@ class RunnerServiceManagerTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (str_contains($line, 'docker')) {
+                if (is_array($cmd) && preg_match('/\A(compose|account-container)\./', (string) LocalRoot::action($cmd)) === 1) {
                     $this->journal[] = $cmd;
                     $cmd = ['true'];
                 }
                 $process = is_array($cmd)
-                    ? new Process(array_values(array_filter($cmd, static fn ($a, $i) => !($i === 0 && $a === 'sudo'), ARRAY_FILTER_USE_BOTH)))
-                    : Process::fromShellCommandline(str_replace('sudo ', '', $cmd));
-                $process->run();
+                    ? new Process(LocalRoot::argv($cmd))
+                    : Process::fromShellCommandline(LocalRoot::line($cmd));
+                $process->run(null, [
+                    'PA_ROOT_LOCAL_ROOTS' => json_encode(['engine' => $this->engineRoot, 'homes' => $this->engineRoot . '/home'], JSON_THROW_ON_ERROR),
+                ]);
 
                 return $process;
             }

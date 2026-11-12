@@ -9,6 +9,8 @@ use App\Http\Requests\EximTestEmailSendRequest;
 use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\NamingBaseSetting;
+use App\Lib\Host\ApiFeatures;
 use App\Lib\Mail\EximConfigSecrets;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
@@ -19,8 +21,10 @@ use App\Lib\Ssl\SharedZones;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
+use App\Rules\AcmeDirectoryUrl;
 use App\System;
 use App\System\AccountContainers;
+use App\System\HostScriptReport;
 use App\System\Network;
 use App\System\Services\Webserver\Litespeed;
 use Illuminate\Http\JsonResponse;
@@ -50,6 +54,7 @@ class SystemController extends Controller
 
         $data = [
             'version' => config('system.version'),
+            'features' => ApiFeatures::ALL,
             'url' => $url !== '' ? $url : null,
             'api_url' => $url !== '' ? $url.'/api' : null,
             'mcp_url' => $url !== '' ? $url.'/mcp' : null,
@@ -68,6 +73,8 @@ class SystemController extends Controller
             'panelalpha_online' => self::panelalphaOnline(),
             'unreadable_secrets' => self::unreadableSecrets($caller, User::query()->cursor()),
             'orphan_account_containers' => self::orphanAccountContainers($system, $caller),
+            'tenant_network_firewall' => (new HostScriptReport($system, HostScriptReport::TENANT_NETWORK_FIREWALL))->reportFor($caller),
+            'host_firewall' => (new HostScriptReport($system, HostScriptReport::HOST_FIREWALL))->reportFor($caller),
         ];
 
         return new JsonResponse([
@@ -91,7 +98,7 @@ class SystemController extends Controller
      * Where a project created without a domain of its own lands (<name>.<sites_base_domain>), and whether
      * sites there can hold a real certificate: a caller cannot know either without it.
      *
-     * @return array{sites_base_domain: mixed, sites_certificates: array{issuer: string, shared_zone: bool, shared_zone_issuance: bool}}
+     * @return array{sites_base_domain: mixed, project_domain_bases: list<array<string, mixed>>, sites_certificates: array{issuer: string, shared_zone: bool, shared_zone_issuance: bool}}
      */
     private static function sitesDomain(): array
     {
@@ -99,6 +106,7 @@ class SystemController extends Controller
 
         return [
             'sites_base_domain' => $base,
+            'project_domain_bases' => DomainAllocator::projectDomainBases(),
             'sites_certificates' => [
                 'issuer' => Issuers::configured()->id(),
                 'shared_zone' => $base === null || SharedZones::covers((string) $base),
@@ -263,7 +271,7 @@ class SystemController extends Controller
         $params = $request->validate([
             'issuer' => 'string|nullable|in:self_signed,acme',
             'sites_base_domain' => 'string|nullable|max:253',
-            'acme_directory_url' => 'string|nullable|max:2048',
+            'acme_directory_url' => ['nullable', 'string', 'max:2048', new AcmeDirectoryUrl],
             'acme_email' => 'email|nullable|max:255',
             'shared_zone_issuance' => 'boolean|nullable',
         ]);
@@ -294,7 +302,7 @@ class SystemController extends Controller
                 'sites_base_domain' => "{$base} is not a hostname sites can be named under.",
             ]);
         }
-        self::setOrForget('default_wildcard_domain', $base);
+        NamingBaseSetting::save('default_wildcard_domain', $base);
     }
 
     /** An emptied value removes the setting, so it reads back as null rather than "". */
@@ -599,8 +607,8 @@ class SystemController extends Controller
     #[OA\Put(
         path: '/system/webserver-config',
         summary: 'Update webserver configuration',
-        description: 'LiteSpeed and OpenLiteSpeed only. On the nginx-proxy webserver every engine runs today this answers 422, because only (Open)LiteSpeed implements a panel config.',
-        x: ['mcp-description' => '(Open)LiteSpeed only; answers 422 on nginx-proxy.'],
+        description: 'LiteSpeed only. On the nginx-proxy webserver every engine runs today, and on OpenLiteSpeed, which has no serial number, this answers 422, because only LiteSpeed implements a panel config.',
+        x: ['mcp-description' => 'LiteSpeed only; answers 422 on nginx-proxy and OpenLiteSpeed.'],
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(

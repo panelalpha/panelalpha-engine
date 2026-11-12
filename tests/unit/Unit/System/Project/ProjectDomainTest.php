@@ -8,10 +8,13 @@ use App\Models\Setting;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
+use App\System\Privileged\AccountFiles;
 use App\System\Project;
 use App\System\Project\Domain as DomainCollaborator;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\WebserverInterface;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
@@ -53,6 +56,7 @@ class ProjectDomainTest extends TestCase
         );
         $user->method('getUid')->willReturn(1000);
         $user->method('getGid')->willReturn(1000);
+        $user->method('linuxIds')->willReturn([1000, 1000]);
         $user->method('hasGitProject')->willReturn(false);
         $user->method('getTemplate')->willReturn('dind');
 
@@ -157,6 +161,7 @@ class ProjectDomainTest extends TestCase
         );
         $user->method('getUid')->willReturn(1000);
         $user->method('getGid')->willReturn(1000);
+        $user->method('linuxIds')->willReturn([1000, 1000]);
         $user->method('hasGitProject')->willReturn(false);
         $user->method('getTemplate')->willReturn('default');
 
@@ -315,12 +320,13 @@ class ProjectDomainTest extends TestCase
             $publicHtml = $domainDir . '/public_html';
 
             $this->assertDirectoryExists($publicHtml);
-            $this->assertContains('sudo mkdir -p ' . $domainDir, $system->journal);
-            $this->assertContains('sudo chown 1001:1001 ' . $domainDir, $system->journal);
+            $this->assertContains($this->homeEntry($domainDir), $system->journal);
+            $this->assertContains($this->asAlice()->makeDirectories($domainDir), $system->requests);
             $this->assertContains('isDir:' . $publicHtml, $system->journal);
-            $this->assertContains('template:' . $publicHtml . ':1001:1001', $system->journal);
-            $this->assertContains('sudo mkdir -p ' . $publicHtml, $system->journal);
-            $this->assertContains('sudo chown 1001:1001 ' . $publicHtml, $system->journal);
+            $this->assertContains('template:'.$publicHtml.':as-account', $system->journal);
+            $this->assertContains($this->asAlice()->makeDirectories($publicHtml), $system->requests);
+            $this->assertContains($this->asAlice()->changeModeRecursively('ugo-rwx,u+rwX,go+rX', $publicHtml), $system->requests);
+            $this->assertNoRootChown($system->requests);
         } finally {
             $this->removeTree($tmpRoot);
         }
@@ -340,9 +346,10 @@ class ProjectDomainTest extends TestCase
 
             $publicHtml = $domainDir . '/public_html';
             $this->assertDirectoryExists($publicHtml);
-            $this->assertContains('sudo mkdir -p ' . $domainDir, $system->journal);
-            $this->assertContains('sudo chown 1001:1001 ' . $domainDir, $system->journal);
-            $this->assertContains('template:' . $publicHtml . ':1001:1001', $system->journal);
+            $this->assertContains($this->homeEntry($domainDir), $system->journal);
+            $this->assertContains($this->asAlice()->makeDirectories($publicHtml), $system->requests);
+            $this->assertContains('template:'.$publicHtml.':as-account', $system->journal);
+            $this->assertNoRootChown($system->requests);
         } finally {
             $this->removeTree($tmpRoot);
         }
@@ -361,15 +368,39 @@ class ProjectDomainTest extends TestCase
             $project = new Project($system, $this->phpHostingAlice());
             $project->domain($this->phpHostingAliceDomain())->createDomainRootDir();
 
-            $this->assertContains('sudo mkdir -p ' . $domainDir, $system->journal);
-            $this->assertContains('sudo chown 1001:1001 ' . $domainDir, $system->journal);
-            $this->assertContains('sudo mkdir -p ' . $publicHtml, $system->journal);
-            $this->assertContains('sudo chown 1001:1001 ' . $publicHtml, $system->journal);
+            $this->assertContains($this->homeEntry($domainDir), $system->journal);
+            $this->assertContains($this->asAlice()->makeDirectories($domainDir), $system->requests);
+            $this->assertContains($this->asAlice()->makeDirectories($publicHtml), $system->requests);
+            $this->assertNoRootChown($system->requests);
             $templateLines = array_values(array_filter(
                 $system->journal,
                 static fn (string $line): bool => str_starts_with($line, 'template:')
             ));
             $this->assertSame([], $templateLines);
+        } finally {
+            $this->removeTree($tmpRoot);
+        }
+    }
+
+    public function test_a_document_root_at_the_home_makes_only_the_domain_dir(): void
+    {
+        $tmpRoot = sys_get_temp_dir() . '/pa-domain-home-root-' . bin2hex(random_bytes(4));
+        $home = $tmpRoot . '/home/alice';
+        mkdir($home, 0777, true);
+        $system = $this->phpHostingDomainRootSystem($tmpRoot);
+        $domain = $this->phpHostingAliceDomain();
+        $domain->setDocumentRoot('/');
+
+        try {
+            (new Project($system, $this->phpHostingAlice()))->domain($domain)->createDomainRootDir();
+
+            $homeEntries = array_values(array_filter(
+                $system->requests,
+                static fn (array $argv): bool => LocalRoot::action($argv) === 'scripts.makeHomeEntry',
+            ));
+            $this->assertSame([Privileged::scripts()->makeHomeEntry($home . '/alice.example.test', '0755', '1001:1001')], $homeEntries);
+            $this->assertNotContains($this->asAlice()->makeDirectories($home . '/'), $system->requests);
+            $this->assertSame([], preg_grep('/^template:/', $system->journal));
         } finally {
             $this->removeTree($tmpRoot);
         }
@@ -435,6 +466,53 @@ class ProjectDomainTest extends TestCase
         } finally {
             $this->removeTree($tmpRoot);
         }
+    }
+
+    public function test_a_self_signed_certificate_names_the_domain_in_its_alt_name_and_a_long_one_only_there(): void
+    {
+        $long = 'inner1791790778236.pay1791790776217.pw22d32763-4311.panelalpha.online';
+        foreach ([$long => null, 'self.example.test' => 'self.example.test'] as $name => $commonName) {
+            $parsed = $this->selfSignFor($name);
+
+            $this->assertSame('DNS:'.$name, $parsed['extensions']['subjectAltName'] ?? null, $name);
+            $this->assertSame($commonName, $parsed['subject']['CN'] ?? null, $name);
+        }
+    }
+
+    /** @return array<string, mixed> the certificate generateSelfSignedCertificate() wrote, as openssl parses it */
+    private function selfSignFor(string $name): array
+    {
+        $tmpRoot = sys_get_temp_dir().'/pa-domain-selfsign-'.bin2hex(random_bytes(4));
+        mkdir($tmpRoot.'/users/alice', 0777, true);
+        $user = $this->createStub(ModelsUser::class);
+        $user->method('__get')->willReturnCallback(static fn (string $key): mixed => $key === 'username' ? 'alice' : null);
+        $domainModel = new DomainModel();
+        $domainModel->forceFill(['domain' => $name]);
+
+        try {
+            (new Project($this->systemRunningWithoutSudo($tmpRoot), $user))->domain($domainModel)->generateSelfSignedCertificate();
+
+            return openssl_x509_parse((string) file_get_contents($tmpRoot.'/users/alice/ssl-certs/'.$name.'.crt')) ?: [];
+        } finally {
+            $this->removeTree($tmpRoot);
+        }
+    }
+
+    private function systemRunningWithoutSudo(string $engineRoot): System
+    {
+        return new class ($engineRoot) extends System {
+            public function __construct(private string $engineRoot) {}
+
+            public function engineDirPath(): string
+            {
+                return $this->engineRoot;
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return (new \Symfony\Component\Process\Process(LocalRoot::plain((array) $cmd)))->mustRun()->getOutput();
+            }
+        };
     }
 
     public function test_get_ssl_certificate_info_reads_installed_pem_without_lib_domain(): void
@@ -616,6 +694,7 @@ class ProjectDomainTest extends TestCase
         );
         $user->method('getUid')->willReturn(1000);
         $user->method('getGid')->willReturn(1000);
+        $user->method('linuxIds')->willReturn([1000, 1000]);
         $user->method('getTemplate')->willReturn('default');
 
         $domainModel = new DomainModel();
@@ -687,15 +766,12 @@ class ProjectDomainTest extends TestCase
                         file_put_contents($file, 'vhost');
                     }
 
-                    public function makeDirFromTemplate(
+                    public function makeDirFromTemplateAsAccount(
+                        AccountFiles $account,
                         string $dir,
                         string $templateDir,
                         array $templateVars,
-                        ?string $chown = null,
-                        ?string $chmod = null,
-                        array $exclude = [],
                     ): void {
-                        mkdir($dir, 0777, true);
                     }
                 };
             }
@@ -732,14 +808,36 @@ class ProjectDomainTest extends TestCase
         return $domainModel;
     }
 
+    private function homeEntry(string $entry): string
+    {
+        return implode(' ', Privileged::scripts()->makeHomeEntry($entry, '0755', '1001:1001'));
+    }
+
+    private function asAlice(): AccountFiles
+    {
+        return new AccountFiles(1001, 1001);
+    }
+
+    /** @param list<list<string>> $requests */
+    private function assertNoRootChown(array $requests): void
+    {
+        $this->assertSame([], array_values(array_filter(
+            $requests,
+            static fn (array $argv): bool => str_starts_with((string) LocalRoot::action($argv), 'files.changeOwner'),
+        )));
+    }
+
     /**
-     * @return System&object{journal: list<string>}
+     * @return System&object{journal: list<string>, requests: list<list<string>>}
      */
     private function phpHostingDomainRootSystem(string $engineRoot): System
     {
         return new class ($engineRoot) extends System {
             /** @var list<string> */
             public array $journal = [];
+
+            /** @var list<list<string>> */
+            public array $requests = [];
 
             public function __construct(private string $engineRoot)
             {
@@ -759,7 +857,13 @@ class ProjectDomainTest extends TestCase
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->journal[] = $line;
-                if (preg_match('/mkdir -p (.+)$/', $line, $matches) === 1) {
+                if (is_array($cmd)) {
+                    $this->requests[] = array_values($cmd);
+                }
+                if (is_array($cmd) && str_starts_with((string) LocalRoot::action($cmd), 'account.')) {
+                    $line = implode(' ', LocalRoot::plain($cmd));
+                }
+                if (preg_match('/mkdir -p -- (.+)$/', $line, $matches) === 1) {
                     $path = trim($matches[1]);
                     if (!is_dir($path)) {
                         mkdir($path, 0777, true);
@@ -784,18 +888,16 @@ class ProjectDomainTest extends TestCase
                         return is_dir($target);
                     }
 
-                    public function makeDirFromTemplate(
+                    public function makeDirFromTemplateAsAccount(
+                        AccountFiles $account,
                         string $dir,
                         string $templateDir,
                         array $templateVars,
-                        ?string $chown = null,
-                        ?string $chmod = null,
-                        array $exclude = [],
                     ): void {
                         if (!is_dir($dir)) {
                             mkdir($dir, 0777, true);
                         }
-                        $this->outer->journal[] = 'template:' . $dir . ':' . (string) $chown;
+                        $this->outer->journal[] = 'template:'.$dir.':as-account';
                     }
                 };
             }
@@ -836,15 +938,15 @@ class ProjectDomainTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
-                $argv = is_array($cmd) ? $cmd : (preg_split('/\s+/', $cmd) ?: []);
+                $argv = LocalRoot::plain(is_array($cmd) ? $cmd : (preg_split('/\s+/', $cmd) ?: []));
                 $exit = 1;
                 $output = '';
 
                 if (($argv[0] ?? '') === 'test' && ($argv[1] ?? '') === '-e') {
                     $exit = file_exists((string) ($argv[2] ?? '')) ? 0 : 1;
-                } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'find') {
-                    $dir = (string) ($argv[2] ?? '');
-                    $name = (string) ($argv[6] ?? '');
+                } elseif (($argv[0] ?? '') === 'find') {
+                    $dir = (string) ($argv[1] ?? '');
+                    $name = (string) ($argv[5] ?? '');
                     $found = [];
                     if (is_dir($dir)) {
                         foreach (scandir($dir) ?: [] as $file) {
@@ -888,10 +990,8 @@ class ProjectDomainTest extends TestCase
 
             private function applyHostCommand(string|array $cmd): void
             {
-                $argv = is_array($cmd) ? $cmd : (preg_split('/\s+/', trim($cmd)) ?: []);
-                if (($argv[0] ?? '') === 'sudo') {
-                    array_shift($argv);
-                }
+                $argv = LocalRoot::plain(is_array($cmd) ? $cmd : (preg_split('/\s+/', trim($cmd)) ?: []));
+                $argv = array_values(array_filter($argv, static fn (string $word): bool => $word !== '--'));
                 $op = $argv[0] ?? '';
                 if ($op === 'mkdir' && ($argv[1] ?? '') === '-p') {
                     if (!is_dir((string) $argv[2]) && !mkdir((string) $argv[2], 0777, true) && !is_dir((string) $argv[2])) {

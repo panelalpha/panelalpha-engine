@@ -4,6 +4,7 @@ namespace App\System\Project\Git;
 
 use App\Support\JobBudget;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -88,7 +89,7 @@ final class CredentialFiles
     public static function remove(EngineSystem $system, string $path): bool
     {
         try {
-            $system->exec(['sudo', 'rm', '-f', '--', $path]);
+            $system->exec(Privileged::files()->removeIfExists($path));
 
             return true;
         } catch (\Throwable $e) {
@@ -127,15 +128,7 @@ final class CredentialFiles
      */
     private static function stalePaths(EngineSystem $system, string $root, ?int $depth): array
     {
-        $find = [
-            'sudo', 'find', rtrim($root, '/'),
-            '-ignore_readdir_race',
-            ...($depth === null ? ['-xdev'] : ['-maxdepth', (string) $depth]),
-            '-type', 'f',
-            '(', '-name', self::ASKPASS_PREFIX.'*', '-o', '-name', self::SSH_PREFIX.'*', ')',
-            '-mmin', '+'.intdiv(self::STALE_SECONDS, 60),
-            '-print0',
-        ];
+        $find = Privileged::files()->staleFilesStartingWith($root, $depth, intdiv(self::STALE_SECONDS, 60), self::ASKPASS_PREFIX, self::SSH_PREFIX);
 
         return array_values(array_filter(
             explode("\0", $system->exec($find)),

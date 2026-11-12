@@ -73,6 +73,7 @@ class DomainStatisticsLifecycleTest extends TestCase
         );
         $user->method('getUid')->willReturn(1000);
         $user->method('getGid')->willReturn(1000);
+        $user->method('linuxIds')->willReturn([1000, 1000]);
         $user->method('hasGitProject')->willReturn(false);
         $user->method('getTemplate')->willReturn('dind');
 

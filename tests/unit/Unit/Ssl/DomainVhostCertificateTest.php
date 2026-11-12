@@ -10,6 +10,7 @@ use App\System\Project\Domain as ProjectDomain;
 use App\System\Services\Webserver\NginxProxy;
 use Illuminate\Support\Facades\Blade;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -208,6 +209,7 @@ class DomainVhostCertificateTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = is_array($cmd) ? LocalRoot::plain($cmd) : $cmd;
                 $this->test->commands[] = $cmd;
                 if (is_array($cmd) && in_array('openssl', $cmd, true)) {
                     if ($this->test->opensslFails) {
@@ -221,17 +223,16 @@ class DomainVhostCertificateTest extends TestCase
                         $this->test->touchCert(substr($out, 0, -4) . '.pem');
                         $this->test->touchCert(substr($out, 0, -4) . '.ca');
                     }
-                } elseif (is_string($cmd) && str_starts_with($cmd, 'sudo cp ')) {
-                    $parts = explode(' ', $cmd);
-                    $source = $parts[2] ?? '';
-                    $target = $parts[3] ?? '';
-                    if ($source !== '' && $target !== '' && file_exists($source)) {
+                } elseif (is_array($cmd) && ($cmd[0] ?? '') === 'cp') {
+                    [$source, $target] = array_slice($cmd, -2);
+                    if (file_exists($source)) {
                         $this->test->touchCert($target);
                     }
-                } elseif (is_string($cmd) && str_starts_with($cmd, 'sudo mkdir -p ')) {
-                    $dir = substr($cmd, strlen('sudo mkdir -p '));
-                    if (!is_dir($dir)) {
-                        mkdir($dir, 0777, true);
+                } elseif (is_array($cmd) && ($cmd[0] ?? '') === 'mkdir') {
+                    foreach (array_slice($cmd, (int) array_search('--', $cmd, true) + 1) as $dir) {
+                        if (!is_dir($dir)) {
+                            mkdir($dir, 0777, true);
+                        }
                     }
                 }
 

@@ -4,9 +4,11 @@ namespace Tests\Unit\System;
 
 use App\Exceptions\DockerErrorException;
 use App\System;
-use App\System\HostProcess;
+use App\System\Privileged;
+use App\System\Privileged\InvalidArgument;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -20,31 +22,34 @@ use Tests\TestCase;
  */
 class HostProcessTest extends TestCase
 {
-    // --- the nsenter prefix ---
+    // --- only the gateway's commands reach the host ---
 
-    public function test_a_list_stays_a_list_when_it_is_sent_to_the_host(): void
+    public function test_a_gateway_command_is_sent_to_the_host_as_the_gateway_built_it(): void
     {
-        $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'id', '-u', 'alice'],
-            HostProcess::onHost(['id', '-u', 'alice'])
-        );
+        $system = new RecordingHostSystem;
+
+        $system->runProcessOnHost(Privileged::users()->uid('alice'));
+        $system->runProcessOnHost(Privileged::docker()->info());
+
+        $this->assertSame([
+            self::onHost(Privileged::users()->uid('alice')),
+            self::onHost(Privileged::docker()->info()),
+        ], $system->seen);
+        $this->assertSame(['id', '-u', 'alice'], LocalRoot::plain($system->seen[0]));
     }
 
-    /**
-     * A caller that passed a shell line meant a shell line; turning it into an
-     * argv here would change how it is quoted.
-     */
-    public function test_a_shell_line_stays_a_shell_line(): void
+    public function test_a_command_of_the_callers_own_never_reaches_the_host(): void
     {
-        $this->assertSame(
-            'sudo nsenter --target 1 --all ls /tmp | wc -l',
-            HostProcess::onHost('ls /tmp | wc -l')
-        );
-    }
+        $system = new RecordingHostSystem;
 
-    public function test_an_empty_list_is_just_the_prefix(): void
-    {
-        $this->assertSame(['sudo', 'nsenter', '--target', '1', '--all'], HostProcess::onHost([]));
+        foreach ([['id', '-u', 'alice'], ['nsenter', '--target', '1', '--all', 'sh'], []] as $command) {
+            try {
+                $system->execOnHost($command);
+                $this->fail('ran '.implode(' ', $command).' on the host');
+            } catch (InvalidArgument) {
+            }
+        }
+        $this->assertSame([], $system->seen);
     }
 
     // --- exec() error mapping ---
@@ -118,9 +123,9 @@ class HostProcessTest extends TestCase
             }
         };
 
-        $this->assertSame('faked', $system->execOnHost(['whoami']));
+        $this->assertSame('faked', $system->execOnHost(Privileged::probes()->gitVersion()));
         $this->assertSame(
-            [['sudo', 'nsenter', '--target', '1', '--all', 'whoami']],
+            [self::onHost(Privileged::probes()->gitVersion())],
             $system->seen
         );
     }
@@ -139,8 +144,8 @@ class HostProcessTest extends TestCase
             }
         };
 
-        $this->assertSame('intercepted', $system->execOnHost('ls /tmp'), 'execOnHost() must go through exec()');
-        $this->assertSame(['sudo nsenter --target 1 --all ls /tmp'], $system->seen);
+        $this->assertSame('intercepted', $system->execOnHost(Privileged::probes()->gitVersion()), 'execOnHost() must go through exec()');
+        $this->assertSame([self::onHost(Privileged::probes()->gitVersion())], $system->seen);
     }
 
     public function test_overriding_run_process_alone_also_changes_run_process_on_host(): void
@@ -157,12 +162,13 @@ class HostProcessTest extends TestCase
             }
         };
 
-        $system->runProcessOnHost(['kill', '-0', '42']);
+        $system->runProcessOnHost(Privileged::host()->processExists(42));
 
         $this->assertSame(
-            [['sudo', 'nsenter', '--target', '1', '--all', 'kill', '-0', '42']],
+            [self::onHost(Privileged::host()->processExists(42))],
             $system->seen
         );
+        $this->assertSame(['kill', '-0', '--', '42'], LocalRoot::plain($system->seen[0]));
     }
 
     /**
@@ -183,8 +189,8 @@ class HostProcessTest extends TestCase
         };
 
         $system->exec(['true']);
-        $system->execOnHost(['true']);
-        $system->runProcessOnHost(['true']);
+        $system->execOnHost(Privileged::probes()->gitVersion());
+        $system->runProcessOnHost(Privileged::probes()->gitVersion());
 
         $this->assertTrue($system->ranSomething);
     }
@@ -220,6 +226,15 @@ class HostProcessTest extends TestCase
         $this->assertSame('a b', trim($system->exec("echo 'a b'")), 'a string is a shell line');
     }
 
+    /**
+     * @param  list<string>  $request
+     * @return list<string>
+     */
+    private static function onHost(array $request): array
+    {
+        return $request[1] === '--host' ? $request : [LocalRoot::CLIENT, '--host', ...array_slice($request, 1)];
+    }
+
     public function test_a_failing_real_command_throws_with_its_stderr(): void
     {
         $system = new System();
@@ -232,6 +247,20 @@ class HostProcessTest extends TestCase
             // RuntimeException from an unbooted facade and pass for the wrong reason.
             $this->assertSame('nope', trim($e->getMessage()));
         }
+    }
+}
+
+/** @internal */
+final class RecordingHostSystem extends System
+{
+    /** @var list<string|list<string>> */
+    public array $seen = [];
+
+    public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+    {
+        $this->seen[] = $cmd;
+
+        return FakeProcess::ok();
     }
 }
 

@@ -2,18 +2,14 @@
 
 namespace App\System\Project\Dind;
 
+use App\System\Privileged;
 use App\System\Project\Dind;
 use RuntimeException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Puts a project's memory limit on its account container: in the account's
- * compose file, so a recreated container keeps it, and on the running
- * container through `docker update`, so nothing restarts.
- *
- * Only the two memory keys change. Re-rendering the file from the template
- * instead would move an older account onto the current template's image and
- * mounts as a side effect of a limit change.
+ * Puts a project's memory limit in its account's compose file and on the running container, nothing else:
+ * re-rendering the template would move an older account onto today's image and mounts.
  */
 final class AccountMemory
 {
@@ -21,16 +17,14 @@ final class AccountMemory
 
     public function __construct(private readonly Dind $project) {}
 
+    /** Swap equals memory on the running container, as the template sets it: no swap at all. */
     public function apply(): void
     {
         $mb = $this->project->userModel()->effectiveMemoryLimit();
         $container = $this->writeCompose($mb);
 
         if ($this->project->isRunning()) {
-            // Swap equal to memory, as the template sets it: no swap at all.
-            $this->project->system()->exec([
-                'sudo', 'docker', 'update', '--memory', $mb.'m', '--memory-swap', $mb.'m', $container,
-            ]);
+            $this->project->system()->exec(Privileged::docker()->limitMemory($container, $mb));
         }
     }
 

@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Services;
 use App\System;
 use App\System\Services\Modsec;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /** Rule file names are joined to rules/ and renamed as root: nothing may climb out. */
@@ -77,8 +78,10 @@ class ModsecToggleTest extends TestCase
 
         $modsec->toggleConfigFiles('owasp', [], ['REQUEST-901.conf']);
 
-        $this->assertSame('mv', $system->ran[0][1] ?? null);
-        $this->assertStringEndsWith('/rules/REQUEST-901.conf.disabled', $system->ran[0][3] ?? '');
+        $this->assertTrue(LocalRoot::isRequest($system->ran[0]));
+        $argv = LocalRoot::plain($system->ran[0]);
+        $this->assertSame('mv', $argv[0] ?? null);
+        $this->assertStringEndsWith('/rules/REQUEST-901.conf.disabled', $argv[3] ?? '');
     }
 
     public function test_the_name_the_list_shows_for_a_disabled_file_enables_it(): void
@@ -97,8 +100,9 @@ class ModsecToggleTest extends TestCase
         $modsec->toggleConfigFiles('owasp', ['REQUEST-901.conf.disabled']);
         $modsec->toggleConfigFiles('owasp', ['REQUEST-901.conf']);
 
-        $expected = ['sudo', 'mv', $rules . '/REQUEST-901.conf.disabled', $rules . '/REQUEST-901.conf'];
+        $expected = [LocalRoot::CLIENT, 'files.move', '--', $rules . '/REQUEST-901.conf.disabled', $rules . '/REQUEST-901.conf'];
         $this->assertSame([$expected, $expected], $system->ran);
+        $this->assertSame(['mv', '--', $rules . '/REQUEST-901.conf.disabled', $rules . '/REQUEST-901.conf'], LocalRoot::plain($expected));
     }
 
     public function test_the_request_pattern(): void

@@ -17,6 +17,7 @@ use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\LocalRoot;
 
 class DindInnerRuntimeTest extends TestCase
 {
@@ -30,10 +31,12 @@ class DindInnerRuntimeTest extends TestCase
         $this->homeRoot = $this->tmpRoot . '/home';
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
         mkdir($this->homeRoot . '/alice/project', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => dirname($this->homeRoot)]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -176,6 +179,8 @@ class DindInnerRuntimeTest extends TestCase
         $homeRoot = $this->homeRoot;
 
         return new class ($tmpRoot, $homeRoot) extends System {
+            private const RUN_BY_THE_BROKER_ITSELF = ['account.renameInHome', 'account.readInHome', 'files.existingRealPaths'];
+
             public string $lxcfs = '';
 
             public function __construct(
@@ -199,14 +204,16 @@ class DindInnerRuntimeTest extends TestCase
                 return $this->homeRoot . '/' . $username;
             }
 
-            // Filesystem probes answer from the temp tree, without sudo.
+            /** Filesystem probes answer from the temp tree, through pa-root-local. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = $this->withoutSudo($cmd);
-                if (!in_array($argv[0] ?? null, ['test', 'stat', 'realpath', 'python3'], true)) {
+                $argv = (array) $cmd;
+                $probe = in_array(LocalRoot::action($argv), self::RUN_BY_THE_BROKER_ITSELF, true)
+                    || in_array($this->asRun($argv)[0] ?? null, ['test', 'stat'], true);
+                if (!$probe) {
                     throw new \LogicException('Unexpected process in test: ' . implode(' ', $argv));
                 }
-                $process = new Process($argv);
+                $process = new Process(LocalRoot::argv($argv), null, ['PA_ROOT_LOCAL_ROOTS' => (string) getenv('PA_ROOT_LOCAL_ROOTS')]);
                 $process->run();
 
                 return $process;
@@ -215,23 +222,25 @@ class DindInnerRuntimeTest extends TestCase
             // File writes really happen so the test can assert on them; anything else is inert.
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $argv = $this->withoutSudo($cmd);
+                $argv = $this->asRun($cmd);
                 if (in_array($argv[0] ?? null, ['mkdir', 'cp', 'chmod', 'mv'], true)) {
                     return (new Process($argv))->mustRun()->getOutput();
                 }
                 // The account's answer to which lxcfs files it has.
-                if (($argv[0] ?? null) === 'docker' && str_contains((string) end($argv), '/var/lib/lxcfs/proc')) {
+                if (str_contains(implode(' ', LocalRoot::inAccount($argv)), '/var/lib/lxcfs/proc')) {
                     return $this->lxcfs;
                 }
 
                 return '';
             }
 
-            private function withoutSudo(string|array $cmd): array
+            /**
+             * @param  string|list<string>  $cmd
+             * @return list<string>
+             */
+            private function asRun(string|array $cmd): array
             {
-                $argv = is_array($cmd) ? array_values($cmd) : explode(' ', $cmd);
-
-                return ($argv[0] ?? null) === 'sudo' ? array_slice($argv, 1) : $argv;
+                return is_array($cmd) ? LocalRoot::plain($cmd) : explode(' ', $cmd);
             }
         };
     }

@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project;
 use App\Models\User;
 use App\System\Project\SitePasswordProtection;
 use Illuminate\Support\Facades\Blade;
+use Tests\Support\LocalRoot;
 use Tests\Support\RecordingRunner;
 use Tests\TestCase;
 
@@ -94,9 +95,10 @@ class SitePasswordProtectionTest extends TestCase
 
         $this->assertCount(1, $runner->commands);
         $this->assertSame(
-            ['sudo', 'chown', '-R', 'www-data:www-data', $cache],
+            [LocalRoot::CLIENT, 'files.changeOwnerRecursively', '--', 'www-data:www-data', $cache],
             $runner->commands[0]
         );
+        $this->assertSame(['chown', '-R', '--', 'www-data:www-data', $cache], LocalRoot::plain($runner->commands[0]));
     }
 
     public function test_reclaim_framework_cache_as_non_root_is_noop(): void

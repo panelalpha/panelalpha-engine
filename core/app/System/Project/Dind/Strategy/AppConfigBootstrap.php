@@ -12,17 +12,12 @@ use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
 use App\Lib\Deploy\Platform\StageResolver;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Everything the project's app config does to the checkout, before anything is
- * detected.
- *
- * An app config is a bootstrap, not a strategy: it writes its file snippets, its
- * compose file if it ships one, and runs its after-clone script. What that
- * leaves behind is what detection reads — a compose file an app config wrote is
- * read ahead of the repository's own, and an app config that writes none
- * leaves the repository's own as the only one detection sees.
+ * What the project's app config does to the checkout before detection: its file snippets,
+ * its compose file and its after-clone script, which detection then reads.
  */
 class AppConfigBootstrap
 {
@@ -35,15 +30,13 @@ class AppConfigBootstrap
         $this->dind = $dind;
     }
 
+    /**
+     * Without an app config the scripts still run, since a deploy request may set the prepare stage,
+     * and a compose file a gone config wrote is removed so it is not read ahead of the repository's own.
+     */
     public function run(?AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
-        // A deploy request may speak for the prepare stage of a project that
-        // has no app config at all, so the scripts run on their own terms rather
-        // than as something an app config brought with it.
         if ($appConfig === null) {
-            // A config that is gone -- or has nothing left to say, which reads
-            // the same -- stopped shipping its compose file too. Left behind,
-            // that file would still be read ahead of the repository's own.
             $this->removeCompose($projectDir);
             $this->runScripts($projectDir, null);
 
@@ -56,11 +49,7 @@ class AppConfigBootstrap
         $this->runScripts($projectDir, $appConfig);
     }
 
-    /**
-     * An entrypoint the app config supplies, written where a repository would
-     * have put its own — {@see EntrypointWriter} reads one path, whoever
-     * wrote it.
-     */
+    /** An entrypoint the app config supplies, written where {@see EntrypointWriter} reads a repository's own. */
     private function writeEntrypoint(AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
         $script = $appConfig->entrypoint();
@@ -75,21 +64,8 @@ class AppConfigBootstrap
     }
 
     /**
-     * The compose file the app config ships, written under the engine's
-     * reserved names (ADR-0001) rather than one the client's own compose
-     * file might use.
-     *
-     * `override` is layered over the run file whenever present (D8).
-     * `replace` goes to {@see EngineArtifacts::APP_CONFIG_COMPOSE}, which
-     * detection ({@see ComposeUsableProbe})
-     * reads ahead of the repository's own compose file — writing it to the
-     * run file directly would run before detection ever sees it, since the
-     * run file is not one of detection's own candidate names.
-     *
-     * An app config that stops shipping a compose file -- or stops existing --
-     * removes whichever of these it had written; they survive `clean -fd`
-     * (excluded), so a stale one would otherwise outlive the app config that
-     * wrote it.
+     * The app config's compose file under the engine's reserved names (ADR-0001): `override` layers over the run file;
+     * `replace` is what detection ({@see ComposeUsableProbe}) and inspect's RecipeFileOverlay read ahead of the repository's.
      */
     private function writeCompose(AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
@@ -106,28 +82,38 @@ class AppConfigBootstrap
         }
 
         if ($appConfig->composeMode() === AppConfig::COMPOSE_OVERRIDE) {
-            // Layered over the run file as written, so it gets the run file's
-            // isolation rules first.
-            $hardened = ComposeOverride::harden($content, null, $this->dind->environment()->forInterpolation(), $this->dind->userModel()->username, $this->dind->userAppDirPath());
-            if ($hardened['yaml'] === null) {
-                throw new \InvalidArgumentException('The app config\'s compose override could not be read as YAML.');
-            }
-            foreach ($hardened['removed'] as $what) {
-                $this->dind->shell()->logger()?->warn(
-                    "Removed from the app config's compose override, not allowed in hosting: {$what}"
-                );
-            }
-            $fs->writeFileReplacingPath($engineOverride, $hardened['yaml'], $chown, '644');
-            $this->removeIfExists($appConfigCompose, $system, $fs);
+            $this->writeHardenedOverride($content, $engineOverride, $appConfigCompose, $chown, $system, $fs);
 
             return;
         }
 
-        // The same answer inspect's RecipeFileOverlay lays over a clone.
         $fs->writeFileReplacingPath($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
         $this->removeIfExists($engineOverride, $system, $fs);
     }
 
+    /** Layered over the run file as written, so it gets the run file's isolation rules first. */
+    private function writeHardenedOverride(
+        string $content,
+        string $engineOverride,
+        string $appConfigCompose,
+        ?string $chown,
+        System $system,
+        Filesystem $fs
+    ): void {
+        $hardened = ComposeOverride::harden($content, null, $this->dind->environment()->forInterpolation(), $this->dind->userModel()->username, $this->dind->userAppDirPath());
+        if ($hardened['yaml'] === null) {
+            throw new \InvalidArgumentException('The app config\'s compose override could not be read as YAML.');
+        }
+        foreach ($hardened['removed'] as $what) {
+            $this->dind->shell()->logger()?->warn(
+                "Removed from the app config's compose override, not allowed in hosting: {$what}"
+            );
+        }
+        $fs->writeFileReplacingPath($engineOverride, $hardened['yaml'], $chown, '644');
+        $this->removeIfExists($appConfigCompose, $system, $fs);
+    }
+
+    /** Both reserved files survive `clean -fd`, so one a config stopped shipping would outlive it. */
     private function removeCompose(string $projectDir): void
     {
         $system = $this->dind->system();
@@ -139,17 +125,13 @@ class AppConfigBootstrap
     private function removeIfExists(string $path, System $system, Filesystem $fs): void
     {
         if ($fs->fileExists($path)) {
-            $system->exec(['sudo', 'rm', '-f', $path]);
+            $system->exec(Privileged::accountFiles(...$this->dind->userModel()->linuxIds())->removeIfExists($path));
         }
     }
 
     /**
-     * The app config's own prepare-stage work: its staged commands, then its
-     * after-clone script.
-     *
-     * No platform is passed, because none has been chosen yet — that is the
-     * point of running here. The platform's own prepare commands run later,
-     * once detection has said which platform it is.
+     * The app config's staged prepare commands, then its after-clone script. No platform is passed:
+     * none has been chosen yet, and the platform's own prepare commands run after detection.
      */
     private function runScripts(string $projectDir, ?AppConfig $appConfig): void
     {

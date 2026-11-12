@@ -3,9 +3,11 @@
 namespace App\System\Services;
 
 use App\Support\JobBudget;
-use App\Support\SitesDbCaches;
 use App\System as EngineSystem;
+use App\System\Privileged;
+use App\System\Privileged\RootEngineComposeLines;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use App\System\Services\Mysql\Users;
@@ -27,7 +29,17 @@ class Mysql
 
     public function __construct(
         private readonly ?EngineSystem $system = null,
+        private ?int $timeout = null,
     ) {}
+
+    /** Run this connection on one job step's budget, so a long dump cannot outlast its job. */
+    public function withTimeout(int $timeout): self
+    {
+        $clone = clone $this;
+        $clone->timeout = $timeout;
+
+        return $clone;
+    }
 
     public function databases(): Databases
     {
@@ -61,11 +73,7 @@ class Mysql
         }
 
         try {
-            $this->runInCore(
-                $this->inSitesDb($this->dumpCommand($name, $table))
-                .' | gzip -c > '.escapeshellarg($dest),
-                'mysqldump failed'
-            );
+            $this->runInCore($this->sitesDb()->sitesDbDump($name, $table).' | gzip -c > '.escapeshellarg($dest), 'mysqldump failed');
             $this->assertDumpCompleted($table ?? $name, $dest);
         } catch (\Throwable $e) {
             $this->discardDump($dest);
@@ -82,20 +90,6 @@ class Mysql
     }
 
     /**
-     * The table name travels as a plain argument; flags that dump database-level
-     * objects (routines, events) are left off a single-table dump.
-     */
-    private function dumpCommand(string $database, ?string $table): string
-    {
-        $command = 'mariadb-dump --single-transaction -uroot '.escapeshellarg($database);
-        if ($table !== null) {
-            return $command.' '.escapeshellarg($table);
-        }
-
-        return $command.' --routines --triggers --events';
-    }
-
-    /**
      * A dump cut short still gzips cleanly; only a finished one ends with `-- Dump completed`.
      */
     private function assertDumpCompleted(string $name, string $dest): void
@@ -109,10 +103,7 @@ class Mysql
     public function restoreFromGzip(string $name, string $sqlGzPath): void
     {
         self::assertDatabaseName($name);
-        $this->runInCore(
-            'gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->inSitesDb('mariadb -uroot '.escapeshellarg($name)),
-            'database restore failed'
-        );
+        $this->runInCore('gunzip -c '.escapeshellarg($sqlGzPath).' | '.$this->sitesDb()->sitesDbRestore($name), 'database restore failed');
     }
 
     private function pdo(): PDO
@@ -138,38 +129,40 @@ class Mysql
         return is_string($value) ? $value : $default;
     }
 
-    /** Core has no MySQL client; sites-db, which holds every site database, has MariaDB's. */
-    private function inSitesDb(string $command): string
+    /**
+     * Streams $from, or only its $table, into $to inside sites-db, rewriting each DEFINER by $definers.
+     */
+    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
     {
-        $argv = [
-            'sudo', 'docker', 'compose', '--project-directory', $this->system()->engineDirPath(),
-            'exec', '-T', SitesDbCaches::SERVICE, 'bash', '-c',
-            'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; '.$command,
-        ];
-
-        return implode(' ', array_map('escapeshellarg', $argv));
+        $this->runInCore($this->sitesDb()->sitesDbCopy($from, $to, $table, $definers->orphan(), $definers->accounts()), $failurePrefix);
     }
 
-    /**
-     * Run one shell script inside sites-db, on the connection the dump and the
-     * restore use. Kept public so a copy can stream a dump straight into the
-     * destination without staging a file.
-     */
-    public function runSitesDbScript(string $script, string $failurePrefix): void
+    public function dropTableInSitesDb(string $database, string $table): void
     {
-        $this->runInCore($this->inSitesDb($script), $failurePrefix);
+        $this->runInCore($this->sitesDb()->sitesDbDropTable($database, $table), 'table drop failed');
+    }
+
+    /** Core has no MySQL client, so this runs in sites-db. */
+    private function sitesDb(): RootEngineComposeLines
+    {
+        return Privileged::engineComposeLines($this->system()->engineDirPath());
     }
 
     /** pipefail, so a failing dump is not hidden by gzip's success. */
     private function runInCore(string $command, string $failurePrefix): string
     {
-        $process = $this->system()->runProcess(['bash', '-c', 'set -o pipefail; '.$command], [], self::DB_COMMAND_TIMEOUT);
+        $process = $this->system()->runProcess(['bash', '-c', 'set -o pipefail; '.$command], [], $this->commandTimeout());
         if (! $process->isSuccessful()) {
             $message = $process->getErrorOutput() ?: $process->getOutput();
             throw new RuntimeException($failurePrefix.': '.trim($message));
         }
 
         return $process->getOutput();
+    }
+
+    private function commandTimeout(): int
+    {
+        return $this->timeout ?? self::DB_COMMAND_TIMEOUT;
     }
 
     private function system(): EngineSystem

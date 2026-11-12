@@ -4,6 +4,7 @@ namespace App\Console\Commands\System;
 
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind\HostDiskGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
@@ -14,12 +15,12 @@ use Illuminate\Support\Facades\Log;
  *
  * Caps host build cache at DEPLOY_HOST_BUILD_CACHE_MAX, then, while free
  * space on a deploy path is below DEPLOY_DISK_PRESSURE_FREE, frees the oldest
- * build cache and finally base images unused for a few hours. Images are only
- * ever removed by `system:image:prune`, which keeps out of a deploy's way.
+ * build cache, then through `system:image:prune` images unused for 6 hours,
+ * halving the window until enough is free; what a deploy names stays.
  */
 class GuardHostDisk extends Command
 {
-    /** How long an image may sit unused before disk pressure may take it. */
+    /** The first window disk pressure takes images from; each further pass halves it. */
     public const PRESSURE_IMAGE_AGE = '6h';
 
     protected $signature = 'system:disk:guard
@@ -36,7 +37,7 @@ class GuardHostDisk extends Command
 
         $cap = self::bytes(config('deploy.host_build_cache_max'));
         if ($cap !== null) {
-            $this->pruneBuildCache($system, ['--max-used-space', (string) $cap], 'over the '.HostPrewarmPlan::formatBytes($cap).' cap', $dryRun);
+            $this->pruneBuildCache($system, Privileged::docker()->pruneBuildCacheAbove($cap), 'over the '.HostPrewarmPlan::formatBytes($cap).' cap', $dryRun);
         }
 
         $guard = new HostDiskGuard($system, null);
@@ -55,16 +56,17 @@ class GuardHostDisk extends Command
 
         $this->report('warning', self::state($lowest).', below the '.HostPrewarmPlan::formatBytes($target).' target; freeing disk.');
         if ($dryRun) {
-            $this->line('Would prune host build cache down to '.HostPrewarmPlan::formatBytes($target).' free, then images unused for '.self::PRESSURE_IMAGE_AGE.'.');
+            $this->line('Would prune host build cache down to '.HostPrewarmPlan::formatBytes($target).' free, then images unused for '.self::PRESSURE_IMAGE_AGE.' and less.');
 
             return 0;
         }
 
-        $this->pruneBuildCache($system, ['--min-free-space', (string) $target], 'to reach the free-space target', false);
+        $this->pruneBuildCache($system, Privileged::docker()->pruneBuildCacheUntilFree($target), 'to reach the free-space target', false);
         $lowest = $guard->lowest() ?? $lowest;
         if ($lowest['free'] < $target) {
             Artisan::call('system:image:prune', [
                 '--older-than' => self::PRESSURE_IMAGE_AGE,
+                '--until-free' => (string) $target,
                 '--build-cache-older-than' => 'off',
             ]);
             $this->line(trim(Artisan::output()));
@@ -113,8 +115,8 @@ class GuardHostDisk extends Command
         return self::bytes($value, '0');
     }
 
-    /** @param list<string> $limit */
-    private function pruneBuildCache(System $system, array $limit, string $why, bool $dryRun): void
+    /** @param list<string> $prune */
+    private function pruneBuildCache(System $system, array $prune, string $why, bool $dryRun): void
     {
         if ($dryRun) {
             $this->line("Would prune host build cache {$why}.");
@@ -122,7 +124,7 @@ class GuardHostDisk extends Command
             return;
         }
         try {
-            $out = $system->exec(['sudo', 'docker', 'buildx', 'prune', '-af', ...$limit], [], 300);
+            $out = $system->exec($prune, [], 300);
         } catch (\Exception $e) {
             $this->report('warning', 'Could not prune the host build cache: '.trim($e->getMessage()));
 

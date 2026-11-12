@@ -6,22 +6,14 @@ use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Env\EnvExampleCopies;
 
 /**
- * Reading, merging and writing a project's `.env`.
- *
- * Deliberately tolerant and round-trip oriented — the same rules the panel's
- * own parser follows — because the file belongs to the customer: comments,
- * blank lines and the order of the keys all survive a merge, and only the
- * values the engine was asked to set are touched.
- *
- * Which `.env` files a checkout is *missing* is a different question, and
- * lives in {@see EnvExampleCopies}.
+ * Reading, merging and writing a project's `.env`, round-trip: comments, blank lines and key order
+ * survive. Which files a checkout is missing is {@see EnvExampleCopies}'s question.
  */
 class EnvFile
 {
     /**
-     * An env file's text as UTF-8: a UTF-8 BOM dropped, UTF-16 with a BOM
-     * converted (DumbPad ships its .env.example as UTF-16LE). Null when NUL
-     * bytes remain, since Compose refuses such a file whatever is done to it.
+     * An env file's text as UTF-8: a UTF-8 BOM dropped, UTF-16 with a BOM converted.
+     * Null when NUL bytes remain, since Compose refuses such a file.
      */
     public static function asUtf8(string $raw): ?string
     {
@@ -58,17 +50,8 @@ class EnvFile
 
                 continue;
             }
-            // `KEY = "v"` is accepted by Compose's dotenv too; the space is not part of the value.
-            if (preg_match('/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=[ \t]*(.*)$/s', $line, $m)) {
-                $row = [
-                    'type' => 'variable',
-                    'key' => $m[1],
-                    'value' => self::unquote($m[2]),
-                ];
-                // Single quotes keep `$` literal; remember so a rewrite does too.
-                if (strlen($m[2]) >= 2 && $m[2][0] === "'" && str_ends_with($m[2], "'")) {
-                    $row['literal'] = true;
-                }
+            $row = self::variableRow($line);
+            if ($row !== null) {
                 $rows[] = $row;
 
                 continue;
@@ -77,6 +60,28 @@ class EnvFile
         }
 
         return $rows;
+    }
+
+    /**
+     * `KEY = "v"` is accepted by Compose's dotenv too; single quotes keep `$` literal, so a rewrite does too.
+     *
+     * @return array<string, string|true>|null
+     */
+    private static function variableRow(string $line): ?array
+    {
+        if (! preg_match('/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=[ \t]*(.*)$/s', $line, $m)) {
+            return null;
+        }
+        $row = [
+            'type' => 'variable',
+            'key' => $m[1],
+            'value' => self::unquote($m[2]),
+        ];
+        if (strlen($m[2]) >= 2 && $m[2][0] === "'" && str_ends_with($m[2], "'")) {
+            $row['literal'] = true;
+        }
+
+        return $row;
     }
 
     /**
@@ -148,9 +153,8 @@ class EnvFile
     }
 
     /**
-     * Comment out the lines Docker Compose's dotenv reader refuses. A
-     * `.env.example` written to be `source`d (saltcorn: `unset DATABASE_URL …`)
-     * otherwise stops `docker compose up` with "key cannot contain a space".
+     * Comment out the lines Docker Compose's dotenv reader refuses (keys outside letters, digits and `_ . - [ ]`).
+     * Lines inside a multi-line quoted value are values to Compose, not keys.
      *
      * @return array{0: string, 1: list<int>} contents, the 1-based lines commented out
      */
@@ -161,7 +165,6 @@ class EnvFile
         $openQuote = null;
         foreach ($lines as $i => $line) {
             if ($openQuote !== null) {
-                // Inside a multi-line quoted value: Compose reads it as value, not keys.
                 if (preg_match('/(?<!\\\\)'.preg_quote($openQuote, '/').'/', $line) === 1) {
                     $openQuote = null;
                 }
@@ -174,7 +177,6 @@ class EnvFile
             }
             $statement = (string) preg_replace('/^export\s+/', '', $trimmed);
             $parts = preg_split('/[=:]/', $statement, 2) ?: [$statement];
-            // Compose's own key alphabet: letters, digits, `_ . - [ ]`.
             if (preg_match('/^[\p{L}\p{N}_.\-\[\]]+$/u', rtrim($parts[0])) !== 1) {
                 $lines[$i] = '# '.$line;
                 $rejected[] = $i + 1;
@@ -221,8 +223,8 @@ class EnvFile
     }
 
     /**
-     * $literal: the value is meant as written (a value the engine was given), so
-     * a `$` in it must not reach Compose's interpolation (bcrypt hashes, passwords).
+     * $literal: the value is meant as written, so a `$` must not reach Compose's interpolation.
+     * One that cannot be single-quoted uses `$$`, Compose's escape inside double quotes.
      */
     private static function quote(string $value, bool $literal = false): string
     {
@@ -233,7 +235,6 @@ class EnvFile
             if (preg_match("/['\n\r]/", $value) !== 1) {
                 return "'".$value."'";
             }
-            // Cannot be single-quoted; `$$` is Compose's escape inside double quotes.
             $escaped = str_replace(['\\', '"', "\n", "\r", "\t", '$'], ['\\\\', '\\"', '\\n', '\\r', '\\t', '$$'], $value);
 
             return '"'.$escaped.'"';
@@ -272,8 +273,7 @@ class EnvFile
     }
 
     /**
-     * Relative `env_file:` paths Docker Compose will look for. Used by the
-     * deploy pipeline, which reads the compose file via sudo.
+     * Relative `env_file:` paths Docker Compose will look for, for a pipeline that reads the file as root.
      *
      * @return list<string>
      */
@@ -283,11 +283,7 @@ class EnvFile
     }
 
     /**
-     * DB_* from `.env`, falling back to `.env.example`.
-     *
-     * Pass `$read` to go through the account's own file layer: a 0600 `.env`
-     * is unreadable to the engine's user and would silently lose to the
-     * example.
+     * DB_* from `.env`, falling back to `.env.example`; `$read` goes through the account's file layer for a 0600 `.env`.
      *
      * @param  (callable(string): ?string)|null  $read  path => contents, null when absent
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}

@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Git\Exception as GitException;
@@ -16,9 +17,8 @@ use App\System\Project\Git\Path as GitPath;
 use App\System\Project\Git\WorkTree;
 
 /**
- * The deploy ingest's view of ~/project. Everything a work tree can do lives in
- * {@see WorkTree}; this adds the one-shot clone of the account's configured
- * remote and runs every command through the DinD shell.
+ * The deploy ingest's view of ~/project: {@see WorkTree} plus the one-shot clone of the account's configured
+ * remote, with every command run through the DinD shell.
  */
 class GitRepository extends WorkTree
 {
@@ -56,11 +56,8 @@ class GitRepository extends WorkTree
     }
 
     /**
-     * Clone the account's configured git remote into ~/project (no deploy preparation).
-     *
-     * With $beforeReplacing the clone lands in a staging directory first, and
-     * ~/project is only emptied (after $beforeReplacing ran) once it succeeded,
-     * so a failed clone leaves the running app and its files alone.
+     * Clone the account's configured remote into ~/project (no deploy preparation). With $beforeReplacing it lands in
+     * staging, and ~/project is emptied (after $beforeReplacing) only once it worked: a failed clone leaves the app.
      */
     public function cloneConfiguredRepository(?callable $beforeReplacing = null): void
     {
@@ -165,9 +162,9 @@ class GitRepository extends WorkTree
         $system = $this->project->system();
         $chown = $this->project->userModel()->getChownString();
 
-        $system->exec(['sudo', 'mkdir', '-p', $dir]);
+        $system->exec(Privileged::files()->makeDirectories($dir));
         if ($chown) {
-            $system->exec(['sudo', 'chown', $chown, $dir]);
+            $system->exec(Privileged::files()->changeOwner($chown, $dir));
         }
         if ($clear) {
             $this->tree()->clearContents($dir);
@@ -188,11 +185,8 @@ class GitRepository extends WorkTree
     }
 
     /**
-     * The submodules the checkout records, or the ones the app config names. One that
-     * cannot be fetched fails the deploy: a build without it fails later, on a missing
-     * file that says nothing about the submodule. $keepPrevious on a redeploy of a project
-     * that deployed before: a submodule the deployed commit already declared keeps whatever
-     * checkout it had, with a warning.
+     * The submodules the checkout records or the app config names; one not fetched fails the deploy, as the build
+     * would later on a file naming no submodule. $keepPrevious keeps one the deployed commit declared as it was, warned.
      */
     public function fetchSubmodules(string $gitRepo, ?string $gitToken, bool $keepPrevious = false): void
     {
@@ -221,9 +215,8 @@ class GitRepository extends WorkTree
     }
 
     /**
-     * Only a submodule the deployed commit already declared may stay as it was. One new in this
-     * commit fails the deploy as on a first deploy, and so do one a re-clone would drop and a
-     * checkout git cannot read.
+     * Only a submodule the deployed commit already declared may stay as it was. One new in this commit fails the
+     * deploy as on a first deploy, and so do one a re-clone would drop and a checkout git cannot read.
      *
      * @param  ?list<string>  $paths
      *

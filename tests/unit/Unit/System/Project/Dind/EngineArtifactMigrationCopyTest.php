@@ -9,12 +9,13 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\EngineArtifactMigration;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
 
 /**
  * Migrating an account the previous engine deployed copies its compose file
- * to the run file as root. A compose file the tenant replaced with a link to
+ * to the run file as the account. A compose file the tenant replaced with a link to
  * another account's file must be copied as that link, never as its contents,
  * and a link already at the run file's name must not be written through.
  */
@@ -46,9 +47,13 @@ class EngineArtifactMigrationCopyTest extends TestCase
         EngineArtifactMigration::forProject($this->dind())->migrate();
 
         $this->assertCount(1, $this->copies);
-        $this->assertContains('--no-dereference', $this->copies[0]);
-        $this->assertContains('--remove-destination', $this->copies[0]);
-        $this->assertSame($this->root.'/home/alice/project/'.EngineArtifacts::RUN_COMPOSE, end($this->copies[0]));
+        $this->assertStringStartsWith('account.', (string) LocalRoot::action($this->copies[0]));
+        $this->assertSame(['1000', '1000'], array_slice(LocalRoot::values($this->copies[0]), 0, 2));
+        $copy = LocalRoot::plain($this->copies[0]);
+        $this->assertSame('cp', $copy[0]);
+        $this->assertContains('--no-dereference', $copy);
+        $this->assertContains('--remove-destination', $copy);
+        $this->assertSame($this->root.'/home/alice/project/'.EngineArtifacts::RUN_COMPOSE, end($copy));
     }
 
     private function dind(): DindProject
@@ -80,7 +85,7 @@ class EngineArtifactMigrationCopyTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                if (array_slice((array) $cmd, 0, 2) === ['sudo', 'cp']) {
+                if (in_array('cp', LocalRoot::plain((array) $cmd), true)) {
                     $this->copies[] = (array) $cmd;
 
                     return '';

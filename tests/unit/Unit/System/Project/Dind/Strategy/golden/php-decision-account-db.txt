@@ -1,0 +1,29 @@
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root scripts.makeHomeEntry -- /home/{user}/.cache 0755 1001:1001
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root account.makeDirectories -- 1001 1001 /home/{user}/.cache/composer
+
+
+[1 log lines] decision
+{
+    "runtime": "php",
+    "image": "panelalpha/php:8.3",
+    "app_root": "",
+    "user": "1001:1001",
+    "composer_cache_dir": "/home/{user}/.cache/composer",
+    "env": {
+        "FROM_MANIFEST": "1",
+        "APP_ENV": "production",
+        "LOG_CHANNEL": "stderr",
+        "APP_URL": "https://acme.example.test",
+        "ASSET_URL": "https://acme.example.test",
+        "PA_DOCROOT": "/app/web",
+        "PA_DEPLOY_PHASE": "install"
+    },
+    "extra_hosts": [
+        "localhost:127.0.0.1"
+    ]
+}
+
+== log
+#0 info: Starting stage: running

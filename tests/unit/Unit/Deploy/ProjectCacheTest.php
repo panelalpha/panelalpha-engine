@@ -3,7 +3,9 @@
 namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\ProjectCache;
+use App\System\Privileged;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class ProjectCacheTest extends TestCase
 {
@@ -42,19 +44,15 @@ class ProjectCacheTest extends TestCase
     {
         $argv = ProjectCache::pruneArgv(86400);
 
-        $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'sh', ProjectCache::PRUNE_SCRIPT, '86400'],
-            $argv
-        );
+        $this->assertSame([LocalRoot::CLIENT, '--host', 'host.pruneProjectCaches', '--', '86400', ''], $argv);
     }
 
     public function test_prune_passes_dry_run_and_the_skip_list_through(): void
     {
         $argv = ProjectCache::pruneArgv(3600, true, ['alice', 'bob']);
 
-        $this->assertContains('--dry-run', $argv);
-        $this->assertContains('--skip', $argv);
-        $this->assertContains('alice,bob', $argv);
+        $this->assertSame('host.pruneProjectCaches', LocalRoot::action($argv));
+        $this->assertSame(['3600', 'dry-run', 'alice', 'bob'], LocalRoot::values($argv));
     }
 
     public function test_prune_refuses_an_unsafe_name_to_skip(): void
@@ -109,7 +107,7 @@ class ProjectCacheTest extends TestCase
 
     public function test_prepare_never_names_another_projects_directory(): void
     {
-        $script = ProjectCache::prepareScript('alice', '1004:1004');
+        $script = LocalRoot::script(Privileged::host()->prepareProjectCache('alice', '1004:1004'));
 
         $this->assertStringNotContainsString(ProjectCache::dirFor('bob'), $script);
         // The shared root as an argument of its own would chown every project.

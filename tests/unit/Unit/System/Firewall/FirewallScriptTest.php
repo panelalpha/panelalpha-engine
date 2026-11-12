@@ -90,7 +90,7 @@ class FirewallScriptTest extends TestCase
             // CSF's uninstaller flushes Docker's chains; the restart puts them back.
             $this->assertLessThan(strpos($script, 'service docker restart', (int) strpos($script, $call)) ?: PHP_INT_MAX, (int) strpos($script, $call), $file);
         }
-        $entrypoint = $this->repo('dockerfiles/entrypoint-core.sh');
+        $entrypoint = $this->repo('dockerfiles/entrypoint-root-broker.sh');
         $this->assertStringContainsString('firewall_script=/opt/panelalpha/shared-hosting/scripts/firewall.sh', $entrypoint);
         $this->assertStringContainsString('"$firewall_script" --apply', $entrypoint);
         $this->assertStringContainsString('firewall.sh" --unhook', $this->repo('scripts/uninstall.sh'));

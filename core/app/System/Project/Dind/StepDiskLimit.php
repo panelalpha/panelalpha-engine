@@ -4,12 +4,12 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Disk checked while a deploy step runs, not only before it starts: one pull
- * took a host from 34 GB free to 0. The account's inner Docker
- * store lands on the host as uid 0, so user quota never counts it.
+ * Disk checked while a deploy step runs, not only before it (one pull took a host from 34 GB free to 0):
+ * the account's inner Docker store lands on the host as uid 0, so user quota never counts it.
  */
 final class StepDiskLimit
 {
@@ -35,6 +35,11 @@ final class StepDiskLimit
     /** What was exceeded, or null to carry on. A reading that cannot be taken carries on. */
     public function reason(): ?string
     {
+        return $this->hostShortfall() ?? $this->limitExcess();
+    }
+
+    private function hostShortfall(): ?string
+    {
         if ($this->hostMinimumBytes !== null) {
             $lowest = (new HostDiskGuard($this->system, $this->hostMinimumBytes))->lowest();
             if ($lowest !== null && $lowest['free'] < $this->hostMinimumBytes) {
@@ -47,6 +52,11 @@ final class StepDiskLimit
             }
         }
 
+        return null;
+    }
+
+    private function limitExcess(): ?string
+    {
         if ($this->limitMb !== null && $this->limitMb > 0) {
             $used = $this->usedBytes();
             $limit = $this->limitMb * 1024 * 1024;
@@ -66,7 +76,7 @@ final class StepDiskLimit
     private function usedBytes(): ?int
     {
         try {
-            $output = $this->system->execOnHost(['du', '-sxk', $this->homeDir]);
+            $output = $this->system->execOnHost(Privileged::probes()->diskUsageInKilobytes($this->homeDir));
         } catch (\Throwable) {
             return null;
         }

@@ -6,24 +6,26 @@ use App\Exceptions\NotFoundException;
 use App\Models\Admin;
 use App\Models\Domain;
 use App\Models\User;
-use App\System;
 use App\System\EnginePaths;
-use App\System\Project\FileManager;
+use App\System\Privileged\Exchange;
 use App\System\Services\Webserver;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Routing\Events\RouteMatched;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Console\Output\BufferedOutput;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
+use Tests\Support\PlainCommandBroker;
 use Tests\TestCase;
 
 /**
  * What the file, log and ssh commands print and return, pinned end to end:
- * the engine code runs for real and only `sudo` is a shim, which records
- * every call and answers with canned output unless told to run the command.
+ * the engine code runs for real and only the root broker is a shim, which
+ * records every request and answers with canned output unless told to run it.
  *
  * The tests that need real files under /home and the engine dir skip unless
  * both are writable; in the composer:2 container, bind-mount scratch dirs
@@ -77,7 +79,6 @@ class FileAndSshCommandsTest extends TestCase
         $this->shimLog = $this->shimDir . '/calls.log';
         file_put_contents($this->shimDir . '/sudo', <<<'SH'
             #!/bin/sh
-            if [ "$1" = setpriv ]; then shift 6; fi
             { for a in "$@"; do printf '%s\037' "$a"; done; printf '\n'; } >> "$SHIM_LOG"
             for c in $SHIM_EXEC; do
               if [ "$1" = "$c" ]; then exec "$@"; fi
@@ -87,6 +88,7 @@ class FileAndSshCommandsTest extends TestCase
             exit "${SHIM_EXIT:-0}"
             SH);
         chmod($this->shimDir . '/sudo', 0755);
+        PlainCommandBroker::install($this->shimDir, $this->shimDir . '/sudo');
 
         $this->setEnv('PATH', $this->shimDir . ':' . (string) getenv('PATH'));
         $this->setEnv('SHIM_LOG', $this->shimLog);
@@ -100,6 +102,7 @@ class FileAndSshCommandsTest extends TestCase
 
     protected function tearDown(): void
     {
+        LocalRoot::answerByBroker();
         foreach ($this->savedEnv as $key => $value) {
             if ($value === false) {
                 putenv($key);
@@ -366,14 +369,18 @@ class FileAndSshCommandsTest extends TestCase
         $this->assertRun(0, sprintf("Uploaded %s to up/%s\n", basename($local), basename($local)), 'project:file:upload', [
             'project' => self::USER, 'file' => $local, '--path' => 'up/',
         ]);
+        $calls = $this->calls();
+        $staged = $calls[1][4] ?? '';
+        $this->assertStringStartsWith(Exchange::directory() . '/pa-put-', $staged);
         $this->assertSame([
             $this->confined('F:' . $this->home() . '/up/' . basename($local)),
             [
                 'sh', '-c', 'dir=$(dirname -- "$2"); mkdir -p -- "$dir" 2>/dev/null; '
                     . '[ -w "$2" ] || { [ -d "$dir" ] && [ -w "$dir" ]; } || exit 6; cat -- "$1" > "$2" && chmod 644 -- "$2"',
-                'sh', $local, $this->home() . '/up/' . basename($local),
+                'sh', $staged, $this->home() . '/up/' . basename($local),
             ],
-        ], $this->calls());
+        ], $calls);
+        $this->assertFileDoesNotExist($staged);
     }
 
     public function test_upload_prints_why_the_write_failed(): void
@@ -555,7 +562,7 @@ class FileAndSshCommandsTest extends TestCase
             'project' => self::USER, 'cmd' => 'ls | wc -l', '--cwd' => '/home/clidemo/project', '--timeout' => '30',
         ]);
         $this->assertSame([[
-            'docker', 'compose', '-f', (new System())->projectDirPath(self::USER) . '/docker-compose.yml', 'exec', '-T', 'dind',
+            'pa-root', 'account-container.exec', '--', self::USER, '', '', '0',
             'su', '-s', '/bin/bash', '-l', self::USER, '-c', 'exec timeout -k 5 30 bash -c ' . escapeshellarg("cd '/home/clidemo/project' && ls | wc -l"),
         ]], $this->calls());
     }
@@ -678,7 +685,7 @@ class FileAndSshCommandsTest extends TestCase
      */
     private function confined(string ...$paths): array
     {
-        return ['sh', '-c', FileManager::CONFINE_SCRIPT, 'sh', $this->home(), ...$paths];
+        return ['sh', '-c', BrokerScripts::confine(), 'sh', $this->home(), ...$paths];
     }
 
     /**
@@ -688,7 +695,7 @@ class FileAndSshCommandsTest extends TestCase
      */
     private function entryType(string $path): array
     {
-        return ['sh', '-c', FileManager::ENTRY_TYPE_SCRIPT, 'sh', $path, rtrim($path, '/')];
+        return ['sh', '-c', BrokerScripts::entryType(), 'sh', $path, rtrim($path, '/')];
     }
 
     private function home(): string

@@ -10,7 +10,7 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # The host disk projects live on (every account's files and images are under
-# /home), reached through volumes_from: core. Same path as core's DataDisk.
+# /home), mounted read-only. Same path as core's DataDisk.
 DATA_DISK = "/home"
 
 # int-updater.sh sets DB_CONNECTION=mysql (docker-compose.yml's CORE_DB_*
