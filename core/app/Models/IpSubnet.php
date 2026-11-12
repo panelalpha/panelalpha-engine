@@ -32,6 +32,10 @@ class IpSubnet extends Model
         'is_shared',
     ];
 
+    protected $casts = [
+        'is_shared' => 'boolean',
+    ];
+
     public function ipAssigned(): HasMany
     {
         return $this->hasMany(IpAssigned::class);

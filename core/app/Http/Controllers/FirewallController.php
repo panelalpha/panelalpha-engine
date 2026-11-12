@@ -84,7 +84,7 @@ class FirewallController extends Controller
         try {
             $rules = $this->firewall()->rules();
         } catch (FirewallException $e) {
-            return $this->hostFault($e);
+            throw $this->hostFailure($e);
         }
 
         return new JsonResponse([
@@ -109,11 +109,11 @@ class FirewallController extends Controller
                 new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny sent without a scope is both; a scope that is sent is kept, except both on an outbound rule, which is host.'),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true, description: 'Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination.'),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: 'Omit for both. Required with a port range or list.'),
-                new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
+                new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list; at most 15 ports in one rule, a range counting as two.'),
                 new OA\Property(property: 'source', type: 'string', nullable: true, example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
-                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
-                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, one that is only delete or that has in or out followed by more words (delete everything is kept). A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
+                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose port, range or list includes the engine API port is always refused; a deny with no port blocks its address from every port, the API port included, and is added with a warning for each port the engine opened that it covers.'),
             ],
         )),
         responses: [
@@ -154,8 +154,8 @@ class FirewallController extends Controller
                 new OA\Property(property: 'port', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'source', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.', x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, one that is only delete or that has in or out followed by more words (delete everything is kept). A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'confirm', type: 'boolean', nullable: true, description: 'A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose port, range or list includes the engine API port is always refused; a deny with no port blocks its address from every port, the API port included, and is added with a warning for each port the engine opened that it covers.'),
             ],
         )),
         responses: [
@@ -206,7 +206,11 @@ class FirewallController extends Controller
         summary: 'Enable the firewall',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
-        responses: [new OA\Response(response: 200, description: 'Firewall enabled', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Firewall enabled', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 409, description: 'Another firewall change held the lock for too long; retry.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 502, description: 'The host firewall could not be driven.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
     )]
     public function enable(): JsonResponse
     {
@@ -219,7 +223,11 @@ class FirewallController extends Controller
         description: 'Every port on the host is then open. The engine\'s own isolation of accounts and builds stays in force.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
-        responses: [new OA\Response(response: 200, description: 'Firewall disabled', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Firewall disabled', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 409, description: 'Another firewall change held the lock for too long; retry.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 502, description: 'The host firewall could not be driven.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
     )]
     public function disable(): JsonResponse
     {
@@ -231,7 +239,11 @@ class FirewallController extends Controller
         summary: 'Reload the firewall',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
-        responses: [new OA\Response(response: 200, description: 'Firewall reloaded', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse'))],
+        responses: [
+            new OA\Response(response: 200, description: 'Firewall reloaded', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 409, description: 'Another firewall change held the lock for too long; retry.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 502, description: 'The host firewall could not be driven.', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
     )]
     public function reload(): JsonResponse
     {
@@ -480,10 +492,8 @@ class FirewallController extends Controller
             return $call();
         } catch (FirewallNotFound $e) {
             throw new NotFoundHttpException($e->getMessage(), $e);
-        } catch (FirewallBusy $e) {
-            throw new HttpException(409, $e->getMessage(), $e);
-        } catch (FirewallCommandFailed $e) {
-            throw new HttpException(502, $e->getMessage(), $e);
+        } catch (FirewallBusy|FirewallCommandFailed $e) {
+            throw $this->hostFailure($e);
         } catch (FirewallException $e) {
             throw ValidationException::withMessages(['rule' => $e->getMessage()]);
         }
@@ -494,15 +504,17 @@ class FirewallController extends Controller
         try {
             $call();
         } catch (FirewallException $e) {
-            return $this->hostFault($e);
+            throw $this->hostFailure($e);
         }
 
-        return new JsonResponse(['data' => '']);
+        return new JsonResponse(['success' => true]);
     }
 
-    /** A firewall that cannot be read or driven is a host fault: 502, not a 500. */
-    private function hostFault(FirewallException $e): JsonResponse
+    /** The HTTP failure a provider exception is: a lock held elsewhere is retryable (409); any other failure to read or drive the host is a fault (502). */
+    private function hostFailure(FirewallException $e): HttpException
     {
-        return new JsonResponse(['message' => $e->getMessage()], 502);
+        return $e instanceof FirewallBusy
+            ? new HttpException(409, $e->getMessage(), $e)
+            : new HttpException(502, $e->getMessage(), $e);
     }
 }

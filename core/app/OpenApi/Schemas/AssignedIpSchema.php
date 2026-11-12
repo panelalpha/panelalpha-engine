@@ -25,6 +25,11 @@ use OpenApi\Attributes as OA;
             type: 'boolean',
             description: 'Only present on assign/unassign: true when the network reload still has to run.',
         ),
+        new OA\Property(
+            property: 'host_cleanup_failed',
+            type: 'boolean',
+            description: 'Only present on unassign: true when the host refused to remove the address from its interface. The assignment is gone; the address stays on the host until removed there.',
+        ),
     ],
     type: 'object',
 )]

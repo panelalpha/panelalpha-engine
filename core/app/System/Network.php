@@ -2,10 +2,10 @@
 
 namespace App\System;
 
+use App\Exceptions\ProblemException;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use Exception;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -14,6 +14,11 @@ use Illuminate\Support\Facades\Log;
 class Network
 {
     public const DEFAULT_IPV4_NAT_LOOKUP_URL = 'https://icanhazip.com';
+
+    /** Kinds of interface that sit on a NIC and carry its traffic; a physical NIC has no kind at all. */
+    private const UPLINK_KINDS = ['bond', 'team', 'vlan'];
+
+    private const LOOKUP_TIMEOUT_SECONDS = 10;
 
     /** @var array{gateway: string, interface: string}|null */
     private static ?array $defaultIpv4Route = null;
@@ -60,14 +65,13 @@ class Network
      */
     private function getDefaultGatewayAndInterface(int $family = 4): array
     {
-        $cmd = $family === 6 ? ['ip', '-6', 'route', 'show', 'default'] : ['ip', 'route', 'show', 'default'];
-        $process = $this->system->runProcessOnHost($cmd);
+        $process = $this->system->runProcessOnHost(Privileged::network()->defaultRoute($family));
         $output = $process->getOutput();
         if (empty($output)) {
             throw new Exception("No default route found for IPv$family");
         }
 
-        if (preg_match('/default via ([^ ]+) dev ([^ ]+)/', $output, $m)) {
+        if (preg_match('/default via (\S+) dev (\S+)/', $output, $m)) {
             return [
                 'gateway' => $m[1],
                 'interface' => $m[2],
@@ -78,11 +82,13 @@ class Network
     }
 
     /**
+     * The host's default route for IPv4 (4) or IPv6 (6).
+     *
      * @return array{gateway: string, interface: string}
      *
      * @throws Exception
      */
-    private function defaultRoute(int $family): array
+    public function defaultRoute(int $family): array
     {
         return $family === 4 ? $this->getDefaultIpv4Route() : $this->getDefaultIpv6Route();
     }
@@ -122,7 +128,9 @@ class Network
             $interface ??= $route['interface'];
         }
 
-        return ['ip', 'route', $verb, $ip.'/'.$mask, 'via', $gateway, 'dev', $interface];
+        return $verb === 'add'
+            ? Privileged::network()->addRoute($ip, $mask, $gateway, $interface)
+            : Privileged::network()->deleteRoute($ip, $mask, $gateway, $interface);
     }
 
     /**
@@ -132,7 +140,7 @@ class Network
      */
     public function generateIpAddressAddCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        return ['ip', 'addr', 'add', $ip.'/'.$mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
+        return Privileged::network()->addAddress($ip, $mask, $interface ?? $this->defaultRoute($family)['interface']);
     }
 
     /**
@@ -142,24 +150,30 @@ class Network
      */
     public function generateIpAddressDelCommand(string $ip, int $mask, int $family, ?string $interface = null): array
     {
-        return ['ip', 'addr', 'del', $ip.'/'.$mask, 'dev', $interface ?? $this->defaultRoute($family)['interface']];
+        return Privileged::network()->deleteAddress($ip, $mask, $interface ?? $this->defaultRoute($family)['interface']);
     }
 
     /**
+     * Asks the lookup service, from each uplink address, which public address it arrives as. A stored map onto an
+     * address the host holds itself, or from one on a Docker interface, is dropped.
+     *
      * @return array{
      *   maps: array<Ipv4NatMap>,
      *   default_ipv4_replaced: bool,
      *   default_ipv4_previous: ?string,
      *   default_ipv4_current: ?string,
      * }
+     *
+     * @throws ProblemException when two local addresses would map to one public address
      */
     public function rebuildIpv4NatMaps(
         string $lookupUrl = self::DEFAULT_IPV4_NAT_LOOKUP_URL,
         bool $replaceDefaultIpv4 = false,
     ): array {
-        $localIps = $this->localIpv4Addresses();
+        $interfaces = $this->hostIpv4Interfaces();
+        $localIps = $this->uplinkIpv4Addresses($interfaces);
         $previousPublicToLocal = Ipv4NatMap::getPublicToLocalMap();
-        $maps = $this->upsertDiscoveredMaps($localIps, $lookupUrl);
+        $maps = $this->upsertDiscoveredMaps($localIps, $this->ipv4AddressesOf($interfaces), $this->dockerIpv4Addresses($interfaces, $localIps), $lookupUrl);
 
         $defaultIpv4Previous = Setting::get('default_ipv4');
         $replacement = $replaceDefaultIpv4 && ! empty($defaultIpv4Previous)
@@ -177,26 +191,169 @@ class Network
     }
 
     /**
-     * @param  list<string>  $localIps
-     * @return array<Ipv4NatMap>
+     * Forgets the stored maps from addresses the host holds on Docker's own interfaces, without asking the lookup
+     * service. A map from any other address, the host's or not, stays.
+     *
+     * @return list<Ipv4NatMap> the maps forgotten
+     *
+     * @throws Exception when the host's interfaces cannot be read
      */
-    private function upsertDiscoveredMaps(array $localIps, string $lookupUrl): array
+    public function forgetDockerIpv4NatMaps(): array
     {
+        $process = $this->system->runProcessOnHost(Privileged::network()->addressDetails());
+        if (! $process->isSuccessful()) {
+            throw new Exception("Could not read the host's interfaces: ".(trim($process->getErrorOutput()) ?: trim($process->getOutput())));
+        }
+        $interfaces = self::interfacesIn($process->getOutput());
+
+        return $this->forgetMapsFrom($this->dockerIpv4Addresses($interfaces, $this->uplinkIpv4Addresses($interfaces)));
+    }
+
+    /**
+     * @param  list<string>  $localIps
+     * @param  list<string>  $hostIps
+     * @param  list<string>  $dockerIps
+     * @return array<Ipv4NatMap>
+     *
+     * @throws ProblemException
+     */
+    private function upsertDiscoveredMaps(array $localIps, array $hostIps, array $dockerIps, string $lookupUrl): array
+    {
+        $answers = $this->discoverPublicIps($localIps, $lookupUrl);
+        $translated = array_filter(
+            $answers,
+            static fn (string $publicIp, string|int $localIp): bool => $publicIp !== (string) $localIp,
+            ARRAY_FILTER_USE_BOTH,
+        );
+        $this->refuseSharedPublicIps(array_diff_key($this->storedMapsNotOnto($hostIps), $translated, array_flip($dockerIps)), $answers);
+        $this->forgetMapsOnto($hostIps);
+        $this->forgetMapsFrom($dockerIps);
+
         $maps = [];
-        foreach ($localIps as $localIp) {
-            $publicIp = $this->lookupPublicIp($localIp, $lookupUrl);
-            if ($publicIp !== null && $publicIp !== $localIp) {
-                $maps[] = Ipv4NatMap::upsertMap($localIp, $publicIp);
-            }
+        foreach ($translated as $localIp => $publicIp) {
+            $maps[] = Ipv4NatMap::upsertMap((string) $localIp, $publicIp);
         }
 
         return $maps;
     }
 
     /**
-     * Point the default IPv4 setting at the public address NAT now maps its local
-     * address to, when it names a local address or one the map gave out before
-     * this rebuild; null when nothing was replaced.
+     * Each lookup's answer, by the local address it left from. An address that answers as itself is behind no NAT.
+     *
+     * @param  list<string>  $localIps
+     * @return array<string, string>
+     */
+    private function discoverPublicIps(array $localIps, string $lookupUrl): array
+    {
+        $answers = [];
+        foreach ($localIps as $localIp) {
+            $publicIp = $this->lookupPublicIp($localIp, $lookupUrl);
+            if ($publicIp !== null) {
+                $answers[$localIp] = $publicIp;
+            }
+        }
+
+        return $answers;
+    }
+
+    /**
+     * @param  list<string>  $hostIps
+     * @return array<string, string>
+     */
+    private function storedMapsNotOnto(array $hostIps): array
+    {
+        return array_filter(
+            Ipv4NatMap::getLocalToPublicMap(),
+            static fn (string $publicIp): bool => ! in_array($publicIp, $hostIps, true),
+        );
+    }
+
+    /**
+     * An address the host holds is no NAT's public side, so a map onto one was stored by mistake, and binding the
+     * sites through it takes that address off the air.
+     *
+     * @param  list<string>  $hostIps
+     */
+    private function forgetMapsOnto(array $hostIps): void
+    {
+        foreach (Ipv4NatMap::query()->whereIn('public_ip', $hostIps)->get() as $map) {
+            $map->delete();
+        }
+    }
+
+    /**
+     * No NAT translates an address on docker0, a Docker bridge or a veth, so a map from one was stored by the
+     * discovery from before uplinks were told apart, and binding the sites through it puts them on that bridge.
+     *
+     * @param  list<string>  $dockerIps
+     * @return list<Ipv4NatMap>
+     */
+    private function forgetMapsFrom(array $dockerIps): array
+    {
+        $maps = array_values(Ipv4NatMap::query()->whereIn('local_ip', $dockerIps)->get()->all());
+        foreach ($maps as $map) {
+            $map->delete();
+        }
+
+        return $maps;
+    }
+
+    /**
+     * A 1:1 NAT gives each public address to one local address. Two claiming one, as a stored map or as a lookup's
+     * answer (an address answering as itself claims itself), would bind every site on it to just one of them.
+     *
+     * @param  array<string, string>  $stored  the stored maps that stay and that no answer replaces
+     * @param  array<string, string>  $answers
+     *
+     * @throws ProblemException
+     */
+    private function refuseSharedPublicIps(array $stored, array $answers): void
+    {
+        foreach (self::claimsByPublicIp($stored, $answers) as $publicIp => $claims) {
+            if ($claims['answered'] !== [] && count($claims['stored']) + count($claims['answered']) > 1) {
+                throw ProblemException::conflict('ipv4_nat_maps', 'nat_public_ip_shared', self::sharedPublicIpMessage((string) $publicIp, $claims));
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, string>  $stored
+     * @param  array<string, string>  $answers
+     * @return array<string, array{stored: list<string>, answered: list<string>}>
+     */
+    private static function claimsByPublicIp(array $stored, array $answers): array
+    {
+        $claims = [];
+        foreach (['stored' => $stored, 'answered' => $answers] as $source => $localToPublic) {
+            foreach ($localToPublic as $localIp => $publicIp) {
+                $claims[$publicIp] ??= ['stored' => [], 'answered' => []];
+                $claims[$publicIp][$source][] = (string) $localIp;
+            }
+        }
+
+        return $claims;
+    }
+
+    /** @param  array{stored: list<string>, answered: non-empty-list<string>}  $claims */
+    private static function sharedPublicIpMessage(string $publicIp, array $claims): string
+    {
+        $unchanged = ' No NAT map was changed and no site was rebound.';
+        if (count($claims['answered']) === 1) {
+            return "Refusing to store the discovered IPv4 NAT maps: {$claims['answered'][0]} reaches the internet as {$publicIp}, "
+                ."which the stored NAT map {$claims['stored'][0]} => {$publicIp} already gives to another local address. "
+                .'Delete that map if it is stale, then run the discovery again.'.$unchanged;
+        }
+        $localIps = $claims['answered'];
+        $last = array_pop($localIps);
+
+        return 'Refusing to store the discovered IPv4 NAT maps: '.implode(', ', $localIps)." and {$last} reach the internet as the same public address {$publicIp}. "
+            .'A 1:1 NAT gives each public address to one local address, so this host shares one public address between several, '
+            .'or the lookup service does not answer with the address a request came from.'.$unchanged;
+    }
+
+    /**
+     * Point default_ipv4 at the public address NAT maps its local address to, when it names a
+     * local address or one the previous map gave out; null when nothing was replaced.
      *
      * @param  list<string>  $localIps
      * @param  array<string, string>  $previousPublicToLocal
@@ -219,7 +376,7 @@ class Network
      */
     public function localIpv4Addresses(): array
     {
-        $process = $this->system->runProcessOnHost(['ip', '-4', 'addr', 'show']);
+        $process = $this->system->runProcessOnHost(Privileged::network()->addresses());
         $output = $process->getOutput();
         if (empty($output)) {
             return [];
@@ -241,6 +398,115 @@ class Network
         return array_values(array_unique($ips));
     }
 
+    /** @return list<array<string, mixed>> the host's interfaces with their IPv4 addresses, as `ip -json` prints them */
+    private function hostIpv4Interfaces(): array
+    {
+        return self::interfacesIn($this->system->runProcessOnHost(Privileged::network()->addressDetails())->getOutput());
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function interfacesIn(string $json): array
+    {
+        $interfaces = json_decode($json, true);
+
+        return is_array($interfaces) ? array_values(array_filter($interfaces, is_array(...))) : [];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $interfaces
+     * @return list<string>
+     */
+    private function ipv4AddressesOf(array $interfaces): array
+    {
+        $ips = [];
+        foreach ($interfaces as $interface) {
+            foreach ($interface['addr_info'] ?? [] as $address) {
+                $ip = (string) ($address['local'] ?? '');
+                if (($address['family'] ?? null) === 'inet' && $this->isUsableHostIpv4($ip)) {
+                    $ips[] = $ip;
+                }
+            }
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    /**
+     * Addresses on the host's uplinks, the only ones a 1:1 NAT translates.
+     *
+     * @param  list<array<string, mixed>>  $interfaces
+     * @return list<string>
+     */
+    private function uplinkIpv4Addresses(array $interfaces): array
+    {
+        $defaultInterface = $this->defaultIpv4Interface();
+
+        return $this->ipv4AddressesOf(array_values(array_filter(
+            $interfaces,
+            static fn (array $interface): bool => self::isUplink($interface, $defaultInterface),
+        )));
+    }
+
+    /**
+     * Addresses on Docker's own interfaces; an address an uplink holds as well is not one.
+     *
+     * @param  list<array<string, mixed>>  $interfaces
+     * @param  list<string>  $uplinkIps
+     * @return list<string>
+     */
+    private function dockerIpv4Addresses(array $interfaces, array $uplinkIps): array
+    {
+        $dockerInterfaces = array_values(array_filter(
+            $interfaces,
+            static fn (array $interface): bool => self::isDockerInterface((string) ($interface['ifname'] ?? '')),
+        ));
+
+        return array_values(array_diff($this->ipv4AddressesOf($dockerInterfaces), $uplinkIps));
+    }
+
+    /** Read afresh rather than from the route cache; null when the host has no default route with a gateway. */
+    private function defaultIpv4Interface(): ?string
+    {
+        try {
+            return $this->getDefaultGatewayAndInterface(4)['interface'];
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * A NIC, a bond, team or VLAN on one, or the bridge the default route leaves through. Not loopback, a Docker
+     * bridge, a veth, a tunnel or a dummy: a lookup from one leaves through the default route and says nothing.
+     *
+     * @param  array<string, mixed>  $interface
+     */
+    private static function isUplink(array $interface, ?string $defaultInterface): bool
+    {
+        if (($interface['link_type'] ?? null) !== 'ether') {
+            return false;
+        }
+        $kind = $interface['linkinfo']['info_kind'] ?? null;
+        if ($kind === 'bridge') {
+            return $defaultInterface !== null
+                && ($interface['ifname'] ?? null) === $defaultInterface
+                && ! self::isDockerBridge($defaultInterface);
+        }
+
+        return $kind === null || in_array($kind, self::UPLINK_KINDS, true);
+    }
+
+    /** docker0, and the bridges Docker names br-<id>, the tenant and build networks' included. */
+    private static function isDockerBridge(string $name): bool
+    {
+        return $name === 'docker0' || str_starts_with($name, 'br-');
+    }
+
+    /** A Docker bridge, or a veth Docker plugs a container into one with. */
+    private static function isDockerInterface(string $name): bool
+    {
+        return self::isDockerBridge($name) || str_starts_with($name, 'veth');
+    }
+
     /**
      * Whether the interface carries `$ip/$mask` now: `ip addr add` exiting 0
      * does not prove it. The default route's interface when none is given.
@@ -251,7 +517,7 @@ class Network
     {
         $interface ??= $this->defaultRoute($family)['interface'];
 
-        $process = $this->system->runProcessOnHost(['ip', 'addr', 'show', 'dev', $interface]);
+        $process = $this->system->runProcessOnHost(Privileged::network()->interfaceAddresses($interface));
         if (! $process->isSuccessful()) {
             throw new Exception(
                 "Could not read addresses of interface {$interface}: "
@@ -289,8 +555,7 @@ class Network
      */
     public function hasRoute(string $ip, int $mask, int $family): bool
     {
-        $cmd = $family === 6 ? ['ip', '-6', 'route', 'show', "{$ip}/{$mask}"] : ['ip', 'route', 'show', "{$ip}/{$mask}"];
-        $process = $this->system->runProcessOnHost($cmd);
+        $process = $this->system->runProcessOnHost(Privileged::network()->route($ip, $mask, $family));
         if (! $process->isSuccessful()) {
             throw new Exception("Could not read the host's routes: ".($process->getErrorOutput() ?: $process->getOutput()));
         }
@@ -301,22 +566,7 @@ class Network
     private function lookupPublicIp(string $localIp, string $lookupUrl): ?string
     {
         try {
-            $url = $lookupUrl;
-            if (strpos($url, '?') === false) {
-                $url .= '?local_ip='.urlencode($localIp);
-            }
-
-            $response = Http::timeout(10)->get($url);
-            if (! $response->ok()) {
-                return null;
-            }
-
-            $body = trim($response->body());
-            if (! filter_var($body, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                return null;
-            }
-
-            return $body;
+            return $this->fetchPublicIp($localIp, $lookupUrl);
         } catch (Exception $e) {
             Log::warning('Could not lookup public IP for local IP', [
                 'local_ip' => $localIp,
@@ -326,6 +576,32 @@ class Network
 
             return null;
         }
+    }
+
+    /** @throws Exception when the lookup fails */
+    private function fetchPublicIp(string $localIp, string $lookupUrl): ?string
+    {
+        $process = $this->system->runProcessOnHost($this->lookupArgv($localIp, $lookupUrl), [], self::LOOKUP_TIMEOUT_SECONDS + 5);
+        if (! $process->isSuccessful()) {
+            throw new Exception(trim($process->getErrorOutput()) ?: "The lookup exited with code {$process->getExitCode()}.");
+        }
+
+        $body = trim($process->getOutput());
+
+        return $this->isUsableHostIpv4($body) ? $body : null;
+    }
+
+    /**
+     * curl in the host's namespaces, bound to $localIp, so the service sees what the NAT turns that address into.
+     * A URL without a query is told which address it is about.
+     *
+     * @return list<string>
+     */
+    private function lookupArgv(string $localIp, string $lookupUrl): array
+    {
+        $url = str_contains($lookupUrl, '?') ? $lookupUrl : $lookupUrl.'?local_ip='.urlencode($localIp);
+
+        return Privileged::network()->publicAddressLookup($localIp, $url, self::LOOKUP_TIMEOUT_SECONDS);
     }
 
     /** A valid IPv4 address outside 127.0.0.0/8 and 0.0.0.0/8. */

@@ -41,6 +41,10 @@ test.describe('IP assignments', () => {
         ip_address: ipAddress,
       });
       await expectStatus(released, 200);
+      expect(
+        (released.body as { host_cleanup_failed?: boolean }).host_cleanup_failed,
+        'the host kept the address'
+      ).toBe(false);
     } finally {
       await removeSubnet(api, subnetId);
     }

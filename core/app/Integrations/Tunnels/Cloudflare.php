@@ -10,9 +10,11 @@ use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\SitePasswordProtection;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -47,9 +49,7 @@ class Cloudflare
         $token = $user->getCloudflareApiToken();
         if ($token === null) {
             throw new CloudflareException(
-                "Project '{$user->username}' has no Cloudflare API token. "
-                .'Run: pae projects:settings:set --project='.$user->username
-                .' cloudflare-api-token TOKEN'
+                "Project '{$user->username}' has no Cloudflare API token; set its cloudflare-api-token setting first."
             );
         }
 
@@ -139,8 +139,7 @@ class Cloudflare
     public static function unreadableTunnelTokenMessage(string $username): string
     {
         return "The Cloudflare tunnel token stored for '{$username}' cannot be decoded, so its tunnel is left as it is. "
-            ."Reconnect it: `pae project:settings:unset --project={$username} cloudflare-api-token --force`, "
-            .'set the cloudflare-api-token setting again and re-create the tunnel hostnames.';
+            .'Reconnect it: clear its cloudflare-api-token setting, set it again and re-create the tunnel hostnames.';
     }
 
     /**
@@ -221,6 +220,27 @@ class Cloudflare
     }
 
     /**
+     * The origin of a domain served through the host proxy, at an address its vhost listens on.
+     *
+     * @param  Collection<int, ProxyRule>  $rules
+     * @return array{string, array<string, mixed>}
+     */
+    private static function hostProxyIngress(User $user, Domain $domain, Collection $rules): array
+    {
+        $sslOn = $domain->sslEnabled();
+        $rule = $rules->firstWhere('listen_port', $sslOn ? 443 : 80);
+        $origin = HostProxyOrigin::url($sslOn, $rule?->listen_ip, $user->getBindIpAddresses());
+
+        $originRequest = ['httpHostHeader' => $domain->domain];
+        if ($sslOn) {
+            $originRequest['originServerName'] = $domain->domain;
+            $originRequest['noTLSVerify'] = true;
+        }
+
+        return [$origin, $originRequest];
+    }
+
+    /**
      * Push Cloudflare Tunnel ingress from ProxyRule rows for this domain (source of truth).
      * Empty/disabled rules remove each tunnel hostname from ingress (DNS stays).
      */
@@ -270,17 +290,7 @@ class Cloudflare
         $passwordOn = SitePasswordProtection::isEnabled($user);
         if ($passwordOn) {
             // Hairpin through host nginx-proxy so the site password gate applies.
-            // DinD compose already maps host.docker.internal → host-gateway.
-            $sslOn = $domain->sslEnabled();
-            $origin = $sslOn
-                ? 'https://host.docker.internal:443'
-                : 'http://host.docker.internal:80';
-            $originRequest = [
-                'httpHostHeader' => $domain->domain,
-            ];
-            if ($sslOn) {
-                $originRequest['noTLSVerify'] = true;
-            }
+            [$origin, $originRequest] = self::hostProxyIngress($user, $domain, $rules);
         } else {
             $origin = CloudflareApi::originServiceUrl($upstreamPort);
             $originRequest = new \stdClass;
@@ -404,9 +414,6 @@ class Cloudflare
             );
         }
 
-        // Legacy path from the account's previous init.
-        self::removeConnectorToken($user);
-
         $details = $user->getDetails();
         unset(
             $details['cloudflare_api_token'],
@@ -430,7 +437,7 @@ class Cloudflare
     {
         try {
             $path = self::connectorEnvPath($user);
-            (new System)->exec(['sudo', 'rm', '-f', $path]);
+            (new System)->exec(Privileged::accountFiles(...$user->linuxIds())->removeIfExists($path));
         } catch (\Throwable $e) {
             // best-effort
         }
@@ -500,14 +507,15 @@ class Cloudflare
 
     /**
      * Stop cloudflared and clear its token from the account (keep User.details tunnel ids).
+     * The legacy token file goes first, so a connector that cannot be rendered still loses it.
      */
     public static function disableConnector(User $user): void
     {
         if (! ($user->project()->runtime() instanceof Dind)) {
             return;
         }
-        self::renderConnector($user, false);
         self::removeConnectorToken($user);
+        self::renderConnector($user, false);
         self::reloadConnector($user);
     }
 

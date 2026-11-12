@@ -1021,7 +1021,12 @@ ignore_list() { awk '{ sub(/#.*/, "") } $1 != "" { print $1 }' "$1" | sort -u | 
 
 # The host's Docker networks. A tunnel's cloudflared reaches a site from its
 # account's address on one: banning that would cut the account off the host.
+# The root broker passes them in PA_DOCKER_SUBNETS, else docker's CLI reads them.
 docker_subnets() {
+    if [ -n "${PA_DOCKER_SUBNETS+set}" ]; then
+        printf '%s' "$PA_DOCKER_SUBNETS"
+        return
+    fi
     local containers
     containers=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $(docker network ls -q 2>/dev/null) 2>/dev/null |
         tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')
@@ -1145,7 +1150,10 @@ maxretry = 10
 bantime.increment = false
 # A jail's own ignoreip replaces [DEFAULT]'s, so it repeats it, then adds
 # PanelAlpha Connect's caller: SSH, SFTP and FTP can still ban that address.
-ignoreip = ${api_ignore}
+# The host's Docker bridges follow it: a request to :2011 from the host is
+# logged with a bridge gateway as its address, and banning that would ban
+# every local caller at once.
+ignoreip = ${api_ignore}${containers:+ ${containers}}
 
 # Any site's visitors, often many behind one address, and a ban closes the
 # whole host to them. No increment: a fixed hour is enough to stop guessing.
@@ -1278,8 +1286,13 @@ published_off() {
 # (port 08080); each refused rule is set aside and the rest tested again.
 refused_rules() {
     [ ! -f "$UFW_DIR/user.rules" ] || refused_in iptables "$UFW_DIR/user.rules"
-    [ ! -f "$UFW_DIR/user6.rules" ] || refused_in ip6tables "$UFW_DIR/user6.rules"
+    [ ! -f "$UFW_DIR/user6.rules" ] || ! ufw_loads_ipv6 || refused_in ip6tables "$UFW_DIR/user6.rules"
     return 0
+}
+
+# As ufw-init: user6.rules loads only with IPV6=yes and a working ip6tables.
+ufw_loads_ipv6() {
+    grep -qixE 'IPV6="?yes"?' "$UFW_DEFAULTS" 2>/dev/null && ip6tables -L INPUT -n >/dev/null 2>&1
 }
 
 # refused_rules for one rule file, through <iptables|ip6tables>-restore.

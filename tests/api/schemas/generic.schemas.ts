@@ -107,7 +107,7 @@ export const ipamSubnetSchema = z
     ip: z.string(),
     mask: z.coerce.number(),
     family: z.coerce.number().optional(),
-    is_shared: z.union([z.boolean(), z.number()]).optional(),
+    is_shared: z.boolean().optional(),
     created_at: z.union([z.string(), z.null()]).optional(),
     updated_at: z.union([z.string(), z.null()]).optional(),
     assigned_ips: ipamAssignedIpsSchema.optional(),
