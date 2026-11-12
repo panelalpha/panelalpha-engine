@@ -8,3 +8,26 @@ description: >-
   database settings nor its images. The installer is left as upstream ships it.
 extends: php-plain
 database: mysql
+commands:
+  - id: database-login
+    stage: [install, upgrade]
+    description: >-
+      The installer writes the database login into
+      ndxzsite/config/config.php once, and the file lives in ~/.panelalpha.
+      A staging or clone copies it while the engine hands the copy a
+      database of its own in DB_*, so the login is put back from DB_* on
+      every boot, and nothing is written while it already matches.
+      Indexhibit connects without a port, so DB_PORT is not written. Left
+      alone until the installer has written the file.
+    run: >-
+      php -r '
+      $f = "/app/ndxzsite/config/config.php";
+      $c = (string) @file_get_contents($f);
+      if ((string) getenv("DB_DATABASE") === "" || !str_contains($c, "\x24indx[")) { exit(0); }
+      $set = fn (string $s, string $at, string $v): string => preg_replace_callback("/(" . $at . ")\x27(?:[^\x27\\\\]|\\\\.)*\x27/m", fn (array $m): string => $m[1] . var_export($v, true), $s, 1) ?? exit(1);
+      $n = $c;
+      foreach (["db" => "DB_DATABASE", "user" => "DB_USERNAME", "pass" => "DB_PASSWORD", "host" => "DB_HOST"] as $k => $e) { $n = $set($n, "^[$]indx\[\x27" . $k . "\x27\]\s*=\s*", (string) getenv($e)); }
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      '

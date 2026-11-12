@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../platforms/_schema.json
+id: roundcube
+strategy: php
+label: Roundcube
+priority: 945
+runtime: php
+port: 8000
+# From 1.7 every asset is served through public_html/static.php, and this root
+# keeps config/, logs/, temp/ and SQL/ off the web.
+docroot: public_html
+# Not SQLite: its file would live in the checkout, which a redeploy wipes.
+database: mysql
+requires:
+  php: runtime
+  node:
+    role: build
+    optional: true
+detect:
+  all:
+    - file: composer.json
+    - path: program/include/iniset.php
+    - path: program/lib/Roundcube/rcube.php
+    # 1.6 and older serve from the repository root and have no static.php; this
+    # manifest's document root would not exist there.
+    - path: public_html/static.php
+    - path: bin/initdb.sh
+# The repository ships the elastic skin as LESS only; these are the files and
+# lessc options of upstream's skins/elastic/Makefile.
+frontend_build: 'npx lessc --clean-css="--s1 --advanced" skins/elastic/styles/styles.less skins/elastic/styles/styles.min.css && npx lessc --clean-css="--s1 --advanced" skins/elastic/styles/print.less skins/elastic/styles/print.min.css && npx lessc --clean-css="--s1 --advanced" skins/elastic/styles/embed.less skins/elastic/styles/embed.min.css'
+commands:
+  - id: composer-install
+    stage: build
+    role: dependencies
+    run: 'composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader'
+  - id: js-dependencies
+    stage: build
+    description: 'jQuery, TinyMCE, Bootstrap and the rest are not in the repository: bin/install-jsdeps.sh downloads the versions jsdeps.json pins and checks each against its sha1, which is the step a release tarball has already done. Without them the login page loads no scripts and no Bootstrap. The download cache under temp/ is dropped so it does not ship in the image.'
+    run: 'php bin/install-jsdeps.sh && rm -rf temp/js_cache'
+  - id: write-config
+    stage: [install, upgrade]
+    description: 'Renders config/config.inc.php from the account''s database (DB_*) and a des_key derived from PA_INSTANCE_SECRET. The des_key encrypts the IMAP password Roundcube keeps in its session; the sample config ships one fixed value, and a key taken from the checkout would be the same on every account, as every checkout is /app. Rendered on every boot that follows a build, since a staging copy or a clone gets a database of its own, and left alone when nothing changed. Anything else is set through Roundcube''s own ROUNDCUBE_<OPTION> environment variables, which it reads over this file: ROUNDCUBE_IMAP_HOST and ROUNDCUBE_SMTP_HOST (default localhost:143 and localhost:587) are the ones a login needs.'
+    run: >-
+      php -r '
+      $e = fn (string $k): string => (string) getenv($k);
+      foreach (["DB_DATABASE", "PA_INSTANCE_SECRET"] as $k) { if ($e($k) === "") { fwrite(STDERR, "write-config: $k is empty, so Roundcube has no database or no key of its own\n"); exit(1); } }
+      $config = [
+      "db_dsnw" => "mysql://" . rawurlencode($e("DB_USERNAME")) . ":" . rawurlencode($e("DB_PASSWORD")) . "@" . $e("DB_HOST") . ":" . ($e("DB_PORT") ?: "3306") . "/" . rawurlencode($e("DB_DATABASE")),
+      "des_key" => substr(hash("sha256", "roundcube-des-key:" . $e("PA_INSTANCE_SECRET")), 0, 24),
+      "log_driver" => "stdout",
+      "plugins" => ["archive", "zipdownload"],
+      ];
+      $f = "/app/config/config.inc.php";
+      $n = "<?php\n\$config = " . var_export($config, true) . ";\n";
+      if ((string) @file_get_contents($f) === $n) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "write-config: cannot write $f\n"); exit(1); }
+      fwrite(STDERR, "write-config: $f now points at database " . $e("DB_DATABASE") . "\n");
+      '
+  - id: schema
+    stage: [install, upgrade]
+    description: 'Creates Roundcube''s tables on an empty database, or applies the schema updates a newer checkout brings to one that has them (initdb.sh --update tells the two apart by its `system` table). The installer that would otherwise do it stays disabled, as Roundcube ships it. Retried while the account''s database is not answering yet; a failure after that fails the boot rather than serve a webmail with no tables.'
+    run: 'n=0; until php /app/bin/initdb.sh --dir=/app/SQL --update; do n=$((n + 1)); if [ "$n" -ge 15 ]; then echo "schema: Roundcube could not create or update its tables" >&2; exit 1; fi; sleep 2; done'

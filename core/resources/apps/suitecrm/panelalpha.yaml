@@ -31,3 +31,18 @@ commands:
     stage: [install, upgrade]
     description: 'The Setup Wizard writes config.php and config_override.php at the root and fills cache/ and upload/ as it runs; it stops on its own permission check when any of them is read-only. upload/ is not in the repository at all.'
     run: 'mkdir -p /app/cache /app/upload /app/custom && chmod -R 775 /app/cache /app/upload /app/custom'
+  - id: database-login
+    stage: [install, upgrade]
+    description: 'The Setup Wizard writes the database login and the site''s address into config.php once. A staging or clone copies that file while the engine hands the copy a database of its own in DB_* and its own APP_URL, so both are put back on every boot, and nothing is written while they already match. Left alone until the wizard has locked the installer.'
+    run: >-
+      php -r '
+      $f = "/app/config.php";
+      if ((string) getenv("DB_DATABASE") === "" || !is_file($f)) { exit(0); }
+      include $f;
+      if (!is_array($sugar_config["dbconfig"] ?? null) || empty($sugar_config["installer_locked"])) { exit(0); }
+      $u = rtrim((string) getenv("APP_URL"), "/");
+      $n = array_replace_recursive($sugar_config, ["dbconfig" => ["db_host_name" => getenv("DB_HOST"), "db_port" => getenv("DB_PORT"), "db_name" => getenv("DB_DATABASE"), "db_user_name" => getenv("DB_USERNAME"), "db_password" => getenv("DB_PASSWORD")]], $u === "" ? [] : ["site_url" => $u, "host_name" => parse_url($u, PHP_URL_HOST)]);
+      if ($n === $sugar_config) { exit(0); }
+      if (file_put_contents($f, "<?php\n\x24sugar_config = " . var_export($n, true) . ";\n") === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      '

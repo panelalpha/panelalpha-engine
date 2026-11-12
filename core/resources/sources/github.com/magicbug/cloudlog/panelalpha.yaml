@@ -10,3 +10,35 @@ description: >-
   directories live in ~/.panelalpha/cloudlog, so a redeploy keeps them.
 extends: php-plain
 database: mysql
+commands:
+  - id: database-login
+    stage: [install, upgrade]
+    description: >-
+      The installer writes the database login into database.php and the
+      site's address into config.php once, and both live in ~/.panelalpha.
+      A staging or clone copies them while the engine hands the copy a
+      database of its own in DB_* and its own APP_URL, so both are put back
+      on every boot, and nothing is written while they already match. The
+      installer's database.php carries no port, so DB_PORT is not written.
+      Left alone until the installer has written the files.
+    run: >-
+      php -r '
+      $f = "/app/application/config/database.php";
+      $c = (string) @file_get_contents($f);
+      if ((string) getenv("DB_DATABASE") === "" || !str_contains($c, "hostname")) { exit(0); }
+      $set = fn (string $s, string $at, string $v): string => preg_replace_callback("/(" . $at . ")\x27(?:[^\x27\\\\]|\\\\.)*\x27/m", fn (array $m): string => $m[1] . var_export($v, true), $s, 1) ?? exit(1);
+      $n = $c;
+      foreach (["hostname" => "DB_HOST", "username" => "DB_USERNAME", "password" => "DB_PASSWORD", "database" => "DB_DATABASE"] as $k => $e) { $n = $set($n, "\x27" . $k . "\x27\s*=>\s*", (string) getenv($e)); }
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      ' && php -r '
+      $f = "/app/application/config/config.php";
+      $c = (string) @file_get_contents($f);
+      $u = rtrim((string) getenv("APP_URL"), "/");
+      if ($u === "" || !str_contains($c, "base_url")) { exit(0); }
+      $n = preg_replace_callback("/^([$]config\[\x27base_url\x27\]\s*=\s*)\x27(?:[^\x27\\\\]|\\\\.)*\x27/m", fn (array $m): string => $m[1] . var_export("$u/", true), $c, 1) ?? exit(1);
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at $u/\n");
+      '

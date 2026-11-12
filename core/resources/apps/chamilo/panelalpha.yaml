@@ -34,3 +34,28 @@ commands:
     stage: [install, upgrade]
     description: 'What each line of Chamilo writes into: 1.11 keeps courses, uploads and its generated configuration.php under app/, 2.x keeps Symfony''s cache and logs under var/. Both sets are created because one manifest covers both trees, and creating a directory the tree does not use costs nothing.'
     run: 'mkdir -p /app/app/cache /app/app/courses /app/app/upload /app/app/logs /app/app/config /app/var/cache /app/var/log && chmod -R 775 /app/app /app/var 2>/dev/null; true'
+  - id: database-login
+    stage: [install, upgrade]
+    description: 'Both lines of Chamilo write the database login once at install: 1.11 into app/config/configuration.php (with the site''s address, root_web), 2.x into .env. A staging or clone copies the file while the engine hands the copy a database of its own in DB_* and its own APP_URL, so they are put back on every boot, and nothing is written while they already match. Left alone until the installer has finished: 1.11 has no configuration.php before that, and 2.x says APP_INSTALLED=''1'' only after.'
+    run: >-
+      php -r '
+      $f = "/app/app/config/configuration.php";
+      $c = (string) @file_get_contents($f);
+      if ((string) getenv("DB_DATABASE") === "" || !str_contains($c, "main_database")) { exit(0); }
+      $set = fn (string $s, string $at, string $v): string => preg_replace_callback("/(" . $at . ")\x27(?:[^\x27\\\\]|\\\\.)*\x27/m", fn (array $m): string => $m[1] . var_export($v, true), $s, 1) ?? exit(1);
+      $u = rtrim((string) getenv("APP_URL"), "/");
+      $n = $c;
+      foreach (["db_host" => getenv("DB_HOST"), "db_port" => getenv("DB_PORT"), "main_database" => getenv("DB_DATABASE"), "db_user" => getenv("DB_USERNAME"), "db_password" => getenv("DB_PASSWORD")] + ($u === "" ? [] : ["root_web" => "$u/"]) as $k => $v) { $n = $set($n, "^[$]_configuration\[\x27" . $k . "\x27\]\s*=\s*", (string) $v); }
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      ' && php -r '
+      $f = "/app/.env";
+      $c = (string) @file_get_contents($f);
+      if ((string) getenv("DB_DATABASE") === "" || !preg_match("/^APP_INSTALLED=\x271\x27/m", $c)) { exit(0); }
+      $n = $c;
+      foreach (["DATABASE_HOST" => "DB_HOST", "DATABASE_PORT" => "DB_PORT", "DATABASE_NAME" => "DB_DATABASE", "DATABASE_USER" => "DB_USERNAME", "DATABASE_PASSWORD" => "DB_PASSWORD"] as $k => $e) { $n = preg_replace_callback("/^" . $k . "=.*$/m", fn (array $m): string => $k . "=\x27" . getenv($e) . "\x27", $n, 1) ?? exit(1); }
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, $n) === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      '

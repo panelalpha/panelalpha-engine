@@ -92,6 +92,30 @@ class ComposePublicUrlTest extends TestCase
         $this->assertSame(['ORIGIN', 'BASE_URL', 'ADMIN_URL'], $result['urls']);
     }
 
+    public function test_a_localhost_url_with_a_path_keeps_the_path_on_the_public_address(): void
+    {
+        $result = $this->fill([
+            'postmill' => [
+                'image' => 'ghcr.io/postmill-ai/postmill-app:latest',
+                'ports' => ['4007:5000'],
+                'environment' => [
+                    'MAIN_URL' => 'http://localhost:4007',
+                    'NEXT_PUBLIC_BACKEND_URL' => 'http://localhost:4007/api',
+                    'CALLBACK_URL' => 'http://localhost:4007/auth/callback/',
+                    'BACKEND_INTERNAL_URL' => 'http://localhost:3000',
+                    'REDIS_URL' => 'http://localhost:4007/0',
+                ],
+            ],
+        ]);
+        $environment = $result['compose']['services']['postmill']['environment'];
+
+        $this->assertSame(self::URL, $environment['MAIN_URL']);
+        $this->assertSame(self::URL . '/api', $environment['NEXT_PUBLIC_BACKEND_URL']);
+        $this->assertSame(self::URL . '/auth/callback/', $environment['CALLBACK_URL']);
+        $this->assertSame('http://localhost:3000', $environment['BACKEND_INTERNAL_URL']);
+        $this->assertSame('http://localhost:4007/0', $environment['REDIS_URL']);
+    }
+
     public function test_a_stack_that_publishes_nothing_is_rewritten_as_before(): void
     {
         $result = $this->fill(['app' => ['image' => 'x', 'environment' => ['APP_URL' => 'http://localhost:3000']]]);

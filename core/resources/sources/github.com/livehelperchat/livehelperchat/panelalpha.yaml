@@ -17,3 +17,24 @@ description: >-
 extends: php
 app_root: lhc_web
 database: mysql
+commands:
+  - id: database-login
+    stage: [install, upgrade]
+    description: >-
+      The installer writes the database login into settings.ini.php once,
+      and the file lives in ~/.panelalpha. A staging or clone copies it while
+      the engine hands the copy a database of its own in DB_*, so the db
+      settings are put back from DB_* on every boot, in the form Live Helper
+      Chat saves them in, and nothing is written while they already match.
+      Left alone until the installer has marked the site installed.
+    run: >-
+      php -r '
+      $f = "/app/settings/settings.ini.php";
+      $c = is_file($f) ? include $f : null;
+      if ((string) getenv("DB_DATABASE") === "" || ($c["settings"]["site"]["installed"] ?? false) !== true || !is_array($c["settings"]["db"] ?? null)) { exit(0); }
+      $n = $c;
+      $n["settings"]["db"] = array_replace($c["settings"]["db"], ["host" => getenv("DB_HOST"), "port" => (int) getenv("DB_PORT"), "user" => getenv("DB_USERNAME"), "password" => getenv("DB_PASSWORD"), "database" => getenv("DB_DATABASE")]);
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, "<?php\n return " . var_export($n, true) . ";\n?>") === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      '

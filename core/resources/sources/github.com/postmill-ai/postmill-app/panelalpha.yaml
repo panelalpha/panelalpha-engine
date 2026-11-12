@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Postmill is a social media scheduler: one all-in-one image runs nginx on
+  :5000 in front of a NestJS backend and a Next.js frontend, with PostgreSQL
+  beside it. The repository's docker-compose.yaml runs the published image,
+  with two gaps. It expects Redis as an external endpoint (REDIS_URL, e.g.
+  Upstash) and ships none, so .env.example's redis://localhost:6379 leaves
+  the backend retrying a refused connection and every /api request answers
+  502. And the image never applies its Prisma migrations (upstream's docker
+  guide runs prisma migrate deploy by hand after the first boot), so the
+  backend starts on an empty database and answers 500.
+  overrides/docker-compose.override.yml adds a Redis service and a one-shot
+  postmill-migrate service from the same image, and the app waits for both.
+  On a redeploy the migration step applies only what is new.
