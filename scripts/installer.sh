@@ -129,6 +129,9 @@ DEPLOY_ONLY=0
 DEPLOY_PROJECT_NAME=''
 DEPLOY_PROJECT_URL=''
 DEPLOY_FAILED=0
+# 1 when project:create --update-existing found the project already deploying --repo and
+# deployed it again instead of creating another (a second run of the same install).
+DEPLOY_UPDATED=0
 # Short reason from a failed project:create (stderr/stdout), for logs + outro.
 DEPLOY_ERROR=''
 # Site password for the --repo project. Empty + DEPLOY_NO_PASSWORD=0 → generate.
@@ -2357,6 +2360,12 @@ EOF
 #
 # A failed deploy is reported, not fatal: on an install the engine itself is up
 # and usable, and saying so beats rolling it back over a bad repository URL.
+# Whether the running core's project:create knows --update-existing (Engine 2.3.0 and later).
+core_create_updates_existing() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan project:create --help 2>/dev/null | grep -q -- '--update-existing'
+}
+
 deploy_repository() {
     local args=(project:create "--repo=${DEPLOY_REPO}" --json)
     if [ -n "$DEPLOY_BRANCH" ]; then
@@ -2370,6 +2379,11 @@ deploy_repository() {
     fi
     if [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ]; then
         args+=(--full-privileges)
+        # The panel: run again, the install updates the one it made rather than adding a second. A deploy-only run
+        # talks to the core already running, which may be older than this script and not know the option.
+        if core_create_updates_existing; then
+            args+=(--update-existing)
+        fi
     fi
     local pair
     for pair in "${DEPLOY_ENV_VARS[@]+"${DEPLOY_ENV_VARS[@]}"}"; do
@@ -2432,6 +2446,13 @@ deploy_repository() {
         return 0
     fi
     DEPLOY_PROJECT_URL="https://${domain}"
+    if printf '%s' "$json" | grep -q '"updated":true'; then
+        # Its admin, environment and Hub pairing stay: what this run generated for a new one was not applied.
+        DEPLOY_UPDATED=1
+        PANEL_ADMIN_PASSWORD=''
+        PANEL_HUB_CODE=''
+        return 0
+    fi
     apply_deploy_site_password
 }
 
@@ -2528,6 +2549,9 @@ report_deployed_project() {
         return 0
     fi
 
+    if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
+        echo_info "${DEPLOY_REPO_LABEL} was already deployed as ${DEPLOY_PROJECT_NAME}: updated it, its admin and settings unchanged"
+    fi
     echo_info "${DEPLOY_REPO_LABEL} available at: ${DEPLOY_PROJECT_URL}"
     echo_info "Project: ${DEPLOY_PROJECT_NAME}    logs: pae project:deploy:log ${DEPLOY_PROJECT_NAME}"
     if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
@@ -2540,6 +2564,9 @@ report_deployed_project() {
         echo_info "The panel connects to PanelAlpha Hub on its first start; watch the Hub page you copied the command from."
     fi
     echo_info ""
+    if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
+        outro_say 247 "Updated ${DEPLOY_PROJECT_NAME}, which already ran it; its admin and settings are unchanged."
+    fi
     outro_c 15 "${DEPLOY_REPO_LABEL}"
     outro_c 247 ' available at: '
     outro_c 39 "${DEPLOY_PROJECT_URL}"

@@ -121,6 +121,13 @@ STUB_BIN="${WORK_DIR}/bin"
 mkdir -p "$STUB_BIN"
 cat >"${STUB_BIN}/docker" <<STUB
 #!/bin/bash
+# project:create --help: the options the running core knows.
+case "\$*" in
+*'project:create --help'*)
+    [ "\${STUB_OLD_CORE:-0}" = 1 ] || echo '      --update-existing  When a project already deploys this repository…'
+    exit 0
+    ;;
+esac
 printf '%s\n' "\$*" >"${WORK_DIR}/docker-args"
 if [ "\${STUB_FAIL:-0}" = 1 ]; then
     # The hint on stdout; the deploy log and then the reason on stderr, last.
@@ -132,7 +139,12 @@ if [ "\${STUB_FAIL:-0}" = 1 ]; then
 fi
 # project:create --json: deploy log on stderr, JSON on stdout.
 echo 'Cloning https://github.com/n8n-io/n8n' >&2
-echo '${JSON}'
+if [ "\${STUB_UPDATED:-0}" = 1 ]; then
+    # --update-existing found the project and deployed it again.
+    echo '${JSON%\}\}},"updated":true}}'
+else
+    echo '${JSON}'
+fi
 STUB
 chmod +x "${STUB_BIN}/docker"
 export PATH="${STUB_BIN}:${PATH}"
@@ -202,10 +214,16 @@ DEPLOY_FULL_PRIVILEGES=1
 DEPLOY_FAILED=0
 deploy_repository >/dev/null 2>&1
 case "$(cat "${WORK_DIR}/docker-args")" in
-*'project:create --repo=https://github.com/n8n-io/n8n --json --full-privileges') pass 'full privileges reach project:create' ;;
-*) fail 'full privileges reach project:create' '… --full-privileges' "$(cat "${WORK_DIR}/docker-args")" ;;
+*'project:create --repo=https://github.com/n8n-io/n8n --json --full-privileges --update-existing') pass 'full privileges reach project:create, with --update-existing' ;;
+*) fail 'full privileges reach project:create, with --update-existing' '… --full-privileges --update-existing' "$(cat "${WORK_DIR}/docker-args")" ;;
 esac
 expect 'retry names full privileges' 'pae project:create --repo n8n-io/n8n --full-privileges' "$(deploy_retry_command)"
+# A core from before --update-existing gets the create it knows.
+STUB_OLD_CORE=1 deploy_repository >/dev/null 2>&1
+case "$(cat "${WORK_DIR}/docker-args")" in
+*'--json --full-privileges') pass 'an older core is not sent --update-existing' ;;
+*) fail 'an older core is not sent --update-existing' '… --full-privileges' "$(cat "${WORK_DIR}/docker-args")" ;;
+esac
 DEPLOY_FULL_PRIVILEGES=0
 
 # --env-var pairs and the panel's admin + Hub code reach project:create.
@@ -246,6 +264,31 @@ esac
 DEPLOY_ENV_VARS=()
 PANEL_ADMIN_EMAIL=''
 PANEL_ADMIN_PASSWORD=''
+PANEL_HUB_CODE=''
+
+# Run a second time, the panel is updated: nothing generated for a new one is reported.
+DEPLOY_FULL_PRIVILEGES=1
+PANEL_ADMIN_EMAIL='ada@example.com'
+PANEL_ADMIN_PASSWORD=''
+PANEL_HUB_CODE='WDJB-MJHT'
+DEPLOY_FAILED=0
+DEPLOY_UPDATED=0
+STUB_UPDATED=1 deploy_repository >/dev/null 2>&1
+expect 'an update is recorded' '1' "$DEPLOY_UPDATED"
+expect 'an update keeps the project name' 'n8n3163' "$DEPLOY_PROJECT_NAME"
+expect 'an update reports no generated password' '' "$PANEL_ADMIN_PASSWORD"
+reported=$(report_deployed_project 2>&1)
+case "$reported" in
+*'was already deployed as n8n3163: updated it'*) pass 'the report says the project was updated' ;;
+*) fail 'the report says the project was updated' 'was already deployed as n8n3163' "$reported" ;;
+esac
+case "$reported" in
+*'Log in as:'* | *'connects to PanelAlpha Hub'*) fail 'an update prints no login or Hub line' 'neither' "$reported" ;;
+*) pass 'an update prints no login or Hub line' ;;
+esac
+DEPLOY_FULL_PRIVILEGES=0
+DEPLOY_UPDATED=0
+PANEL_ADMIN_EMAIL=''
 PANEL_HUB_CODE=''
 
 # ---- site password helpers -------------------------------------------------

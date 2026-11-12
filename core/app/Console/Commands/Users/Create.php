@@ -54,6 +54,7 @@ class Create extends Command
                             {--recipe= : Deploy with this recipe instead of the detected one}
                             {--env-var=* : KEY=VALUE environment override, repeatable}
                             {--full-privileges : Trust the application with this engine: an Engine API token for every project, the server\'s own name and public ports, and protection from API tokens once it is live}
+                            {--update-existing : When a project already deploys this repository, deploy it again from it instead of creating another (the one-line installer run a second time)}
                             {--quiet-deploy : Do not print the deploy log while it runs}
                             {--json : Print the created project as JSON instead of a summary}';
 
@@ -87,6 +88,19 @@ class Create extends Command
             $this->error('--full-privileges needs a container project: give --repo, or --template=dind.');
 
             return 1;
+        }
+
+        if ($this->option('update-existing') && isset($params['git_repo'])) {
+            $existing = $creator->projectsDeploying($params['git_repo']);
+            if (count($existing) > 1) {
+                $names = implode(', ', array_map(static fn (User $user): string => $user->username, $existing));
+                $this->error("More than one project deploys {$params['git_repo']} ({$names}): update the one you mean with pae project:rebuild --project=<name>.");
+
+                return 1;
+            }
+            if ($existing !== []) {
+                return $this->updateExisting($existing[0], $params['git_repo'], $fullPrivileges, $creator);
+            }
         }
 
         $envVars = $this->envVarOptions();
@@ -133,6 +147,50 @@ class Create extends Command
         }
 
         return $this->report($this->created($user, $creator), $creator);
+    }
+
+    /**
+     * `--update-existing` found the project: deploy it again from its repository. Its name, domain, settings, data,
+     * environment and git token stay as they are, so the --env-var, --email, --branch and --git-token of this run are
+     * not applied; the JSON says `updated: true` so a caller does not report the values it generated for a new one.
+     */
+    private function updateExisting(User $user, string $repo, bool $fullPrivileges, ProjectCreator $creator): int
+    {
+        if (! $this->option('json')) {
+            $this->info("Updating project {$user->username}, which already deploys {$repo} — this takes a few minutes.");
+        }
+        // Granted again: an earlier run without --full-privileges, or one revoked since, is what this run asks for.
+        if ($fullPrivileges) {
+            $this->grantFullPrivileges($user);
+        }
+
+        $this->followDeployLog();
+        try {
+            $creator->redeploy($user);
+        } finally {
+            $this->stopFollowingDeployLog();
+        }
+
+        if ($fullPrivileges && ! $user->fresh()->isProtected()) {
+            $this->protect($user);
+        }
+
+        $user->refresh();
+        if ($this->option('json')) {
+            /** @var array<string, mixed> $payload */
+            $payload = (new UserResource($user))->response()->getData(true);
+            $payload['data']['updated'] = true;
+            $this->output->writeln((string) json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+            return 0;
+        }
+
+        $this->info("Project {$user->username} updated.");
+        if ($user->domain) {
+            $this->info('Live at '.$this->url($user->domain));
+        }
+
+        return 0;
     }
 
     /**

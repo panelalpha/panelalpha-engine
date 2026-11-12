@@ -17,6 +17,7 @@ use App\Lib\Deploy\ProjectName;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\Source\RepoUrl;
 use App\Lib\Deploy\Source\RepositoryAddress;
 use App\Lib\Domains\AllocatedDomain;
 use App\Lib\Domains\DomainAllocationException;
@@ -132,6 +133,44 @@ class ProjectCreator
      *
      * @throws ValidationException
      */
+    /**
+     * The projects that deploy this repository: the same host, owner and name, whatever the scheme, credentials or
+     * `.git` the address was given with. What `project:create --update-existing` looks for.
+     *
+     * @return list<User>
+     */
+    public function projectsDeploying(string $repo): array
+    {
+        $wanted = self::repoIdentity($repo);
+        if ($wanted === null) {
+            return [];
+        }
+
+        return User::query()->orderBy('username')->get()
+            ->filter(static fn (User $user): bool => self::repoIdentity((string) $user->getGitRepo()) === $wanted)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Deploy an existing project again from its repository, in this process: what POST /projects/{username}/rebuild
+     * runs with a deploy stream. The project keeps its name, domain, settings, data and the git token it was made with.
+     */
+    public function redeploy(User $user): void
+    {
+        $rebuild = app(ProjectRebuild::class);
+        $rebuild->whileIdle($user, static function () use ($rebuild, $user): void {
+            $rebuild->run($user, ProjectRebuild::REBUILD, $rebuild->openLogWithoutTask($user, ProjectRebuild::REBUILD), null);
+        });
+    }
+
+    private static function repoIdentity(string $repo): ?string
+    {
+        $parsed = trim($repo) === '' ? null : RepoUrl::parse(GitRepoInput::normalise($repo));
+
+        return $parsed === null ? null : strtolower($parsed['host'].'/'.$parsed['owner'].'/'.$parsed['repo']);
+    }
+
     public function queue(NewProjectInput $input, ?CreateFollowUp $followUp = null): Task
     {
         $plan = DeployPlanInput::parse($input->stages);
