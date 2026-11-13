@@ -487,8 +487,11 @@ class SystemController extends Controller
             )],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Webserver change initiated', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'object')],
+            new OA\Response(response: 200, description: 'Webserver change initiated; or, when the requested webserver is already active, nothing is run and `data` is the latest change run', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string', description: 'Only when the requested webserver is already active'),
+                    new OA\Property(property: 'data', type: 'object', nullable: true),
+                ],
             )),
             new OA\Response(response: 422, description: 'Any webserver other than nginx-proxy is temporarily refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 409, description: 'A webserver change is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -514,6 +517,13 @@ class SystemController extends Controller
 
         if ($system->isChangeWebserverScriptRunning()) {
             return new JsonResponse(['message' => 'Change webserver script is already running'], 409);
+        }
+
+        if ($serialNumber === null && $system->isWebserverActive($params['new_webserver'])) {
+            return new JsonResponse([
+                'message' => "Webserver '{$params['new_webserver']}' is already active; nothing was changed",
+                'data' => $system->getLatestChangeWebserverInfo(),
+            ]);
         }
 
         if ($serialNumber !== null) {

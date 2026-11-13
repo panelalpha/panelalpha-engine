@@ -199,6 +199,11 @@ class System implements ProcessRunner
         return $this->webserver()->isChangeWebserverScriptRunning();
     }
 
+    public function isWebserverActive(string $webserver): bool
+    {
+        return $this->webserver()->isActive($webserver);
+    }
+
     /**
      * Render every domain's config and apply it, reporting whether the reload
      * reached the webserver.

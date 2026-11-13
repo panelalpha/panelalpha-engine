@@ -285,6 +285,19 @@ class Webserver implements WebserverInterface
         }
     }
 
+    /**
+     * Whether sites-http already runs `$webserver`, so switching to it would only recreate it and rebuild every
+     * project. False when either cannot be read: the switch then repairs whatever is wrong.
+     */
+    public function isActive(string $webserver): bool
+    {
+        try {
+            return $this->detectWebserver() === $webserver && $this->isRunning();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public function isChangeWebserverScriptRunning(): bool
     {
         $latestLink = '/opt/panelalpha/log/change-webserver/latest';

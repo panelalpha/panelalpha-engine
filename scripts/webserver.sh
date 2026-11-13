@@ -11,12 +11,22 @@ ENGINE_DIR=/opt/panelalpha/shared-hosting
 BROKER_LIB=/usr/local/lib/panelalpha
 SERIAL_NO=""
 
-# sites-http's label, read for the help alone: a switch asks Docker for nothing but compose's down and up and the
-# rebuild in core.
+# sites-http's label, stopped or not, for the help.
 current_webserver() {
     local webserver
     webserver=$(docker compose -f $ENGINE_DIR/docker-compose.yml ps -a sites-http --format json 2>/dev/null | jq '.Labels' 2>/dev/null | tr ',' '\n' | awk -F= '$1=="com.panelalpha.webserver"{print $2}')
     echo "${webserver:-unknown}"
+}
+
+# The label of a running sites-http only: a stopped or missing one is not active, and switching repairs it.
+running_webserver() {
+    docker compose -f $ENGINE_DIR/docker-compose.yml ps sites-http --format '{{.Labels}}' 2>/dev/null | tr ',' '\n' | awk -F= '$1=="com.panelalpha.webserver"{print $2}'
+}
+
+# Switching to the webserver already running would recreate sites-http and rebuild every project for nothing.
+# A serial number is a change of its own, so it always runs.
+already_active() {
+    [ -z "$SERIAL_NO" ] && [ "$(running_webserver)" = "$1" ]
 }
 
 print_info() {
@@ -85,6 +95,13 @@ set_webserver() {
         exit 1
         ;;
     esac
+
+    if already_active "$1"; then
+        echo ""
+        echo "Webserver '$1' is already active; nothing was changed."
+        echo ""
+        exit 0
+    fi
 
     if [ "$1" == "litespeed" ] && [ -n "$SERIAL_NO" ]; then
         prepare_litespeed_serial
