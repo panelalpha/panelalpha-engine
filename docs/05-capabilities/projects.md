@@ -6,19 +6,25 @@ This page covers creating, inspecting, rebuilding, copying, suspending, protecti
 
 ## Creating one
 
-You can create a project in one request, from where its code comes from. Creating a project from a repository *is* the deploy, and it is covered in full on [Connecting with Git](connecting-with-git.md). Looking after WordPress you already host is on [WordPress](wordpress-and-apps.md).
+A project is created in one request, together with its code. Creating a project from a repository *is* the deploy, and it is covered in full on [Connecting with Git](connecting-with-git.md). Looking after WordPress you already host is on [WordPress](wordpress-and-apps.md).
 
-A project says where its code comes from. You can ask for any of these:
+The code can come from any of these:
 
-- **A git repository.** Over HTTPS the assistant asks for a token on a paste page, if the repository is private. Over SSH the engine uses a **deploy key**: the assistant has the engine make the key, shows you its public half, and you add it to the repository as a read-only deploy key. Then the project is created. The private half is kept by the engine and is never shown.
+- **A git repository.** Over HTTPS the assistant asks for a token on a paste page, if the repository is private. Over SSH the engine uses a **deploy key**: the assistant has the engine make the key, shows you its public half, and you add it to the repository as a read-only deploy key. Then the project is created. The private half is kept by the engine and is never shown. For a git server other than GitHub, GitLab.com or Bitbucket, the engine reads and remembers that server's SSH host key when it makes the deploy key.
 - **An archive.** A `.zip`, `.tar.gz` or `.tgz`. The assistant either uploads it first, or gives the engine a web address to download it from. An upload nobody uses expires after 24 hours and is deleted.
 - **A copy of another project.** It is made in the background, with its databases if you ask for them. It is the same copy as [Cloning](#cloning).
-- **A new WordPress site.** On traditional PHP hosting, with a title and an administrator name, email and password. The password is never shown again. If the install fails, the project is removed.
+- **A new WordPress site.** On traditional PHP hosting, with a title and an administrator name, email and password of at least 8 characters. The engine keeps the password out of its task records. If the install fails, the project is removed.
 
 ```text
 Create a project called tshop from https://example.com/files/shop.tar.gz.
+```
+
+```text
 Create a project called tapp from git@git.example.com:team/app.git. Make a
 deploy key for it first and show me the public half.
+```
+
+```text
 Create a WordPress site called tblog titled "My blog", with admin you@example.com.
 ```
 
@@ -93,7 +99,7 @@ Push the staging copy live.
 
 You can push in either direction between the pair - staging to live to release changes, or live to staging to refresh your test copy with real data.
 
-A project can have **one** staging copy, and a staging copy cannot itself have one. A staging copy is refused while the live project is busy. **A live project that still has a staging copy cannot be deleted:** delete the staging copy first.
+A project can have **one** staging copy, and a staging copy cannot itself have one. A staging copy is refused while the live project is busy, for example during a deploy.
 
 **On a traditional PHP project, the copy gets its own databases.** Every MySQL database the project owns is copied into the staging copy, with new database users, new passwords and the same permissions. The staging copy then serves the copied site, not a placeholder page. A database the project does not own is not copied, and the assistant says so. To leave the databases out:
 
@@ -133,7 +139,7 @@ A clone is an independent copy, with no ongoing link and no later push.
 Clone this project.
 ```
 
-A clone is active as soon as it exists. It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
+It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
 
 **It does not copy** subdomains, or FTP or SFTP accounts. On a container project it does not copy MySQL databases either: the application's own stored data is copied (unless you ask to leave the databases out, which leaves that data out too), but a database you created for it is not, so create one on the clone. Use clone as a starting template, not as a backup.
 
@@ -234,7 +240,7 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
-**A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so. If you changed CPU limits under 2.2.0, run `pae project:cpu-limit:apply --all` once on the server; the update to 2.3.0 runs it for you.
+**A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so.
 
 **Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and only just ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 
@@ -271,7 +277,7 @@ The command runs in that service's running container, as that container's own us
 
 A command can be up to 640 bytes. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB.
 
-On traditional PHP hosting, a `%` in a command now runs as you wrote it.
+On traditional PHP hosting, write a `%` in a command as it is: the engine escapes it for cron.
 
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
@@ -477,7 +483,7 @@ Mode: full. Tools: `container_list`, `cron_job_create`, `cron_job_list`, `file_d
 Create a project called tarch from the archive at <a web address of a .tar.gz or .zip that holds a small static site>. Follow the deploy and open the site.
 ```
 
-Mode: modify. Tools: `project_create` with an archive source and `url`, `task_get`. Check: the project is created as a container project, the deploy completes, the site answers, and an address that is not http or https is refused with nothing created.
+Mode: modify. Tools: `project_create` with an archive source and `url`, `task_get`. Check: the project is created as a container project, the deploy completes and the site answers.
 
 **Create from git over SSH with a deploy key**
 
@@ -496,7 +502,7 @@ Upload the archive <file> to the engine without creating a project yet. Show me
 when the upload expires, then delete it.
 ```
 
-Mode: modify for the upload, full for the delete. Tools: `upload_create`, `upload_get`, `upload_delete`. Check: the upload reads back with its file name and an expiry about 24 hours away, a name that does not end in .zip, .tar.gz or .tgz is refused, and after the delete `upload_get` finds nothing.
+Mode: modify for the upload, full for the delete. Tools: `upload_create`, `upload_get`, `upload_delete`. Check: the upload reads back with its file name and an expiry about 24 hours away, and after the delete `upload_get` finds nothing.
 
 **Copy a project in one request**
 
@@ -504,16 +510,17 @@ Mode: modify for the upload, full for the delete. Tools: `upload_create`, `uploa
 Create tcopy as a copy of tshop, without its databases.
 ```
 
-Mode: modify. Tools: `project_create` with a project source, `task_get`. Check: the copy runs in the background and finishes as a task, the copy has the files and limits of tshop, and a name that is taken is refused with nothing created.
+Mode: modify. Tools: `project_create` with a project source, `task_get`. Check: the copy runs in the background and finishes as a task, and the copy has the files and limits of tshop.
 
 **WordPress in one request**
 
 ```text
 Create a WordPress site called tblog on traditional PHP hosting, titled "Test
-blog", with administrator you@example.com. Send the password on a paste page.
+blog", with administrator you@example.com. Choose a strong password for the
+administrator and tell me it once.
 ```
 
-Mode: modify. Tools: `project_create` with a WordPress source, `task_get`. Check: the site opens, the administrator can sign in, and the password is not repeated in the answer.
+Mode: modify. Tools: `project_create` with a WordPress source, `task_get`. Check: the site opens and the administrator can sign in with that password.
 
 **Give an empty project its code**
 
@@ -522,7 +529,7 @@ Create an empty project called tempty. Then use the archive at <address> as its
 source.
 ```
 
-Mode: modify. Tools: `project_create`, `project_source_set`, `task_get`. Check: the empty project is a container project, the source is deployed, and the same request on a traditional PHP project is refused.
+Mode: modify. Tools: `project_create`, `project_source_set`, `task_get`. Check: the empty project is a container project and the archive is deployed into it.
 
 **A cron job in a service, refused before the first deploy**
 
@@ -530,7 +537,7 @@ Mode: modify. Tools: `project_create`, `project_source_set`, `task_get`. Check: 
 On the empty container project tempty, add a cron job that runs date every minute.
 ```
 
-Mode: full. Tools: `cron_job_create`. Check: the job is refused, with the reason that the project has not been deployed yet.
+Mode: modify. Tools: `cron_job_create`. Check: the job is refused, with the reason that the project has not been deployed yet.
 
 **Staging and delete order**
 
