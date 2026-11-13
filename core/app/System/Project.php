@@ -548,12 +548,14 @@ class Project
 
     /**
      * Holds the lock a DinD rebuild takes through its deploy log: a delete holds it
-     * too, and this would otherwise recreate the account that delete is removing.
+     * too, and this would otherwise recreate the account that delete is removing,
+     * or, from a model read before it, the account it removed.
      */
     private function recreateHostSideUnderDeployLock(): void
     {
         $lock = DeployLock::acquireFor($this->username());
         try {
+            $this->model->assertNotDeletedElsewhere();
             $this->prepareLinuxIsolation();
             $this->recreateOuterCompose();
         } finally {

@@ -358,6 +358,19 @@ class User extends Authenticatable
             ?? throw new NotFoundException("Project '{$username}' not found.", self::class);
     }
 
+    /**
+     * Refuses a model whose row was deleted after it was read, by this process or another: acting on it would
+     * recreate the account that delete removed.
+     *
+     * @throws NotFoundException
+     */
+    public function assertNotDeletedElsewhere(): void
+    {
+        if ($this->exists && self::query()->whereKey($this->getKey())->doesntExist()) {
+            throw new NotFoundException("Project '{$this->username}' no longer exists.", self::class);
+        }
+    }
+
     public static function existsByUsername(string $username): bool
     {
         return self::query()

@@ -3,6 +3,7 @@
 namespace App\System\Project\Deployment;
 
 use App\Exceptions\DeployCancelledException;
+use App\Exceptions\NotFoundException;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\UserController;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
@@ -375,6 +376,7 @@ final class DeploymentWorkflow
         if ($deployLogger === null) {
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
         }
+        self::refuseDeletedProject($user, $deployLogger);
         $this->logSourceRebuildStart($deployLogger);
 
         $succeeded = false;
@@ -394,6 +396,25 @@ final class DeploymentWorkflow
             throw $e;
         } finally {
             $mechanics->settleRedeploy($succeeded);
+        }
+    }
+
+    /**
+     * Asked with the deploy lock held, which a delete keeps until the row is gone, so a model read before a delete
+     * never rebuilds the account it removed. The log just opened for it goes too, unless the name is taken again.
+     *
+     * @throws NotFoundException
+     */
+    private static function refuseDeletedProject(ModelsUser $user, ?DeployLogger $deployLogger): void
+    {
+        try {
+            $user->assertNotDeletedElsewhere();
+        } catch (NotFoundException $e) {
+            $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage().' Nothing was rebuilt.');
+            if (! ModelsUser::existsByUsername($user->username)) {
+                DeployLogger::deleteUserLogs($user->username);
+            }
+            throw $e;
         }
     }
 

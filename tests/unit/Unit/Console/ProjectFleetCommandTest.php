@@ -28,6 +28,8 @@ class ProjectFleetCommandTest extends TestCase
         SpyFleetCommand::$failOn = [];
         SpyFleetCommand::$beforeAllThrows = false;
         SpyFleetCommand::$beforeAllSawTouched = null;
+        SpyFleetCommand::$deletes = [];
+        SpyFleetCommand::$recreateDeleted = false;
 
         $this->app[\Illuminate\Contracts\Console\Kernel::class]
             ->registerCommand(new SpyFleetCommand());
@@ -181,6 +183,37 @@ class ProjectFleetCommandTest extends TestCase
         }
     }
 
+    /** A long run must not recreate the account of a project deleted after the list was read. */
+    public function test_a_project_deleted_while_the_run_goes_is_skipped_and_said_so(): void
+    {
+        $this->makeUser('alice');
+        $this->makeUser('bob');
+        $this->makeUser('carol');
+        SpyFleetCommand::$deletes = ['alice' => 'bob'];
+
+        $exit = Artisan::call('spy:fleet', ['--all' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exit);
+        $this->assertSame(['alice', 'carol'], SpyFleetCommand::$touched);
+        $this->assertStringContainsString("Skipping 'bob': the project no longer exists.", $output);
+        $this->assertStringNotContainsString("Touching 'bob'", $output);
+    }
+
+    /** The project the run read is the one it acts on, never a newer one that took its name. */
+    public function test_a_project_replaced_under_its_name_while_the_run_goes_is_skipped(): void
+    {
+        $this->makeUser('alice');
+        $this->makeUser('bob');
+        SpyFleetCommand::$deletes = ['alice' => 'bob'];
+        SpyFleetCommand::$recreateDeleted = true;
+
+        Artisan::call('spy:fleet', ['--all' => true]);
+
+        $this->assertSame(['alice'], SpyFleetCommand::$touched);
+        $this->assertStringContainsString("Skipping 'bob'", Artisan::output());
+    }
+
     public function test_no_projects_at_all_is_a_clean_run(): void
     {
         $this->assertSame(0, Artisan::call('spy:fleet', ['--all' => true]));
@@ -202,6 +235,11 @@ class SpyFleetCommand extends ProjectFleetCommand
 
     public static bool $beforeAllThrows = false;
 
+    /** @var array<string, string> touching the key deletes the project named by the value */
+    public static array $deletes = [];
+
+    public static bool $recreateDeleted = false;
+
     /** @var ?list<string> what had been touched when beforeAll() ran */
     public static ?array $beforeAllSawTouched = null;
 
@@ -221,6 +259,19 @@ class SpyFleetCommand extends ProjectFleetCommand
         }
 
         self::$touched[] = $user->username;
+        $this->deleteBehindTheRun($user->username);
+    }
+
+    private function deleteBehindTheRun(string $touched): void
+    {
+        $doomed = self::$deletes[$touched] ?? null;
+        if ($doomed === null) {
+            return;
+        }
+        User::findByUsernameOrFail($doomed)->delete();
+        if (self::$recreateDeleted) {
+            User::make(['username' => $doomed, 'domain' => $doomed . '.example.test', 'details' => []])->save();
+        }
     }
 
     protected function beforeAll(): void
