@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# installer.sh's update counts only core and root-broker images built from the clone's sources.
+# installer.sh's update counts every image the release builds only when built from the clone's sources.
 #
 #   bash tests/scripts/installer-engine-images.test.sh
 
@@ -11,7 +11,8 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-for fn in engine_image_dockerfile engine_image_inputs engine_image_sources engine_image_built_from engine_service_image prepare_engine_images; do
+for fn in engine_image_inputs engine_image_sources engine_image_built_from engine_built_images \
+    engine_published_sources engine_retag_built_from ensure_engine_image prepare_engine_images; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$TMP/funcs.sh"
 done
 # shellcheck source=/dev/null
@@ -39,31 +40,51 @@ INSTALL_DIR="$TMP/install"
 PANELALPHA_DIR="$TMP/opt"
 SRC="$INSTALL_DIR/src"
 
-# Stub state in $TMP: local/<image>, registry/<service> and unbuildable.
-selected() { [ "$1" = core ] && echo root-broker; echo "$1"; }
+# The services the stub compose file builds: service <TAB> Dockerfile. sites-db and core-db share one image.
+SERVICES=$'core\tDockerfile-core\nroot-broker\tDockerfile-root-broker\nmail\tDockerfile-exim\nsites-db\tDockerfile-database\ncore-db\tDockerfile-database'
+image_of() { case "$1" in sites-db | core-db) echo image-database ;; *) echo "image-$1" ;; esac; }
+
+# Stub state in $TMP: local/<image>, registry/<image>, unbuildable and unreadable (the registry cannot be asked).
 docker() {
-    local args=("$@") service
+    local args=("$@") service image
     case "$1" in
     compose)
         echo "${args[*]}" >>"$TMP/calls"
         [ -f "$SRC/docker-compose.yml-webserver" ] || return 1
         service="${!#}"
+        image=$(image_of "$service")
         case " ${args[*]} " in
-        *" pull "*) [ -f "$TMP/registry/$service" ] && cp "$TMP/registry/$service" "$TMP/local/image-$service" ;;
-        *" config --images "*) for s in $(selected "$service"); do echo "image-$s"; done ;;
         *" config --format json "*)
-            for s in $(selected "$service"); do printf '"%s":{"image":"image-%s"}\n' "$s" "$s"; done |
-                paste -sd, | sed 's/^/{"name":"shared-hosting","services":{/; s/$/}}/'
+            while IFS=$'\t' read -r s f; do
+                printf '"%s":{"image":"%s","build":{"context":"%s","dockerfile":"%s"}}\n' "$s" "$(image_of "$s")" "$SRC/dockerfiles" "$f"
+            done <<<"$SERVICES" | paste -sd, | sed 's/^/{"name":"shared-hosting","services":{"sites-dns-plain":{"image":"x"},/; s/$/}}/'
             ;;
+        *" pull "*) [ -f "$TMP/registry/$image" ] && cp "$TMP/registry/$image" "$TMP/local/$image"; true ;;
         *" build "*)
             grep -qx "$service" "$TMP/unbuildable" && return 1
-            printf '%s' "${args[*]}" | sed -n 's/.* --build-arg PANELALPHA_SOURCES=\([^ ]*\) .*/\1/p' >"$TMP/local/image-$service"
+            printf '%s' "${args[*]}" | sed -n 's/.* --build-arg PANELALPHA_SOURCES=\([^ ]*\) .*/\1/p' >"$TMP/local/$image"
             ;;
         esac
+        ;;
+    buildx)
+        [ "$2 $3 $4 $5" = 'imagetools inspect --format {{ index .Image.Config.Labels "panelalpha.sources.sha256" }}' ] || return 2
+        [ -f "$TMP/unreadable" ] && return 1
+        [ -f "$TMP/registry/${!#}" ] && cat "$TMP/registry/${!#}"
         ;;
     image)
         [ "$2 $3 $4" = 'inspect --format {{ index .Config.Labels "panelalpha.sources.sha256" }}' ] || return 2
         [ -f "$TMP/local/${!#}" ] && cat "$TMP/local/${!#}"
+        ;;
+    images)
+        local label="${3#label=panelalpha.sources.sha256=}" f
+        for f in "$TMP"/old/"${!#}":*; do
+            [ -f "$f" ] && [ "$(cat "$f")" = "$label" ] && basename "$f"
+        done
+        true
+        ;;
+    tag)
+        echo "tag $2 $3" >>"$TMP/calls"
+        cp "$TMP/old/$2" "$TMP/local/$3"
         ;;
     esac
 }
@@ -78,81 +99,105 @@ release() {
 release
 CORE=$(engine_image_sources "$SRC/dockerfiles" Dockerfile-core)
 BROKER=$(engine_image_sources "$SRC/dockerfiles" Dockerfile-root-broker)
+MAIL=$(engine_image_sources "$SRC/dockerfiles" Dockerfile-exim)
+DB=$(engine_image_sources "$SRC/dockerfiles" Dockerfile-database)
 
 host() {
-    rm -rf "$PANELALPHA_DIR" "$TMP/local" "$TMP/registry"
-    mkdir -p "$PANELALPHA_DIR/shared-hosting" "$TMP/local" "$TMP/registry"
+    rm -rf "$PANELALPHA_DIR" "$TMP/local" "$TMP/registry" "$TMP/old" "$TMP/unreadable"
+    mkdir -p "$PANELALPHA_DIR/shared-hosting" "$TMP/local" "$TMP/registry" "$TMP/old"
     echo 'apache' >"$PANELALPHA_DIR/shared-hosting/docker-compose.yml-webserver"
     echo 'COMPOSE_PROFILES=full' >"$PANELALPHA_DIR/shared-hosting/.env"
     : >"$TMP/unbuildable"
     : >"$TMP/calls"
 }
-local_image() { printf '%s' "$2" >"$TMP/local/image-$1"; }
-published() { printf '%s' "$2" >"$TMP/registry/$1"; }
-label() { cat "$TMP/local/image-$1" 2>/dev/null; }
+local_image() { printf '%s' "$2" >"$TMP/local/$(image_of "$1")"; }
+published() { printf '%s' "$2" >"$TMP/registry/$(image_of "$1")"; }
+all_local() { local_image core "$CORE"; local_image root-broker "$BROKER"; local_image mail "$MAIL"; local_image sites-db "$DB"; }
+all_published() { published core "$CORE"; published root-broker "$BROKER"; published mail "$MAIL"; published sites-db "$DB"; }
+old_tag() { printf '%s' "$3" >"$TMP/old/$(image_of "$1"):$2"; }
+label() { cat "$TMP/local/$(image_of "$1")" 2>/dev/null; }
+tags() { grep -o '^tag .*' "$TMP/calls" | tr '\n' ' ' | sed 's/ $//'; }
 builds() { grep -o ' build .*' "$TMP/calls" | sed 's/ --build-arg [^ ]*//; s/^ build //' | tr '\n' ' ' | sed 's/ $//'; }
-pulls() { grep -o ' pull .*' "$TMP/calls" | sed 's/^ pull --ignore-pull-failures //' | tr '\n' ' ' | sed 's/ $//'; }
+pulls() { grep -o ' pull .*' "$TMP/calls" | sed 's/^ pull --quiet --ignore-pull-failures //' | tr '\n' ' ' | sed 's/ $//'; }
 
-check "the two images hash differently" "yes" "$([ -n "$CORE" ] && [ -n "$BROKER" ] && [ "$CORE" != "$BROKER" ] && echo yes)"
+check "the images hash differently" "yes" \
+    "$([ -n "$CORE" ] && [ "$CORE" != "$BROKER" ] && [ "$MAIL" != "$CORE" ] && [ "$DB" != "$MAIL" ] && echo yes)"
 
 host
-local_image core "$CORE"
-local_image root-broker "$BROKER"
 touch "$SRC/docker-compose.yml-webserver"
-check "core's image is read alone, not with the one it depends on" "image-core|image-root-broker" \
-    "$(engine_service_image core docker compose)|$(engine_service_image root-broker docker compose)"
+check "every service with a build section, once per image, sorted by image" \
+    "core image-core $SRC/dockerfiles Dockerfile-core|sites-db image-database $SRC/dockerfiles Dockerfile-database|mail image-mail $SRC/dockerfiles Dockerfile-exim|root-broker image-root-broker $SRC/dockerfiles Dockerfile-root-broker" \
+    "$(engine_built_images docker compose | tr '\t' ' ' | paste -sd'|')"
 rm "$SRC/docker-compose.yml-webserver"
+
+host
+all_local
+touch "$TMP/unreadable"
 out=$(prepare_engine_images)
-check "so a second identical update neither pulls nor builds" "0||" "$?|$(pulls)|$(builds)"
+check "a host holding every image, with the registry out of reach, neither pulls nor builds" "0||" "$?|$(pulls)|$(builds)"
+
+host
+all_local
+all_published
+out=$(prepare_engine_images)
+check "published images from these sources are pulled even when the host has them, to take a rebuild" \
+    "0|core sites-db mail root-broker|" "$?|$(pulls)|$(builds)"
+
+host
+all_local
+published core 'a release'
+published mail 'a release'
+out=$(prepare_engine_images)
+check "published images from other sources are not pulled over the host's, as on a develop host" "0||" "$?|$(pulls)|$(builds)"
 
 host
 out=$(prepare_engine_images)
-check "a host with neither image and nothing published: done" "0" "$?"
-check "both are looked for in the registry" "core root-broker" "$(pulls)"
-check "and built" "core root-broker" "$(builds)"
-check "each labelled with the hash of its sources" "$CORE $BROKER" "$(label core) $(label root-broker)"
+check "a host with no image and nothing published: done" "0" "$?"
+check "each image is looked for in the registry" "core sites-db mail root-broker" "$(pulls)"
+check "and built" "core sites-db mail root-broker" "$(builds)"
+check "each labelled with the hash of its sources" "$CORE $BROKER $MAIL $DB" "$(label core) $(label root-broker) $(label mail) $(label core-db)"
 check "from the clone's compose file, with the host's .env" \
     "compose --project-directory $SRC -f $SRC/docker-compose.yml --env-file $PANELALPHA_DIR/shared-hosting/.env build --build-arg PANELALPHA_SOURCES=$BROKER root-broker" \
     "$(grep ' build ' "$TMP/calls" | tail -n1)"
 check "the webserver include leaves the clone again" "no" "$([ -e "$SRC/docker-compose.yml-webserver" ] && echo yes || echo no)"
 
 host
-published core "$CORE"
-published root-broker "$BROKER"
+all_published
 out=$(prepare_engine_images)
-check "published images built from these sources are pulled" "0|core root-broker" "$?|$(pulls)"
+check "published images from these sources are pulled" "0|core sites-db mail root-broker" "$?|$(pulls)"
 check "and nothing is built" "" "$(builds)"
 
 host
-local_image core 'an older release'
-local_image root-broker 'an older release'
+published mail 'another release'
+local_image mail 'an older release'
+local_image core "$CORE"; local_image root-broker "$BROKER"; local_image sites-db "$DB"
 out=$(prepare_engine_images)
-check "a host holding older images under the same tags rebuilds both" "core root-broker" "$(builds)"
-check "which now carry this release's hashes" "$CORE $BROKER" "$(label core) $(label root-broker)"
+check "an image published from other sources is not pulled, the host's older one is built over" "|mail|$MAIL" "$(pulls)|$(builds)|$(label mail)"
 
 host
-local_image core ''
-local_image root-broker ''
+all_local
+local_image mail ''
+touch "$TMP/unreadable"
 out=$(prepare_engine_images)
-check "an image with no label, as an unlabelled build leaves it, is rebuilt" "core root-broker" "$(builds)"
+check "with the registry out of reach, an unlabelled image is looked for, then built" "mail|mail" "$(pulls)|$(builds)"
 
 host
-local_image root-broker 'an older release'
-published root-broker 'another release'
-local_image core "$CORE"
+old_tag core v2.3.0-20261105 "$CORE"
+old_tag root-broker v2.3.0-20261105 'an older release'
+local_image mail "$MAIL"; local_image sites-db "$DB"
+touch "$TMP/unreadable"
 out=$(prepare_engine_images)
-check "an image already built from these sources is neither pulled nor built" "root-broker" "$(pulls)"
-check "a published one built from other sources is pulled, then built over" "root-broker|$BROKER" "$(builds)|$(label root-broker)"
+check "the previous release's image from the same sources is tagged, not built; one from other sources is not" \
+    "tag image-core:v2.3.0-20261105 image-core|root-broker|$CORE" "$(tags)|$(builds)|$(label core)"
 
 host
-echo root-broker >"$TMP/unbuildable"
+echo mail >"$TMP/unbuildable"
 out=$(prepare_engine_images)
 check "a failed build stops the update" "101" "$?"
-check "and says which" "error:Could not build the root-broker image; the engine was not changed" "$out"
+check "and says which" "error:Could not build the mail image; the engine was not changed" "$out"
 
 host
-published core "$CORE"
-published root-broker "$BROKER"
+all_published
 rm "$PANELALPHA_DIR/shared-hosting/docker-compose.yml-webserver"
 out=$(prepare_engine_images)
 check "a host without its webserver file uses the default one" "0" "$?"
@@ -192,7 +237,7 @@ release
 check "and the build context leaves it out of the images too" "**/__pycache__ **/*.pyc" \
     "$(tr '\n' ' ' <"$REPO_DIR/dockerfiles/.dockerignore" | sed 's/ $//')"
 
-for f in Dockerfile-core Dockerfile-root-broker; do
+for f in $(sed -n 's/^ *dockerfile: //p' "$REPO_DIR"/docker-compose.yml "$REPO_DIR"/docker-compose.yml-* | sort -u) ../templates/config/pure-ftpd/build/Dockerfile; do
     check "$f takes the hash as a build argument into the label read" 'LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES' \
         "$(grep -A1 '^ARG PANELALPHA_SOURCES=$' "$REPO_DIR/dockerfiles/$f" | sed -n 2p)"
 done

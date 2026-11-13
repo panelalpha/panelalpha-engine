@@ -1,3 +1,6 @@
 FROM atmoz/sftp:debian@sha256:f308cffe27242286d1e93a548dc5a581223b963e9b044d9e452594ef30dd05bd
 
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

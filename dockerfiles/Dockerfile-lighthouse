@@ -32,3 +32,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g lighthouse
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

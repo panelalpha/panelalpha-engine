@@ -1,3 +1,6 @@
 FROM alpine/socat:1.8.0.3
 
 RUN apk upgrade --no-cache
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

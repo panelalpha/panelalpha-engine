@@ -26,3 +26,6 @@ COPY --from=brotli /out/ /usr/lib/nginx/modules/
 # The nginx-proxy config includes these by glob, so it also starts on an image without them.
 COPY nginx/modules-enabled/ /etc/nginx/modules-enabled/
 COPY nginx/modules-http/ /etc/nginx/modules-http/
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

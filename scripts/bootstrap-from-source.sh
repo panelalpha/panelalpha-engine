@@ -398,41 +398,34 @@ free_dns_proxy_port() {
     report_dns_port_holder
 }
 
-# installer.sh's own: the image a service runs and the hash of its sources.
+# installer.sh's own: the images the tree builds, their source hashes, and whether to pull, keep or build each.
 import_engine_image_functions() {
     local fn
-    for fn in engine_image_dockerfile engine_image_inputs engine_image_sources engine_image_built_from engine_service_image; do
+    for fn in engine_image_inputs engine_image_sources engine_image_built_from engine_built_images \
+        engine_published_sources engine_retag_built_from ensure_engine_image; do
         source <(sed -n "/^${fn}() {/,/^}\$/p" scripts/installer.sh)
     done
 }
 
-# An image counts only when its label holds this tree's source hash: host copy, published, else built.
-ensure_service_image() { # <service>
-    local image sources
-    docker compose config --services 2>/dev/null | grep -qx "$1" || {
-        warn "No compose service '$1' — skipping its image"
-        return 0
-    }
-    if ! image=$(engine_service_image "$1" docker compose) ||
-        ! sources=$(engine_image_sources dockerfiles "$(engine_image_dockerfile "$1")"); then
-        echo "Could not read the $1 image or its sources from this tree." >&2
-        exit 1
-    fi
-    engine_image_built_from "$image" "$sources" && return 0
-    docker compose pull --quiet --ignore-pull-failures "$1" >/dev/null 2>&1 || true
-    engine_image_built_from "$image" "$sources" && return 0
-    warn "No '$1' image built from this tree — building it"
-    docker compose build --build-arg "PANELALPHA_SOURCES=${sources}" "$1" || {
-        echo "Could not build the $1 image from this tree." >&2
-        exit 1
-    }
-}
-
-ensure_core_images() {
-    step "Ensuring the core images exist"
+# Every image the tree builds counts only when its label holds the tree's source hash: published, host copy, else built.
+ensure_engine_images() {
+    local images service image context dockerfile sources
+    step "Ensuring the engine images exist"
     import_engine_image_functions
-    ensure_service_image core
-    ensure_service_image root-broker
+    images=$(engine_built_images docker compose) || {
+        echo "Could not read the engine images from docker-compose.yml." >&2
+        exit 1
+    }
+    while IFS=$'\t' read -r service image context dockerfile; do
+        sources=$(engine_image_sources "$context" "$dockerfile") || {
+            echo "Could not read the $service image's sources from this tree." >&2
+            exit 1
+        }
+        ensure_engine_image "$service" "$image" "$sources" docker compose || {
+            echo "Could not build the $service image from this tree." >&2
+            exit 1
+        }
+    done <<<"$images"
 }
 
 # Installing Sysbox restarts Docker and brings the stack up, so it runs once the
@@ -670,7 +663,7 @@ generate_self_signed_cert
 prepare_networks
 install_composer_dependencies
 free_dns_proxy_port
-ensure_core_images
+ensure_engine_images
 install_sysbox
 harden_host
 configure_account_isolation

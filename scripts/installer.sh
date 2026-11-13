@@ -1726,25 +1726,21 @@ start_engine_stack() {
     fi
 }
 
-# The Dockerfile docker-compose.yml builds an engine service's image from, in dockerfiles/.
-engine_image_dockerfile() { # <service>
-    case "$1" in
-    core) echo Dockerfile-core ;;
-    root-broker) echo Dockerfile-root-broker ;;
-    *) return 1 ;;
-    esac
-}
-
-# The build context paths a Dockerfile's COPY and ADD read, skipping COPY --from.
+# The build context paths a Dockerfile's COPY and ADD read, skipping COPY --from and here-documents, which are text in
+# the Dockerfile itself.
 engine_image_inputs() { # <dockerfile>
     awk '
+        heredoc != "" { if ($0 == heredoc) heredoc = ""; next }
         /\\$/ { text = text substr($0, 1, length($0) - 1) " "; next }
         {
             $0 = text $0
             text = ""
             if (toupper($1) != "COPY" && toupper($1) != "ADD") next
             for (i = 2; i <= NF; i++) if ($i ~ /^--from=/) next
-            for (i = 2; i < NF; i++) if ($i !~ /^--/) print $i
+            for (i = 2; i < NF; i++) {
+                if ($i ~ /^<</) { heredoc = $i; sub(/^<<-?/, "", heredoc); gsub(/["\047]/, "", heredoc); continue }
+                if ($i !~ /^--/) print $i
+            }
         }' "$1"
 }
 
@@ -1760,33 +1756,59 @@ engine_image_built_from() { # <image> <sources hash>
     [ "$(docker image inspect --format '{{ index .Config.Labels "panelalpha.sources.sha256" }}' "$1" 2>/dev/null)" = "$2" ]
 }
 
-# Compose v5's `config --images <service>` also prints its dependencies' images.
-engine_service_image() { # <service> <compose command...>
+# Every image the compose project builds, once each: service, image, build context and Dockerfile, tab-separated.
+engine_built_images() { # <compose command...>
     local config
-    config=$("${@:2}" config --format json "$1") || return
-    jq -er --arg service "$1" '.services[$service].image // empty' <<<"$config"
+    config=$("$@" config --format json) || return
+    jq -er '[.services | to_entries[] | select(.value.build)] | unique_by(.value.image)[]
+        | [.key, .value.image, .value.build.context, (.value.build.dockerfile // "Dockerfile")] | @tsv' <<<"$config"
 }
 
-# Before the copy: an image counts only when its label holds this release's source hash.
+# The published image's source hash; empty when it is not published, carries none, or the registry cannot be asked.
+engine_published_sources() { # <image>
+    docker buildx imagetools inspect --format '{{ index .Image.Config.Labels "panelalpha.sources.sha256" }}' "$1" 2>/dev/null
+}
+
+# Another tag of the image's repository on the host built from these sources, e.g. the previous release's, tagged as it.
+engine_retag_built_from() { # <image> <sources hash>
+    local other
+    [ -n "$2" ] || return 1
+    other=$(docker images --filter "label=panelalpha.sources.sha256=$2" --format '{{.Repository}}:{{.Tag}}' "${1%:*}" 2>/dev/null |
+        grep -vx -- "$1" | head -n1)
+    [ -n "$other" ] && docker tag "$other" "$1"
+}
+
+# A published image built from these sources is pulled, so a rebuild of them reaches the host; one built from other
+# sources is never pulled; then the host's image counts only when built from these sources, else it is built here.
+ensure_engine_image() { # <service> <image> <sources> <compose command...>
+    local service="$1" image="$2" sources="$3" published
+    shift 3
+    published=$(engine_published_sources "$image")
+    if [ "$published" = "$sources" ] || { [ -z "$published" ] && ! engine_image_built_from "$image" "$sources"; }; then
+        "$@" pull --quiet --ignore-pull-failures "$service" >/dev/null 2>&1 || true
+    fi
+    engine_image_built_from "$image" "$sources" && return 0
+    engine_retag_built_from "$image" "$sources" && return 0
+    "$@" build --build-arg "PANELALPHA_SOURCES=${sources}" "$service"
+}
+
+# Before the copy: every image the release builds counts only when its label holds this release's source hash.
 prepare_engine_images() {
-    local src="$INSTALL_DIR/src" host="$PANELALPHA_DIR/shared-hosting" service image sources webserver
+    local src="$INSTALL_DIR/src" host="$PANELALPHA_DIR/shared-hosting" images service image context dockerfile sources webserver
     local compose=(docker compose --project-directory "$src" -f "$src/docker-compose.yml")
     [ -f "$host/.env" ] && compose+=(--env-file "$host/.env")
     # docker-compose.yml includes it, and it is host state, not in the clone.
     webserver="$host/docker-compose.yml-webserver"
     [ -f "$webserver" ] || webserver="$src/docker-compose.yml-nginx-proxy"
     cp "$webserver" "$src/docker-compose.yml-webserver"
-    for service in core root-broker; do
-        image=$(engine_service_image "$service" "${compose[@]}") ||
-            echo_error "Could not read the ${service} image from the new docker-compose.yml"
-        sources=$(engine_image_sources "$src/dockerfiles" "$(engine_image_dockerfile "$service")") ||
+    images=$(engine_built_images "${compose[@]}") ||
+        echo_error "Could not read the engine images from the new docker-compose.yml"
+    while IFS=$'\t' read -r service image context dockerfile; do
+        sources=$(engine_image_sources "$context" "$dockerfile") ||
             echo_error "Could not read the ${service} image's sources from the new release"
-        engine_image_built_from "$image" "$sources" && continue
-        "${compose[@]}" pull --ignore-pull-failures "$service" || true
-        engine_image_built_from "$image" "$sources" && continue
-        "${compose[@]}" build --build-arg "PANELALPHA_SOURCES=${sources}" "$service" ||
+        ensure_engine_image "$service" "$image" "$sources" "${compose[@]}" ||
             echo_error "Could not build the ${service} image; the engine was not changed"
-    done
+    done <<<"$images"
     rm -f "$src/docker-compose.yml-webserver"
 }
 

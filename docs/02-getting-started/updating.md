@@ -22,6 +22,7 @@ An update installs only a newer release than the one running. This holds for an 
 - The webserver for your sites is restarted only when its configuration changed.
 - The engine's own certificate is not requested again unless it is due for renewal.
 - While the engine's database is being migrated, its scheduler and background workers wait, so no job runs new code against the old database.
+- The engine's own images are downloaded for the version being installed, and a newer build of them for the same version, such as one with operating system security fixes, is downloaded on the next update. An image is built on the server only when none is published for exactly that version's sources.
 
 **Existing projects are brought up to date too.** When a release changes how projects are set up, the update applies it to the projects you already have: CPU limits on running containers, the web server settings of traditional PHP hosting projects, the permissions of `wp-config.php`, read-only configuration mounts and clean-up of old address maps. You do nothing. If one of these steps fails for some project, the update still finishes and prints a warning that names the command to run again, for example `pae projects:wp-config:restrict --all`.
 

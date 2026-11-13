@@ -1,3 +1,6 @@
 FROM mariadb:12.2
 
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

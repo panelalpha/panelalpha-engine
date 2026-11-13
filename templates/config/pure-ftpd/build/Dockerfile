@@ -59,3 +59,6 @@ CMD /usr/sbin/pure-ftpd \
         -E \
         -j \
         -R
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

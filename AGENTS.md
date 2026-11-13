@@ -983,3 +983,26 @@ Worked examples in the tree: `php.yaml` (DokuWiki), `matomo.yaml` (database +
 restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 (`app_root`), `opencart.yaml` (docroot below repo, outranks Dockerfile),
 `osticket.yaml` (PHP, no Composer).
+
+---
+
+## 12. Engine images and their tags
+
+Every image a compose file builds is tagged with the engine version, `ghcr.io/panelalpha/<image>:v<version>` with the
+version from `core/config/system.php`; `tests/scripts/engine-image-tags.test.sh` fails a tag that differs, so a
+version bump moves every tag. Each Dockerfile ends with `ARG PANELALPHA_SOURCES=` and the label
+`panelalpha.sources.sha256`, the hash of its build inputs (`engine_image_sources` in `scripts/installer.sh`).
+
+An update (`prepare_engine_images`) and a source deploy (`ensure_engine_images`) treat every built image the same way:
+
+| Registry has `:v<version>` from | Host has it from these sources | What happens |
+|---|---|---|
+| these sources | either | pulled, so a rebuild of the same sources (newer base layers) reaches the host |
+| other sources (a develop host before the release) | yes | kept |
+| other sources | no | built here |
+| unknown (no buildx, registry out of reach) | no | pulled, then built if it still does not match |
+
+Before building, another tag of the same repository built from the same sources, such as the previous release's
+dated tag, is re-tagged instead. The images are published from PanelAlpha's release tooling when the engine is
+tagged; until a version is published, hosts build its images.
+
