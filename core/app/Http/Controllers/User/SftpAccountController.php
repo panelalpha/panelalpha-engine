@@ -11,6 +11,7 @@ use App\Lib\Limits\ResourceLimit;
 use App\Models\SftpAccount;
 use App\Models\User;
 use App\System;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -111,7 +112,7 @@ class SftpAccountController extends Controller
             $params['password'] = $this->hashPassword($params['password']);
         }
 
-        $sftpAccount = SftpAccount::create([
+        $sftpAccount = $this->createAccount([
             'user_id' => $user->id,
             'username' => $params['username'],
             'auth_method' => $params['auth_method'],
@@ -209,7 +210,7 @@ class SftpAccountController extends Controller
 
         $system->sftp()->endSessions([$sftpAccount->username]);
 
-        $sftpAccount->delete();
+        $user->sftpAccounts()->where('username', $sftpAccount->username)->delete();
 
         $system->sftp()->rebuildSftpAccounts();
 
@@ -317,10 +318,31 @@ class SftpAccountController extends Controller
     private function assertAccountNameFree(string $name): void
     {
         if (SftpAccount::query()->where('username', $name)->exists()) {
-            throw ValidationException::withMessages([
-                'username' => 'Username not available',
-            ]);
+            throw $this->nameTaken();
         }
+    }
+
+    /**
+     * A concurrent create of the same name passes {@see assertAccountNameFree()} too; the unique index refuses it.
+     *
+     * @param  array<string, mixed>  $row
+     *
+     * @throws ValidationException
+     */
+    private function createAccount(array $row): SftpAccount
+    {
+        try {
+            return SftpAccount::create($row);
+        } catch (UniqueConstraintViolationException) {
+            throw $this->nameTaken();
+        }
+    }
+
+    private function nameTaken(): ValidationException
+    {
+        return ValidationException::withMessages([
+            'username' => 'Username not available',
+        ]);
     }
 
     /**
