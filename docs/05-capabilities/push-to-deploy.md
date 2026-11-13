@@ -38,7 +38,9 @@ What the push changes depends on which copy the hook is for:
 Show me the push-to-deploy hook for this project's public_html folder.
 ```
 
-A push that arrives while a deploy is already running waits. When that deploy finishes, or the lock on the project is freed by a backup or another job, the engine runs one more, from the latest push that waited. An earlier waiting push does not get a deploy of its own. A push to a project that is stopped starts it first.
+A push that arrives while a deploy is already running waits. When that deploy finishes, the engine runs one more, from the latest push that waited. An earlier waiting push does not get a deploy of its own.
+
+A push also waits while a backup or another job holds the project, and runs when that ends. A push to a project that is stopped starts it first.
 
 If the site was already running and the new version fails, or the deploy is cancelled, the site keeps serving the previous version and the copy on the server goes back to the commit it was on: [Deploying again later](../02-getting-started/how-a-deploy-works.md#deploying-again-later). If the site was not running, the new commit stays in the copy on the server. If the engine stops in the middle of the deploy, that push is marked failed and says it was interrupted. Push again, or ask for a rebuild.
 

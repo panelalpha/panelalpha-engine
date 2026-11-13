@@ -267,7 +267,9 @@ On a project deployed into its own container (from a repository, an archive, or 
 Every five minutes, run php artisan schedule:run in the app service of this project.
 ```
 
-The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A command can be up to 640 bytes. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
+The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
+
+A command can be up to 640 bytes. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB.
 
 On traditional PHP hosting, a `%` in a command now runs as you wrote it.
 

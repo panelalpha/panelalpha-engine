@@ -102,9 +102,11 @@ Reset the password for user 5 on this WordPress site.
 Delete WordPress user 5 on this site, reassigning their posts to user 1.
 ```
 
-Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the user you name in `reassign`, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the user you name, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
-**Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in the `Authorization` header. On traditional PHP hosting the webserver now passes that header on to PHP, so those logins work for any PHP app there, not only WordPress. A domain written by an earlier release picks it up when the update runs `pae projects:domain-config:refresh --all`. Run it yourself if the update reported that it could not.
+**Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in a request header. On traditional PHP hosting the webserver now passes that header on to PHP, so those logins work for any PHP app there, not only WordPress.
+
+A domain created by an earlier release picks this up when the update runs `pae projects:domain-config:refresh --all`. Run it yourself if the update reported that it could not.
 
 ## Run WP-CLI
 

@@ -30,7 +30,7 @@ backup rows still point at it, so the engine refuses such a location with a 422
 when you create or change the store. It refuses the engine's own directory,
 `/opt/panelalpha/shared-hosting`, and anything below it, the same way: only the
 engine's own files may be written there, so every backup into it would fail. It
-also refuses `/opt/panelalpha` and `/var/www/html/storage` themselves, which the
+also refuses `/home`, `/opt/panelalpha` and `/var/www/html/storage` themselves, which the
 engine depends on: use a folder below them. **A store that already sits at one of
 these paths refuses every change, a rename included, until you move it** to a
 folder such as `/opt/panelalpha/backups/`.
@@ -59,7 +59,11 @@ When the test fails, the answer says what failed on one line: the kind of store,
 Create a backup of this project.
 ```
 
-You get a backup ID and a status. Wait for `completed` - a backup of a large site takes a while. A backup, a restore, a push and a staging copy never run on the same project at the same time: the second one is refused as busy, and a scheduled backup tries again. A backup or restore stops the app while it works and always starts it again, also when it fails. A long backup or restore shares one time limit across all its steps, so it cannot hang with the app stopped.
+You get a backup ID and a status. Wait for `completed`, because a backup of a large site takes a while.
+
+A backup, a restore, a push and a staging copy never run on the same project at the same time. The second one is refused as busy, and a scheduled backup tries again.
+
+A backup or restore stops the app while it works and always starts it again, also when it fails. A long backup or restore has one time limit for all its steps, so it cannot hang with the app stopped.
 
 You can back up only the files, or only the databases, and add a note to find the backup again later. On a container project, "databases" also covers the stored data volumes.
 
@@ -222,7 +226,7 @@ Restore only the database <name> from the newest backup of tshop. Then restore
 everything except the volume <name>.
 ```
 
-Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores just that database, the second restores all but that volume, and a request that sends both `only` and `exclude` is refused.
+Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores only that database, the second restores all but that volume, and a request that sends both `only` and `exclude` is refused.
 
 **A backup while a push runs**
 

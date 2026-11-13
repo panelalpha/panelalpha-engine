@@ -12,7 +12,7 @@ What you should see: progress in the chat, then a web address to open.
 
 ## What happens after you ask
 
-**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down. The deploy log says what this stage is doing: creating the project's folders and user, writing its compose file, starting its container and waiting for the Docker inside it and setting its disk quota. If that Docker is slow to answer, the log warns and the deploy goes on.
+**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down. The deploy log says what this stage is doing: creating the project's folders and user, writing its compose file, starting its container and waiting for its own Docker to answer and setting its disk quota. If that Docker is slow to answer, the log warns and the deploy goes on.
 
 **2. The engine fetches the code.** For git, it clones the repository and fetches its submodules. A submodule that cannot be fetched fails the deploy, and the message says why. For a zip, it unpacks the files you pointed at. A private repository needs a git token first, pasted on a page the assistant sends you, not in the chat: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
