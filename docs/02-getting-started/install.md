@@ -58,7 +58,7 @@ When it finishes, it prints the web address of your new site (it starts with `ht
 | `--git-token TOKEN` | Access token that lets the installer read a private repository. Without it, a private or missing repository is refused before the install starts. |
 | `--password PASS` | Site password for the new project. |
 | `--no-password` | Do not set a site password on the project. |
-| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end. No site password is set unless you pass `--password`. It needs `--repo`. Give it only to an application you trust with the whole server. |
+| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end; `--hub-code` goes to the panel, which connects itself to PanelAlpha Hub on its first start (the engine is not connected). No site password is set unless you pass `--password`. It needs `--repo`. Give it only to an application you trust with the whole server. |
 | `--env-var KEY=VALUE` | An environment variable for the project. Repeat it for more. It needs `--repo`, and the value is never printed. |
 
 If the deploy fails, the engine is still installed and usable. The installer prints what went wrong. Deploy again from the VPS:
