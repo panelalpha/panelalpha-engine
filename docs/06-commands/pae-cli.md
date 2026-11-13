@@ -106,6 +106,14 @@ pae project:create --repo=https://github.com/org/panel --full-privileges
 
 What this does: before the first deploy, it does what `pae system:api-access:allow {project} --scope=all` and `pae system:public-routing:allow {project} --host-domain --ports` do, so that deploy already hands the application its Engine API token and can move it to the server's own name. Once the application is live, the project is protected as with `pae project:settings:set protected on`. If the deploy fails, the project is not protected. `--full-privileges` needs a container project: `--repo`, or `--template=dind`.
 
+To deploy the project that already runs this repository again, instead of creating a second one:
+
+```bash
+pae project:create --repo=https://github.com/org/panel --full-privileges --update-existing
+```
+
+The project keeps its name, domain, settings, data and git token, so `--email`, `--branch`, `--env-var` and `--git-token` from this run are not applied. If more than one project deploys the repository, nothing is changed and the command names them, so you can run `pae project:rebuild --project={project}` on the one you mean.
+
 Deploy a local archive into a project that was created without a repository:
 
 ```bash
