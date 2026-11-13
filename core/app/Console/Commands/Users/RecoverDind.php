@@ -55,7 +55,7 @@ class RecoverDind extends Command
         }
 
         $this->warn('Running host recovery in the host\'s namespaces...');
-        $process = new Process($this->recoveryCommand($username, $detect, $allStuck, $wipeInner, $recreate));
+        $process = $this->recoveryProcess($this->recoveryCommand($username, $detect, $allStuck, $wipeInner, $recreate));
         $process->setTimeout(300);
         $process->run(function ($type, $buffer) {
             $this->output->write($buffer);
@@ -67,21 +67,65 @@ class RecoverDind extends Command
             return (int) $process->getExitCode();
         }
 
-        // Best-effort: refresh compose template so mem_limit / restart policy match DB.
-        if ($recreate && $username) {
-            try {
-                $user = User::findByUsername($username);
-                if ($user) {
-                    $this->info("Rebuilding user `{$username}` project config...");
-                    $project = $user->project();
-                    $project->rebuildFromSource();
-                }
-            } catch (\Throwable $e) {
-                $this->warn('Container recovered but rebuild failed: '.$e->getMessage());
-            }
+        if ($detect || ! $username) {
+            return 0;
+        }
+
+        if (! self::recovered($process->getOutput(), $username)) {
+            $this->sayOptionsSkipped($username, $wipeInner, $recreate);
+
+            return 0;
+        }
+
+        if ($recreate) {
+            $this->refreshComposeTemplate($username);
         }
 
         return 0;
+    }
+
+    /** @param  list<string>  $argv */
+    protected function recoveryProcess(array $argv): Process
+    {
+        return new Process($argv);
+    }
+
+    /**
+     * The broker ends a recovery it ran with `done <name>`; an account it found healthy it leaves alone, and a
+     * rebuild then would only redeploy it and drop the files written into ~/project since the last deploy.
+     */
+    private static function recovered(string $output, string $username): bool
+    {
+        return preg_match('/(?:^|\] )done '.preg_quote($username, '/').' \(/m', $output) === 1;
+    }
+
+    private function sayOptionsSkipped(string $username, bool $wipeInner, bool $recreate): void
+    {
+        $skipped = array_keys(array_filter(['--wipe-inner' => $wipeInner, '--recreate' => $recreate]));
+        if ($skipped === []) {
+            return;
+        }
+
+        $this->info(implode(' and ', $skipped)." skipped: `{$username}` is healthy, so nothing was recreated, wiped or rebuilt.");
+    }
+
+    /** Best-effort, after a real recreate: the compose template refreshed so mem_limit and the restart policy match the database. */
+    private function refreshComposeTemplate(string $username): void
+    {
+        try {
+            $user = User::findByUsername($username);
+            if ($user) {
+                $this->info("Rebuilding user `{$username}` project config...");
+                $this->rebuild($user);
+            }
+        } catch (\Throwable $e) {
+            $this->warn('Container recovered but rebuild failed: '.$e->getMessage());
+        }
+    }
+
+    protected function rebuild(User $user): void
+    {
+        $user->project()->rebuildFromSource();
     }
 
     /** @return list<string> */
