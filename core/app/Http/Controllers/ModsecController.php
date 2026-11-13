@@ -139,7 +139,7 @@ class ModsecController extends Controller
             new OA\Response(response: 200, description: 'Updated rulesets', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ModsecRuleset'))],
             )),
-            new OA\Response(response: 422, description: 'A file name the ruleset does not hold', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'A file name the ruleset does not hold, or files the webserver would not load with the ruleset enabled; nothing is renamed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function toggleConfigFiles(string $name, Request $request): ModsecRulesetCollection

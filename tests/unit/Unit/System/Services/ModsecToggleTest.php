@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Services;
 
+use App\Models\Setting;
 use App\System;
 use App\System\Services\Modsec;
 use Symfony\Component\Process\Process;
@@ -19,10 +20,12 @@ class ModsecToggleTest extends TestCase
         $this->root = sys_get_temp_dir() . '/pa-modsec-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/config/modsecurity/rulesets/owasp/rules', 0777, true);
         touch($this->root . '/config/modsecurity/rulesets/owasp/rules/REQUEST-901.conf');
+        Setting::setRuntimeSettings(['modsec' => json_encode(['mode' => 'off', 'enabled_rulesets' => []])]);
     }
 
     protected function tearDown(): void
     {
+        Setting::clearRuntimeSettings();
         exec('rm -rf ' . escapeshellarg($this->root));
         parent::tearDown();
     }

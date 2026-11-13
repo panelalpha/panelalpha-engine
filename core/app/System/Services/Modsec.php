@@ -364,9 +364,10 @@ class Modsec
         $enable = array_map($canonical, $enable);
         $disable = array_map($canonical, $disable);
 
-        $shouldRestart = $this->renameToggledFiles($dir, $enable, $disable);
+        $moves = $this->renameToggledFiles($dir, $enable, $disable);
 
-        if ($shouldRestart) {
+        if ($moves !== []) {
+            $this->liveConfigTestOrMoveBack($ruleset, $moves);
             $this->restartWebserver();
         }
     }
@@ -374,15 +375,16 @@ class Modsec
     /**
      * @param  array<string>  $enable
      * @param  array<string>  $disable
+     * @return list<array{0: string, 1: string}> each rename done, from => to
      */
-    private function renameToggledFiles(string $dir, array $enable, array $disable): bool
+    private function renameToggledFiles(string $dir, array $enable, array $disable): array
     {
-        $shouldRestart = false;
+        $moves = [];
         foreach ($enable as $filename) {
             $filePath = $dir.'/'.$filename;
             if (is_file($filePath.'.disabled')) {
                 $this->runProcessOrFail(Privileged::files()->move($filePath.'.disabled', $filePath));
-                $shouldRestart = true;
+                $moves[] = [$filePath.'.disabled', $filePath];
             }
         }
 
@@ -390,11 +392,57 @@ class Modsec
             $filePath = $dir.'/'.$filename;
             if (is_file($filePath)) {
                 $this->runProcessOrFail(Privileged::files()->move($filePath, $filePath.'.disabled'));
-                $shouldRestart = true;
+                $moves[] = [$filePath, $filePath.'.disabled'];
             }
         }
 
-        return $shouldRestart;
+        return $moves;
+    }
+
+    /**
+     * A loaded rule set's files after the renames must still load: the last file disabled leaves main.conf an include
+     * glob libmodsecurity refuses, and an enabled file may not parse. Either way the files go back and nothing restarts.
+     * A rule set that is not loaded, or a webserver with no config test, is renamed as before.
+     *
+     * @param  list<array{0: string, 1: string}>  $moves
+     *
+     * @throws \InvalidArgumentException with what the webserver said
+     */
+    private function liveConfigTestOrMoveBack(string $ruleset, array $moves): void
+    {
+        if (! $this->loadsRuleset($ruleset)) {
+            return;
+        }
+        $webserver = $this->currentWebserver();
+        if (self::liveConfigTestCommand($webserver) === null) {
+            return;
+        }
+
+        try {
+            $problem = $this->liveConfigTest($webserver);
+        } catch (\Throwable $e) {
+            $this->moveBack($moves);
+            throw $e;
+        }
+        if ($problem !== null) {
+            $this->moveBack($moves);
+            throw new \InvalidArgumentException('The webserver would not load the rule set with these files, so nothing changed: '.$problem);
+        }
+    }
+
+    private function loadsRuleset(string $ruleset): bool
+    {
+        $config = Setting::getModsecConfig();
+
+        return $config['mode'] !== 'off' && in_array($ruleset, $config['enabled_rulesets'], true);
+    }
+
+    /** @param  list<array{0: string, 1: string}>  $moves */
+    private function moveBack(array $moves): void
+    {
+        foreach (array_reverse($moves) as [$from, $to]) {
+            $this->runProcessOrFail(Privileged::files()->move($to, $from));
+        }
     }
 
     public function customRules(): string
@@ -1156,7 +1204,7 @@ class Modsec
         $services = $this->services();
         $problem = $this->testInWebserver($webserver === 'apache' ? $services->apacheConfigTest() : $services->nginxConfigTest());
         if ($problem !== null && ! str_contains($problem, 'Rules error')) {
-            Log::warning('Webserver config test failed with the new custom ModSecurity rules in place', ['verdict' => $problem]);
+            Log::warning('Webserver config test failed with the new ModSecurity rules in place', ['verdict' => $problem]);
 
             return 'the webserver configuration does not pass its own test; what it said is in the engine log';
         }

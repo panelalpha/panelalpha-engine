@@ -27,6 +27,7 @@ class ModsecRulesetFilesTest extends TestCase
             dirname(base_path()).'/templates/config/modsecurity-main.conf.blade.php',
             $this->root.'/templates/config/modsecurity-main.conf.blade.php'
         );
+        $this->settings('off', []);
     }
 
     protected function tearDown(): void
@@ -129,6 +130,97 @@ class ModsecRulesetFilesTest extends TestCase
                 $this->assertSame($message, $e->getMessage());
             }
             $this->assertSame(['run mv -- '.$this->sets.'/owasp/rules/a.conf '.$this->sets.'/owasp/rules/a.conf.disabled'], $system->journal);
+        }
+    }
+
+    public function test_disabling_the_last_file_of_a_loaded_set_is_refused_and_renamed_back(): void
+    {
+        $rules = $this->loadedSet();
+        $system = $this->system();
+
+        try {
+            $this->modsec($system, null, 'nginx-proxy', 'Rules error. File: /opt/modsecurity/main.conf. Line: 21.')
+                ->toggleConfigFiles('owasp', [], ['a.conf']);
+            $this->fail('a toggle the webserver would not load should be refused');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertSame(
+                'The webserver would not load the rule set with these files, so nothing changed: '
+                .'Rules error. File: /opt/modsecurity/main.conf. Line: 21.',
+                $e->getMessage()
+            );
+        }
+
+        $this->assertSame([
+            "run mv -- {$rules}/a.conf {$rules}/a.conf.disabled",
+            'currentWebserver',
+            'liveConfigTest nginx-proxy',
+            "run mv -- {$rules}/a.conf.disabled {$rules}/a.conf",
+        ], $system->journal);
+    }
+
+    public function test_a_live_test_that_throws_renames_every_file_back_in_reverse(): void
+    {
+        $rules = $this->loadedSet();
+        touch($rules.'/b.conf.disabled');
+        $failure = new \RuntimeException('live test timed out');
+        $system = $this->system();
+
+        try {
+            $this->modsec($system, null, 'nginx-proxy', $failure)->toggleConfigFiles('owasp', ['b.conf'], ['a.conf']);
+            $this->fail('the live test failure should come through');
+        } catch (\RuntimeException $e) {
+            $this->assertSame($failure, $e);
+        }
+
+        $this->assertSame([
+            "run mv -- {$rules}/b.conf.disabled {$rules}/b.conf",
+            "run mv -- {$rules}/a.conf {$rules}/a.conf.disabled",
+            'currentWebserver',
+            'liveConfigTest nginx-proxy',
+            "run mv -- {$rules}/a.conf.disabled {$rules}/a.conf",
+            "run mv -- {$rules}/b.conf {$rules}/b.conf.disabled",
+        ], $system->journal);
+    }
+
+    public function test_a_toggle_the_loaded_set_passes_with_is_tested_then_restarts(): void
+    {
+        $rules = $this->loadedSet();
+        $system = $this->system();
+
+        $this->modsec($system)->toggleConfigFiles('owasp', [], ['a.conf']);
+
+        $this->assertSame([
+            "run mv -- {$rules}/a.conf {$rules}/a.conf.disabled",
+            'currentWebserver',
+            'liveConfigTest nginx-proxy',
+            'restart',
+        ], $system->journal);
+    }
+
+    public function test_a_webserver_with_no_config_test_is_toggled_untested(): void
+    {
+        $rules = $this->loadedSet();
+        $system = $this->system();
+
+        $this->modsec($system, null, 'openlitespeed', 'never asked')->toggleConfigFiles('owasp', [], ['a.conf']);
+
+        $this->assertSame([
+            "run mv -- {$rules}/a.conf {$rules}/a.conf.disabled",
+            'currentWebserver',
+            'restart',
+        ], $system->journal);
+    }
+
+    public function test_a_set_that_is_not_loaded_is_toggled_untested(): void
+    {
+        foreach ([['on', ['custom']], ['off', ['owasp']]] as [$mode, $enabled]) {
+            $rules = $this->loadedSet();
+            $this->settings($mode, $enabled);
+            $system = $this->system();
+
+            $this->modsec($system, null, 'nginx-proxy', 'never asked')->toggleConfigFiles('owasp', [], ['a.conf']);
+
+            $this->assertSame(["run mv -- {$rules}/a.conf {$rules}/a.conf.disabled", 'restart'], $system->journal, $mode);
         }
     }
 
@@ -361,6 +453,18 @@ class ModsecRulesetFilesTest extends TestCase
             $this->assertNotInstanceOf(\InvalidArgumentException::class, $e);
             $this->assertSame('rm: denied', $e->getMessage());
         }
+    }
+
+    private function loadedSet(): string
+    {
+        $rules = $this->sets.'/owasp/rules';
+        if (! is_dir($rules)) {
+            mkdir($rules, 0777, true);
+        }
+        touch($rules.'/a.conf');
+        $this->settings('on', ['owasp']);
+
+        return $rules;
     }
 
     private function rulesets(): void
