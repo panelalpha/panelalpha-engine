@@ -988,6 +988,10 @@ restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 
 ## 12. Engine images and their tags
 
+No engine image carries engine code: core's app (`./core`) and the root broker with its client
+(`./dockerfiles/root-broker`, read-only at `/usr/local/lib/panelalpha` in both) are mounted from the tree the
+installer fetched, so a code change needs no image build.
+
 Every image a compose file builds is tagged with the engine version, `ghcr.io/panelalpha/<image>:v<version>` with the
 version from `core/config/system.php`; `tests/scripts/engine-image-tags.test.sh` fails a tag that differs, so a
 version bump moves every tag. Each Dockerfile ends with `ARG PANELALPHA_SOURCES=` and the label

@@ -11,7 +11,7 @@ command or API call for that action, never one it is handed.
 
 | | |
 |---|---|
-| Container | `root-broker` in the engine's compose project, image `dockerfiles/Dockerfile-root-broker` |
+| Container | `root-broker` in the engine's compose project, image `dockerfiles/Dockerfile-root-broker` (a runtime only: this directory is mounted read-only at `/usr/local/lib/panelalpha`, in core too) |
 | Process | `pa-root-broker` (`rootbroker.server`), supervised by s6 with the `tenant-network` and `logrotate` services (`config/root-broker/services/`) |
 | Socket | `/run/panelalpha/root.sock`, `0660 root:www-data`, shared with core |
 | Sees | `pid: host`, the host's `/var/run/docker.sock`, `/home`, `/opt/panelalpha`, `/etc/letsencrypt`, the backup stage |
@@ -153,7 +153,7 @@ moving the roots, and a native action against `DOCKER_HOST`'s daemon.
 |---|---|
 | `server.py`, `runner.py`, `channel.py`, `output.py` | the socket, the request process, the client's connection, an action's output |
 | `direct.py`, `pa-broker` | an action run by root in the broker's container, on a request process of its own |
-| `protocol.py`, `client.py`, `terminal.py` | the frames, `pa-root`, the pty's size; the only modules core's image copies |
+| `protocol.py`, `client.py`, `terminal.py` | the frames, `pa-root`, the pty's size; the only modules core's client imports |
 | `peer.py`, `hostns.py`, `audit.py`, `libc.py` | who may ask, the host's namespaces, the audit line, the C calls the os module lacks |
 | `actions/` | the areas and their `ACTIONS`; `sequence.py` and `__init__.py` hold `Command`, `Action`, `Param`, `Policy` |
 | `actions/daemoncall.py`, `actions/hostapi.py`, `actions/accountdocker.py`, `actions/failures.py` | `DaemonCall`, the native build on a daemon, the host's and an account's daemon and their `Failures` tables |

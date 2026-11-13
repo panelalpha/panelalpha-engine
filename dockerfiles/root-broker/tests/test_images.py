@@ -1,50 +1,48 @@
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
 import support
 
 BROKER = os.path.dirname(support.HERE)
 DOCKERFILES = os.path.dirname(BROKER)
+ENGINE = os.path.dirname(DOCKERFILES)
+MOUNT = './dockerfiles/root-broker:/usr/local/lib/panelalpha:ro'
 
 
-def copied(dockerfile, target):
-    """The sources of every COPY into `target`, relative to the build context."""
-    with open(os.path.join(DOCKERFILES, dockerfile)) as f:
-        text = f.read().replace('\\\n', ' ')
-    sources = []
-    for line in re.findall(r'^COPY (.+)$', text, re.M):
-        words = line.split()
-        if words[-1].rstrip('/') == target.rstrip('/'):
-            sources += words[:-1]
-    return sources
+def dockerfile(name):
+    with open(os.path.join(DOCKERFILES, name)) as f:
+        return f.read().replace('\\\n', ' ')
 
 
-class CoreImageTest(unittest.TestCase):
-    def test_the_modules_core_copies_are_all_the_client_imports(self):
-        modules = copied('Dockerfile-core', '/usr/local/lib/panelalpha/rootbroker/')
-        self.assertTrue(modules)
-        with tempfile.TemporaryDirectory() as base:
-            os.makedirs(os.path.join(base, 'rootbroker'))
-            for module in modules:
-                shutil.copy(os.path.join(DOCKERFILES, module), os.path.join(base, 'rootbroker'))
-            shutil.copy(os.path.join(BROKER, 'pa-root'), base)
-            result = subprocess.run([sys.executable, '-I', os.path.join(base, 'pa-root')], capture_output=True)
+def service_volumes(name):
+    """The volume lines of one service in docker-compose.yml."""
+    with open(os.path.join(ENGINE, 'docker-compose.yml')) as f:
+        text = f.read()
+    block = re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][a-z0-9-]*:$)', text, re.M | re.S).group(1)
+    return re.findall(r'^      - (\S+)$', block, re.M)
+
+
+class CodeIsMountedTest(unittest.TestCase):
+    def test_no_image_copies_the_broker_s_code(self):
+        for name in ('Dockerfile-core', 'Dockerfile-root-broker'):
+            text = dockerfile(name)
+            self.assertNotIn('COPY root-broker', text, name)
+            self.assertNotIn('compileall', text, name)
+
+    def test_core_and_the_broker_run_it_from_the_engine_tree_read_only(self):
+        for service in ('core', 'root-broker'):
+            self.assertIn(MOUNT, service_volumes(service), service)
+
+    def test_the_programs_mounted_are_executable_and_the_client_runs_from_there(self):
+        for program in ('pa-root', 'pa-root-broker', 'pa-broker', 'pa-file-stream', 'pa-root-owned'):
+            self.assertTrue(os.access(os.path.join(BROKER, program), os.X_OK), program)
+        result = subprocess.run([sys.executable, '-I', os.path.join(BROKER, 'pa-root')], capture_output=True)
         self.assertEqual(result.returncode, 64, result.stderr)
         self.assertNotIn(b'Error', result.stderr)
 
-
-class BrokerImageTest(unittest.TestCase):
-    def test_the_broker_image_holds_the_package_and_the_programs_it_runs(self):
-        self.assertEqual(copied('Dockerfile-root-broker', '/usr/local/lib/panelalpha/rootbroker'), ['root-broker/rootbroker'])
-        self.assertEqual(sorted(copied('Dockerfile-root-broker', '/usr/local/lib/panelalpha/')),
-                         ['root-broker/pa-broker', 'root-broker/pa-file-stream', 'root-broker/pa-root-broker',
-                          'root-broker/pa-root-owned'])
-
     def test_pa_broker_is_on_the_path_of_a_docker_exec(self):
-        with open(os.path.join(DOCKERFILES, 'Dockerfile-root-broker')) as f:
-            self.assertIn('ln -s /usr/local/lib/panelalpha/pa-broker /usr/local/bin/pa-broker', f.read())
+        self.assertIn('ln -s /usr/local/lib/panelalpha/pa-broker /usr/local/bin/pa-broker',
+                      dockerfile('Dockerfile-root-broker'))

@@ -128,11 +128,11 @@ out=$(ensure_engine_images 2>&1)
 check "a failed build stops the deploy and says which" "1|Could not build the mail image from this tree." "$?|$(printf '%s\n' "$out" | tail -n1)"
 
 host
-rm "$TREE/dockerfiles/root-broker/pa-root-owned"
+rm "$TREE/dockerfiles/Dockerfile-exim"
 out=$(ensure_engine_images 2>&1)
-check "a tree missing a file the Dockerfile copies stops the deploy" "1|Could not read the root-broker image's sources from this tree." \
+check "a tree missing a Dockerfile stops the deploy" "1|Could not read the mail image's sources from this tree." \
     "$?|$(printf '%s\n' "$out" | tail -n1)"
-cp "$REPO_DIR/dockerfiles/root-broker/pa-root-owned" "$TREE/dockerfiles/root-broker/"
+cp "$REPO_DIR/dockerfiles/Dockerfile-exim" "$TREE/dockerfiles/"
 
 check "the bootstrap ensures the images this way" "1" "$(grep -c '^ensure_engine_images$' "$SCRIPT_DIR/bootstrap-from-source.sh")"
 check "with jq, which installer.sh's image lookup needs, among the tools it installs" "1" \

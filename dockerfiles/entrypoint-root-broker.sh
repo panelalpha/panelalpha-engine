@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 if [ ! -x /usr/local/lib/panelalpha/pa-root-broker ]; then
-    echo "root-broker: this image has no pa-root-broker; build it from dockerfiles/Dockerfile-root-broker" >&2
+    echo "root-broker: no pa-root-broker at /usr/local/lib/panelalpha; mount the engine's dockerfiles/root-broker there" >&2
     exit 1
 fi
 

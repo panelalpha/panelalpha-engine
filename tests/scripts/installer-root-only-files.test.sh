@@ -52,20 +52,21 @@ SCRIPTS=(scripts/tenant-network-firewall.sh scripts/build-network-firewall.sh sc
     scripts/letsencrypt-request-cert.sh scripts/updater.sh scripts/webserver.sh scripts/firewall.sh
     scripts/firewall/ufw.sh updater.sh webserver.sh installer.sh)
 COMPOSE=(docker-compose.yml docker-compose.yml-nginx-proxy docker-compose.yml-apache)
+BROKER_CODE=(dockerfiles/root-broker/pa-root-broker dockerfiles/root-broker/rootbroker/server.py dockerfiles/entrypoint-root-broker.sh)
 
 # The release, as a clone by root leaves it.
 (
     umask 022
-    mkdir -p "$INSTALL_DIR/src/scripts/firewall" "$INSTALL_DIR/src/users"
-    for f in "${SCRIPTS[@]}"; do printf '#!/bin/sh\n' >"$INSTALL_DIR/src/$f" && chmod 0755 "$INSTALL_DIR/src/$f"; done
+    mkdir -p "$INSTALL_DIR/src/scripts/firewall" "$INSTALL_DIR/src/users" "$INSTALL_DIR/src/dockerfiles/root-broker/rootbroker"
+    for f in "${SCRIPTS[@]}" "${BROKER_CODE[@]}"; do printf '#!/bin/sh\n' >"$INSTALL_DIR/src/$f" && chmod 0755 "$INSTALL_DIR/src/$f"; done
     for f in "${COMPOSE[@]}"; do echo 'services: {}' >"$INSTALL_DIR/src/$f"; done
     touch "$INSTALL_DIR/src/users/.gitkeep"
 )
 # The host: the same paths at 775 and 664, and its own state beside them.
 (
     umask 002
-    mkdir -p "$ENGINE/scripts/firewall" "$ENGINE/users/alice"
-    for f in "${SCRIPTS[@]}"; do printf '#!/bin/sh\n# old\n' >"$ENGINE/$f" && chmod 0775 "$ENGINE/$f"; done
+    mkdir -p "$ENGINE/scripts/firewall" "$ENGINE/users/alice" "$ENGINE/dockerfiles/root-broker/rootbroker"
+    for f in "${SCRIPTS[@]}" "${BROKER_CODE[@]}"; do printf '#!/bin/sh\n# old\n' >"$ENGINE/$f" && chmod 0775 "$ENGINE/$f"; done
     for f in "${COMPOSE[@]}" docker-compose.override.yml users/alice/docker-compose.yml; do
         echo 'services: {}' >"$ENGINE/$f" && chmod 0664 "$ENGINE/$f"
     done
@@ -74,7 +75,8 @@ COMPOSE=(docker-compose.yml docker-compose.yml-nginx-proxy docker-compose.yml-ap
     echo 'host' >"$ENGINE/scripts/monit.conf" && chmod 0666 "$ENGINE/scripts/monit.conf"
     ln -s "$ENGINE/docker-compose.yml-nginx-proxy" "$ENGINE/docker-compose.yml-webserver"
 )
-chmod 0775 "$PANELALPHA_DIR" "$ENGINE" "$ENGINE/scripts" "$ENGINE/scripts/firewall" "$ENGINE/users" "$ENGINE/users/alice"
+chmod 0775 "$PANELALPHA_DIR" "$ENGINE" "$ENGINE/scripts" "$ENGINE/scripts/firewall" "$ENGINE/users" "$ENGINE/users/alice" \
+    "$ENGINE/dockerfiles" "$ENGINE/dockerfiles/root-broker" "$ENGINE/dockerfiles/root-broker/rootbroker"
 echo 'outside' >"$W/outside" && chmod 0666 "$W/outside"
 ln -s "$W/outside" "$ENGINE/scripts/link"
 
@@ -171,6 +173,10 @@ for f in "" scripts scripts/firewall "${SCRIPTS[@]}" scripts/monit.conf "${COMPO
     check "${f:-the engine directory} is handed to root" "1" "$(grep -cxF -- "$ENGINE${f:+/$f}" "$W/chowned")"
 done
 check "the directory above it is handed to root" "1" "$(grep -cxF -- "$PANELALPHA_DIR" "$W/chowned")"
+for f in dockerfiles dockerfiles/root-broker dockerfiles/root-broker/rootbroker "${BROKER_CODE[@]}"; do
+    check "$f, which the broker and core run mounted, is handed to root" "1|0" \
+        "$(grep -cxF -- "$ENGINE/$f" "$W/chowned")|$(($(stat -c '0%a' "$ENGINE/$f") & 022))"
+done
 for f in users users/alice users/alice/docker-compose.yml; do
     check "$f keeps its owner, the engine or root" "0" "$(grep -cxF -- "$ENGINE/$f" "$W/chowned")"
     check "$f loses group and other write" "0" "$(($(stat -c '0%a' "$ENGINE/$f") & 022))"

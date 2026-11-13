@@ -65,17 +65,18 @@ class RootBrokerContainerTest extends TestCase
         $this->assertSame('missing', $broker['pull_policy']);
     }
 
-    /** One base, so www-data is 33:33 in both and the socket's group means the same. */
-    public function test_core_s_image_carries_only_the_client_and_the_broker_s_runs_only_the_broker(): void
+    /** One base, so www-data is 33:33 in both and the socket's group means the same; neither image holds engine code. */
+    public function test_both_images_are_runtimes_and_run_the_broker_s_code_from_the_engine_tree(): void
     {
         $core = (string) file_get_contents(self::repo('dockerfiles/Dockerfile-core'));
         $broker = (string) file_get_contents(self::repo('dockerfiles/Dockerfile-root-broker'));
 
         $this->assertSame(self::baseImage($core), self::baseImage($broker));
-        $this->assertStringContainsString('COPY root-broker/pa-root /usr/local/lib/panelalpha/', $core);
-        foreach (['pa-root-broker', 'pa-broker', 'pa-file-stream', 'pa-root-owned', 'root-broker/rootbroker /'] as $brokerOnly) {
-            $this->assertStringNotContainsString($brokerOnly, $core);
-            $this->assertStringContainsString($brokerOnly, $broker);
+        foreach ([$core, $broker] as $dockerfile) {
+            $this->assertStringNotContainsString('COPY root-broker', $dockerfile);
+        }
+        foreach (['core', 'root-broker'] as $service) {
+            $this->assertContains('./dockerfiles/root-broker:/usr/local/lib/panelalpha:ro', $this->services[$service]['volumes'], $service);
         }
         $this->assertStringNotContainsString('php', $broker);
     }

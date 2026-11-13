@@ -203,9 +203,9 @@ out=$(prepare_engine_images)
 check "a host without its webserver file uses the default one" "0" "$?"
 
 host
-rm "$SRC/dockerfiles/root-broker/pa-root-owned"
+rm "$SRC/dockerfiles/Dockerfile-exim"
 out=$(prepare_engine_images 2>/dev/null)
-check "a release missing a file the Dockerfile copies stops the update" "101|error:Could not read the root-broker image's sources from the new release" "$?|$out"
+check "a release missing a Dockerfile stops the update" "101|error:Could not read the mail image's sources from the new release" "$?|$out"
 release
 
 moved() { # <file under dockerfiles> -- whether each image's hash moves when the file changes, "<core> <broker>"
@@ -216,22 +216,13 @@ moved() { # <file under dockerfiles> -- whether each image's hash moves when the
     release
     printf '%s %s' "$([ "$core" = "$CORE" ] && echo same || echo moved)" "$([ "$broker" = "$BROKER" ] && echo same || echo moved)"
 }
-check "a change to the broker's code moves the broker's hash alone" "same moved" "$(moved root-broker/rootbroker/server.py)"
-check "a change to the client both images carry moves both" "moved moved" "$(moved root-broker/rootbroker/client.py)"
-check "so does a change to a broker program, for the broker" "same moved" "$(moved root-broker/pa-root-broker)"
-check "and to pa-broker, which only the broker carries" "same moved" "$(moved root-broker/pa-broker)"
-check "and a change to a Dockerfile, for its own image" "moved same" "$(moved Dockerfile-core)"
-check "a file neither image copies moves neither" "same same" "$(moved root-broker/tests/support.py)"
+check "the broker's code is mounted, so a change to it moves neither hash" "same same" "$(moved root-broker/rootbroker/server.py)"
+check "nor does a change to the client core runs" "same same" "$(moved root-broker/rootbroker/client.py)"
+check "nor to a broker program" "same same" "$(moved root-broker/pa-root-broker)"
+check "a change to a Dockerfile moves its own image's hash" "moved same" "$(moved Dockerfile-core)"
 mkdir -p "$SRC/dockerfiles/root-broker/rootbroker/actions/new"
 echo 'x = 1' >"$SRC/dockerfiles/root-broker/rootbroker/actions/new/module.py"
-check "a new file in a copied folder moves the hash" "yes" \
-    "$([ "$(engine_image_sources "$SRC/dockerfiles" Dockerfile-root-broker)" != "$BROKER" ] && echo yes)"
-release
-mkdir -p "$SRC/dockerfiles/root-broker/rootbroker/__pycache__" "$SRC/dockerfiles/root-broker/rootbroker/actions/__pycache__"
-echo bytecode >"$SRC/dockerfiles/root-broker/rootbroker/__pycache__/server.cpython-312.pyc"
-echo bytecode >"$SRC/dockerfiles/root-broker/rootbroker/actions/__pycache__/files.cpython-314.pyc"
-echo bytecode >"$SRC/dockerfiles/root-broker/rootbroker/stray.pyc"
-check "Python bytecode in a copied folder, as a test run leaves it, moves neither hash" "$CORE $BROKER" \
+check "a new broker module moves no hash either" "$CORE $BROKER" \
     "$(engine_image_sources "$SRC/dockerfiles" Dockerfile-core) $(engine_image_sources "$SRC/dockerfiles" Dockerfile-root-broker)"
 release
 check "and the build context leaves it out of the images too" "**/__pycache__ **/*.pyc" \

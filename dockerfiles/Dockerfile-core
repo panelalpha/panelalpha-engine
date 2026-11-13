@@ -80,13 +80,6 @@ RUN apt-get update -y \
     && apt-get clean autoclean \
     && apt-get autoremove -y
 
-# root broker client
-COPY root-broker/rootbroker/__init__.py root-broker/rootbroker/client.py root-broker/rootbroker/protocol.py \
-    root-broker/rootbroker/terminal.py /usr/local/lib/panelalpha/rootbroker/
-COPY root-broker/pa-root /usr/local/lib/panelalpha/
-RUN chmod 0755 /usr/local/lib/panelalpha/pa-root \
-    && python3 -m compileall -q /usr/local/lib/panelalpha/rootbroker
-
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

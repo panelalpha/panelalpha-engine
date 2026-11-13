@@ -1267,12 +1267,15 @@ unzip_panelalpha_engine() {
     hand_engine_files_to_root "$PANELALPHA_DIR"
 }
 
-# The root broker refuses engine files anyone but root can write; links are skipped, chown follows them.
+# The root broker refuses engine files anyone but root can write, and runs its own code from dockerfiles/; links are
+# skipped, chown follows them.
 hand_engine_files_to_root() { # <panelalpha dir>
     local engine="$1/shared-hosting"
     {
         chown root:root "$1" "$engine" && chmod go-w "$1" "$engine" &&
             find "$engine/scripts" ! -type l -exec chown root:root {} + -exec chmod go-w {} + &&
+            { [ ! -d "$engine/dockerfiles" ] ||
+                find "$engine/dockerfiles" ! -type l -exec chown root:root {} + -exec chmod go-w {} +; } &&
             find "$engine" -mindepth 1 -maxdepth 1 -type f \( -name '*.sh' -o -name '*compose*.y*ml*' -o -name .env \) \
                 -exec chown root:root {} + -exec chmod go-w {} + &&
             hand_account_compose_files "$engine/users"

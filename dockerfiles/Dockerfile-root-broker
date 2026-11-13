@@ -28,14 +28,8 @@ RUN apt-get update -y \
     && rm -rf /var/lib/apt/lists/* \
     && test "$(id -u www-data):$(id -g www-data)" = 33:33
 
-# root broker
-COPY root-broker/rootbroker /usr/local/lib/panelalpha/rootbroker
-COPY root-broker/pa-root-broker root-broker/pa-broker root-broker/pa-file-stream root-broker/pa-root-owned \
-    /usr/local/lib/panelalpha/
-RUN chmod 0755 /usr/local/lib/panelalpha/pa-root-broker /usr/local/lib/panelalpha/pa-broker \
-        /usr/local/lib/panelalpha/pa-file-stream /usr/local/lib/panelalpha/pa-root-owned \
-    && ln -s /usr/local/lib/panelalpha/pa-broker /usr/local/bin/pa-broker \
-    && python3 -m compileall -q /usr/local/lib/panelalpha/rootbroker
+# the broker's code is mounted from the engine tree at /usr/local/lib/panelalpha
+RUN ln -s /usr/local/lib/panelalpha/pa-broker /usr/local/bin/pa-broker
 
 ARG PANELALPHA_SOURCES=
 LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

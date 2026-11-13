@@ -46,6 +46,7 @@ services:
       - /home:/home
       - /var/tmp/panelalpha-backup:/var/tmp/panelalpha-backup
       - ./dockerfiles/entrypoint-core.sh:/entrypoint.sh
+      - ./dockerfiles/root-broker:/usr/local/lib/panelalpha:ro
     command: bash /entrypoint.sh
     environment:
       # sqlite is the default for every install; int-updater.sh backfills the
@@ -89,6 +90,7 @@ services:
       - ./config/logrotate:/etc/logrotate.d
       - ./data/logrotate:/var/lib/logrotate
       - ./dockerfiles/entrypoint-root-broker.sh:/entrypoint.sh
+      - ./dockerfiles/root-broker:/usr/local/lib/panelalpha:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/lib/letsencrypt:/var/lib/letsencrypt
