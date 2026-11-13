@@ -65,10 +65,12 @@ final class ContainerOperations
     }
 
     /**
-     * Inner compose stop for backup downtime (throws on failure).
+     * Inner compose stop for backup downtime (throws on failure); whether a service was running for it to stop.
      */
-    public function composeStop(): void
+    public function composeStop(): bool
     {
+        $running = $this->runsAnyService();
+
         try {
             $this->shell->execAsUser(
                 $this->project->userAppComposeCommand(['stop']),
@@ -78,23 +80,30 @@ final class ContainerOperations
         } catch (\Throwable $e) {
             throw new \RuntimeException('compose stop failed: '.$e->getMessage(), 0, $e);
         }
+
+        return $running;
     }
 
     /**
-     * Inner compose start (resume, no rebuild) after backup/restore; an account never deployed
-     * has no inner compose project to resume.
+     * Inner compose start (resume, no rebuild) of what {@see composeStop()} stopped.
      */
     public function composeStart(): void
     {
-        if ($this->project->app() === null) {
-            return;
-        }
-
         $this->shell->execAsUser(
             $this->project->userAppComposeCommand(['start']),
             [],
             self::COMPOSE_TIMEOUT,
         );
+    }
+
+    /** A daemon that cannot say counts as running: a start that finds nothing costs less than an app left down. */
+    private function runsAnyService(): bool
+    {
+        try {
+            return $this->project->accountDaemon()->stackContainerIds() !== [];
+        } catch (\Throwable) {
+            return true;
+        }
     }
 
     /**
