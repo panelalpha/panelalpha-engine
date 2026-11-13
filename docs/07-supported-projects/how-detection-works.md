@@ -14,7 +14,20 @@ Inspect this repository and tell me what stack you detect: https://github.com/or
 
 The engine downloads a copy, tells you what it found, and deletes the copy. Nothing is put online. If the answer is wrong, fix the repository first.
 
-Sometimes it will say these files cannot be run as a website. That usually means the project is a library, or it has no file that starts a site. Fix that before you deploy.
+The answer ends with a verdict on what a deploy would serve:
+
+| Verdict | Meaning |
+|---|---|
+| deployable | The application would start. |
+| no start command | It would deploy, but nothing says how to start it, so the deploy warns. |
+| placeholder | The deploy would serve the "Project not configured" page. |
+| not deployable | The engine found no way to start a website from these files. It says why. |
+
+Not deployable usually means the project is a library, or it has no file that starts a site. Fix that before you deploy.
+
+A repository that has moved to another address is refused: the engine does not follow redirects. Give it the new address.
+
+**.NET** projects are read as the .NET SDK reads them: the SDK version comes from `global.json` (`sdk.version`, or `tools.dotnet`), and the target framework from the projects in the solution and any `Directory.Build.props` above them. Desktop apps, libraries, tests and console programs are not claimed, because none of them serves a website. A .NET Framework web app is refused, since the engine runs only modern .NET.
 
 If it lists more than one way to run the project, you can choose:
 
@@ -32,7 +45,9 @@ It tries the most specific match first.
 2. A Docker Compose file in a `docker`, `.docker`, `deploy`, `deployment`, `docker-compose` or `compose` folder, if nothing else matched. It is run from the top of the repository, with its paths adjusted to match.
 3. Unknown, if nothing matched. The deploy shows the "Project not configured" page, with HTTP status 404 on every address.
 
-A general build (Railpack) is never picked by itself. Ask for it, for example `Deploy https://github.com/org/app as railpack`.
+A general build (Railpack) is never picked by itself. Ask for it, for example `Deploy https://github.com/org/app as railpack`. **That choice is not saved.** A rebuild, a pull, a revert, a branch change, a deployed archive and a push webhook each have to ask again, or the deploy ends on the "Project not configured" page. To stop asking, give the repository a Dockerfile, a Compose file or a `panelalpha.yaml`. Inspect still lists Railpack as a candidate when the repository has a language file, and says "the recipe railpack may build it".
+
+Some stacks that Railpack would have built, such as Deno and Elixir, are therefore unknown unless you ask for the general build.
 
 The first match is the one it uses. That matters most if you have a `docker-compose.yml` you only use on your own computer. The engine cannot tell that from a file meant for the live site, so it will try to use it. Rename the file if you do not want that.
 

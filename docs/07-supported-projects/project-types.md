@@ -28,6 +28,14 @@ A hand-written site of pages such as `home.html` and `about.html`, with no `inde
 
 WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Roundcube, Adminer, and phpMyAdmin are recognised as PHP apps and started for you.
 
+Two more apps have their own recipe and deploy from their repository: Roundcube (`https://github.com/roundcube/roundcubemail`, version 1.7 and the development branch) and Postmill (`https://github.com/postmill-ai/postmill-app`).
+
+Roundcube is a mail client only. Set `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST` in the project's environment variables to the mail servers it should log in to and send through. Without them it tries `localhost`, where no mail server runs. The engine creates its database and sets up its configuration on the first deploy.
+
+Postmill starts with a Redis service of its own and applies its database migrations on every deploy.
+
+OpenCart deploys from its `4.1.x.x` branch. The default `master` branch is refused: [OpenCart](#real-applications-to-try).
+
 How to finish the first WordPress setup and look after a site that is already on this engine: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 
 ## JavaScript apps
@@ -87,7 +95,9 @@ A `Gemfile` on its own, with none of those, is not recognised. A [general build]
 
 **Unknown** means it did not recognise the project, or the project is not a website. The deploy then shows the "Project not configured" page, with HTTP status 404, so an uptime monitor reports the site as down. Check that before you deploy: [What your repository needs](what-your-repo-needs.md).
 
-A **general build** (Railpack) runs only when you ask for it, for example `Deploy https://github.com/org/app as railpack`. Inspect offers it among the candidates when the repository has a language file (`package.json`, `composer.json`, `go.mod`, `requirements.txt`, `Gemfile`, and similar). It is not picked by itself, because most repositories that reach it are libraries or tools with no website to start.
+A **general build** (Railpack) runs only when you ask for it, for example `Deploy https://github.com/org/app as railpack`. Inspect offers it among the candidates when the repository has a language file (`package.json`, `composer.json`, `go.mod`, `requirements.txt`, `Gemfile`, and similar), and says "the recipe `railpack` may build it". It is not picked by itself, because most repositories that reach it are libraries or tools with no website to start.
+
+**The choice is for one deploy.** It is not saved. Every later deploy of the project has to ask for it again: a rebuild, a pull, a revert, a branch change, a deployed archive and a push webhook. Without it, that deploy ends on the "Project not configured" page. To stop asking, give the repository a `Dockerfile`, a Compose file or a [panelalpha.yaml](panelalpha-yaml.md).
 
 ## Names you might see in a log
 
@@ -132,6 +142,7 @@ These deploy real applications from the Supported board, a few from each stack. 
 |---|---|---|---|
 | PrestaShop | PHP | `https://github.com/PrestaShop/PrestaShop` | #334 |
 | OpenCart | PHP, known app | `https://github.com/opencart/opencart`, branch `4.1.x.x` | #335 |
+| Roundcube | PHP, known app | `https://github.com/roundcube/roundcubemail` | #61 |
 | Firefly III | Laravel | `https://github.com/firefly-iii/firefly-iii` | #8 |
 | MeTube | Python | `https://github.com/alexta69/metube` | #191 |
 | Umami | Node.js | `https://github.com/umami-software/umami` | #26 |
@@ -171,6 +182,15 @@ first page asks for.
 Check: the inspection reports a known app, and the first page is served by OpenCart: its storefront, its installer or its login.
 
 OpenCart's default branch, `master`, is an unreleased rewrite whose page loads its scripts from `http://localhost/`. The engine recognises it and refuses the deploy, naming the branch to use instead. The 4.1 release line, branch `4.1.x.x`, is the one supported.
+
+**PHP known app: Roundcube**
+
+```text
+Deploy https://github.com/roundcube/roundcubemail as project troundcube. Tell me
+what mail server settings it needs and what the first page shows.
+```
+
+Check: the inspection reports a known app, the assistant names `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST`, and the first page is Roundcube's login. Delete the project when done.
 
 **Laravel: Firefly III**
 
@@ -247,7 +267,7 @@ Extra tools: `container_list`. Check: every service it starts is listed, and the
 **Clean up**
 
 ```text
-Delete the projects tprestashop, topencart, tfirefly, tmetube, tumami, tntfy2,
+Delete the projects tprestashop, topencart, troundcube, tfirefly, tmetube, tumami, tntfy2,
 tmemos, tstump, tscoold and tchatwoot.
 ```
 

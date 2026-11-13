@@ -31,7 +31,8 @@ A file in the folder wins over the same thing written inline. A folder cannot sh
 ## How the engine reads it
 
 - **Every key is optional.** A key written with no value says nothing: under `extends`, it leaves the recipe's own value alone.
-- **A key the engine does not know fails the deploy.** The deploy log names it and lists the keys that are allowed. So does a value of the wrong shape.
+- **A key the engine does not know fails the deploy.** The deploy log names it and lists the keys that are allowed. So does a value of the wrong shape. Every error names the file it comes from, whether yours or one of the engine's own recipes.
+- **A `strategy` the engine does not know is refused** the same way, instead of being ignored.
 - **`detect` is not allowed.** The file is found by where it is, not by detection.
 - **Editors can check the file as you write it.** The engine ships a JSON schema for it. With the YAML extension of VS Code or any editor using yaml-language-server, put this line at the top:
 
@@ -84,7 +85,7 @@ env:
 
 `env` adds to the recipe's values and wins on the same name. The project's own environment variables, set in the panel or over the API, win over both: [Environment variables](../05-capabilities/projects.md#environment-variables).
 
-`env` reaches every application the engine builds, but not a repository's own compose file. There, set the values in the file itself, or layer them on with `compose` in `override` mode ([Files and a compose file](#files-and-a-compose-file)).
+`env` reaches every application the engine builds. For a project that runs its own compose file, the values go into the project's `.env`, under the environment variables you set yourself. When the repository tracks its own `.env`, the engine leaves that file as committed and writes them to `.env.panelalpha` instead, which every service that loads `.env` also loads.
 
 `${PA_PUBLIC_URL}` is the project's address, such as `https://shop.example.com`, and `${PA_PUBLIC_HOST}` is its domain alone. Names starting with `PA_` belong to the engine and cannot be set.
 
@@ -176,7 +177,7 @@ The engine generates the values once and keeps them, encrypted, with the project
 
 - A compose service reads them with `env_file: ../.panelalpha/app-credentials.env`, and a script with `. ~/.panelalpha/app-credentials.env`.
 - `kind` is `username` (default `admin`), `email` or `password` (24 random letters and digits).
-- `value` sets a username or email of your own. It may use `{random}`, `{host}` and `{email}`.
+- `value` sets a username or email of your own. It may use `{random}`, `{host}` and `{email}`. A value that ends in a newline is refused.
 - `symbol: true` adds a symbol to a password, for an application whose rules demand one.
 - A field the project's own environment variables set takes that value instead.
 

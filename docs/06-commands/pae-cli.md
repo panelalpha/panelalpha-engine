@@ -12,7 +12,7 @@ This page groups the commands by what you are doing. The ones you will use day t
 pae <command> --help
 ```
 
-Throughout this page, `{project}` means the project's name - the value shown as `username` in the engine's output.
+Throughout this page, `{project}` means the project's name, the value shown as `username` in the engine's output.
 
 ## Configuring the engine
 
@@ -75,6 +75,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
 | `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes, at least 6 (256 for a container project), and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. Any other limit takes `-1` for unlimited. Asks you to confirm; `--force` skips that. |
+| `pae project:cpu-limit:apply --project={project}` | Puts the stored CPU limit of a container project on its running account. Use it when a limit was changed after the project was created and the project still runs with the old one. |
 | `pae project:network:move --all` | Moves running projects created before this version onto the isolated network. The project container stays up. An application using the server's MySQL may restart, and its site is unavailable until it answers again. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Without a terminal, such as in a script, it refuses and changes nothing unless you add `--force`. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
@@ -126,6 +127,9 @@ More project commands:
 | `pae projects:php-config:refresh` | On traditional PHP hosting, makes projects created before this version write PHP errors to a log file of their own, which the assistant can then read. `--project={project}` does one, `--all` every project. Safe to run again. Each project picks it up when its PHP handler next restarts. |
 | `pae projects:domain-config:refresh` | On traditional PHP hosting behind nginx-proxy, writes the Apache config of each domain inside the project again from the current template and reloads that Apache, so a fix to the template reaches domains created before it. Certificates, PHP handlers and container projects are not touched. `--project={project}` does one, `--all` every project; an update runs it for every project. Safe to run again. |
 | `pae projects:wp-config:restrict` | On traditional PHP hosting, makes the `wp-config.php` in each domain's document root, and in the folder above it, readable by the project's own user only, as the engine writes new ones: one written before this version is readable by every other project. A link at that name is left alone. `--project={project}` does one, `--all` every project; an update runs it for every project. Safe to run again. |
+| `pae projects:config-mounts:restrict` | On traditional PHP hosting, mounts the engine's own configuration read-only inside existing projects, so a project cannot change it. Each project picks it up when its container is next recreated. `--recreate` does that now for running projects, which restarts their sites. `--project={project}` does one, `--all` every project. Safe to run again. |
+| `pae project:dind:recover --project={project}` | Brings back a container project whose account stopped answering. `--detect` only lists the stuck ones and `--all-stuck` recovers every one. `--recreate` recreates the account only when it was stuck: a healthy account is left alone and the command says so. |
+| `pae system:nat:prune` | Removes stored IPv4 address maps that a project could never use. The installer runs it on an update, so you rarely need it. |
 
 ## Environment variables and settings
 
@@ -436,7 +440,7 @@ bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register
 ```
 
 **A command needs a project name and I do not know it.**
-List them with `pae project:deploy:list` - the value you want is `username`.
+List them with `pae project:deploy:list`. The value you want is `username`.
 
 **A destructive command is asking me to confirm and I am in a script.**
 Most take `--force` to skip the prompt. Run with `--no-interaction` and without `--force`, such a command changes nothing, says so on stderr and exits with 1. Be certain before you use `--force`: `pae project:delete --all --force` deletes every project on your VPS with no further questions.

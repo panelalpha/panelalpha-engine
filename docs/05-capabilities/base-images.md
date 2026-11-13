@@ -82,6 +82,31 @@ A compose service can also run the image directly with `image: whmcs-dev-base:ph
 
 Write the name literally. A `FROM ${BASE}` built from a build argument is not recognised, and the build then asks Docker Hub for it.
 
+## Images the engine downloads for you
+
+**PHP, Python and Ruby base images.** A host downloads the base images PanelAlpha publishes instead of compiling them, which saves several minutes on the first deploy of a PHP version. `DEPLOY_BASE_IMAGE_REGISTRY` in `.env-core` names where they come from. Set it to `none` to always compile them on the server.
+
+**`pae configure prewarm`** lists the images the server can keep ready before a project asks. It now offers the bases of every shipped app, and a prewarm run also downloads the image every project account starts from, so the first project you create does not wait for it.
+
+**ghcr.io.** Every project account pulls images from ghcr.io through a pass-through cache on the server, with no login. An image is kept for 24 hours before the cache asks ghcr.io again. `GHCR_PROXY_TTL` in `.env` changes that time. It works without any setup on an engine that runs the full stack.
+
+## Build caches for public repositories
+
+A **build cache** lets every project that deploys the same public repository start its image build from layers the server already built. Build one before many projects deploy the same repository:
+
+```bash
+pae system:build-cache:build https://github.com/org/app
+pae system:build-cache:list
+pae system:build-cache:remove https://github.com/org/app
+```
+
+- The repository must be public and reached over `https://`.
+- The cache helps a deploy of the same commit. Once the repository moves on, build it again.
+- A repository that deploys through a recipe or its own `panelalpha.yaml` is refused for now. So is one that builds nothing, such as a plain static site.
+- The weekly refresh keeps build caches. Only `remove` deletes them.
+
+The server builds the repository in an isolated container with no access to the server itself. Projects only read the cache.
+
 ## Changing, refreshing and removing
 
 ```bash
@@ -116,6 +141,8 @@ None of the automatic clean-ups remove your images: not the weekly clean-up of t
 
 An image takes space once in the image cache, once more on the server for an image the server built or downloaded, and once in the Docker of each project that builds from it. That last part counts towards each project's own disk use. A 650 MB base used by twenty projects therefore takes about 14 GB in total, so remove the images you no longer use.
 
+When the server itself runs low on disk, `pae system:image:prune --until-free=35G` removes the engine's own unused images until that much is free. It never removes yours.
+
 ## Checking that a deploy used it
 
 - The deploy log has the line `Pulled base image <name> from the cache registry`.
@@ -131,6 +158,10 @@ curl -s https://<engine>:2011/api/system/images -H "Authorization: Bearer $TOKEN
 ```
 
 Each entry has `ref`, `present` (whether the image cache holds it right now), `digest`, `size` and `refreshed_at`. A token limited to some projects is refused; an application with [Engine API access](../06-commands/pae-cli.md#engine-api-for-projects) needs the scope `all`. The same endpoint takes `POST` to add an image (`ref`, `source`, `dockerfile`, `build_args`, `why`), `PUT /system/images/{id}` to change one, `POST /system/images/{id}/refresh` and `DELETE /system/images/{id}`. Each of those runs as a task and answers with its `task_id`.
+
+## From the server
+
+The commands for everything on this page, with the options of each: [Base images for every project](../06-commands/pae-cli.md#base-images-for-every-project) and [Build caches for public repositories](../06-commands/pae-cli.md#build-caches-for-public-repositories).
 
 ## More requests to try
 
@@ -153,3 +184,36 @@ build from.
 ```
 
 Mode: modify. Tools: `system_image_create`, `task_get`, `system_image_list`. Check: the task completes and the image is listed with source `pull` and `present: true`.
+
+**Refresh an image now**
+
+```text
+Refresh the base image debian:bookworm-slim now and tell me when it is done.
+```
+
+Mode: modify. Tools: `system_image_refresh`, `task_get`, `system_image_list`. Check: the task completes and the image shows a new refresh time.
+
+**Remove an image**
+
+```text
+Remove the base image debian:bookworm-slim from this server's image cache.
+```
+
+Mode: full. Tools: `system_image_delete`, `task_get`, `system_image_list`. Check: the image is no longer listed, and the assistant warns that a new build `FROM` it will fail.
+
+**Build caches for a repository**
+
+```text
+Build a shared build cache for https://github.com/octocat/Hello-World and then
+list the build caches on this server.
+```
+
+Mode: modify. Tools: `system_build_cache_build`, `task_get`, `system_build_cache_list`. Check: the task completes and the repository appears in the list.
+
+**Remove a build cache**
+
+```text
+Remove the build cache of https://github.com/octocat/Hello-World.
+```
+
+Mode: full. Tools: `system_build_cache_remove`, `system_build_cache_list`. Check: the repository is gone from the list.

@@ -14,7 +14,7 @@ Seconds, and creates nothing. Do this before a first deploy of anything unusual.
 
 ## What each kind needs
 
-Everything in the middle column must be at the **top level** of the repository - not in a subfolder.
+Everything in the middle column must be at the **top level** of the repository, not in a subfolder.
 
 PHP and Laravel run Apache **inside the project's container**. The VPS still serves your sites through nginx-proxy only: [Install](../02-getting-started/install.md).
 
@@ -41,6 +41,8 @@ PHP and Laravel run Apache **inside the project's container**. The VPS still ser
 ## Docker Compose projects: editing the compose file
 
 The engine never runs your `docker-compose.yml` as it is. It runs a copy made fit for hosting, with resource limits and a restart policy on every service that publishes a port or that another service needs, and your own file stays unchanged. A service counts as needed when another one names it in `depends_on`, `links`, `volumes_from` or `network_mode: service:…`, or reaches it by name in its environment (`DB_HOST=db`, `REDIS_URL=redis://cache:6379`). Any other service that sets no `restart:` of its own is not restarted when it exits, so a one-off helper runs once, and a background worker nothing depends on needs `restart: unless-stopped` if it must come back after a crash or a server restart. If you edit your compose file on the account, over SSH or with the file tools, start the project again with the `up` or `pull` action. The engine rebuilds that copy from your edited file before it starts the containers. It does not clone the repository again. The same applies to an account with no repository where you created a `docker-compose.yml` yourself.
+
+**Where a service may mount from.** A service may bind only your project folder (`~/project`, which is where relative paths such as `./data` point) and the account's `~/.panelalpha` folder. **Any other bind is removed from the copy the engine runs**, and the deploy log warns which service and volume it removed. This covers the Docker socket, the account's home folder and every other path on the server. If a service needs more, copy the files into your repository, or keep them in a named Docker volume.
 
 ## Dockerfile projects: what goes into the build
 
