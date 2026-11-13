@@ -53,7 +53,7 @@ PanelAlpha engine uninstaller (dev/test oriented).
 Always removes:
   - $ENGINE_DIR (containers, volumes, directory)
   - engine users / projects (unless --keep-projects)
-  - pae / pae-artisan registration, sysctl/monit deconfigure
+  - pae / pae-artisan / pae-broker registration, sysctl/monit deconfigure
   - engine-installer.sh, log/engine-*, tmp/engine, letsencrypt cron
   - Docker networks $TENANT_NETWORK_NAME and $DOCKER_NETWORK_NAME (when unused)
 
@@ -384,7 +384,7 @@ clean_engine_sidecars() {
     rm -f /etc/cron.d/panelalpha-letsencrypt
 
     # Orphan binaries if unregister did not run (tree already gone).
-    rm -f /usr/local/bin/paengine /usr/local/bin/pae /usr/local/bin/pae-artisan
+    rm -f /usr/local/bin/paengine /usr/local/bin/pae /usr/local/bin/pae-artisan /usr/local/bin/pae-broker
     rm -f /etc/panelalpha/paengine.yaml
     rmdir /etc/panelalpha 2>/dev/null || true
 

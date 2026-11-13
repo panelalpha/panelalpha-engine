@@ -416,6 +416,7 @@ The engine ships more commands than belong on a daily list. Most are for support
 - **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, or that started before sysbox-fs last did, which a runtime restart or a host crash leaves behind, and prints what it found in each, such as `sysbox-fs no longer serves its mounts`; `--dry-run` only prints).
 - **PHP Apache modules (inside a project, not on the VPS):** `apache:mod:enable`, `apache:mod:disable`.
 - **Engine settings:** `settings:get`, `settings:set`, `settings:exists`.
+- **Root actions:** `pae-broker`, a separate command registered with `pae`, runs one of the engine's root actions on the server the way the engine runs it, for example `pae-broker --host host.applyTenantNetworkFirewall --` to re-apply the projects' network firewall. It is for support, and each run is logged with the engine's other root actions.
 
 Only run one of these when you understand what it does, or when support hands you the exact line.
 
@@ -427,7 +428,7 @@ Installing, updating and removing the engine are scripts rather than `pae` comma
 
 ## Troubleshooting
 
-**`pae: command not found`.**
+**`pae: command not found`** (or `pae-broker: command not found`).
 The registration step did not finish during install. Run it yourself:
 
 ```bash

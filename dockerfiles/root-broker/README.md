@@ -30,11 +30,15 @@ of the broker's own compose project.
 ## Root on the host
 
 ```
-docker compose exec -T root-broker pa-broker [--host] [--pty] [--env NAME]... AREA.ACTION -- VALUE...
+pae-broker [--host] [--pty] [--env NAME]... AREA.ACTION -- VALUE...
 ```
 
-`pa-broker` runs any action for root on the host, who reaches the broker's container through `docker exec`; the
-installers use it. It takes `pa-root`'s arguments and opens no socket: it forks the broker's own request process
+`pae-broker` is `scripts/pae-broker.sh`, which `scripts/pae-command.sh register` links into `/usr/local/bin` beside
+`pae`. It runs `docker compose exec -T root-broker pa-broker` with the same arguments, with a terminal only for
+`--pty` on one, and passes each `--env NAME` as `-e NAME`, so a value never appears on a command line.
+
+In the container, `pa-broker` runs any action for root on the host, who reaches it through `docker exec`; the
+installers call it that way. It takes `pa-root`'s arguments and opens no socket: it forks the broker's own request process
 (`Direct`, a `Broker` that admits uid 0 in place of core) and talks to it over a socket pair. The same action table
 checks the values, a refusal says the same as `pa-broker: refused: …` with the same exit code, and the audit line is a
 socket request's with `"via": "pa-broker"`, written to the container's own stdout, so it is in `docker compose logs
@@ -42,7 +46,7 @@ root-broker`. When Docker does not say which process the container runs, nothing
 firewall with every port:
 
 ```
-docker compose exec -T root-broker pa-broker --host host.applyTenantNetworkFirewall --
+pae-broker --host host.applyTenantNetworkFirewall --
 ```
 
 ## A request

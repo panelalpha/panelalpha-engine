@@ -65,7 +65,7 @@ cd /opt/panelalpha/shared-hosting && docker compose logs root-broker | grep pa-r
 
 A password or a license key an action takes is left out of its line.
 
-Root on the server can run the same actions in the root broker's container with `pa-broker`, which the installer uses. They are checked the same way, and each line is marked `"via": "pa-broker"`.
+Root on the server can run the same actions with `pae-broker`, which the installer registers next to `pae`, for example `pae-broker --host host.applyTenantNetworkFirewall --`. They are checked the same way, and each line is marked `"via": "pa-broker"`.
 
 ## The firewall
 
