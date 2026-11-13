@@ -13,6 +13,34 @@ GET_BASE="${GET_BASE%/}"
 # Trusted release-signing public keys, one PEM per file; once one is shipped every download is verified.
 KEY_DIR="${PANELALPHA_RELEASE_KEY_DIR:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/release-keys}"
 
+usage() {
+    cat <<'USAGE'
+Usage: bash updater.sh [options]
+
+Updates this engine to the newest release: the engine's code is replaced and
+the engine stack restarts, so API and MCP clients disconnect for about a
+minute. Hosted sites keep running.
+
+      --version REF      install this git ref (default: main, the newest release)
+      --background       let the installer run on after this script exits
+      --no-self-update   run get.panelalpha.com's installer as downloaded
+  -f, --force            accepted for older callers; ignored
+  -h, --help             print this and exit
+USAGE
+    exit 0
+}
+
+# Usage comes before anything else, whatever the other arguments are.
+wants_help() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+        -h | --help) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # Exits with an error unless the flag <name> still has a value after it.
 require_value() { # <args left> <name>
     [[ $1 -ge 2 ]] || {
@@ -54,7 +82,7 @@ parse_args() {
         --package-host=*)
             shift
             ;;
-        -f | --force | -h | --help)
+        -f | --force)
             shift
             ;;
         -*)
@@ -123,6 +151,7 @@ run_installer() { # <dir>
     sh "$1/engine" --no-tui "${forward[@]}"
 }
 
+wants_help "$@" && usage
 forward=()
 parse_args "$@"
 

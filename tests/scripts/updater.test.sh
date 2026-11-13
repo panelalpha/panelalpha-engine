@@ -82,9 +82,10 @@ run() {
     rm -f "$TMP/args"
     PATH="$TMP/bin:$PATH" TMPDIR="$TMP/run-$name" FAKE_SITE="${SITE:-$TMP/site}" FAKE_STATE="$TMP/state-$name" \
         FAKE_ARGS="$TMP/args" PANELALPHA_RELEASE_KEY_DIR="${KEYS:-$TMP/nokeys}" \
-        bash "$SCRIPT_DIR/updater.sh" "$@" >/dev/null 2>"$TMP/stderr-$name"
+        bash "$SCRIPT_DIR/updater.sh" "$@" >"$TMP/stdout-$name" 2>"$TMP/stderr-$name"
 }
 left() { find "$TMP/run-$1" -mindepth 1 | wc -l; }
+ran() { [[ -e "$TMP/args" ]] && echo ran || echo absent; }
 
 FAKE_INSTALLER_EXIT=0 run ok -f --background --version 2.1.0
 check "a successful update exits 0" "0" "$?"
@@ -172,6 +173,16 @@ check "and runs no installer" "absent" "$([[ -e "$TMP/args" ]] && echo ran || ec
 sign_site "$TMP/signed" next
 SITE="$TMP/signed" KEYS="$TMP/rotating" run rotated -f --background
 check "the next key pinned beside the current one verifies" "--no-tui --background" "$(cat "$TMP/args" 2>/dev/null)"
+
+for flag in --help -h; do
+    run "help$flag" -f --background "$flag"
+    check "$flag exits 0" "0" "$?"
+    check "$flag prints the usage" "yes" "$(grep -q '^Usage: bash updater.sh' "$TMP/stdout-help$flag" && echo yes || echo no)"
+    check "$flag runs no installer" "absent" "$(ran)"
+    check "$flag downloads nothing" "0" "$(left "help$flag")"
+done
+run helpfirst --version --help
+check "--help wins over a flag missing its value" "0" "$?"
 
 # Every fetch refuses anything but https, a redirect included.
 cat >"$TMP/bin/curl" <<'EOF'
