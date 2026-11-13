@@ -102,9 +102,9 @@ Reset the password for user 5 on this WordPress site.
 Delete WordPress user 5 on this site, reassigning their posts to user 1.
 ```
 
-Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the user you name, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the user you name, or to the first other administrator when you give none. When the site has no other administrator and you name no one, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
-**Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in a request header. On traditional PHP hosting the webserver now passes that header on to PHP, so those logins work for any PHP app there, not only WordPress.
+**Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in a request header. On traditional PHP hosting the webserver passes that header on to PHP, so those logins work for any PHP app there, not only WordPress.
 
 A domain created by an earlier release picks this up when the update runs `pae projects:domain-config:refresh --all`. Run it yourself if the update reported that it could not.
 
@@ -146,7 +146,7 @@ All of them take the same `path` and `service` as above, and `skip_plugins`, whi
 
 A database export is readable by the project's own user only, so the webserver cannot serve it and answers 403 if someone asks for it by URL. It takes no table locks, so it works for a database user that has no right to lock tables and does not stop the site writing while it runs.
 
-On the server, `pae wordpress:command` ends with WP-CLI's own exit code, so a script sees a failed command as a failure. Options of the WP-CLI command go after `--`. WordPress core's automatic updates read back as off after you switch them off.
+On the server, `pae wordpress:command` ends with WP-CLI's own exit code, so a script sees a failed command as a failure. Options of the WP-CLI command go after `--`.
 
 ## Move a WordPress site here
 
@@ -176,7 +176,7 @@ A start is refused with 422 `domain_taken` when a project here already has the d
 
 **Following, resuming and cancelling.** The status shows how far the whole run is, the step it is on, and the file or table it is sending. A failed import, or one that has not moved for 15 minutes, can be resumed. Cancelling removes the project, files and database the import made here, and on a `wp_admin` source the migrator plugin. A finished, failed or cancelled import can be deleted from the list.
 
-**What an import leaves alone.** A migrator plugin the source site already had before the import stays on it, also when the import is cancelled or fails. Only a plugin the engine installed is removed. An import refuses a redirect that would send the wp-admin password or the plugin token to another site: a redirect to a different address, or from https to plain http, ends the test or the import with the reason. A redirect from the address to its `www.` twin is followed. The download link for the plugin package uses the engine's own address (`APP_URL`), so it opens from your computer.
+**What an import leaves alone.** A migrator plugin the source site already had before the import stays on it, also when the import is cancelled or fails. Only a plugin the engine installed is removed. An import never sends the wp-admin password or the plugin token to another site. A redirect from https to plain http ends the test or the import with the reason, and so does a redirect that would carry the password to a different address. A redirect to the `www.` form of the same address is followed. The download link for the plugin package uses the engine's own address (`APP_URL`), so it opens from your computer.
 
 **Secrets.** The wp-admin password and the plugin token are kept encrypted and never shown. If an import sits idle for 7 days, they are cleared; resuming it then asks for them again.
 
@@ -346,7 +346,7 @@ List the users of twp. Delete the user jdoe and give their posts to user 1.
 Then delete a user that does not exist, id 9999.
 ```
 
-Mode: full. Tools: `app_user_list`, `app_user_delete` with `reassign` (or `wp_user_delete`), `app_user_delete`. Check: the posts of jdoe now belong to user 1. The delete of 9999 answers not found. With no other administrator and no `reassign`, a delete is refused and nothing is removed.
+Mode: full. Tools: `app_user_list`, `app_user_delete` with `reassign` (or `wp_user_delete`). Check: the posts of jdoe now belong to user 1, and the delete of 9999 answers not found.
 
 **Short passwords are refused**
 
@@ -367,21 +367,22 @@ Mode: read. Tools: `wp_app_password_list`. Check: each entry has a name and a cr
 **Roundcube webmail**
 
 ```text
-Deploy https://github.com/roundcube/roundcubemail as the project troundcube
-(version 1.7 or newer) with ROUNDCUBE_IMAP_HOST and ROUNDCUBE_SMTP_HOST set to mail.example.com.
+Deploy https://github.com/roundcube/roundcubemail as the project troundcube,
+with ROUNDCUBE_IMAP_HOST and ROUNDCUBE_SMTP_HOST set to mail.example.com.
 Tell me when its login page opens.
 ```
 
-Mode: modify. Tools: `project_create`, `env_var_set`, `task_get`. Check: the first page is Roundcube's login, and the project has its own database. Skip it where no mail server is at hand: the login page still opens.
+Mode: modify. Tools: `project_create` with the environment variables, `task_get`. Check: the first page is Roundcube's login, and the project has its own database. Skip it where no mail server is at hand: the login page still opens.
 
 **Postmill and OpenCart**
 
 ```text
-Deploy https://github.com/postmill-ai/postmill-app as the project tpostmill. Then try to deploy the default
-branch of OpenCart, and after that its 4.1.x.x branch.
+Deploy https://github.com/postmill-ai/postmill-app as the project tpostmill. Then deploy
+https://github.com/opencart/opencart from its default branch, and after that
+from its 4.1.x.x branch.
 ```
 
-Mode: modify. Tools: `source_inspect`, `project_create`, `task_get`. Check: Postmill comes up with its own Redis and a migrated database. The OpenCart default branch is refused with an explanation, and the 4.1.x.x branch deploys.
+Mode: modify. Tools: `source_inspect`, `project_create`, `task_get`. Check: Postmill comes up with its own Redis and a migrated database. The OpenCart default branch fails with a message that names the 4.1.x.x branch, and that branch deploys.
 
 **Import a WordPress site**
 
