@@ -226,7 +226,7 @@ Restore only the database <name> from the newest backup of tshop. Then restore
 everything except the volume <name>.
 ```
 
-Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores only that database, the second restores all but that volume, and a request that sends both `only` and `exclude` is refused.
+Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores only that database and the second restores all but that volume.
 
 **A backup while a push runs**
 

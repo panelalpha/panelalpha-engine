@@ -86,9 +86,9 @@ Write the name literally. A `FROM ${BASE}` built from a build argument is not re
 
 **PHP, Python and Ruby base images.** A host downloads the base images PanelAlpha publishes instead of compiling them, which saves several minutes on the first deploy of a PHP version. `DEPLOY_BASE_IMAGE_REGISTRY` in `.env-core` names where they come from. Set it to `none` to always compile them on the server.
 
-**`pae configure prewarm`** lists the images the server can keep ready before a project asks. It now offers the bases of every shipped app, and a prewarm run also downloads the image every project account starts from, so the first project you create does not wait for it.
+**`pae configure prewarm`** lists the images the server can keep ready before a project asks. It also offers the bases some shipped apps need, such as PHP with ffmpeg for Castopod. A prewarm run also downloads the image every project account starts from, so the first project you create does not wait for it.
 
-**ghcr.io.** Every project account pulls images from ghcr.io through a pass-through cache on the server, with no login. An image is kept for 24 hours before the cache asks ghcr.io again. `GHCR_PROXY_TTL` in `.env` changes that time. It works without any setup on an engine that runs the full stack.
+**ghcr.io.** Every project account pulls images from ghcr.io through a pass-through cache on the server, with no login. An image is kept for 24 hours before the cache asks ghcr.io again. `GHCR_PROXY_TTL` in `.env` changes that time. A standard install needs no setup for it.
 
 ## Build caches for public repositories
 
