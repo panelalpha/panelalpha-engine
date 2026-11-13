@@ -51,7 +51,7 @@ The application database that the engine creates for a container project (its na
 
 ## Copies of a project
 
-On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A table push ignores a difference in AUTO_INCREMENT counters, so tables that differ only in that are not listed. A push with an empty list of tables is refused: leave the list out to push the whole database. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
+On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. Tables whose structure differs only in their AUTO_INCREMENT counter count as the same. A push with an empty list of tables is refused: leave the list out to push the whole database. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
 
 ## Limits
 

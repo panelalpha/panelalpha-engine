@@ -223,15 +223,6 @@ Is tshop serving the application itself, or something else?
 
 Mode: read. Tools: `app_health_check` with `timeout` and `attempts`. Check: the answer separates "something answers" from "it is the application", and says what to do when it is not.
 
-**A project that shows the placeholder**
-
-```text
-Create an empty container project called tempty, then check whether it is
-serving an application.
-```
-
-Mode: modify. Tools: `project_create`, `app_health_check`. Check: the answer says `placeholder`, reports the project as not healthy, and says no application is deployed yet. On the server, `pae project:deploy:check` fails for it too.
-
 **Everything at once**
 
 ```text
