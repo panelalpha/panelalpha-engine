@@ -388,6 +388,7 @@ class System implements ProcessRunner
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,

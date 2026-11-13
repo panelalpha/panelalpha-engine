@@ -253,7 +253,7 @@ class EngineUpdateTest extends TestCase
         $this->assertTrue($latest['failed']);
         $this->assertNull($latest['exit_code']);
         $this->assertSame("curl: (6) Could not resolve host: get.panelalpha.com\n", $latest['tail_stderr']);
-        $this->assertNull($latest['reason'], 'the tail already says why');
+        $this->assertSame('the update job never started', $latest['reason'], 'a tail is two lines of output, not a reason');
     }
 
     /** It has no output at all, so the answer has to say the job never started. */
@@ -282,6 +282,164 @@ class EngineUpdateTest extends TestCase
 
         $this->assertTrue($latest['failed']);
         $this->assertSame('the update process ended without writing an exit code', $latest['reason']);
+    }
+
+    /** A process killed mid-run leaves output but no exit code; it failed, and the answer says so and when it stopped. */
+    public function test_a_run_killed_after_writing_output_is_failed_with_a_reason_and_a_finish_time(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = [
+            "{$dir}/pid" => "1626378\n",
+            "{$dir}/from_version" => "2.3.0\n",
+            "{$dir}/to_version" => '2.3.1',
+        ];
+        $fs->tails = ["{$dir}/stdout" => ">>> Installing composer dependencies\n"];
+        $fs->mtimes = ["{$dir}/pid" => 1000, "{$dir}/stdout" => 1300];
+
+        $latest = (new EngineUpdate($this->system($fs, 1)))->latest();
+
+        $this->assertTrue($latest['failed']);
+        $this->assertNull($latest['exit_code']);
+        $this->assertSame('the update process ended without writing an exit code', $latest['reason']);
+        $this->assertSame(1300, $latest['finished_at'], 'when it last wrote output');
+        $this->assertSame('2.3.0', $latest['from_version']);
+        $this->assertSame('2.3.1', $latest['to_version']);
+        $this->assertNull($latest['result']);
+    }
+
+    /** One killed before its first line of output finished when it started, as far as anything shows. */
+    public function test_a_run_killed_before_any_output_finished_when_it_started(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = ["{$dir}/pid" => '4321'];
+        $fs->mtimes = ["{$dir}/pid" => 1000];
+
+        $this->assertSame(1000, (new EngineUpdate($this->system($fs, 1)))->latest()['finished_at']);
+    }
+
+    /** A live run has not finished, whatever it has written so far. */
+    public function test_a_running_update_has_no_finish_time(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = ["{$dir}/pid" => '4321'];
+        $fs->mtimes = ["{$dir}/pid" => 1000, "{$dir}/stdout" => 1300];
+
+        $latest = (new EngineUpdate($this->system($fs, 0)))->latest();
+
+        $this->assertFalse($latest['failed']);
+        $this->assertNull($latest['finished_at']);
+        $this->assertNull($latest['reason']);
+    }
+
+    /** A target that is the running release changes nothing; the caller is told so, not handed a bare success. */
+    public function test_an_update_with_nothing_newer_says_it_is_up_to_date(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = [
+            "{$dir}/pid" => '4321',
+            "{$dir}/exit_code" => "0\n",
+            "{$dir}/result" => 'up_to_date',
+            "{$dir}/reason" => 'Already up to date: 2.3.0 (b9f8c105) is running and main is the same commit. Nothing was changed.',
+            "{$dir}/from_version" => '2.3.0',
+            "{$dir}/to_version" => '2.3.0',
+        ];
+
+        $latest = (new EngineUpdate($this->system($fs)))->latest();
+
+        $this->assertFalse($latest['failed']);
+        $this->assertSame('up_to_date', $latest['result']);
+        $this->assertSame('Already up to date: 2.3.0 (b9f8c105) is running and main is the same commit. Nothing was changed.', $latest['reason']);
+    }
+
+    /** An older target is refused before anything changed, and the record says why rather than "exit code 1". */
+    public function test_a_refused_downgrade_reports_its_own_reason(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $reason = 'Refusing to install 2.2.0 (main) over the running 2.3.0: it is an older release. Nothing was changed.';
+        $fs->files = [
+            "{$dir}/pid" => '4321',
+            "{$dir}/exit_code" => "1\n",
+            "{$dir}/result" => "refused\n",
+            "{$dir}/reason" => $reason,
+            "{$dir}/from_version" => '2.3.0',
+            "{$dir}/to_version" => '2.2.0',
+        ];
+
+        $latest = (new EngineUpdate($this->system($fs)))->latest();
+
+        $this->assertTrue($latest['failed']);
+        $this->assertSame('refused', $latest['result']);
+        $this->assertSame($reason, $latest['reason']);
+        $this->assertSame('2.2.0', $latest['to_version']);
+    }
+
+    public function test_a_rolled_back_update_reports_it(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = [
+            "{$dir}/pid" => '4321',
+            "{$dir}/exit_code" => '101',
+            "{$dir}/result" => 'rolled_back',
+            "{$dir}/reason" => 'These engine services are not running: core(exited); the previous release was restored',
+        ];
+        $fs->mtimes = ["{$dir}/pid" => 1000, "{$dir}/exit_code" => 1500];
+
+        $latest = (new EngineUpdate($this->system($fs)))->latest();
+
+        $this->assertTrue($latest['failed']);
+        $this->assertSame(101, $latest['exit_code']);
+        $this->assertSame(1500, $latest['finished_at']);
+        $this->assertSame('rolled_back', $latest['result']);
+        $this->assertStringEndsWith('the previous release was restored', $latest['reason']);
+    }
+
+    /** An installer that records no reason still fails with one. */
+    public function test_a_failed_exit_without_a_recorded_reason_names_its_exit_code(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = ["{$dir}/pid" => '4321', "{$dir}/exit_code" => "101\n"];
+        $fs->tails = ["{$dir}/stdout" => ">>> Not enough disk space. Required: 15G, available: 7G\n"];
+
+        $latest = (new EngineUpdate($this->system($fs)))->latest();
+
+        $this->assertSame('the update exited with code 101', $latest['reason']);
+        $this->assertNull($latest['result']);
+    }
+
+    /** A version file left empty is not known, not the empty string. */
+    public function test_empty_record_files_are_null(): void
+    {
+        $fs = new FakeUpdateFilesystem();
+        $dir = EngineUpdate::LOGS_DIR . '/latest';
+        $fs->directories = [$dir];
+        $fs->files = [
+            "{$dir}/exit_code" => '0',
+            "{$dir}/from_version" => "\n",
+            "{$dir}/to_version" => '',
+            "{$dir}/result" => ' ',
+            "{$dir}/reason" => '',
+        ];
+
+        $latest = (new EngineUpdate($this->system($fs)))->latest();
+
+        $this->assertNull($latest['from_version']);
+        $this->assertNull($latest['to_version']);
+        $this->assertNull($latest['result']);
+        $this->assertNull($latest['reason']);
     }
 
     public function test_a_placeholder_within_the_grace_has_not_failed(): void

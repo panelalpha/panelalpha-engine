@@ -7,7 +7,8 @@ use Symfony\Component\Process\Process;
 
 /**
  * Updating the engine: starting `updater.sh` detached through `at`, so nothing here waits for it, and reading back the
- * small files it leaves under `latest` (pid, exit code, output, versions), the only way to report progress.
+ * small files it leaves under `latest` (pid, exit code, output, versions, result, reason), the only way to report
+ * progress.
  */
 final class EngineUpdate
 {
@@ -44,6 +45,7 @@ final class EngineUpdate
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,
@@ -65,6 +67,7 @@ final class EngineUpdate
     /**
      * `started_at` is the mtime of `pid` -- the one file a run writes once, at
      * its start; the `latest` symlink's own time moves whenever it is re-pointed.
+     * A run that died without an exit code finished when it last wrote anything.
      *
      * @return array{
      *   started_at: ?int,
@@ -72,6 +75,7 @@ final class EngineUpdate
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,
@@ -86,37 +90,56 @@ final class EngineUpdate
         $pid = $fs->cat("{$dir}/pid");
         $exitCode = self::exitCode($fs->cat("{$dir}/exit_code"));
         $failed = $exitCode === null ? ! $this->isRunning() : $exitCode !== 0;
-        $tailStdout = self::stripAnsi($fs->tail("{$dir}/stdout", self::TAIL_LINES));
-        $tailStderr = self::stripAnsi($fs->tail("{$dir}/stderr", self::TAIL_LINES));
+        $died = $failed && $exitCode === null;
+        $recordedReason = self::field($fs->cat("{$dir}/reason"));
 
         return [
             'started_at' => $fs->mtime("{$dir}/pid"),
-            'finished_at' => $fs->mtime("{$dir}/exit_code"),
+            'finished_at' => $died ? $this->lastWrite($dir) : $fs->mtime("{$dir}/exit_code"),
             'pid' => is_numeric($pid) ? (int) $pid : null,
             'exit_code' => $exitCode,
             'failed' => $failed,
-            'reason' => $failed ? self::failureReason($exitCode, $pid, $tailStdout, $tailStderr) : null,
-            'tail_stdout' => $tailStdout,
-            'tail_stderr' => $tailStderr,
-            'from_version' => $fs->cat("{$dir}/from_version"),
-            'to_version' => $fs->cat("{$dir}/to_version"),
+            'result' => self::field($fs->cat("{$dir}/result")),
+            'reason' => $recordedReason ?? ($failed ? self::failureReason($exitCode, $pid) : null),
+            'tail_stdout' => self::stripAnsi($fs->tail("{$dir}/stdout", self::TAIL_LINES)),
+            'tail_stderr' => self::stripAnsi($fs->tail("{$dir}/stderr", self::TAIL_LINES)),
+            'from_version' => self::field($fs->cat("{$dir}/from_version")),
+            'to_version' => self::field($fs->cat("{$dir}/to_version")),
             'logs_path' => $dir,
         ];
     }
 
-    /**
-     * Why a failed run failed when neither stream says it: a placeholder that
-     * never became a run has nothing, and a dead process leaves only its pid.
-     */
-    private static function failureReason(?int $exitCode, ?string $pid, ?string $stdout, ?string $stderr): ?string
+    /** When a run that left no exit code last wrote anything: its output, else its start. */
+    private function lastWrite(string $dir): ?int
     {
-        if ($exitCode !== null || trim((string) $stdout) !== '' || trim((string) $stderr) !== '') {
-            return null;
+        $fs = $this->system->filesystem();
+
+        return $fs->mtime("{$dir}/stdout")
+            ?? $fs->mtime("{$dir}/pid")
+            ?? $fs->mtime("{$dir}/".self::PENDING_FILE);
+    }
+
+    /**
+     * Why a failed run failed when it recorded no reason itself: a non-zero exit,
+     * a process that died before writing one, or a job that never started.
+     */
+    private static function failureReason(?int $exitCode, ?string $pid): string
+    {
+        if ($exitCode !== null) {
+            return "the update exited with code {$exitCode}";
         }
 
         return is_numeric(trim((string) $pid))
             ? 'the update process ended without writing an exit code'
             : 'the update job never started';
+    }
+
+    /** A one-line file the run wrote; empty or missing is not known. */
+    private static function field(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
     }
 
     /** A run is over once it has an exit code; a code that is not a number is not one. */

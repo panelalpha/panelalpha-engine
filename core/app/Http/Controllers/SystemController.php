@@ -426,14 +426,21 @@ class SystemController extends Controller
 
     #[OA\Put(
         path: '/system/update',
-        summary: 'Trigger a system update',
+        summary: 'Update the engine to its newest release',
+        description: 'Replaces the engine\'s code with the newest release and restarts the engine stack: API and MCP '
+            .'clients disconnect for about a minute, while hosted sites keep running. It runs in the background and '
+            .'answers at once; read how it ended from `latest_update` in GET /system/info. A release older than the '
+            .'running one is refused (`result: refused`); a newer commit of the running version is installed as an '
+            .'update within the release, and when the newest release is the running commit nothing changes '
+            .'(`result: up_to_date`). A run that fails after replacing the engine\'s files puts the previous '
+            .'release back (`result: rolled_back`); database migrations the new release ran stay.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'license_key', type: 'string', nullable: true)],
+            properties: [new OA\Property(property: 'license_key', type: 'string', nullable: true, description: 'Accepted for older callers; ignored')],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Update initiated', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'The update has started; `data` is its run, still pending', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', ref: '#/components/schemas/EngineUpdateRun')],
             )),
             new OA\Response(response: 409, description: 'An update is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),

@@ -8,6 +8,8 @@ Update when PanelAlpha releases a fix. If a deploy failed for a reason PanelAlph
 
 The update restarts the engine, so a connected assistant will disconnect for under a minute and then reconnect.
 
+An update started from the engine itself (the API, your assistant, or the updater on the server) installs only a newer release than the one running. If the newest release is exactly what you run, the same version from the same commit, it says `Already up to date` and changes nothing. A fix published under the same version number is installed as an update within the release. If it is older, it refuses and changes nothing. If an update fails after it started replacing the engine's files, it puts the previous release back on its own.
+
 ## Before you update to 2.2
 
 Read this if you update from 2.1 or earlier.
@@ -37,6 +39,14 @@ pae system:version
 ```
 
 Write it down. If anything goes wrong, this is the version you ask PanelAlpha to put you back on.
+
+To see whether there is anything newer without changing anything:
+
+```bash
+bash /opt/panelalpha/shared-hosting/updater.sh --check
+```
+
+It prints the running version and the newest release, each with its commit, and whether an update is available.
 
 ### 2. Run the update
 
@@ -73,7 +83,17 @@ curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --versi
 An update is already in progress; only one can run at a time. Wait for it to finish.
 
 **The version number did not change.**
-The update failed or you already had the newest version. The log is in `/opt/panelalpha/log/engine-updates/`. If you start updates from your assistant, the engine information it reads reports a run that never finished as failed, with the reason and the last lines of the updater's output, instead of leaving it looking as if it is still running.
+You already had the newest version (`Already up to date`), the newest release is older than yours (`Refusing to install`), or the update failed. The log is in `/opt/panelalpha/log/engine-updates/`. If you start updates from your assistant, the engine information it reads reports what the last update did, the version it ran on and the version it was installing, and for a run that failed or never finished, the reason and the last lines of the updater's output.
+
+**Support asked me to install an older version, or the same one again.**
+The updater refuses both unless you say so:
+
+```bash
+bash /opt/panelalpha/shared-hosting/updater.sh --version 2.0.1 --allow-downgrade
+bash /opt/panelalpha/shared-hosting/updater.sh --reinstall
+```
+
+Going back to an older version does not undo the changes the newer one made to the engine's own database, so only do it when PanelAlpha asks you to.
 
 **The update stopped with `Failed to fetch`, followed by an address.**
 The updater downloads only over `https` and stops if it cannot, including after a redirect to a plain `http` address. The engine on this VPS was not replaced. Check that the VPS can reach `get.panelalpha.com` over HTTPS, then run the update again.
@@ -90,5 +110,11 @@ Expected while the engine restarts. Most reconnect on their own within a minute;
 **A website broke straight after the update.**
 Updates do not touch running websites, so these are usually unrelated. Ask your assistant: *"This site stopped working. Read its deploy log and tell me what the site is serving."*
 
+**The update failed, and says the previous release was restored.**
+The update stopped after it had started replacing the engine's files, so it put the previous release's files back and restarted the engine on them. Your engine runs the version it ran before. Changes the new release made to the engine's own database stay. Run the update again; if it fails at the same point, contact PanelAlpha with the log from `/opt/panelalpha/log/engine-updates/`.
+
+**An update was interrupted, for example the server rebooted in the middle.**
+Run the update again. It first puts back the release the interrupted run was replacing, then updates.
+
 **I need to go back to the previous version.**
-There is no automatic way back, because the update also changed the engine's own database. Contact PanelAlpha with your old version number and your current one.
+There is no automatic way back from an update that succeeded, because the update also changed the engine's own database. Contact PanelAlpha with your old version number and your current one.

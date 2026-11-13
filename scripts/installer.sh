@@ -10,18 +10,26 @@ yellow_color='\e[33m'
 
 die() {
     exit_code=$?
+    # A second signal must not cut a rollback short.
+    trap '' HUP INT TERM
     if [[ ${exit_code} -ne 0 ]]; then
         echo -e "${yellow_color}${BASH_COMMAND} ${red_color}command failed with exit code ${yellow_color}${exit_code}${default_color}"
     fi
+    ! declare -F rollback_engine_update >/dev/null || rollback_engine_update "$exit_code" || true
     ! declare -F resume_core_background >/dev/null || resume_core_background
     ! declare -F start_core_tenant_network >/dev/null || start_core_tenant_network
     ! declare -F resume_broker_rotation >/dev/null || resume_broker_rotation
+    ! declare -F record_run_outcome >/dev/null || record_run_outcome "$exit_code" || true
     send_update_status "$exit_code" || true
 }
 
 set -e
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
 trap die EXIT
+# Killed without these, the exit trap would see status 0 and take the run for a success.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # A caller's umask 077 (panelalpha-installer.sh sets one) would leave the whole tree
 # root-only, and php-fpm (www-data) then answers every request "File not found".
@@ -149,12 +157,30 @@ HUB_ONLY=0
 HUB_FAILED=0
 HUB_ERROR=''
 HUB_ACCOUNT=''
+# An update installs only a newer release than the running one; these let it
+# install an older one, or the running one again.
+ALLOW_DOWNGRADE="${PANELALPHA_ALLOW_DOWNGRADE:-0}"
+REINSTALL="${PANELALPHA_REINSTALL:-0}"
+# 1 once the files an update replaces are saved: a failure after that puts them back.
+ENGINE_SNAPSHOT_ARMED=0
+# What a rollback after a failure achieved, for the run's record.
+ENGINE_ROLLBACK=''
+ENGINE_ROLLBACK_RESULT=''
+# Set when an update stays on the running version but moves to another commit of it, for the run's record.
+UPDATE_NOTE=''
 
 usage() {
     cat <<'USAGE'
 Usage: bash installer.sh [options]
 
   -v, --version REF        git ref (default: main)
+      --reinstall          on an update, install the target even when it is
+                           the running release (or PANELALPHA_REINSTALL=1)
+      --allow-downgrade    on an update, install the target even when it is
+                           older than the running release (or
+                           PANELALPHA_ALLOW_DOWNGRADE=1). Without either an
+                           update of an engine already at the target changes
+                           nothing, and an older target is refused.
   -host, --hostname HOST   hostname to install under
       --domain FQDN        serve the engine on your own name. Point an A
                            record at this host first; the certificate is
@@ -451,6 +477,14 @@ while true; do
     --software=* | --entry=* | --self-update-url=* | --get-base=* | --background | --no-tui | --no-self-update | --no-script-update | --attach | --ask-email)
         shift
         ;;
+    --reinstall)
+        REINSTALL=1
+        shift
+        ;;
+    --allow-downgrade)
+        ALLOW_DOWNGRADE=1
+        shift
+        ;;
     -h | --help)
         usage
         ;;
@@ -707,6 +741,23 @@ send_update_status() {
 # engine | deploy — TUI two-step chrome for --repo install/update.
 INSTALLER_PHASE=engine
 
+# One field of this run's record in --run-dir, which core reads back as latest_update.
+record_run() { # <name> <value>
+    [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || return 0
+    printf '%s' "$2" >"$RUN_DIR/$1"
+}
+
+# What the run did, beside the exit code the wrapper writes: installed, updated, rolled_back or failed, and why.
+record_run_outcome() { # <exit code>
+    if [ "$1" = 0 ]; then
+        [ "$ENGINE_OP" = update ] && record_run result updated || record_run result installed
+        [ -z "${UPDATE_NOTE:-}" ] || record_run reason "$UPDATE_NOTE"
+        return 0
+    fi
+    record_run result "${ENGINE_ROLLBACK_RESULT:-failed}"
+    record_run reason "$(installer_error_message "$1")${ENGINE_ROLLBACK:+; $ENGINE_ROLLBACK}"
+}
+
 set_installer_phase() {
     INSTALLER_PHASE="$1"
     if [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ]; then
@@ -760,6 +811,7 @@ define_variables() {
     mkdir -p $LOG_DIR
     PANELALPHA_DIR="/opt/panelalpha"
     INSTALL_DIR='/opt/panelalpha/tmp/engine'
+    ENGINE_SNAPSHOT_DIR='/opt/panelalpha/tmp/engine-previous'
 }
 
 detect_distro() {
@@ -1193,13 +1245,18 @@ unzip_panelalpha_engine() {
     if [ ! -d "$INSTALL_DIR/src" ]; then
         echo_error "Engine tree missing under ${INSTALL_DIR}/src (expected a git clone)"
     fi
-    # Before the copy: a file that became a folder, or the other way round,
-    # would stop cp.
-    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
     # The repository's agent setup is for people working on the engine, not for
     # a host, and a .claude/skills folder an older release left cannot take the
     # link this one has. The host's own .claude is host state and stays.
     rm -rf "$INSTALL_DIR/src/.claude"
+    if [ "${ENGINE_OP:-}" = update ]; then
+        snapshot_engine_tree "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting" "$INSTALL_DIR/dropped-files" "$ENGINE_SNAPSHOT_DIR" ||
+            echo_error "Could not save the files the update replaces; the engine was not changed"
+        ENGINE_SNAPSHOT_ARMED=1
+    fi
+    # Before the copy: a file that became a folder, or the other way round,
+    # would stop cp.
+    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
     replace_running_updaters "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
@@ -1232,6 +1289,107 @@ replace_running_updaters() { # <src> <engine dir>
         [ -f "$1/$f" ] && [ -f "$2/$f" ] || continue
         cp --preserve=mode "$1/$f" "$2/$f.new" && mv -f "$2/$f.new" "$2/$f"
     done
+}
+
+# Rewritten by composer after the copy rather than by it, so kept whole.
+ENGINE_REBUILT_DIRS=(core/vendor core/bootstrap/cache)
+
+# Saves what copying <src> over <engine dir> replaces, and no more: every file the copy overwrites or the
+# dropped-file pass may remove, the files and folders the copy adds, and the folders composer rewrites.
+# Host state is not in a release, so storage, users and logs are never copied.
+snapshot_engine_tree() { # <src> <engine dir> <dropped list> <snapshot dir>
+    local path rec dir
+    local -a prune=()
+    rm -rf "$4"
+    mkdir -p "$4/dirs" || return 1
+    : >"$4/replaced"
+    : >"$4/added"
+    : >"$4/added-dirs"
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do prune+=(-path "./$dir" -prune -o); done
+    (cd "$1" && find . -mindepth 1 "${prune[@]}" -print0) | while IFS= read -r -d '' path; do
+        path=${path#./}
+        if [ -d "$1/$path" ] && [ ! -L "$1/$path" ]; then
+            [ -e "$2/$path" ] || [ -L "$2/$path" ] || printf '%s\0' "$path" >>"$4/added-dirs"
+        elif [ -f "$2/$path" ] || [ -L "$2/$path" ]; then
+            printf '%s\0' "$path" >>"$4/replaced"
+        elif [ ! -e "$2/$path" ]; then
+            printf '%s\0' "$path" >>"$4/added"
+        fi
+    done
+    if [ -s "$3" ]; then
+        while IFS= read -r -d '' rec; do
+            path=${rec#* } path=${path#* }
+            case "/$path/" in */../* | */./* | *//*) continue ;; esac
+            engine_host_state "$path" && continue
+            if [ -f "$2/$path" ] || [ -L "$2/$path" ]; then printf '%s\0' "$path" >>"$4/replaced"; fi
+        done <"$3"
+    fi
+    tar -C "$2" --null -T "$4/replaced" -cf "$4/files.tar" || return 1
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do
+        [ -d "$2/$dir" ] || continue
+        mkdir -p "$4/dirs/$(dirname "$dir")" && cp -a "$2/$dir" "$4/dirs/$dir" || return 1
+    done
+    touch "$4/armed"
+}
+
+# Undoes the copy a snapshot was taken for: what it added goes, and what it replaced or removed comes back.
+restore_engine_tree() { # <engine dir> <snapshot dir>
+    local path dir
+    [ -f "$2/armed" ] || return 0
+    while IFS= read -r -d '' path; do
+        rm -f -- "$1/$path"
+    done <"$2/added"
+    sort -zr "$2/added-dirs" | while IFS= read -r -d '' path; do
+        rmdir -- "$1/$path" 2>/dev/null || true
+    done
+    tar -C "$1" -xpf "$2/files.tar" || return 1
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do
+        [ -d "$2/dirs/$dir" ] || continue
+        rm -rf -- "${1:?}/$dir" && mv -- "$2/dirs/$dir" "$1/$dir" || return 1
+    done
+    rm -rf -- "$2"
+}
+
+# From here a rollback restarts the stack on the restored release as well.
+mark_engine_stack_touched() {
+    [ "$ENGINE_SNAPSHOT_ARMED" = 1 ] || return 0
+    touch "$ENGINE_SNAPSHOT_DIR/stack-touched"
+}
+
+# Puts the release a snapshot holds back in place, and its stack once the new release's had started.
+restore_previous_release() {
+    local touched=0
+    [ ! -f "$ENGINE_SNAPSHOT_DIR/stack-touched" ] || touched=1
+    restore_engine_tree "$PANELALPHA_DIR/shared-hosting" "$ENGINE_SNAPSHOT_DIR" || return 1
+    [ "$touched" = 0 ] || start_engine_stack
+}
+
+# A failure after the copy leaves the previous release running, not half of each.
+rollback_engine_update() { # <exit code>
+    [ "$1" != 0 ] && [ "$ENGINE_SNAPSHOT_ARMED" = 1 ] || return 0
+    ENGINE_SNAPSHOT_ARMED=0
+    echo_warning "The update failed after replacing the engine's files; putting the previous release back"
+    if restore_previous_release; then
+        ENGINE_ROLLBACK='the previous release was restored'
+        ENGINE_ROLLBACK_RESULT=rolled_back
+    else
+        ENGINE_ROLLBACK="restoring the previous release failed as well; its files stay in ${ENGINE_SNAPSHOT_DIR} and the next update puts them back first"
+    fi
+    echo_warning "$ENGINE_ROLLBACK"
+}
+
+# An update killed after its copy leaves its snapshot behind, armed: the next one restores it before anything else.
+restore_interrupted_update() {
+    [ -f "$ENGINE_SNAPSHOT_DIR/armed" ] || return 0
+    echo_warning "An earlier update stopped after replacing the engine's files; putting its previous release back first"
+    restore_previous_release ||
+        echo_error "Could not put back the release an earlier update replaced; its files are in ${ENGINE_SNAPSHOT_DIR}"
+}
+
+# The new release runs and has migrated: a later failure leaves it in place rather than roll the code back under it.
+discard_engine_snapshot() {
+    ENGINE_SNAPSHOT_ARMED=0
+    rm -rf "$ENGINE_SNAPSHOT_DIR"
 }
 
 generate_ssl_cert() {
@@ -1765,6 +1923,7 @@ EOF
     # never runs `down`, so on a re-run over an existing install the old
     # host-networked `webserver` would still hold :80/:443 against the new
     # sites-http. Drop the old containers by service label before starting.
+    mark_engine_stack_touched
     remove_renamed_containers
     bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
@@ -2460,6 +2619,67 @@ normalize_version() {
     printf '%s' "$1" | sed -E 's/^[vV]//'
 }
 
+# older, same or newer: a target release against the running one.
+release_order() { # <running> <target>
+    if [ "$1" = "$2" ]; then
+        echo same
+    elif [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; then
+        echo older
+    else
+        echo newer
+    fi
+}
+
+# Stops an update before anything changed. A deliberate stop, so monitoring hears nothing.
+stop_update() { # <exit code> <result> <reason>
+    record_run result "$2"
+    record_run reason "$3"
+    if [ "$1" = 0 ]; then
+        record_run outro "$3"
+        echo_info "$3"
+    else
+        echo -e ">>> ${red_color}$3${default_color}"
+    fi
+    clean_installer
+    trap - EXIT
+    exit "$1"
+}
+
+# Once the clone is in and before the live tree is touched: a newer release, or a newer commit of the running one,
+# is installed; an older release only when allowed, and the very same commit only when asked for again.
+check_update_target() {
+    local running target running_commit target_commit
+    running=$(normalize_version "$(detect_installed_engine_version)")
+    target=$(normalize_version "$(version_from_system_php "$(cat "$INSTALL_DIR/src/core/config/system.php" 2>/dev/null)")")
+    running_commit=$(detect_installed_engine_commit)
+    target_commit=$(printf '%.8s' "$(tr -d '\r\n' <"$INSTALL_DIR/src/version" 2>/dev/null)")
+    record_run from_version "$running"
+    record_run to_version "$target"
+    record_run from_commit "$running_commit"
+    record_run to_commit "$target_commit"
+    [ "$ENGINE_OP" = update ] || return 0
+    [ -n "$target" ] || [ "$ALLOW_DOWNGRADE" = 1 ] ||
+        stop_update 101 refused "Could not read the release version of ${PANELALPHA_ENGINE_VERSION}. Nothing was changed. Pass --allow-downgrade to install it anyway."
+    if [ -z "$running" ]; then
+        echo_warning "Could not read the running engine's version; installing ${target:-the target} without comparing"
+        return 0
+    fi
+    case "$(release_order "$running" "${target:-0}")" in
+    older)
+        [ "$ALLOW_DOWNGRADE" = 1 ] ||
+            stop_update 101 refused "Refusing to install ${target} (${PANELALPHA_ENGINE_VERSION}) over the running ${running}: it is an older release. Nothing was changed. Pass --allow-downgrade to install it anyway."
+        ;;
+    same)
+        if [ -z "$running_commit" ] || [ "$running_commit" != "$target_commit" ]; then
+            UPDATE_NOTE="Updating within ${running}: ${running_commit:-unknown} → ${target_commit:-unknown} (${PANELALPHA_ENGINE_VERSION})"
+            echo_info "$UPDATE_NOTE"
+        elif [ "$REINSTALL" != 1 ] && [ "$UPDATE_ENGINE" != 1 ]; then
+            stop_update 0 up_to_date "Already up to date: ${running} (${running_commit}) is running and ${PANELALPHA_ENGINE_VERSION} is the same commit. Nothing was changed. Pass --reinstall to install it again."
+        fi
+        ;;
+    esac
+}
+
 # Label like "2.0.1 (b9f8c105)" for update messages.
 engine_identity_label() { # product_version short_sha
     local ver="${1:-}" sha="${2:-}"
@@ -2766,6 +2986,10 @@ install | update) ;;
     ;;
 esac
 
+if [ "$ENGINE_OP" = update ]; then
+    restore_interrupted_update
+fi
+
 refuse_engine_v1_to_v2_upgrade
 
 if [ -n "$DEPLOY_REPO" ]; then
@@ -2854,6 +3078,7 @@ update_progress 25 "Download PanelAlpha engine package"
 echo_info "Download PanelAlpha engine package"
 download_panelalpha_engine
 warn_old_host_git
+check_update_target
 
 if [ "$ENGINE_OP" = update ]; then
     update_progress 30 "Preparing PanelAlpha engine images"
@@ -2893,6 +3118,7 @@ else
     echo_info "Installing PanelAlpha engine"
 fi
 install_panelalpha_engine
+discard_engine_snapshot
 
 update_progress 85 "Cleaning installation files"
 echo_info "Cleaning installation files"
