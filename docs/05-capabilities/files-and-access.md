@@ -26,7 +26,7 @@ The file is saved into a directory that already exists. Only an `http` or `https
 List what is in /project on this project.
 ```
 
-The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, or a path that is a file, is refused. A very long folder is cut off after 5000 entries by default, and the answer says so.
+The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, including one that gets out through a link, or a path that is a file, is refused. A very long folder is cut off after 5000 entries by default, and the answer says so.
 
 ```text
 Set the permissions on /project/script.sh to 755.
@@ -57,6 +57,8 @@ with directory /project.
 The directory must already exist inside the project's home: `/project` on a repository-deployed project. On traditional PHP hosting each domain has its own folder, `/<domain>/public_html` (`/shop.example.com/public_html` here), which the domain shows as its `document_root`; there is no `/public_html` at the top. Leave the directory out to give the account the whole home. A folder that does not exist is refused.
 
 An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted.
+
+An SFTP login is the project's name, an underscore and a suffix (`tshop_sftp1`). You can give the suffix alone, and the engine adds the `tshop_` part. The whole login, with that part, is at most 32 characters. Each login is one account: deleting it removes it completely.
 
 An SFTP login can only move files. It cannot open a shell, and it sees only that project's files.
 
@@ -96,10 +98,10 @@ It is looking at the directory it was configured with. Check that against where 
 Your archive had a wrapper folder inside it, so the site's files ended up one level too deep. Repackage it with the files at the top level of the zip.
 
 **Unpacking an archive fails.**
-The answer is a 422 on `zip_path`: `not_found` when no file is there, otherwise the reason the archive was refused or could not be unpacked. Unzip reads a `.zip`, `.tar.gz` or `.tgz`, or `.gz` by its name and refuses any other, such as `.rar` or `.7z`. The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
+The answer is a 422 on `zip_path`: `not_found` when no file is there, otherwise the reason the archive was refused or could not be unpacked. Unzip reads a `.zip`, `.tar.gz`, `.tgz` or `.gz` by its name, in any letter case, and refuses any other, such as `.rar` or `.7z`, with the reason. The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
 
 **Unpacking a zip made on Windows reports a warning about backslashes.**
-Some Windows tools write backslashes between folder names. A zip that says it was made on Windows is unpacked into the right folders, and the warning comes back in `warnings` (in the deploy log for an archive deploy); nothing more to do. A zip that uses backslashes without saying so is refused, because each backslash would end up inside a file name: re-create it with forward slashes, for example with 7-Zip or `tar -a -cf archive.zip <folder>`.
+Some Windows tools write backslashes between folder names. A zip that says it was made on Windows is unpacked into the right folders, and the warning comes back in `warnings` (in the deploy log for an archive deploy); nothing more to do. A zip that uses backslashes without saying so is refused, because each backslash would end up inside a file name: re-create it with forward slashes, for example with 7-Zip or `tar -a -cf archive.zip <folder>`. A zip made on VMS or an Amiga is refused too: re-create it on Windows, macOS or Linux.
 
 ## More requests to try
 
@@ -187,7 +189,7 @@ Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
 login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. The key is one line of a `.pub` file: Ed25519, ECDSA, or RSA of at least 2048 bits. A shorter RSA key is refused as `ssh_key_too_weak`, a DSA key as `ssh_key_type_not_accepted`, and a line whose key data is not a key of its type as `ssh_key_corrupt`. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), a suffix alone gets the prefix added, and a login over 32 characters is refused. After the update the account accepts the key and not the password. The key is one line of a `.pub` file: Ed25519, ECDSA, a security-key form of either, or RSA of at least 2048 bits. A shorter RSA key is refused as `ssh_key_too_weak`, a DSA key as `ssh_key_type_not_accepted`, and a line whose key data is not a key of its type as `ssh_key_corrupt`. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 

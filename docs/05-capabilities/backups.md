@@ -28,8 +28,12 @@ Anywhere else (a plain `/var/backups`, say) lives in the container's writable
 layer and would be lost the next time that container is recreated, while the
 backup rows still point at it, so the engine refuses such a location with a 422
 when you create or change the store. It refuses the engine's own directory,
-`/opt/panelalpha/shared-hosting`, the same way: only the engine's own files may
-be written there, so every backup into it would fail.
+`/opt/panelalpha/shared-hosting`, and anything below it, the same way: only the
+engine's own files may be written there, so every backup into it would fail. It
+also refuses `/opt/panelalpha` and `/var/www/html/storage` themselves, which the
+engine depends on: use a folder below them. **A store that already sits at one of
+these paths refuses every change, a rename included, until you move it** to a
+folder such as `/opt/panelalpha/backups/`.
 
 Keep local stores under `/opt/panelalpha/backups/`. Avoid a folder directly in
 `/home`: every project's home is `/home/<project name>`, so `/home/backups`
@@ -47,13 +51,15 @@ To check the engine can actually reach a remote store before you depend on it:
 Test that backup store.
 ```
 
+When the test fails, the answer says what failed on one line: the kind of store, the host, the folder or bucket, and the reason the storage itself gave. Passwords and keys in it are hidden.
+
 ## Taking a backup
 
 ```text
 Create a backup of this project.
 ```
 
-You get a backup ID and a status. Wait for `completed` - a backup of a large site takes a while. A backup waits for any deploy running on the project, and the other way round.
+You get a backup ID and a status. Wait for `completed` - a backup of a large site takes a while. A backup, a restore, a push and a staging copy never run on the same project at the same time: the second one is refused as busy, and a scheduled backup tries again. A backup or restore stops the app while it works and always starts it again, also when it fails. A long backup or restore shares one time limit across all its steps, so it cannot hang with the app stopped.
 
 You can back up only the files, or only the databases, and add a note to find the backup again later. On a container project, "databases" also covers the stored data volumes.
 
@@ -70,7 +76,7 @@ Restore last backup onto this project.
 
 **A restore overwrites the live project.** Anything created since that backup was taken is gone. Always list the backups and check the date on the one you are about to restore before you confirm it. Your assistant will ask you to confirm; that confirmation is required and not a formality.
 
-On a traditional PHP project, a restore replaces the home folder with the backed-up one and puts the old one back if the restore fails. To keep the files that are there and only write the backed-up ones over them, say so. You can also restore only the databases or only the files, if the backup has them. Choosing parts by volume is for container projects only.
+On a traditional PHP project, a restore replaces the home folder with the backed-up one and puts the old one back if the restore fails. To keep the files that are there and only write the backed-up ones over them, say so. You can also restore only the databases or only the files, if the backup has them. Choosing parts by volume is for container projects only. On a traditional PHP project, a restore that fails puts the databases back as they were, and a restore of a classic WordPress site makes its `wp-config.php` private again.
 
 The parts are chosen with `only` or `exclude`, never both. Each is an object with up to three keys: `files` (true or false), `volumes` (a list of volume names) and `databases` (a list of database names). For example, `only` with `databases` set to the one database name restores just that database.
 
@@ -93,7 +99,7 @@ Back up this project every night at 03:00 into the store local-main, and keep
 the last 14.
 ```
 
-Times are in UTC, not the server's local time. A schedule can run at most once an hour, and the number to keep is from 1 to 365. Only the backups the schedule made are cleaned up when there are more than that. Backups you took yourself are never deleted by it. If the project is busy at the planned time, the engine tries again for up to an hour. A store that a schedule uses cannot be deleted until the schedule is removed or pointed elsewhere.
+Times are in UTC, not the server's local time. A schedule can run at most once an hour, and the number to keep is from 1 to 365. Only the backups the schedule made are cleaned up when there are more than that. Backups you took yourself are never deleted by it. If the project is busy at the planned time, the engine tries again for up to an hour, then skips that run. On the server, `backups:run-scheduled` prints what it did for each schedule that was due. A store that a schedule uses cannot be deleted until the schedule is removed or pointed elsewhere.
 
 To look at the schedule, or turn it off:
 
@@ -201,13 +207,38 @@ the schedule, then try every 10 minutes, then remove it.
 
 Mode: modify to set it, full to remove it. Tools: `backup_schedule_set` with `container`, `cron` and `keep_last`, `backup_schedule_get`, `backup_schedule_delete`, `backup_list` with `kind` scheduled. Check: the schedule reads back in UTC, the 10-minute one is refused as `cron_too_frequent`, and scheduled backups are listed with `kind` scheduled.
 
+**A store in a refused place**
+
+```text
+Create a backup store called bad-store on this host at /opt/panelalpha/shared-hosting/backups.
+```
+
+Mode: modify. Tools: `backup_container_create`. Check: the store is refused with the reason that only the engine's own files may be written there, and nothing is created.
+
+**Restore only some parts**
+
+```text
+Restore only the database <name> from the newest backup of tshop. Then restore
+everything except the volume <name>.
+```
+
+Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores just that database, the second restores all but that volume, and a request that sends both `only` and `exclude` is refused.
+
+**A backup while a push runs**
+
+```text
+Back up tshop while a push to its staging copy is running.
+```
+
+Mode: modify. Tools: `backup_create`, `project_push`, `task_get`. Check: the backup is refused as busy, and works once the push has finished. After any backup the app is running again. Skip when you cannot start both within the push's run time.
+
 **Delete a backup**
 
 ```text
 Delete the oldest backup of tshop.
 ```
 
-Mode: full. Tools: `backup_delete`, `backup_list`. Check: only that backup is gone.
+Mode: full. Tools: `backup_delete`, `backup_list`. Check: only that backup is gone, and a folder the delete leaves empty is removed too. Deleting a local store that holds nothing removes its folder.
 
 ## From the server
 

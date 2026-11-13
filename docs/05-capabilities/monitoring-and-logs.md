@@ -42,7 +42,9 @@ Sweep every project on this engine and tell me which ones are not serving
 themselves properly.
 ```
 
-Suspended projects are skipped, because a site stopped on purpose is not a fault.
+Suspended projects are skipped, and so is a project you stopped on request, because a site stopped on purpose is not a fault. A project whose container is down without you asking is listed, with `stopped` as what it serves.
+
+An application that keeps restarting is reported only once the engine has confirmed the loop, so a single restart during a deploy is not reported.
 
 The check, the six-hourly sweep and the deploy log cover projects that run in their own container. Traditional PHP hosting is not checked this way: open its address, and read its domain logs and PHP error log (section 3).
 
@@ -68,13 +70,13 @@ When the answer is no, it names what it found instead. The common ones:
 
 | What the engine reports | What is actually happening |
 |---|---|
-| `placeholder` | PanelAlpha's own placeholder page. Your application is not being served. |
+| `placeholder` | PanelAlpha's own placeholder page. Your application is not being served. The page answers 404, and the project is reported as not healthy. |
 | `no_application` | Nothing was deployed into the web directory. |
 | `default_page` | The webserver's stock "It works!" page. |
 | `framework_default` | Your framework's blank new-project page. The app runs, but nothing is set up at `/`. |
 | `missing_entry` | No front page found: there is no index file, or the webserver cannot read it. |
 | `directory_listing` | A list of files instead of a page. |
-| `error_page` | Your application is running and returning an error. |
+| `error_page` | Your application is running and returning an error. This includes an error page of the application's own that answers with status 200: it counts as not serving. |
 | `php_error` | A fatal PHP error is on the page. |
 | `blank_page` | Your application answered `/` with an empty page. In PHP this is usually a fatal error the application hides; its container output or debug mode shows it. |
 | `database_error` | The application is up but cannot reach its database. |
@@ -177,7 +179,7 @@ Linux does not scope these two to a container, so an agent that reads them repor
 | `/sys/fs/cgroup/memory.current` | the memory in use now, in bytes |
 | `/sys/fs/cgroup/cpu.stat` | CPU time used (`usage_usec`) |
 
-In an app container, `memory.max` is that service's own limit. A limit above the project's is lowered to fit inside it when the project deploys. A service that sets only a reservation reads `max`, and the project's plan limit still applies to it.
+In an app container, `memory.max` is that service's own limit. The container's memory limit in the project's metrics is the lower of the container's own limit and the project's. A limit above the project's is lowered to fit inside it when the project deploys. A service that sets only a reservation reads `max`, and the project's plan limit still applies to it.
 
 ## 5. Lighthouse - "is it fast?"
 
@@ -220,6 +222,15 @@ Is tshop serving the application itself, or something else?
 ```
 
 Mode: read. Tools: `app_health_check` with `timeout` and `attempts`. Check: the answer separates "something answers" from "it is the application", and says what to do when it is not.
+
+**A project that shows the placeholder**
+
+```text
+Create an empty container project called tempty, then check whether it is
+serving an application.
+```
+
+Mode: modify. Tools: `project_create`, `app_health_check`. Check: the answer says `placeholder`, reports the project as not healthy, and says no application is deployed yet. On the server, `pae project:deploy:check` fails for it too.
 
 **Everything at once**
 

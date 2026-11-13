@@ -6,15 +6,37 @@ This page covers creating, inspecting, rebuilding, copying, suspending, protecti
 
 ## Creating one
 
-Creating a project from a repository *is* the deploy. It is covered in full on [Connecting with Git](connecting-with-git.md). Creating WordPress without a repository, or looking after WordPress you already host, is on [WordPress](wordpress-and-apps.md).
+You can create a project in one request, from where its code comes from. Creating a project from a repository *is* the deploy, and it is covered in full on [Connecting with Git](connecting-with-git.md). Looking after WordPress you already host is on [WordPress](wordpress-and-apps.md).
 
-A new project runs in its own container unless you ask for traditional PHP hosting. For that, say so: "Create it on traditional PHP hosting." The assistant then creates the project with the template `default`.
+A project says where its code comes from. You can ask for any of these:
+
+- **A git repository.** Over HTTPS the assistant asks for a token on a paste page, if the repository is private. Over SSH the engine uses a **deploy key**: the assistant has the engine make the key, shows you its public half, and you add it to the repository as a read-only deploy key. Then the project is created. The private half is kept by the engine and is never shown.
+- **An archive.** A `.zip`, `.tar.gz` or `.tgz`. The assistant either uploads it first, or gives the engine a web address to download it from. An upload nobody uses expires after 24 hours and is deleted.
+- **A copy of another project.** It is made in the background, with its databases if you ask for them. It is the same copy as [Cloning](#cloning).
+- **A new WordPress site.** On traditional PHP hosting, with a title and an administrator name, email and password. The password is never shown again. If the install fails, the project is removed.
+
+```text
+Create a project called tshop from https://example.com/files/shop.tar.gz.
+Create a project called tapp from git@git.example.com:team/app.git. Make a
+deploy key for it first and show me the public half.
+Create a WordPress site called tblog titled "My blog", with admin you@example.com.
+```
+
+A project created with nothing to deploy is an empty container project, unless you ask for traditional PHP hosting: "Create it on traditional PHP hosting." If the request is refused, nothing is created.
+
+An empty container project can be given its code later. Ask for a git repository or an archive as its source, and the engine deploys it:
+
+```text
+Use this repository as the source of tshop.
+```
 
 To see what you already have:
 
 ```text
 List the projects on this engine.
 ```
+
+Projects on traditional PHP hosting are reported as WordPress or as plain PHP. Ask the assistant for the project's app type.
 
 ## Inspecting one
 
@@ -49,6 +71,8 @@ Use it after you change files directly on a project without a repository, after 
 
 A rebuild runs in the background, and so does deploying an uploaded archive. The engine answers the assistant at once and the assistant follows the deploy until it ends, however long the build takes. Asking again while one is still running is refused and points at the one already under way, so a slow deploy is never started twice.
 
+On the server, `pae project:deploy-archive` queues the deploy and follows it. Add `--no-wait` to print the task and return, or `--timeout` to stop watching after that many seconds (1800 by default). Pressing Ctrl-C stops only the printing: the deploy carries on.
+
 A rebuild does not wipe what the application keeps. For applications with a ready-made recipe, the passwords and keys the engine generated and the files people uploaded stay as they were. A project you set up yourself keeps only the storage you declared for it.
 
 A rebuild judges itself on what the site is actually serving afterwards, not merely on whether the process started. So a rebuild that "succeeded" but left a broken page will be marked `partial` and tell you why. See [What the engine checks](monitoring-and-logs.md#what-the-engine-checks).
@@ -69,7 +93,7 @@ Push the staging copy live.
 
 You can push in either direction between the pair - staging to live to release changes, or live to staging to refresh your test copy with real data.
 
-A project can have **one** staging copy, and a staging copy cannot itself have one.
+A project can have **one** staging copy, and a staging copy cannot itself have one. A staging copy is refused while the live project is busy. **A live project that still has a staging copy cannot be deleted:** delete the staging copy first.
 
 **On a traditional PHP project, the copy gets its own databases.** Every MySQL database the project owns is copied into the staging copy, with new database users, new passwords and the same permissions. The staging copy then serves the copied site, not a placeholder page. A database the project does not own is not copied, and the assistant says so. To leave the databases out:
 
@@ -109,7 +133,7 @@ A clone is an independent copy, with no ongoing link and no later push.
 Clone this project.
 ```
 
-It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
+A clone is active as soon as it exists. It copies the files, the stored data, the environment variables and the plan limits. On a traditional PHP project it also copies the MySQL databases, with new users, new passwords and the same permissions, and the clone serves the copied site. To leave the databases out, say so: "Clone this project without its databases." A WordPress site on a traditional PHP project cannot be cloned without them, as for [staging](#staging).
 
 **It does not copy** subdomains, or FTP or SFTP accounts. On a container project it does not copy MySQL databases either: the application's own stored data is copied (unless you ask to leave the databases out, which leaves that data out too), but a database you created for it is not, so create one on the clone. Use clone as a starting template, not as a backup.
 
@@ -166,6 +190,8 @@ Delete this project.
 
 **This removes the entire hosting account** - its database records, its configuration, and its home directory with every file in it. There is no undo. Take a backup first if there is any doubt.
 
+A live project that still has a staging copy is not deleted: delete the staging copy first. A project deleted while a command such as `pae project:rebuild --all` is running is skipped by it, not rebuilt.
+
 ## Environment variables
 
 Environment variables are settings your application reads when it starts: a database connection string, an API key, a mode switch.
@@ -208,7 +234,7 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
-**A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so.
+**A container project's CPU limit applies at once.** It is put on the running project without a rebuild, and removing it gives the running project every CPU of the server again. When the engine's root broker cannot change the running project, the limit is still saved and applies the next time the project's container is recreated; the answer says so. If you changed CPU limits under 2.2.0, run `pae project:cpu-limit:apply --all` once on the server; the update to 2.3.0 runs it for you.
 
 **Every project has a memory limit.** It is at least 6 MB, the least Docker starts a container with, and at least 256 MB for a container project, whose account runs its own Docker: measured, that Docker was stopped for lack of memory at 112 MB and only just ran a small static site at 128 MB. No project may have more than the server's RAM less what is kept for the engine, 512 MB by default; on a 4 GB server that is about 3.3 GB. A project created without a limit gets exactly that maximum. How much memory is free at the moment does not matter: a project is not refused because others are using memory, so projects together can be given more than the server has. Ask for the server's current metrics to see the numbers; they are under `memory_budget`.
 
@@ -241,7 +267,9 @@ On a project deployed into its own container (from a repository, an archive, or 
 Every five minutes, run php artisan schedule:run in the app service of this project.
 ```
 
-The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
+The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A command can be up to 640 bytes. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
+
+On traditional PHP hosting, a `%` in a command now runs as you wrote it.
 
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
@@ -440,6 +468,75 @@ its app service, show me what it wrote after two minutes, then delete it.
 ```
 
 Mode: full. Tools: `container_list`, `cron_job_create`, `cron_job_list`, `file_download`, `cron_job_delete`. Check: the job lists with `service: app`, `~/.panelalpha/cron/cron.log` in the project's home shows a `start` and an `exit 0` line for it, and a job without a service is refused with the reason.
+
+**Create from an archive address**
+
+```text
+Create a project called tarch from the archive at <a web address of a .tar.gz or .zip that holds a small static site>. Follow the deploy and open the site.
+```
+
+Mode: modify. Tools: `project_create` with an archive source and `url`, `task_get`. Check: the project is created as a container project, the deploy completes, the site answers, and an address that is not http or https is refused with nothing created.
+
+**Create from git over SSH with a deploy key**
+
+```text
+Create a project called tapp from git@git.example.com:team/app.git. Make a deploy
+key first and show me the public half. I will add it to the repository, then you
+create the project.
+```
+
+Mode: modify. Tools: `vault_deploy_key_create`, `project_create` with a git source and a deploy key. Check: the assistant shows only the public key and waits for you, the private half is never printed, and an SSH address without a deploy key is refused with the reason. Skip when you have no repository that takes a deploy key.
+
+**Upload an archive first**
+
+```text
+Upload the archive <file> to the engine without creating a project yet. Show me
+when the upload expires, then delete it.
+```
+
+Mode: modify for the upload, full for the delete. Tools: `upload_create`, `upload_get`, `upload_delete`. Check: the upload reads back with its file name and an expiry about 24 hours away, a name that does not end in .zip, .tar.gz or .tgz is refused, and after the delete `upload_get` finds nothing.
+
+**Copy a project in one request**
+
+```text
+Create tcopy as a copy of tshop, without its databases.
+```
+
+Mode: modify. Tools: `project_create` with a project source, `task_get`. Check: the copy runs in the background and finishes as a task, the copy has the files and limits of tshop, and a name that is taken is refused with nothing created.
+
+**WordPress in one request**
+
+```text
+Create a WordPress site called tblog on traditional PHP hosting, titled "Test
+blog", with administrator you@example.com. Send the password on a paste page.
+```
+
+Mode: modify. Tools: `project_create` with a WordPress source, `task_get`. Check: the site opens, the administrator can sign in, and the password is not repeated in the answer.
+
+**Give an empty project its code**
+
+```text
+Create an empty project called tempty. Then use the archive at <address> as its
+source.
+```
+
+Mode: modify. Tools: `project_create`, `project_source_set`, `task_get`. Check: the empty project is a container project, the source is deployed, and the same request on a traditional PHP project is refused.
+
+**A cron job in a service, refused before the first deploy**
+
+```text
+On the empty container project tempty, add a cron job that runs date every minute.
+```
+
+Mode: full. Tools: `cron_job_create`. Check: the job is refused, with the reason that the project has not been deployed yet.
+
+**Staging and delete order**
+
+```text
+Make a staging copy of tshop. Then try to delete tshop.
+```
+
+Mode: full. Tools: `project_staging`, `project_delete`. Check: the delete of the live project is refused and says to delete the staging copy first; deleting the staging copy and then tshop works.
 
 **Delete**
 

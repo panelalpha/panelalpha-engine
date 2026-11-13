@@ -45,11 +45,13 @@ Rename the database shop on this project to store.
 
 The new name gets the project's prefix, like any new database. The data is moved, every user keeps the access it had, and the old name disappears. If anything fails along the way, the old database is kept as it was. Update your application to the new prefixed name afterwards, and rebuild.
 
-The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused.
+A database that holds only tables is renamed in one quick step. **A database that also holds views, triggers, stored routines or events is copied instead, and for that time its users lose access to the old name and their open connections are closed.** A write from your application during the copy fails with an error, so nothing is lost without a sign. Access is put back if the rename fails. Do it when the site is quiet.
+
+The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused. So is a rename while a push between the project and its staging copy is running, and a push while a rename is running.
 
 ## Copies of a project
 
-On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
+On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A table push ignores a difference in AUTO_INCREMENT counters, so tables that differ only in that are not listed. A push with an empty list of tables is refused: leave the list out to push the whole database. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
 
 ## Limits
 
@@ -148,6 +150,32 @@ shopuser may do on store.
 ```
 
 Mode: full. Tools: `mysql_database_rename` with `new_dbname`, `task_get`, `mysql_database_list`, `mysql_privileges_get`. Check: the rename runs as a task, the new name has the project's prefix, shopuser keeps its access on the new name, and the old name is gone. On a container project the application's own database (ending in `app`) is refused.
+
+**Rename and push do not overlap**
+
+```text
+Rename the database shop on tphpsite to store while a push to its staging copy
+is running.
+```
+
+Mode: full. Tools: `mysql_database_rename`, `project_push`, `task_get`. Check: while the push runs the rename is refused as busy, and the other way round. Skip when you cannot start both within the push's run time.
+
+**Push selected tables**
+
+```text
+Push only the table <table> of the database <db> from tphpsite to tphpstage.
+Then try to push with an empty list of tables.
+```
+
+Mode: modify. Tools: `project_push` with `tables`. Check: only that table is replaced on the other side, and the empty list is refused with nothing replaced.
+
+**Database size**
+
+```text
+How big is each database of tshop?
+```
+
+Mode: read. Tools: `mysql_database_list`. Check: a database that holds data reports a size above 0, not 0.
 
 **Remove**
 
