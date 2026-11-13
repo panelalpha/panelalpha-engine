@@ -177,6 +177,8 @@ You can read the mode, switch rulesets on and off, write your own rules, and rea
 Read the ModSecurity audit log and tell me which rule blocked this request.
 ```
 
+The assistant reads the 10 newest entries unless you ask for more, up to 500 at a time.
+
 Disabling ModSecurity entirely to fix one form is a large step backwards for a small problem.
 
 ## Keep the engine updated
