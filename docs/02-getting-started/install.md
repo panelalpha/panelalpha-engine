@@ -282,8 +282,8 @@ You have not restarted the engine. Do all three steps in [Change a setting](#cha
 **It still shows the old value after restarting.**
 Restart once more and check again. If it is still wrong, you edited the wrong file. Make sure it was `.env-core`, not `.env`.
 
-**My browser keeps asking me to sign in on port 2011.**
-The engine's session cookie is `Secure`, so it works only over `https`. Open the engine on its `https://` address. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove the line and reload the engine as in [Change a setting](#change-a-setting).
+**A paste page for a secret will not save.**
+The page keeps a `Secure` cookie, so it works only over `https`. Open the link on its `https://` address. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove the line, reload the engine as in [Change a setting](#change-a-setting), then open the link again.
 
 **I changed `APP_URL` and my assistant stopped connecting.**
 The new address has to be one your certificate covers and one your computer can reach. Put the old value back, then sort the certificate out first: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md).

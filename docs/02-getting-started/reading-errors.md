@@ -13,7 +13,7 @@ If PanelAlpha already knows the fix for this failure, the deploy log ends with `
 
 ## Codes and hints
 
-Every failure, warning and refusal also carries a short, stable **code**, such as `host_refused`, and a list of **hints**: what to do next. Your assistant reads both and can act on them. On the server, `pae project:deploy:log <project>` and `pae project:create` print each sentence followed by the commands that act on it. The sentence can change between releases. The code does not, so quote the code when you ask for help.
+Every failure, warning and refusal also carries a short, stable **code**, such as `host_disk_low`, and a list of **hints**: what to do next. Your assistant reads both and can act on them. On the server, `pae project:deploy:log <project>` and `pae project:create` print each sentence followed by the commands that act on it. The sentence can change between releases. The code does not, so quote the code when you ask for help.
 
 Come back here when you want to look up the sentence yourself. If none of the rows below match, the log usually says `A build step failed (exit code N)`. That means the engine did not recognise the cause, not that there is no cause. The command that failed is in the log just above it. This page is the common wording, not every sentence the engine can produce.
 
@@ -54,7 +54,7 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 
 | The message | What it means | What to do |
 |---|---|---|
-| The container runtime is not running on the engine host | The runtime the engine starts projects with is stopped, so no project can start or build. The deploy is refused before it starts. A project that lost its connection to it says the same, with "function not implemented" in its log. | Restart the runtime as `root` on the VPS, then deploy again. In the second case, recreate the project's container first. |
+| `sysbox is not running on the engine host` | The runtime the engine starts projects with is stopped, so no project can start or build. The deploy is refused before it starts. A project that lost its connection to it says the same, with "function not implemented" in its log. | Restart the runtime as `root` on the VPS, then deploy again. In the second case, recreate the project's container with `pae project:dind:recover --project=<name> --recreate`. |
 
 ```bash
 systemctl restart sysbox
@@ -98,7 +98,7 @@ systemctl restart sysbox
 
 ## The site is up but the page is wrong
 
-If your deploy **succeeded** and the page is still wrong - a placeholder, a directory listing, someone else's welcome page, a PHP error - that is not a build failure and it will never appear here. The build worked.
+If your deploy **succeeded** and the page is still wrong (a placeholder, a directory listing, someone else's welcome page, a PHP error), that is not a build failure and it will never appear here. The build worked.
 
 The "Project not configured" page is the engine's own placeholder for a repository it could not recognise. It answers 404 on every address, so the project counts as not healthy and the deploy does not report plain success. An app's own error page served with a 200 counts as not serving, too. A project of the general build (Railpack) shows the placeholder after a rebuild that did not ask for Railpack again: [How detection works](../07-supported-projects/how-detection-works.md).
 

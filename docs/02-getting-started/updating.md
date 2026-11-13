@@ -21,7 +21,7 @@ An update installs only a newer release than the one running. This holds for an 
 - Docker is restarted only when its firewall chains are missing, for example after something cleared the server's firewall rules.
 - The webserver for your sites is restarted only when its configuration changed.
 - The engine's own certificate is not requested again unless it is due for renewal.
-- While the engine's database is being migrated, its scheduler and background workers wait, then carry on. No job runs half across the change.
+- While the engine's database is being migrated, its scheduler and background workers wait, so no job runs new code against the old database.
 
 **Existing projects are brought up to date too.** When a release changes how projects are set up, the update applies it to the projects you already have: CPU limits on running containers, the web server settings of traditional PHP hosting projects, the permissions of `wp-config.php`, read-only configuration mounts and clean-up of old address maps. You do nothing. If one of these steps fails for some project, the update still finishes and prints a warning that names the command to run again, for example `pae projects:wp-config:restrict --all`.
 
@@ -34,16 +34,16 @@ An update that fails after it started replacing the engine's files puts the prev
 
 Once the new release is running and has migrated, a later failure leaves the new release in place instead of taking the code back from under its database.
 
-Every update is recorded with the versions it moved between, how it ended and why. The engine information your assistant reads shows the last run. It ends as one of `updated`, `up_to_date`, `rolled_back`, `refused` or `failed`.
+Every update is recorded with the versions it moved between, how it ended and why. The engine information your assistant reads shows the last run. Its result is one of `installed`, `updated`, `up_to_date`, `refused`, `rolled_back` or `failed`.
 
 ## Before you update to 2.3
 
 Read this if you update from 2.2 or earlier.
 
-- **Browser sessions on port 2011 end once.** The engine's session cookie is now host-locked and `Secure`, so any browser signed in to `https://…:2011` is asked to sign in again after the update. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove that line: with it, a browser refuses the new cookie and cannot stay signed in. [Change a setting](install.md#change-a-setting) shows how.
+- **A paste page opened before the update must be opened again.** The engine's browser cookie on port 2011 changed, so a paste page for a secret that was already open cannot be saved. Open its link again. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove that line: with it, browsers refuse the new cookie and no paste page can be saved. [Change a setting](install.md#change-a-setting) shows how.
 - **The engine has a new container, the root broker.** It does every step that needs root, so the engine's own container no longer has `sudo` or the Docker socket. It has its own memory cap, 4 GB by default: [Install](install.md#memory-the-engine-keeps-for-itself). How it protects the server: [Security](../05-capabilities/security.md).
 - **The engine's scripts and settings files must belong to root and not be writable by anyone else.** The installer sets this. If you changed ownership or permissions by hand, the broker refuses the file and the message names the `chown` and `chmod` that fix it.
-- **A Railpack project must ask for Railpack again.** The general build is no longer chosen on its own, and the choice is not saved. Each redeploy of a project first deployed with Railpack has to ask for it again, or the project needs a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A failed Railpack redeploy keeps the running app online.
+- **A Railpack project must ask for Railpack again.** The general build is no longer chosen on its own, and the choice is not saved. Each redeploy of a project first deployed with Railpack has to ask for it again. A push to your git host cannot ask, so it replaces such a project with the "Project not configured" page. Before you update, give these projects a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A failed Railpack redeploy keeps the running app online.
 - **A project the engine could not recognise answers 404.** Its "Project not configured" page now carries that status and counts as not serving. Software that checks a project's address will see the change.
 
 ## Before you update to 2.2

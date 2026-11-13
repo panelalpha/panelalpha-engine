@@ -12,7 +12,7 @@ What you should see: progress in the chat, then a web address to open.
 
 ## What happens after you ask
 
-**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down. The deploy log says what this stage is doing: creating the project's folders and user, writing its compose file, starting its container and waiting for its own Docker to answer and setting its disk quota. If that Docker is slow to answer, the log warns and the deploy goes on.
+**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down. The deploy log names each step as it starts: the project's folders and user, its compose file, its container and its disk quota. It also says how long the project's own Docker took to answer. If it never answers, the log warns and the deploy goes on.
 
 **2. The engine fetches the code.** For git, it clones the repository and fetches its submodules. A submodule that cannot be fetched fails the deploy, and the message says why. For a zip, it unpacks the files you pointed at. A private repository needs a git token first, pasted on a page the assistant sends you, not in the chat: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
@@ -26,7 +26,7 @@ What you should see: progress in the chat, then a web address to open.
 
 If the project needs a database or another service that does not come up healthy, the deploy fails and quotes what that service's own health check answered, so a wrong password or a slow start is named instead of only the start-up output.
 
-**What counts as serving.** A page that answers with an error does not count, and neither does an app that answers once and then keeps restarting: the engine confirms a restart loop before it reports one. An app's own error page served with a success code (200) counts as not serving. So does the engine's "Project not configured" page, which shows when it could not recognise the repository. That page now answers 404 on every address, and the project counts as not healthy.
+**What counts as serving.** A page that answers with an error does not count, and neither does an app that answers once and then keeps restarting: the engine confirms a restart loop before it reports one. An app's own error page served with a success code (200) counts as not serving. So does the engine's "Project not configured" page, which shows when it could not recognise the repository. That page answers 404 on every address, and the project counts as not healthy.
 
 If nothing answered, or the hostname cannot be opened from the internet, the deploy finishes as **partial** rather than successful and says in plain sentences what is wrong. See [Monitoring and logs](../05-capabilities/monitoring-and-logs.md) and [When a deploy fails](what-happens.md).
 
@@ -36,7 +36,9 @@ If nothing answered, or the hostname cannot be opened from the internet, the dep
 systemctl restart sysbox
 ```
 
-**Railpack only when asked.** The general build, Railpack, is never chosen on its own. Ask for it in the request, for example `Deploy https://github.com/org/app as railpack`. The choice is not saved: a rebuild has to ask again, or the repository needs a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A Railpack rebuild that fails leaves the running app as it was.
+**Railpack only when asked.** The general build, Railpack, is never chosen on its own. Ask for it in the request, for example "Deploy https://github.com/org/app on this PanelAlpha Engine with Railpack." The choice is not saved, so every redeploy has to ask for it again. A Railpack redeploy that fails leaves the running app as it was.
+
+**A push to your git host cannot ask for Railpack, so it replaces a Railpack project with the "Project not configured" page.** For such a project, give the repository a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md).
 
 ## What you do next
 
