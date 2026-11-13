@@ -27,7 +27,7 @@ Not deployable usually means the project is a library, or it has no file that st
 
 A repository that has moved to another address is refused: the engine does not follow redirects. Give it the new address.
 
-**.NET** projects are read as the .NET SDK reads them: the SDK version comes from `global.json` (`sdk.version`, or `tools.dotnet`), and the target framework from the projects in the solution and any `Directory.Build.props` above them. Desktop apps, libraries, tests and console programs are not claimed, because none of them serves a website. A .NET Framework web app is refused, since the engine runs only modern .NET.
+**.NET** projects are read as the .NET SDK reads them: the SDK version comes from `global.json` (`sdk.version`, or `tools.dotnet`), and the target framework from the projects in the solution and any `Directory.Build.props` above them. Desktop apps and libraries are not claimed, because neither serves a website. A .NET Framework web app is refused, since the engine runs only modern .NET.
 
 If it lists more than one way to run the project, you can choose:
 

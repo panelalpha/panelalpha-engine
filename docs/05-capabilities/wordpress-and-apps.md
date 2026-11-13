@@ -364,25 +364,14 @@ List the application passwords of the WordPress user admin on tphpwp.
 
 Mode: read. Tools: `wp_app_password_list`. Check: each entry has a name and a creation date, and no hash or secret.
 
-**Roundcube webmail**
+**Postmill**
 
 ```text
-Deploy https://github.com/roundcube/roundcubemail as the project troundcube,
-with ROUNDCUBE_IMAP_HOST and ROUNDCUBE_SMTP_HOST set to mail.example.com.
-Tell me when its login page opens.
+Deploy https://github.com/postmill-ai/postmill-app as the project tpostmill and
+tell me when its site answers.
 ```
 
-Mode: modify. Tools: `project_create` with the environment variables, `task_get`. Check: the first page is Roundcube's login, and the project has its own database. Skip it where no mail server is at hand: the login page still opens.
-
-**Postmill and OpenCart**
-
-```text
-Deploy https://github.com/postmill-ai/postmill-app as the project tpostmill. Then deploy
-https://github.com/opencart/opencart from its default branch, and after that
-from its 4.1.x.x branch.
-```
-
-Mode: modify. Tools: `source_inspect`, `project_create`, `task_get`. Check: Postmill comes up with its own Redis and a migrated database. The OpenCart default branch fails with a message that names the 4.1.x.x branch, and that branch deploys.
+Mode: modify. Tools: `source_inspect`, `project_create`, `task_get`. Check: Postmill comes up with its own Redis and a migrated database, and its pages load without errors. Roundcube and OpenCart are covered on [Project types](../07-supported-projects/project-types.md#real-applications-to-try).
 
 **Import a WordPress site**
 

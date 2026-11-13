@@ -36,7 +36,7 @@ If nothing answered, or the hostname cannot be opened from the internet, the dep
 systemctl restart sysbox
 ```
 
-**Railpack only when asked.** The general build, Railpack, is never chosen on its own. Ask for it in the request, for example "Deploy https://github.com/org/app on this PanelAlpha Engine with Railpack." The choice is not saved, so every redeploy has to ask for it again. A Railpack redeploy that fails leaves the running app as it was.
+**Railpack only when asked.** The general build, Railpack, is never chosen on its own. Ask for it in the request, for example `Deploy https://github.com/org/app as railpack`. The choice is not saved, so every redeploy has to ask for it again. A Railpack redeploy that fails leaves the running app as it was.
 
 **A push to your git host cannot ask for Railpack, so it replaces a Railpack project with the "Project not configured" page.** For such a project, give the repository a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md).
 
