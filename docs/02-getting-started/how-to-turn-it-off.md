@@ -54,6 +54,8 @@ Leave the value empty, then restart the engine. Reports are still produced and r
 
 **It does not affect the error messages you rely on.** The plain-sentence explanations in your deploy logs are produced locally and have nothing to do with telemetry: [Reading errors](reading-errors.md).
 
+**It does not stop the installer's own report.** The one short report the installer sends when an install or update finishes does not depend on this setting: [What it contains](what-is-collected.md#the-installers-own-report).
+
 **It does not disable on-demand health checks.** The scheduled six-hourly sweep is telemetry, so it stops when sending is fully off. Checking a site yourself still works:
 
 ```bash

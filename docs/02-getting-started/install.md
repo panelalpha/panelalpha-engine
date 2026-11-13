@@ -20,7 +20,7 @@ You need a VPS that meets all five:
 
 The installer checks the operating system and refuses anything else. It does not check the rest, so check them yourself.
 
-> **Why the VPS has to be brand new.** The installer takes the machine over: it installs Docker, a firewall and a watchdog, and it takes over how the machine looks up domain names. That is fine on an empty VPS and destructive on one already doing a job. Do not use your laptop, a VPS already running a website or control panel, or anything you would mind reinstalling.
+> **Why the VPS has to be brand new.** The installer takes the machine over: it installs Docker, a firewall and a watchdog, turns on disk quota and mounts `/home` with `nosuid,nodev` (see [Troubleshooting](#troubleshooting)), and it takes over how the machine looks up domain names. That is fine on an empty VPS and destructive on one already doing a job. Do not use your laptop, a VPS already running a website or control panel, or anything you would mind reinstalling.
 
 **No public IPv4 address?** The engine still works, but the install command is different. Read [Troubleshooting](#troubleshooting) before you install.
 
@@ -58,8 +58,8 @@ When it finishes, it prints the web address of your new site (it starts with `ht
 | `--git-token TOKEN` | Access token that lets the installer read a private repository. Without it, a private or missing repository is refused before the install starts. |
 | `--password PASS` | Site password for the new project. |
 | `--no-password` | Do not set a site password on the project. |
-| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end; `--hub-code` goes to the panel, which connects itself to PanelAlpha Hub on its first start (the engine is not connected). No site password is set unless you pass `--password`. Give it only to an application you trust with the whole server. |
-| `--env-var KEY=VALUE` | An environment variable for the project. Repeat it for more. The value is never printed. |
+| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end. No site password is set unless you pass `--password`. It needs `--repo`. Give it only to an application you trust with the whole server. |
+| `--env-var KEY=VALUE` | An environment variable for the project. Repeat it for more. It needs `--repo`, and the value is never printed. |
 
 If the deploy fails, the engine is still installed and usable. The installer prints what went wrong. Deploy again from the VPS:
 
@@ -107,6 +107,8 @@ Most VPS installs never need this. Come here to change the address your assistan
 
 All settings live in `/opt/panelalpha/shared-hosting/.env-core`. There is a second file next to it called `.env`. That one holds internal passwords. **Do not edit it** unless PanelAlpha support asks you to.
 
+**Keep the file owned by root and not writable by anyone else.** The same goes for the engine's scripts, `.env` and compose files in that folder. The installer sets this, and the engine refuses a file that fails it, with a message that names the `chown` and `chmod` that fix it. Editing in `nano` as `root` keeps it as it is.
+
 **Editing the file does nothing on its own.** The engine reads its settings when it starts, so your change sits there doing nothing until you tell it to reload.
 
 **1. Open the file.**
@@ -127,9 +129,13 @@ Copy that line exactly. The API picks up the change on its next request. Backgro
 
 **3. Check it worked.** For telemetry, `pae telemetry:status`. For what the assistant is allowed to do, `pae mcp:tool:list`. If it still shows the old value, the restart did not take. Run step 2 again.
 
-`APP_URL` is the address your AI assistant uses to reach the engine, including the port, for example `APP_URL=https://panel.example.com:2011`. The installer sets this for you and keeps it up to date whenever the engine gets a certificate for a new name. You only need to touch it if you are changing that address yourself. The new address has to be one your certificate covers and one your computer can reach.
+`APP_URL` is the address people and software reach the engine on, including the port, for example `APP_URL=https://panel.example.com:2011`. Your AI assistant connects to it, and the link the WordPress migrator plugin calls back on is built from it, so a wrong value breaks WordPress imports. The installer sets this for you and keeps it up to date whenever the engine gets a certificate for a new name. You only need to touch it if you are changing that address yourself. The new address has to be one your certificate covers and one your computer can reach.
 
 What the assistant is allowed to do lives in the same file: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do). To stop telemetry, the usual command does not need this file: [How to turn telemetry off](how-to-turn-it-off.md).
+
+## Memory the engine keeps for itself
+
+The engine runs as several containers, each with a memory cap. By default the engine's own container may use 6 GB (`MEM_LIMIT_CORE`) and the root broker 4 GB (`MEM_LIMIT_ROOT_BROKER`, with `MEMSWAP_LIMIT_ROOT_BROKER` for its swap). They are caps, not memory set aside, so a quiet engine uses far less. They sit in `/opt/panelalpha/shared-hosting/.env`, the file with the internal settings, so change one only when PanelAlpha support asks you to. Count them when you plan the VPS's memory beside your projects.
 
 ## Outgoing email
 
@@ -217,7 +223,7 @@ The engine itself is up. Read the message at the end of the install, or run `pae
 The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It does this with its own service, `panelalpha-quota`, which turns quota back on at every boot before Docker starts the projects and keeps the limits already set; `/etc/fstab` is not changed, and a quota option an older version added there is left as it is. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
 
 **The project homes are mounted `nosuid,nodev`.**
-The installer mounts `/home` with those two options, so a file a project leaves in its home can never run as a privileged program or act as a device on the server. Applications in projects are not affected. It does this with its own service, `panelalpha-home-mounts`, which runs at every boot before Docker starts the projects; `/etc/fstab` is not changed. When `/home` is a folder on the system disk, the service mounts it onto itself with the two options; when it is a disk of its own, the service remounts that disk with them. `systemctl status panelalpha-home-mounts` shows whether it worked. The uninstaller removes the service.
+The installer mounts `/home` with those two options, so a file a project leaves in its home can never run as a privileged program or act as a device on the server. Applications in projects are not affected. It does this with its own service, `panelalpha-home-mounts`, which runs at every boot before Docker starts the projects; `/etc/fstab` is not changed. When `/home` is a folder on the system disk, the service mounts it onto itself with the two options; when it is a disk of its own, the service remounts that disk with them. `systemctl status panelalpha-home-mounts` shows whether it worked. To leave `/home` as it is, run the installer with `PANELALPHA_HOME_HARDENING=0` set, for example `curl --proto '=https' -fsSL https://get.panelalpha.com/engine | PANELALPHA_HOME_HARDENING=0 sh`. The uninstaller removes the service.
 
 **A container project's disk limit and its own Docker storage.**
 Disk quota counts the files a project writes as its own user. The images and build layers of a container project are written by its own Docker, which quota does not count. The engine covers that during a deploy instead: it measures every 15 seconds, and stops the deploy when the project passes its disk limit or the server falls below `DEPLOY_HOST_MIN_FREE` (3G by default). It then clears the project's unused Docker storage. A running application that grows its own data after the deploy is still bounded only by quota.
@@ -275,6 +281,9 @@ You have not restarted the engine. Do all three steps in [Change a setting](#cha
 
 **It still shows the old value after restarting.**
 Restart once more and check again. If it is still wrong, you edited the wrong file. Make sure it was `.env-core`, not `.env`.
+
+**My browser keeps asking me to sign in on port 2011.**
+The engine's session cookie is `Secure`, so it works only over `https`. Open the engine on its `https://` address. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove the line and reload the engine as in [Change a setting](#change-a-setting).
 
 **I changed `APP_URL` and my assistant stopped connecting.**
 The new address has to be one your certificate covers and one your computer can reach. Put the old value back, then sort the certificate out first: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md).

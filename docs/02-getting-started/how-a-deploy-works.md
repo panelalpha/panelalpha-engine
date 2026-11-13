@@ -12,7 +12,7 @@ What you should see: progress in the chat, then a web address to open.
 
 ## What happens after you ask
 
-**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down.
+**1. A project is created.** A project is one application or website on your VPS. It gets its own isolated container, so a broken app cannot take the others down. The deploy log says what this stage is doing: creating the project's folders and user, writing its compose file, starting its container and waiting for the Docker inside it and setting its disk quota. If that Docker is slow to answer, the log warns and the deploy goes on.
 
 **2. The engine fetches the code.** For git, it clones the repository and fetches its submodules. A submodule that cannot be fetched fails the deploy, and the message says why. For a zip, it unpacks the files you pointed at. A private repository needs a git token first, pasted on a page the assistant sends you, not in the chat: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
@@ -26,7 +26,17 @@ What you should see: progress in the chat, then a web address to open.
 
 If the project needs a database or another service that does not come up healthy, the deploy fails and quotes what that service's own health check answered, so a wrong password or a slow start is named instead of only the start-up output.
 
+**What counts as serving.** A page that answers with an error does not count, and neither does an app that answers once and then keeps restarting: the engine confirms a restart loop before it reports one. An app's own error page served with a success code (200) counts as not serving. So does the engine's "Project not configured" page, which shows when it could not recognise the repository. That page now answers 404 on every address, and the project counts as not healthy.
+
 If nothing answered, or the hostname cannot be opened from the internet, the deploy finishes as **partial** rather than successful and says in plain sentences what is wrong. See [Monitoring and logs](../05-capabilities/monitoring-and-logs.md) and [When a deploy fails](what-happens.md).
+
+**Refused before it starts.** A deploy is refused up front when the container runtime the engine starts projects with is not running on the host, because no project container could start or build. The message says so and names the fix. Run this on the VPS as `root`, then deploy again:
+
+```bash
+systemctl restart sysbox
+```
+
+**Railpack only when asked.** The general build, Railpack, is never chosen on its own. Ask for it in the request, for example `Deploy https://github.com/org/app as railpack`. The choice is not saved: a rebuild has to ask again, or the repository needs a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A Railpack rebuild that fails leaves the running app as it was.
 
 ## What you do next
 
@@ -34,7 +44,7 @@ Open the address in a browser.
 
 - **It opens and looks right.** The first deploy is done. Add your own domain, take a backup, or make a test copy: [Looking after your project](looking-after-your-project.md).
 - **The address ends in `.local`.** Nobody on the internet can open that project. The application is fine; it has no public name. Point DNS at your VPS, then add a domain: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md).
-- **The deploy failed, or came back "partial".** [When a deploy fails](what-happens.md).
+- **The deploy failed, or came back "partial".** [When a deploy fails](what-happens.md). Each failure, warning and refusal carries a short code and a list of what to do next, which your assistant reads and acts on: [Codes and hints](reading-errors.md#codes-and-hints).
 - **It opens but is not your application** (a placeholder, a directory listing, an error page). Ask:
 
 ```text
@@ -71,3 +81,31 @@ List the recent deploys of this project and show the log of the last failed one.
 ```
 
 Each deploy is listed with its result, the branch and commit, and what started it: your assistant, your own software through the API, a command on the server, or a push to your git host.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Examples assume a repository project named `tshop`.
+
+**Why a deploy failed, and what to do next**
+
+```text
+The last deploy of tshop failed. Read its log, tell me the code and the reason, and list what I can do about it.
+```
+
+Mode: read. Tools: `deploy_list`, `deploy_log_get` or `deploy_log_read`. Check: the answer quotes the failure sentence and its code, and lists the next steps the log gives, not guesses of its own.
+
+**A project that serves the placeholder**
+
+```text
+tshop does not open properly. Check what it is serving and whether the engine counts it as healthy.
+```
+
+Mode: read. Tools: `app_health_check`, `project_inspect`. Check: for a project the engine could not recognise, the answer says it serves the "Project not configured" page with a 404 and that this is not healthy, and it names a way to fix it, such as adding a `Dockerfile`.
+
+**The preparing stage in the log**
+
+```text
+Deploy https://github.com/org/app as tshop and show me what the preparing stage did in the deploy log.
+```
+
+Mode: modify. Tools: `project_create`, `task_get`, `deploy_log_get`. Check: the log lists the account folders, the compose file and the wait for the account's Docker before the build starts.

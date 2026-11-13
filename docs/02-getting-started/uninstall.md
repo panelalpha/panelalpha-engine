@@ -12,6 +12,8 @@ bash /opt/panelalpha/shared-hosting/uninstall.sh
 
 It asks you to confirm before doing anything. When it finishes, the engine and the `pae` command are gone.
 
+It also removes the two services the installer added for the project homes, `panelalpha-quota` (disk quota) and `panelalpha-home-mounts` (the `nosuid,nodev` mount of `/home`). They are gone from the next boot on. Until you restart the VPS, quota and the mount stay as they are, which is one more reason to restart before you reinstall. The installer does not edit `/etc/fstab`. A quota option that an older version added there stays.
+
 ## What stays on the VPS afterwards
 
 Three things are left behind on purpose:

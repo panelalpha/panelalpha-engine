@@ -65,6 +65,18 @@ Two addresses can identify a person, and only if you give them. One is a contact
 
 There is a setting that allows a copy of your source to be attached to a failed deploy. It is **off**, and the only reason to turn it on is if PanelAlpha support asks you to during an investigation. Set it back afterwards.
 
+## The installer's own report
+
+When the installer finishes an install or an update, it sends one short report to `monitoring.panelalpha.com`, whether the run worked or not. The installer sends it, not the running engine, so `pae telemetry:disable` does not stop it. It holds:
+
+- whether it was an install or an update, when it started and ended, and the exit code
+- the engine version it was installing and, when something failed, a short message saying what
+- the email you gave with `--email`, if any
+- with `--repo`: the branch or tag, the repository address with any user name or token in it replaced by `***`, and `deploy_result`, which is `deployed`, `updated`, `failed` or `not_run`
+- `software`, which is `engine`, or `single-server` when `--full-privileges` deployed the PanelAlpha panel
+
+**The repository address is not hashed here.** It is sent as you typed it, so the name of a private repository leaves your VPS in this one report. No source code is sent, and neither are the values of `--git-token`, `--password` or `--env-var`.
+
 ## An email for alerts
 
 Optional. Monitoring can write to you if this engine, or a site it probes, looks down. The address leaves your VPS.

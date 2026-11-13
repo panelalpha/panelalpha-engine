@@ -34,6 +34,8 @@ When the engine recognises what went wrong, the log contains a plain sentence sa
 
 The full technical output is still there underneath if anyone needs it. Start with the sentence.
 
+Each one also has a short code and a list of what to do next, shown by your assistant and by `pae project:deploy:log`. A refusal, for example when the engine's container runtime is stopped, comes with the fix. [Codes and hints](reading-errors.md#codes-and-hints).
+
 Common sentences, and what to do about each, are on [Reading errors](reading-errors.md). If the sentence in your log is not on that page, still start from it: the page covers the usual cases, not every wording the engine can produce.
 
 ## Step 3: work out whose problem it is
@@ -49,6 +51,8 @@ This is the fork in the road, and getting it right saves a lot of time.
 ## Step 4: if the project deployed but looks wrong
 
 A deploy that says "success" can still leave a broken page. That is not a build failure and it will not appear in the error list - the build genuinely worked.
+
+A project the engine could not recognise serves its "Project not configured" page with a 404 and counts as not healthy, so it does not end as a plain success.
 
 The engine checks what your site is actually serving and can usually name the problem exactly: [What the engine checks](../05-capabilities/monitoring-and-logs.md#what-the-engine-checks).
 

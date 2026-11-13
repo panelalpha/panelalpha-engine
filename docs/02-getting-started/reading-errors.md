@@ -11,6 +11,10 @@ what you can.
 
 If PanelAlpha already knows the fix for this failure, the deploy log ends with `Known problem:`, why it happened and how to fix it. Your assistant sees it too. See [What it gives you](what-is-collected.md#what-it-gives-you).
 
+## Codes and hints
+
+Every failure, warning and refusal also carries a short, stable **code**, such as `host_refused`, and a list of **hints**: what to do next. Your assistant reads both and can act on them. On the server, `pae project:deploy:log <project>` and `pae project:create` print each sentence followed by the commands that act on it. The sentence can change between releases. The code does not, so quote the code when you ask for help.
+
 Come back here when you want to look up the sentence yourself. If none of the rows below match, the log usually says `A build step failed (exit code N)`. That means the engine did not recognise the cause, not that there is no cause. The command that failed is in the log just above it. This page is the common wording, not every sentence the engine can produce.
 
 ## Wrong version of something
@@ -45,6 +49,16 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 | Docker Hub temporarily refused further downloads | A public download rate limit, not your fault. | Wait a few minutes and deploy again. To raise the limit for good, give the engine a Docker Hub login: `pae docker-hub:login`. |
 | A base image this project asks for could not be downloaded | Your `Dockerfile` names an image that does not exist or is private. | Check the image name and tag in your `Dockerfile`. |
 | The image name "*name*" is not valid: Docker image names must be lowercase | The compose file or `Dockerfile` spells an image with capitals, such as `Owner/app:1`. Docker reads `Owner` as the address of a registry and fails to find it. | Use the lowercase name the message gives. |
+
+## The server, not the project
+
+| The message | What it means | What to do |
+|---|---|---|
+| The container runtime is not running on the engine host | The runtime the engine starts projects with is stopped, so no project can start or build. The deploy is refused before it starts. A project that lost its connection to it says the same, with "function not implemented" in its log. | Restart the runtime as `root` on the VPS, then deploy again. In the second case, recreate the project's container first. |
+
+```bash
+systemctl restart sysbox
+```
 
 ## The repository
 
@@ -85,6 +99,8 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 ## The site is up but the page is wrong
 
 If your deploy **succeeded** and the page is still wrong - a placeholder, a directory listing, someone else's welcome page, a PHP error - that is not a build failure and it will never appear here. The build worked.
+
+The "Project not configured" page is the engine's own placeholder for a repository it could not recognise. It answers 404 on every address, so the project counts as not healthy and the deploy does not report plain success. An app's own error page served with a 200 counts as not serving, too. A project of the general build (Railpack) shows the placeholder after a rebuild that did not ask for Railpack again: [How detection works](../07-supported-projects/how-detection-works.md).
 
 The engine has a separate check for exactly that, and it can usually name what is being served instead: [What the engine checks](../05-capabilities/monitoring-and-logs.md#what-the-engine-checks).
 

@@ -8,7 +8,43 @@ Update when PanelAlpha releases a fix. If a deploy failed for a reason PanelAlph
 
 The update restarts the engine, so a connected assistant will disconnect for under a minute and then reconnect.
 
-An update started from the engine itself (the API, your assistant, or the updater on the server) installs only a newer release than the one running. If the newest release is exactly what you run, the same version from the same commit, it says `Already up to date` and changes nothing. A fix published under the same version number is installed as an update within the release. If it is older, it refuses and changes nothing. If an update fails after it started replacing the engine's files, it puts the previous release back on its own.
+An update installs only a newer release than the one running. This holds for an update started from the engine (the API or your assistant) and for the updater on the server.
+
+- **The newest release is what you run**, the same version from the same commit: it says `Already up to date` and changes nothing.
+- **A fix published under the same version number** is installed as an update within the release.
+- **The newest release is older than yours:** it refuses and changes nothing. Forcing it is covered under [Troubleshooting](#troubleshooting).
+
+## What an update does to your sites
+
+**The websites keep running.** An update touches only what changed:
+
+- Docker is restarted only when its firewall chains are missing, for example after something cleared the server's firewall rules.
+- The webserver for your sites is restarted only when its configuration changed.
+- The engine's own certificate is not requested again unless it is due for renewal.
+- While the engine's database is being migrated, its scheduler and background workers wait, then carry on. No job runs half across the change.
+
+**Existing projects are brought up to date too.** When a release changes how projects are set up, the update applies it to the projects you already have: CPU limits on running containers, the web server settings of traditional PHP hosting projects, the permissions of `wp-config.php`, read-only configuration mounts and clean-up of old address maps. You do nothing. If one of these steps fails for some project, the update still finishes and prints a warning that names the command to run again, for example `pae projects:wp-config:restrict --all`.
+
+## If an update fails
+
+An update that fails after it started replacing the engine's files puts the previous release back on its own, and the engine runs the version it ran before. Two limits:
+
+- **Database changes are not undone.** Migrations the new release already ran stay.
+- **Only the engine's own files come back.** Anything else the update changed on the server is not restored.
+
+Once the new release is running and has migrated, a later failure leaves the new release in place instead of taking the code back from under its database.
+
+Every update is recorded with the versions it moved between, how it ended and why. The engine information your assistant reads shows the last run. It ends as one of `updated`, `up_to_date`, `rolled_back`, `refused` or `failed`.
+
+## Before you update to 2.3
+
+Read this if you update from 2.2 or earlier.
+
+- **Browser sessions on port 2011 end once.** The engine's session cookie is now host-locked and `Secure`, so any browser signed in to `https://…:2011` is asked to sign in again after the update. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove that line: with it, a browser refuses the new cookie and cannot stay signed in. [Change a setting](install.md#change-a-setting) shows how.
+- **The engine has a new container, the root broker.** It does every step that needs root, so the engine's own container no longer has `sudo` or the Docker socket. It has its own memory cap, 4 GB by default: [Install](install.md#memory-the-engine-keeps-for-itself). How it protects the server: [Security](../05-capabilities/security.md).
+- **The engine's scripts and settings files must belong to root and not be writable by anyone else.** The installer sets this. If you changed ownership or permissions by hand, the broker refuses the file and the message names the `chown` and `chmod` that fix it.
+- **A Railpack project must ask for Railpack again.** The general build is no longer chosen on its own, and the choice is not saved. Each redeploy of a project first deployed with Railpack has to ask for it again, or the project needs a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A failed Railpack redeploy keeps the running app online.
+- **A project the engine could not recognise answers 404.** Its "Project not configured" page now carries that status and counts as not serving. Software that checks a project's address will see the change.
 
 ## Before you update to 2.2
 
@@ -46,7 +82,7 @@ To see whether there is anything newer without changing anything:
 bash /opt/panelalpha/shared-hosting/updater.sh --check
 ```
 
-It prints the running version and the newest release, each with its commit, and whether an update is available.
+It prints the running version and the newest release, each with its commit, and whether an update is available. `bash /opt/panelalpha/shared-hosting/updater.sh --help` lists every option and starts nothing.
 
 ### 2. Run the update
 
@@ -93,6 +129,8 @@ bash /opt/panelalpha/shared-hosting/updater.sh --version 2.0.1 --allow-downgrade
 bash /opt/panelalpha/shared-hosting/updater.sh --reinstall
 ```
 
+Setting `PANELALPHA_ALLOW_DOWNGRADE=1` or `PANELALPHA_REINSTALL=1` in the environment of that command has the same effect as the flags.
+
 Going back to an older version does not undo the changes the newer one made to the engine's own database, so only do it when PanelAlpha asks you to.
 
 **The update stopped with `Failed to fetch`, followed by an address.**
@@ -116,5 +154,32 @@ The update stopped after it had started replacing the engine's files, so it put 
 **An update was interrupted, for example the server rebooted in the middle.**
 Run the update again. It first puts back the release the interrupted run was replacing, then updates.
 
+**The update says it could not put the previous release back.**
+The old files are kept in a folder the message names, and the next update puts them back first. Run the update again.
+
+**An update printed a warning that names a `pae … --all` command.**
+One step that brings existing projects up to date failed. The update itself finished. Run the command the warning names on the VPS.
+
 **I need to go back to the previous version.**
 There is no automatic way back from an update that succeeded, because the update also changed the engine's own database. Contact PanelAlpha with your old version number and your current one.
+
+## More requests to try
+
+**Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)). Whether a newer release exists is read on the server with `updater.sh --check`, step 1 above.
+
+**What the last update did**
+
+```text
+What did the last engine update do? Tell me the version it ran on, the version it installed and how it ended.
+```
+
+Mode: read. Tools: `system_info`. Check: the answer gives both versions and a result of updated, up_to_date, rolled_back, refused or failed, and for a failed run the reason.
+
+**Update and follow it**
+
+```text
+Update this engine to the newest release. Wait for it to finish, then tell me whether it worked and which version runs now.
+```
+
+Mode: modify. Tools: `system_update`, `system_info`. Check: the assistant waits for the reconnect after the restart, reads the update's result, and does not start a second update while one runs. On an engine already on the newest release the result is up_to_date and nothing changed.
+
