@@ -5,7 +5,7 @@ namespace App\Lib\Deploy\CacheManager;
 use Illuminate\Container\Container;
 
 /**
- * Where scripts/publish-base-images.sh pushed one of our base images, so a host pulls it instead of compiling it.
+ * Where PanelAlpha publishes one of our base images, so a host pulls it instead of compiling it.
  * A pulled copy counts only when its label holds the hash of the Dockerfile this engine would build.
  */
 final class PublishedBaseImage

@@ -649,8 +649,8 @@ needs the host to build one of the catalogue's built entries,
 it only when its `panelalpha.dockerfile.sha256` label equals
 `PublishedBaseImage::dockerfileSha()` of the Dockerfile this engine renders; any
 other copy is removed and the host builds. `--refresh` takes the same pull, so a
-host follows the weekly republish. `scripts/publish-base-images.sh` is what
-publishes them. A host-side pull, not the account's: one per host, and nothing
+host follows the weekly republish. PanelAlpha's release tooling, outside this
+repository, publishes them from an engine checkout. A host-side pull, not the account's: one per host, and nothing
 on the ladder below the host changes.
 
 **Check the registry through the daemon, never over the network.** The probe is

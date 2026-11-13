@@ -52,7 +52,7 @@ return [
     'prewarm_reserve' => env('DEPLOY_PREWARM_RESERVE', ''),
 
     /*
-     * Where scripts/publish-base-images.sh pushes our base images. A host keeps
+     * Where PanelAlpha publishes our base images. A host keeps
      * a pulled one only when built from the same Dockerfile; empty or `none` compiles.
      */
     'base_image_registry' => env('DEPLOY_BASE_IMAGE_REGISTRY', 'ghcr.io/panelalpha'),
