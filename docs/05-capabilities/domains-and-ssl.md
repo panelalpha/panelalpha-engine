@@ -168,11 +168,7 @@ Deleting a domain keeps its files. Its folder (`~/<domain>`) and its document ro
 
 ## Cookies between projects under one parent name
 
-Projects named under one parent name, such as the `panelalpha.online` names or the base domain you gave the engine for sites, are different sites to you but the same site to a browser, which lets them share cookies. The engine keeps them apart. A cookie one project sets for the parent name is narrowed to that project's own name, and a request that comes from a neighbouring project's page loses its cookies unless it is a plain link the visitor followed. Nothing is set up. A login that depends on a cookie shared across projects under the parent name stops working, which is the point.
-
-## Certificate requests and the site
-
-A certificate request for a name whose certificate is not due leaves the sites running and changes nothing. A request that goes ahead takes the sites' plain HTTP port offline for a short while, so Let's Encrypt can reach the engine. The engine stops the request after a time limit (600 seconds for a first request, 120 for a renewal), and the sites come back. Ask the assistant for a certificate again after a timeout.
+Projects named under one parent name, such as the `panelalpha.online` names or the base domain you gave the engine for sites, are different sites to you but the same site to a browser, which lets them share cookies. The engine keeps them apart. A cookie one project sets for the parent name is narrowed to that project's own name, and a request that comes from a neighbouring project's page loses its cookies unless it is a plain link the visitor followed. Nothing is set up. A login that relies on a cookie shared between such projects stops working, by design.
 
 ## Notices on every page
 

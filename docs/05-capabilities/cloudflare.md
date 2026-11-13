@@ -166,7 +166,7 @@ Save a Cloudflare API token on tshop, then tell me which Cloudflare account it
 belongs to and whether it is missing a permission.
 ```
 
-Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: a token that sees zones in several accounts is refused with the accounts named, and a token without Zone · Zone · Read is refused naming that permission.
+Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: the answer names the token's Cloudflare account, and a token that sees several accounts is refused with the accounts named.
 
 ## From the server
 

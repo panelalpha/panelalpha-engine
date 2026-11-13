@@ -207,7 +207,9 @@ curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domai
 ```
 
 **I want a real certificate on an engine that is already self-signed.**
-Point a name of your own at the VPS at your DNS provider, wait until it resolves, then run:
+Point a name of your own at the VPS at your DNS provider and wait until it resolves. **Getting the certificate stops the web server for every site while Let's Encrypt checks the name.** The engine stops a request that hangs after 600 seconds (120 for a renewal), and the sites come back. When the certificate already covers that name and is not due for renewal, the request changes nothing and the sites keep running.
+
+Then run:
 
 ```bash
 pae ssl:engine-cert:request --domain panel.example.com
