@@ -102,7 +102,9 @@ Reset the password for user 5 on this WordPress site.
 Delete WordPress user 5 on this site, reassigning their posts to user 1.
 ```
 
-Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the `reassign` user id you give, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Passwords for WordPress users must also be at least 8 characters. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the `reassign` user id you give, or to the first other administrator when you give none. When the site has no other administrator and no `reassign` user, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords of 8 characters or fewer are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+
+**Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in the `Authorization` header. On traditional PHP hosting the webserver now passes that header on to PHP, so those logins work for any PHP app there, not only WordPress. A domain written by an earlier release picks it up when the update runs `pae projects:domain-config:refresh --all`. Run it yourself if the update reported that it could not.
 
 ## Run WP-CLI
 
@@ -129,7 +131,7 @@ List the plugins of the WordPress in the shop service.
 
 ### Named WordPress operations
 
-For common jobs the assistant does not have to write a WP-CLI command. Each of these is its own tool (`wp_*`), its own API route under `/projects/{project}/wp/`, and its own `pae wordpress:*` command:
+For common jobs the assistant does not have to write a WP-CLI command. Each of these is its own tool (`wp_*`), its own API route under `/projects/{project}/wp/`, and its own `pae` command ([CLI commands](../06-commands/pae-cli.md#wordpress)):
 
 - **Plugins and themes**: search wordpress.org, list, read one, check whether one is installed, install, activate, update and delete. Plugins can also be deactivated; a theme is switched off by activating another one.
 - **Users**: list (by `role`, with chosen `fields`), create (with `send_email` to send the welcome mail), update, set a password, delete, application passwords, and a one-time login link.
@@ -140,7 +142,9 @@ For common jobs the assistant does not have to write a WP-CLI command. Each of t
 
 All of them take the same `path` and `service` as above, and `skip_plugins`, which loads WordPress without its plugins and themes, so a site with a broken plugin can still be managed. Plugin and theme lists take `fields` and `status`, and search takes `fields` and `per_page`. A value that starts with `-`, such as a slug, login or option name, is refused, so it cannot be read as a WP-CLI option.
 
-A database export is readable by the project's own user only, so the webserver cannot serve it and answers 403 if someone asks for it by URL.
+A database export is readable by the project's own user only, so the webserver cannot serve it and answers 403 if someone asks for it by URL. It takes no table locks, so it works for a database user that has no right to lock tables and does not stop the site writing while it runs.
+
+On the server, `pae wordpress:command` ends with WP-CLI's own exit code, so a script sees a failed command as a failure. Options of the WP-CLI command go after `--`. WordPress core's automatic updates read back as off after you switch them off.
 
 ## Move a WordPress site here
 
@@ -169,6 +173,8 @@ A start is refused with 422 `domain_taken` when a project here already has the d
 **While the domain still points to the old host.** With [PanelAlpha Connect](../02-getting-started/connect-to-panelalpha-connect.md), the import opens a preview of the site on a `panelalpha.online` address (`preview_url`). The import status shows the DNS record to set. Every 15 minutes the engine checks the domain; once it points here, the engine requests the certificate and removes the preview. Without Connect there is no preview: the site answers on its domain once DNS points here.
 
 **Following, resuming and cancelling.** The status shows how far the whole run is, the step it is on, and the file or table it is sending. A failed import, or one that has not moved for 15 minutes, can be resumed. Cancelling removes the project, files and database the import made here, and on a `wp_admin` source the migrator plugin. A finished, failed or cancelled import can be deleted from the list.
+
+**What an import leaves alone.** A migrator plugin the source site already had before the import stays on it, also when the import is cancelled or fails. Only a plugin the engine installed is removed. An import refuses a redirect that would send the wp-admin password or the plugin token to another site: a redirect to a different address, or from https to plain http, ends the test or the import with the reason. A redirect from the address to its `www.` twin is followed. The download link for the plugin package uses the engine's own address (`APP_URL`), so it opens from your computer.
 
 **Secrets.** The wp-admin password and the plugin token are kept encrypted and never shown. If an import sits idle for 7 days, they are cleared; resuming it then asks for them again.
 
@@ -204,13 +210,18 @@ A few other known apps worth knowing:
 - **Flarum, SuiteCRM, and Chamilo** get a database, and you finish their own installer in the browser.
 - **MantisBT and Easy!Appointments** get a database and a configuration file written from it, so you are not asked for credentials the engine already has.
 - **OpenCart** is supported on its 4.1 release line, branch `4.1.x.x`. Its default branch is an unreleased rewrite that does not render, and a deploy of it is refused with that explanation.
-- **Roundcube** gets a database, its tables, and a configuration file written from it, so the first page is its login. It is a mail client only: set `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST` in the project's environment variables to the mail servers it logs in to and sends through.
+- **Roundcube** (version 1.7 or newer) gets a database, its tables, and a configuration file written from it, so the first page is its login. It is a mail client only: set `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST` in the project's environment variables to the mail servers it logs in to and sends through.
+- **Postmill** (`https://github.com/postmill-ai/postmill-app`) gets a Redis of its own, and its database migrations run on every deploy.
 - **Adminer** is built into a single page you can open. It does not get a database of its own.
 - **phpMyAdmin** deployed from its repository is a project that signs in to that project's database. The sign-on link on [Databases](databases.md#phpmyadmin) is different: it opens the engine's own phpMyAdmin for a project you already have.
 
+A staging copy or a clone of phpBB, osTicket, OpenCart, Flarum, Magento, SuiteCRM, Chamilo, Forte, Indexhibit, Live Helper Chat or Cloudlog uses its own database, not the original's, so changing the copy does not touch the original.
+
+Managing the application (users, one-click login, WP-CLI style actions) is refused when the project's app configuration is written for another stack than the one that ran. The answer says app management is not supported for this application. Deploy it again with a matching configuration.
+
 ## Troubleshooting
 
-**"App user management works only on container projects (template dind)."**
+**"App user management works only on container projects …"**
 The WordPress user, install and one-click-login actions work on a WordPress site in its own container. A WordPress site on traditional PHP hosting can still be managed with WP-CLI, and you can still change its PHP version.
 
 **"No WordPress install was found in this project's containers."**
@@ -325,6 +336,50 @@ all plugins. Do the same on twp.
 ```
 
 Mode: modify. Tools: `wp_cli_run` with `args`, `wp_plugin_update`. Check: the version comes back and the plugin update output is reported on both `tphpwp` (traditional PHP hosting) and `twp` (a container project).
+
+**Delete a user and keep their posts**
+
+```text
+List the users of twp. Delete the user jdoe and give their posts to user 1.
+Then delete a user that does not exist, id 9999.
+```
+
+Mode: full. Tools: `app_user_list`, `app_user_delete` with `reassign` (or `wp_user_delete`), `app_user_delete`. Check: the posts of jdoe now belong to user 1. The delete of 9999 answers not found. With no other administrator and no `reassign`, a delete is refused and nothing is removed.
+
+**Short passwords are refused**
+
+```text
+Add a user to twp with the password abc123.
+```
+
+Mode: modify. Tools: `app_user_create` (or `wp_user_create`). Check: the request is refused because the password has fewer than 8 characters, and no user is created.
+
+**Application passwords stay private**
+
+```text
+List the application passwords of the WordPress user admin on tphpwp.
+```
+
+Mode: read. Tools: `wp_app_password_list`. Check: each entry has a name and a creation date, and no hash or secret.
+
+**Roundcube webmail**
+
+```text
+Deploy https://github.com/roundcube/roundcubemail as the project troundcube
+(version 1.7 or newer) with ROUNDCUBE_IMAP_HOST and ROUNDCUBE_SMTP_HOST set to mail.example.com.
+Tell me when its login page opens.
+```
+
+Mode: modify. Tools: `project_create`, `env_var_set`, `task_get`. Check: the first page is Roundcube's login, and the project has its own database. Skip it where no mail server is at hand: the login page still opens.
+
+**Postmill and OpenCart**
+
+```text
+Deploy https://github.com/postmill-ai/postmill-app as the project tpostmill. Then try to deploy the default
+branch of OpenCart, and after that its 4.1.x.x branch.
+```
+
+Mode: modify. Tools: `source_inspect`, `project_create`, `task_get`. Check: Postmill comes up with its own Redis and a migrated database. The OpenCart default branch is refused with an explanation, and the 4.1.x.x branch deploys.
 
 **Import a WordPress site**
 

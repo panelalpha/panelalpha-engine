@@ -29,7 +29,7 @@ That token belongs to the project it was pasted for. The first project given it 
 
 <img src="../assets/connect-repository.jpg" alt="Connect your repository page: paste a git token and select Save secret" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 
-If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat. The secret's type has to match the field it is passed in: `git_token` for a new project, `token` when you replace the token of a project that exists.
+If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat. A paste page made for a git token works in either place, when you create a project and when you replace the token of one that exists.
 
 ## A token shared by several projects
 
@@ -111,6 +111,25 @@ Show recent commits on this project.
 This project's git token no longer works. Send me the page to replace it.
 ```
 
+Pulling, going back to a commit, switching branch and pushing start the project first when it is stopped, then do their work. Going back to an older commit works on a project that holds only the newest commit: the engine fetches the commit you name from the repository. A commit the repository does not have is refused.
+
+## Pushing local edits
+
+Pushing is for a project whose files are kept in git (a folder such as `public_html`). A project the engine deploys from a repository is changed in the repository, not from the server.
+
+```text
+Commit my edits on this project and push them to the repository.
+```
+
+The assistant commits what changed and pushes. Ask it to confirm before it does, since it commits everything in the folder. Pushing into a repository that is still empty creates the branch.
+
+A push the repository turns down changes nothing there, and your work stays on the server as uncommitted changes, with the files as they were. The answer gives the reason:
+
+- **The branch has newer commits.** Or a protected branch or a rule on the repository's side declined the push. Pull first, or push to another branch.
+- **The token or key may not write.** No token is stored, or the token or deploy key can read the repository and not change it. Store a token with write access, or give the deploy key write access.
+
+A repository that answers with a redirect is refused when you connect it, with the address to use instead. The engine does not follow redirects. On GitLab that is often the address ending in `.git`.
+
 ## A project that was created without a repository
 
 A project created without a repository, for example one set up first and pointed at its code later, can be given one. The assistant checks the repository the same way as for a new project, saves it, and starts the first deploy.
@@ -147,6 +166,12 @@ The engine fetches the repository's submodules with the same token on every depl
 The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks, nor from the reserved ranges that no real server uses, such as the documentation networks (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32). This covers a repository, a submodule, an SSH remote, the git server named for a deploy key, a file fetched by URL, and the webhook a push-to-deploy hook registers at your git host, where a redirect to another host is not followed either. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback, link-local and other reserved addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting). On traditional PHP hosting, a server whose git is older than 2.37 (Ubuntu 22.04) also refuses a pull from any host name not in `EGRESS_ALLOW_HOSTS`, and the message says git 2.37 or newer is required: [Troubleshooting](../02-getting-started/install.md#troubleshooting).
 
 A host name the engine cannot resolve is refused too, since the engine cannot check where it leads. Check the spelling, and write an address in its usual dotted form.
+
+**The repository is refused and the answer gives another address.**
+The repository redirects, for example after it was renamed or moved. Use the address in the answer.
+
+**A push is refused.**
+The answer says which of the two reasons it is, as above. Nothing was pushed and your edits are still on the server.
 
 **A pull or branch change is refused because the project is busy.**
 A deploy, backup or restore holds the project. The answer names which. Wait for it to end, or cancel the deploy, then ask again.
@@ -322,7 +347,7 @@ Mode: modify. Tools: `git_status`, `git_branches`, `git_commits`, `git_change_br
 Roll tmemos back to the previous commit.
 ```
 
-Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for. A deploy from git clones only the newest commit, so there is no earlier one to go back to unless the repository's `.panelalpha/panelalpha.yaml` sets `git: {history: full}`.
+Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `task_get`. Check: the assistant warns that local changes are discarded and asks first. The deployed commit afterwards is the one asked for. `git_commits` lists only the newest commit on a project deployed from git, unless the repository's `.panelalpha/panelalpha.yaml` sets `git: {history: full}`. A revert to an older commit named by its id still works: the engine fetches it. A commit the repository does not have is refused.
 
 **Push local edits, force a pull**
 
@@ -340,7 +365,43 @@ Connect the project tfiles to https://github.com/org/site.git, branch main.
 Later, disconnect it again without deleting the files.
 ```
 
-Mode: full. Tools: `git_connect`, `git_status` (poll while `connecting` is true), `git_disconnect`. Check: connect is not called a second time while `connecting` is true. After the disconnect the files are still there and a deploy hook, if it had one, is gone.
+Mode: full. Tools: `git_connect`, `git_status` (poll while `connecting` is true), `git_disconnect`. Check: connect is not called a second time while `connecting` is true. After the disconnect the files are still there, and a deploy hook, if it had one, is gone together with the webhook the engine registered at the git host.
+
+**Push into an empty repository**
+
+```text
+On tsitegit, commit my edits and push them to the empty repository I just
+created, branch main.
+```
+
+Mode: modify. Tools: `git_push`, `git_status`. Check: the branch exists on the remote afterwards and `git_status` shows nothing to push.
+
+**A refused push keeps the work**
+
+```text
+On tsitegit, commit my edits and push them. If the repository refuses, tell me
+why and what happened to my edits.
+```
+
+Mode: modify. Tools: `git_push`, `git_status`. Check: when the branch has newer commits, the answer says so and `git_status` shows the edits as uncommitted. When the token may not write, the answer says to store a token with write access. Nothing is pushed in either case.
+
+**A repository that redirects**
+
+```text
+Deploy https://github.com/old-org/app as the project tredirect. The repository
+was renamed.
+```
+
+Mode: modify. Tools: `project_create`. Check: the request is refused with the address to use, and no project is left behind. Skip it when no renamed repository is at hand.
+
+**Go back to an older commit**
+
+```text
+Roll tmemos back to the commit <id from the history>, then pull to return to
+the latest.
+```
+
+Mode: modify. Tools: `git_revert` with `ref`, `git_pull`, `task_get`. Check: the revert works although the project holds only the newest commit, and a project that was stopped is started first.
 
 **Replace a token**
 

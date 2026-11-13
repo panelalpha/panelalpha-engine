@@ -65,7 +65,27 @@ cd /opt/panelalpha/shared-hosting && docker compose logs root-broker | grep pa-r
 
 A password or a license key an action takes is left out of its line.
 
+The engine's own scripts and compose files must stay owned by root and not writable by group or others, because the broker refuses to run anything else. The installer and the update set this. If it could not, it prints a warning, and the broker refuses those files until you fix it.
+
+Two of those scripts keep the firewall in place for the projects: the one that guards the projects' network and the one that hooks the host firewall into Docker. The system information the assistant reads (`system_info`) says whether the last run of each worked, and if not, what failed and the command that fixes it.
+
 Root on the server can run the same actions with `pae-broker`, which the installer registers next to `pae`, for example `pae-broker --host host.applyTenantNetworkFirewall --`. They are checked the same way, and each line is marked `"via": "pa-broker"`.
+
+## What a project cannot touch on the server
+
+- **Project homes** are mounted so that a program in one cannot gain privileges from a file in it and cannot create device files (`nosuid,nodev`).
+- **A project on PHP hosting** sees the engine's own configuration read-only. On projects created before 2.3.0 this applies the next time their container is recreated. To apply it at once, which restarts their sites:
+
+  ```bash
+  pae projects:config-mounts:restrict --all --recreate
+  ```
+
+- **A project's own compose file** may mount only the project's folder (`~/project`) and its `~/.panelalpha` folder from the server. Any other mount from the server is dropped, and the deploy log names it. The Docker socket is never allowed.
+- **Rollback database dumps** that a push makes, and the copies a container restore works from, are kept outside the project's home, so the project cannot read or change them.
+- **`wp-config.php`** of a PHP hosting project, which holds the database password, is readable only by that project. The update applies it to every project. To apply it yourself: `pae projects:wp-config:restrict --all`.
+- **The engine's own login cookie** is set so that a browser sends it only over HTTPS and only to the exact address that set it.
+
+Projects named under one parent name are also kept from sharing cookies: [Cookies between projects under one parent name](domains-and-ssl.md#cookies-between-projects-under-one-parent-name).
 
 ## The firewall
 
@@ -256,6 +276,15 @@ tell me which rule fired.
 ```
 
 Mode: read. Tools: `modsec_audit_log_list`, `modsec_audit_log_tail`, `modsec_audit_log_download`. Check: the answer names one rule id and suggests turning off that rule, not ModSecurity as a whole. A large log is read in pieces with `offset`, and an older rotated (compressed) log can be read too.
+
+**Check that the engine's files and firewall scripts are in order**
+
+```text
+Show the system information. Did the host firewall script and the project
+network guard run fine the last time? If not, what failed?
+```
+
+Mode: read. Tools: `system_info`. Check: `host_firewall` and `tenant_network_firewall` each say whether they are failing, and a failing one carries the warning with the command that fixes it.
 
 **Extra IP addresses**
 

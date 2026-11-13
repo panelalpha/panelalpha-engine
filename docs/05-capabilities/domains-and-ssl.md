@@ -142,6 +142,8 @@ Make shop.example.com the main domain of shop. Once https://shop.example.com/
 works, delete shop.panelalpha.online.
 ```
 
+This is for container projects only, and the new main domain has to be an addon domain: a subdomain is refused (add the name as an addon first), and so is a project on PHP hosting, which is renamed instead. Without the assistant: `pae project:domain:main shop.example.com --project=shop`.
+
 Ports work the same way. A domain of a container project answers HTTPS on 443 unless you give it other ports: add the port, make it the domain's main port, then remove 443 if it should stop answering there.
 
 ```bash
@@ -158,9 +160,21 @@ pae project:domain:https-ports shop.example.com --project=shop --ports=8443
 
 ## Removing and renaming a domain
 
-A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+Every deploy routes all of a container project's domains to its application again, so a domain you added is served without further steps. A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
 
 Deleting a domain keeps its files. Its folder (`~/<domain>`) and its document root stay in the project home, because they may hold the site's files or be shared with another domain. The answer lists them in `files_kept`. Delete them with the file tools or over SFTP when you no longer need them.
+
+## Cookies between projects under one parent name
+
+Projects named under one parent name, such as the `panelalpha.online` names or the base domain you gave the engine for sites, are different sites to you but the same site to a browser, which lets them share cookies. The engine keeps them apart. A cookie one project sets for the parent name is narrowed to that project's own name, and a request that comes from a neighbouring project's page loses its cookies unless it is a plain link the visitor followed. Nothing is set up. A login that depends on a cookie shared across projects under the parent name stops working, which is the point.
+
+## Certificate requests and the site
+
+A certificate request for a name whose certificate is not due leaves the sites running and changes nothing. A request that goes ahead takes the sites' plain HTTP port offline for a short while, so Let's Encrypt can reach the engine. The engine stops the request after a time limit (600 seconds for a first request, 120 for a renewal), and the sites come back. Ask the assistant for a certificate again after a timeout.
+
+## Notices on every page
+
+A banner, a notice or a script can be written into every page the engine serves, for all projects or for one: [Overlays](projects.md#overlays).
 
 ## Mail from a domain
 
@@ -342,6 +356,24 @@ project tshop's app, change it to point at port 3000, and delete it.
 ```
 
 Mode: full. Tools: `proxy_rule_list`, `proxy_rule_create`, `proxy_rule_get`, `proxy_rule_update`, `proxy_rule_delete`. Check: a rule that belongs to a project can only point at that project's own app, and any other destination is refused. The rule's port is opened in the firewall and removed again with the rule.
+
+**Switch the main domain**
+
+```text
+Make shop.example.com the main domain of tshop. When https://shop.example.com/
+works, delete the old main domain.
+```
+
+Mode: full. Tools: `domain_update` with `main`, `task_get`, `domain_delete`. Check: the old main domain stays as an addon and answers until it is deleted. The project is redeployed so the app learns its new address. Deleting the main domain before the switch is refused. A subdomain, or a project on PHP hosting, cannot become the main domain.
+
+**HTTPS on another port**
+
+```text
+Let shop.example.com on tshop answer HTTPS on port 8443 as well as 443, and
+make 8443 the port in the project's public address.
+```
+
+Mode: full. Tools: `domain_update` with `https_ports` and `https_port`, `task_get`. Check: without the operator's permission for ports the change is refused and the assistant tells you to run `pae system:public-routing:allow tshop --ports` on the server. Afterwards `https://shop.example.com:8443/` opens and the app is told that address. Skip it where the operator has not allowed ports.
 
 **Remove a domain**
 

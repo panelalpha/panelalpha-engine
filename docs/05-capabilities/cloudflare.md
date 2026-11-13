@@ -27,7 +27,7 @@ If you also want to purge the cache or change the security level from the engine
 - **Zone · Cache Purge · Purge**
 - **Zone · Zone Settings · Edit**
 
-Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first three drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
+Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. **Scope the token to one Cloudflare account.** A token that can see zones in more than one account is refused, and the answer names the accounts it found. Under Account Resources select the one account. The token may cover any number of zones in it. The engine's paste page repeats those steps when you open the link. A token with only the first three drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
 
 ## What you do, and what the engine does
 
@@ -109,7 +109,7 @@ If tunnel hostnames still exist, clearing the token is refused, so you are not l
 Save the token first, then attach the hostname. Two steps, in that order.
 
 **Saving the token fails.**
-The token is missing one of the two required permissions, or it belongs to a different Cloudflare account than the one that owns the zone.
+The token is missing one of the three required permissions, or it belongs to a different Cloudflare account than the one that owns the zone. If the answer lists several accounts, the token sees more than one: edit it in Cloudflare so Account Resources names a single account, then save it again.
 
 **"That hostname is already in use."**
 The name already exists on this engine. Pick a free name in your Cloudflare zone, and do not add it as a normal domain first: attach it to the domain the project already has.
@@ -118,7 +118,7 @@ The name already exists on this engine. Pick a free name in your Cloudflare zone
 The site is not running in a container. Deploy it from a repository, or point an A record at your VPS and use Let's Encrypt instead.
 
 **A cache purge or security-level change says Cloudflare is rate-limiting the token, or could not be reached.**
-Nothing was changed. Wait a few minutes and try again. A missing permission is named instead, and a request Cloudflare refused for another reason carries Cloudflare's own message.
+Nothing was changed. Wait a few minutes and try again. A missing permission is named instead of a general "invalid token" message, and a request Cloudflare refused for another reason carries Cloudflare's own message.
 
 **Visitors see a Cloudflare certificate, not my project's.**
 Expected. HTTPS terminates at Cloudflare, so the project's own certificate is not the one visitors see.
@@ -131,7 +131,7 @@ Do not. Ask it to send a paste link on the engine instead.
 
 ## More requests to try
 
-These need a Cloudflare account with a zone and a token with the two permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+These need a Cloudflare account with a zone and a token with the three permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
 
 **Save the token without pasting it**
 
@@ -158,6 +158,15 @@ Clear the Cloudflare token on tshop while a tunnel hostname still exists.
 ```
 
 Mode: full. Tools: `project_setting_delete`. Check: the call is refused, and the assistant offers removing the hostnames first. `force` is used only when asked for.
+
+**Check the token before attaching**
+
+```text
+Save a Cloudflare API token on tshop, then tell me which Cloudflare account it
+belongs to and whether it is missing a permission.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: a token that sees zones in several accounts is refused with the accounts named, and a token without Zone · Zone · Read is refused naming that permission.
 
 ## From the server
 
