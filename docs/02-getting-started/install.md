@@ -172,7 +172,7 @@ Signs that a firewall in front of the VPS is the problem:
 - A webhook delivery in GitHub shows `failed to connect to host`.
 - Your assistant connects from your office but not from home, or the other way round.
 
-The engine's own firewall also lets a blocked connection time out, so check it first: `pae firewall:status` on the VPS shows what it allows. When it allows the port and the connection still times out from outside, the block is in front of the VPS.
+The engine's own firewall also lets a blocked connection time out, so check it first: `ufw status` on the VPS shows what it allows. When it allows the port and the connection still times out from outside, the block is in front of the VPS.
 
 ## Next
 
