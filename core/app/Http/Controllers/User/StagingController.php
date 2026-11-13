@@ -186,6 +186,7 @@ class StagingController extends Controller
                     description: 'Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item is an object with `database`, the source database, and `name`, the table in it.',
                     type: 'array',
                     maxItems: 500,
+                    minItems: 1,
                     nullable: true,
                     items: new OA\Items(
                         required: ['database', 'name'],

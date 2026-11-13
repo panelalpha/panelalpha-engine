@@ -109,6 +109,7 @@ class Projects
         $to = ModelsUser::findByUsernameOrFail($targetUsername);
         self::assertCanPush($from, $to);
         self::assertContainerPushCarriesSomething($from, $to, $files, $databases);
+        self::assertTablesSelectSomething($tables);
 
         $targetSnapshot = ModelsUser::copiedDeploySnapshot($to->getDetails());
         if ($files) {
@@ -1547,6 +1548,18 @@ class Projects
         $problems = self::emptyContainerPushProblems($from, $to, $files, $databases);
         if ($problems !== []) {
             throw new \RuntimeException($problems[0]['message'], 422);
+        }
+    }
+
+    /**
+     * An empty selection is not a whole-database push: it would drop every table the target holds alone.
+     *
+     * @param  list<array{database: string, name: string}>|null  $tables
+     */
+    private static function assertTablesSelectSomething(?array $tables): void
+    {
+        if ($tables === []) {
+            throw new \RuntimeException('Selecting tables needs at least one table.', 422);
         }
     }
 

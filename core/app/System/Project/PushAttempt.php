@@ -82,6 +82,6 @@ final class PushAttempt
     /** Whether the push copies databases one table at a time. */
     public function replacesTables(): bool
     {
-        return $this->tables !== null && $this->tables !== [];
+        return $this->tables !== null;
     }
 }
