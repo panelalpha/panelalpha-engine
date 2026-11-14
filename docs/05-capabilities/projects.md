@@ -290,7 +290,7 @@ List the cron jobs on this project.
 Create one that runs /usr/bin/php /home/<user>/script.php every hour, on the hour.
 ```
 
-On a project deployed into its own container (from a repository, an archive, or WordPress set up by the engine), each cron job runs in one of the project's services, so name the service as well:
+On a project deployed into its own container (from a repository or an archive), each cron job runs in one of the project's services, so name the service as well:
 
 ```text
 Every five minutes, run php artisan schedule:run in the app service of this project.
@@ -402,7 +402,7 @@ Put the password ShopTest-2026 on tshop. Check that the site asks for it.
 Then remove it.
 ```
 
-Mode: modify. Tools: `project_password_set`, `project_password_unset`. Check: while set, an anonymous request to the site is refused and the page says "This site is password protected." After the removal it opens without a prompt. The password is not repeated in the assistant's answer.
+Mode: modify to set it, full to remove it. Tools: `project_password_set`, `project_password_unset`. Check: while set, an anonymous request to the site is refused and the page says "This site is password protected." After the removal it opens without a prompt. The password is not repeated in the assistant's answer.
 
 **Banner on every site**
 
@@ -529,8 +529,9 @@ Mode: modify. Tools: `vault_deploy_key_create`, `project_create` with a git sour
 **Upload an archive first**
 
 ```text
-Upload the archive <file> to the engine without creating a project yet. Show me
-when the upload expires, then delete it.
+Upload the archive https://github.com/FreshRSS/FreshRSS/archive/refs/heads/edge.zip
+to the engine without creating a project yet. Show me when the upload expires,
+then delete it.
 ```
 
 Mode: modify for the upload, full for the delete. Tools: `upload_create`, `upload_get`, `upload_delete`. Check: the upload reads back with its file name and an expiry about 24 hours away, and after the delete `upload_get` finds nothing.

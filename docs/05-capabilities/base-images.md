@@ -204,8 +204,8 @@ Mode: full. Tools: `system_image_delete`, `task_get`, `system_image_list`. Check
 **Build caches for a repository**
 
 ```text
-Build a shared build cache for https://github.com/octocat/Hello-World and then
-list the build caches on this server.
+Build a shared build cache for https://github.com/TwiN/gatus and then list the
+build caches on this server.
 ```
 
 Mode: modify. Tools: `system_build_cache_build`, `task_get`, `system_build_cache_list`. Check: the task completes and the repository appears in the list.

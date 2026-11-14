@@ -236,11 +236,11 @@ Mode: modify. Tools: `backup_container_create`. Check: the store is refused with
 **Restore only some parts**
 
 ```text
-Restore only the database <name> from the newest backup of tshop. Then restore
-everything except the volume <name>.
+Restore only the databases from the newest backup of tshop. Then restore
+everything except the files.
 ```
 
-Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores only that database and the second restores all but that volume.
+Mode: modify. Tools: `backup_restore` with `only` and with `exclude`. Check: the first restores only the databases and the second restores everything but the files.
 
 **A backup while a push runs**
 

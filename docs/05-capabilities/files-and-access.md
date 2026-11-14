@@ -193,7 +193,9 @@ Mode: full. Tools: `ftp_account_create`, `ftp_account_list`, `ftp_account_update
 
 ```text
 Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
-login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
+login using this public key:
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIApWAkKVzgReKYul8SQpaYM0MJfdnc92MJi/XNWjUoKh example
+Delete it afterwards.
 ```
 
 Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), a suffix alone gets the prefix added, and a login over 32 characters is refused. After the update the account accepts the key and not the password. The key is one line of a `.pub` file: Ed25519, ECDSA, a security-key form of either, or RSA of at least 2048 bits. A shorter RSA key is refused as `ssh_key_too_weak`, a DSA key as `ssh_key_type_not_accepted`, and a line whose key data is not a key of its type as `ssh_key_corrupt`. Prefer SFTP in the answer over plain FTP.

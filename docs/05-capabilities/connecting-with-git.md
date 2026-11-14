@@ -406,11 +406,11 @@ Mode: modify. Tools: `project_create`. Check: the request is refused with the ad
 **Go back to an older commit**
 
 ```text
-Roll tmemos back to the commit <id from the history>, then pull to return to
+Roll tmemos back to the commit before the newest one, then pull to return to
 the latest.
 ```
 
-Mode: modify. Tools: `git_revert` with `ref`, `git_pull`, `task_get`. Check: the revert works although the project holds only the newest commit, and a project that was stopped is started first.
+Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `git_pull`, `task_get`. Check: the revert works although the project holds only the newest commit, and a project that was stopped is started first.
 
 **Replace a token**
 

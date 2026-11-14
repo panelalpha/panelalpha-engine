@@ -259,7 +259,8 @@ Mode: full. Tools: `firewall_rule_create` with `action` deny, `direction` both, 
 
 ```text
 Allow 203.0.113.7 to reach published container port 8080. Then change the
-comment to "office". Do not open any port for an application's website.
+comment to "office", then to "by Fail2Ban", and try the same rule for ports
+08080 and 70000. Do not open any port for an application's website.
 ```
 
 Mode: modify. Tools: `firewall_rule_create` with `scope` published, `firewall_rule_update`. Check: the rule gets a new id when what it matches changes, and a comment starting `by Fail2Ban` is refused. A port such as 08080 or 70000 is refused.

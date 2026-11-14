@@ -168,8 +168,8 @@ Mode: full. Tools: `mysql_database_rename`, `project_push`, `task_get`. Check: w
 **Push selected tables**
 
 ```text
-Push only the table <table> of the database <db> from tphpsite to tphpstage.
-Then try to push with an empty list of tables.
+Pick one table of a database on tphpsite and push only that table to
+tphpstage. Then try to push with an empty list of tables.
 ```
 
 Mode: modify. Tools: `project_push` with `tables`. Check: only that table is replaced on the other side, and the empty list is refused with nothing replaced.

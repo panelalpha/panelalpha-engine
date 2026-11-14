@@ -21,7 +21,7 @@ From there you can add a domain, take a backup, change PHP, run WP-CLI, or manag
 There are two kinds of WordPress on this engine, and they are not the same:
 
 - **Traditional PHP hosting.** Files live in the domain's folder, `/<domain>/public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI, which also covers WordPress users and plugins. The App users tools, with the install wizard, are not available on this kind; the WP-CLI operations below cover users and a one-time login link instead. Cloudflare is not available either: a tunnel, a cache purge or the security level.
-- **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains. That includes WordPress from a Docker Compose file of your own, such as the official `wordpress` image next to a database.
+- **Its own container.** Files live in `project/`. This is what you get when you deploy WordPress from git, for example its official repository. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains. That includes WordPress from a Docker Compose file of your own, such as the official `wordpress` image next to a database.
 
 If an action is refused, see [Troubleshooting](#troubleshooting). Older versions called a project a "user". If output still says `username`, that is the project's name.
 
@@ -54,17 +54,30 @@ The tool needs the PHP version, so name it, as above. A WordPress site in its ow
 
 Do the domain first if you are using your own. WordPress records its own site address when it is installed and does not take kindly to that address changing afterwards: [Domains and HTTPS](domains-and-ssl.md).
 
-Then ask your assistant:
+There are two ways, one for each kind of project above.
+
+**Ready to use, on traditional PHP hosting.** Give the site a title and name its first administrator:
 
 ```text
-Set up WordPress on a new project on this PanelAlpha Engine.
+Create a WordPress site called myblog on this PanelAlpha Engine, titled
+"My blog", with administrator admin and email you@example.com. Choose a strong
+password for the administrator and tell me it once.
 ```
 
-The engine creates the project in its own isolated container, creates a MySQL database for it, and writes the WordPress configuration. It does not finish the WordPress setup wizard for you; that is the next step.
+The engine creates the project and its MySQL database, writes `wp-config.php` and installs WordPress. When the task finishes, the site is live and the administrator can sign in. The password must be at least 8 characters and does not appear in the engine's task records. If the install fails, the project is removed.
+
+**In its own container.** Deploy the official WordPress repository:
+
+```text
+Deploy https://github.com/WordPress/WordPress as a new project on this
+PanelAlpha Engine.
+```
+
+The engine recognises WordPress, creates a MySQL database for it and writes the WordPress configuration. It does not finish the WordPress setup wizard for you; that is the next step.
 
 ## Finish the install
 
-Give WordPress the details it needs for the first administrator account. You need all five: the site address, the site title, an admin username, an admin email, and a password of at least 8 characters.
+On a project in its own container, give WordPress the details it needs for the first administrator account. You need all five: the site address, the site title, an admin username, an admin email and a password of at least 8 characters.
 
 ```text
 Install WordPress on this project. Title: My Site. Admin user: admin.
@@ -281,10 +294,11 @@ Usually file permissions, the account's disk quota, or PHP running out of memory
 **Fresh WordPress**
 
 ```text
-Set up WordPress on a new project called twp on this PanelAlpha Engine.
+Deploy https://github.com/WordPress/WordPress as project twp on this
+PanelAlpha Engine.
 ```
 
-Mode: modify. Tools: `project_create`, `task_get`, `app_info`. Check: the project is created in its own container with its own database, and the WordPress setup wizard is not finished yet.
+Mode: modify. Tools: `project_create`, `task_get`, `app_info`. Check: the project runs in its own container with its own database, the engine recognises it as WordPress and the WordPress setup wizard is not finished yet.
 
 **What the engine knows about the app**
 
