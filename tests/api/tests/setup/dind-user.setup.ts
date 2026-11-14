@@ -13,6 +13,7 @@ import { configuredGitRepo, waitForDeploy } from '@/helpers/deploy-helpers';
 import { isDindUser } from '@/helpers/sss-feature-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 import { waitForSiteHttpReady } from '@/helpers/webserver-helpers';
+import { keepManualUser } from '@/test-data/factories/user.factory';
 import { Timeouts } from '@/config/timeouts';
 
 /**
@@ -87,5 +88,6 @@ test('provision shared DinD git-deployed user', async ({
     createdAt: Date.now(),
     ...runIdentity(),
   });
+  keepManualUser(created.username);
   refreshLease();
 });

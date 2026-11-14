@@ -245,10 +245,10 @@ class HostCompileBuildSlotTest extends TestCase
 
     public function test_deploy_build_memory_wins_on_the_real_engine(): void
     {
-        config(['deploy.build_memory' => '3g']);
+        config(['deploy.build_memory' => '512m']);
         $builder = (new DindEngine)->hostBuilder();
 
-        $this->assertSame(3072, $builder->memoryLimitMb());
+        $this->assertSame(512, $builder->memoryLimitMb());
         $this->assertSame(BuildMemory::SETTING, $builder->memoryOrigin()->source);
     }
 

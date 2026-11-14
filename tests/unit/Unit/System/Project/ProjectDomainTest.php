@@ -14,15 +14,19 @@ use App\System\Project;
 use App\System\Project\Domain as DomainCollaborator;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\WebserverInterface;
+use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
 class ProjectDomainTest extends TestCase
 {
+    use InMemoryDatabase;
+
     protected function setUp(): void
     {
         parent::setUp();
+        $this->bootInMemoryDatabase();
         // create() configures statistics for the new domain; keep that off this machine's awstats directory.
         $this->app->instance(Statistics::class, new FakeStatistics());
     }

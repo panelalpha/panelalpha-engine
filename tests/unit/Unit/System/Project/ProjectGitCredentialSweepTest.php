@@ -92,7 +92,7 @@ class ProjectGitCredentialSweepTest extends TestCase
     /** A chown that fails after the install leaves neither the helper nor its local copy holding the token. */
     public function test_a_failed_chown_removes_the_installed_askpass_and_its_local_copy(): void
     {
-        $system = new AskPassFailingSystem('chown');
+        $system = new AskPassFailingSystem('changeOwner');
 
         $this->executeWithToken($system);
 
@@ -115,7 +115,7 @@ class ProjectGitCredentialSweepTest extends TestCase
     {
         Log::spy();
 
-        $output = (new SweepableGit(new AskPassFailingSystem('find'), $this->home))
+        $output = (new SweepableGit(new AskPassFailingSystem('staleFilesStartingWith'), $this->home))
             ->callExecute(['git', '-C', $this->home . '/project', 'status']);
 
         $this->assertSame('', $output);
@@ -255,17 +255,18 @@ final class AskPassFailingSystem extends EngineSystem
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
     {
         $request = is_array($cmd) ? array_values($cmd) : [$cmd];
-        $argv = LocalRoot::plain($request);
-        $step = LocalRoot::isRequest($request) ? $argv[0] : '';
+        $action = (string) LocalRoot::action($request);
+        $step = $action === '' ? '' : substr($action, (int) strrpos($action, '.') + 1);
+        $values = LocalRoot::values($request);
         if ($step === 'install') {
-            $this->installArgv = $argv;
+            $this->installArgv = $values;
         }
         if ($step === $this->failingStep) {
             throw new \RuntimeException("{$step} failed");
         }
         match ($step) {
-            'install' => copy($argv[4], $argv[5]),
-            'rm' => @unlink((string) end($argv)),
+            'install' => copy($values[1], $values[2]),
+            'removeIfExists' => @unlink((string) end($values)),
             default => null,
         };
 
@@ -275,6 +276,6 @@ final class AskPassFailingSystem extends EngineSystem
     /** @return array{0: string, 1: string} the local copy and where it was installed */
     public function installed(): array
     {
-        return [(string) ($this->installArgv[4] ?? ''), (string) ($this->installArgv[5] ?? '')];
+        return [(string) ($this->installArgv[1] ?? ''), (string) ($this->installArgv[2] ?? '')];
     }
 }

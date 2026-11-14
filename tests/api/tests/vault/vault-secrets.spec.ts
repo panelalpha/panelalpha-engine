@@ -209,13 +209,12 @@ test.describe('secret vault', () => {
     await expectStatus(await api.getVaultSecretRaw(created.data.ref), 404);
   });
 
-  test('deleting twice is not an error', async ({ api }) => {
+  test('deleting twice answers 404 the second time', async ({ api }) => {
     const created = await api.createVaultSecret({ type: vaultType() });
 
     await api.deleteVaultSecret(created.data.ref);
-    // Matches the engine's delete semantics elsewhere — see
-    // tests/integration/delete-idempotency.spec.ts.
-    await expectStatus(await api.deleteVaultSecretRaw(created.data.ref), 200);
+    // Matches tests/integration/delete-idempotency.spec.ts.
+    await expectStatus(await api.deleteVaultSecretRaw(created.data.ref), 404);
   });
 
   test('an unknown reference is not found', async ({ api }) => {

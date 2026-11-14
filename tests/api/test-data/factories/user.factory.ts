@@ -74,6 +74,11 @@ export function manualCleanupPending(): string[] {
   return [...manualCleanupUsers];
 }
 
+/** Hands an `autoCleanup: false` user over to later runs, so the worker sweep keeps it. */
+export function keepManualUser(username: string): void {
+  manualCleanupUsers.delete(username);
+}
+
 const DIAGNOSTICS_BUDGET_MS = 15_000;
 const DEPLOY_LOG_TAIL_LINES = 40;
 

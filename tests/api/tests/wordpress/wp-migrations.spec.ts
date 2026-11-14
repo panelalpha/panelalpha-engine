@@ -150,8 +150,22 @@ test.describe('WordPress migrations', () => {
 
     await expectStatus(
       await authedRequest.post(`wordpress/migrations/${migration.id}/cancel`),
+      202,
+      'cancel a failed migration'
+    );
+    await expect
+      .poll(
+        async () => {
+          const shown = await authedRequest.get(`wordpress/migrations/${migration.id}`);
+          return ((await shown.json()) as Migration).status;
+        },
+        { timeout: 120_000, intervals: [3_000], message: 'the cancel never finished' }
+      )
+      .toBe('cancelled');
+    await expectStatus(
+      await authedRequest.post(`wordpress/migrations/${migration.id}/cancel`),
       409,
-      'cancel an ended migration'
+      'cancel a cancelled migration'
     );
     await expectStatus(
       await authedRequest.delete(`wordpress/migrations/${migration.id}`),

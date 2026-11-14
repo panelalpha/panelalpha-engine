@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -198,9 +199,8 @@ class FileListHttpTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->processJournal[] = is_array($cmd) ? $cmd : [$cmd];
-                $argv = array_slice((array) $cmd, 7);
-                $process = new Process($argv);
+                $this->processJournal[] = LocalRoot::plain((array) $cmd);
+                $process = new Process(LocalRoot::argv((array) $cmd));
                 $process->run();
 
                 return $process;
