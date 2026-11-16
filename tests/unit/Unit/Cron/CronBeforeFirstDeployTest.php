@@ -8,6 +8,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Privileged;
+use App\System\Project\CronRunner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\Support\LocalRoot;
@@ -90,6 +91,9 @@ class CronBeforeFirstDeployTest extends TestCase
             Privileged::files()->touch($this->crontab()),
             Privileged::files()->changeOwner('1500:1500', $this->crontab()),
             Privileged::files()->changeMode('600', $this->crontab()),
+            Privileged::files()->makeDirectories($this->root . '/home/alice/' . CronRunner::LOG_DIR),
+            Privileged::files()->changeOwner('1500:1500', $this->root . '/home/alice/' . CronRunner::LOG_DIR),
+            Privileged::files()->changeMode('755', $this->root . '/home/alice/' . CronRunner::LOG_DIR),
         ], $system->calls);
         $this->assertSame([$created], $system->project($user)->cron()->list());
     }
@@ -195,6 +199,12 @@ class CronBeforeFirstDeployTest extends TestCase
 
                     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
                     {
+                        file_put_contents($path, $contents);
+                    }
+
+                    public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
+                    {
+                        @mkdir(dirname($path), 0777, true);
                         file_put_contents($path, $contents);
                     }
                 };

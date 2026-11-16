@@ -10,6 +10,7 @@ use App\System\Privileged\AccountFiles;
 use App\System\Project as UserProject;
 use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use App\System\Project\PhpHosting\PhpHandlerNotRunning;
+use App\System\Project\PhpHosting\PhpRuntime;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
@@ -97,11 +98,23 @@ class Php
 
         if ($settings === []) {
             $this->removeDirectivesFile($system, $path);
-
-            return;
+        } else {
+            $this->installDirectivesFile($this->encodedDirectives($settings), $path);
         }
 
-        $this->installDirectivesFile($this->encodedDirectives($settings), $path);
+        $this->reloadDomainPhpHandler($domain);
+    }
+
+    /**
+     * php-fpm reads the file again within user_ini.cache_ttl, which the pool and the version's default.ini set to 3 s;
+     * a handler that started before the pool carried it replaces its workers as before. lsphp restarts.
+     */
+    private function reloadDomainPhpHandler(Domain $domain): void
+    {
+        $phpVersion = $domain->getPhpVersion();
+        if ($phpVersion !== null) {
+            $this->reloadPhpHandler($phpVersion);
+        }
     }
 
     private function removeDirectivesFile(System $system, string $path): void
@@ -172,9 +185,27 @@ class Php
 
     private function domainDirectivesPath(Domain $domain): string
     {
-        $relative = rtrim($domain->getDocumentRoot(), '/').'/.user.ini';
+        return $this->project->fileManager()->resolvePath(self::domainDirectiveRelativePath($domain));
+    }
 
-        return $this->project->fileManager()->resolvePath($relative);
+    /**
+     * The Engine's own record of a domain's directives, a shared document root once.
+     *
+     * @return list<string>
+     */
+    public function domainDirectiveRelativePaths(): array
+    {
+        $paths = [];
+        foreach ($this->project->model()->domains as $domain) {
+            $paths[self::domainDirectiveRelativePath($domain)] = true;
+        }
+
+        return array_keys($paths);
+    }
+
+    private static function domainDirectiveRelativePath(Domain $domain): string
+    {
+        return rtrim($domain->getDocumentRoot(), '/').'/.user.ini';
     }
 
     /**
@@ -289,20 +320,38 @@ class Php
     }
 
     /**
-     * With no domain on this version yet the file is saved and takes effect when one
+     * With no handler running that version the file is saved and takes effect when one
      * uses it; that is logged so it is not a silent success.
      */
+    private function reloadPhpHandler(string $phpVersion): void
+    {
+        $this->savedWithoutHandler(
+            $phpVersion,
+            fn (PhpRuntime $phpRuntime) => $phpRuntime->reloadPhpHandler($phpVersion)
+        );
+    }
+
+    /** A php.ini value is read when the handler starts, so that one takes a restart. */
     private function restartPhpHandler(string $phpVersion): void
+    {
+        $this->savedWithoutHandler(
+            $phpVersion,
+            fn (PhpRuntime $phpRuntime) => $phpRuntime->restartPhpHandler($phpVersion)
+        );
+    }
+
+    /** @param  callable(PhpRuntime): void  $apply */
+    private function savedWithoutHandler(string $phpVersion, callable $apply): void
     {
         $runtime = $this->project->runtime();
         if (! $runtime instanceof PhpHosting) {
             return;
         }
         try {
-            $runtime->phpRuntime()->restartPhpHandler($phpVersion);
+            $apply($runtime->phpRuntime());
         } catch (PhpHandlerNotRunning) {
             Log::info(
-                "PHP {$phpVersion} settings saved for {$this->project->username()}; no domain runs that version yet"
+                "PHP {$phpVersion} settings saved for {$this->project->username()}; no PHP handler of that version is running"
             );
         }
     }

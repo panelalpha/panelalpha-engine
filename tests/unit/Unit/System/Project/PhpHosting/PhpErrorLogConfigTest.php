@@ -105,9 +105,68 @@ class PhpErrorLogConfigTest extends TestCase
         $ini = $this->accountFile('8.3', 'default.ini');
         $this->assertSame(1, substr_count($ini, 'log_errors'));
         $this->assertSame(1, substr_count($ini, 'error_log'));
+        $this->assertSame(1, substr_count($ini, 'user_ini.cache_ttl'));
         $pool = $this->accountFile('8.3', 'fpm/pool.d/www.conf');
         $this->assertSame(1, substr_count($pool, 'catch_workers_output'));
         $this->assertSame(1, substr_count($pool, 'decorate_workers_output'));
+        $this->assertSame(1, substr_count($pool, 'user_ini.cache_ttl'));
+    }
+
+    /** A saved document root's user INI is read again within this window; a worker keeps its own copy for 5 minutes. */
+    public function test_an_existing_project_gets_a_three_second_user_ini_cache(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        $this->account('8.2', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        foreach (['8.3', '8.2'] as $version) {
+            $this->assertStringContainsString("user_ini.cache_ttl = 3\n", $this->accountFile($version, 'default.ini'), $version);
+        }
+    }
+
+    /** A longer cache in the file is rewritten, not duplicated, so one edit cannot slow a saved setting down again. */
+    public function test_a_longer_user_ini_cache_in_the_file_is_rewritten(): void
+    {
+        $this->account('8.3', "user_ini.cache_ttl = 60\nmax_execution_time = 600\n", "[www]\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $ini = $this->accountFile('8.3', 'default.ini');
+        $this->assertSame(1, substr_count($ini, 'user_ini.cache_ttl'));
+        $this->assertStringStartsWith("user_ini.cache_ttl = 3\nmax_execution_time = 600\n", $ini);
+    }
+
+    /** For php-fpm the pool holds the value as an admin value, which a project's own ini cannot raise. */
+    public function test_an_existing_project_gets_the_short_user_ini_cache_in_its_pool(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        $this->account('8.2', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        foreach (['8.3', '8.2'] as $version) {
+            $this->assertStringContainsString(
+                PhpErrorLogConfig::POOL_USER_INI_CACHE_TTL_LINE."\n",
+                $this->accountFile($version, 'fpm/pool.d/www.conf'),
+                $version
+            );
+        }
+    }
+
+    public function test_a_pool_that_carries_a_longer_user_ini_cache_is_rewritten(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nphp_admin_value[user_ini.cache_ttl] = 300\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $pool = $this->accountFile('8.3', 'fpm/pool.d/www.conf');
+        $this->assertSame(1, substr_count($pool, 'user_ini.cache_ttl'));
+        $this->assertStringStartsWith("[www]\n".PhpErrorLogConfig::POOL_USER_INI_CACHE_TTL_LINE."\n", $pool);
     }
 
     public function test_a_version_the_project_does_not_ship_is_left_alone(): void

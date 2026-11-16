@@ -12,6 +12,7 @@ use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
 use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use App\System\Services\Webserver;
 use Mockery;
 use PHPUnit\Framework\TestCase;
@@ -95,6 +96,21 @@ class PhpHostingApplicationTest extends TestCase
         );
     }
 
+    /** The pool has told php-fpm to re-read a document root's user INI, so a reload only checks that it did. */
+    public function test_reload_php_handler_runs_the_user_ini_cache_check(): void
+    {
+        $system = $this->system();
+        $project = $this->phpHosting($this->userModel(), $system);
+        file_put_contents($project->composeFilePath(), "services:\n  php:\n    image: test\n");
+
+        $project->phpRuntime()->reloadPhpHandler('8.1');
+
+        $this->assertSame(
+            [Privileged::accountContainer('alice')->exec(['bash', '-c', FpmStack::reloadScript('8.1')])],
+            $system->processJournal
+        );
+    }
+
     public function test_run_wp_cli_execs_in_the_php_container_as_the_account(): void
     {
         $system = $this->system();
@@ -115,10 +131,11 @@ class PhpHostingApplicationTest extends TestCase
         $this->assertSame('/usr/bin/php8.3', $command[4]);
         $this->assertSame('-d', $command[5]);
         $this->assertSame('memory_limit=384M', $command[6]);
-        $this->assertSame('/opt/wp-cli.phar', $command[7]);
-        $this->assertSame('--exec='.MustUsePlugin::MEND_ON_LOAD, $command[8], 'an old must-use plugin is mended first');
-        $this->assertSame('plugin', $command[9]);
-        $this->assertSame('list', $command[10]);
+        $this->assertSame(WpCli::PHP_FLAGS, array_slice($command, 7, count(WpCli::PHP_FLAGS)));
+        $this->assertSame('/opt/wp-cli.phar', $command[11]);
+        $this->assertSame('--exec='.MustUsePlugin::MEND_ON_LOAD, $command[12], 'an old must-use plugin is mended first');
+        $this->assertSame('plugin', $command[13]);
+        $this->assertSame('list', $command[14]);
     }
 
     /** A --path that names a subdirectory of a document root still picks that domain's PHP. */

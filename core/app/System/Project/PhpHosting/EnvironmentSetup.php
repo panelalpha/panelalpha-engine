@@ -142,5 +142,6 @@ BASH;
         $chown = $project->userModel()->getChownString() ?? '33:33';
         $system->exec(Privileged::files()->changeOwner($chown, $file));
         $system->exec(Privileged::files()->changeMode('600', $file));
+        $project->project()->cron()->rewrite();
     }
 }

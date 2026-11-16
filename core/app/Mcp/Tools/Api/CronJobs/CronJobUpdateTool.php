@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Update a cron job
 
-    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Each run, and a run skipped because the service is not running, is logged to ~/.panelalpha/cron/cron.log in the account. The hash is derived from the job's entries, so the job this returns carries a new one: address it by `data.hash` from here on, not by the hash the request used.
+    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/.panelalpha/cron/cron.log in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too. The hash is derived from the job's entries, so the job this returns carries a new one: address it by `data.hash` from here on, not by the hash the request used.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

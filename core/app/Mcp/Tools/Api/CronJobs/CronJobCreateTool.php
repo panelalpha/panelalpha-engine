@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a cron job
 
-    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Each run, and a run skipped because the service is not running, is logged to ~/.panelalpha/cron/cron.log in the account.
+    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/.panelalpha/cron/cron.log in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too.
     MARKDOWN)]
 #[IsDestructive]
 class CronJobCreateTool extends ApiTool

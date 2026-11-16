@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Php;
 
+use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use Tests\TestCase;
 
 /**
@@ -37,6 +38,18 @@ class PhpErrorLogTemplatesTest extends TestCase
         $this->assertGreaterThanOrEqual(2, $checked);
     }
 
+    /** A saved document root's user INI reaches the site in seconds, out of reach of the root's own .user.ini. */
+    public function test_every_php_version_re_reads_a_document_roots_user_ini_within_seconds(): void
+    {
+        foreach ($this->phpTemplates('default.ini') as $version => $file) {
+            $this->assertMatchesRegularExpression(
+                '/^user_ini\\.cache_ttl = 3$/m',
+                (string) file_get_contents($file),
+                $version
+            );
+        }
+    }
+
     public function test_every_fpm_pool_catches_worker_output(): void
     {
         foreach ($this->phpTemplates('fpm/pool.d/www.conf.blade.php') as $version => $file) {
@@ -45,6 +58,22 @@ class PhpErrorLogTemplatesTest extends TestCase
             $this->assertStringContainsString('catch_workers_output = yes', $contents, $version);
             $this->assertStringContainsString('decorate_workers_output = no', $contents, $version);
         }
+    }
+
+    /** The pool carries the short user INI cache too, as an admin value a project's own ini cannot raise. */
+    public function test_every_fpm_pool_holds_the_short_user_ini_cache(): void
+    {
+        $checked = 0;
+        foreach ($this->phpTemplates('fpm/pool.d/www.conf.blade.php') as $version => $file) {
+            $this->assertMatchesRegularExpression(
+                '/^php_admin_value\[user_ini\.cache_ttl\] = '.PhpErrorLogConfig::USER_INI_CACHE_TTL.'$/m',
+                (string) file_get_contents($file),
+                $version
+            );
+            $checked++;
+        }
+
+        $this->assertGreaterThanOrEqual(6, $checked);
     }
 
     public function test_the_error_log_is_not_admin_locked_in_the_pool(): void

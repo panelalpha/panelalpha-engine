@@ -14,7 +14,7 @@ Upload this archive into the project and deploy it: /path/to/app.zip
 Write these files into the project and rebuild.
 ```
 
-The assistant can upload a file, write files directly, download a file from an address, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be.
+The assistant can upload a file, write files directly, download a file from an address, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be. A deploy removes the archive it was given once it has unpacked it, and only that one: anything else in the folder the archive was staged in stays, an archive staged there for a later deploy included, while the files the archive itself holds for that folder are written into it. That happens inside the deploy, so a deploy that has finished has nothing left to delete.
 
 ```text
 Download https://example.com/plugin.zip into /project on this project.
@@ -74,6 +74,10 @@ To end the sessions of every SFTP account on the project at once, say "all SFTP 
 
 **Upload into `/project/`**, not into `/`. Anything at the top level is outside what the webserver serves. For traditional PHP hosting (including most existing WordPress sites) the folder is the domain's `/<domain>/public_html` instead, and those files are served as soon as you upload them. Ask the assistant to inspect the project if you are unsure which applies.
 
+An upload keeps the permissions the file has on your computer. A file only you can read (mode `600`) is not served, and its address answers 403: upload it as `644`, or `chmod 644` it over SFTP.
+
+The name must be a plain file name, with no folder part. PHP keeps only the part after the last `/` or `\` of a multipart file name, so the engine refuses a name such as `sub\upload.txt` with `file_name_changed` and writes nothing, rather than replace another file of the shortened name.
+
 ## Troubleshooting
 
 **"I uploaded my files and the site did not change."**
@@ -81,6 +85,9 @@ Two possible causes, in order of likelihood. Either the files went to the accoun
 
 **"Permission denied" on upload.**
 The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
+
+**"The file name ... would be stored as ..." on upload.**
+The name has a folder part, for example `sub\upload.txt`. PHP keeps only the part after the last `/` or `\`, so the engine refuses it with the code `file_name_changed` and writes nothing: the file of the shortened name is left as it was. Upload it under a plain name.
 
 **"... is not a folder the project's account can write to" on upload, write, new folder or unzip.**
 The folder exists but does not belong to the account, so nothing was written, created or unpacked; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
@@ -205,7 +212,7 @@ Mode: modify. Tools: `sftp_session_kill`, `sftp_session_kill_all`. Check: each a
 Run `ls -la /project | head` inside the tshop container and show me the output.
 ```
 
-Mode: modify. Tools: `ssh_run` with `cwd` and `timeout`. Check: pipes work, a non-zero exit is reported in the answer rather than as an error, and the same request on traditional PHP hosting is refused.
+Mode: modify. Tools: `ssh_run` with `cwd` and `timeout`. Check: pipes work, a non-zero exit is reported in the answer rather than as an error, the same request on traditional PHP hosting is refused, and a command is stopped when the caller that started it goes away, instead of running on in the container.
 
 ## From the server
 

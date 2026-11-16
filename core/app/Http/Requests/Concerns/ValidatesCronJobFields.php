@@ -4,6 +4,7 @@ namespace App\Http\Requests\Concerns;
 
 use App\Lib\Helpers\CronSchedule;
 use App\Models\User;
+use App\System\Project\CronRunner;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountCron;
 use App\System\Project\Dind\ContainerOperations;
@@ -41,7 +42,14 @@ trait ValidatesCronJobFields
         $inService = $this->runsInAService();
 
         $rules = [
-            'command' => ['string', 'required', $oneLine, $inService ? $this->fitsTheRunner(...) : $this->hasNoEscapedPercent(...)],
+            'command' => [
+                'string',
+                'required',
+                $oneLine,
+                ...($inService
+                    ? [$this->fitsTheRunner(...)]
+                    : [$this->hasNoEscapedPercent(...), $this->fitsTheAccountRunner(...)]),
+            ],
             'service' => $inService
                 ? ['bail', 'required', 'string', 'max:63', 'regex:'.ContainerOperations::SERVICE_NAME]
                 : ['prohibited'],
@@ -65,6 +73,14 @@ trait ValidatesCronJobFields
     {
         if (strlen((string) $value) > AccountCron::MAX_COMMAND_BYTES) {
             $fail('The :attribute field must be at most '.AccountCron::MAX_COMMAND_BYTES.' bytes for a job that runs in a service.');
+        }
+    }
+
+    /** A classic account's job carries the runner and the command in base64 in front of it, and cron reads 1000 characters. */
+    private function fitsTheAccountRunner(string $attribute, mixed $value, Closure $fail): void
+    {
+        if (! CronRunner::fits((string) $value)) {
+            $fail('The :attribute field must be at most '.CronRunner::MAX_COMMAND_BYTES.' bytes for a job on PHP hosting.');
         }
     }
 

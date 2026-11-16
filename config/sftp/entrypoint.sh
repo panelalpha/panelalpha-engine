@@ -8,6 +8,11 @@ function log() {
     echo "[$0] $*" >&2
 }
 
+# An upload lands as FTP writes it: the internal-sftp of a session takes the
+# umask it runs under, and sshd hands down this one. Without it a container
+# started under umask 077 leaves uploads 0600 and the webserver answers 403.
+SFTP_UMASK=0022
+
 # Allow running other programs, e.g. bash
 if [[ -z "$1" || "$1" =~ $reArgsMaybe ]]; then
     startSshd=true
@@ -34,6 +39,7 @@ if $startSshd; then
     # 2222 as published: the host firewall matches a published port after the DNAT.
     # Logs go to the host's journal as local5, so fail2ban can tell SFTP
     # logins from the host's own SSH; without the socket, to the container log.
+    umask "${SFTP_UMASK}"
     if [ -S /dev/log ]; then
         exec /usr/sbin/sshd -D -p 2222 -o SyslogFacility=LOCAL5
     fi

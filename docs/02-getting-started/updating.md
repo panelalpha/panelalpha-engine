@@ -20,6 +20,7 @@ An update installs only a newer release than the one running. This holds for an 
 
 - Docker is restarted only when its firewall chains are missing, for example after something cleared the server's firewall rules.
 - The webserver for your sites is restarted only when its configuration changed.
+- The SFTP service is recreated only when the start-up script a release ships for it changed, so a fix to how uploads are written reaches a server on its own. An SFTP session that is open at that moment ends.
 - The engine's own certificate is not requested again unless it is due for renewal.
 - While the engine's database is being migrated, its scheduler and background workers wait, so no job runs new code against the old database.
 - The engine's own images are downloaded for the version being installed, and a newer build of them for the same version, such as one with operating system security fixes, is downloaded on the next update. An image is built on the server only when none is published for exactly that version's sources.

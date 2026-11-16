@@ -81,6 +81,8 @@ class FileController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/files/remove',
         summary: 'Delete a file or directory',
+        x: ['mcp-description' => 'Deletes the file or directory at `path` for good; `recursive` takes everything '
+            .'inside a directory with it. This cannot be undone. Ask the operator to confirm first, naming the path.'],
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [
@@ -686,7 +688,7 @@ class FileController extends Controller
     #[OA\Post(
         path: '/projects/{username}/files/upload',
         summary: 'Upload a file',
-        description: 'Stores one file in the account, under `path` (relative to the home directory, e.g. /project). Over HTTP the file is a multipart form part. Over MCP pass file_name plus file_contents (base64, or text with file_encoding: text) for a small file, or file_url for anything the engine should download itself, such as a release archive; then project_deploy_archive deploys an uploaded .zip or .tar.gz. Plain text files can also be written directly with file_write.',
+        description: 'Stores one file in the account, under `path` (relative to the home directory, e.g. /project). Over HTTP the file is a multipart form part. The part\'s file name is the name stored, and it must be a plain name: PHP keeps only the part after the last `/` or `\`, so a name with a folder part is refused with `file_name_changed` before anything is written rather than replace the file of the shortened name. Over MCP pass file_name plus file_contents (base64, or text with file_encoding: text) for a small file, or file_url for anything the engine should download itself, such as a release archive; then project_deploy_archive deploys an uploaded .zip or .tar.gz. Plain text files can also be written directly with file_write.',
         x: ['mcp-description' => 'Stores one file under `path` (e.g. /project). Small: file_name + file_contents. '
             .'Anything larger: file_url, which the engine downloads.'],
         security: [['bearerAuth' => []]],
@@ -698,13 +700,13 @@ class FileController extends Controller
                 required: ['path', 'file'],
                 properties: [
                     new OA\Property(property: 'path', type: 'string', example: '/public_html'),
-                    new OA\Property(property: 'file', type: 'string', format: 'binary'),
+                    new OA\Property(property: 'file', type: 'string', format: 'binary', description: 'The file; its name is stored as sent and must have no folder part.'),
                 ],
             ),
         )),
         responses: [
             new OA\Response(response: 200, description: 'File uploaded', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
-            new OA\Response(response: 422, description: 'The project cannot write to path', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'The project cannot write to path, or the part\'s file name has a folder part (problems[].code file_name_changed)', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function upload(string $username, UploadRequest $request): JsonResponse

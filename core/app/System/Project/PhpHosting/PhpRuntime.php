@@ -4,6 +4,7 @@ namespace App\System\Project\PhpHosting;
 
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Support\Str;
 
 /**
@@ -41,6 +42,11 @@ final class PhpRuntime
     public function restartPhpHandler(string $phpVersion): void
     {
         $this->project->stackVariant()->restartPhpHandler($this->project, $phpVersion);
+    }
+
+    public function reloadPhpHandler(string $phpVersion): void
+    {
+        $this->project->stackVariant()->reloadPhpHandler($this->project, $phpVersion);
     }
 
     public function syncPhpHandlersScripts(): void
@@ -87,6 +93,7 @@ final class PhpRuntime
             $this->phpBinaryPath($wpPath),
             '-d',
             'memory_limit='.$this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
+            ...WpCli::PHP_FLAGS,
             '/opt/wp-cli.phar',
             '--exec='.MustUsePlugin::MEND_ON_LOAD,
             ...$args,

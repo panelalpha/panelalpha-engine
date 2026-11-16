@@ -152,11 +152,31 @@ class FileManager
 
     public function moveUploadedFile(string $path, UploadedFile $file): void
     {
+        $this->assertNameUnchanged($file);
         $path = $this->resolvePath($path);
         $targetDir = rtrim($path, '/');
         $target = $targetDir.'/'.$file->getClientOriginalName();
 
         $this->writeAsUser($file->path(), $target);
+    }
+
+    /**
+     * PHP's multipart parser keeps only the part after the last `/` or `\`, so a name with a folder part
+     * would write over a file the request never named.
+     */
+    private function assertNameUnchanged(UploadedFile $file): void
+    {
+        $sent = $file->getClientOriginalPath();
+        $read = $file->getClientOriginalName();
+        if ($sent === $read) {
+            return;
+        }
+
+        throw ProblemException::one(
+            'file',
+            'file_name_changed',
+            "The file name '{$sent}' would be stored as '{$read}': send a plain file name with no folder part.",
+        );
     }
 
     /**

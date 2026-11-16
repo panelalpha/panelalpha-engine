@@ -9,6 +9,7 @@ use App\System\Privileged;
 use App\System\Privileged\Arguments;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\Services\Service;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 final class FpmApacheStack implements PhpStack
@@ -77,6 +78,11 @@ final class FpmApacheStack implements PhpStack
         (new FpmStack($this->system, $this->model))->restartPhpHandler($project, $phpVersion);
     }
 
+    public function reloadPhpHandler(PhpHosting $project, string $phpVersion): void
+    {
+        (new FpmStack($this->system, $this->model))->reloadPhpHandler($project, $phpVersion);
+    }
+
     public function isApacheRunning(PhpHosting $project): bool
     {
         try {
@@ -112,7 +118,7 @@ final class FpmApacheStack implements PhpStack
 
         $phpVersion = $domain->getPhpVersion();
         if ($phpVersion) {
-            $this->restartManagedPhpHandler($project, $phpVersion);
+            $this->reloadManagedPhpHandler($project, $phpVersion);
         }
 
         $this->reloadWebserver($project);
@@ -201,14 +207,17 @@ final class FpmApacheStack implements PhpStack
     }
 
     /**
-     * Through the account's services, never `service ... restart`, whose master they cannot see. A version
-     * switch lands here before its service is written; the sync that follows starts it.
+     * Through the account's services, never `service ... restart`, whose master they cannot see: a vhost change
+     * leaves the handler's own configuration as it was, so its workers are replaced and running requests finish.
+     * A swap that fails is logged and never keeps the webserver from loading the new vhost.
      */
-    private function restartManagedPhpHandler(PhpHosting $project, string $phpVersion): void
+    private function reloadManagedPhpHandler(PhpHosting $project, string $phpVersion): void
     {
         try {
-            $this->restartPhpHandler($project, $phpVersion);
+            $this->reloadPhpHandler($project, $phpVersion);
         } catch (PhpHandlerNotRunning) {
+        } catch (\RuntimeException $e) {
+            Log::warning("{$project->username()}: {$e->getMessage()}");
         }
     }
 

@@ -44,9 +44,9 @@ class PhpConfigRefreshCommandTest extends TestCase
 
         $this->assertSame(0, $exit);
         $this->assertStringContainsString("Refreshing the PHP config of 'alice'...", $output);
-        $this->assertStringContainsString('Error-log directives written.', $output);
+        $this->assertStringContainsString('PHP directives written.', $output);
         $this->assertStringContainsString(
-            "log_errors = On\nerror_log = /var/log/php/php_error.log\n",
+            "log_errors = On\nerror_log = /var/log/php/php_error.log\nuser_ini.cache_ttl = 3\n",
             $this->projectFile('alice', '8.3', 'default.ini')
         );
         $this->assertStringContainsString(

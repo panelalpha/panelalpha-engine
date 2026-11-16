@@ -195,6 +195,51 @@ class PhpDirectivesHttpTest extends TestCase
             ->assertExactJson(['data' => ['memory_limit' => '128M']]);
     }
 
+    /** A save runs the cache check and nothing else: no restart, no signal outside the check. */
+    public function test_put_runs_the_cache_check_and_restarts_no_handler(): void
+    {
+        $this->account();
+        $this->domain('a.example', '/a.example/public_html', [], '8.2');
+        $this->makeDocumentRoot('a.example');
+
+        $this->putJson('/api/domains/a.example/php-directives', [
+            'settings' => ['memory_limit' => '256M'],
+        ])->assertNoContent();
+
+        $this->assertSame("memory_limit=256M\n", file_get_contents($this->userIni('a.example')));
+        $this->assertSame(1, $this->scriptCount(FpmStack::reloadScript('8.2')));
+        $this->assertCount(2, $this->journal(), 'the file write and the cache check');
+        $this->assertSame(0, $this->restartCount('8.2'));
+    }
+
+    public function test_clearing_domain_directives_runs_the_cache_check_and_restarts_no_handler(): void
+    {
+        $this->account();
+        $this->domain('a.example', '/a.example/public_html', [], '8.2');
+        $this->makeDocumentRoot('a.example');
+        file_put_contents($this->userIni('a.example'), "memory_limit=256M\n");
+
+        $this->putJson('/api/domains/a.example/php-directives', ['settings' => []])->assertNoContent();
+
+        $this->assertFileDoesNotExist($this->userIni('a.example'));
+        $this->assertSame(1, $this->scriptCount(FpmStack::reloadScript('8.2')));
+        $this->assertCount(2, $this->journal(), 'the file removal and the cache check');
+        $this->assertSame(0, $this->restartCount('8.2'));
+    }
+
+    public function test_a_refused_domain_map_signals_nothing(): void
+    {
+        $this->account();
+        $this->domain('a.example', '/a.example/public_html', [], '8.2');
+        $this->makeDocumentRoot('a.example');
+
+        $this->putJson('/api/domains/a.example/php-directives', [
+            'settings' => ['memory_limit' => '256M; no'],
+        ])->assertStatus(422);
+
+        $this->assertSame(0, $this->handlerSignals());
+    }
+
     public function test_comments_and_sections_are_omitted_and_a_later_write_drops_them(): void
     {
         $this->account();
@@ -462,7 +507,7 @@ class PhpDirectivesHttpTest extends TestCase
     /**
      * @param array<int, string> $aliases
      */
-    private function domain(string $name, string $documentRoot, array $aliases = []): Domain
+    private function domain(string $name, string $documentRoot, array $aliases = [], ?string $phpVersion = null): Domain
     {
         $user = User::findByUsername('alice');
         $this->assertNotNull($user);
@@ -471,10 +516,14 @@ class PhpDirectivesHttpTest extends TestCase
         $domain->user_id = $user->id;
         $domain->domain = $name;
         $domain->type = 'main';
-        $domain->setDetails([
+        $details = [
             'document_root' => $documentRoot,
             'aliases' => $aliases,
-        ]);
+        ];
+        if ($phpVersion !== null) {
+            $details['php_version'] = $phpVersion;
+        }
+        $domain->setDetails($details);
         $domain->save();
 
         return $domain;
@@ -509,13 +558,34 @@ class PhpDirectivesHttpTest extends TestCase
         return $this->tmpRoot . "/engine/users/alice/php/{$version}/custom.ini";
     }
 
+    /** Anything that would stop or replace the handler's processes: a restart entrypoint or a signal. */
+    private function handlerSignals(): int
+    {
+        $count = 0;
+        foreach ($this->journal() as $command) {
+            $line = implode(' ', $command);
+            foreach (['entrypoint-runner', 'pkill', 'pgrep', 'kill'] as $signal) {
+                if (str_contains($line, $signal)) {
+                    $count++;
+                    break;
+                }
+            }
+        }
+
+        return $count;
+    }
+
     private function restartCount(string $version): int
     {
         // The account has no services/, so it is on the runner.
-        $script = FpmStack::restartScript(
+        return $this->scriptCount(FpmStack::restartScript(
             new RunnerServiceManager(new PhpHosting(new ProjectAggregate(new System(), new User()))),
             $version
-        );
+        ));
+    }
+
+    private function scriptCount(string $script): int
+    {
         $count = 0;
         foreach ($this->journal() as $command) {
             if (in_array($script, $command, true)) {

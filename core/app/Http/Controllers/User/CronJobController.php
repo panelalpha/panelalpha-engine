@@ -7,7 +7,7 @@ use App\Http\Requests\CronJobStoreRequest;
 use App\Http\Requests\CronJobUpdateRequest;
 use App\Http\Resources\CronJobCollection;
 use App\Http\Resources\CronJobResource;
-use App\System\Project\Dind\AccountCron;
+use App\System\Project\CronRunner;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
@@ -41,7 +41,7 @@ class CronJobController extends Controller
     #[OA\Post(
         path: '/projects/{username}/cron-jobs',
         summary: 'Create a cron job',
-        description: 'On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Each run, and a run skipped because the service is not running, is logged to ~/'.AccountCron::LOG.' in the account.',
+        description: 'On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/'.CronRunner::LOG.' in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -93,7 +93,7 @@ class CronJobController extends Controller
     #[OA\Put(
         path: '/projects/{username}/cron-jobs/{hash}',
         summary: 'Update a cron job',
-        description: 'On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Each run, and a run skipped because the service is not running, is logged to ~/'.AccountCron::LOG.' in the account. The hash is derived from the job\'s entries, so the job this returns carries a new one: address it by `data.hash` from here on, not by the hash the request used.',
+        description: 'On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/'.CronRunner::LOG.' in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too. The hash is derived from the job\'s entries, so the job this returns carries a new one: address it by `data.hash` from here on, not by the hash the request used.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [
@@ -153,7 +153,9 @@ class CronJobController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/cron-jobs/{hash}',
         summary: 'Delete a cron job',
-        description: 'The hash is derived from the job\'s entries, so it is the one the list or the last update returned.',
+        description: 'The hash is derived from the job\'s entries, so it is the one the list or the last update returned. '
+            .'The job stops running and its schedule is not kept anywhere; this cannot be undone. Ask the operator '
+            .'to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [

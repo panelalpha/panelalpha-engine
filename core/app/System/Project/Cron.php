@@ -10,9 +10,14 @@ use App\System\Project\Dind\AccountCron;
 use Dsc\Cron\Crontab;
 use Dsc\Cron\Job;
 use Exception;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class Cron
 {
+    /** cron answers a job's output to the account's bare name, which the MTA refuses: the mail is off and the log has it. */
+    private const MAIL_OFF = 'MAILTO=""';
+
     public function __construct(
         private readonly UserProject $project,
     ) {}
@@ -109,7 +114,7 @@ class Cron
         $crontab = $this->loadCrontab();
 
         $job = new Job;
-        $job->setCommand(self::commandLine($params));
+        $job->setCommand($this->commandLine($params));
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
         $job->setDayOfMonth($params['day_of_month']);
@@ -183,7 +188,7 @@ class Cron
         /** @var Job $job */
         $job = $crontab->getJobByHash($hash);
 
-        $job->setCommand(self::commandLine($params));
+        $job->setCommand($this->commandLine($params));
         $job->setMinute($params['minute']);
         $job->setHour($params['hour']);
         $job->setDayOfMonth($params['day_of_month']);
@@ -197,15 +202,19 @@ class Cron
     }
 
     /**
-     * A job in a service names it on the line with the command in base64;
-     * any other command is written as cron reads it.
+     * A job in a service names it on the line with the command in base64; a classic account's job calls the runner that
+     * logs it the same way, and any other command is written as cron reads it.
      *
      * @param  array{command: string, service?: string}  $params
      */
-    private static function commandLine(array $params): string
+    private function commandLine(array $params): string
     {
-        return isset($params['service'])
-            ? AccountCron::command($params['service'], $params['command'])
+        if (isset($params['service'])) {
+            return AccountCron::command($params['service'], $params['command']);
+        }
+
+        return $this->logsToFile()
+            ? CronRunner::command($params['command'])
             : self::storedCommand($params['command']);
     }
 
@@ -268,13 +277,19 @@ class Cron
         $contents = $this->project->system()->filesystem()->fileGetContents($this->crontabPath());
         foreach (explode("\n", $contents) as $line) {
             $line = trim($line);
-            if ($line === '' || str_starts_with($line, '#')) {
+            if ($line === '' || str_starts_with($line, '#') || self::isSetting($line)) {
                 continue;
             }
             $crontab->addJob(self::parseLine($line));
         }
 
         return $crontab;
+    }
+
+    /** `MAILTO=""` and the like are the crontab's settings, not one of its jobs. */
+    private static function isSetting(string $line): bool
+    {
+        return preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*=/', $line) === 1;
     }
 
     /**
@@ -300,12 +315,63 @@ class Cron
         return $job;
     }
 
+    /** Write the crontab as this engine writes it now, so a project rendered again logs the jobs it already had. */
+    public function rewrite(): void
+    {
+        if (! $this->hasCrontab()) {
+            return;
+        }
+        $this->persistCrontab($this->loadCrontab());
+    }
+
     private function persistCrontab(Crontab $crontab): void
     {
         $this->project->system()->filesystem()->filePutContents(
             $this->crontabPath(),
-            $crontab->render().PHP_EOL,
+            $this->rendered($crontab),
         );
+    }
+
+    /** A classic account's jobs go through the runner that logs them, under the line that keeps cron from mailing them. */
+    private function rendered(Crontab $crontab): string
+    {
+        if (! $this->logsToFile()) {
+            return $crontab->render().PHP_EOL;
+        }
+
+        (new CronRunner($this->project))->install();
+        foreach ($crontab->getJobs() as $job) {
+            if (AccountCron::parse($job->getCommand()) === null) {
+                $this->logThroughTheRunner($job);
+            }
+        }
+
+        return self::MAIL_OFF.PHP_EOL.$crontab->render().PHP_EOL;
+    }
+
+    /**
+     * A job written before this engine version gets the runner form too, unless its command is too long for cron to
+     * read it in base64: that one keeps the line it ran on, unlogged, and the write says so.
+     */
+    private function logThroughTheRunner(Job $job): void
+    {
+        $stored = $job->getCommand();
+        $command = CronRunner::parse($stored) ?? self::listedCommand($stored);
+        if (CronRunner::fits($command)) {
+            $job->setCommand(CronRunner::command($command));
+
+            return;
+        }
+        Log::warning(
+            "{$this->project->username()}: a cron job longer than ".CronRunner::MAX_COMMAND_BYTES
+                .' bytes keeps its own line and its runs are not logged: '.Str::limit($command, 80)
+        );
+    }
+
+    /** A classic account's cron has no mail transport its jobs could reach, so their output goes to the runner's log. */
+    private function logsToFile(): bool
+    {
+        return ! $this->project->runsInDind();
     }
 
     /**
@@ -322,11 +388,13 @@ class Cron
      */
     private function jobToArray(Job $job): array
     {
-        $inService = AccountCron::parse($job->getCommand());
+        $stored = $job->getCommand();
+        $inService = AccountCron::parse($stored);
+        $logged = $inService === null ? CronRunner::parse($stored) : null;
 
         return [
             'hash' => $job->getHash(),
-            'command' => $inService['command'] ?? self::listedCommand($job->getCommand()),
+            'command' => $inService['command'] ?? $logged ?? self::listedCommand($stored),
             'service' => $inService['service'] ?? null,
             'minute' => $job->getMinute(),
             'hour' => $job->getHour(),
