@@ -12,6 +12,7 @@ use App\Mcp\ToolPolicy;
 use App\Mcp\ToolRegistry;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
+use Illuminate\Support\Facades\DB;
 use Laravel\Prompts\Key;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\WizardScreen;
@@ -93,11 +94,11 @@ class TokenSectionsTest extends TestCase
 
     public function test_the_global_scope_is_reachable_and_its_failure_ends_the_section(): void
     {
-        unlink($this->envPath());
+        DB::unprepared("CREATE TRIGGER refuse_insert BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'settings are read-only'); END");
         $this->keys([...self::row(self::GLOBAL), Key::ENTER, Key::CTRL_A, Key::ENTER, Key::ENTER, Key::ENTER]);
 
         $this->assertSame(1, (new McpTokensSection())->run(false));
-        $this->assertScreenShows('No .env file at '.$this->envPath().'.');
+        $this->assertScreenShows('settings are read-only');
     }
 
     public function test_a_dry_run_of_the_global_scope_comes_back_with_its_receipt(): void

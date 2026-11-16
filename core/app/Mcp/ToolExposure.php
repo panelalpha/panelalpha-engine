@@ -47,7 +47,7 @@ class ToolExposure
     /** What this engine is serving right now. */
     public static function current(): self
     {
-        return new self((array) config('mcp-tools', []));
+        return new self(McpScopeSettings::config());
     }
 
     /** @param array<string, string> $overrides */

@@ -2,12 +2,11 @@
 
 namespace App\Console\Wizard;
 
+use App\Auth\OperatorTokens;
 use App\Auth\TokenAbilities;
 use App\Console\Prompts\Screen;
 use App\Console\Wizard\Scopes\Scope;
-use App\Models\Admin;
 use App\Models\PersonalAccessToken;
-use Illuminate\Support\Carbon;
 use Throwable;
 
 use function Laravel\Prompts\confirm;
@@ -61,7 +60,7 @@ class TokenManager
     {
         while (true) {
             try {
-                $tokens = $this->tokens();
+                $tokens = $this->tokens()->all();
             } catch (Throwable $e) {
                 // Tokens live in the database, unlike everything else the
                 // wizard touches. Stack-tracing here would look broken rather
@@ -184,7 +183,7 @@ class TokenManager
         }
 
         try {
-            $token->forceFill(['revoked_at' => Carbon::now()])->save();
+            $this->tokens()->revoke($token);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -221,7 +220,7 @@ class TokenManager
         $id = $token->id;
 
         try {
-            $token->delete();
+            $this->tokens()->delete($token);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -263,9 +262,7 @@ class TokenManager
             label: 'How long should it last?',
             placeholder: '90d',
             hint: 'A number and a unit — 30m, 12h, 90d, 2w. Leave empty for a token that never expires.',
-            validate: fn (string $v): ?string => trim($v) === '' || preg_match('/^\d+\s*[smhdw]$/i', trim($v)) === 1
-                ? null
-                : 'Give a number and a unit, like 90d — or leave it empty.',
+            validate: fn (string $v): ?string => OperatorTokens::badLifetime($v),
         ));
 
         if ($this->dryRun) {
@@ -276,14 +273,7 @@ class TokenManager
         }
 
         try {
-            $token = Admin::rootAccount()->createToken(
-                $name,
-                TokenAbilities::build(
-                    api: $this->ability === TokenAbilities::API,
-                    mcp: $this->ability === TokenAbilities::MCP,
-                ),
-                $expires === '' ? null : $this->moment($expires),
-            );
+            $token = $this->tokens()->mint($name, $expires === '' ? null : $expires);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -377,39 +367,12 @@ class TokenManager
         );
     }
 
-    private function moment(string $expires): Carbon
-    {
-        preg_match('/^(\d+)\s*([smhdw])$/i', $expires, $m);
-
-        return Carbon::now()->add(match (strtolower($m[2])) {
-            's' => 'seconds',
-            'm' => 'minutes',
-            'h' => 'hours',
-            'w' => 'weeks',
-            default => 'days',
-        }, (int) $m[1]);
-    }
-
     /**
-     * The tokens of this kind.
-     *
-     * A token from before the split carries `*` and satisfies both, so it
-     * appears in both sections. That is the truth about it, and hiding it from
-     * one would hide the broadest credential on the engine from half the
-     * places someone might go looking to narrow it.
-     *
-     * @return array<int, PersonalAccessToken>
+     * The tokens of this kind. A token from before the split carries `*` and appears in both sections: hiding it
+     * from one would hide the broadest credential on the engine from half the places someone might go to narrow it.
      */
-    private function tokens(): array
+    private function tokens(): OperatorTokens
     {
-        return Admin::rootAccount()
-            ->tokens()
-            ->orderBy('id')
-            ->get()
-            ->filter(fn (PersonalAccessToken $t): bool => $this->ability === TokenAbilities::API
-                ? TokenAbilities::of($t)->mayUseApi()
-                : TokenAbilities::of($t)->mayUseMcp())
-            ->values()
-            ->all();
+        return new OperatorTokens($this->ability);
     }
 }

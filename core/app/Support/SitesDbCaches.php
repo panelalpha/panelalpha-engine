@@ -35,13 +35,36 @@ final class SitesDbCaches
     /** @return array<string, string> key => what `.env` says, or the default */
     public function configured(): array
     {
-        $env = $this->env();
+        $written = $this->written();
         $values = [];
         foreach (self::CACHES as $key => $cache) {
-            $values[$key] = $env->get($key) ?? $cache['default'];
+            $values[$key] = $written[$key] ?? $cache['default'];
         }
 
         return $values;
+    }
+
+    /**
+     * Each cache by its MariaDB variable, as the API reports it: the size set or the default, where it came from,
+     * and what the running mariadbd uses in MB (null when sites-db is not running).
+     *
+     * @return array<string, array{value: string, source: string, default: string, running_mb: ?int}>
+     */
+    public function toArray(): array
+    {
+        $written = $this->written();
+        $running = $this->running();
+        $caches = [];
+        foreach (self::CACHES as $key => $cache) {
+            $caches[$cache['variable']] = [
+                'value' => $written[$key] ?? $cache['default'],
+                'source' => $written[$key] === null ? EngineSetting::DEFAULT : EngineSetting::ENV,
+                'default' => $cache['default'],
+                'running_mb' => $running[$key] ?? null,
+            ];
+        }
+
+        return $caches;
     }
 
     /**
@@ -121,8 +144,29 @@ final class SitesDbCaches
         return Privileged::engineCompose($this->system->engineDirPath());
     }
 
-    private function env(): EnvFile
+    /**
+     * Sets the given sizes and recreates sites-db as {@see apply()} does; null puts a size back to the engine's
+     * default, which compose reads from an empty value.
+     *
+     * @param  array<string, ?string>  $sizes  key => size, or null
+     * @return array{changed: array<int, string>, recreated: bool}
+     */
+    public function set(array $sizes): array
     {
-        return new EnvFile($this->system->engineDirPath().'/.env');
+        return $this->apply(array_map(static fn (?string $size): string => $size ?? '', $sizes));
+    }
+
+    /** @return array<string, ?string> key => what `.env` sets it to, null when nothing or empty */
+    private function written(): array
+    {
+        return array_map(
+            static fn (?string $value): ?string => $value === null || $value === '' ? null : $value,
+            $this->env()->values(array_keys(self::CACHES))
+        );
+    }
+
+    private function env(): EngineEnvFile
+    {
+        return EngineEnvFile::compose($this->system);
     }
 }

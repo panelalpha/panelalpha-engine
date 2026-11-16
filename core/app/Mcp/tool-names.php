@@ -371,6 +371,14 @@ return [
     'GET /system/exim-config' => 'system_exim_config_get',
     'PUT /system/exim-config' => 'system_exim_config_set',
     'POST /system/exim-send-test-email' => 'system_test_email_send',
+    // What `pae configure` changes, one area each, stored in the engine database over .env-core.
+    'GET /system/engine-address' => 'system_engine_address_get',
+    'PUT /system/engine-address' => 'system_engine_address_set',
+    'GET /system/prewarm' => 'system_prewarm_get',
+    'PUT /system/prewarm' => 'system_prewarm_set',
+    'GET /system/sites-db' => 'system_sites_db_get',
+    'GET /system/telemetry' => 'system_telemetry_get',
+    'PUT /system/telemetry' => 'system_telemetry_set',
 
     // Server metrics
     'GET /metrics/current' => 'metrics_current',

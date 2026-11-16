@@ -4,13 +4,17 @@ namespace Tests\Integration\Console\Wizard;
 
 use App\Console\Wizard\Sections\PrewarmSection;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
+use App\Models\Setting;
+use Illuminate\Support\Facades\DB;
 use Laravel\Prompts\Key;
+use Tests\Support\InMemoryDatabase;
 use Tests\Support\WizardScreen;
 use Tests\TestCase;
 
 /** `pae configure prewarm`: the paths that do not end in a write. */
 class PrewarmSectionFlowTest extends TestCase
 {
+    use InMemoryDatabase;
     use WizardScreen;
 
     private string $first = '';
@@ -74,15 +78,19 @@ class PrewarmSectionFlowTest extends TestCase
         $this->assertSame("APP_KEY=base64:dGVzdA==\nDEPLOY_PREWARM_IMAGES=\n", $this->envContents());
     }
 
-    public function test_a_file_that_cannot_be_written_ends_the_section_with_an_error(): void
+    public function test_a_database_that_refuses_the_write_ends_the_section_with_an_error(): void
     {
-        unlink($this->envPath());
+        Setting::flushCache();
+        $this->bootInMemoryDatabase();
+        $this->promptsAnswerKeys();
+        DB::unprepared("CREATE TRIGGER refuse_insert BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'settings are read-only'); END");
         $this->keys([...self::row(1), self::typed('4G'), Key::ENTER, Key::ENTER]);
 
         $section = new PrewarmSection();
 
         $this->assertSame(1, $section->run(false));
-        $this->assertScreenShows('No .env file at '.$this->envPath().'.');
+        $this->assertScreenShows('settings are read-only');
         $this->assertSame([], $section->receipt());
+        Setting::flushCache();
     }
 }

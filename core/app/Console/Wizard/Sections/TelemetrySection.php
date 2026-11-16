@@ -9,7 +9,7 @@ use App\Lib\Deploy\Telemetry\DeployReport;
 use App\Lib\Deploy\Telemetry\NotificationPreferences;
 use App\Lib\Deploy\Telemetry\SourceBundlePolicy;
 use App\Lib\Deploy\Telemetry\Telemetry;
-use App\Models\Setting;
+use App\Lib\Deploy\Telemetry\TelemetrySettings;
 use App\Support\EnvFile;
 use Illuminate\Support\Facades\Artisan;
 use Throwable;
@@ -30,10 +30,9 @@ use function Laravel\Prompts\warning;
  * application source. Somebody running this engine is entitled to be asked
  * those in words rather than to find them in a file.
  *
- * Two of the four live in different places, and the section says so rather
- * than hiding it: **sending** is a database setting that overrides
- * `TELEMETRY_ENABLED`, and turning it off also syncs that decision to
- * monitoring. The rest are plain env.
+ * All four are saved in the engine database through {@see TelemetrySettings},
+ * which the API uses too, over the `.env-core` key of each. Turning
+ * **sending** off also syncs that decision to monitoring.
  */
 class TelemetrySection implements Section
 {
@@ -41,6 +40,13 @@ class TelemetrySection implements Section
 
     /** Cleared the first time a settings read throws. */
     private bool $database = true;
+
+    private TelemetrySettings $settings;
+
+    public function __construct(?TelemetrySettings $settings = null)
+    {
+        $this->settings = $settings ?? new TelemetrySettings;
+    }
 
     public static function key(): string
     {
@@ -129,7 +135,7 @@ class TelemetrySection implements Section
         // The stored preference this section toggles; Telemetry::enabled()
         // ignores it under test.
         try {
-            return NotificationPreferences::isTelemetryEnabled();
+            return $this->settings->sending();
         } catch (Throwable) {
             $this->database = false;
 
@@ -161,9 +167,7 @@ class TelemetrySection implements Section
         $this->warnAboutEnv();
 
         if ($sending === null) {
-            // The rest of this section is env and still works; saying which
-            // half is unavailable beats one blanket failure.
-            warning('The database could not be read, so whether reports are sent cannot be shown or changed. Everything below still can.');
+            warning('The database could not be read: what is shown below comes from .env-core, and nothing here can be saved until it is back.');
         }
 
         if ($sending === true && Telemetry::sourceBundleMode() !== SourceBundlePolicy::MODE_OFF) {
@@ -221,8 +225,7 @@ class TelemetrySection implements Section
             // below would run unseen. Both halves are here because both
             // matter — the local switch, and telling monitoring to stop
             // probing this install.
-            Setting::set(NotificationPreferences::SETTING_TELEMETRY_ENABLED, $on ? '0' : '1');
-            $sync = NotificationPreferences::sync(! $on);
+            $sync = $this->settings->setSending(! $on);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -288,7 +291,7 @@ class TelemetrySection implements Section
         $tier = $tiers[$chosen] ?? DeployReport::TIER_LOG;
 
         $this->writeEnv(
-            ['TELEMETRY_TIER' => (string) $tier],
+            fn () => $this->settings->setTier($tier),
             sprintf('Reports now carry: %s', $this->tier($tier)),
             $dryRun
         );
@@ -326,7 +329,7 @@ class TelemetrySection implements Section
         }
 
         $this->writeEnv(
-            ['TELEMETRY_SOURCE_BUNDLE' => $mode],
+            fn () => $this->settings->setSourceBundle($mode),
             sprintf('Source code: %s', $this->bundle($mode)),
             $dryRun
         );
@@ -350,7 +353,7 @@ class TelemetrySection implements Section
         }
 
         $this->writeEnv(
-            ['TELEMETRY_BUG_REPORTS' => $on ? 'false' : 'true'],
+            fn () => $this->settings->setBugReports(! $on),
             sprintf('Bug reports %s.', $on ? 'turned off' : 'allowed'),
             $dryRun
         );
@@ -382,10 +385,7 @@ class TelemetrySection implements Section
         pause('Press enter to carry on...');
     }
 
-    /**
-     * @param  array<string, string>  $values
-     */
-    private function writeEnv(array $values, string $said, bool $dryRun): void
+    private function writeEnv(callable $write, string $said, bool $dryRun): void
     {
         if ($dryRun) {
             note('Dry run: '.$said, 'warning');
@@ -395,7 +395,7 @@ class TelemetrySection implements Section
         }
 
         try {
-            EnvFile::current()->set($values);
+            $write();
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -403,38 +403,14 @@ class TelemetrySection implements Section
             return;
         }
 
-        // The process booted with the old values and the menu reads them back
-        // from config on the next turn of the loop.
-        foreach ($values as $key => $value) {
-            config([$this->configKey($key) => $this->cast($key, $value)]);
-        }
-
         $this->receipt[] = $said;
         note($said, 'info');
         pause('Press enter to carry on...');
     }
 
-    private function configKey(string $env): string
-    {
-        return match ($env) {
-            'TELEMETRY_TIER' => 'telemetry.tier',
-            'TELEMETRY_SOURCE_BUNDLE' => 'telemetry.source_bundle.mode',
-            default => 'telemetry.bug_reports.enabled',
-        };
-    }
-
-    private function cast(string $env, string $value): mixed
-    {
-        return match ($env) {
-            'TELEMETRY_TIER' => (int) $value,
-            'TELEMETRY_BUG_REPORTS' => $value === 'true',
-            default => $value,
-        };
-    }
-
     private function bugReports(): bool
     {
-        return (bool) config('telemetry.bug_reports.enabled', true);
+        return $this->settings->bugReports();
     }
 
     private function tier(int $tier): string

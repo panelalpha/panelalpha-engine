@@ -91,7 +91,7 @@ class Telemetry
      */
     public static function bugReportsEnabled(): bool
     {
-        return self::enabled() && (bool) config('telemetry.bug_reports.enabled', true);
+        return self::enabled() && (new TelemetrySettings)->bugReports();
     }
 
     /**
@@ -122,7 +122,7 @@ class Telemetry
 
     public static function tier(): int
     {
-        return DeployReport::clampTier((int) config('telemetry.tier', DeployReport::TIER_LOG));
+        return DeployReport::clampTier((int) (TelemetrySettings::tierSetting()->value() ?? DeployReport::TIER_LOG));
     }
 
     /**
@@ -132,7 +132,7 @@ class Telemetry
     public static function sourceBundleMode(): string
     {
         return SourceBundlePolicy::normalizeMode(
-            (string) config('telemetry.source_bundle.mode', SourceBundlePolicy::MODE_OFF)
+            (string) (TelemetrySettings::sourceBundleSetting()->value() ?? SourceBundlePolicy::MODE_OFF)
         );
     }
 

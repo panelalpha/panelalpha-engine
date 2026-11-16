@@ -6,10 +6,10 @@ use App\Console\Prompts\Screen;
 use App\Console\Wizard\CommandPicker;
 use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
+use App\Mcp\McpScopeSettings;
 use App\Mcp\ToolExposure;
 use App\Mcp\ToolPolicy;
 use App\Mcp\ToolRegistry;
-use App\Support\EnvFile;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -35,6 +35,13 @@ use function Laravel\Prompts\warning;
 class McpGlobalScopeSection implements Section
 {
     use KeepsAReceipt;
+
+    private McpScopeSettings $settings;
+
+    public function __construct(?McpScopeSettings $settings = null)
+    {
+        $this->settings = $settings ?? new McpScopeSettings;
+    }
 
     public static function key(): string
     {
@@ -318,8 +325,6 @@ class McpGlobalScopeSection implements Section
         $this->header($current, $next);
         $this->summarise($current, $next);
 
-        $env = EnvFile::current();
-
         if ($dryRun) {
             return $this->finishDryRun($next);
         }
@@ -331,14 +336,14 @@ class McpGlobalScopeSection implements Section
             return null;
         }
 
-        if (! confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
+        if (! confirm(label: 'Save this? It is kept in the engine database, over .env-core.', default: true)) {
             note('Nothing was written. Your ticks are still here.', 'warning');
             pause('Press enter to carry on...');
 
             return null;
         }
 
-        return $this->write($env, $current, $next);
+        return $this->write($current, $next);
     }
 
     private function finishDryRun(ToolExposure $next): int
@@ -356,30 +361,28 @@ class McpGlobalScopeSection implements Section
     }
 
     /**
-     * Write the ticks to the env file and leave the operator a receipt; the
+     * Save the ticks in the engine database and leave the operator a receipt; the
      * final pause lets it be read before the next screen draws over it.
      */
-    private function write(EnvFile $env, ToolExposure $current, ToolExposure $next): int
+    private function write(ToolExposure $current, ToolExposure $next): int
     {
         try {
-            $changed = $env->set($next->envLines());
+            $changed = $this->settings->save($next);
         } catch (Throwable $e) {
             error($e->getMessage());
 
             return 1;
         }
 
-        $this->adoptInThisProcess($next);
-
         if ($changed === []) {
-            $this->receipt = [sprintf('%s already said that; nothing to do.', $env->path())];
+            $this->receipt = ['The engine database already said that; nothing to do.'];
             note($this->receipt[0], 'info');
             pause('Press enter to carry on...');
 
             return 0;
         }
 
-        $this->receipt = $this->receiptFor($env, $current, $next, $changed);
+        $this->receipt = $this->receiptFor($current, $next, $changed);
 
         note(implode("\n", $this->receipt), 'info');
 
@@ -388,18 +391,6 @@ class McpGlobalScopeSection implements Section
         pause('Press enter to carry on...');
 
         return 0;
-    }
-
-    /**
-     * Put the new values into this process's config, which booted with the old
-     * ones and is what `ToolExposure::current()` reads when the operator comes
-     * back to this section. Needed even when the file already agreed.
-     */
-    private function adoptInThisProcess(ToolExposure $next): void
-    {
-        foreach (array_keys(ToolExposure::ENV_KEYS) as $key) {
-            config(['mcp-tools.'.$key => $next->get($key)]);
-        }
     }
 
     /** The table of what moves, and what the file would end up saying. */
@@ -458,13 +449,12 @@ class McpGlobalScopeSection implements Section
 
     /**
      * What the operator leaves with, said once more on the way out. The old
-     * value is in full so it can be put back; the new one is shortened. The
-     * backup sits inside the core container, not beside .env-core on the host.
+     * value is in full so it can be put back; the new one is shortened.
      *
      * @param  array<int, string>  $changed
      * @return array<int, string>
      */
-    private function receiptFor(EnvFile $env, ToolExposure $current, ToolExposure $next, array $changed): array
+    private function receiptFor(ToolExposure $current, ToolExposure $next, array $changed): array
     {
         $was = $current->envLines();
         $now = $next->envLines();
@@ -480,17 +470,9 @@ class McpGlobalScopeSection implements Section
         );
 
         return array_merge(
-            [sprintf(
-                'Updated %s%s:',
-                $env->path(),
-                $env->isCoreMount() ? ' — the file you know as .env-core' : '',
-            )],
+            ['Saved in the engine database, where it wins over .env-core:'],
             $moved,
-            [sprintf(
-                'The file as it was is at %s%s.',
-                $env->path().EnvFile::BACKUP_SUFFIX,
-                $env->isCoreMount() ? ', inside the core container rather than next to .env-core on the host' : '',
-            )],
+            ['GET /api/system/mcp-scope reads it; PUT with null for a field puts .env-core back in charge.'],
         );
     }
 
@@ -506,13 +488,8 @@ class McpGlobalScopeSection implements Section
         return implode("\n", $lines);
     }
 
-    /** A cached config was built from the old values and would ignore the file just written. */
     private function sayWhatHappensNext(): void
     {
-        if (app()->configurationIsCached()) {
-            note('The cached configuration was built from the old values — run `pae config:cache` to rebuild it.', 'warning');
-        }
-
         note(
             "The engine reads this on its next request, so `pae mcp:tool:list` will show the new set now.\n"
             ."A connected client will not: it asked for the command list once, when it connected.\n"

@@ -56,7 +56,7 @@ A token can also be limited to some projects instead of some commands. `pae` can
 
 Whatever the limits, a token you no longer trust should be revoked with `pae mcp:token:revoke {id}`, which stops it everywhere at once.
 
-These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected. Reconnect it to see the change.
+These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). `pae configure mcp-tokens` and `PUT /system/mcp-scope` save `MCP_PERMISSION_MODE`, `MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_DENIED_TOOLS` in the engine database instead, where they win over the file and apply without a restart; `GET /system/mcp-scope` says which one is in force. Either way, an assistant that is already connected keeps the tool list it was given when it connected. Reconnect it to see the change.
 
 ### How far it may go
 
@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 311 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 318 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -310,7 +310,7 @@ Almost always the certificate. Your engine is self-signed and the assistant's ma
 Wrong token type. Assistants need a token from `pae connect` or `pae mcp:token:create`, not `pae api:token:create`. Or the token was truncated when you copied it.
 
 **The assistant says it cannot do something you know the engine can do.**
-The permission settings are filtering it out. Run `pae mcp:tool:list` on your VPS. Check `MCP_PERMISSION_MODE`, `MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_DENIED_TOOLS` in `.env-core`. If the tool is allowed but not in the assistant's list, ask it to look for it with `search_tools` (see [How many tools the assistant loads](#how-many-tools-the-assistant-loads)). [Every tool](#every-tool) is the full list. That list is not the same as what your assistant is currently allowed to call.
+The permission settings are filtering it out. Run `pae mcp:tool:list` on your VPS. Check `MCP_PERMISSION_MODE`, `MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_DENIED_TOOLS` with `GET /system/mcp-scope`, which also says whether each comes from the engine database or `.env-core`. If the tool is allowed but not in the assistant's list, ask it to look for it with `search_tools` (see [How many tools the assistant loads](#how-many-tools-the-assistant-loads)). [Every tool](#every-tool) is the full list. That list is not the same as what your assistant is currently allowed to call.
 
 **I set a permission mode and everything became read-only.**
 The value must be exactly `readonly`, `modify` or `full`. Anything else is treated as `readonly`.
@@ -705,6 +705,8 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_build_cache_remove` | Remove a repository's build caches |
 | `system_egress_list` | List the projects and builds the outbound limits stopped |
 | `system_egress_unblock` | Lift a project's or build's outbound scan block |
+| `system_engine_address_get` | Read the address clients connect to, the certificate name and the default tunnel for new projects |
+| `system_engine_address_set` | Change the certificate name, its Let's Encrypt email or the default tunnel for new projects |
 | `system_engine_cert_request` | Request the engine's own Let's Encrypt certificate |
 | `system_exim_config_get` | Get Exim mail server configuration |
 | `system_exim_config_set` | Update Exim mail server configuration |
@@ -718,8 +720,13 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_overlay_delete` | Remove the global overlay |
 | `system_overlay_get` | Read the global overlay |
 | `system_overlay_set` | Write HTML (a banner, a script) into every page of every project |
+| `system_prewarm_get` | Read which base images the server keeps ready, and the disk they may use |
+| `system_prewarm_set` | Choose which base images the server keeps ready, and the disk they may use |
+| `system_sites_db_get` | Read the site database's cache sizes, set and running |
 | `system_ssl_config_get` | How certificates for project sites are obtained |
 | `system_ssl_config_set` | Set how certificates for project sites are obtained |
+| `system_telemetry_get` | Read whether this engine sends failure reports and what they carry |
+| `system_telemetry_set` | Change whether failure reports are sent, what they carry, and whether source code goes with them |
 | `system_test_email_send` | Send a test email via Exim |
 | `system_update` | Starts a background updater on the VPS. Not how you update day to day: [Updating](../02-getting-started/updating.md) |
 | `system_webserver_change` | Change the active webserver. Not supported: the engine runs nginx-proxy only |

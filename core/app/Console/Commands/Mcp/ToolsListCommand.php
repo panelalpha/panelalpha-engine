@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Mcp;
 
+use App\Mcp\McpScopeSettings;
 use App\Mcp\ToolPolicy;
 use App\Mcp\ToolRegistry;
 use Illuminate\Console\Command;
@@ -25,7 +26,8 @@ class ToolsListCommand extends Command
 
     public function handle(): int
     {
-        $policy = new ToolPolicy;
+        $config = McpScopeSettings::config();
+        $policy = new ToolPolicy($config);
 
         $all = ToolRegistry::all();
         $exposed = $policy->filter($all);
@@ -34,9 +36,9 @@ class ToolsListCommand extends Command
         $this->line('');
         $this->line(sprintf(
             '  <fg=gray>toolsets</> %s   <fg=gray>mode</> %s   <fg=gray>denied</> %s',
-            config('mcp-tools.toolsets') ?: 'all',
+            ($config['toolsets'] ?? '') ?: 'all',
             $policy->mode(),
-            config('mcp-tools.denied') ?: (config('mcp-tools.denied_regex') ? 'regex' : 'none')
+            ($config['denied'] ?? '') ?: (($config['denied_regex'] ?? '') ? 'regex' : 'none')
         ));
 
         $shown = $this->option('excluded') ? $excluded : $exposed;

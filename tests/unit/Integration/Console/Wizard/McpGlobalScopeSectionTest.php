@@ -3,17 +3,21 @@
 namespace Tests\Integration\Console\Wizard;
 
 use App\Console\Wizard\Sections\McpGlobalScopeSection;
+use App\Mcp\McpScopeSettings;
 use App\Mcp\ToolExposure;
 use App\Mcp\ToolPolicy;
 use App\Mcp\ToolRegistry;
-use App\Support\EnvFile;
+use App\Models\Setting;
+use Illuminate\Support\Facades\DB;
 use Laravel\Prompts\Key;
+use Tests\Support\InMemoryDatabase;
 use Tests\Support\WizardScreen;
 use Tests\TestCase;
 
-/** `pae configure mcp-global`: ticks accumulate, and only Review and save writes the `MCP_*` lines. */
+/** `pae configure mcp-global`: ticks accumulate, and only Review and save stores the `MCP_*` settings. */
 class McpGlobalScopeSectionTest extends TestCase
 {
+    use InMemoryDatabase;
     use WizardScreen;
 
     private const GROUPS = 0;
@@ -29,6 +33,8 @@ class McpGlobalScopeSectionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Setting::flushCache();
+        $this->bootInMemoryDatabase();
         $this->startWizardScreen();
         $this->serving([]);
     }
@@ -36,6 +42,7 @@ class McpGlobalScopeSectionTest extends TestCase
     protected function tearDown(): void
     {
         $this->stopWizardScreen();
+        Setting::flushCache();
         parent::tearDown();
     }
 
@@ -46,16 +53,14 @@ class McpGlobalScopeSectionTest extends TestCase
         $section = new McpGlobalScopeSection();
 
         $this->assertSame(0, $section->run(false));
-        $env = $this->envContents();
-        $this->assertStringContainsString('MCP_TOOLSETS=none', $env);
-        $this->assertStringContainsString('MCP_PERMISSION_MODE=full', $env);
-        $this->assertSame('none', config('mcp-tools.toolsets'));
+        $this->assertSame('none', $this->stored('toolsets'));
+        $this->assertSame('full', $this->stored('permission_mode'));
+        $this->assertSame("APP_KEY=base64:dGVzdA==\n", $this->envContents());
         $this->assertSame([], ToolExposure::current()->exposed());
         $receipt = $section->receipt();
-        $this->assertSame('Updated '.$this->envPath().':', $receipt[0]);
+        $this->assertSame('Saved in the engine database, where it wins over .env-core:', $receipt[0]);
         $this->assertContains(sprintf('  %-24s %s → %s', 'MCP_TOOLSETS', 'all', 'none'), $receipt);
-        $this->assertSame('The file as it was is at '.$this->envPath().EnvFile::BACKUP_SUFFIX.'.', end($receipt));
-        $this->assertFileExists($this->envPath().EnvFile::BACKUP_SUFFIX);
+        $this->assertSame('GET /api/system/mcp-scope reads it; PUT with null for a field puts .env-core back in charge.', end($receipt));
         $this->assertScreenShows('The assistant would see no commands at all, and could do nothing with this engine.');
         $this->assertScreenShows(sprintf('0 of %d commands would be offered, against %d now.', count(ToolRegistry::all()), count(ToolRegistry::all())));
         $this->assertScreenShows('Your ticks: 0 of '.count(ToolRegistry::all()).' commands, ceiling full. (unsaved)');
@@ -90,8 +95,8 @@ class McpGlobalScopeSectionTest extends TestCase
         $section = new McpGlobalScopeSection();
         $section->run(false);
 
-        $this->assertStringContainsString('MCP_PERMISSION_MODE=readonly', $this->envContents());
-        $this->assertSame(ToolPolicy::MODE_READONLY, config('mcp-tools.permission_mode'));
+        $this->assertSame(ToolPolicy::MODE_READONLY, $this->stored('permission_mode'));
+        $this->assertSame(ToolPolicy::MODE_READONLY, ToolExposure::current()->get('permission_mode'));
         $this->assertScreenShows('readonly — they may look, and change nothing');
         $this->assertScreenShows(sprintf('(%d of the ticked commands)', $readonly));
         $this->assertScreenShows('(above the ceiling)');
@@ -121,7 +126,7 @@ class McpGlobalScopeSectionTest extends TestCase
         $section = new McpGlobalScopeSection();
 
         $this->assertSame(0, $section->run(false));
-        $this->assertStringNotContainsString('MCP_TOOLSETS', $this->envContents());
+        $this->assertNull($this->stored('toolsets'));
         $this->assertSame([], $section->receipt());
         $this->assertScreenShows('Nothing was written. Your ticks are still here.');
         $this->assertScreenShows('Back, throwing these ticks away');
@@ -136,7 +141,7 @@ class McpGlobalScopeSectionTest extends TestCase
 
         $this->assertSame(0, $section->run(false));
         $this->assertScreenShows('Nothing to save: this is what the engine is already serving.');
-        $this->assertSame("APP_KEY=base64:dGVzdA==\n", $this->envContents());
+        $this->assertNull($this->stored('toolsets'));
     }
 
     public function test_a_dry_run_leaves_the_lines_on_the_receipt_only(): void
@@ -146,7 +151,7 @@ class McpGlobalScopeSectionTest extends TestCase
         $section = new McpGlobalScopeSection();
 
         $this->assertSame(0, $section->run(true));
-        $this->assertSame("APP_KEY=base64:dGVzdA==\n", $this->envContents());
+        $this->assertNull($this->stored('toolsets'));
         $this->assertSame([
             'A dry run of mcp-global would have written:',
             'MCP_PERMISSION_MODE=full',
@@ -158,28 +163,16 @@ class McpGlobalScopeSectionTest extends TestCase
         $this->assertScreenShows('Review it — this is a dry run, so nothing will be written');
     }
 
-    public function test_a_file_that_already_says_it_is_left_alone(): void
+    public function test_a_database_that_refuses_the_write_ends_the_section_with_an_error(): void
     {
-        file_put_contents($this->envPath(), "APP_KEY=base64:dGVzdA==\nMCP_PERMISSION_MODE=full\nMCP_TOOLSETS=none\nMCP_TOOLS=\nMCP_DENIED_TOOLS=\nMCP_DENIED_TOOLS_REGEX=\n");
-        $this->keys([Key::ENTER, Key::CTRL_A, Key::ENTER, Key::ENTER, Key::ENTER, Key::ENTER]);
-
-        $section = new McpGlobalScopeSection();
-
-        $this->assertSame(0, $section->run(false));
-        $this->assertSame([$this->envPath().' already said that; nothing to do.'], $section->receipt());
-        $this->assertSame('none', config('mcp-tools.toolsets'));
-        $this->assertFileDoesNotExist($this->envPath().EnvFile::BACKUP_SUFFIX);
-    }
-
-    public function test_a_file_that_cannot_be_written_ends_the_section_with_an_error(): void
-    {
-        unlink($this->envPath());
+        DB::unprepared("CREATE TRIGGER refuse_insert BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'settings are read-only'); END");
+        DB::unprepared("CREATE TRIGGER refuse_update BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'settings are read-only'); END");
         $this->keys([Key::ENTER, Key::CTRL_A, Key::ENTER, Key::ENTER, Key::ENTER]);
 
         $section = new McpGlobalScopeSection();
 
         $this->assertSame(1, $section->run(false));
-        $this->assertScreenShows('No .env file at '.$this->envPath().'.');
+        $this->assertScreenShows('settings are read-only');
         $this->assertSame([], $section->receipt());
     }
 
@@ -199,6 +192,11 @@ class McpGlobalScopeSectionTest extends TestCase
         $this->assertSame('mcp-global', McpGlobalScopeSection::key());
         $this->assertStringNotContainsString('rest', strtolower(McpGlobalScopeSection::label().' '.McpGlobalScopeSection::hint()));
         $this->assertStringContainsString('assistants', McpGlobalScopeSection::hint());
+    }
+
+    private function stored(string $key): ?string
+    {
+        return McpScopeSettings::setting($key)->stored();
     }
 
     /** @param array<string, string> $overrides */

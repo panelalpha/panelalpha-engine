@@ -6,7 +6,7 @@ use App\Console\Prompts\Screen;
 use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
 use App\Lib\Domains\DomainPlan;
-use App\Lib\Domains\NamingBaseSetting;
+use App\Lib\Ssl\EngineAddressSettings;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\ServedCertificate;
 use App\Models\Setting;
@@ -49,6 +49,13 @@ class EngineAddressSection implements Section
 
     /** Whether the settings table could be read at all this run. */
     private bool $database = true;
+
+    private EngineAddressSettings $settings;
+
+    public function __construct(?EngineAddressSettings $settings = null)
+    {
+        $this->settings = $settings ?? new EngineAddressSettings;
+    }
 
     public static function key(): string
     {
@@ -275,13 +282,9 @@ class EngineAddressSection implements Section
             return;
         }
 
-        if (! $this->write(['APP_URL' => $url], sprintf('Address set to %s.', $url))) {
+        if (! $this->write(fn () => $this->settings->setUrl($url), sprintf('Address set to %s.', $url))) {
             return;
         }
-
-        // The process booted with the old one and the header reads config();
-        // without this the screen would still show what was just replaced.
-        config(['app.url' => $url]);
 
         note(
             "The engine uses this on its next request, so `pae connect` prints the new address now.\n"
@@ -337,8 +340,8 @@ class EngineAddressSection implements Section
         }
 
         try {
-            NamingBaseSetting::save('cert_domain', $name);
-            Setting::set('cert_email', $email);
+            $this->settings->setCertificateName($name);
+            $this->settings->setCertificateEmail($email);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -465,7 +468,7 @@ class EngineAddressSection implements Section
         }
 
         try {
-            Setting::set(DomainPlan::SETTING_DEFAULT_TUNNEL, $choice);
+            $this->settings->setDefaultTunnel($choice);
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -485,49 +488,21 @@ class EngineAddressSection implements Section
             : DomainPlan::TUNNEL_PANELALPHA;
     }
 
-    /**
-     * A hostname, or nothing. Deliberately strict about the shape rather than
-     * clever about the name: two labels at least, letters, digits and hyphens,
-     * no leading or trailing dot.
-     */
     private function badName(string $name): ?string
     {
-        if ($name === '') {
-            return null;
-        }
-
-        if (! str_contains($name, '.')) {
-            return 'A certificate name is a full hostname, like panel.example.com.';
-        }
-
-        return preg_match('/^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i', $name) === 1
-            ? null
-            : 'That is not a hostname. Letters, digits and hyphens, in labels separated by dots.';
+        return EngineAddressSettings::badName($name);
     }
 
     private function badUrl(string $url): ?string
     {
-        if ($url === '') {
-            return null;
-        }
-
-        $host = parse_url($url, PHP_URL_HOST);
-
-        if (! is_string($host) || $host === '' || ! str_contains($url, '://')) {
-            return 'Give the whole address, including https:// and the port.';
-        }
-
-        return null;
+        return EngineAddressSettings::badUrl($url);
     }
 
-    /**
-     * @param  array<string, string>  $values
-     * @return bool whether the values were written
-     */
-    private function write(array $values, string $said): bool
+    /** @return bool whether the work was done */
+    private function write(callable $work, string $said): bool
     {
         try {
-            EnvFile::current()->set($values);
+            $work();
         } catch (Throwable $e) {
             error($e->getMessage());
             pause('Press enter to carry on...');
@@ -543,7 +518,7 @@ class EngineAddressSection implements Section
 
     private function url(): string
     {
-        return rtrim((string) config('app.url'), '/');
+        return $this->settings->url();
     }
 
     /**

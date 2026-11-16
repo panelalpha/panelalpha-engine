@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\TokenLifetime;
 use Illuminate\Foundation\Http\FormRequest;
 
 class McpTokenStoreRequest extends FormRequest
@@ -18,6 +19,7 @@ class McpTokenStoreRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            'expires_in' => ['sometimes', 'nullable', 'string', 'max:16', new TokenLifetime],
             'projects' => ['sometimes', 'array', 'max:500'],
             'projects.*' => ['string', 'exists:users,username'],
         ];

@@ -240,6 +240,27 @@ class EnsureTokenMayUseApiTest extends TestCase
         }
     }
 
+    /** What `pae configure` changes is the operator's, and so are the operator's own tokens. */
+    public function test_a_project_scoped_token_is_refused_the_configure_and_token_routes(): void
+    {
+        $abilities = TokenAbilities::build(api: true, mcp: true, projects: ['alice']);
+
+        foreach ([
+            ['GET', 'api/system/engine-address'], ['PUT', 'api/system/engine-address'],
+            ['GET', 'api/system/telemetry'], ['PUT', 'api/system/telemetry'],
+            ['GET', 'api/system/prewarm'], ['GET', 'api/system/sites-db'], ['GET', 'api/system/mcp-scope'],
+            ['PUT', 'api/system/prewarm'], ['PUT', 'api/system/mcp-scope'], ['PUT', 'api/mcp-tokens/{id}/commands'],
+        ] as $route) {
+            $response = $this->dispatched($abilities, route: $route, params: ['id' => '1']);
+
+            $this->assertSame(403, $response->getStatusCode(), $route[0] . ' ' . $route[1]);
+        }
+
+        foreach ([['GET', 'api/system/telemetry'], ['PUT', 'api/system/engine-address']] as $route) {
+            $this->assertSame(403, $this->through($abilities, internal: true, route: $route), 'tool call: ' . $route[1]);
+        }
+    }
+
     /** A project limit travels with the token, so an MCP tool call is bound by it too. */
     public function test_the_project_scope_is_enforced_on_a_tool_call(): void
     {

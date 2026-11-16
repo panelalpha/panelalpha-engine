@@ -44,7 +44,8 @@ return [
     /*
      * Catalogue ids the host prewarms (`php:8.3`, `php:8.3+mongodb`, `composer`);
      * empty warms nothing. Budget and reserve override images.yaml's `host`
-     * block. Set with `pae configure prewarm`.
+     * block. `pae configure prewarm` and the API store them in the database,
+     * which wins over these: {@see \App\Lib\Deploy\CacheManager\PrewarmSettings}.
      */
     'prewarm_images' => env('DEPLOY_PREWARM_IMAGES', ''),
     'prewarm_budget' => env('DEPLOY_PREWARM_BUDGET', ''),

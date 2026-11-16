@@ -4,21 +4,26 @@ namespace Tests\Integration\Console;
 
 use App\Console\Wizard\Sections\PrewarmSection;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
+use App\Models\Setting;
 use Laravel\Prompts\Key;
 use Laravel\Prompts\Prompt;
+use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
- * `pae configure prewarm` writes DEPLOY_PREWARM_* to `.env`, and the plan the
- * weekly prewarm runs follows it.
+ * `pae configure prewarm` saves the DEPLOY_PREWARM_* settings in the engine
+ * database, over `.env-core`, and the plan the weekly prewarm runs follows it.
  */
 class PrewarmSectionTest extends TestCase
 {
+    use InMemoryDatabase;
+
     private string $dir;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->bootInMemoryDatabase();
 
         $this->dir = sys_get_temp_dir() . '/prewarm-section-' . bin2hex(random_bytes(4));
         mkdir($this->dir);
@@ -39,6 +44,7 @@ class PrewarmSectionTest extends TestCase
         Prompt::interactive(false);
         array_map('unlink', array_filter(glob($this->dir . '/{,.}*', GLOB_BRACE) ?: [], 'is_file'));
         @rmdir($this->dir);
+        Setting::flushCache();
 
         parent::tearDown();
     }
@@ -54,7 +60,8 @@ class PrewarmSectionTest extends TestCase
         $section = new PrewarmSection();
         $this->assertSame(0, $section->run(false));
 
-        $this->assertStringContainsString("DEPLOY_PREWARM_IMAGES={$first}\n", $this->env());
+        $this->assertSame($first, Setting::get('deploy_prewarm_images'));
+        $this->assertSame("APP_ENV=testing\nDEPLOY_PREWARM_IMAGES=\n", $this->env(), '.env-core is root\'s and stays as it was');
         $this->assertSame([$first], array_column(HostPrewarmPlan::catalog(), 'id'));
         $this->assertNotSame([], $section->receipt());
     }
@@ -71,9 +78,8 @@ class PrewarmSectionTest extends TestCase
 
         $this->assertSame(0, (new PrewarmSection())->run(false));
 
-        $env = $this->env();
-        $this->assertStringContainsString("DEPLOY_PREWARM_BUDGET=2G\n", $env);
-        $this->assertStringContainsString("DEPLOY_PREWARM_RESERVE=20G\n", $env);
+        $this->assertSame('2G', Setting::get('deploy_prewarm_budget'));
+        $this->assertSame('20G', Setting::get('deploy_prewarm_reserve'));
         $this->assertSame(2 * 1073741824, HostPrewarmPlan::budgetBytes());
         $this->assertSame(20 * 1073741824, HostPrewarmPlan::reserveBytes());
     }
@@ -84,7 +90,7 @@ class PrewarmSectionTest extends TestCase
 
         $this->assertSame(0, (new PrewarmSection())->run(true));
 
-        $this->assertStringContainsString("DEPLOY_PREWARM_IMAGES=\n", $this->env());
+        $this->assertNull(Setting::get('deploy_prewarm_images'));
         $this->assertSame([], HostPrewarmPlan::selected());
     }
 

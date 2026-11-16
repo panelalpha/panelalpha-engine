@@ -112,15 +112,14 @@ class HostPrewarmPlan
         return strtolower($declared) === 'none' ? null : self::parseBytes($declared);
     }
 
-    /** A `deploy.*` value, or '' without a Laravel config (plain unit tests). */
+    /** A prewarm setting as {@see PrewarmSettings} resolves it, or '' without a Laravel config (plain unit tests). */
     private static function setting(string $key): string
     {
         if (! Container::getInstance()->bound('config')) {
             return '';
         }
-        $value = config('deploy.'.$key, '');
 
-        return is_scalar($value) ? trim((string) $value) : '';
+        return PrewarmSettings::raw(substr($key, strlen('prewarm_')));
     }
 
     /**

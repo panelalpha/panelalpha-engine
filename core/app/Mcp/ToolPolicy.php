@@ -55,7 +55,7 @@ class ToolPolicy
      */
     public function __construct(private array $config = [])
     {
-        $this->config = $config ?: (array) config('mcp-tools', []);
+        $this->config = $config ?: McpScopeSettings::config();
     }
 
     /**

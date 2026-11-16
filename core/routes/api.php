@@ -20,8 +20,13 @@ use App\Http\Controllers\SystemApiAccessController;
 use App\Http\Controllers\SystemBuildCacheController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\SystemEgressController;
+use App\Http\Controllers\SystemEngineAddressController;
 use App\Http\Controllers\SystemImageController;
+use App\Http\Controllers\SystemMcpScopeController;
 use App\Http\Controllers\SystemOverlayController;
+use App\Http\Controllers\SystemPrewarmController;
+use App\Http\Controllers\SystemSitesDbController;
+use App\Http\Controllers\SystemTelemetryController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TokenController;
 use App\Http\Controllers\UploadController;
@@ -117,6 +122,7 @@ Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
 Route::put('/mcp-tokens/{id}/projects', [McpTokenController::class, 'updateProjects']);
+Route::put('/mcp-tokens/{id}/commands', [McpTokenController::class, 'updateCommands']);
 Route::delete('/mcp-tokens/{id}', [McpTokenController::class, 'destroy']);
 
 Route::get('/mcp-activity-logs', [McpActivityLogController::class, 'index']);
@@ -546,6 +552,16 @@ Route::delete('/system/overlay', [SystemOverlayController::class, 'destroy']);
 Route::get('/system/exim-config', [SystemController::class, 'getEximConfig']);
 Route::put('/system/exim-config', [SystemController::class, 'updateEximConfig']);
 Route::post('/system/exim-send-test-email', [SystemController::class, 'sendTestEmail']);
+// What `pae configure` changes, one area each.
+Route::get('/system/engine-address', [SystemEngineAddressController::class, 'show']);
+Route::put('/system/engine-address', [SystemEngineAddressController::class, 'update']);
+Route::get('/system/mcp-scope', [SystemMcpScopeController::class, 'show']);
+Route::put('/system/mcp-scope', [SystemMcpScopeController::class, 'update']);
+Route::get('/system/prewarm', [SystemPrewarmController::class, 'show']);
+Route::put('/system/prewarm', [SystemPrewarmController::class, 'update']);
+Route::get('/system/sites-db', [SystemSitesDbController::class, 'show']);
+Route::get('/system/telemetry', [SystemTelemetryController::class, 'show']);
+Route::put('/system/telemetry', [SystemTelemetryController::class, 'update']);
 
 Route::get('/system/ipv4-nat-maps', [SystemController::class, 'listIpv4NatMaps']);
 Route::put('/system/ipv4-nat-maps', [SystemController::class, 'upsertIpv4NatMap']);

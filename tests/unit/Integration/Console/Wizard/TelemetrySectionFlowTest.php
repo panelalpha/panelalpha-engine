@@ -7,6 +7,7 @@ use App\Lib\Deploy\Telemetry\DeployReport;
 use App\Lib\Deploy\Telemetry\NotificationPreferences;
 use App\Lib\Deploy\Telemetry\SourceBundlePolicy;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\Lib\Deploy\Telemetry\TelemetrySettings;
 use App\Models\Setting;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Artisan;
@@ -18,7 +19,7 @@ use Tests\Support\InMemoryDatabase;
 use Tests\Support\WizardScreen;
 use Tests\TestCase;
 
-/** `pae configure telemetry`: sending lives in the settings table, the rest in `.env`. */
+/** `pae configure telemetry`: every choice is saved in the settings table, over `.env-core`. */
 class TelemetrySectionFlowTest extends TestCase
 {
     use InMemoryDatabase;
@@ -144,19 +145,19 @@ class TelemetrySectionFlowTest extends TestCase
 
         $this->assertScreenShows('Sending: unknown — the database could not be read');
         $this->assertScreenShows('Sending unknown');
-        $this->assertScreenShows('The database could not be read, so whether reports are sent cannot be shown or changed.');
+        $this->assertScreenShows('The database could not be read: what is shown below comes from .env-core, and nothing here can be saved until it is back.');
         $this->assertScreenShows('The database could not be read, so this cannot be changed here.');
     }
 
-    public function test_the_tier_is_written_to_the_env_file_and_read_back(): void
+    public function test_the_tier_is_saved_and_read_back(): void
     {
         $this->keys([...self::row(self::TIER), ...self::row(0), Key::ENTER, ...self::row(self::TIER), ...self::row(1), Key::ENTER, ...self::row(self::BACK)]);
 
         $section = new TelemetrySection();
         $section->run(false);
 
-        $this->assertStringContainsString('TELEMETRY_TIER=1', $this->envContents());
-        $this->assertSame(DeployReport::TIER_REPO, config('telemetry.tier'));
+        $this->assertSame((string) DeployReport::TIER_REPO, TelemetrySettings::tierSetting()->stored());
+        $this->assertSame("APP_KEY=base64:dGVzdA==\n", $this->envContents());
         $this->assertSame([
             'Reports now carry: what failed and when — nothing more',
             'Reports now carry: that, plus which repository',
@@ -165,23 +166,22 @@ class TelemetrySectionFlowTest extends TestCase
         $this->assertScreenShows('Reports carry: that, plus which repository');
     }
 
-    public function test_a_dry_run_or_an_unwritable_file_leaves_the_tier_alone(): void
+    public function test_a_dry_run_or_a_refused_write_leaves_the_tier_alone(): void
     {
         $this->keys([...self::row(self::TIER), ...self::row(0), Key::ENTER, ...self::row(self::BACK)]);
         $dry = new TelemetrySection();
         $dry->run(true);
         $this->assertScreenShows('Dry run: Reports now carry: what failed and when — nothing more');
 
-        unlink($this->envPath());
+        DB::unprepared("CREATE TRIGGER refuse_insert BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'settings are read-only'); END");
         $this->keys([...self::row(self::TIER), ...self::row(0), Key::ENTER, ...self::row(self::BACK)]);
         $failed = new TelemetrySection();
         $failed->run(false);
 
-        $this->assertScreenShows('No .env file at '.$this->envPath().'.');
-        $this->assertScreenShows('There is no '.$this->envPath().' to write to.');
+        $this->assertScreenShows('settings are read-only');
         $this->assertSame([], $dry->receipt());
         $this->assertSame([], $failed->receipt());
-        $this->assertSame(DeployReport::TIER_LOG, config('telemetry.tier'));
+        $this->assertNull(TelemetrySettings::tierSetting()->stored());
     }
 
     public function test_uploading_source_has_to_be_confirmed(): void
@@ -195,8 +195,7 @@ class TelemetrySectionFlowTest extends TestCase
         $section = new TelemetrySection();
         $section->run(false);
 
-        $this->assertStringContainsString('TELEMETRY_SOURCE_BUNDLE=failed', $this->envContents());
-        $this->assertSame(SourceBundlePolicy::MODE_FAILED, config('telemetry.source_bundle.mode'));
+        $this->assertSame(SourceBundlePolicy::MODE_FAILED, TelemetrySettings::sourceBundleSetting()->stored());
         $this->assertSame(['Source code: uploaded whenever a deploy fails'], $section->receipt());
         $this->assertScreenShows('Left as it is — nothing was changed.');
         $this->assertScreenShows("Source bundles are on: a failed deploy uploads the application's own source code.");
@@ -211,7 +210,7 @@ class TelemetrySectionFlowTest extends TestCase
         $section->run(false);
 
         $this->assertScreenShows('Source code: uploaded when a deploy fails unexplained');
-        $this->assertStringContainsString('TELEMETRY_SOURCE_BUNDLE=off', $this->envContents());
+        $this->assertSame(SourceBundlePolicy::MODE_OFF, TelemetrySettings::sourceBundleSetting()->stored());
         $this->assertSame(['Source code: never uploaded'], $section->receipt());
     }
 
@@ -226,8 +225,8 @@ class TelemetrySectionFlowTest extends TestCase
         $section = new TelemetrySection();
         $section->run(false);
 
-        $this->assertStringContainsString('TELEMETRY_BUG_REPORTS=true', $this->envContents());
-        $this->assertTrue(config('telemetry.bug_reports.enabled'));
+        $this->assertSame('true', TelemetrySettings::bugReportsSetting()->stored());
+        $this->assertTrue((new TelemetrySettings())->bugReports());
         $this->assertSame(['Bug reports turned off.', 'Bug reports allowed.'], $section->receipt());
         $this->assertScreenShows('Bug reports off');
         $this->assertScreenShows('Allow bug reports?');

@@ -5,9 +5,7 @@ namespace App\Console\Wizard\Sections;
 use App\Console\Prompts\Screen;
 use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
-use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
-use App\Lib\Deploy\CacheManager\ImageCatalog;
-use App\Support\EnvFile;
+use App\Lib\Deploy\CacheManager\PrewarmSettings;
 use Throwable;
 
 use function Laravel\Prompts\confirm;
@@ -20,18 +18,19 @@ use function Laravel\Prompts\text;
 
 /**
  * Which catalogue images the host keeps ready, and the disk the prewarm may
- * spend. None by default. Written to `.env`: images.yaml is read-only.
+ * spend. None by default. Saved through {@see PrewarmSettings}, which the API
+ * uses too: images.yaml is read-only.
  */
 class PrewarmSection implements Section
 {
     use KeepsAReceipt;
 
-    /** @var array<string, string> setting => env key */
-    private const ENV_KEYS = [
-        'images' => 'DEPLOY_PREWARM_IMAGES',
-        'budget' => 'DEPLOY_PREWARM_BUDGET',
-        'reserve' => 'DEPLOY_PREWARM_RESERVE',
-    ];
+    private PrewarmSettings $settings;
+
+    public function __construct(?PrewarmSettings $settings = null)
+    {
+        $this->settings = $settings ?? new PrewarmSettings;
+    }
 
     public static function key(): string
     {
@@ -95,28 +94,13 @@ class PrewarmSection implements Section
     /** @return array{images: list<string>, budget: string, reserve: string} */
     private function current(): array
     {
-        return [
-            'images' => HostPrewarmPlan::selected(),
-            'budget' => trim((string) config('deploy.prewarm_budget', '')),
-            'reserve' => trim((string) config('deploy.prewarm_reserve', '')),
-        ];
+        return $this->settings->current();
     }
 
-    /**
-     * Everything the catalogue could warm, grouped by runtime so a minor sits
-     * beside its siblings; within a runtime, the catalogue's own order.
-     *
-     * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
-     */
+    /** @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}> */
     private function catalog(): array
     {
-        $items = HostPrewarmPlan::available();
-        $rank = array_flip(array_values(array_unique(array_column($items, 'runtime'))));
-        $position = array_flip(array_column($items, 'id'));
-
-        usort($items, static fn (array $a, array $b): int => [$rank[$a['runtime']], $position[$a['id']]] <=> [$rank[$b['runtime']], $position[$b['id']]]);
-
-        return $items;
+        return $this->settings->catalog();
     }
 
     /**
@@ -245,26 +229,13 @@ class PrewarmSection implements Section
 
     private function badSize(string $which, string $value): ?string
     {
-        $value = trim($value);
-        if ($value === '' || ($which === 'budget' && strtolower($value) === 'none')) {
-            return null;
-        }
-
-        try {
-            HostPrewarmPlan::parseBytes($value);
-        } catch (\InvalidArgumentException $e) {
-            return $which === 'budget'
-                ? 'A size like 6G or 512M, `none`, or empty for the default.'
-                : 'A size like 10G or 512M, or empty for the default.';
-        }
-
-        return null;
+        return PrewarmSettings::badSize($which, $value);
     }
 
     /** The value in force for a setting, as the operator would write it. */
     private function effective(string $which, string $value): string
     {
-        return $value !== '' ? $value : $this->shipped($which);
+        return $this->settings->effective($which, $value);
     }
 
     private function describe(string $which, string $value): string
@@ -274,14 +245,7 @@ class PrewarmSection implements Section
 
     private function shipped(string $which): string
     {
-        $declared = $which === 'budget' ? ImageCatalog::budget() : ImageCatalog::reserve();
-        if ($declared !== null && $declared !== '') {
-            return $declared;
-        }
-
-        return HostPrewarmPlan::formatBytes($which === 'budget'
-            ? HostPrewarmPlan::FALLBACK_BUDGET_BYTES
-            : HostPrewarmPlan::FALLBACK_RESERVE_BYTES);
+        return $this->settings->shipped($which);
     }
 
     /**
@@ -319,8 +283,7 @@ class PrewarmSection implements Section
             return null;
         }
 
-        $env = EnvFile::current();
-        if (! confirm(label: sprintf('Write this to %s?', $env->path()), default: true)) {
+        if (! confirm(label: 'Save this? It is kept in the engine database, over .env-core.', default: true)) {
             note('Nothing was written. Your changes are still here.', 'warning');
             pause('Press enter to carry on...');
 
@@ -328,26 +291,15 @@ class PrewarmSection implements Section
         }
 
         try {
-            $env->set($lines);
+            $this->settings->save($next);
         } catch (Throwable $e) {
             error($e->getMessage());
 
             return 1;
         }
 
-        // This process booted with the old values; the menu may be re-entered.
-        config([
-            'deploy.prewarm_images' => $lines[self::ENV_KEYS['images']],
-            'deploy.prewarm_budget' => $next['budget'],
-            'deploy.prewarm_reserve' => $next['reserve'],
-        ]);
-
         $this->receipt = ['Prewarm: '.$this->summary($catalog, $next).'.'];
         note($this->receipt[0], 'info');
-
-        if (app()->configurationIsCached()) {
-            note('The cached configuration was built from the old values — run `pae config:cache` to rebuild it.', 'warning');
-        }
 
         note(
             "Takes effect on the next prewarm: weekly, Sunday 03:30, or now with `pae system:image:prewarm`.\n"
@@ -366,11 +318,7 @@ class PrewarmSection implements Section
      */
     private function envLines(array $state): array
     {
-        return [
-            self::ENV_KEYS['images'] => implode(',', $state['images']),
-            self::ENV_KEYS['budget'] => $state['budget'],
-            self::ENV_KEYS['reserve'] => $state['reserve'],
-        ];
+        return PrewarmSettings::envLines($state);
     }
 
     /**
