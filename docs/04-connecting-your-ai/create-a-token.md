@@ -79,7 +79,7 @@ The token was not accepted. Check you copied the whole string with no line break
 pae mcp:token:create laptop
 ```
 
-`laptop` is a label so you can tell your tokens apart. This prints the token, then a registration command for each assistant. `--client=claude` prints only one. `--short` prints only the token.
+`laptop` is a label so you can tell your tokens apart. This prints the token, then a registration command for each assistant. `--client=claude` prints only one; a name the engine does not know is refused before any token is made, and the message lists the names it does know. `--short` prints only the token.
 
 **I need a token for a script or a control panel, not an assistant.**
 That is a different kind of token. Create it with `pae api:token:create`. See [CLI commands](../06-commands/pae-cli.md).

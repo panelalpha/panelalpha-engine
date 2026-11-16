@@ -23,7 +23,7 @@ PHP and Laravel run Apache **inside the project's container**. The VPS still ser
 | Docker Compose | A working `docker-compose.yml` | Your compose file |
 | Dockerfile | A `Dockerfile` or `Containerfile` | The image's own `CMD` or `ENTRYPOINT` |
 | Laravel | `composer.json` and `artisan` | PHP with Apache inside the project |
-| PHP | `composer.json`, or a recognised application. Plain PHP just needs source files and no Composer | Apache inside the project |
+| PHP | `composer.json`, or a recognised application. Plain PHP needs only source files and no Composer | Apache inside the project |
 | Rails | `Gemfile` and `config/application.rb` | `rails server` |
 | Ruby | `Gemfile`, plus `config.ru` or a Procfile web entry | `rackup` |
 | Django | `manage.py`, and `requirements.txt` if you have one | `manage.py runserver` |
@@ -101,7 +101,7 @@ An empty list fetches none. Without this setting, every submodule is fetched. Th
 There is no `package.json` or `composer.json` at the top level. Either your application lives in a subfolder, or the file is genuinely missing. Move the application to the top level.
 
 **A complete HTML site came out as `fallback`.**
-Something in your repository is not a browser file, so the HTML rule would not claim it. Look for a stray script, a binary, or a build file. See [Sites made only of HTML pages](how-detection-works.md#sites-made-only-of-html-pages).
+Something in your repository is not a browser file, so the HTML rule would not claim it. Look for a stray script, a binary or a build file. See [Sites made only of HTML pages](how-detection-works.md#sites-made-only-of-html-pages).
 
 **It says `compose`, but that file is only for local development.**
 Docker Compose is checked near the top and almost always wins. Rename or remove the file, or expect the engine to run it. A named application the engine already knows can win instead.

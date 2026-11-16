@@ -37,7 +37,7 @@ A file in the folder wins over the same thing written inline. A folder cannot sh
 - **Editors can check the file as you write it.** The engine ships a JSON schema for it. With the YAML extension of VS Code or any editor using yaml-language-server, put this line at the top:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/panelalpha/engine/develop/core/resources/sources/_schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/panelalpha/panelalpha-engine/develop/core/resources/sources/_schema.json
 ```
 
 ## A first example

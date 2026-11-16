@@ -23,7 +23,7 @@ Throughout this page, `{project}` means the project's name, the value shown as `
 | `pae configure api-access` | Let a project call the engine's API, rotate its token, or take that access away. Same as [Engine API for projects](#engine-api-for-projects). |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
-| `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. Left unset, it is 1 on a server with less than 4 GB of RAM and 2 otherwise. |
+| `pae configure queue` | How many deploys, backups or staging jobs run at once. A number from 1 to 32. Left unset, it is 1 on a server with less than 4 GB of RAM and 2 otherwise. |
 | `pae configure docker-hub` | The Docker Hub account image downloads go out under. |
 | `pae configure prewarm` | Which base images are kept ready before a deploy asks, and the disk budget and reserve for them. None by default. |
 | `pae configure sites-db` | How much memory the database for hosted PHP sites keeps for its caches. Defaults are 32M, 8M and 8M. Changing one restarts that database for a few seconds. |
@@ -35,8 +35,8 @@ The menu, and what each line does: [Configure the engine](../02-getting-started/
 Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
- Groups      37 of 37 groups on
- Commands    225 of 225 commands on
+ Groups      40 of 40 groups on
+ Commands    311 of 311 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back
@@ -80,7 +80,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. `--timeout` (300 seconds by default) bounds it, and it ends with its caller: if that connection goes away, the command is stopped instead of left running. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. Without a terminal, such as in a script, it refuses and changes nothing unless you add `--force`. Work still queued for the project is cancelled first. While a deploy or rebuild, staging copy, push, backup or restore is running on it, the delete is refused and changes nothing; cancel that task or wait for it, then delete again. |
 | `pae project:orphan:list` | Names on this server that no project has but something the engine made still holds: an account, a home directory, a project directory or a container left behind by a create or a delete that did not finish. A name only the server's own accounts or files hold, such as its admin user, is not listed. A create refuses such a name and says which of the four holds it. |
-| `pae project:orphan:delete {name}` | Frees such a name: its container first, then its account, its home and its project directory. Asks you to confirm; without a terminal it refuses unless you add `--force`. It refuses a name a project still has — delete that project instead — and it leaves alone an account the engine did not make (remove it with `userdel <name>`), a home directory without the engine's `.panelalpha` folder and no engine account (remove it with `rm -rf /home/<name>`), or a container the engine did not start from the project's directory (remove it with `docker rm -f <name>`). |
+| `pae project:orphan:delete {name}` | Frees such a name: its container first, then its account, its home and its project directory. Asks you to confirm; without a terminal it refuses unless you add `--force`. It refuses a name a project still has (delete that project instead) and it leaves alone an account the engine did not make (remove it with `userdel <name>`), a home directory without the engine's `.panelalpha` folder and no engine account (remove it with `rm -rf /home/<name>`), or a container the engine did not start from the project's directory (remove it with `docker rm -f <name>`). |
 
 Create a project from a public repository and wait until it is up:
 
@@ -98,7 +98,7 @@ A private repository. The URL must be `https://`, with no username or password i
 pae project:create --repo=https://github.com/org/private-app --git-token=<token>
 ```
 
-`--branch` picks a branch, tag, or commit. `--project` and `--domain` set the name and hostname when you do not want them generated. `--env-var=KEY=VALUE` can be repeated.
+`--branch` picks a branch, tag or commit. `--project` and `--domain` set the name and hostname when you do not want them generated. `--env-var=KEY=VALUE` can be repeated.
 
 An application that manages the engine, such as a hosting panel:
 
@@ -122,7 +122,7 @@ Deploy a local archive into a project that was created without a repository:
 pae project:deploy-archive --project={project} --file=/opt/panelalpha/app.tar.gz
 ```
 
-What this does: puts the archive into the project and queues its deploy, as the API does. The engine's queue worker runs it and removes the archive once the deploy has ended, whether it worked, failed or was cancelled. `.zip`, `.tar.gz` and `.tgz` are accepted. `pae` runs inside the engine's container, so the file must be somewhere that container can read; anything under `/opt/panelalpha` is. A project that deploys from a repository refuses an archive: push the change and rebuild instead. While another task of the project holds its account - a deploy, an environment or an API-access apply - the command refuses at once with one plain line naming that task and what to do, and a deploy asked for through the API meanwhile is refused with this one's task.
+What this does: puts the archive into the project and queues its deploy, as the API does. The engine's queue worker runs it and removes the archive once the deploy has ended, whether it worked, failed or was cancelled. `.zip`, `.tar.gz` and `.tgz` are accepted. `pae` runs inside the engine's container, so the file must be somewhere that container can read; anything under `/opt/panelalpha` is. A project that deploys from a repository refuses an archive: push the change and rebuild instead. While another task of the project holds its account (a deploy, an environment or an API-access apply) the command refuses at once with one plain line naming that task and what to do, and a deploy asked for through the API meanwhile is refused with this one's task.
 
 What you should see: `Queued the deploy of <file> to <project> as task <id>.`, the deploy log as the worker writes it, then `Deployed <file> to <project>.` When the deploy fails or is cancelled, the command prints why on one line and exits non-zero. Ctrl-C stops only the printing: the deploy goes on, and the command names its task. While no queue worker has taken the deploy, it says so once. `--timeout` (default 1800 seconds, the wait for a worker included) stops watching the same way and exits non-zero. `--no-wait` returns as soon as the deploy is queued. `--quiet-deploy` hides the log but still waits for the result. `--recipe` and `--env-var=KEY=VALUE` work as they do for `project:create`.
 
@@ -159,7 +159,7 @@ Context: [Environment variables](../05-capabilities/projects.md#environment-vari
 
 ## Repository projects
 
-For projects deployed from git, these act on the checkout the engine owns. A pull, a branch change, or a revert on that checkout rebuilds the running site. `pae project:rebuild` rebuilds without changing the checkout.
+For projects deployed from git, these act on the checkout the engine owns. A pull, a branch change or a revert on that checkout rebuilds the running site. `pae project:rebuild` rebuilds without changing the checkout.
 
 | Command | What it does |
 |---|---|
@@ -335,7 +335,7 @@ Context: [A token shared by several projects](../05-capabilities/connecting-with
 | `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
 | `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
 | `pae project:domain:visitors {project} {domain} --start= --end=` | Visitor overview for one hostname (`domain_visitors`). Daily hits and visits clip to the range; unique visitors and session length are calendar months. |
-| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers, at month grain; or `status_codes`, requests and bytes per HTTP status for exactly the range. |
+| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os or browsers, at month grain; or `status_codes`, requests and bytes per HTTP status for exactly the range. |
 | `pae geolocation:database update` | Downloads the local City MMDB used for country / continent / region. Not scheduled. Geo lists stay empty until this has run. `--accept-terms` for scripts; `--force` to replace this month's file. |
 
 Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visitor statistics](../05-capabilities/visitor-statistics.md).
@@ -433,7 +433,7 @@ The engine ships more commands than belong on a daily list. Most are for support
 - **Server upkeep:** `system:version`, `system:database:test`, `system:ip:sync`, `system:domain:rebuild`, `system:modsec:rebuild`, `system:sftp:rebuild`, `system:exim:rebuild`, `system:webserver:update`.
 - **Scheduled jobs:** `backups:run-scheduled` (every minute: starts the automatic backups that are due, set with `project:backup:schedule`), `metrics:projects:disk` (every 15 minutes: measures each project's disk use for `project:usage`), `metrics:projects:sample` (every minute: CPU and memory of each project and its containers), `metrics:projects:rollup` (every hour: hourly averages of those), `metrics:projects:bandwidth` (every hour: this month's transfer on each project), `tunnels:expire` (every five minutes: removes a tunnel whose lifetime has passed and whose removal at that lifetime, which the engine queues when it creates one, did not run), `proxy:rule:refresh-certificates` (every hour: serves each extra route on port 443 with the certificate on the server that covers it now, so a renewed, removed or newly added one is picked up), `git:credentials:sweep` (every hour: removes leftover git credential helpers and deploy keys from account homes).
 - **Scheduled cleanup:** `task:prune` (keeps the newest tasks of each project; a deleted project's tasks stay as its record, and `--project=<name> --keep=0 --keep-other=0` removes them), `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `system:image:prune` (runs once a day; while a deploy is running the image half waits and is retried the next hour: removes deploy base images and host build images (`panelalpha/build-node`, `panelalpha/build-rust`) not selected in `pae configure prewarm` that no deploy has pulled, built or named for 3 days, except the newest of each kind (an old PHP recipe goes once unused), never your own base images, their tags in the cache registry (then garbage-collected), and host build cache unused for 24 hours; `--older-than`, `--build-cache-older-than` and `--dry-run` as above, `--due-after=20h` skips the image half when it last completed within that window, `--until-free=35G` (or a share, 15%) repeats the image half with the window halved, down to any age, until that much is free on the Docker root and is not deferred by a deploy, which keeps only what its log names, defaults in `DEPLOY_HOST_IMAGE_RETENTION` and `DEPLOY_HOST_BUILD_CACHE_RETENTION`), `system:disk:guard` (every five minutes: keeps host build cache under `DEPLOY_HOST_BUILD_CACHE_MAX`, 10G, and while free space on the Docker root or /home is below `DEPLOY_DISK_PRESSURE_FREE`, 15% by default, prunes the oldest build cache and then base images unused for 6 hours, 3, 1.5 and less until enough is free; `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
-- **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, or that started before sysbox-fs last did, which a runtime restart or a host crash leaves behind, and prints what it found in each, such as `sysbox-fs no longer serves its mounts`; `--dry-run` only prints).
+- **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`, `project:mapping:check` (every five minutes: recreates a running project container whose image the container runtime no longer maps, or that started before the container runtime's file layer last did, which a runtime restart or a host crash leaves behind, and prints what it found in each; `--dry-run` only prints).
 - **PHP Apache modules (inside a project, not on the VPS):** `apache:mod:enable`, `apache:mod:disable`.
 - **Engine settings:** `settings:get`, `settings:set`, `settings:exists`.
 - **Root actions:** `pae-broker`, a separate command registered with `pae`, runs one of the engine's root actions on the server the way the engine runs it, for example `pae-broker --host host.applyTenantNetworkFirewall --` to re-apply the projects' network firewall. It is for support, and each run is logged with the engine's other root actions.

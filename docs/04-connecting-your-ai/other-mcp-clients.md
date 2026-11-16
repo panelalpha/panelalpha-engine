@@ -58,5 +58,11 @@ Your assistant is not using HTTP transport. It needs HTTP, not an SSE-only or st
 **Connects, but has very few abilities.**
 The permission settings on your VPS are filtering them. Run `pae mcp:tool:list` on your VPS: [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).
 
+**400 Bad Request.**
+The body of the request was not valid JSON. The answer carries a JSON-RPC parse error.
+
+**404 Session not found.**
+The assistant sent a session id this engine never issued, or one it no longer remembers (an id is kept for a week). The assistant has to start a new session: disconnect it and connect again.
+
 **Connection times out.**
 Port 2011 is not reachable from your computer. Check any firewall between you and your VPS, and confirm the address is right with `pae mcp:check` on your VPS itself.

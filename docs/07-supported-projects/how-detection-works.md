@@ -55,7 +55,7 @@ A few ready-made apps, such as WordPress, are recognised even when they also shi
 
 ### Extra notes in the repository
 
-You can add a folder named `.panelalpha` with extra notes: extra commands, extra settings, or which known app this is. A `panelalpha.yaml` or `panelalpha.md` at the top of the repository works too. Every key it may hold: [panelalpha.yaml](panelalpha-yaml.md).
+You can add a folder named `.panelalpha` with extra notes: extra commands, extra settings or which known app this is. A `panelalpha.yaml` or `panelalpha.md` at the top of the repository works too. Every key it may hold: [panelalpha.yaml](panelalpha-yaml.md).
 
 Those notes cannot tell the engine to look in a subfolder. The files that mark the project still have to sit at the top. A few known apps already have their own layout (phpBB lives in a subfolder, and the engine handles that). For anything else, move the project to the top of the repository.
 
@@ -63,7 +63,7 @@ Those notes cannot tell the engine to look in a subfolder. The files that mark t
 
 A folder of pages such as `home.html` and `about.html`, with a `css/` folder and no `index.html`, is still treated as a website.
 
-Every file in the repository has to be something a browser can open: a page, stylesheet, script, image, font, or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated as a plain HTML site.
+Every file in the repository has to be something a browser can open: a page, stylesheet, script, image, font or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated as a plain HTML site.
 
 A site that does have an `index.html` is handled as an ordinary static site. See [Project types](project-types.md).
 

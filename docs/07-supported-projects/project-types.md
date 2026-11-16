@@ -22,11 +22,11 @@ A folder of files with `index.html` (or `index.htm`) at the top is a static site
 
 ### Pages without an index.html
 
-A hand-written site of pages such as `home.html` and `about.html`, with no `index.html`, is still a website. Every file has to be something a browser can open: a page, stylesheet, script, image, font, or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated this way.
+A hand-written site of pages such as `home.html` and `about.html`, with no `index.html`, is still a website. Every file has to be something a browser can open: a page, stylesheet, script, image, font or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated this way.
 
 ## WordPress and ready-made apps
 
-WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Roundcube, Adminer, and phpMyAdmin are recognised as PHP apps and started for you.
+WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Roundcube, Adminer and phpMyAdmin are recognised as PHP apps and started for you.
 
 Two more apps have their own recipe and deploy from their repository: Roundcube (`https://github.com/roundcube/roundcubemail`, version 1.7 and the development branch) and Postmill (`https://github.com/postmill-ai/postmill-app`).
 
@@ -44,13 +44,13 @@ These are projects with a `package.json` at the top of the repository. Commit th
 
 ### Apps that stay running
 
-Next.js, Nuxt, SvelteKit, Remix, Astro (when it runs on the server), NestJS, TanStack Start, Express, Fastify, and a plain Node app. A plain Node app also needs a `start` script in `package.json`, or a file such as `index.js`, `server.js`, or `app.js`.
+Next.js, Nuxt, SvelteKit, Remix, Astro (when it runs on the server), NestJS, TanStack Start, Express, Fastify and a plain Node app. A plain Node app also needs a `start` script in `package.json`, or a file such as `index.js`, `server.js`, or `app.js`.
 
 They start from the `start` script when there is one.
 
 ### Apps that build into files
 
-Vite, Angular, Create React App, Astro when it builds a static site, and Next.js when it exports static files. The engine builds the files, then shows them as a website.
+Vite, Angular, Create React App, Astro when it builds a static site and Next.js when it exports static files. The engine builds the files, then shows them as a website.
 
 ### If package.json is almost empty
 
@@ -68,7 +68,7 @@ Ready-made PHP apps are covered under [WordPress and ready-made apps](#wordpress
 
 ### Python
 
-Django needs a `manage.py` file (it may sit in a subfolder). Other Python projects need one of `requirements.txt`, `pyproject.toml`, `Pipfile`, or `setup.py` at the top, and no `manage.py`.
+Django needs a `manage.py` file (it may sit in a subfolder). Other Python projects need one of `requirements.txt`, `pyproject.toml`, `Pipfile` or `setup.py` at the top, and no `manage.py`.
 
 Django starts the way Django usually starts. Other Python projects start from `main.py` or `app.py`, or from a common Python web server if one is already in the project. Failing those, the engine runs the one command the project declares under `[project.scripts]` in `pyproject.toml`, or the one top-level `.py` file that ends in an `if __name__ == "__main__":` block. When there are several of either, name the entry point in a `panelalpha.yaml`.
 
@@ -78,7 +78,7 @@ Rails needs a `Gemfile` and `config/application.rb`. Plain Ruby needs a `Gemfile
 
 A `Gemfile` on its own, with none of those, is not recognised. A [general build](#if-the-engine-does-not-recognise-it) is there if you ask for one.
 
-### Go, Rust, Java, and .NET
+### Go, Rust, Java and .NET
 
 - **Go:** a `go.mod` at the top. The engine builds the program and runs it.
 - **Rust:** a `Cargo.toml` at the top, built for production. A library with nothing to run is refused.
@@ -89,7 +89,7 @@ A `Gemfile` on its own, with none of those, is not recognised. A [general build]
 
 **Docker Compose.** A `docker-compose.yml` or `compose.yml` file is checked near the top, so it usually wins. A compose file you only use on your own computer is still picked up. Rename or remove it if you do not want that.
 
-**A Dockerfile.** A `Dockerfile` or `Containerfile`. The image starts the way it was written to start. If both files exist, the `Dockerfile` is used.
+**A Dockerfile.** A `Dockerfile` or `Containerfile`. The image starts the way it was written to start. If both files exist, the `Dockerfile` is used. A Dockerfile in `docker/`, `build/` or `scripts/docker/`, or a variant such as `Dockerfile.prod`, is also found. A single `<name>.dockerfile` at the top is used when nothing else matches. A Dockerfile written for local development (one that maps the host's user id) is not used.
 
 ## If the engine does not recognise it
 
@@ -108,7 +108,7 @@ These are the short names the engine uses when you inspect a repository and in d
 | `compose` | Docker Compose |
 | `dockerfile` | A `Dockerfile` or `Containerfile` |
 | `laravel` | Laravel |
-| `php` | PHP, including WordPress, OpenCart, Magento, Matomo, and PHP without Composer |
+| `php` | PHP, including WordPress, OpenCart, Magento, Matomo and PHP without Composer |
 | `rails` | Ruby on Rails |
 | `ruby` | Ruby |
 | `django` | Django |

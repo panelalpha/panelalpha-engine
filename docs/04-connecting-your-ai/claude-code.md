@@ -41,7 +41,7 @@ An empty list on a fresh engine is a success.
 
 ### Trust a self-signed engine certificate
 
-Skip this if your engine has a real certificate. You will know because Claude Code just works.
+Skip this if your engine has a real certificate. You will know because Claude Code connects without extra steps.
 
 **Symptom.** Claude Code registers the server without complaint, then fails when it actually tries to connect:
 
