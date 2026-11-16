@@ -168,8 +168,8 @@ final class DindHostBuilder implements HostBuilder
     }
 
     /**
-     * Every host build's environment: per-project caches, CI so nothing prompts, and the runtimes' heap share
-     * of the limit (JAVA_TOOL_OPTIONS, which MAVEN_ARGS cannot carry); caller environment is appended after.
+     * Every host build's environment: per-project caches, CI so nothing prompts, no `packageManager` pinned in the
+     * checkout, and the runtimes' heap share of the limit (JAVA_TOOL_OPTIONS, which MAVEN_ARGS cannot carry).
      *
      * @return array<string, string>
      */
@@ -180,6 +180,7 @@ final class DindHostBuilder implements HostBuilder
             'HOME' => '/tmp',
             'NODE_OPTIONS' => '--max-old-space-size='.ServiceLimits::nodeHeapMbFor($this->memoryLimit()),
             'COREPACK_HOME' => '/tmp/corepack',
+            'COREPACK_ENABLE_AUTO_PIN' => '0',
             'npm_config_cache' => '/var/cache/pa-js/npm',
             'npm_config_audit' => 'false',
             'npm_config_fund' => 'false',

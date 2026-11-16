@@ -411,11 +411,91 @@ public function test_connect_when_origin_mismatches_throws_422(): void
         $runner->failIfContains = ['rev-parse --verify HEAD'];
         $git = $this->testable($model, 'public_html', $runner);
 
-        $git->connect('https://github.com/octocat/Hello-World', 'main', null);
+        $status = $git->connect('https://github.com/octocat/Hello-World', 'main', null);
 
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
         $this->assertTrue($this->commandsContain($joined, 'symbolic-ref HEAD refs/heads/main'));
+        $this->assertTrue($this->commandsContain($joined, 'fetch --depth=1 origin main'), 'an empty checkout is synced, not left empty');
+        $this->assertTrue($this->commandsContain($joined, 'reset --hard origin/main'));
+        $this->assertArrayNotHasKey('sync_error', $status);
         $this->assertSame('main', $model->getSiteGit('public_html')['branch']);
+    }
+
+    /** A first connect reads the remote before it makes the checkout, so the read cannot run inside it. */
+    public function test_a_first_connect_reads_the_remote_outside_the_checkout_it_has_not_made_yet(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = ['ls-remote --heads' => "abc\trefs/heads/main\n"];
+        $git = $this->testable($model, 'public_html', $runner);
+        $runner->failIfContains = ['rev-parse --is-inside-work-tree', $git->absolutePath().' ls-remote'];
+        $repo = 'https://github.com/octocat/Hello-World';
+
+        $status = $git->connect($repo, 'main', null);
+
+        $this->assertTrue($status['connected']);
+        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+        $this->assertContains(['git', 'ls-remote', '--heads', $repo], $runner->commands);
+        $this->assertLessThan($this->commandIndexContaining($joined, ' init'), $this->commandIndexContaining($joined, 'ls-remote'));
+    }
+
+    /** A connect sent without a token uses the stored one throughout: the read, the fetch, and what it keeps. */
+    public function test_a_connect_without_a_token_fetches_and_keeps_the_token_it_read_the_remote_with(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $repo = 'https://github.com/octocat/Hello-World';
+        $model->putSiteGit('public_html', ['repo_url' => $repo, 'branch' => 'main', 'token' => 'pat-stored']);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "main\n",
+            'config --get remote.origin.url' => $repo."\n",
+            'ls-remote --heads' => "abc\trefs/heads/main\n",
+        ];
+        $runner->failIfContains = ['rev-parse --verify HEAD'];
+        $tokens = [];
+        $git = $this->testable($model, 'public_html', function (array $cmd, ?string $token, int $timeout = 600) use ($runner, &$tokens): string {
+            $tokens[implode(' ', $cmd)] = $token;
+
+            return $runner->run($cmd, $token, $timeout);
+        });
+
+        $git->connect($repo, 'main', null);
+
+        $this->assertSame('pat-stored', $tokens["git ls-remote --heads {$repo}"]);
+        $fetch = array_values(array_filter(array_keys($tokens), fn (string $cmd): bool => str_contains($cmd, 'fetch --depth=1 origin main')));
+        $this->assertCount(1, $fetch);
+        $this->assertSame('pat-stored', $tokens[$fetch[0]]);
+        $this->assertSame('pat-stored', $model->getSiteGit('public_html')['token']);
+    }
+
+    /** An empty token is the caller clearing it: nothing stored is used, and nothing stays. */
+    public function test_a_connect_with_an_empty_token_clears_the_stored_one(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $repo = 'https://github.com/octocat/Hello-World';
+        $model->putSiteGit('public_html', ['repo_url' => $repo, 'branch' => 'main', 'token' => 'pat-stored']);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "main\n",
+            'rev-parse --verify HEAD' => "abc123\n",
+            'config --get remote.origin.url' => $repo."\n",
+        ];
+        $tokens = [];
+        $git = $this->testable($model, 'public_html', function (array $cmd, ?string $token, int $timeout = 600) use ($runner, &$tokens): string {
+            $tokens[implode(' ', $cmd)] = $token;
+
+            return $runner->run($cmd, $token, $timeout);
+        });
+
+        $git->connect($repo, 'main', '');
+
+        $this->assertSame('', $tokens["git ls-remote --heads {$repo}"]);
+        $this->assertNull($model->getSiteGit('public_html')['token']);
     }
 
     public function test_disconnect_removes_site_git_and_remote(): void
@@ -505,7 +585,8 @@ public function test_connect_when_origin_mismatches_throws_422(): void
             $git->connect('', '', null, true);
             $this->fail('Expected GitException');
         } catch (GitException $e) {
-            $this->assertSame(400, $e->httpStatus);
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('git_repository_unreadable', $e->problemCode);
         }
 
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);

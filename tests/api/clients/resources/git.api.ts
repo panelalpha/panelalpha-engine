@@ -234,6 +234,11 @@ export class GitApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
+  async getDeployKeyRaw(username: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(`projects/${username}/git/deploy-key`);
+    return this.rawCall(response);
+  }
+
   async deleteDeployKeyRaw(username: string): Promise<{ status: number; body: any }> {
     const response = await this.api.delete(`projects/${username}/git/deploy-key`);
     return this.rawCall(response);

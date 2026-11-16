@@ -49,8 +49,8 @@ final class HostRunProject
     }
 
     /**
-     * Shell prefix giving the plain-Node run container the corepack pnpm or Yarn 2+ the host build
-     * provisioned; empty for npm, Yarn 1 and every non-Node strategy.
+     * Shell prefix giving the plain-Node run container the corepack pnpm or Yarn 2+ the host build provisioned without
+     * pinning it in the checkout's package.json; empty for npm, Yarn 1 and every non-Node strategy.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -68,7 +68,8 @@ final class HostRunProject
             return '';
         }
 
-        return 'export COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_cache=/tmp/npm-cache'
+        return 'export COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0'
+            .' npm_config_cache=/tmp/npm-cache'
             .' PATH='.HostNodeBuild::PROVISIONED_PATH.':$PATH && '.$prepare.' && ';
     }
 

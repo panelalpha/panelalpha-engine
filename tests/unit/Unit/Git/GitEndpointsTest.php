@@ -257,6 +257,47 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->assertTrue($this->called("'log' '-n' '7' '--format=%H%x1f%h%x1f%s%x1f%an%x1f%aI' 'dev'"));
     }
 
+    /** The branch list reads the remote, so a branch it offers is fetched to list its commits instead of git's error. */
+    public function test_commits_fetches_the_branch_first_and_refuses_one_the_remote_does_not_have(): void
+    {
+        $this->siteGitPublicHtml();
+        $this->withRepository();
+        $this->respond("'--end-of-options' 'origin/test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'--end-of-options' 'test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $sha = str_repeat('a', 40);
+        $this->respond("'ls-remote' '--heads' 'origin'", 0, "{$sha}\trefs/heads/main\n{$sha}\trefs/heads/develop\n");
+
+        $response = $this->getJson(self::URL . '/commits?path=public_html&branch=test');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_found')
+            ->assertJsonPath('problems.0.message', "The remote has no branch named 'test'. Its branches: main, develop.");
+        $this->assertTrue($this->called("'fetch' 'origin' '+refs/heads/test:refs/remotes/origin/test'"));
+        $this->assertFalse($this->called("'log'"));
+    }
+
+    /** A branch that cannot be fetched is a typed refusal, never git's own words. */
+    public function test_commits_refuses_a_branch_it_could_not_fetch(): void
+    {
+        $this->siteGitPublicHtml();
+        $this->withRepository();
+        $this->respond("'--end-of-options' 'origin/test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'--end-of-options' 'test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'fetch' 'origin' '+refs/heads/test:refs/remotes/origin/test'", 128,
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n");
+
+        $response = $this->getJson(self::URL . '/commits?path=public_html&branch=test');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_fetched')
+            ->assertJsonPath('problems.0.message', "The branch 'test' could not be fetched from the remote, so this "
+                ."project's checkout has no commits of it to list. Check that this server can reach the repository "
+                .'and that the stored token still reads it, then try again.');
+        $this->assertFalse($this->called("'log'"));
+    }
+
     public function test_connect_keeps_the_deploy_origin_in_sync(): void
     {
         $user = $this->user('main');
@@ -268,6 +309,71 @@ class GitEndpointsTest extends DeployHookTestCase
         $response->assertStatus(200);
         $this->assertSame('deploy', $response->json('data.managed_by'));
         $this->assertSame('ghp_x', $user->fresh()->getDetails()['git_token']);
+    }
+
+    /** The repository is read before anything is written, so one that does not exist is never stored as connected. */
+    public function test_connect_refuses_a_repository_it_cannot_read(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withRepository();
+        $missing = 'https://github.com/mdn/t3d-no-such-repo-xyz';
+        $this->respond("'ls-remote' '--heads' '" . $missing, 128, "remote: Repository not found.\nfatal: repository '{$missing}/' not found\n");
+
+        $response = $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => $missing, 'branch' => 'main']);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_repository_not_found')
+            ->assertJsonPath('problems.0.message', 'The repository could not be read: github.com has no repository at '
+                .'this address, or it is private and needs a read token. Nothing was connected.');
+        $this->assertFalse($this->called("'remote' 'add'"));
+        $this->assertFalse($this->called("'remote' 'set-url'"));
+        $this->assertNull($user->fresh()->getSiteGit('public_html'));
+    }
+
+    public function test_connect_refuses_a_branch_the_remote_does_not_have(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withRepository();
+        $sha = str_repeat('a', 40);
+        $this->respond("'ls-remote' '--heads'", 0, "{$sha}\trefs/heads/main\n{$sha}\trefs/heads/develop\n");
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'mian'])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_found')
+            ->assertJsonPath('problems.0.message', "The remote has no branch named 'mian'. Did you mean 'main'?");
+        $this->assertFalse($this->called("'remote' 'add'"));
+        $this->assertFalse($this->called("'remote' 'set-url'"));
+        $this->assertNull($user->fresh()->getSiteGit('public_html'));
+    }
+
+    /** A repository that has no commits yet has no branch to check, and connecting one is still how it gets its first push. */
+    public function test_connect_accepts_a_repository_with_no_branches_yet(): void
+    {
+        $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withoutRepository();
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'])
+            ->assertStatus(200)
+            ->assertJsonPath('data.connected', true);
+        $this->assertTrue($this->called("'ls-remote' '--heads' '" . self::REPO));
+    }
+
+    /** A private repository is read with the token the project stored, which the request does not have to send again. */
+    public function test_connect_reads_a_private_remote_with_the_stored_token(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $user->putSiteGit('public_html', ['repo_url' => self::REPO, 'branch' => 'main', 'token' => 'ghp_stored']);
+        $this->withRepository();
+        $this->respond("'config' '--get' 'remote.origin.url'", 0, self::REPO . "\n");
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'])
+            ->assertStatus(200);
+
+        $probe = array_values(array_filter($this->calls(), fn (string $call): bool => str_contains($call, "'ls-remote'")));
+        $this->assertCount(1, $probe);
+        $this->assertStringNotContainsString('GIT_ASKPASS=/bin/false', $probe[0]);
     }
 
     public function test_connect_refuses_a_repository_the_egress_guard_will_not_fetch(): void

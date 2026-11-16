@@ -407,8 +407,8 @@ class GitRemoteProbe
                     "The token was refused by {$host}. Check it has not expired and that it "
                     .'grants read access to this repository.')
                 : $this->problemOf($repoField, 'requires_token',
-                    'This repository is private, or does not exist. Pass a read token as '
-                    ."`{$tokenField}`, or check the address."));
+                    'This repository is private, or does not exist. Send a token that can read it, '
+                    .'or check the address.'));
         }
         if ($this->matches($stderr, 'missing')) {
             return GitProbeResult::refused($this->problemOf($repoField, 'not_found',

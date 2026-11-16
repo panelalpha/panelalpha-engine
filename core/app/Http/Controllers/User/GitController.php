@@ -136,7 +136,10 @@ class GitController extends Controller
     #[OA\Get(
         path: '/projects/{username}/git/commits',
         description: 'List git commits. Optional `path` defaults to `project` on DinD and the document root '
-            .'of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.',
+            .'of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned. '
+            .'A branch the checkout has not fetched is fetched once for the listing, so every branch another call lists can be listed here '
+            .'before it is deployed; a branch the remote does not have is refused 422 with `problems[{field: git, code: git_branch_not_found}]`, '
+            .'and one that could not be fetched 422 `git_branch_not_fetched`. Neither answer carries git\'s own error.',
         summary: 'List git commits',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -170,7 +173,10 @@ class GitController extends Controller
             .'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
             .'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first. A `repo_url` '
             .'whose host resolves to an internal address, or does not resolve at all, is refused 422 with '
-            .'`problems[{field: repo_url, code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first.',
+            .'`problems[{field: repo_url, code: host_refused}]`; anything that is not a URL (`file://`, `ext::`) fails validation first. The remote is read '
+            .'before anything changes: a repository these credentials cannot read, and a branch it does not have, are refused 422 '
+            .'with `problems[].code` `git_repository_not_found`, `git_token_refused`, `git_repository_unreachable` or '
+            .'`git_branch_not_found`, and the checkout and the stored connection stay as they were.',
         summary: 'Connect a directory to a git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -477,10 +483,52 @@ class GitController extends Controller
         return new JsonResponse(['data' => $data], $data['created'] ? 201 : 200);
     }
 
+    /**
+     * The key the project has, in the shape the create answers it: reading it
+     * back never makes one.
+     */
+    #[OA\Get(
+        path: '/projects/{username}/git/deploy-key',
+        description: 'Show the project\'s SSH deploy key: `public_key` is the line to add to the repository as a '
+            .'read-only deploy key, with its `fingerprint` and the `hosts` a clone trusts (`pinned` is `published` or '
+            .'`scanned`). `created` is false. It only reads, so it creates nothing: a project without a key answers '
+            .'404. The private half is stored encrypted and never returned. This is the key POST '
+            .'/projects/{username}/git/deploy-key made; delete and create again for a new one.',
+        summary: 'Show a git deploy key',
+        security: [['bearerAuth' => []]],
+        tags: ['Git'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        responses: [
+            new OA\Response(response: 200, description: 'The key it has', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'created', type: 'boolean', example: false),
+                    new OA\Property(property: 'public_key', type: 'string'),
+                    new OA\Property(property: 'fingerprint', type: 'string'),
+                    new OA\Property(property: 'hosts', type: 'array', items: new OA\Items(type: 'object', properties: [
+                        new OA\Property(property: 'host', type: 'string'),
+                        new OA\Property(property: 'pinned', type: 'string', enum: ['published', 'scanned']),
+                        new OA\Property(property: 'fingerprints', type: 'array', items: new OA\Items(type: 'string')),
+                    ])),
+                ])],
+            )),
+            new OA\Response(response: 404, description: 'Project or deploy key not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function showDeployKey(string $username): JsonResponse
+    {
+        $key = DeployKey::show($this->projectOr404($username));
+
+        return $key === null
+            ? self::noDeployKey($username)
+            : new JsonResponse(['data' => $key]);
+    }
+
     #[OA\Delete(
         path: '/projects/{username}/git/deploy-key',
         description: 'Delete the project\'s SSH deploy key and the host keys pinned with it. SSH remotes stop '
-            .'authenticating; remove the key from the repository too. 404 when the project has no deploy key.',
+            .'authenticating; remove the key from the repository too. 404 when the project has no deploy key. '
+            .'The key pair is gone and the engine keeps no copy of the private half; this cannot be undone. Ask '
+            .'the operator to confirm first.',
         summary: 'Delete a git deploy key',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
@@ -494,10 +542,16 @@ class GitController extends Controller
     {
         $user = $this->projectOr404($username);
         if (! DeployKey::delete($user)) {
-            return new JsonResponse(['message' => "Project '{$username}' has no deploy key."], 404);
+            return self::noDeployKey($username);
         }
 
         return new JsonResponse(null, 204);
+    }
+
+    /** 404 naming the project, as DELETE answers it. */
+    private static function noDeployKey(string $username): JsonResponse
+    {
+        return new JsonResponse(['message' => "Project '{$username}' has no deploy key."], 404);
     }
 
     /**

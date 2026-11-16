@@ -252,6 +252,33 @@ class ProjectGitFailedPushTest extends TestCase
         $this->assertChangesKept();
     }
 
+    public function test_a_push_leaves_the_lockfile_an_install_generated_out_of_the_commit(): void
+    {
+        $this->commit($this->checkout, ['package.json' => "{\"name\":\"shop\"}\n"], 'Add package.json');
+        $this->git($this->checkout, ['push', 'origin', 'main']);
+        file_put_contents($this->checkout.'/package-lock.json', "{\"lockfileVersion\": 3}\n");
+        file_put_contents($this->checkout.'/index.php', "local edit\n");
+
+        $this->makeGit()->push();
+
+        $this->assertSame("local edit\n", $this->git($this->origin, ['show', 'main:index.php']));
+        $this->assertSame('', $this->git($this->origin, ['ls-tree', '--name-only', 'main', 'package-lock.json']));
+        $this->assertFileExists($this->checkout.'/package-lock.json');
+    }
+
+    public function test_a_push_whose_only_change_is_the_lockfile_an_install_generated_pushes_nothing(): void
+    {
+        $this->commit($this->checkout, ['package.json' => "{\"name\":\"shop\"}\n"], 'Add package.json');
+        $this->git($this->checkout, ['push', 'origin', 'main']);
+        $before = trim($this->git($this->origin, ['rev-parse', 'main']));
+        file_put_contents($this->checkout.'/package-lock.json', "{\"lockfileVersion\": 3}\n");
+
+        $this->makeGit()->push();
+
+        $this->assertSame($before, trim($this->git($this->origin, ['rev-parse', 'main'])));
+        $this->assertFileExists($this->checkout.'/package-lock.json');
+    }
+
     public function test_head_goes_back_to_the_commit_read_before_the_push_whoever_moves_the_backup_ref(): void
     {
         $this->changeTheCheckout();

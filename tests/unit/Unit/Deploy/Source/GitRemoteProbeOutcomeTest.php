@@ -121,12 +121,12 @@ class GitRemoteProbeOutcomeTest extends TestCase
             'auth without token' => [$refused('fatal: could not read Username for https://example.test'), null, 2, 'refused', 1, [
                 'field' => 'git_repo',
                 'code' => 'git_repo_requires_token',
-                'message' => 'This repository is private, or does not exist. Pass a read token as `git_token`, or check the address.',
+                'message' => 'This repository is private, or does not exist. Send a token that can read it, or check the address.',
             ]],
             'missing without token' => [$refused('remote: Repository not found.'), null, 2, 'refused', 1, [
                 'field' => 'git_repo',
                 'code' => 'git_repo_requires_token',
-                'message' => 'This repository is private, or does not exist. Pass a read token as `git_token`, or check the address.',
+                'message' => 'This repository is private, or does not exist. Send a token that can read it, or check the address.',
             ]],
             'missing with token' => [$refused('remote: Repository not found.'), 'tok', 2, 'refused', 1, [
                 'field' => 'git_repo',

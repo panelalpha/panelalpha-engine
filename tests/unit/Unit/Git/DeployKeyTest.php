@@ -256,6 +256,40 @@ class DeployKeyTest extends DeployHookTestCase
         $this->deleteJson(self::URL . '/deploy-key')->assertStatus(404);
     }
 
+    /** A client that lost the create's answer reads the key again: same shape, nothing made, nothing scanned. */
+    public function test_the_key_is_read_back_without_making_one(): void
+    {
+        $this->project();
+        $created = $this->postJson(self::URL . '/deploy-key', ['host' => 'git.example.test:2222'])->assertStatus(201);
+        $calls = count($this->calls());
+
+        $read = $this->getJson(self::URL . '/deploy-key')->assertStatus(200);
+
+        $this->assertFalse($read->json('data.created'));
+        $this->assertSame($created->json('data.public_key'), $read->json('data.public_key'));
+        $this->assertSame($created->json('data.fingerprint'), $read->json('data.fingerprint'));
+        $this->assertSame($created->json('data.hosts'), $read->json('data.hosts'));
+        $this->assertStringNotContainsString('PRIVATE KEY', (string) $read->getContent());
+        $this->assertCount($calls, $this->calls(), 'the read ran a host command');
+    }
+
+    public function test_reading_a_project_without_a_key_answers_the_deletes_404_and_makes_nothing(): void
+    {
+        $user = $this->project();
+
+        $this->getJson(self::URL . '/deploy-key')
+            ->assertStatus(404)
+            ->assertExactJson(['message' => "Project 'alice' has no deploy key."]);
+
+        $this->assertNull(DeployKey::stored($user->fresh()));
+        $this->assertSame([], $this->calls());
+    }
+
+    public function test_reading_the_key_of_a_project_that_does_not_exist_is_404(): void
+    {
+        $this->getJson('/api/projects/nosuchproject999/git/deploy-key')->assertStatus(404);
+    }
+
     public function test_an_ssh_remote_without_a_deploy_key_is_refused_with_the_way_to_get_one(): void
     {
         $this->project();

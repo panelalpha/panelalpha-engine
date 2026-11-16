@@ -47,6 +47,7 @@ class DindHostBuilderTest extends TestCase
         $this->assertContains(ProjectCache::dirFor('landingpagebolt').'/node_modules:/app/node_modules', $build['mounts']);
         $this->assertSame(Images::NODE_IMAGE, $build['image']);
         $this->assertSame('node-server', $build['environment']['NITRO_PRESET'] ?? null);
+        $this->assertSame('0', $build['environment']['COREPACK_ENABLE_AUTO_PIN'] ?? null, 'corepack wrote packageManager into the checkout');
         $this->assertStringContainsString('node_modules cache hit', $build['script']);
         $this->assertStringContainsString('npm ci --no-audit --no-fund', $build['script']);
         $this->assertStringContainsString('astro build', $build['script']);

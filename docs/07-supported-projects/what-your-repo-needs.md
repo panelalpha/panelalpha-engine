@@ -79,6 +79,8 @@ Whichever lockfile is present is the package manager that gets used:
 
 **Commit your lockfile.** Without one, dependency versions are not pinned, and a build that worked last week can fail this week because something upstream released a new version.
 
+The engine never puts one in your repository. A lockfile its own install generates, because none was committed, is kept out of the project's changes on the server and is never pushed. That holds for a PHP project's `composer.lock` too.
+
 A `start` script in your `package.json` takes precedence over the default the engine would use.
 
 ## Git submodules

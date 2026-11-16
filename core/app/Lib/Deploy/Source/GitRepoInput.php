@@ -234,8 +234,8 @@ final class GitRepoInput
 
         if (isset($parts['user']) || isset($parts['pass'])) {
             return self::problemOf($field, 'embedded_credentials',
-                'A repository URL must not embed credentials. Pass the token as `git_token` '
-                .'instead, which is injected at clone time and never written to .git/config.',
+                'A repository URL must not embed credentials. Send the token separately instead: '
+                .'the engine injects it at clone time and never writes it to .git/config.',
                 GitUrl::sanitize($url));
         }
 

@@ -98,6 +98,18 @@ class DeployKey
         return $host !== null && ! self::isShipped($host) && ! isset($key['known_hosts'][$host]);
     }
 
+    /**
+     * The key the project has, in the shape {@see ensure()} answers, or null when it has none.
+     *
+     * @return ?array<string, mixed>
+     */
+    public static function show(User $user): ?array
+    {
+        $key = self::stored($user);
+
+        return $key === null ? null : ['created' => false] + self::view($key);
+    }
+
     /** False when the project had no key. */
     public static function delete(User $user): bool
     {

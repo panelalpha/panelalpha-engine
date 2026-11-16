@@ -81,7 +81,7 @@ final class GitTokenInput
         }
         if (str_contains($value, '://')) {
             return self::problemOf($field, 'looks_like_url',
-                'This looks like a URL, not a token. The repository address goes in `git_repo`.');
+                'This looks like a URL, not a token. Send the repository address separately from the token.');
         }
         if (self::isQuoted($value)) {
             return self::problemOf($field, 'quoted',

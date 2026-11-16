@@ -71,6 +71,8 @@ A project that already exists can get a key of its own too:
 Create a deploy key for the project shop and connect git@github.com:acme/shop.git, branch main.
 ```
 
+The key is made once and then read back: the engine answers with the same public half and fingerprint every time you ask, so a public half you lost the page for can be shown again without making a new key. Reading it back never changes it. The private half is never shown by either.
+
 ## A zip of files, not a repository
 
 ```text
@@ -91,9 +93,11 @@ Deploy /path/to/app-v2.zip into the project shop.
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
+The engine installs the project's dependencies in that copy on every deploy, and what that install writes there is the engine's own work: the dependency folder, and a lockfile the repository ships none of. So it never shows up as your change, never blocks a pull or a branch change, and is never pushed. A `package.json` whose install scripts set up git hooks (husky, lefthook and the like) is trimmed for that install and left as the commit has it: those scripts cannot run in a build.
+
 A repository that uses git submodules gets them fetched on every pull, branch change and push, so a submodule that moved in the repository is deployed at its new commit. Once the project has deployed, a submodule the last deployed commit already had keeps whatever copy it had when it cannot be fetched, and the deploy log warns. A submodule that cannot be fetched fails the first deploy, a deploy whose commit adds it, and a rebuild that would lose a copy the previous deploy had: see Troubleshooting below. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key.
 
-The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. A pull, branch change or revert asked for while a deploy, backup or restore is running on the project is refused too, and the answer says which one. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
+The engine checks the request at once: the repository answers, and the branch or commit exists. Connecting a folder of the project to a repository is checked the same way, before the connection is saved: an address with no repository behind it, a private repository whose token is not there, and a branch the repository does not have are refused, and the folder keeps its files and the connection it had. A folder left with no commit, by a connect that never fetched its branch or by a disconnect, is fetched and synced when it is connected again, so it serves the repository without a pull; a folder that has commits keeps its files until a pull. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. A pull, branch change or revert asked for while a deploy, backup or restore is running on the project is refused too, and the answer says which one. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
 
 ```text
 Pull the latest commit on this project.
@@ -113,6 +117,8 @@ This project's git token no longer works. Send me the page to replace it.
 
 Pulling, going back to a commit, switching branch and pushing start the project first when it is stopped, then do their work. Going back to an older commit works on a project that holds only the newest commit: the engine fetches the commit you name from the repository. A commit the repository does not have is refused.
 
+Listing commits works for a branch the project has not deployed yet: the engine fetches that branch from the repository for the listing, so a branch you pick in the panel's **Redeploy** window shows its commits before anything is deployed from it. A branch the repository does not have is refused, and so is a branch the engine could not fetch; neither answer repeats git's own error message.
+
 ## Pushing local edits
 
 Pushing is for a project whose files are kept in git (a folder such as `public_html`). A project the engine deploys from a repository is changed in the repository, not from the server.
@@ -121,7 +127,7 @@ Pushing is for a project whose files are kept in git (a folder such as `public_h
 Commit my edits on this project and push them to the repository.
 ```
 
-The assistant commits what changed and pushes. Ask it to confirm before it does, since it commits everything in the folder. Pushing into a repository that is still empty creates the branch.
+The assistant commits what changed and pushes. Ask it to confirm before it does, since it commits everything in the folder, except the files the engine itself wrote there: a lockfile its install generated, for example, because the repository ships none. Those stay on the server and are never pushed. Pushing into a repository that is still empty creates the branch.
 
 A push the repository turns down changes nothing there, and your work stays on the server as uncommitted changes, with the files as they were. The answer gives the reason:
 
@@ -162,8 +168,11 @@ The URL is wrong, or the repository is private and no token was saved. Check the
 **The deploy failed with "The repository's submodules could not be fetched".**
 The engine fetches the repository's submodules with the same token on every deploy, including after a pull or a push. A private submodule on another account or forge needs a token that can read it too. A submodule addressed over SSH is fetched over HTTPS when the project has no deploy key, with the git token when it is on the repository's own host; a private one elsewhere needs a deploy key that can read it. If the application does not need that submodule, the repository's `.panelalpha/panelalpha.yaml` can name the ones it does: `git: {submodules: [path/to/one]}`.
 
+**Connecting a repository is refused and nothing changed.**
+"The repository could not be read" means the address has no repository behind it, or it is private and no token was stored. Nothing is connected: the folder keeps its files and the connection it had. Check the address, and store a token first for a private repository. When the answer says the token was refused, that token cannot see this repository. When it says the remote has no branch named `x`, the branch does not exist in the repository: connect the one it does have. "Could not reach `github.com`" means the engine could not open a connection to the host at all.
+
 **The repository is refused with `host_refused`.**
-The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks, nor from the reserved ranges that no real server uses, such as the documentation networks (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32). This covers a repository, a submodule, an SSH remote, the git server named for a deploy key, a file fetched by URL, and the webhook a push-to-deploy hook registers at your git host, where a redirect to another host is not followed either. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback, link-local and other reserved addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting). On traditional PHP hosting, a server whose git is older than 2.37 (Ubuntu 22.04) also refuses a pull from any host name not in `EGRESS_ALLOW_HOSTS`, and the message says git 2.37 or newer is required: [Troubleshooting](../02-getting-started/install.md#troubleshooting).
+The engine does not fetch from internal addresses: its own machine, the private networks and the Docker networks, nor from the reserved ranges that no real server uses, such as the documentation networks (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32). This covers a repository, a submodule, an SSH remote, the git server named for a deploy key, a file fetched by URL, and the webhook a push-to-deploy hook registers at your git host, where a redirect to another host is not followed either. It applies to a git server inside your own network too. The server operator can allow it in `/opt/panelalpha/shared-hosting/.env-core`: `EGRESS_ALLOW_PRIVATE=true` allows private network addresses, or `EGRESS_ALLOW_HOSTS=git.internal` allows named hosts only, comma separated (a name, never an address). Loopback, link-local and other reserved addresses stay refused either way. Reload the engine after the change: [Change a setting](../02-getting-started/install.md#change-a-setting). On traditional PHP hosting, a server whose git is older than 2.37 (Ubuntu 22.04) also refuses a pull, and the first fetch of a connect, from any host name not in `EGRESS_ALLOW_HOSTS`, and the message says git 2.37 or newer is required: [Troubleshooting](../02-getting-started/install.md#troubleshooting).
 
 A host name the engine cannot resolve is refused too, since the engine cannot check where it leads. Check the spelling, and write an address in its usual dotted form.
 
@@ -418,7 +427,7 @@ Create a deploy key for tprivate and connect git@github.com:acme/shop.git,
 branch main. Then remove the key.
 ```
 
-Mode: full. Tools: `git_deploy_key_create`, `git_connect`, `git_deploy_key_delete`. Check: only the public half is shown, and it starts with `ssh-ed25519`. Asking again returns the same key. After the delete, SSH remotes stop authenticating.
+Mode: full. Tools: `git_deploy_key_create`, `git_deploy_key_show`, `git_connect`, `git_deploy_key_delete`. Check: only the public half is shown, and it starts with `ssh-ed25519`. Asking again returns the same key, and `git_deploy_key_show` reads it back without making one. After the delete, SSH remotes stop authenticating.
 
 **A new project from an SSH remote**
 

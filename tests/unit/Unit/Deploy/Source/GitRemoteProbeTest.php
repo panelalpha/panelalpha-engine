@@ -49,7 +49,8 @@ class GitRemoteProbeTest extends TestCase
 
         $this->assertNotNull($problem);
         $this->assertSame('git_repo_requires_token', $problem['code']);
-        $this->assertStringContainsString('git_token', $problem['message']);
+        $this->assertStringContainsString('Send a token that can read it', $problem['message']);
+        $this->assertStringNotContainsString('git_token', $problem['message']);
         $this->assertArrayNotHasKey('retryable', $problem);
     }
 

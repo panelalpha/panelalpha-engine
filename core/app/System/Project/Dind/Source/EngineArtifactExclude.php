@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Source;
 
 use App\Lib\Deploy\Checkout\CheckoutExclude;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Checkout\InstallLockfiles;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Env\EnvExampleCopies;
 use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
@@ -13,7 +14,7 @@ use Closure;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Keeps the engine's block (reserved Engine Artifacts, and untracked files a deploy writes when missing) in a checkout's
+ * Keeps the engine's block (reserved Engine Artifacts, and untracked files a deploy writes or installs) in a checkout's
  * local exclude file, so `git status` shows only the client's changes and `clean -fd` keeps `.env` (ADR-0001).
  */
 final class EngineArtifactExclude
@@ -51,7 +52,12 @@ final class EngineArtifactExclude
             }
 
             $existing = is_file($path) ? (string) file_get_contents($path) : '';
-            $patterns = [...EngineArtifacts::reservedPatterns(), ...$this->untrackedGeneratedPatterns()];
+            $patterns = [
+                ...EngineArtifacts::reservedPatterns(),
+                ...$this->untrackedGeneratedPatterns(),
+                ...$this->untrackedInstallLockfiles(),
+                ...$this->untrackedInstallFolders(),
+            ];
             $merged = CheckoutExclude::merge($existing, CheckoutExclude::render($patterns));
             if ($merged !== $existing) {
                 ($this->writeFile)($path, $merged);
@@ -80,10 +86,61 @@ final class EngineArtifactExclude
      */
     private function untrackedGeneratedPatterns(): array
     {
-        $generated = $this->generatedFiles();
-        $untracked = array_values(array_diff($generated, $this->git->trackedAmong($generated)));
+        return array_map(
+            CheckoutExclude::anchoredPath(...),
+            $this->untrackedAmong($this->generatedFiles())
+        );
+    }
 
-        return array_map(CheckoutExclude::anchoredPath(...), $untracked);
+    /**
+     * The lockfile an install generates because the repository ships none, which the build writes after this block is
+     * written: a repository that tracks one owns it, and keeps it.
+     *
+     * @return list<string>
+     */
+    private function untrackedInstallLockfiles(): array
+    {
+        return array_map(
+            CheckoutExclude::anchoredPath(...),
+            $this->untrackedAmong(InstallLockfiles::candidates($this->git->absolutePath()))
+        );
+    }
+
+    /**
+     * The folders the deploy's own install writes the dependencies into, which no repository writes itself: without
+     * them a repository that ignores none shows every deploy as the client's change, and no branch can be changed.
+     * A folder the repository tracks a file in is the repository's, and stays out.
+     *
+     * @return list<string>
+     */
+    private function untrackedInstallFolders(): array
+    {
+        $folders = InstallLockfiles::dependencyFolders($this->git->absolutePath());
+        $tracked = $this->git->trackedAmong($folders);
+        $untracked = array_filter($folders, static fn (string $folder): bool => ! self::holdsAny($folder, $tracked));
+
+        return array_map(CheckoutExclude::anchoredPath(...), array_values($untracked));
+    }
+
+    /** @param  list<string>  $tracked */
+    private static function holdsAny(string $folder, array $tracked): bool
+    {
+        foreach ($tracked as $path) {
+            if ($path === $folder || str_starts_with($path, $folder.'/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<string>  $paths
+     * @return list<string>
+     */
+    private function untrackedAmong(array $paths): array
+    {
+        return array_values(array_diff($paths, $this->git->trackedAmong($paths)));
     }
 
     /**

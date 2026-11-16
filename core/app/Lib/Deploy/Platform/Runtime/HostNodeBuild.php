@@ -13,6 +13,9 @@ class HostNodeBuild
 {
     public const BUN_IMAGE = 'oven/bun:1';
 
+    /** Where the checkout's manifest waits while the stripped copy is installed: no file of the client's own. */
+    private const MANIFEST_BACKUP = '/tmp/pa-package.json';
+
     public static function usesJsPackageManager(string $install): bool
     {
         $install = self::stripLeadingEnvAssignments(trim($install));
@@ -228,8 +231,7 @@ class HostNodeBuild
             $parts[] = $prepare;
         }
         if ($install !== '') {
-            $parts[] = self::stripGitHooksStep($install, $dir);
-            $parts[] = self::cachedInstallStep($install, $dir);
+            $parts[] = self::installStep($install, $dir);
         }
         if ($build !== '') {
             $parts[] = $build;
@@ -238,14 +240,34 @@ class HostNodeBuild
         return implode(' && ', $parts);
     }
 
-    /** /app is a bind mount of the repo, so only the git-hook tools are stripped: they cannot run without a .git. */
-    private static function stripGitHooksStep(string $install, string $dir): string
+    /**
+     * The install against a manifest stripped of the git-hook scripts it cannot run, with the checkout's own
+     * manifest back afterwards: /app is a bind mount of the repo, so the build leaves no change behind.
+     * Each half is one command of the && chain, so a copy that fails stops it before the install.
+     */
+    private static function installStep(string $install, string $dir): string
+    {
+        $manifest = $dir.'/package.json';
+
+        return self::stripGitHooksStep($install, $manifest).' && '.self::installRestoringManifestStep($install, $dir, $manifest);
+    }
+
+    private static function stripGitHooksStep(string $install, string $manifest): string
     {
         $strip = str_contains($install, 'bun ')
             ? JsPackageManager::dockerfileStripGitHookScriptsCommand('bun', sourcePresent: true)
             : JsPackageManager::dockerfileStripGitHookScriptsCommand('npm', sourcePresent: true);
 
-        return 'if [ -f '.$dir.'/package.json ]; then '.$strip.'; fi';
+        return 'if [ -f '.$manifest.' ]; then cp '.$manifest.' '.self::MANIFEST_BACKUP.' && { '.$strip.'; }; fi';
+    }
+
+    /** The manifest comes back whatever the install did, and the install's own code is the step's. */
+    private static function installRestoringManifestStep(string $install, string $dir, string $manifest): string
+    {
+        return '{ pa_install_status=0; '
+            .self::cachedInstallStep($install, $dir).' || pa_install_status=$?; '
+            .'if [ -f '.self::MANIFEST_BACKUP.' ]; then mv '.self::MANIFEST_BACKUP.' '.$manifest.'; fi; '
+            .'if [ "$pa_install_status" -ne 0 ]; then exit $pa_install_status; fi; }';
     }
 
     /**

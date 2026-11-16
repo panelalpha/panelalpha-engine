@@ -100,7 +100,7 @@ class GitRepoInputProblemPinTest extends TestCase
             'credentials' => ['https://user:secret@github.com/o/r.git', false, [
                 'field' => 'git_repo',
                 'code' => 'git_repo_embedded_credentials',
-                'message' => 'A repository URL must not embed credentials. Pass the token as `git_token` instead, which is injected at clone time and never written to .git/config.',
+                'message' => 'A repository URL must not embed credentials. Send the token separately instead: the engine injects it at clone time and never writes it to .git/config.',
                 'expected' => 'https://<host>/<owner>/<repo>[.git]',
                 'suggestion' => 'https://github.com/o/r.git',
                 'examples' => [
@@ -111,7 +111,7 @@ class GitRepoInputProblemPinTest extends TestCase
             'user only' => ['https://user@gitlab.com/o/r.git', false, [
                 'field' => 'git_repo',
                 'code' => 'git_repo_embedded_credentials',
-                'message' => 'A repository URL must not embed credentials. Pass the token as `git_token` instead, which is injected at clone time and never written to .git/config.',
+                'message' => 'A repository URL must not embed credentials. Send the token separately instead: the engine injects it at clone time and never writes it to .git/config.',
                 'expected' => 'https://<host>/<owner>/<repo>[.git]',
                 'suggestion' => 'https://gitlab.com/o/r.git',
                 'examples' => [

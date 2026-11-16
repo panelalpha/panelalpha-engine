@@ -246,7 +246,7 @@ final class SourceResolver
             $command = GitUrl::withAskPass($command, $askPass);
         }
 
-        $this->run($command, 'Could not clone the repository', $root);
+        $this->run($command, 'Could not clone the repository', $root, $token !== null);
     }
 
     /**
@@ -312,7 +312,7 @@ final class SourceResolver
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
-            $this->run($command, 'Could not clone the repository', $root);
+            $this->run($command, 'Could not clone the repository', $root, $token !== null);
             $this->initSubmodules($target, $askPass);
         } catch (\Throwable $e) {
             (new ResolvedSource(self::TYPE_GIT, $repoUrl, $root, [], $root))->release();
@@ -793,10 +793,11 @@ final class SourceResolver
     /**
      * @param  list<string>  $command
      * @param  ?string  $redact  a path that must not appear in the error message
+     * @param  bool  $tokenSent  a token went with the clone, so a refusal reads as the token's
      *
      * @throws InspectException
      */
-    private function run(array $command, string $failure, ?string $redact = null): void
+    private function run(array $command, string $failure, ?string $redact = null, bool $tokenSent = false): void
     {
         $process = new Process($command, null, $this->gitEnv(), null, $this->timeout);
 
@@ -815,7 +816,7 @@ final class SourceResolver
                     'message' => GitUrl::redirectRefusal(GitUrl::redirectedTo($output)),
                 ]);
             }
-            $message = self::reason($output, $redact);
+            $message = self::reason($output, $redact, $tokenSent);
             throw new InspectException($failure.($message === '' ? '.' : ': '.$message));
         }
     }
@@ -835,7 +836,7 @@ final class SourceResolver
      * The one line of git's output worth returning: the `fatal:` one, else the last (the first only announces the clone),
      * with $redact, a workspace already deleted by the time the caller reads this, replaced by `<workspace>`.
      */
-    private static function reason(string $output, ?string $redact): string
+    private static function reason(string $output, ?string $redact, bool $tokenSent): string
     {
         $lines = self::nonEmptyLines($output);
         if ($lines === []) {
@@ -843,8 +844,16 @@ final class SourceResolver
         }
 
         if (self::mentionsAuthentication($lines)) {
-            return 'the repository is private or does not exist. '
-                .'Pass git_token to read a private HTTPS repository.';
+            return $tokenSent
+                ? 'the token was refused, or it cannot read this repository. '
+                    .'Check that it has not expired and grants read access.'
+                : 'the repository is private or does not exist. '
+                    .'Send an access token that can read it, or check the address.';
+        }
+
+        if ($tokenSent && self::mentionsMissingRepository($lines)) {
+            return 'there is no repository at this address, or the token cannot see it. '
+                .'Check the address and that the token can read this repository.';
         }
 
         $chosen = self::fatalOrLastLine($lines);
@@ -881,6 +890,22 @@ final class SourceResolver
     {
         foreach ($lines as $line) {
             if (preg_match('/askpass|could not read (Username|Password)|Authentication failed|terminal prompts disabled/i', $line) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A forge answers "not found" to a token that cannot see a repository, so a token sent makes it both cases.
+     *
+     * @param  list<string>  $lines
+     */
+    private static function mentionsMissingRepository(array $lines): bool
+    {
+        foreach ($lines as $line) {
+            if (preg_match('/repository not found|the project you were looking for could not be found|does not appear to be a git repository/i', $line) === 1) {
                 return true;
             }
         }

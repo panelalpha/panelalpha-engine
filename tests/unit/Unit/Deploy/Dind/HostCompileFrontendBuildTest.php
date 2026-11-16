@@ -201,7 +201,7 @@ class HostCompileFrontendBuildTest extends TestCase
         $this->assertTrue($ran);
         $this->assertCount(1, $commands);
         $script = LocalRoot::build($commands[0])['script'];
-        $this->assertStringEndsWith('; fi && yarn install', $script);
+        $this->assertStringEndsWith('; fi; } && yarn install', $script);
         $this->assertStringNotContainsString('run build', $script);
     }
 

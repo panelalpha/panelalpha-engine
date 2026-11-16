@@ -44,6 +44,16 @@ test.describe('git deploy key', () => {
       expect(key.fingerprint).toBe(first.fingerprint);
     });
 
+    await test.step('the key is read back without making one', async () => {
+      const response = await api.getDeployKeyRaw(user.username);
+      await expectStatus(response, 200, 'GET git/deploy-key');
+      const key = keyOf(response.body);
+      expect(key.created).toBe(false);
+      expect(key.public_key).toBe(first.public_key);
+      expect(key.fingerprint).toBe(first.fingerprint);
+      expect(JSON.stringify(response.body)).not.toMatch(/PRIVATE KEY|private_key/);
+    });
+
     await test.step('a host that is not a host name is refused', async () => {
       await expectStatus(
         await api.createDeployKeyRaw(user.username, { host: 'not a host!' }),
@@ -66,6 +76,15 @@ test.describe('git deploy key', () => {
       await expectStatus(await api.deleteDeployKeyRaw(user.username), 404, 'second delete');
     });
 
+    await test.step('a read after the delete is a 404 that makes no key', async () => {
+      const response = await api.getDeployKeyRaw(user.username);
+      await expectStatus(response, 404, 'GET git/deploy-key after delete');
+      expect(String((response.body as { message?: unknown } | null)?.message)).toContain(
+        'has no deploy key'
+      );
+      await expectStatus(await api.getDeployKeyRaw(user.username), 404, 'second GET makes no key');
+    });
+
     await test.step('the next call makes a new key', async () => {
       const response = await api.createDeployKeyRaw(user.username);
       await expectStatus(response, 201, 'POST git/deploy-key after delete');
@@ -75,6 +94,7 @@ test.describe('git deploy key', () => {
 
   test('the deploy key of a project that does not exist is 404', async ({ api }) => {
     await expectStatus(await api.createDeployKeyRaw('nosuchproject999'), 404, 'POST');
+    await expectStatus(await api.getDeployKeyRaw('nosuchproject999'), 404, 'GET');
     await expectStatus(await api.deleteDeployKeyRaw('nosuchproject999'), 404, 'DELETE');
   });
 });
