@@ -10,16 +10,20 @@
 #   - anything routed to a private, link-local or reserved range is refused,
 #     which covers core, the shared MySQL and every other container, including
 #     published ports that DNAT turns into a container address,
-#   - everything else leaves, masqueraded.
+#   - everything else leaves, masqueraded, within the default outbound limits
+#     of tenant-egress-limits.sh (no SMTP, no floods, no scans).
 # DNS is unaffected: Docker's embedded resolver forwards from the daemon.
 #
-# Usage: build-network-firewall.sh [--create] [--network-on-stdin] [network]   (default panelalpha-build)
+# Usage: build-network-firewall.sh [--create] [--network-on-stdin] [--without-limits] [network]
+#        (default panelalpha-build)
 # Idempotent. Run by the engine before every host build -- a reboot drops these
 # rules. --create makes the network first; the installers run that right after
 # restarting Docker, because once a firewall flush (moving a host off CSF) has
 # removed Docker's chains `docker network create` fails
 # ("iptables ... -A DOCKER-FORWARD ...: No chain/target/match by that name").
 # --network-on-stdin reads `id`, `bridge` and `subnet` lines from stdin instead of docker's CLI.
+# --without-limits leaves the outbound limits out; the root broker passes it when
+# tenant-egress-limits.sh is missing or not root's alone.
 
 # iptables-legacy gives up at once ("Another app is currently holding the
 # xtables lock") while Docker, ufw or fail2ban is changing rules; -w waits for
@@ -28,8 +32,16 @@ iptables() { command iptables -w 30 "$@"; }
 
 CREATE=0
 ON_STDIN=0
-if [ "${1:-}" = "--create" ]; then CREATE=1; shift; fi
-if [ "${1:-}" = "--network-on-stdin" ]; then ON_STDIN=1; shift; fi
+LIMITS=1
+while :; do
+    case "${1:-}" in
+    --create) CREATE=1 ;;
+    --network-on-stdin) ON_STDIN=1 ;;
+    --without-limits) LIMITS=0 ;;
+    *) break ;;
+    esac
+    shift
+done
 NET="${1:-panelalpha-build}"
 
 if [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
@@ -87,6 +99,17 @@ iptables -C INPUT -i "$bridge" -j REJECT --reject-with icmp-host-prohibited 2>/d
 if [ -n "$subnet" ]; then
     iptables -t nat -C POSTROUTING -s "$subnet" ! -o "$bridge" -j MASQUERADE 2>/dev/null ||
         iptables -t nat -A POSTROUTING -s "$subnet" ! -o "$bridge" -j MASQUERADE
+fi
+
+# The accounts' default outbound limits cover builds too (tenant-egress-limits.sh); a kernel that refuses them,
+# or a missing script, leaves the rules above standing.
+limits="$(dirname "$0")/tenant-egress-limits.sh"
+if [ "$LIMITS" = 0 ]; then
+    :
+elif [ -f "$limits" ]; then
+    sh "$limits" --source "$bridge" >/dev/null || true
+else
+    echo "build-network-firewall: $limits is missing; the outbound limits are not applied" >&2
 fi
 
 echo "build-network-firewall: $NET ($bridge${subnet:+, $subnet}) egress to the internet only"

@@ -1,5 +1,6 @@
 """run_host_script, and the broker's entrypoint and tenant-network service that run the host's firewalls through it."""
 
+import functools
 import os
 import re
 import shutil
@@ -9,7 +10,7 @@ import time
 import unittest
 
 import support
-from rootbroker import tenantports
+from rootbroker import egress, tenantports
 
 ENGINE = os.path.join(support.HERE, '..', '..', '..')
 LIBRARY = os.path.join(ENGINE, 'config', 'root-broker', 'services', '.lib', 'host-script.sh')
@@ -219,12 +220,19 @@ class Silent:
 class TenantNetworkServiceTest(Scratch):
     def setUp(self):
         super().setUp()
-        self.saved = (tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.host_links, os.environ['PATH'])
-        tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.host_links = self.library, self.failed, list
+        self.saved = (tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.LIMITS_FAILED, tenantports.host_links,
+                      os.environ['PATH'], egress.reconcile)
+        self.limits = os.path.join(os.path.dirname(self.script), tenantports.LIMITS)
+        self.limits_failed = os.path.join(self.base, 'log', 'limits.failed')
+        open(self.limits, 'w').close()
+        tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.LIMITS_FAILED = self.library, self.failed, self.limits_failed
+        tenantports.host_links = list
         os.environ['PATH'] = self.bin + os.pathsep + os.environ['PATH']
+        egress.reconcile = functools.partial(egress.reconcile, path=os.path.join(self.base, 'log', 'tenant-egress.json'))
 
     def tearDown(self):
-        tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.host_links, os.environ['PATH'] = self.saved
+        (tenantports.HOST_SCRIPT, tenantports.FAILED, tenantports.LIMITS_FAILED, tenantports.host_links,
+         os.environ['PATH'], egress.reconcile) = self.saved
         super().tearDown()
 
     def apply(self, daemon=None):
@@ -242,8 +250,30 @@ class TenantNetworkServiceTest(Scratch):
 
     def test_the_tenant_firewall_runs_in_the_hosts_namespaces(self):
         self.assertEqual(self.apply(), [])
-        self.assertEqual(self.asked('pa-root-owned'), [self.script, self.script], 'checked first, then by the run')
-        self.assertEqual(self.asked('nsenter'), [f'--target 1 --all sh {self.script} --ports-on-stdin'])
+        self.assertEqual(self.asked('pa-root-owned'), [self.script, self.limits, self.script],
+                         'the script checked first, then its limits, then the script by the run')
+        self.assertEqual(self.asked('nsenter'), [f'--target 1 --all sh {self.script} --ports-on-stdin',
+                                                 '--target 1 --all nft -j list set inet pa_egress blocked4'],
+                         'then the outbound limits\' marks are read, also in the host\'s namespaces')
+
+    def test_a_missing_or_refused_limits_script_is_logged_and_the_firewall_runs_without_it(self):
+        os.remove(self.limits)
+        logged = self.apply()
+        self.assertEqual(len(logged), 1)
+        self.assertTrue(logged[0].startswith(f'tenant-network: the outbound limits script was not applied ({self.limits} is missing)'),
+                        logged[0])
+        self.assertIn('the tenant firewall still applies', logged[0])
+        self.assertEqual(self.asked('nsenter')[0], f'--target 1 --all sh {self.script} --ports-on-stdin --without-limits')
+        self.assertFalse(os.path.exists(self.failed), 'the tenant firewall itself applied')
+        open(self.limits, 'w').close()
+        self.fake('pa-root-owned', f'echo "$*" >>"$0.argv"; [ "$1" != "{self.limits}" ] || {{ echo "{REFUSAL.format(self.limits)}" >&2; exit 1; }}')
+        self.assertEqual(len(self.apply()), 1, 'a new reason is logged at once')
+        self.assertEqual(self.asked('nsenter')[2], f'--target 1 --all sh {self.script} --ports-on-stdin --without-limits')
+        self.assertEqual(self.apply(), [], 'the same one again is not')
+        self.fake('pa-root-owned', 'echo "$*" >>"$0.argv"')
+        self.assertEqual(self.apply(), ['tenant-network: the outbound limits script applies again'])
+        self.assertFalse(os.path.exists(self.limits_failed))
+        self.assertEqual(self.asked('nsenter')[-2], f'--target 1 --all sh {self.script} --ports-on-stdin')
 
     def test_a_refusal_says_what_an_account_loses(self):
         self.refuse(self.script)

@@ -19,6 +19,7 @@ use App\Http\Controllers\SourceRefsController;
 use App\Http\Controllers\SystemApiAccessController;
 use App\Http\Controllers\SystemBuildCacheController;
 use App\Http\Controllers\SystemController;
+use App\Http\Controllers\SystemEgressController;
 use App\Http\Controllers\SystemImageController;
 use App\Http\Controllers\SystemOverlayController;
 use App\Http\Controllers\TaskController;
@@ -224,6 +225,7 @@ $projectRoutes = function (): void {
     Route::delete('/{username}/domains/{domain}', [UserDomainController::class, 'destroy']);
 
     Route::put('/{username}/domains/{domain}/install-ssl-cert', [UserDomainController::class, 'installSslCert']);
+    Route::delete('/{username}/domains/{domain}/installed-ssl-cert', [UserDomainController::class, 'destroyInstalledSslCert']);
     Route::post('/{username}/domains/{domain}/request-ssl-cert', [UserDomainController::class, 'requestSslCert']);
 
     // Per-project settings the engine needs and the project cannot carry in
@@ -324,6 +326,7 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/push', [GitController::class, 'push']);
     Route::post('/{username}/git/revert', [GitController::class, 'revert']);
     Route::post('/{username}/git/deploy-key', [GitController::class, 'deployKey']);
+    Route::get('/{username}/git/deploy-key', [GitController::class, 'showDeployKey']);
     Route::delete('/{username}/git/deploy-key', [GitController::class, 'deleteDeployKey']);
     Route::post('/{username}/git/deploy-hook', [DeployHookController::class, 'create']);
     Route::get('/{username}/git/deploy-hook', [DeployHookController::class, 'show']);
@@ -517,6 +520,8 @@ Route::get('/system/api-access', [SystemApiAccessController::class, 'index']);
 Route::put('/system/api-access/{project}', [SystemApiAccessController::class, 'update']);
 Route::post('/system/api-access/{project}/rotate', [SystemApiAccessController::class, 'rotate']);
 Route::delete('/system/api-access/{project}', [SystemApiAccessController::class, 'destroy']);
+Route::get('/system/egress', [SystemEgressController::class, 'index']);
+Route::delete('/system/egress/{owner}', [SystemEgressController::class, 'destroy']);
 Route::get('/system/images', [SystemImageController::class, 'index']);
 Route::post('/system/images', [SystemImageController::class, 'store']);
 Route::get('/system/images/{id}', [SystemImageController::class, 'show'])->whereNumber('id');

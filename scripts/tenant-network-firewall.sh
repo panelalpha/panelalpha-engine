@@ -13,20 +13,24 @@
 #   - anything else private, link-local or reserved: refused, which covers
 #     core, SFTP, the other networks and published ports DNAT turns into them,
 #   - the host itself: mail (25) and the sites (80/443) only,
-#   - the internet: open, masqueraded.
+#   - the internet: open, masqueraded, within the default outbound limits of
+#     tenant-egress-limits.sh (no SMTP, no floods, no scans).
 # Nothing may open a connection into the network from outside it; the proxy
 # reaches accounts from the host itself, which is not forwarded traffic.
 #
 # enable_icc=false makes Docker load br_netfilter, without which traffic
 # between two ports of one bridge never reaches iptables at all.
 #
-# Usage: tenant-network-firewall.sh [--create [--restart-docker]] [--ports-on-stdin]
+# Usage: tenant-network-firewall.sh [--create [--restart-docker]] [--ports-on-stdin] [--without-limits]
 #        tenant-network-firewall.sh --prefix
 # Idempotent. Run at root broker start (a reboot empties iptables) and by the engine
 # before an account starts. ufw reloads only its own chains, so it leaves these.
 #
 # --ports-on-stdin rebinds the ports from the broker's `subnet`, `member` and `port` lines; without
 # it the binding stays and only the rules around it are replaced, so unbound ports stay closed.
+# Its `source` lines name the build networks' bridges the outbound limits also cover.
+# --without-limits leaves the outbound limits out; the root broker passes it when
+# tenant-egress-limits.sh is missing or not root's alone.
 #
 # --prefix prints the prefix --create would pick, from `network <cidr>` lines on stdin.
 #
@@ -53,6 +57,7 @@ BOOT=0
 UNITS=0
 PORTS_ON_STDIN=0
 PREFIX=0
+LIMITS=1
 for arg in "$@"; do
     case "$arg" in
     --create) CREATE=1 ;;
@@ -61,6 +66,7 @@ for arg in "$@"; do
     --install-units) UNITS=1 ;;
     --ports-on-stdin) PORTS_ON_STDIN=1 ;;
     --prefix) PREFIX=1 ;;
+    --without-limits) LIMITS=0 ;;
     esac
 done
 
@@ -366,6 +372,21 @@ if command -v nft >/dev/null 2>&1; then
 else
     echo "tenant-network-firewall: nft is missing; ports are not bound to their addresses (install nftables)" >&2
     bound='none port(s) bound'
+fi
+
+# The limits on new outbound connections (tenant-egress-limits.sh), on this
+# bridge and every build network's the broker named. Kept apart from the
+# isolation above: a kernel that refuses them, or a missing script, leaves the
+# isolation standing, and the broker reports the limits missing.
+limits="$(dirname "$0")/tenant-egress-limits.sh"
+sources=$(printf '%s\n' "$network_lines" | awk '$1 == "source" && $2 ~ /^[a-zA-Z0-9_.-]+$/ { printf " --source %s", $2 }')
+if [ "$LIMITS" = 0 ]; then
+    :
+elif [ -f "$limits" ]; then
+    # shellcheck disable=SC2086
+    sh "$limits" $sources >/dev/null || true
+else
+    echo "tenant-network-firewall: $limits is missing; the outbound limits are not applied" >&2
 fi
 
 if [ "$BOOT" = 1 ]; then

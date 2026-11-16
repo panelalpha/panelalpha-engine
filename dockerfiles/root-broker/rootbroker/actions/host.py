@@ -7,11 +7,12 @@ every component down to it is no symlink and owned by root or the engine.
 import contextlib
 import functools
 import ipaddress
+import json
 import os
 import posixpath
 import re
 
-from .. import composefiles, dindrecovery, hostdaemon, paths, projectstats, scriptrun, tenantports, values
+from .. import composefiles, dindrecovery, egress, hostdaemon, paths, projectstats, scriptrun, tenantports, values
 from ..refused import Refused
 from . import hostapi, hostimages, hostscripts
 from .builders import script
@@ -21,6 +22,7 @@ from .rootscripts import HOST_CACHE_REGISTRY
 
 BUILD_NETWORK_FIREWALL = 'scripts/build-network-firewall.sh'
 TENANT_NETWORK_FIREWALL = 'scripts/tenant-network-firewall.sh'
+TENANT_EGRESS_LIMITS = 'scripts/tenant-egress-limits.sh'
 PRUNE_PROJECT_CACHES = 'scripts/prune-project-caches.sh'
 REQUEST_ENGINE_CERTIFICATE = 'scripts/letsencrypt-request-cert.sh'
 WEBSERVER = ('webserver.sh', 'scripts/webserver.sh')
@@ -182,22 +184,43 @@ def own_image(context, image):
 
 
 def tenant_network(context):
-    """The firewall script's path, checked to be the engine's own and root's alone."""
-    return (engine_script(context.policy, TENANT_NETWORK_FIREWALL),)
+    """The firewall script's path, checked to be the engine's own and root's alone, and why the limits script it runs
+    may not run, None when it may."""
+    return engine_script(context.policy, TENANT_NETWORK_FIREWALL), limits_refusal(context.policy)
 
 
 def build_network(context, network):
-    """The firewall script's path, checked to be the engine's own and root's alone, and the network's name."""
-    return engine_script(context.policy, BUILD_NETWORK_FIREWALL), network
+    """The firewall script's path, checked to be the engine's own and root's alone, the network's name, and why the
+    limits script it runs may not run, None when it may."""
+    return engine_script(context.policy, BUILD_NETWORK_FIREWALL), network, limits_refusal(context.policy)
 
 
-def apply_build_network_firewall(daemon, output, script, network):
+def limits_refusal(policy):
+    """Why the outbound limits script may not run as root, None when it is there and root's alone. The isolation
+    firewalls run without it then, never not at all."""
+    try:
+        limits = engine_script(policy, TENANT_EGRESS_LIMITS)
+    except Refused as refused:
+        return str(refused)
+    return None if os.path.isfile(limits) else f"'{limits}' is missing"
+
+
+def without_limits(output, refusal):
+    """The firewall script's flag that skips the limits, with the warning on the action's stderr; none when they run."""
+    if refusal is None:
+        return ()
+    output.stderr(f'the outbound limits were not applied ({refusal}); the isolation firewall is, without them\n'.encode())
+    return (tenantports.WITHOUT_LIMITS,)
+
+
+def apply_build_network_firewall(daemon, output, script, network, refusal):
     """The script run on the network's id, bridge and subnet, read through the host's Engine API, and on no lines when
     the daemon does not answer, as its own read was: its output and exit code are the action's."""
     lines = b''
     with contextlib.suppress(*hostdaemon.UNANSWERED):
         lines = build_network_lines(hostdaemon.network(daemon, network))
-    return scriptrun.relayed(output, scriptrun.ran(['sh', script, '--network-on-stdin', network], lines))
+    argv = ['sh', script, *without_limits(output, refusal), '--network-on-stdin', network]
+    return scriptrun.relayed(output, scriptrun.ran(argv, lines))
 
 
 def build_network_lines(network):
@@ -211,10 +234,36 @@ def build_network_lines(network):
                     if isinstance(value, str) and LINE_WORD.fullmatch(value))
 
 
-def apply_tenant_network_firewall(daemon, output, script):
+def apply_tenant_network_firewall(daemon, output, script, refusal):
     """The script run on the network's subnet and its members' ports as the host's netlink names them, the network
     made through the host's Engine API first when it is missing."""
-    return tenantports.firewall(daemon, output, script)
+    return tenantports.firewall(daemon, output, script, without_limits(output, refusal))
+
+
+def egress_members(daemon):
+    return egress.members(daemon, hostdaemon.network(daemon, tenantports.NETWORK))
+
+
+def egress_limits(context):
+    """The limits script's path, checked to be the engine's own and root's alone."""
+    return (engine_script(context.policy, TENANT_EGRESS_LIMITS),)
+
+
+def egress_report(daemon, output, script):
+    """The outbound limits as JSON: whether they are in place, the settings in force, and each scan block and recent
+    flood, SMTP or scan mark by the account or build that made it."""
+    found = egress.reconcile(egress_members(daemon))
+    found['settings'] = egress.settings(scriptrun.ran(['sh', script, '--settings']).stdout)
+    output.stdout((json.dumps(found, sort_keys=True) + '\n').encode())
+    return 0
+
+
+def egress_unblock(daemon, output, owner):
+    """The owner's scan block lifted and its addresses' marks and counters cleared, as JSON naming the addresses; none
+    when it had no block."""
+    lifted = egress.unblock(owner, egress_members(daemon))
+    output.stdout((json.dumps({'owner': owner, 'addresses': lifted}, sort_keys=True) + '\n').encode())
+    return 0
 
 
 def project_stats(context, seconds, usernames):
@@ -229,10 +278,12 @@ def project_disk(context, homes):
 
 
 def classic_app_types(context, docroots):
-    for _, path, docroot in docroots:
+    for _, path, docroot, install in docroots:
         home(context.policy, path)
         if paths.below(path, docroot) is None:
             raise Refused(f"'{docroot}' is not inside {path}")
+        if install != '' and paths.below(path, install) is None:
+            raise Refused(f"'{install}' is not inside {path}")
     return ['bash', '-c', hostscripts.classic_app_types(docroots)]
 
 
@@ -306,6 +357,8 @@ ACTIONS = {
     'applyTenantNetworkFirewall': hostapi.asking(
         nothing, apply_tenant_network_firewall, prepare=tenant_network, host_only=True,
     ),
+    'egressReport': hostapi.asking(nothing, egress_report, prepare=egress_limits, host_only=True),
+    'egressUnblock': hostapi.asking(reads(values.name), egress_unblock, host_only=True),
     'ensureOwnImage': hostapi.asking(
         reads(values.image), hostimages.best_effort(hostimages.ensure_own_image), prepare=own_image, host_only=True,
     ),
@@ -314,7 +367,7 @@ ACTIONS = {
     ),
     'projectStats': host(reads(values.positive, rest(values.username)), project_stats, native=True),
     'projectDisk': host(reads(group(values.username, values.path)), project_disk),
-    'classicAppTypes': host(reads(group(values.username, values.path, values.path)), classic_app_types),
+    'classicAppTypes': host(reads(group(values.username, values.path, values.path, values.optional(values.path))), classic_app_types),
     'edgeProbe': host(
         reads(plain_hostname, ip, values.integer, flag('https')),
         lambda context, domain, address, seconds, https: ['bash', '-c', hostscripts.edge_probe(domain, address, seconds, https)],

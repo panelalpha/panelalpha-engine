@@ -275,6 +275,7 @@ class ActionTest(support.Serving):
             'exit 3\n'
         ).encode())
         os.chmod(self.path('engine', 'scripts/tenant-network-firewall.sh'), 0o755)
+        self.make('engine', 'scripts/tenant-egress-limits.sh')
 
     def test_the_script_runs_in_the_host_s_namespaces_on_the_lines_their_ports_are_named_on(self):
         self.routes[('GET', f'/networks/{NETWORK}')] = (200, network([
@@ -340,6 +341,20 @@ class ActionTest(support.Serving):
         self.assertEqual((result.returncode, result.stderr), (
             1, b'picked\nError response from daemon: network with name pash-tenants already exists\n'))
         self.assertEqual(self.runs(), '--prefix\n')
+
+    def test_a_missing_or_unsafe_limits_script_leaves_the_firewall_to_run_without_it(self):
+        self.routes[('GET', f'/networks/{NETWORK}')] = (200, network([], [PREFIX + '.0.0/16']))
+        self.stand_in()
+        limits = self.path('engine', 'scripts/tenant-egress-limits.sh')
+        for unsafe, why in ((lambda: os.chmod(limits, 0o666), b'someone other'), (lambda: os.remove(limits), b'is missing')):
+            with self.subTest(why=why):
+                unsafe()
+                result = self.pa_root('host.applyTenantNetworkFirewall', host=True)
+                self.assertEqual((result.returncode, result.stdout), (3, b'applied\n'))
+                self.assertTrue(result.stderr.startswith(b'the outbound limits were not applied ('), result.stderr)
+                self.assertIn(why, result.stderr)
+                self.assertTrue(result.stderr.endswith(b'the isolation firewall is, without them\nrefused\n'))
+        self.assertEqual(self.runs(), '--ports-on-stdin --without-limits\n' * 2)
 
     def test_a_missing_script_fails_with_sh_s_own_words_and_status(self):
         self.routes[('GET', f'/networks/{NETWORK}')] = (200, network([]))
@@ -407,7 +422,13 @@ class FirewallScriptTest(unittest.TestCase):
                             'esac\nexit 1\n')
         self.stub('iptables', 'exit 0\n')
         self.stub('iptables-restore', f'cat >"{self.written["restore"]}"\n')
-        self.stub('nft', f'cat >"{self.written["nft"]}"\n')
+        self.written['egress'] = os.path.join(self.base, 'egress.in')
+        self.stub('nft', 'case " $* " in *" -f "*) ;; *) exit 1 ;; esac\n'
+                         'input=$(cat)\n'
+                         'case "$input" in\n'
+                         f'*"inet pa_egress"*) printf "%s\\n" "$input" >"{self.written["egress"]}" ;;\n'
+                         f'*) printf "%s\\n" "$input" >"{self.written["nft"]}" ;;\n'
+                         'esac\n')
         self.api_access = os.path.join(self.base, 'api-access')
         self.environment = {
             **os.environ,
@@ -475,6 +496,17 @@ class FirewallScriptTest(unittest.TestCase):
         self.assertIn('counter drop', table)
         self.assertNotIn('--ctorigdstport 2011', self.written_text('restore'))
 
+    def test_the_limits_run_on_the_named_bridges_and_without_limits_not_at_all(self):
+        lines = f'member alice {ALICE}\nsource br-pa-build\n'.encode()
+        result = self.run_script('--ports-on-stdin', lines=lines)
+        self.assertEqual((result.returncode, result.stderr), (0, b''), result.stderr)
+        self.assertIn('{ "br-pa-tenants", "br-pa-build" }', self.written_text('egress'))
+        os.remove(self.written['egress'])
+        result = self.run_script('--ports-on-stdin', '--without-limits', lines=lines)
+        self.assertEqual((result.returncode, result.stderr), (0, b''), result.stderr)
+        self.assertIn('applied', result.stdout.decode())
+        self.assertFalse(os.path.exists(self.written['egress']))
+
 
 class Stopped(Exception):
     """Ends the service loop of the test once it has done what the test watches for."""
@@ -511,6 +543,9 @@ class FakeDaemon:
     def __init__(self):
         self.streams = []
 
+    def json(self, method, path, missing=(404,), **_):
+        return None
+
     def stream(self, method, path, seconds, headers=None):
         response = Stream([b'{"Type":"network","Action":"connect"}\n'])
         self.streams.append(response)
@@ -519,6 +554,9 @@ class FakeDaemon:
 
 class Refusing:
     """A daemon that will not stream the network's events at all."""
+
+    def json(self, method, path, missing=(404,), **_):
+        raise ConnectionRefusedError
 
     def stream(self, method, path, seconds, headers=None):
         raise ConnectionRefusedError

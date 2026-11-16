@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 307 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 311 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -696,6 +696,8 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_api_access_deny` | Take that access away from a project |
 | `system_api_access_list` | List the projects allowed to call the engine's API |
 | `system_api_access_rotate` | Replace an allowed project's API token |
+| `system_egress_list` | List the projects and builds the outbound limits stopped |
+| `system_egress_unblock` | Lift a project's or build's outbound scan block |
 | `system_engine_cert_request` | Request the engine's own Let's Encrypt certificate |
 | `system_exim_config_get` | Get Exim mail server configuration |
 | `system_exim_config_set` | Update Exim mail server configuration |
@@ -835,6 +837,7 @@ Cloudflare cache and security level for a domain, with the project's own Cloudfl
 | `git_deploy_hook_show` | Show a push-to-deploy hook |
 | `git_deploy_key_create` | Create a git deploy key |
 | `git_deploy_key_delete` | Delete a git deploy key |
+| `git_deploy_key_show` | Show a git deploy key |
 | `git_disconnect` | Disconnect git from a directory |
 | `git_pull` | Pull from the git remote |
 | `git_push` | Push local git changes |

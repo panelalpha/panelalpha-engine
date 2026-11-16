@@ -305,6 +305,18 @@ export class SystemApi extends ModSecurityApi {
     return this.rawCall(await this.api.delete('system/build-caches', { params }));
   }
 
+  /** The outbound limits in force and what they stopped: the events in force, or every one of the last `days`. */
+  async listEgressRaw(days?: number | string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(
+      await this.api.get('system/egress', days === undefined ? {} : { params: { days } })
+    );
+  }
+
+  /** Lifts a project's or a build's outbound scan block: 200 with whether there was one. */
+  async unblockEgressRaw(owner: string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.delete(`system/egress/${encodeURIComponent(owner)}`));
+  }
+
   /** Base images the host keeps for its projects: the operator's own first, then the engine's catalogue. */
   async listSystemImages(): Promise<ApiListResponse<SystemImage>> {
     const response = await this.api.get('system/images');

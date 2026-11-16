@@ -131,6 +131,7 @@ return [
     'GET /projects/{username}/domains/{domain}/installed-ssl-cert' => 'ssl_cert_get',
     'GET /projects/{username}/domains/{domain}/ssl-check' => 'ssl_check',
     'PUT /projects/{username}/domains/{domain}/install-ssl-cert' => 'ssl_cert_install',
+    'DELETE /projects/{username}/domains/{domain}/installed-ssl-cert' => 'ssl_cert_remove',
     'POST /projects/{username}/domains/{domain}/request-ssl-cert' => 'ssl_cert_request',
 
     // FTP and SFTP accounts
@@ -201,6 +202,7 @@ return [
     'POST /projects/{username}/git/push' => 'git_push',
     'POST /projects/{username}/git/revert' => 'git_revert',
     'POST /projects/{username}/git/deploy-key' => 'git_deploy_key_create',
+    'GET /projects/{username}/git/deploy-key' => 'git_deploy_key_show',
     'DELETE /projects/{username}/git/deploy-key' => 'git_deploy_key_delete',
     'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
     'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
@@ -344,6 +346,8 @@ return [
     'PUT /system/api-access/{project}' => 'system_api_access_allow',
     'POST /system/api-access/{project}/rotate' => 'system_api_access_rotate',
     'DELETE /system/api-access/{project}' => 'system_api_access_deny',
+    'GET /system/egress' => 'system_egress_list',
+    'DELETE /system/egress/{owner}' => 'system_egress_unblock',
     // Cache registry base images: the operator's own, and the engine's catalogue (listed only).
     'GET /system/images' => 'system_image_list',
     'POST /system/images' => 'system_image_create',

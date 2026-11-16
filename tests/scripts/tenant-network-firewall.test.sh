@@ -86,7 +86,16 @@ END {
 MODEL
 cat >"$W/bin/nft" <<FAKE
 #!/bin/bash
-cat >"$W/nft.in"
+# The outbound limits' table (tenant-egress-limits.sh) is recorded apart from the model; it is never listed.
+case " \$* " in *" -f "*) ;; *) exit 1 ;; esac
+input=\$(cat)
+if [[ "\$input" == *"inet pa_egress"* ]]; then
+    printf '%s\n' "\$input" >"$W/egress.in"
+    echo "nft \$*" >>"$W/egress.calls"
+    [ -f "$W/egress.refused" ] && exit 1
+    exit 0
+fi
+printf '%s\n' "\$input" >"$W/nft.in"
 echo "nft \$*" >>"$W/nft.calls"
 touch "$W/nft.state"
 awk -f "$W/nft.awk" "$W/nft.state" "$W/nft.in" >"$W/nft.next" && mv "$W/nft.next" "$W/nft.state"
@@ -371,6 +380,20 @@ expect "and none for the account that is not on the bridge" "0" "$(grep -c "$T0.
 
 expect "boot: the allow-list is not read and Docker is not asked" "0" "$(run --boot)"
 expect "no engine port rule before its ports are bound" "0" "$(grep -c -- '--ctorigdstport 2011' "$W/restore.in")"
+
+# The outbound limits (tenant-egress-limits.sh) follow every run, boot included.
+rm -f "$W/egress.calls" "$W/egress.in"
+expect "boot applies the outbound limits" "0|1" "$(run --boot)|$(grep -c . "$W/egress.calls")"
+expect "on both networks' default bridges" "1" "$(grep -c 'add element inet pa_egress sources { "br-pa-tenants", "br-pa-build" }' "$W/egress.in")"
+printf 'subnet %s.0.0/16\nsource br-custom\nsource bad"name\n' "$T0" >"$W/stdin"
+expect "a build network the broker named" "0" "$(run --ports-on-stdin)"
+expect "joins them" "1" "$(grep -c 'sources { "br-pa-tenants", "br-pa-build", "br-custom" }' "$W/egress.in")"
+expect "a name that is not a bridge's is left out" "0" "$(grep -c 'bad' "$W/egress.in")"
+touch "$W/egress.refused"
+expect "a kernel refusing the limits still applies the isolation" "0" "$(run --ports-on-stdin)"
+expect "and the ports stay bound" "1" "$(grep -c 'delete table bridge pa_tenants' "$W/nft.in")"
+rm -f "$W/egress.refused" "$W/egress.calls"
+expect "--without-limits applies the isolation alone" "0|0" "$(run --ports-on-stdin --without-limits)|$(grep -c . "$W/egress.calls" 2>/dev/null || echo 0)"
 
 echo
 [ "$failures" = 0 ] && echo "All passed." || echo "$failures failed."

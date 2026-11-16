@@ -47,11 +47,50 @@ Revoking stops it working immediately while keeping it in the list, so you keep 
 
 ## Projects kept apart
 
-Projects can reach the internet, the server's MySQL databases and image caches, and the server's mail and web services. They cannot connect directly to another project, the engine's API, FTP, SFTP or phpMyAdmin, or private addresses on your network. Visitors still reach the sites through the engine's webserver.
+Projects can reach the internet, within the [limits on outbound connections](#limits-on-outbound-connections), the server's MySQL databases and image caches, and the server's mail and web services. They cannot connect directly to another project, the engine's API, FTP, SFTP or phpMyAdmin, or private addresses on your network. Visitors still reach the sites through the engine's webserver.
 
-One exception is on purpose. A project that runs in its own container can be allowed to call the engine's API, for an app that manages the engine, such as a deploy dashboard. The engine gives that project its own token, limited to that project, to chosen projects, or to everything, and deleting the project removes the token. Allowing and denying is a server command: [CLI commands](../06-commands/pae-cli.md#engine-api-for-projects) (`pae system:api-access:allow`). Allow it only for an app you trust with that reach.
+One exception is on purpose. A project that runs in its own container can be allowed to call the engine's API, for an app that manages the engine, such as a deploy dashboard. The engine gives that project its own token, limited to that project, to chosen projects, or to everything, and replacing that token, denying the access or deleting the project removes the old one. Allowing and denying is a server command: [CLI commands](../06-commands/pae-cli.md#engine-api-for-projects) (`pae system:api-access:allow`). Allow it only for an app you trust with that reach.
 
 The update attempts to move running projects created on an earlier version onto the isolated network. An application using the server's MySQL may restart during the move, and its site is unavailable until it answers again. A stopped project is left where it was. If a project was stopped or the update reports that its move failed, start it and retry the move from the server: [CLI commands](../06-commands/pae-cli.md#projects-and-deploys).
+
+## Limits on outbound connections
+
+The engine limits the new connections projects open to the rest of the internet, so one application cannot scan networks, flood a server or send spam from your server's address. Hosting providers lock servers that do, and the first you would hear of it is their abuse report. The limits are on for every install:
+
+- Mail sent straight to other servers on port 25 is blocked. A project sends mail through the server's own mail relay, or through a mail service on port 587 or 465.
+- A project may open 100 new connections a second. The ones over that are dropped.
+- A project may reach 60 new addresses at once, then 20 a minute. Going over looks like a network scan, so the project loses every new outbound connection for 30 minutes. Each block that follows within a day lasts twice as long as the one before, up to a day. An address it reached in the last 10 minutes is not new.
+- The web ports, 80 and 443 over TCP, are counted on their own, with ten times more room: 600 new addresses at once, then 200 a minute. A federated server, a feed reader or an uptime monitor reaches many servers there. An address reached on a web port is still new on any other port.
+
+The same limits apply to the builds the engine runs for a project. A build that goes over is blocked on its own, and the project's site keeps its connections. Connections already open, answers to visitors, and the server's own services (the databases, the mail relay, the sites, the engine API a project may call) are not counted, and a blocked project still reaches them.
+
+When a limit stops a project, its deploy log gets a line that says what happened and until when, and the engine's log names the project. With telemetry on, the engine reports it to monitoring too. To see what is stopped now, every event of the last week, and to lift a block early:
+
+```bash
+pae system:egress:list
+pae system:egress:list --days=7
+pae system:egress:unblock <project>
+```
+
+Lifting a block also clears the project's count of new addresses, and its next block lasts 30 minutes again. It does not open port 25 or raise the connection limit: those have no block to lift, only their settings below.
+
+The API has the same: `GET /system/egress` and `DELETE /system/egress/{project}`.
+
+Each limit is a setting in `/opt/panelalpha/shared-hosting/.env`. 0 turns a limit off. A change applies within a minute, with no restart.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `EGRESS_BLOCK_SMTP` | `1` | `1` blocks mail to other servers on port 25. |
+| `EGRESS_NEW_CONNECTIONS_PER_SECOND` | `100` | New connections a project may open each second, in bursts of up to ten times that. |
+| `EGRESS_NEW_DESTINATIONS_BURST` | `60` | New addresses a project may reach at once, on any port but 80 and 443. |
+| `EGRESS_NEW_DESTINATIONS_PER_MINUTE` | `20` | New addresses a minute after that. |
+| `EGRESS_WEB_NEW_DESTINATIONS_BURST` | `600` | New addresses a project may reach at once on ports 80 and 443 (TCP). |
+| `EGRESS_WEB_NEW_DESTINATIONS_PER_MINUTE` | `200` | New addresses a minute on those ports after that. |
+| `EGRESS_SCAN_BLOCK_MINUTES` | `30` | How long a project that went over is blocked the first time in a day. `0` drops only the connections over the limit. |
+
+An application that reaches more servers than that on purpose, such as a crawler, a proxy checker, a large federated server (Mastodon, Matrix) or a monitor of hundreds of sites, will be stopped. Raise the limits for the whole server, or lift its block. The settings apply to every project; one project cannot be given its own yet.
+
+What the limits do not cover: a blocked project reaches up to 60 new addresses again each time its block ends, though each block after it is longer, and a flood of traffic to one address over UDP, or plain bandwidth, is not limited. A scan of ports 80 and 443 alone is stopped only past the higher web limits, and HTTP/3 (UDP 443) counts with the other ports, not the web ones. On the server, `journalctl -k -g pa-egress` shows each time a limit was hit, and `nft list table inet pa_egress` the rules.
 
 ## How the engine works as root
 
@@ -224,6 +263,24 @@ comment to "office". Do not open any port for an application's website.
 ```
 
 Mode: modify. Tools: `firewall_rule_create` with `scope` published, `firewall_rule_update`. Check: the rule gets a new id when what it matches changes, and a comment starting `by Fail2Ban` is refused. A port such as 08080 or 70000 is refused.
+
+**What the outbound limits stopped**
+
+```text
+Is any project blocked from opening connections to the internet? Show the
+limits in force and everything they stopped this week.
+```
+
+Mode: read. Tools: `system_egress_list` (also with `days` 7). Check: the answer says whether the limits are in place and gives the five settings, and each event names a project or build, what it did (scan, flood or SMTP) and, for a block, when it ends.
+
+**Lift an outbound block**
+
+```text
+tshop was blocked for a network scan, but it is our uptime monitor. Lift the
+block.
+```
+
+Mode: full. Tools: `system_egress_list`, `system_egress_unblock`. Check: the block is lifted and the list shows it lifted by `api`. The assistant says the block comes back if the project goes over the limit again, and that the limits are server settings.
 
 **Trusted addresses and the log**
 

@@ -81,6 +81,7 @@ class BuildNetworkTest(Scripted):
     def setUp(self):
         super().setUp()
         self.stand_in(self.make('engine', 'scripts/build-network-firewall.sh'))
+        self.make('engine', 'scripts/tenant-egress-limits.sh')
 
     def build_network(self, described):
         self.routes[('GET', f'/networks/{BUILD_NETWORK}')] = (200, {'Name': BUILD_NETWORK, 'Id': BUILD_ID, **described})
@@ -113,6 +114,13 @@ class BuildNetworkTest(Scripted):
         result = self.pa_root('host.applyBuildNetworkFirewall', BUILD_NETWORK, host=True)
         self.assertEqual((result.returncode, result.stderr), (3, b'refused\n'))
         self.assertTrue(self.given().endswith(f'path {runner.ENVIRONMENT["PATH"]}\n'))
+
+    def test_a_limits_script_someone_else_could_have_written_is_left_out_and_the_firewall_runs(self):
+        os.chmod(self.path('engine', 'scripts/tenant-egress-limits.sh'), 0o666)
+        result = self.pa_root('host.applyBuildNetworkFirewall', BUILD_NETWORK, host=True)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn(b'the outbound limits were not applied (', result.stderr)
+        self.assertTrue(self.given().startswith(f'argv --without-limits --network-on-stdin {BUILD_NETWORK}\n'))
 
     def test_a_script_someone_else_could_have_written_is_refused(self):
         os.chmod(self.path('engine', 'scripts/build-network-firewall.sh'), 0o777)
@@ -163,8 +171,11 @@ class BuildNetworkScriptTest(unittest.TestCase):
         os.makedirs(self.bin)
         self.stub('iptables', f'echo "iptables $*" >> "{self.calls}"\ncase " $* " in *" -C "*) exit 1 ;; esac\n')
         self.stub('docker', f'echo "docker $*" >> "{self.calls}"\n')
+        self.limits = os.path.join(self.base, 'limits')
+        self.stub('nft', f'[ "$1" = -f ] || exit 1\ncat > "{self.limits}"\n')
         self.environment = {**os.environ, 'PATH': self.bin + os.pathsep + os.environ['PATH'],
-                            'PA_BUILD_LOCK': os.path.join(self.base, 'lock')}
+                            'PA_BUILD_LOCK': os.path.join(self.base, 'lock'),
+                            'PA_ENV_FILE': os.path.join(self.base, 'env')}
 
     def tearDown(self):
         shutil.rmtree(self.base, ignore_errors=True)
@@ -198,6 +209,27 @@ class BuildNetworkScriptTest(unittest.TestCase):
         self.assertIn(f'iptables -w 30 -t nat -A POSTROUTING -s {BUILD_SUBNET} ! -o br-pa-build -j MASQUERADE\n',
                       self.called())
         self.assertNotIn('docker', self.called())
+        with open(self.limits) as f:
+            self.assertIn('add element inet pa_egress sources { "br-pa-tenants", "br-pa-build" }', f.read(),
+                          'the outbound limits cover the build network too')
+
+    def test_without_limits_the_rules_stand_and_the_limits_are_left_out(self):
+        result = self.run_script('--without-limits', '--network-on-stdin', lines=f'id {BUILD_ID}\nbridge br-pa-build\n'.encode())
+        self.assertEqual((result.returncode, result.stderr), (0, b''), result.stderr)
+        self.assertIn('iptables -w 30 -I DOCKER-USER -i br-pa-build -j PA-BUILD-EGRESS\n', self.called())
+        self.assertFalse(os.path.exists(self.limits))
+
+    def test_a_missing_limits_script_leaves_the_rules_standing_and_says_so(self):
+        scripts = os.path.join(self.base, 'scripts')
+        os.makedirs(scripts)
+        shutil.copy(BUILD_SCRIPT, scripts)
+        result = subprocess.run(['sh', os.path.join(scripts, 'build-network-firewall.sh'), '--network-on-stdin', BUILD_NETWORK],
+                                input=f'id {BUILD_ID}\nbridge br-pa-build\n'.encode(), capture_output=True,
+                                env=self.environment, timeout=support.SECONDS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, f'build-network-firewall: {scripts}/tenant-egress-limits.sh is missing; the outbound '
+                                        'limits are not applied\n'.encode())
+        self.assertIn('iptables -w 30 -I DOCKER-USER -i br-pa-build -j PA-BUILD-EGRESS\n', self.called())
 
     def test_a_network_without_a_bridge_name_is_on_docker_s_own_bridge_and_without_a_subnet_is_not_masqueraded(self):
         result = self.run_script('--network-on-stdin', lines=f'id {BUILD_ID}\n'.encode())

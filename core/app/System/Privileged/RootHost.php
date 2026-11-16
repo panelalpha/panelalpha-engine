@@ -69,6 +69,27 @@ final class RootHost
     }
 
     /**
+     * The outbound limits as one JSON line: whether they are in place, the settings in force, and each scan block and
+     * recent mark by the account or build that made it.
+     *
+     * @return list<string>
+     */
+    public function egressReport(): array
+    {
+        return $this->onHost(__FUNCTION__, []);
+    }
+
+    /**
+     * Lifts an account's or a build's scan block and clears its addresses' counters.
+     *
+     * @return list<string>
+     */
+    public function egressUnblock(string $owner): array
+    {
+        return $this->onHost(__FUNCTION__, [Arguments::name($owner)]);
+    }
+
+    /**
      * Pulls one of our images from the cache registry writer unless the host has it.
      *
      * @return list<string>
@@ -115,7 +136,8 @@ final class RootHost
     }
 
     /**
-     * @param  array<string, array{home: string, docroot: string}>  $docroots  username => paths on the host
+     * @param  array<string, array{home: string, docroot: string, install: string}>  $docroots  username => paths on the host;
+     *                                                                                          install is empty for none
      * @return list<string>
      */
     public function classicAppTypes(array $docroots): array
@@ -123,6 +145,7 @@ final class RootHost
         $checked = $this->byUsername($docroots, static fn (array $paths): array => [
             'home' => Arguments::path($paths['home']),
             'docroot' => Arguments::path($paths['docroot']),
+            'install' => $paths['install'] === '' ? '' : Arguments::path($paths['install']),
         ]);
 
         return $this->onHost(__FUNCTION__, $this->docrootValues($checked));
@@ -291,14 +314,14 @@ final class RootHost
     }
 
     /**
-     * @param  array<string, array{home: string, docroot: string}>  $docroots
+     * @param  array<string, array{home: string, docroot: string, install: string}>  $docroots
      * @return list<string>
      */
     private function docrootValues(array $docroots): array
     {
         $values = [(string) count($docroots)];
         foreach ($docroots as $username => $paths) {
-            array_push($values, (string) $username, $paths['home'], $paths['docroot']);
+            array_push($values, (string) $username, $paths['home'], $paths['docroot'], $paths['install']);
         }
 
         return $values;

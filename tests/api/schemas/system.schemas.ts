@@ -234,6 +234,31 @@ export const systemBuildCacheRemovedResponseSchema = z.object({
   removed: z.array(z.string()),
 });
 
+/** One time the outbound limits stopped a project or a host build. */
+export const outboundEventSchema = z.object({
+  owner: z.string().min(1),
+  network: z.enum(['tenants', 'build']),
+  kind: z.enum(['scan', 'flood', 'smtp']),
+  address: z.string().min(1),
+  started_at: z.string(),
+  last_seen_at: z.string(),
+  blocked_until: z.string().nullable(),
+  active: z.boolean(),
+  lifted_at: z.string().nullable(),
+  lifted_by: z.string().nullable(),
+});
+
+export const systemEgressListResponseSchema = z.object({
+  active: z.boolean(),
+  settings: z.record(z.string(), z.number().int().nonnegative()),
+  data: z.array(outboundEventSchema),
+});
+
+export const systemEgressUnblockResponseSchema = z.object({
+  lifted: z.boolean(),
+  addresses: z.array(z.string()),
+});
+
 export const systemImageResponseSchema = z.object({
   data: listedOperatorImageSchema,
 });

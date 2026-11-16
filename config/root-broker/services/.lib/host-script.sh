@@ -21,6 +21,12 @@ host_script_allowed() { # the caller's tag, subject, consequence, failed file an
     return 1
 }
 
+# check_host_script for a script another runs, and a refusal it recorded cleared once the paths pass.
+recheck_host_script() {
+    local tag="$1" subject="$2" consequence="$3" failed="$4" checked="$5"
+    host_script_allowed && host_script_ran
+}
+
 # <tag> <subject> <consequence> <failed file> <root-only paths, script first, globbed> <host command...>
 run_host_script() {
     local tag="$1" subject="$2" consequence="$3" failed="$4" checked="$5" out

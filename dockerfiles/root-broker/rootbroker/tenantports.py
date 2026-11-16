@@ -16,23 +16,26 @@ import sys
 import time
 import urllib.parse
 
-from . import hostdaemon, hostns, scriptrun
+from . import egress, hostdaemon, hostns, scriptrun
 
 NETWORK = 'pash-tenants'
 BRIDGE = 'br-pa-tenants'
 MTU = '1500'
 ROLE = 'com.panelalpha.role'
 SCRIPT = '/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh'
+LIMITS = 'tenant-egress-limits.sh'
+WITHOUT_LIMITS = '--without-limits'
 HOST_SCRIPT = '/etc/s6/root-broker/.lib/host-script.sh'
 CHECK_HOST_SCRIPT = '. "$0" && check_host_script "$@"'
+RECHECK_HOST_SCRIPT = '. "$0" && recheck_host_script "$@"'
 RUN_HOST_SCRIPT = '. "$0" && run_host_script "$@"'
 FAILED = '/opt/panelalpha/log/tenant-network-firewall.failed'
+LIMITS_FAILED = '/opt/panelalpha/log/tenant-egress-limits.failed'
 TAG = 'tenant-network'
 SUBJECT = 'the tenant firewall'
+LIMITS_SUBJECT = 'the outbound limits script'
 LOST = 'an account container Docker starts on its own gets no network until the engine starts it'
-EVENTS = '/events?' + urllib.parse.urlencode({'filters': json.dumps({
-    'type': ['network'], 'network': [NETWORK], 'event': ['connect', 'disconnect'],
-})})
+LIMITS_LOST = 'new outbound connections of projects and builds are not limited; the tenant firewall still applies'
 MINUTE = 60
 NETLINK_SECONDS = 5
 RECEIVING = 1 << 16
@@ -242,19 +245,20 @@ def lines(daemon, network, links=None, proc='/proc'):
         found = port(interfaces, bridge, running, proc) if running is not None else None
         if found is not None:
             written.append(f'port {found} {mac} {address}\n'.encode())
+    written.extend(f'source {name}\n'.encode() for name in egress.bridges(daemon))
     return b''.join(written)
 
 
-def firewall(daemon, output, script=SCRIPT):
-    """`sh <script> --ports-on-stdin` on the lines, the network made first when it is missing: the output and exit
-    code are the action's."""
+def firewall(daemon, output, script=SCRIPT, flags=()):
+    """`sh <script> --ports-on-stdin <flags>` on the lines, the network made first when it is missing: the output and
+    exit code are the action's."""
     network = hostdaemon.network(daemon, NETWORK)
     if network is None:
         code = create(daemon, output, script)
         if code != 0:
             return code
         network = hostdaemon.network(daemon, NETWORK) or {}
-    return scriptrun.relayed(output, scriptrun.ran(['sh', script, '--ports-on-stdin'], lines(daemon, network)))
+    return scriptrun.relayed(output, scriptrun.ran(['sh', script, '--ports-on-stdin', *flags], lines(daemon, network)))
 
 
 def create(daemon, output, script):
@@ -291,7 +295,7 @@ def creation(prefix):
 
 
 def host_script(program, script, *command, lines=b''):
-    """`program`, one of the two fixed shell programs above, on host-script.sh with the tenant firewall's values, each
+    """`program`, one of the fixed shell programs above, on host-script.sh with the tenant firewall's values, each
     one an argument of the shell and none of its program."""
     return subprocess.run(
         ['sh', '-c', program, HOST_SCRIPT, TAG, SUBJECT, LOST, FAILED, script, *command],
@@ -299,18 +303,34 @@ def host_script(program, script, *command, lines=b''):
     )
 
 
+def limits_flags(script):
+    """No flags when the limits script beside `script` may run as root, else the one that skips it. host-script.sh
+    logs a refusal, and that it applies again, as it does the firewall's."""
+    limits = os.path.join(os.path.dirname(script), LIMITS)
+    checked = subprocess.run(
+        ['sh', '-c', RECHECK_HOST_SCRIPT, HOST_SCRIPT, TAG, LIMITS_SUBJECT, LIMITS_LOST, LIMITS_FAILED, limits],
+        stdout=subprocess.DEVNULL,
+    )
+    return () if checked.returncode == 0 else (WITHOUT_LIMITS,)
+
+
 def applied(daemon, script=SCRIPT):
     """Runs the script on the lines through run_host_script while the network is there. The check comes first, so a
-    refusal is reported even with no network or daemon; a failure waits for the next round."""
+    refusal is reported even with no network or daemon; a failure waits for the next round. A limits script that may
+    not run is left out, and the firewall runs without it."""
     if host_script(CHECK_HOST_SCRIPT, script).returncode != 0:
         return
     try:
         network = hostdaemon.network(daemon, NETWORK)
         if network is None:
             return
-        host_script(RUN_HOST_SCRIPT, script, 'sh', script, '--ports-on-stdin', lines=lines(daemon, network))
+        command = ('sh', script, '--ports-on-stdin', *limits_flags(script))
+        host_script(RUN_HOST_SCRIPT, script, *command, lines=lines(daemon, network))
+        egress.reconcile(egress.members(daemon, network))
     except hostdaemon.UNANSWERED:
         pass
+    except (OSError, ValueError, subprocess.SubprocessError) as failed:
+        print(f'{TAG}: the outbound limits\' marks were not read ({failed})', file=sys.stderr)
 
 
 def event(response):
@@ -321,10 +341,19 @@ def event(response):
         return False
 
 
+def watched(daemon):
+    """The daemon's events of a container joining or leaving the accounts' network or a build network."""
+    names = [NETWORK, *(network.get('Name') for network in egress.build_networks(daemon))]
+    return '/events?' + urllib.parse.urlencode({'filters': json.dumps({
+        'type': ['network'], 'network': [name for name in names if isinstance(name, str)],
+        'event': ['connect', 'disconnect'],
+    })})
+
+
 def events(daemon, script=SCRIPT, seconds=MINUTE):
     """Applies on every attach and detach the daemon streams; False when it does not stream them at all."""
     try:
-        conn, response = daemon.stream('GET', EVENTS, seconds)
+        conn, response = daemon.stream('GET', watched(daemon), seconds)
     except hostdaemon.UNANSWERED:
         return False
     try:
