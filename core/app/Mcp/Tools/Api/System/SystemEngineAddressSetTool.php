@@ -53,7 +53,7 @@ class SystemEngineAddressSetTool extends ApiTool
         return [
             'cert_domain' => $schema->string()->description('A hostname that already points at this server; empty or null for the default. Example: panel.example.com.'),
             'cert_email' => $schema->string()->description('Where Let\'s Encrypt sends expiry warnings; empty or null for none. Example: ops@example.com.'),
-            'default_tunnel' => $schema->string()->description('One of: panelalpha, none. Example: panelalpha.'),
+            'default_tunnel' => $schema->string()->description('null removes the setting, which behaves as panelalpha. One of: panelalpha, none. Example: panelalpha.'),
         ];
     }
 }

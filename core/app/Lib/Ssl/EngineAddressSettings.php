@@ -58,9 +58,12 @@ class EngineAddressSettings
         NamingBaseSetting::save(self::CERT_DOMAIN, strtolower(trim($name)));
     }
 
+    /** Stores the Let's Encrypt contact; empty removes it. */
     public function setCertificateEmail(string $email): void
     {
-        Setting::set(self::CERT_EMAIL, strtolower(trim($email)));
+        $email = strtolower(trim($email));
+
+        $email === '' ? Setting::forget(self::CERT_EMAIL) : Setting::set(self::CERT_EMAIL, $email);
     }
 
     /** `none` when set so, `panelalpha` otherwise: an unset setting behaves as panelalpha. */
@@ -71,21 +74,20 @@ class EngineAddressSettings
             : DomainPlan::TUNNEL_PANELALPHA;
     }
 
-    public function setDefaultTunnel(string $tunnel): void
+    /** Stores where a project created without a tunnel is published; null removes it, which behaves as panelalpha. */
+    public function setDefaultTunnel(?string $tunnel): void
     {
-        Setting::set(DomainPlan::SETTING_DEFAULT_TUNNEL, $tunnel);
+        $tunnel === null ? Setting::forget(DomainPlan::SETTING_DEFAULT_TUNNEL) : Setting::set(DomainPlan::SETTING_DEFAULT_TUNNEL, $tunnel);
     }
 
     /**
-     * Applies each given field; one left out stays as it is.
+     * Applies each given field; one left out stays as it is. The address is not one of them: only
+     * `pae configure address` on the host sets it.
      *
-     * @param  array{url?: string, cert_domain?: string, cert_email?: string, default_tunnel?: string}  $changes
+     * @param  array{cert_domain?: string, cert_email?: string, default_tunnel?: ?string}  $changes
      */
     public function set(array $changes): void
     {
-        if (array_key_exists('url', $changes)) {
-            $this->setUrl($changes['url']);
-        }
         if (array_key_exists('cert_domain', $changes)) {
             $this->setCertificateName($changes['cert_domain']);
         }

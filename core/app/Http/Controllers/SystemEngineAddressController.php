@@ -44,7 +44,8 @@ class SystemEngineAddressController extends Controller
         summary: 'Change the engine\'s certificate name or default tunnel',
         description: 'A field left out stays as it is. `cert_domain` also names every project site created from now on; '
             .'empty or null restores the .panelalpha.direct default, and every vhost is re-rendered in the background. '
-            .'Nothing is issued here: PUT /system/engine-certificate does that. `default_tunnel` none keeps new '
+            .'Nothing is issued here: PUT /system/engine-certificate does that. Null `cert_email` or `default_tunnel` '
+            .'removes that setting. `default_tunnel` none keeps new '
             .'projects off PanelAlpha Online; an explicit `tunnel` in a create request still wins. The address itself '
             .'(`url`, APP_URL) is not a setting: the engine is bound to it, and a request that sends it is refused with '
             .'422. Refused with 403 for a token scoped to some projects.',
@@ -55,7 +56,7 @@ class SystemEngineAddressController extends Controller
             properties: [
                 new OA\Property(property: 'cert_domain', type: 'string', nullable: true, example: 'panel.example.com', description: 'A hostname that already points at this server; empty or null for the default.'),
                 new OA\Property(property: 'cert_email', type: 'string', nullable: true, example: 'ops@example.com', description: 'Where Let\'s Encrypt sends expiry warnings; empty or null for none.'),
-                new OA\Property(property: 'default_tunnel', type: 'string', enum: ['panelalpha', 'none'], example: 'panelalpha'),
+                new OA\Property(property: 'default_tunnel', type: 'string', enum: ['panelalpha', 'none'], nullable: true, example: 'panelalpha', description: 'null removes the setting, which behaves as panelalpha.'),
             ],
         )),
         responses: [

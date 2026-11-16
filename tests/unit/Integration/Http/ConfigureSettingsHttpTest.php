@@ -31,10 +31,10 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->withoutMiddleware();
         Queue::fake();
 
-        $this->dir = sys_get_temp_dir() . '/configure-http-' . bin2hex(random_bytes(4));
+        $this->dir = sys_get_temp_dir().'/configure-http-'.bin2hex(random_bytes(4));
         mkdir($this->dir);
-        file_put_contents($this->dir . '/.env', "APP_KEY=base64:x\nAPP_URL=https://engine.example.test:2011\nTELEMETRY_TIER=1\n# MCP_PERMISSION_MODE=\n");
-        file_put_contents($this->dir . '/.env-compose', "COMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=16M\n");
+        file_put_contents($this->dir.'/.env', "APP_KEY=base64:x\nAPP_URL=https://engine.example.test:2011\nTELEMETRY_TIER=1\n# MCP_PERMISSION_MODE=\n");
+        file_put_contents($this->dir.'/.env-compose', "COMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=16M\n");
         $this->app->useEnvironmentPath($this->dir);
         $this->app->loadEnvironmentFrom('.env');
         config([
@@ -52,21 +52,20 @@ class ConfigureSettingsHttpTest extends TestCase
     {
         Setting::clearRuntimeSettings();
         Setting::flushCache();
-        array_map('unlink', array_filter(glob($this->dir . '/{,.}*', GLOB_BRACE) ?: [], 'is_file'));
+        array_map('unlink', array_filter(glob($this->dir.'/{,.}*', GLOB_BRACE) ?: [], 'is_file'));
         @rmdir($this->dir);
         parent::tearDown();
     }
 
     private function system(): System
     {
-        return new class ($this->dir) extends System {
-            public function __construct(private string $dir)
-            {
-            }
+        return new class($this->dir) extends System
+        {
+            public function __construct(private string $dir) {}
 
             public function engineDirPath(): string
             {
-                return $this->dir . '/compose';
+                return $this->dir.'/compose';
             }
 
             /** @var list<string> */
@@ -148,7 +147,7 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->assertSame(['value' => 'metadata', 'source' => 'setting'], $response->json('data.tier'));
         $this->assertSame(['value' => 'failed', 'source' => 'setting'], $response->json('data.source_bundle'));
         $this->assertSame(['value' => false, 'source' => 'setting'], $response->json('data.bug_reports'));
-        $this->assertStringContainsString('TELEMETRY_TIER=1', (string) file_get_contents($this->dir . '/.env'));
+        $this->assertStringContainsString('TELEMETRY_TIER=1', (string) file_get_contents($this->dir.'/.env'));
 
         $response = $this->putJson('/api/system/telemetry', ['tier' => null, 'source_bundle' => null]);
 
@@ -192,11 +191,13 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->assertSame('ops@example.test', Setting::get('cert_email'));
         $this->assertSame(DomainPlan::TUNNEL_NONE, Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL));
 
-        $response = $this->putJson('/api/system/engine-address', ['cert_domain' => null]);
+        $response = $this->putJson('/api/system/engine-address', ['cert_domain' => null, 'cert_email' => null, 'default_tunnel' => null]);
 
         $response->assertOk();
-        $this->assertNull(Setting::get('cert_domain'));
+        $this->assertSame([], Setting::query()->whereIn('name', ['cert_domain', 'cert_email', DomainPlan::SETTING_DEFAULT_TUNNEL])->pluck('name')->all());
         $this->assertSame(['value' => null, 'source' => 'default'], $response->json('data.cert_domain'));
+        $this->assertSame(['value' => null, 'source' => 'default'], $response->json('data.cert_email'));
+        $this->assertSame(['value' => DomainPlan::TUNNEL_PANELALPHA, 'source' => 'default'], $response->json('data.default_tunnel'));
     }
 
     public function test_engine_address_refuses_a_name_that_is_not_a_hostname_and_an_unknown_tunnel(): void
@@ -212,14 +213,14 @@ class ConfigureSettingsHttpTest extends TestCase
 
     public function test_engine_address_refuses_the_url_and_leaves_env_core_alone(): void
     {
-        $before = (string) file_get_contents($this->dir . '/.env');
+        $before = (string) file_get_contents($this->dir.'/.env');
 
         $this->putJson('/api/system/engine-address', ['url' => 'https://other.example.test:2011'])
             ->assertStatus(422)->assertJsonValidationErrors('url');
         $this->putJson('/api/system/engine-address', ['url' => 'https://other.example.test:2011', 'default_tunnel' => 'none'])
             ->assertStatus(422)->assertJsonValidationErrors('url');
 
-        $this->assertSame($before, (string) file_get_contents($this->dir . '/.env'));
+        $this->assertSame($before, (string) file_get_contents($this->dir.'/.env'));
         $this->assertSame('https://engine.example.test:2011', config('app.url'));
         $this->assertNull(Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL));
     }
@@ -291,8 +292,8 @@ class ConfigureSettingsHttpTest extends TestCase
 
     public function test_sites_db_reads_the_set_sizes_the_defaults_and_the_running_ones(): void
     {
-        mkdir($this->dir . '/compose');
-        rename($this->dir . '/.env-compose', $this->dir . '/compose/.env');
+        mkdir($this->dir.'/compose');
+        rename($this->dir.'/.env-compose', $this->dir.'/compose/.env');
 
         $response = $this->getJson('/api/system/sites-db');
 
@@ -317,14 +318,14 @@ class ConfigureSettingsHttpTest extends TestCase
 
     public function test_sites_db_writes_the_sizes_and_recreates_the_running_database(): void
     {
-        mkdir($this->dir . '/compose');
-        rename($this->dir . '/.env-compose', $this->dir . '/compose/.env');
+        mkdir($this->dir.'/compose');
+        rename($this->dir.'/.env-compose', $this->dir.'/compose/.env');
 
         $response = $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '64m', 'key_buffer_size' => null]);
 
         $response->assertOk();
         $this->assertTrue($response->json('recreated'));
-        $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=\n\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\n", file_get_contents($this->dir . '/compose/.env'));
+        $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=\n\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\n", file_get_contents($this->dir.'/compose/.env'));
         $this->assertContains('compose.engineUpWithoutDependencies', $this->app->make(System::class)->actions);
         $this->assertSame(['value' => '8M', 'source' => 'default', 'default' => '8M', 'running_mb' => 16], $response->json('data.key_buffer_size'));
     }
