@@ -9,8 +9,10 @@ use Illuminate\Console\Command;
 /**
  * Removes the tunnels the engine gave a lifetime that has passed: the
  * registration at the provider, the local row, and the domain's vhost aliases.
- * A tunnel without an engine lifetime never expires and is left alone, even if
- * the proxy put its own `valid_until` on it.
+ * A tunnel with a lifetime is normally removed by its own `ExpireTunnel` job at
+ * that lifetime; this sweep is the fallback for a job that never ran. A tunnel
+ * without an engine lifetime never expires and is left alone, even if the proxy
+ * put its own `valid_until` on it.
  */
 class ExpireTunnelsCommand extends Command
 {

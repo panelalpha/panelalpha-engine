@@ -235,7 +235,7 @@ class DomainController extends Controller
     {
         $exim = Setting::getEximConfig();
         $relay = MailDnsRecords::relay($exim['smarthost_provider']);
-        $sending = MailDnsRecords::sendingDomain($model->domain, $exim['sender_domain']);
+        $sending = MailDnsRecords::sendingDomain($model->domain);
         $ips = $relay === ''
             ? MailDnsRecords::hostAddresses(Setting::get('default_ipv4'), Setting::get('default_ipv6'), Ipv4NatMap::getLocalToPublicMap())
             : [];
@@ -410,7 +410,9 @@ class DomainController extends Controller
         description: 'Removes the domain, its aliases, proxy rules, vhosts and any attached tunnel. '
             .'Its files are kept: the domain directory and its document root stay in the project home, '
             .'listed in `files_kept`, since they may hold the site\'s files or serve another domain. '
-            .'Delete them with the file tools when they are no longer needed.',
+            .'Delete them with the file tools when they are no longer needed. '
+            .'The domain\'s record and its settings go and are not kept; this cannot be undone. Ask the operator '
+            .'to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -593,12 +595,44 @@ class DomainController extends Controller
         }
 
         $hosted = $domain->projectDomain();
-        $hosted->putCertificate($params['cert'], $params['key'], $params['ca'] ?? '');
+        $hosted->installCertificate($params['cert'], $params['key'], $params['ca'] ?? '');
 
         $user->project()->reloadWebserver();
         (new System)->webserver()->reload();
 
         return new DomainResource($domain);
+    }
+
+    #[OA\Delete(
+        path: '/projects/{username}/domains/{domain}/installed-ssl-cert',
+        summary: 'Remove the installed SSL certificate from a domain',
+        description: 'Drops the certificate installed on the domain, private key included, and gives the domain the '
+            .'certificate a new domain of this engine gets: the engine\'s own where that covers the name, otherwise '
+            .'the one the issuer setting names (self-signed by default). Any ACME renewal state for the name is '
+            .'forgotten, the webserver is reloaded and the answer is the certificate the domain carries now. '
+            .'A domain already on a certificate the engine made keeps it and nothing is issued again. '
+            .'A main domain, an addon domain and a subdomain all work; a domain with SSL turned off is refused.',
+        x: ['mcp-description' => 'Removes an installed (custom or issued) certificate and puts the domain back on the '
+            .'engine\'s own, so nothing of the old one is served or renewed. '
+            .'The installed certificate and its private key are gone for good and the engine keeps no copy of '
+            .'either. This cannot be undone. Ask the operator to confirm first.'],
+        security: [['bearerAuth' => []]],
+        tags: ['SSL Certificates'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'The certificate the domain carries now', content: new OA\JsonContent(ref: '#/components/schemas/SslCert')),
+            new OA\Response(response: 404, description: 'Project or domain not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The domain has SSL turned off, so it has no certificate to put back', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function destroyInstalledSslCert(string $username, string $domain): SslCertificateResource
+    {
+        $user = $this->projectOr404($username);
+
+        return new SslCertificateResource(ProjectCertificate::remove($this->domainOr404($user, $domain)));
     }
 
     private function domainOr404(User $user, string $name): Domain
@@ -724,7 +758,7 @@ class DomainController extends Controller
             $redirectUrl = $params['redirect_url'] ?? $domain->getRedirectUrl();
             if (empty($redirectUrl)) {
                 throw ValidationException::withMessages([
-                    'redirect_url' => 'redirect_url is required',
+                    'redirect_url' => 'Enter the URL to redirect the domain to.',
                 ]);
             }
             if ($redirectUrl != $domain->getRedirectUrl()) {

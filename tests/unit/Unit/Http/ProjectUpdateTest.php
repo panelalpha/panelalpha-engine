@@ -197,8 +197,8 @@ class ProjectUpdateTest extends TestCase
             'hostname' => 'api-bob.panelalpha.test',
         ]);
 
-        foreach (['shop.test', 'bob-alias.test', 'www.bob.test', 'api-bob.panelalpha.test'] as $taken) {
-            $this->putJson('/api/projects/alice', ['domain' => $taken])
+        foreach (['shop.test' => 'shop.test', 'bob-alias.test' => 'bob-alias.test', 'www.bob.test' => 'bob.test', 'api-bob.panelalpha.test' => 'api-bob.panelalpha.test'] as $given => $taken) {
+            $this->putJson('/api/projects/alice', ['domain' => $given])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.code', 'domain_taken')
                 ->assertJsonPath('problems.0.message', "{$taken} is already on this engine.");

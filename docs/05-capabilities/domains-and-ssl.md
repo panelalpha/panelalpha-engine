@@ -32,6 +32,8 @@ If you create a project without naming a domain, the engine picks the best publi
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it. The same goes for a staging copy or clone that got a name of its own there, and for a create or copy that fails: the name it was given is released with it.
 
+PanelAlpha Online serves those names through its own proxy, which passes a request on without a `multipart/form-data` body; pages, downloads and a form that posts only plain fields are unaffected, while **every upload sent through such a name fails** - a file in phpMyAdmin, a media file in WordPress ([phpMyAdmin](../05-capabilities/databases.md#troubleshooting)). A name that points straight at the server takes the same upload at once.
+
 The server operator can switch the `panelalpha.online` step off for every new project. With the engine setting `default_tunnel` set to `none`, a project created without a name gets step 1 or step 3 above, and nothing is registered at PanelAlpha Online. The value `panelalpha`, or no value, keeps the order above. A request that names `panelalpha` or `none` itself always wins over the setting. Change it with `pae settings:set default_tunnel none`, or with `pae configure address`: [CLI commands](../06-commands/pae-cli.md#configuring-the-engine).
 
 ## Extra names for an app that needs them
@@ -46,7 +48,7 @@ This works for applications that let you choose those names (an `API_DOMAIN` set
 
 ## A preview address
 
-To show a site before its domain points here, ask for a preview address. It is a `panelalpha.online` name that opens the site over HTTPS, and it stops working by itself after 24 hours unless you ask for another time (5 minutes up to 30 days):
+To show a site before its domain points here, ask for a preview address. It is a `panelalpha.online` name that opens the site over HTTPS, and it stops working when its time is up, to within a few seconds: after 24 hours, unless you ask for another time (5 minutes up to 30 days):
 
 ```text
 Give shop a preview address that lasts 3 days.
@@ -82,7 +84,7 @@ Set memory_limit to 256M on shop.example.com, and keep the other PHP settings
 that are already there.
 ```
 
-Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set.
+Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set. A saved set reaches the site within a few seconds: PHP keeps a directory's settings in a cache the engine limits to three seconds, so nothing is restarted and the requests already running finish on the settings they started with. A project whose PHP handler has not started again since an engine update still caches those settings for five minutes; there the engine tells that handler's workers to quit on a save: each finishes the request it is running, and the next request gets a fresh worker with the saved set.
 
 This is not the project's own PHP settings. Those belong to the project and, like these, apply only to traditional PHP hosting: [Change the PHP version](wordpress-and-apps.md#change-the-php-version).
 
@@ -162,7 +164,7 @@ pae project:domain:https-ports shop.example.com --project=shop --ports=8443
 
 Every deploy routes all of a container project's domains to its application again, so a domain you added is served without further steps.
 
-A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A name given with `www.` is taken as the name under it, the way adding a domain takes it: renaming to `www.shop.example.com` makes `shop.example.com` the main domain and keeps `www.shop.example.com` answering as its alias, never `www.www.shop.example.com`. The old main domain's own `www.` alias moves to the new name and its other aliases stay. A rename keeps the certificate of the old name for ten minutes: add that name again as a domain within them, as a primary-domain switch does, and it keeps the certificate it had. Added any later, the name gets a certificate of its own, never the one it had before. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
 
 Deleting a domain keeps its files. Its folder (`~/<domain>`) and its document root stay in the project home, because they may hold the site's files or be shared with another domain. The answer lists them in `files_kept`. Delete them with the file tools or over SFTP when you no longer need them.
 
@@ -182,9 +184,17 @@ Mail a site sends ends up in spam when its domain does not vouch for the server 
 Check the mail DNS records for shop.example.com.
 ```
 
-Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. If the mail relay rewrites senders to its own sender domain, the records belong to that domain, and the answer says so.
+Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. The records belong to the domain itself: a project's mail keeps the domain it owns once the engine can show the domain is this server's (it resolves here, it is below the server's own names, or a tunnel of the project holds it), and any other sender leaves as the relay's sender domain ([sending mail](projects.md#sending-mail-through-the-server)).
 
 The engine does not sign mail itself. A DKIM signature comes from a relay (SendGrid, Amazon SES, MailChannels or your own SMTP server) that signs for the domain. Give the assistant the relay's DKIM selector to check that record too.
+
+## Removing an installed certificate
+
+A certificate you install on a domain yourself (`install-ssl-cert`, or the panel's Custom Certificate) replaces the one the engine gave the site, and the engine keeps no copy of what it replaced. The way back is the way forward: `DELETE /projects/{username}/domains/{domain}/installed-ssl-cert` and `pae ssl:project-cert:remove shop.example.com` (or `ssl_cert_remove` for the assistant) drop the installed certificate and give the domain the one it would get if it were added now - the server's own where that covers the name, otherwise the one this engine is set to issue, self-signed on a stock engine. It works for a main domain, an addon domain and a subdomain alike.
+
+The new certificate replaces all four files of the domain's (`crt`, `key`, `ca`, `pem`), so the installed key is gone, and any ACME challenge state of the name is forgotten. The webserver is reloaded and the answer is the certificate the domain carries now, the same shape `installed-ssl-cert` returns. A domain already on a certificate the engine made (one it issued, its self-signed one or the server's own) keeps it: the call answers with it and nothing is issued again, so repeating it spends no Let's Encrypt rate limit. A domain with SSL turned off has no certificate to put back and is refused.
+
+A self-signed certificate is what browsers warn about, and `ssl:project-cert:renew` leaves a self-signed certificate alone: once the name resolves here, `pae ssl:project-cert:request shop.example.com` is what gets a trusted one back.
 
 ## Checking what visitors really get
 

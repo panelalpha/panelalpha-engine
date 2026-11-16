@@ -37,6 +37,8 @@ Give me a phpMyAdmin sign-on link for this project.
 
 You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second. A suspended project gets no sign-on link.
 
+phpMyAdmin opens on the project's main domain. On a free `panelalpha.online` address an **import never gets through**: PanelAlpha Online's proxy, in front of that name, does not pass a `multipart/form-data` body on - the way a browser sends a file - so the POST hangs until the browser gives up and phpMyAdmin ends with "Some error occurred while getting SQL debug info. Error text: error (rejected)". It is not phpMyAdmin's alone: **every upload on such a name fails the same way** - a media file in WordPress, any form that posts a file. Pages, downloads and a form that posts only plain fields work. To upload, use a name that points straight at this server - see [Troubleshooting](#troubleshooting).
+
 ## Renaming a database
 
 ```text
@@ -85,6 +87,9 @@ The project has used up its plan's database allowance. Either raise the limit ([
 
 **phpMyAdmin gives a 404, or loops back to the login page.**
 The sign-on link has expired - they last five minutes. Ask for a fresh one. If a new link does the same, the project's database user is missing; recreate it, then request the link again.
+
+**An upload fails on a `panelalpha.online` address.**
+In phpMyAdmin an import ends with "Some error occurred while getting SQL debug info. Error text: error (rejected)"; a media file in WordPress spins and then fails; the engine's log of that name holds no request that carried the file. PanelAlpha Online's proxy, in front of every `panelalpha.online` name, does not pass a request whose body is `multipart/form-data` on - the way a browser sends a file - so the POST hangs until the browser gives up and the site never sees it. Every upload there fails for that reason, not only phpMyAdmin's: a page, a download, and a form that posts plain fields without a file, work. Add a name that points straight at this server - a domain you own, or a `panelalpha.direct` name for it ([Adding your own domain](domains-and-ssl.md#adding-your-own-domain)) - make it the project's main domain ([Moving a project to another domain](domains-and-ssl.md#moving-a-project-to-another-domain-or-https-port)), and upload there, where the same file goes through at once.
 
 ## More requests to try
 

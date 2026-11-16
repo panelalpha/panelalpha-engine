@@ -5,6 +5,7 @@ namespace App\Lib\Domains;
 use App\Exceptions\ProblemException;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Project\PublicRouting\HostDomain;
+use App\Lib\Ssl\KeptCertificate;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
@@ -26,22 +27,28 @@ final class MainDomainRename
         .'and served through its proxy, so a main domain is not renamed to one. Add the name as a tunnel instead.';
 
     /**
-     * Point the project's main domain at $newFqdn; the caller saves the user. The same name in any case is left alone,
-     * so its vhost is not torn down and rebuilt for nothing.
+     * Point the project's main domain at $newFqdn; the caller saves the user. A name given as `www.example.org` is the
+     * name under it, as adding a domain makes it, and the same name in any case is left alone, so its vhost is not torn
+     * down and rebuilt for nothing.
      *
      * @throws ProblemException domain_taken, when another project took the name since it was validated
      */
     public static function apply(User $user, string $newFqdn): void
     {
         $oldFqdn = self::currentName($user, $user->getMainDomain());
-        $newFqdn = trim($newFqdn);
+        $requested = trim($newFqdn);
 
+        if (self::isSameName($oldFqdn, $requested)) {
+            return;
+        }
+
+        [$newFqdn] = self::nameFor($requested);
         if (self::isSameName($oldFqdn, $newFqdn)) {
             return;
         }
 
         $domain = $user->getMainDomain() ?? self::placeholder($user);
-        $newDomain = self::replacement($domain, $newFqdn);
+        $newDomain = self::replacement($domain, $requested);
 
         $previous = $user->getOriginal('domain');
         $routing = self::routingOf($user, $oldFqdn);
@@ -57,6 +64,9 @@ final class MainDomainRename
         $user->domain = $newFqdn;
 
         $user->setDetails(['domain' => self::allocationFor($newFqdn)]);
+        if ($oldFqdn !== '') {
+            KeptCertificate::keep($user, $oldFqdn);
+        }
     }
 
     /**
@@ -139,10 +149,11 @@ final class MainDomainRename
         }
     }
 
+    /** The renamed-away name keeps its certificate for a re-add moments later ({@see KeptCertificate}). */
     private static function deleteVhostIgnoringFailure(ProjectDomain $vhost): void
     {
         try {
-            $vhost->delete();
+            $vhost->delete(keepCertificate: true);
         } catch (\Throwable $e) {
             Log::warning("Could not delete the old vhost of {$vhost->model()->domain} during a rename: ".$e->getMessage());
         }
@@ -262,14 +273,19 @@ final class MainDomainRename
     {
         $domain = $user->getMainDomain();
         $oldFqdn = self::currentName($user, $domain);
-        if (self::isSameName($oldFqdn, trim($newFqdn))) {
+        $requested = trim($newFqdn);
+        if (self::isSameName($oldFqdn, $requested)) {
+            return null;
+        }
+        [$newFqdn] = self::nameFor($requested);
+        if (self::isSameName($oldFqdn, $newFqdn)) {
             return null;
         }
         $claim = HostDomain::claimRefusal((string) $user->username, $newFqdn);
         if ($claim !== null) {
             return $claim;
         }
-        if (($taken = self::takenName($user, $newFqdn)) !== null) {
+        if (($taken = self::takenName($user, $requested)) !== null) {
             return ['code' => 'domain_taken', 'message' => "{$taken} is already on this engine."];
         }
         if (DomainPlan::inOnlineZone($newFqdn)) {
@@ -357,8 +373,12 @@ final class MainDomainRename
     {
         $domain = $user->getMainDomain();
         $oldFqdn = self::currentName($user, $domain);
-        $newFqdn = trim($newFqdn);
+        $requested = trim($newFqdn);
 
+        if (self::isSameName($oldFqdn, $requested)) {
+            return null;
+        }
+        [$newFqdn] = self::nameFor($requested);
         if (self::isSameName($oldFqdn, $newFqdn)) {
             return null;
         }
@@ -367,15 +387,29 @@ final class MainDomainRename
         }
 
         $www = 'www.'.$newFqdn;
-        if (
-            $domain !== null
-            && in_array('www.'.$domain->domain, $domain->getAliases())
-            && self::heldElsewhere($user, $domain, $www)
-        ) {
+        if (self::bringsWwwAlias($domain, $requested, $newFqdn) && self::heldElsewhere($user, $domain, $www)) {
             return $www;
         }
 
         return null;
+    }
+
+    /**
+     * The main name a rename to $fqdn gives the project, with the `www.` alias it brings: `www.example.org` is
+     * `example.org`, `www.example.org` kept as an alias, the shape adding a domain creates.
+     *
+     * @return array{0: string, 1: array<mixed>}
+     */
+    private static function nameFor(string $fqdn): array
+    {
+        return NewDomain::withoutWww(trim($fqdn), []);
+    }
+
+    /** Whether the renamed row takes `www.<new name>`: the old main's own `www.` alias moves there, or the name was given with it. */
+    private static function bringsWwwAlias(?Domain $domain, string $requested, string $newFqdn): bool
+    {
+        return $requested !== $newFqdn
+            || ($domain !== null && in_array('www.'.$domain->domain, $domain->getAliases()));
     }
 
     private static function currentName(User $user, ?Domain $mainDomain): string
@@ -411,42 +445,51 @@ final class MainDomainRename
 
     /**
      * The main domain under its new name: the old one's settings, with its
-     * `www.` alias following the name and every other alias kept.
+     * `www.` alias following the name and every other alias kept. A `www.` name is the
+     * name under it, with the `www.` one kept as an alias.
      */
     public static function replacement(Domain $domain, string $newFqdn): Domain
     {
+        [$newFqdn, $ownAliases] = self::nameFor($newFqdn);
         $newDomain = $domain->replicate();
         $newDomain->domain = $newFqdn;
         $newDomain->removeAliases();
         foreach ($domain->getAliases() as $alias) {
             self::carryAlias($domain, $newDomain, $alias, 'www.'.$newFqdn);
         }
+        foreach ($ownAliases as $alias) {
+            self::carryName($domain, $newDomain, (string) $alias);
+        }
         $newDomain->setDetails(['aliases' => array_values(array_unique($newDomain->getAliases()))]);
 
         return $newDomain;
     }
 
-    /**
-     * Moves one alias onto the renamed row, the old `www.` alias becoming $newWww. It is set
-     * directly, not with addAlias(): the old row still holds it, so the availability check would find it taken.
-     */
+    /** Moves one alias onto the renamed row, the old `www.` alias becoming $newWww. */
     private static function carryAlias(Domain $domain, Domain $newDomain, mixed $alias, string $newWww): void
     {
-        if ($alias == 'www.'.$domain->domain) {
-            if (! self::servedBy($domain, $newWww)) {
-                $newDomain->addAlias($newWww);
+        self::carryName($domain, $newDomain, $alias == 'www.'.$domain->domain ? $newWww : (string) $alias);
+    }
 
-                return;
-            }
-            $alias = $newWww;
+    /**
+     * An alias the renamed row takes. It is set directly, not with addAlias(), when the row being
+     * replaced still holds it: the availability check would find it taken.
+     */
+    private static function carryName(Domain $domain, Domain $newDomain, string $alias): void
+    {
+        if (! self::servedBy($domain, $alias)) {
+            $newDomain->addAlias($alias);
+
+            return;
         }
         $newDomain->setDetails(['aliases' => [...$newDomain->getAliases(), $alias]]);
     }
 
-    /** The row already serves $name, as an alias or a tunnel: it goes with the row. */
+    /** The row already serves $name, as its own name, an alias or a tunnel: it goes with the row. */
     private static function servedBy(Domain $domain, string $name): bool
     {
-        return in_array($name, $domain->getAliases())
+        return strcasecmp((string) $domain->domain, $name) === 0
+            || in_array($name, $domain->getAliases())
             || ($domain->exists && $domain->tunnels()->getQuery()->where('hostname', strtolower($name))->exists());
     }
 

@@ -12,6 +12,7 @@ use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\IssuableDomain;
 use App\Lib\Ssl\Issuers;
+use App\Lib\Ssl\KeptCertificate;
 use App\Models\Domain as DomainModel;
 use App\Models\ProxyRule;
 use App\Models\Setting;
@@ -31,6 +32,12 @@ class Domain implements IssuableDomain
     /** OpenSSL refuses a longer subject CN (RFC 5280's ub-common-name). */
     private const COMMON_NAME_MAX = 64;
 
+    /** The organisation of the certificate the engine signs itself. */
+    private const SELF_SIGNED_ORGANISATION = 'PanelAlpha';
+
+    /** Beside the certificate files, the mark that an authority issued them through the engine. */
+    private const ISSUED_MARK = 'issued';
+
     public function __construct(
         private readonly UserProject $project,
         private readonly DomainModel $model,
@@ -46,11 +53,16 @@ class Domain implements IssuableDomain
         return $this->project;
     }
 
+    /**
+     * The name keeps a certificate only when a rename kept it moments ago ({@see KeptCertificate}); any other material
+     * left under the name is discarded, so a name added again later never serves a certificate it had once.
+     */
     public function create(): void
     {
+        $carried = $this->carriesKeptCertificate();
         try {
-            if ($this->model->sslEnabled()) {
-                $this->generateCertificate();
+            if (! $carried) {
+                $this->replaceLeftoverCertificate();
             }
 
             $this->createDomainRootDir();
@@ -63,8 +75,23 @@ class Domain implements IssuableDomain
             $this->hostWebserver()->reload(false);
             $this->syncStatisticsConfig();
         } catch (\Exception $e) {
-            $this->deleteAfterFailedCreate();
+            $this->deleteAfterFailedCreate(keepCertificate: $carried);
             throw $e;
+        }
+    }
+
+    private function carriesKeptCertificate(): bool
+    {
+        return KeptCertificate::isKeptFor($this->userModel(), $this->model->domain) && $this->hasSslCertificate();
+    }
+
+    private function replaceLeftoverCertificate(): void
+    {
+        if ($this->hasSslCertificate()) {
+            $this->deleteCertificates();
+        }
+        if ($this->model->sslEnabled()) {
+            $this->generateCertificate();
         }
     }
 
@@ -81,11 +108,14 @@ class Domain implements IssuableDomain
         }
     }
 
-    /** Best-effort: a cleanup failure is logged so it cannot replace the error that caused it. */
-    private function deleteAfterFailedCreate(): void
+    /**
+     * Best-effort: a cleanup failure is logged so it cannot replace the error that caused it. A certificate the name
+     * carried in is kept, since this create did not make it.
+     */
+    private function deleteAfterFailedCreate(bool $keepCertificate): void
     {
         try {
-            $this->delete();
+            $this->delete($keepCertificate);
         } catch (\Throwable $cleanup) {
             Log::warning(
                 "Cleanup after failed domain create failed for {$this->model->domain}: ".$cleanup->getMessage()
@@ -102,7 +132,11 @@ class Domain implements IssuableDomain
         $this->hostWebserver()->rebuildDomainConfig($this->model);
     }
 
-    public function delete(): void
+    /**
+     * @param  bool  $keepCertificate  The name keeps the certificate material it has, which a rename needs: the name may
+     *                                 be added again and must keep the certificate installed on it.
+     */
+    public function delete(bool $keepCertificate = false): void
     {
         $this->tearDownTunnel();
         $this->deleteOwnProxyRules();
@@ -112,7 +146,9 @@ class Domain implements IssuableDomain
         $this->project->deleteDomainConfig($this->model->domain);
         $this->project->reloadWebserver();
 
-        $this->deleteCertificates();
+        if (! $keepCertificate) {
+            $this->deleteCertificates();
+        }
         (new HttpAcmeChallengeStore($this->system()))->deleteDomainDir($this->model->domain);
     }
 
@@ -124,6 +160,7 @@ class Domain implements IssuableDomain
             $this->certFile('key'),
             $this->certFile('ca'),
             $this->certFile('pem'),
+            $this->certFile(self::ISSUED_MARK),
         ));
     }
 
@@ -239,6 +276,19 @@ class Domain implements IssuableDomain
         Issuers::issueFor($this);
     }
 
+    /**
+     * Replaces whatever certificate this domain carries with the one a new domain gets, and forgets the ACME
+     * challenge state of the old one. Overwritten, not removed first, so a failure leaves the site its certificate.
+     */
+    public function resetCertificate(): void
+    {
+        $this->generateCertificate();
+        (new HttpAcmeChallengeStore($this->system()))->deleteDomainDir($this->model->domain);
+
+        $this->project->reloadWebserver();
+        $this->hostWebserver()->reload();
+    }
+
     /** The domain that answers for the server's bare IP serves the engine's own certificate. */
     private function copyEngineCertificate(): void
     {
@@ -292,7 +342,7 @@ class Domain implements IssuableDomain
 
     private function selfSignSubject(): string
     {
-        $subject = '/C=US/ST=California/O=PanelAlpha/OU=Org';
+        $subject = '/C=US/ST=California/O='.self::SELF_SIGNED_ORGANISATION.'/OU=Org';
         $name = $this->model->domain;
 
         return strlen($name) <= self::COMMON_NAME_MAX ? $subject.'/CN='.$name : $subject;
@@ -391,6 +441,50 @@ class Domain implements IssuableDomain
         $this->installCertFile(trim($cert).PHP_EOL.trim($ca).PHP_EOL, $pemFile);
         $system->exec(Privileged::files()->changeMode('a+r', $certFile, $caFile, $pemFile));
         $system->exec(Privileged::files()->changeMode('600', $keyFile));
+    }
+
+    /** What an authority issued through the engine, marked so a removal of an installed certificate leaves it alone. */
+    public function putIssuedCertificate(string $cert, string $key, string $ca = ''): void
+    {
+        $this->putCertificate($cert, $key, $ca);
+        $this->installCertFile(self::ISSUED_MARK.PHP_EOL, $this->certFile(self::ISSUED_MARK));
+    }
+
+    /** A certificate somebody installed: the engine's issued mark goes, as the engine did not make it. */
+    public function installCertificate(string $cert, string $key, string $ca = ''): void
+    {
+        $this->putCertificate($cert, $key, $ca);
+        $this->system()->exec(Privileged::files()->removeIfExists($this->certFile(self::ISSUED_MARK)));
+    }
+
+    /**
+     * Whether the name is on a certificate the engine made: one an authority issued through it, one it signed itself,
+     * or the server's own that covers the name. Anything else was installed.
+     */
+    public function carriesEngineCertificate(): bool
+    {
+        if (! $this->hasSslCertificate()) {
+            return false;
+        }
+        if ($this->fileExists($this->certFile(self::ISSUED_MARK))) {
+            return true;
+        }
+        $info = $this->getSslCertificateInfo();
+
+        return $this->isSelfSignedByTheEngine($info) || $this->isTheServersCertificate((string) $info['certificate']);
+    }
+
+    /** @param  array<string, mixed>  $info  what {@see getSslCertificateInfo()} answers */
+    private function isSelfSignedByTheEngine(array $info): bool
+    {
+        return ($info['self_signed'] ?? false) === true && ($info['issuer_name'] ?? null) === self::SELF_SIGNED_ORGANISATION;
+    }
+
+    private function isTheServersCertificate(string $certificate): bool
+    {
+        $covering = (new EngineCertificate)->covering($this->model->domain);
+
+        return $covering !== null && trim($covering['certificate']) === trim($certificate);
     }
 
     /** Stages the contents in a temp file the engine can write, then copies it in as root. */

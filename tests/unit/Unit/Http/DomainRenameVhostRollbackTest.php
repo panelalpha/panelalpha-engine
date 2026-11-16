@@ -192,7 +192,7 @@ class DomainRenameVhostRollbackTest extends TestCase
                         ($this->onCreate)($this->model()->domain);
                     }
 
-                    public function delete(): void
+                    public function delete(bool $keepCertificate = false): void
                     {
                         ($this->onDelete)($this->model()->domain);
                     }

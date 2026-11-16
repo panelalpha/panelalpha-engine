@@ -11,6 +11,7 @@ use App\Lib\Project\ProjectListFacts;
 use App\Lib\Project\ProjectOverview;
 use App\Lib\Project\PublicRouting\ProjectPublicRouting;
 use App\Lib\Project\PublicRouting\PublicRoutingGrants;
+use App\Lib\Ssl\KeptCertificate;
 use App\Lib\Usage\ProjectBandwidth;
 use App\Models\User;
 use App\System\Project\Dind\AppDatabase;
@@ -182,6 +183,7 @@ class UserResource extends JsonResource
             $details['site_password_version'],
             $details[User::DETAIL_PROTECTED],
             $details[ProjectPublicRouting::DETAIL],
+            $details[KeptCertificate::DETAIL],
         );
 
         $details['password_protection'] = $passwordProtected;

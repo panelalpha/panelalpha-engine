@@ -81,7 +81,7 @@ final class AcmeIssuer implements Issuer
 
         $intermediates = self::intermediates($parts);
 
-        $domain->putCertificate($certificate, $leafKey, $intermediates);
+        $domain->putIssuedCertificate($certificate, $leafKey, $intermediates);
 
         $this->publish($domain);
     }
