@@ -161,7 +161,8 @@ final class WritableProjectBinds
         return $source;
     }
 
-    private static function normalised(string $path): ?string
+    /** $path with `.` and `..` resolved without touching the disk; null when `..` climbs past the root. */
+    public static function normalised(string $path): ?string
     {
         $parts = [];
         foreach (explode('/', $path) as $part) {

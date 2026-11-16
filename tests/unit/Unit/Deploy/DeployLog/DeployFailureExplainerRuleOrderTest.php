@@ -67,6 +67,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'go-cgo-required',
             'go-package-excluded',
             'go-entrypoint-not-found',
+            'bind-source-missing',
             'env-validation-failed',
             'database-auth-failed',
             'missing-build-script',

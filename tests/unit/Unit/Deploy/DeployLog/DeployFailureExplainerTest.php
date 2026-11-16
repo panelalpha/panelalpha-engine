@@ -1236,6 +1236,17 @@ OUT;
         $this->assertStringNotContainsString('entrypoint', $match['message'] ?? '');
     }
 
+    public function test_a_bind_source_file_missing_from_the_repository_is_named(): void
+    {
+        $output = 'Error response from daemon: invalid mount config for type "bind": '
+            . 'bind source path does not exist: /home/acct/project/config/local_config.rb';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('bind-source-missing', $match['rule'] ?? null);
+        $this->assertStringStartsWith('The compose file binds `config/local_config.rb`, which is not in the repository.', $match['message']);
+    }
+
     public function test_buildkit_git_warning_alone_names_no_entrypoint(): void
     {
         $this->assertNotSame('container-entrypoint-missing', DeployFailureExplainer::match(self::BUILDKIT_GIT_WARNING)['rule'] ?? null);

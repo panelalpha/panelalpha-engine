@@ -1090,6 +1090,13 @@ class DeployFailureExplainer
     private static function configurationRules(): array
     {
         return [
+            'bind-source-missing' => [
+                '#bind source path does not exist: /home/[^/\s]+/project/(\S+)#i',
+                static fn (array $m): string => "The compose file binds `{$m[1]}`, which is not in the repository. The project expects "
+                        .'it to exist before it starts, often copied from an example file next to it: commit it, or create it '
+                        .'in a deploy hook.',
+            ],
+
             'env-validation-failed' => [
                 '/(environment variables? (has|have) failed the following validations|should not be one of the following values|must be longer than or equal to \d+ characters)/i',
                 static fn (): string => 'The application refused to start because one of its settings is missing or still has a placeholder value. '
