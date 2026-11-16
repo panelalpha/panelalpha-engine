@@ -6,18 +6,15 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    env_file:
+      # PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD, the admin login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       # Unprivileged port: no reliance on the image's file capability for :80.
       PGADMIN_LISTEN_PORT: "8080"
-      # Initial admin login, from the project's env vars (checked below).
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-}
     volumes:
       # pgadmin4.db (users, saved servers, preferences) and sessions.
       - pgadmin-data:/var/lib/pgadmin
-    depends_on:
-      env-check:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/misc/ping"]
       interval: 5s
@@ -25,18 +22,6 @@ services:
       retries: 30
       start_period: 20s
     mem_limit: 768m
-
-  # Fails `compose up` (and so the deploy) while a required variable is unset.
-  env-check:
-    image: dpage/pgadmin4:9.18
-    restart: "no"
-    entrypoint: ["/bin/sh", "/pgadmin-env-check.sh"]
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-}
-    volumes:
-      - ./pgadmin-env-check.sh:/pgadmin-env-check.sh:ro
-    mem_limit: 32m
 
   # No-op: `compose up -d` returns once pgAdmin answers (first boot creates its DB).
   ready:

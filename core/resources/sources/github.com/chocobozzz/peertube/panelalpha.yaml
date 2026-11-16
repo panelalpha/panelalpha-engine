@@ -9,9 +9,16 @@ description: >-
   and Redis 8 as upstream's support/docker/production compose does, minus its
   nginx/certbot/postfix sidecars (the engine terminates TLS; SMTP is the
   operator's to configure) and the RTMP live port. The webserver hostname is
-  the site's address. PEERTUBE_ADMIN_EMAIL (the root account's email) is
-  required; the deploy fails naming it when unset. The prepare hook generates
+  the site's address. The prepare hook generates
   PEERTUBE_SECRET and the database password once into
   ~/.panelalpha/peertube/secrets.env. Media, config, database and Redis are on
-  named volumes. PeerTube creates the `root` user on first start and prints
-  its generated password in the container log (upstream behaviour).
+  named volumes. PeerTube creates the `root` user on first start from
+  PEERTUBE_ADMIN_EMAIL and PT_INITIAL_ROOT_PASSWORD, which the engine
+  generates (`credentials:` below) and returns from
+  GET /projects/{name}/app-credentials; the login form takes the email or
+  `root`.
+credentials:
+  login_path: /login
+  fields:
+    PEERTUBE_ADMIN_EMAIL: {kind: email, value: '{email}'}
+    PT_INITIAL_ROOT_PASSWORD: {kind: password}

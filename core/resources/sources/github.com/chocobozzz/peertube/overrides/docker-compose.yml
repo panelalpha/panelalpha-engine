@@ -12,11 +12,12 @@ services:
     env_file:
       # PEERTUBE_SECRET and the DB password, generated once by hooks/prepare.sh.
       - ../.panelalpha/peertube/secrets.env
+      # PEERTUBE_ADMIN_EMAIL / PT_INITIAL_ROOT_PASSWORD, the root login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       PEERTUBE_WEBSERVER_HOSTNAME: ${PA_PUBLIC_HOST}
       PEERTUBE_WEBSERVER_PORT: "443"
       PEERTUBE_WEBSERVER_HTTPS: "true"
-      PEERTUBE_ADMIN_EMAIL: ${PEERTUBE_ADMIN_EMAIL:?Set PEERTUBE_ADMIN_EMAIL to the email of the PeerTube root account}
       PEERTUBE_DB_HOSTNAME: postgres
       PEERTUBE_DB_USERNAME: peertube
       PEERTUBE_DB_SSL: "false"

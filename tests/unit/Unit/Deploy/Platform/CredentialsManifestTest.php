@@ -10,6 +10,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\SourceRecipes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * `credentials:` declares the login an application is seeded with; the engine
@@ -208,6 +209,43 @@ class CredentialsManifestTest extends TestCase
         foreach (glob($dir . '/{hooks,files/*,files/*/*,files/*/*/*}/*.sh', GLOB_BRACE) ?: [] as $script) {
             $this->assertStringNotContainsString($generatedHere, (string) file_get_contents($script), $script);
         }
+    }
+
+    /** @return array<string, array{string, list<string>}> */
+    public static function gatedRecipes(): array
+    {
+        return [
+            'langflow' => ['github.com/langflow-ai/langflow', ['LANGFLOW_SUPERUSER', 'LANGFLOW_SUPERUSER_PASSWORD']],
+            'photoprism' => ['github.com/photoprism/photoprism', ['PHOTOPRISM_ADMIN_USER', 'PHOTOPRISM_ADMIN_PASSWORD']],
+            'invoiceninja' => ['github.com/invoiceninja/invoiceninja', ['IN_USER_EMAIL', 'IN_PASSWORD']],
+            'pgadmin' => ['github.com/pgadmin-org/pgadmin4', ['PGADMIN_DEFAULT_EMAIL', 'PGADMIN_DEFAULT_PASSWORD']],
+            'leafwiki' => ['github.com/perber/leafwiki', ['LEAFWIKI_ADMIN_USERNAME', 'LEAFWIKI_ADMIN_PASSWORD']],
+            'peertube' => ['github.com/chocobozzz/peertube', ['PEERTUBE_ADMIN_EMAIL', 'PT_INITIAL_ROOT_PASSWORD']],
+            'rallly' => ['github.com/lukevella/rallly', ['SUPPORT_EMAIL']],
+            'timetagger' => ['github.com/almarklein/timetagger', ['TIMETAGGER_USERNAME', 'TIMETAGGER_PASSWORD']],
+        ];
+    }
+
+    /**
+     * A deploy without environment variables starts: the login the app refuses
+     * to start without comes from the engine's env file, which no
+     * `environment:` entry of the same name overrides.
+     *
+     * @param list<string> $fields
+     */
+    #[DataProvider('gatedRecipes')]
+    public function test_a_recipe_that_needs_a_login_to_start_takes_it_from_the_engine(string $recipe, array $fields): void
+    {
+        $dir = SourceRecipes::defaultDirectory() . '/' . $recipe;
+        $config = AppConfig::fromYaml((string) file_get_contents($dir . '/panelalpha.yaml'));
+        $raw = (string) file_get_contents($dir . '/overrides/docker-compose.yml');
+
+        $this->assertSame($fields, array_keys($config?->credentials()?->fields ?? []), $recipe);
+        $this->assertStringContainsString('../.panelalpha/app-credentials.env', $raw, $recipe);
+        foreach (Yaml::parse($raw)['services'] as $name => $service) {
+            $this->assertSame([], array_intersect($fields, array_keys($service['environment'] ?? [])), "{$recipe}: {$name}");
+        }
+        $this->assertStringNotContainsString('-check', $raw, $recipe);
     }
 
     public function test_pyfedi_seeds_its_admin_without_a_terminal(): void

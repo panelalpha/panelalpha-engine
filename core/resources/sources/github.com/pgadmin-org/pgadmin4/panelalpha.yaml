@@ -5,6 +5,12 @@ description: >-
   2000 MB account (and earlier hit the Sysbox /proc/tty/driver limit), so this
   recipe runs the official dpage/pgadmin4 image of the current release (9.18)
   on port 8080 with /var/lib/pgadmin on a named volume. The image needs
-  PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD (the initial admin login)
-  from the project env vars; a one-shot check fails the deploy naming whichever
-  is missing.
+  PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD (the initial admin login);
+  the engine generates them (`credentials:` below; the project's email, or one on
+  the site's own domain, since pgAdmin rejects special-use ones such as .local) and returns
+  them from GET /projects/{name}/app-credentials.
+credentials:
+  login_path: /login
+  fields:
+    PGADMIN_DEFAULT_EMAIL: {kind: email, value: '{email}'}
+    PGADMIN_DEFAULT_PASSWORD: {kind: password}

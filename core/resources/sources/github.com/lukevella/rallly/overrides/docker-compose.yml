@@ -10,9 +10,10 @@ services:
     env_file:
       - path: .env
         required: false
+      # SUPPORT_EMAIL, the project's email or one on the site's domain.
+      - ../.panelalpha/app-credentials.env
     environment:
       NEXT_PUBLIC_BASE_URL: ${PA_PUBLIC_URL}
-      SUPPORT_EMAIL: ${SUPPORT_EMAIL:?Set SUPPORT_EMAIL to the address Rallly shows users for support}
       # Session encryption key (min 32 chars) and DB password: generated per account.
       SECRET_PASSWORD: ${SECRET_PASSWORD:?SECRET_PASSWORD is required}
       DATABASE_URL: postgres://rallly:${RALLLY_DB_PASSWORD:?RALLLY_DB_PASSWORD is required}@db:5432/rallly

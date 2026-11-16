@@ -7,7 +7,11 @@ description: >-
   This recipe runs upstream's self-hosted stack on the published image of the
   current release (lukevella/rallly:4.15.2, postgres:18-alpine). The session
   secret and database password are generated per account by the engine;
-  NEXT_PUBLIC_BASE_URL is the site's address; SUPPORT_EMAIL must be set by the
-  customer (the deploy fails naming it otherwise). Optional settings such as
+  NEXT_PUBLIC_BASE_URL is the site's address; SUPPORT_EMAIL, which Rallly refuses
+  to start without, is the project's email (or one on the site's domain
+  without one), kept by the engine as `credentials:` below. Optional settings such as
   SMTP_* are passed through from the project's environment. A health-check
   gate makes the deploy wait until Rallly has migrated and answers.
+credentials:
+  fields:
+    SUPPORT_EMAIL: {kind: email, value: '{email}'}

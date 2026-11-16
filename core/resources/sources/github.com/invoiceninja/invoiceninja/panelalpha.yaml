@@ -13,5 +13,10 @@ description: >-
   ~/.panelalpha/invoiceninja/secrets.env, and writes a ~/project/.env without
   secrets so the repository's .env.example is not used (the image does not
   read it). On first start the image's init.sh creates the first account from
-  IN_USER_EMAIL and IN_PASSWORD and exits without them, so a one-shot check
-  fails the deploy naming whichever of the two project env vars is missing.
+  IN_USER_EMAIL and IN_PASSWORD and exits without them; the engine generates
+  that login (`credentials:` below, the project's email when it has one) and
+  returns it from GET /projects/{name}/app-credentials.
+credentials:
+  fields:
+    IN_USER_EMAIL: {kind: email, value: '{email}'}
+    IN_PASSWORD: {kind: password}

@@ -10,10 +10,9 @@ services:
     env_file:
       # PHOTOPRISM_DATABASE_PASSWORD; a missing file aborts `up`.
       - ../.panelalpha/photoprism/app.env
+      # PHOTOPRISM_ADMIN_USER / PHOTOPRISM_ADMIN_PASSWORD, the admin login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
-      PHOTOPRISM_ADMIN_USER: ${PHOTOPRISM_ADMIN_USER:-admin}
-      # Initial admin password, from the project's env vars (checked below).
-      PHOTOPRISM_ADMIN_PASSWORD: ${PHOTOPRISM_ADMIN_PASSWORD:-}
       PHOTOPRISM_AUTH_MODE: password
       PHOTOPRISM_SITE_URL: ${PA_PUBLIC_URL}/
       # The engine terminates TLS; PhotoPrism serves plain HTTP on 2342.
@@ -31,8 +30,6 @@ services:
     ports:
       - "2342:2342"
     depends_on:
-      env-check:
-        condition: service_completed_successfully
       db:
         condition: service_healthy
     healthcheck:
@@ -66,24 +63,6 @@ services:
       retries: 30
       start_period: 20s
     mem_limit: 640m
-
-  # Fails `compose up` (and so the deploy) while the admin password is unset.
-  env-check:
-    image: mariadb:12.3
-    restart: "no"
-    environment:
-      PHOTOPRISM_ADMIN_PASSWORD: ${PHOTOPRISM_ADMIN_PASSWORD:-}
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        n=$${#PHOTOPRISM_ADMIN_PASSWORD}
-        if [ "$$n" -lt 8 ] || [ "$$n" -gt 72 ]; then
-          echo "photoprism: project environment variable PHOTOPRISM_ADMIN_PASSWORD is missing or not 8-72 characters (the initial admin password; write any \$$ as \$$\$$). Set it and redeploy." >&2
-          exit 1
-        fi
-        echo "photoprism: initial admin password set"
-    mem_limit: 32m
 
   # No-op gate: `compose up -d` returns only once PhotoPrism answers.
   ready:

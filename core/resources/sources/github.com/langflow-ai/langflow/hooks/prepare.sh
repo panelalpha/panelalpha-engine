@@ -9,3 +9,6 @@ if [ ! -f "${STORE_DIR}/db.env" ]; then
     ( umask 077; printf 'POSTGRES_PASSWORD=%s\nLANGFLOW_DATABASE_URL=postgresql://langflow:%s@postgres:5432/langflow\n' "$pw" "$pw" > "${STORE_DIR}/db.env" )
     echo "[langflow] database password written to ${STORE_DIR}" >&2
 fi
+
+# .env.example sets the database URL to SQLite and the superuser empty, and .env is loaded after db.env.
+printf '# Langflow runs from the published image; settings are in docker-compose.yml.\n' > "${HOME}/project/.env"

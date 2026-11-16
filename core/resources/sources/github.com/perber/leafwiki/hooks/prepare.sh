@@ -13,3 +13,6 @@ if [ ! -f "${STORE}/app.env" ]; then
      printf 'LEAFWIKI_JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > "${STORE}/app.env")
 fi
 chmod 600 "${STORE}/app.env"
+
+# .env.example sets the JWT secret and the admin login empty, and .env is loaded after the files above.
+printf '# LeafWiki runs from the published image; settings are in docker-compose.yml.\n' > ~/project/.env

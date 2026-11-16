@@ -5,11 +5,11 @@ PostgreSQL.
 
 ## Deploying
 
-Required project variable:
-
-| Variable | Why |
-|---|---|
-| `SUPPORT_EMAIL` | Rallly refuses to start without it; shown to users as the support contact. The deploy fails naming it when missing. |
+Deploy as is. `SUPPORT_EMAIL`, which Rallly refuses to start without and shows
+users as the support contact, is the project's email, or an address on the
+site's domain without one; the engine keeps it with the project's app
+credentials (`GET /projects/{name}/app-credentials`). A project env var
+`SUPPORT_EMAIL`, set before the first deploy, is used instead.
 
 Rallly signs users in with a one-time code sent by email, so set `SMTP_HOST`,
 `SMTP_PORT`, `SMTP_USER`, `SMTP_PWD` (and `SMTP_SECURE`) to be able to log in.

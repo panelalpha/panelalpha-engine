@@ -8,6 +8,10 @@ description: >-
   This recipe runs the published ghcr.io/perber/leafwiki image of the current
   release (v0.13.0) with /app/data on a named volume. hooks/prepare.sh
   generates LEAFWIKI_JWT_SECRET once into ~/.panelalpha/leafwiki. The initial
-  admin password is the customer's: LEAFWIKI_ADMIN_PASSWORD (and optionally
-  LEAFWIKI_ADMIN_USERNAME, default admin) comes from the project env vars,
-  and a one-shot check fails the deploy naming it when it is unset.
+  admin login (LEAFWIKI_ADMIN_USERNAME / LEAFWIKI_ADMIN_PASSWORD) is generated
+  by the engine (`credentials:` below) and returned by
+  GET /projects/{name}/app-credentials.
+credentials:
+  fields:
+    LEAFWIKI_ADMIN_USERNAME: {kind: username}
+    LEAFWIKI_ADMIN_PASSWORD: {kind: password}
