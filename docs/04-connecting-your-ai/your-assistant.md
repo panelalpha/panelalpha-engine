@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 318 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 319 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -723,6 +723,7 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_prewarm_get` | Read which base images the server keeps ready, and the disk they may use |
 | `system_prewarm_set` | Choose which base images the server keeps ready, and the disk they may use |
 | `system_sites_db_get` | Read the site database's cache sizes, set and running |
+| `system_sites_db_set` | Change the site database's cache sizes; it restarts, so sites lose their database for a few seconds |
 | `system_ssl_config_get` | How certificates for project sites are obtained |
 | `system_ssl_config_set` | Set how certificates for project sites are obtained |
 | `system_telemetry_get` | Read whether this engine sends failure reports and what they carry |

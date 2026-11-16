@@ -29,6 +29,8 @@ final class Arguments
 
     private const ENVIRONMENT_NAME = '/\A[A-Za-z_][A-Za-z0-9_]*\z/';
 
+    private const SETTING_VALUE = '~\A[A-Za-z0-9_./@:,*+-]{0,16384}\z~';
+
     private const HOSTNAME = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*';
 
     public static function path(string $path): string
@@ -164,6 +166,12 @@ final class Arguments
         }
 
         return self::operand($pattern);
+    }
+
+    /** A setting's value as `.env` keeps it unquoted: one word, no quote, space or line break. */
+    public static function settingValue(string $value): string
+    {
+        return self::matching(self::SETTING_VALUE, 'setting value', $value);
     }
 
     private static function matching(string $pattern, string $kind, string $value): string

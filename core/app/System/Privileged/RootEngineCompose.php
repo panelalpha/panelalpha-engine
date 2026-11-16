@@ -26,6 +26,34 @@ final class RootEngineCompose
     }
 
     /**
+     * Sets the site database's cache sizes in the engine's compose `.env` in place. The broker takes only the three
+     * SITES_DB_* sizes, each value one word `.env` keeps unquoted, and never writes `.env-core`.
+     *
+     * @param  array<string, string>  $settings
+     * @return list<string>
+     */
+    public function setEnv(array $settings): array
+    {
+        $pairs = [];
+        foreach ($settings as $key => $value) {
+            array_push($pairs, Arguments::environmentName($key), Arguments::settingValue($value));
+        }
+
+        return $this->compose('engineSetEnv', $pairs);
+    }
+
+    /**
+     * `KEY=value` for each of $keys, all site database cache sizes, a live line of the engine's compose `.env` sets.
+     *
+     * @param  list<string>  $keys
+     * @return list<string>
+     */
+    public function envValues(array $keys): array
+    {
+        return $this->compose('engineEnvValues', array_map(Arguments::environmentName(...), $keys));
+    }
+
+    /**
      * @param  list<string>  $values
      * @return list<string>
      */

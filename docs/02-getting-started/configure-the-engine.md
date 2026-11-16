@@ -85,16 +85,16 @@ A panel or a script can read every area, and change most of them. A token limite
 
 | Area | Read | Change |
 |---|---|---|
-| Address and certificate | `GET /system/engine-address` | `PUT /system/engine-address`: `cert_domain`, `cert_email`, `default_tunnel`. Requesting the certificate is `PUT /system/engine-certificate`. The address itself only with `pae configure address`. |
+| Address and certificate | `GET /system/engine-address` | `PUT /system/engine-address`: `cert_domain`, `cert_email`, `default_tunnel`. Requesting the certificate is `PUT /system/engine-certificate`. The address itself is not a setting: the engine is bound to it, and the API refuses `url`. |
 | Engine API access | `GET /system/api-access` | `PUT`, `POST …/rotate` and `DELETE /system/api-access/{project}` |
 | MCP tokens | `GET /mcp-tokens`, `GET /system/mcp-scope` | `PUT /system/mcp-scope`: `permission_mode`, `commands`. `POST /mcp-tokens` (with `expires_in`), `PUT /mcp-tokens/{id}/commands`, `/projects` and `/revoke`, `DELETE /mcp-tokens/{id}` |
 | API tokens | none | only `pae configure api-tokens` |
 | Prewarmed images | `GET /system/prewarm` | `PUT /system/prewarm`: `images`, `budget`, `reserve` |
-| Site database | `GET /system/sites-db` | only `pae configure sites-db` |
+| Site database | `GET /system/sites-db` | `PUT /system/sites-db`: `innodb_buffer_pool_size`, `key_buffer_size`, `aria_pagecache_buffer_size`. The database restarts, as from the wizard. |
 | Telemetry | `GET /system/telemetry` | `PUT /system/telemetry`: `sending`, `tier`, `source_bundle`, `bug_reports` |
 
 What the API and the wizard change is kept in the engine database, and it wins over the same key in `.env-core`. Each value in a read says where it came from: `setting` for the database, `env` for `.env-core`, `default` for the engine's own. Sending `null` for a field removes it from the database, so `.env-core` or the default applies again. A change applies on the engine's next request; a deploy already running in the queue keeps what it started with. Secrets are never read back.
 
-The engine's address and the site database's cache sizes are read by the server itself, outside the engine, so they still live in `.env-core` and the engine's `.env`, and change only with `pae configure`.
+The site database's cache sizes are read by compose, outside the engine, so they stay in the engine's `.env`. The API writes them through the engine's root helper, which accepts those three keys in that file and nothing else, and never writes `.env-core`.
 
 A token limited to part of the API cannot widen another token's commands. The token routes and `/system/mcp-scope` are for a panel and are not assistant tools.

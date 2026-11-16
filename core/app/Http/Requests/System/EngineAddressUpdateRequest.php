@@ -30,10 +30,16 @@ class EngineAddressUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'url' => ['prohibited'],
             'cert_domain' => ['sometimes', 'present', 'string', 'max:253', $this->check(static fn (string $v): ?string => EngineAddressSettings::badName(strtolower(trim($v))))],
             'cert_email' => ['sometimes', 'present', 'string', 'max:255', $this->check(static fn (string $v): ?string => trim($v) === '' || filter_var(trim($v), FILTER_VALIDATE_EMAIL) ? null : 'That is not an email address.')],
             'default_tunnel' => ['sometimes', 'string', Rule::in(DomainPlan::TUNNELS)],
         ];
+    }
+
+    public function messages(): array
+    {
+        return ['url.prohibited' => 'The engine is bound to its address; it is not a setting the API changes.'];
     }
 
     /** @return array{cert_domain?: string, cert_email?: string, default_tunnel?: string} */

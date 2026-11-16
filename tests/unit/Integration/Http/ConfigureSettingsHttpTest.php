@@ -14,9 +14,9 @@ use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
- * What `pae configure` changes, over the API: every area readable, and every one core reads at use writable, stored
- * in the settings table over `.env-core`. The engine's address and the site database's sizes are read by root or a
- * host container, so they answer here and change only from the wizard.
+ * What `pae configure` changes, over the API: every area readable and writable. What core reads at use is stored in
+ * the settings table over `.env-core`; the engine's address and the site database's sizes stay in their files, which
+ * the root broker writes when this process cannot.
  */
 class ConfigureSettingsHttpTest extends TestCase
 {
@@ -69,13 +69,19 @@ class ConfigureSettingsHttpTest extends TestCase
                 return $this->dir . '/compose';
             }
 
+            /** @var list<string> */
+            public array $actions = [];
+
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                if (is_array($cmd) && LocalRoot::action(array_values($cmd)) === 'compose.sitesDbCacheSizes') {
-                    return "33554432\t16777216\t8388608";
-                }
+                $action = is_array($cmd) ? LocalRoot::action(array_values($cmd)) : null;
+                $this->actions[] = (string) $action;
 
-                throw new RuntimeException('nothing else runs here');
+                return match ($action) {
+                    'compose.sitesDbCacheSizes' => "33554432\t16777216\t8388608",
+                    'compose.engineUpWithoutDependencies' => '',
+                    default => throw new RuntimeException('nothing else runs here'),
+                };
             }
         };
     }
@@ -204,12 +210,18 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->assertNull(Setting::get('cert_domain'));
     }
 
-    public function test_engine_address_never_writes_the_url(): void
+    public function test_engine_address_refuses_the_url_and_leaves_env_core_alone(): void
     {
-        $this->putJson('/api/system/engine-address', ['url' => 'https://other.example.test:2011', 'default_tunnel' => 'none'])->assertOk();
+        $before = (string) file_get_contents($this->dir . '/.env');
 
+        $this->putJson('/api/system/engine-address', ['url' => 'https://other.example.test:2011'])
+            ->assertStatus(422)->assertJsonValidationErrors('url');
+        $this->putJson('/api/system/engine-address', ['url' => 'https://other.example.test:2011', 'default_tunnel' => 'none'])
+            ->assertStatus(422)->assertJsonValidationErrors('url');
+
+        $this->assertSame($before, (string) file_get_contents($this->dir . '/.env'));
         $this->assertSame('https://engine.example.test:2011', config('app.url'));
-        $this->assertStringContainsString('APP_URL=https://engine.example.test:2011', (string) file_get_contents($this->dir . '/.env'));
+        $this->assertNull(Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL));
     }
 
     public function test_prewarm_reads_the_defaults_and_what_could_be_selected(): void
@@ -303,8 +315,24 @@ class ConfigureSettingsHttpTest extends TestCase
         $this->assertArrayHasKey('MCP_PERMISSION_MODE', $response->json('data.env'));
     }
 
-    public function test_the_site_database_sizes_have_no_write_route(): void
+    public function test_sites_db_writes_the_sizes_and_recreates_the_running_database(): void
     {
-        $this->putJson('/api/system/sites-db', ['key_buffer_size' => '16M'])->assertStatus(405);
+        mkdir($this->dir . '/compose');
+        rename($this->dir . '/.env-compose', $this->dir . '/compose/.env');
+
+        $response = $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '64m', 'key_buffer_size' => null]);
+
+        $response->assertOk();
+        $this->assertTrue($response->json('recreated'));
+        $this->assertSame("COMPOSE_PROFILES=full\nSITES_DB_KEY_BUFFER_SIZE=\n\nSITES_DB_INNODB_BUFFER_POOL_SIZE=64M\n", file_get_contents($this->dir . '/compose/.env'));
+        $this->assertContains('compose.engineUpWithoutDependencies', $this->app->make(System::class)->actions);
+        $this->assertSame(['value' => '8M', 'source' => 'default', 'default' => '8M', 'running_mb' => 16], $response->json('data.key_buffer_size'));
+    }
+
+    public function test_sites_db_refuses_a_size_without_a_unit_or_below_its_minimum(): void
+    {
+        $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '64'])->assertStatus(422)->assertJsonValidationErrors('innodb_buffer_pool_size');
+        $this->putJson('/api/system/sites-db', ['innodb_buffer_pool_size' => '4M'])->assertStatus(422)->assertJsonValidationErrors('innodb_buffer_pool_size');
+        $this->putJson('/api/system/sites-db', [])->assertStatus(422);
     }
 }

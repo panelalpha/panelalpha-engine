@@ -8,7 +8,7 @@ import functools
 
 from .. import cli, composefiles, dockerapi, paths, values
 from ..refused import Refused
-from . import engineservices, hostapi
+from . import enginesettings, engineservices, hostapi
 from .engineservices import SITES_HTTP, Service, engine_file
 from .sequence import Command, flag, group, reads, rest
 
@@ -147,4 +147,5 @@ ACTIONS = {
     'serviceContainers': service_lookup(service_containers, 'ps', '-a', '--format', 'json'),
     'cpuPercent': service_lookup(cpu_percent, 'stats', '--no-stream', '--format', '{{.CPUPerc}}', engine_services=()),
     **engineservices.ACTIONS,
+    **enginesettings.ACTIONS,
 }

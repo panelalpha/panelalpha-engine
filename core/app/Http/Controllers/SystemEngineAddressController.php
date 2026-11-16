@@ -46,8 +46,8 @@ class SystemEngineAddressController extends Controller
             .'empty or null restores the .panelalpha.direct default, and every vhost is re-rendered in the background. '
             .'Nothing is issued here: PUT /system/engine-certificate does that. `default_tunnel` none keeps new '
             .'projects off PanelAlpha Online; an explicit `tunnel` in a create request still wins. The address itself '
-            .'(`url`, APP_URL) is read-only here: it lives in .env-core, which only `pae configure address` on the '
-            .'host can write. Refused with 403 for a token scoped to some projects.',
+            .'(`url`, APP_URL) is not a setting: the engine is bound to it, and a request that sends it is refused with '
+            .'422. Refused with 403 for a token scoped to some projects.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         x: ['mcp-description' => 'Changes the certificate name new project sites are named under (cert_domain; empty restores the default), the Let\'s Encrypt email, or the default tunnel for new projects (panelalpha or none). Nothing is issued: system_engine_cert_request does that. Refused 403 for a project-scoped token.'],

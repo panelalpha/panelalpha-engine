@@ -474,7 +474,8 @@ class NativeActionsTest(unittest.TestCase):
     def test_every_native_compose_or_webserver_action_is_covered_here(self):
         covered = {f'compose.{name}' for name, *_ in EXECS}
         covered |= {'compose.runningServices', 'compose.engineRunningServices', 'compose.serviceContainers',
-                    'compose.cpuPercent', 'compose.restart', 'webserver.queueReload'}
+                    'compose.cpuPercent', 'compose.restart', 'webserver.queueReload',
+                    'compose.engineSetEnv', 'compose.engineEnvValues'}
         self.assertEqual(self.native(), covered)
 
     def test_up_down_and_build_stay_compose(self):

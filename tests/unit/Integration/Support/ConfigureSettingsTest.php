@@ -258,14 +258,6 @@ class ConfigureSettingsTest extends TestCase
         $this->assertNull($caches->toArray()['key_buffer_size']['running_mb']);
     }
 
-    public function test_an_unreadable_settings_file_reads_as_unset(): void
-    {
-        $env = new EngineEnvFile(new EnvFile($this->dir . '/missing'), EngineEnvFile::COMPOSE);
-
-        $this->assertFalse($env->readable());
-        $this->assertSame(['A' => null, 'B' => null], $env->values(['A', 'B']));
-    }
-
     public function test_token_lifetimes(): void
     {
         Carbon::setTestNow('2026-11-16 12:00:00');

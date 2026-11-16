@@ -52,6 +52,8 @@ AREAS = {
 RENAMED = {
     'compose.engineUpWithoutDependencies': 'RootEngineCompose::upWithoutDependencies',
     'compose.engineRunningServices': 'RootEngineServices::runningServices',
+    'compose.engineSetEnv': 'RootEngineCompose::setEnv',
+    'compose.engineEnvValues': 'RootEngineCompose::envValues',
     'lines.composePull': 'RootComposeLines::pull',
     'lines.composeBuild': 'RootComposeLines::build',
 }

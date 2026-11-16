@@ -560,6 +560,7 @@ Route::put('/system/mcp-scope', [SystemMcpScopeController::class, 'update']);
 Route::get('/system/prewarm', [SystemPrewarmController::class, 'show']);
 Route::put('/system/prewarm', [SystemPrewarmController::class, 'update']);
 Route::get('/system/sites-db', [SystemSitesDbController::class, 'show']);
+Route::put('/system/sites-db', [SystemSitesDbController::class, 'update']);
 Route::get('/system/telemetry', [SystemTelemetryController::class, 'show']);
 Route::put('/system/telemetry', [SystemTelemetryController::class, 'update']);
 

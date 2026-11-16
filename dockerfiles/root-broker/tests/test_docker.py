@@ -19,6 +19,8 @@ NOT_ACTIONS = {'isRun', 'withRunLabel'}
 RENAMED = {
     ('RootEngineCompose.php', 'upWithoutDependencies'): 'engineUpWithoutDependencies',
     ('RootEngineServices.php', 'runningServices'): 'engineRunningServices',
+    ('RootEngineCompose.php', 'setEnv'): 'engineSetEnv',
+    ('RootEngineCompose.php', 'envValues'): 'engineEnvValues',
 }
 ACCOUNT_FILE = '/opt/panelalpha/shared-hosting/users/alice/docker-compose.yml'
 ENGINE_FILE = '/opt/panelalpha/shared-hosting/docker-compose.yml'

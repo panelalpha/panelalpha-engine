@@ -36,7 +36,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      40 of 40 groups on
- Commands    318 of 318 commands on
+ Commands    319 of 319 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back

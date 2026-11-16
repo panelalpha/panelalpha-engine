@@ -295,6 +295,7 @@ return [
     \App\Mcp\Tools\Api\System\SystemPrewarmSetTool::class,
     \App\Mcp\Tools\Api\System\SystemWebserverPasswordResetTool::class,
     \App\Mcp\Tools\Api\System\SystemSitesDbGetTool::class,
+    \App\Mcp\Tools\Api\System\SystemSitesDbSetTool::class,
     \App\Mcp\Tools\Api\System\SystemSslConfigGetTool::class,
     \App\Mcp\Tools\Api\System\SystemSslConfigSetTool::class,
     \App\Mcp\Tools\Api\System\SystemTelemetryGetTool::class,
