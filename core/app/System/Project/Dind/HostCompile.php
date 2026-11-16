@@ -38,6 +38,7 @@ use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
+use App\Lib\Deploy\Platform\Runtime\StaticBuildOutput;
 use App\Lib\Deploy\Platform\Runtime\ViteOwnUrlEnv;
 use App\Lib\Deploy\Platform\Strategies;
 use App\System\Privileged;
@@ -58,6 +59,9 @@ class HostCompile
 
     private const NODE_BUILD_TIMEOUT_SECONDS = 3600;
 
+    /** Where a static output found elsewhere waits while the predicted directory is cleared for it. */
+    private const STATIC_OUTPUT_STAGING = '.panelalpha-static-output';
+
     private DindProject $project;
 
     /** The deploy and figure last announced, so each is said once per deploy. */
@@ -74,6 +78,9 @@ class HostCompile
 
     /** @var array<string, true> our images put on the host this deploy */
     private array $providedOnHost = [];
+
+    /** When this deploy's compile started; a static output found elsewhere must be newer. */
+    private ?int $buildStartedAt = null;
 
     public function __construct(DindProject $project)
     {
@@ -116,6 +123,11 @@ class HostCompile
         $shipsNodeModules = $isNitro || $isMounted;
         $appRoot = $isMounted ? AppRoot::relative($decision) : '';
         $appDir = self::mountedAppDir($projectDir, $appRoot);
+        $output = self::outputDir($decision, $isNitro);
+        if ($isNginx) {
+            $this->clearRelocatedStaticOutput($appDir, $output);
+        }
+        $this->buildStartedAt = time();
         $image = $this->compileIn(
             $logger, $decision, $projectDir, $appDir, $appRoot, $install, $build, $isNode, $shipsNodeModules, $isNitro, $cached
         );
@@ -123,7 +135,6 @@ class HostCompile
             $this->bundleRustRuntimeLibraries($projectDir, $image, trim((string) ($decision['image'] ?? '')));
         }
 
-        $output = self::outputDir($decision, $isNitro);
         $this->assertBuildProduced($appDir, $output, $isNitro, $isMounted, $isNode);
         $this->chownCompiled($appDir, $output, $isMounted, $isNitro, $isNode);
         $logger?->ok($isNginx ? 'Static assets compiled' : 'Application compiled');
@@ -636,8 +647,68 @@ class HostCompile
         }
 
         $index = $projectDir.'/'.$output.'/index.html';
-        if (! $system->filesystem()->fileExists($index)) {
-            throw new \Exception('Static build finished but '.$output.'/index.html is missing');
+        if (! $system->filesystem()->fileExists($index) && ! $this->relocateStaticOutput($projectDir, $output)) {
+            throw new \Exception(self::missingIndexMessage($output));
+        }
+    }
+
+    private static function missingIndexMessage(string $output): string
+    {
+        return 'Static build finished but '.$output.'/index.html is missing';
+    }
+
+    /**
+     * A build that wrote its page elsewhere (a workspace member's `build`, a script that builds in a subdirectory) is
+     * served from the predicted directory when exactly one directory got a new index.html; several are refused by name.
+     */
+    private function relocateStaticOutput(string $projectDir, string $output): bool
+    {
+        if ($output === '.' || $this->buildStartedAt === null) {
+            return false;
+        }
+        $dirs = StaticBuildOutput::writtenSince($projectDir, $this->buildStartedAt);
+        if (count($dirs) > 1) {
+            throw new \Exception(self::missingIndexMessage($output)
+                .'; the build wrote index.html in several directories: '.implode(', ', $dirs));
+        }
+        if ($dirs === []) {
+            return false;
+        }
+        $this->moveStaticOutput(rtrim($projectDir, '/'), $dirs[0], $output);
+
+        return true;
+    }
+
+    /**
+     * Through a staging name, so an output inside the predicted directory (`dist/web` for `dist`) or around it
+     * moves too; handed to the account before the account writes the marker, as {@see moveNitroOutputUp()}.
+     */
+    private function moveStaticOutput(string $root, string $found, string $output): void
+    {
+        [$uid, $gid] = $this->project->userModel()->linuxIds();
+        $staging = $root.'/'.self::STATIC_OUTPUT_STAGING;
+        $target = $root.'/'.$output;
+        $system = $this->project->system();
+        $system->exec(Privileged::files()->removeTree($staging), [], 60);
+        $system->exec(Privileged::files()->rename($root.'/'.$found, $staging), [], 60);
+        $system->exec(Privileged::files()->removeTree($target), [], 60);
+        if (dirname($target) !== $root) {
+            $system->exec(Privileged::accountFiles($uid, $gid)->makeDirectories(dirname($target)), [], 60);
+        }
+        $system->exec(Privileged::files()->rename($staging, $target), [], 60);
+        $system->exec(Privileged::files()->changeOwnerRecursively($uid.':'.$gid, $target), [], 60);
+        $system->exec(Privileged::accountFiles($uid, $gid)->touch(StaticBuildOutput::markerIn($target)), [], 60);
+        $this->project->shell()->logger()?->info(
+            "The build wrote index.html to {$found}/, not to {$output}/; moved it to {$output}/, where it is served from"
+        );
+    }
+
+    /** An output moved by the last deploy would outlive a build that writes elsewhere again. */
+    private function clearRelocatedStaticOutput(string $appDir, string $output): void
+    {
+        $target = rtrim($appDir, '/').'/'.$output;
+        if ($output !== '.' && $this->project->system()->filesystem()->fileExists(StaticBuildOutput::markerIn($target))) {
+            $this->project->system()->exec(Privileged::files()->removeTree($target), [], 60);
         }
     }
 

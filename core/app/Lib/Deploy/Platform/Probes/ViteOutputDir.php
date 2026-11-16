@@ -7,8 +7,9 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 
 /**
- * Where `vite build` writes, without running it: the build script's `--outDir`, else vite.config's `build.outDir`,
- * resolved against `root` as Vite does (kresus: `build/client`); the default when it is not a literal.
+ * Where `vite build` writes, without running it: the build script's `--outDir`, else the config's `build.outDir`, else
+ * `dist`, resolved against `root` as Vite does (kresus: `build/client`); the config is the one the build script's
+ * `--config` names, else Vite's own; the default when it is not a literal.
  */
 final class ViteOutputDir
 {
@@ -18,10 +19,19 @@ final class ViteOutputDir
         'vite.config.cjs', 'vite.config.mts', 'vite.config.cts',
     ];
 
-    private const BASE = '(?:__dirname|import\.meta\.dirname|process\.cwd\(\))';
+    /** The working directory, which Vite resolves `root` and `resolve()` against. */
+    private const CWD = '(?:process\.cwd\(\))';
 
-    /** A call (two levels of nested parentheses), a string literal, or a name. */
-    private const EXPR = '((?:[\w.$]+\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))|([\'"`])[^\'"`]*\2|[\w$]+)';
+    /** The directory the config file is in. */
+    private const CONFIG_DIR = '(?:__dirname|import\.meta\.dirname)';
+
+    /** A call (two levels of nested parentheses), a string literal, or a (dotted) name. */
+    private const EXPR = '((?:[\w.$]+\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))|([\'"`])[^\'"`]*\2|[\w.$]+)';
+
+    /** `vite build`, up to the end of its command. */
+    private const VITE_BUILD = '/\bvite\s+build\b[^&|;]*/';
+
+    private const OPTION_VALUE = '(?:=|\s+)([\'"]?)([^\s\'"&|;]+)\1';
 
     public static function outputDir(string $projectDir, string $default = 'dist'): string
     {
@@ -30,103 +40,181 @@ final class ViteOutputDir
             return $default;
         }
 
-        $config = null;
-        foreach (self::CONFIGS as $name) {
-            if (is_file($projectDir.'/'.$name)) {
-                $config = (string) AccountHomeRead::contents($projectDir.'/'.$name);
-                break;
-            }
-        }
+        $command = self::viteBuildCommand($projectDir);
+        $configFile = self::configFile($projectDir, self::option($command, '--config|-c'));
+        $config = $configFile === null ? '' : (string) AccountHomeRead::contents($projectDir.'/'.$configFile);
+        $configDir = $configFile === null ? '' : self::directoryOf($configFile);
 
-        $dir = self::resolve($config ?? '', self::cliOutDir($projectDir));
+        $dir = self::resolve($config, self::option($command, '--outDir'), $configDir, $default);
 
         return $dir === null ? $default : NodeRuntime::safeOutputDir($dir, $default);
     }
 
-    /** The output directory relative to the project, or null when the config does not say so in literals. */
-    public static function resolve(string $config, ?string $cliOutDir = null): ?string
-    {
+    /**
+     * The output directory relative to the project, or null when the config does not say so in literals; without an
+     * `outDir` it is $defaultOutDir under `root`, or null when that is not given either.
+     */
+    public static function resolve(
+        string $config,
+        ?string $cliOutDir = null,
+        string $configDir = '',
+        ?string $defaultOutDir = null
+    ): ?string {
+        [$build, $rest] = self::splitBuildBlock($config);
         $outDir = null;
-        $rest = $config;
-        if (preg_match('/\bbuild\s*:\s*\{/', $config, $m, PREG_OFFSET_CAPTURE) === 1) {
-            $block = self::braceBlock($config, $m[0][1] + strlen($m[0][0]) - 1);
-            $rest = str_replace($block, '', $config);
-            if (preg_match('/\boutDir\s*:\s*'.self::EXPR.'/', $block, $o) === 1) {
-                $outDir = self::evaluate(trim($o[1]), $config);
-                if ($outDir === null) {
-                    return null;
-                }
+        if (preg_match('/\boutDir\s*:\s*'.self::EXPR.'/', $build, $o) === 1) {
+            $outDir = self::evaluate(trim($o[1]), $config, $configDir);
+            if ($outDir === null) {
+                return null;
             }
         }
         if ($cliOutDir !== null) {
-            $outDir = [$cliOutDir, false];
+            $outDir = [$cliOutDir, null];
         }
+        $outDir ??= $defaultOutDir === null ? null : [$defaultOutDir, null];
         if ($outDir === null) {
             return null;
         }
 
-        [$path, $anchored] = $outDir;
-        if (! $anchored && preg_match('/\broot\s*:\s*'.self::EXPR.'/', $rest, $r) === 1) {
-            $root = self::evaluate(trim($r[1]), $config);
-            if ($root === null) {
-                return null;
-            }
-            $path = $root[0].'/'.$path;
-        }
+        [$path, $base] = $outDir;
+        $base ??= self::root($rest, $config, $configDir);
 
-        return self::normalize($path);
+        return $base === null ? null : self::normalize(self::join($base, $path));
     }
 
     /**
-     * `--outDir x` or `--outDir=x` on the build script's `vite build`.
+     * The config's `build` block, and the config without it or Vitest's `test` block, where a `root` is not Vite's.
+     *
+     * @return array{0: string, 1: string}
      */
-    private static function cliOutDir(string $projectDir): ?string
+    private static function splitBuildBlock(string $config): array
     {
-        $build = ProjectContext::at($projectDir)->script('build');
-        if (preg_match('/\bvite\s+build\b[^&|;]*?--outDir(?:=|\s+)([\'"]?)([^\s\'"&|;]+)\1/', $build, $m) === 1) {
+        $build = self::block($config, 'build');
+        $rest = str_replace([$build, self::block($config, 'test')], '', $config);
+
+        return [$build, $rest];
+    }
+
+    /** The project-relative `root`: '' when the config sets none, null when it is not a literal. */
+    private static function root(string $rest, string $config, string $configDir): ?string
+    {
+        if (preg_match('/\broot\s*:\s*'.self::EXPR.'/', $rest, $r) !== 1) {
+            return '';
+        }
+        $root = self::evaluate(trim($r[1]), $config, $configDir);
+
+        return $root === null ? null : self::join($root[1] ?? '', $root[0]);
+    }
+
+    /** The `vite build` command the build script runs, directly or through the scripts it runs by name. */
+    private static function viteBuildCommand(string $projectDir): string
+    {
+        $context = ProjectContext::at($projectDir);
+        foreach (self::buildScriptBodies($context->scripts(), $context->script('build')) as $body) {
+            if (preg_match(self::VITE_BUILD, $body, $m) === 1) {
+                return $m[0];
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * The build script, then each script it runs by `npm run x` / `pnpm x` / `yarn x`, breadth first.
+     *
+     * @param  array<string, mixed>  $scripts
+     * @return list<string>
+     */
+    private static function buildScriptBodies(array $scripts, string $build): array
+    {
+        $bodies = [];
+        $pending = [$build];
+        $seen = ['build' => true];
+        while ($pending !== []) {
+            $body = (string) array_shift($pending);
+            $bodies[] = $body;
+            preg_match_all('/\b(?:npm\s+run(?:-script)?|(?:pnpm|yarn|bun)(?:\s+run)?)\s+([\w:.-]+)/', $body, $m);
+            foreach ($m[1] as $name) {
+                if (! isset($seen[$name]) && is_string($scripts[$name] ?? null)) {
+                    $seen[$name] = true;
+                    $pending[] = $scripts[$name];
+                }
+            }
+        }
+
+        return $bodies;
+    }
+
+    /** The value of the first of `$names` (`--outDir x`, `--outDir=x`) on $command. */
+    private static function option(string $command, string $names): ?string
+    {
+        if (preg_match('/(?:^|\s)(?:'.$names.')'.self::OPTION_VALUE.'/', $command, $m) === 1) {
             return $m[2];
         }
 
         return null;
     }
 
+    /** The config Vite reads: the one `--config` names, inside the project, else the first of Vite's own. */
+    private static function configFile(string $projectDir, ?string $named): ?string
+    {
+        if ($named !== null) {
+            $named = self::normalize($named);
+
+            return $named !== null && is_file($projectDir.'/'.$named) ? $named : null;
+        }
+        foreach (self::CONFIGS as $name) {
+            if (is_file($projectDir.'/'.$name)) {
+                return $name;
+            }
+        }
+
+        return null;
+    }
+
     /**
-     * A config expression as `[path, anchored]`: a literal, `fileURLToPath(new URL('./x', import.meta.url))`, or
-     * `(path.)resolve/join(...)`; anchored paths are relative to the project, the rest to Vite's `root`.
+     * A config expression as `[path, base]`: a literal (base null, relative to `root`), the config's directory or a
+     * path under it, `fileURLToPath(new URL('./x', import.meta.url))`, or `(path.)resolve/join(...)`; a base is the
+     * project-relative directory the path is relative to.
      *
-     * @return array{0: string, 1: bool}|null
+     * @return array{0: string, 1: ?string}|null
      */
-    private static function evaluate(string $expr, string $config): ?array
+    private static function evaluate(string $expr, string $config, string $configDir): ?array
     {
         $expr = rtrim($expr, " \t,");
         $literal = self::literal($expr, $config);
         if ($literal !== null) {
-            return [$literal, false];
+            return [$literal, null];
+        }
+        $base = self::base($expr, $config, $configDir);
+        if ($base !== null) {
+            return ['', $base];
         }
 
         if (preg_match('/^fileURLToPath\(\s*new\s+URL\(\s*([\'"`])([^\'"`$]+)\1\s*,\s*import\.meta\.url\s*\)\s*\)$/', $expr, $m) === 1) {
-            return [$m[2], true];
+            return [$m[2], $configDir];
         }
 
-        return self::pathCall($expr, $config);
+        return self::pathCall($expr, $config, $configDir);
     }
 
     /**
-     * `resolve(...)`, `path.resolve(...)`, `join(...)` or `path.join(...)` of literals, optionally from `__dirname`.
+     * `resolve(...)`, `path.resolve(...)`, `join(...)` or `path.join(...)` of literals, optionally from a base.
      *
-     * @return array{0: string, 1: bool}|null
+     * @return array{0: string, 1: ?string}|null
      */
-    private static function pathCall(string $expr, string $config): ?array
+    private static function pathCall(string $expr, string $config, string $configDir): ?array
     {
         if (preg_match('/^(?:path\.)?(resolve|join)\(\s*(.*?)\s*\)$/s', $expr, $m) !== 1) {
             return null;
         }
         $args = array_map('trim', explode(',', $m[2]));
-        $anchored = $m[1] === 'resolve';
+        $base = $m[1] === 'resolve' ? '' : null;
         $parts = [];
         foreach ($args as $i => $arg) {
-            if ($i === 0 && preg_match('/^'.self::BASE.'$/', $arg) === 1) {
-                $anchored = true;
+            $argBase = $i === 0 ? self::base($arg, $config, $configDir) : null;
+            if ($argBase !== null) {
+                $base = $argBase;
 
                 continue;
             }
@@ -137,7 +225,26 @@ final class ViteOutputDir
             $parts[] = $value;
         }
 
-        return $parts === [] ? null : [implode('/', $parts), $anchored];
+        return [implode('/', $parts), $base];
+    }
+
+    /**
+     * The project-relative directory `process.cwd()`, `__dirname` or `import.meta.dirname` stands for, also through a
+     * name declared once as one of them; null for anything else.
+     */
+    private static function base(string $expr, string $config, string $configDir): ?string
+    {
+        if (preg_match('/^[A-Za-z_$][\w$]*$/', $expr) === 1
+            && preg_match('/\b(?:const|let|var)\s+'.preg_quote($expr, '/').'\s*=\s*('.self::CWD.'|'.self::CONFIG_DIR.')\s*[;\n]/', $config, $m) === 1
+        ) {
+            $expr = $m[1];
+        }
+
+        return match (true) {
+            preg_match('/^'.self::CWD.'$/', $expr) === 1 => '',
+            preg_match('/^'.self::CONFIG_DIR.'$/', $expr) === 1 => $configDir,
+            default => null,
+        };
     }
 
     /** A string literal, or an identifier declared once as one. */
@@ -155,7 +262,19 @@ final class ViteOutputDir
         return null;
     }
 
-    /** Collapse `.` and `..`; null when the path is absolute or leaves the project. */
+    private static function join(string $base, string $path): string
+    {
+        return $base === '' ? $path : $base.'/'.$path;
+    }
+
+    private static function directoryOf(string $file): string
+    {
+        $dir = dirname($file);
+
+        return $dir === '.' ? '' : $dir;
+    }
+
+    /** Collapse `.` and `..`; null when the path is absolute, leaves the project or is the project itself. */
     private static function normalize(string $path): ?string
     {
         if (str_starts_with($path, '/')) {
@@ -178,6 +297,16 @@ final class ViteOutputDir
         }
 
         return $out === [] ? null : implode('/', $out);
+    }
+
+    /** The `{...}` block `$key:` opens in $text, or '' when there is none. */
+    private static function block(string $text, string $key): string
+    {
+        if (preg_match('/\b'.$key.'\s*:\s*\{/', $text, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return '';
+        }
+
+        return self::braceBlock($text, $m[0][1] + strlen($m[0][0]) - 1);
     }
 
     /** The text from the `{` at $open to its matching `}`. */

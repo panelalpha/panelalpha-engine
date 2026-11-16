@@ -40,6 +40,33 @@ class ViteOutputDirCallsTest extends TestCase
         $this->assertSame($expected, ViteOutputDir::resolve($config, $cli));
     }
 
+    /** @return array<string, array{0: string, 1: ?string}> */
+    public static function fromAConfigDirectory(): array
+    {
+        return [
+            '__dirname is the config directory' => ["export default { build: { outDir: resolve(__dirname, 'out') } }", 'web/out'],
+            'import.meta.dirname is too' => ["export default { build: { outDir: join(import.meta.dirname, 'out') } }", 'web/out'],
+            'import.meta.url is too' => ["export default { build: { outDir: fileURLToPath(new URL('../out', import.meta.url)) } }", 'out'],
+            'resolve() alone is the working directory' => ["export default { build: { outDir: resolve('out') } }", 'out'],
+            'process.cwd() is the working directory' => ["export default { build: { outDir: resolve(process.cwd(), 'out') } }", 'out'],
+            'a literal is under root' => ["export default { root: __dirname, build: { outDir: 'out' } }", 'web/out'],
+            'a literal root is the working directory\'s' => ["export default { root: 'client', build: { outDir: 'out' } }", 'client/out'],
+            'a name for the config directory' => ["const here = import.meta.dirname;\nexport default { root: here }", 'web/dist'],
+            'a name for something else' => ["const here = compute();\nexport default { root: here }", null],
+        ];
+    }
+
+    #[DataProvider('fromAConfigDirectory')]
+    public function test_resolve_from_a_config_directory(string $config, ?string $expected): void
+    {
+        $this->assertSame($expected, ViteOutputDir::resolve($config, null, 'web', 'dist'));
+    }
+
+    public function test_without_a_default_a_missing_out_dir_is_unknown(): void
+    {
+        $this->assertNull(ViteOutputDir::resolve("export default { root: 'client' }"));
+    }
+
     public function test_an_empty_project_directory_is_the_default(): void
     {
         $this->assertSame('dist', ViteOutputDir::outputDir('/', 'dist'));
