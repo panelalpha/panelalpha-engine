@@ -38,7 +38,7 @@ Open source. Self-hosted. Facile per chiunque, non solo per i sysadmin.
 <p>
 <a href="#passo-1-installalo-sul-tuo-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installazione con un comando"></a>
 <a href="#passo-1-installalo-sul-tuo-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Sistemi supportati"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-287_tools-6f42c1" alt="287 strumenti MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-311_tools-6f42c1" alt="311 strumenti MCP"></a>
 <a href="#licenza"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Entra su Discord"></a>
 </p>
@@ -69,7 +69,7 @@ Già dall'installazione, PanelAlpha Engine dà a te e alla tua AI tutto il neces
 
 ## Come funziona
 
-<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
 
 ## Perché deve esistere
 
@@ -174,7 +174,7 @@ Nessun comando da imparare, e nemmeno formule magiche. Questi esempi mostrano il
 | `Configura un tunnel Cloudflare per n8n.mydomain.com.` | DNS e tunnel pronti, ed è anche il modo di servire da un server dietro NAT. |
 | `Quanto traffico abbiamo ricevuto la settimana scorsa?` | Utilizzo, log e limiti di quel progetto, e di tutto il server. |
 
-Altri esempi pronti: [cosa chiedere](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). L'elenco completo di ciò che il tuo assistente può raggiungere: [287 strumenti](docs/04-connecting-your-ai/your-assistant.md).
+Altri esempi pronti: [cosa chiedere](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). L'elenco completo di ciò che il tuo assistente può raggiungere: [311 strumenti](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

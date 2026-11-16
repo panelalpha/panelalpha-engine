@@ -38,7 +38,7 @@ Open source. Self-hosted. Fácil para qualquer um, não só para sysadmins.
 <p>
 <a href="#passo-1-instale-no-seu-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Instalação com um comando"></a>
 <a href="#passo-1-instale-no-seu-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Sistemas suportados"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-287_tools-6f42c1" alt="287 ferramentas MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-311_tools-6f42c1" alt="311 ferramentas MCP"></a>
 <a href="#licença"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Entre no Discord"></a>
 </p>
@@ -69,7 +69,7 @@ Já na instalação, o PanelAlpha Engine dá a você e à sua IA tudo o que prec
 
 ## Como funciona
 
-<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
 
 ## Por que isso precisa existir
 
@@ -174,7 +174,7 @@ Não há comandos para decorar, nem frases mágicas. Isto mostra o nível de det
 | `Configura um túnel Cloudflare para n8n.mydomain.com.` | DNS e túnel prontos, que é também como você serve de um servidor atrás de NAT. |
 | `Quanto tráfego tivemos na semana passada?` | Uso, logs e limites daquele projeto, e do servidor inteiro. |
 
-Mais exemplos prontos: [o que pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). A lista completa do que seu assistente alcança: [287 ferramentas](docs/04-connecting-your-ai/your-assistant.md).
+Mais exemplos prontos: [o que pedir](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). A lista completa do que seu assistente alcança: [311 ferramentas](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

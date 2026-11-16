@@ -30,7 +30,7 @@ Setting it up takes [three steps](#getting-started).
 
 ## How it works
 
-<img src="assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880" style="max-width: 100%; height: auto; margin-top: 0.5em; margin-bottom: 1.5em;">
+<img src="assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880" style="max-width: 100%; height: auto; margin-top: 0.5em; margin-bottom: 1.5em;">
 
 ## Getting started
 
