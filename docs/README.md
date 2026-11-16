@@ -6,9 +6,9 @@
 
 PanelAlpha Engine is software you install on your VPS to host AI-built and vibe-coded projects, websites and open-source apps you found online.
 
-Once installed, you can connect your own AI agent directly to PanelAlpha Engine and let it handle deployments, maintenance and server management for you. Your server stays organized and under control.
+Once installed, you can connect your own AI agent directly to PanelAlpha Engine and let it handle deployments, maintenance and server management for you. Your server stays organised and under control.
 
-But most importantly, it makes managing your own server/VPS super simple. **You don't have to be a sysadmin to self-host anymore!**
+It makes managing your own server or VPS much easier. **You do not have to be a sysadmin to self-host.**
 
 Out of the box, PanelAlpha Engine gives you and your AI everything you need to run real projects in production:
 
@@ -20,9 +20,9 @@ Out of the box, PanelAlpha Engine gives you and your AI everything you need to r
 - Project isolation with separate Docker containers
 - Firewall and OWASP/WAF protection with per-project access rules
 - Domains, SSL, cron, FTP/SFTP, databases, logs
-- Easy Cloudflare integration for DNS, Tunnels and caching
+- Cloudflare integration for DNS, tunnels and caching
 
-All it takes is just [three simple steps to set it up](#getting-started).
+Setting it up takes [three steps](#getting-started).
 
 <img src="assets/panelalpha-engine.gif" alt="Deploying a project by asking an assistant" style="max-width: 100%; height: auto; margin-top: 0.5em; margin-bottom: 1.5em;">
 
@@ -38,7 +38,7 @@ All it takes is just [three simple steps to set it up](#getting-started).
 
 You need a **fresh** VPS and `root` access over SSH. Full requirements and options are on the [Install](02-getting-started/install.md) page.
 
-**One-line app installation command** is the fastest way to get started. Just add the Git repository you want to use after `--repo`, and the installer immediately starts setting up engine and getting your application online in one go.
+**One-line app installation command** is the fastest way to get started. Add the Git repository you want to use after `--repo`, and the installer starts setting up engine and getting your application online in one go.
 
 For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
 
@@ -46,17 +46,17 @@ For example, if you want to install the engine and deploy n8n at the same time, 
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. For private repositories, your own password, or running an app on a server that already has the engine, see: [One-line app installation command](02-getting-started/install.md#one-line-app-installation-command).
+When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. For private repositories, your own password or running an app on a server that already has the engine, see: [One-line app installation command](02-getting-started/install.md#one-line-app-installation-command).
 
 <img src="assets/installer-repo-success.png" alt="Installer finished: the address and password of the deployed application, then the Claude Code command" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 
-Prefer to do the two steps separately? Use the command below to install only the engine, and deploy your application later from your assistant (see step 3):
+To do the two steps separately, use the command below to install only the engine, and deploy your application later from your assistant (see step 3):
 
 ```bash
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-A few minutes later the engine is running and prints its addresses and a command to connect your assistant. Want a custom name, your own TLS, or a VPS behind NAT? Read [Install](02-getting-started/install.md) first.
+A few minutes later the engine is running and prints its addresses and a command to connect your assistant. For a custom name, your own TLS or a VPS behind NAT, read [Install](02-getting-started/install.md) first.
 
 ### 2. Connect your AI assistant
 
@@ -76,7 +76,7 @@ pae connect
 
 Each assistant has a setup page with how to check it worked and what usually goes wrong: [Connecting your AI](04-connecting-your-ai/your-assistant.md).
 
-**Before you connect**, decide what the assistant may do. By default it can permanently delete an entire project. `pae configure` on the VPS walks through that, and through the address, the queue, and telemetry: [Configure the engine](02-getting-started/configure-the-engine.md). The settings it writes are listed under [Decide what the assistant may do](04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+**Before you connect**, decide what the assistant may do. By default it can permanently delete an entire project. `pae configure` on the VPS walks through that, and through the address, the queue and telemetry: [Configure the engine](02-getting-started/configure-the-engine.md). The settings it writes are listed under [Decide what the assistant may do](04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ### 3. Put your project online
 
@@ -115,6 +115,6 @@ The main way to run PanelAlpha Engine is to connect an AI assistant and describe
 
 - **[Connecting your AI](04-connecting-your-ai/your-assistant.md)**: Connect an assistant after install and drive deployments, maintenance and server management from chat.
 - **[CLI commands](06-commands/pae-cli.md)**: `pae` on your VPS over SSH, and the REST API for software you build on top of the engine.
-- **[Getting Started](02-getting-started/install.md)**: Install, configure the engine, update, uninstall, how a deploy works, looking after a project, connecting to PanelAlpha Connect, telemetry, and failed deploys.
-- **[Supported projects](07-supported-projects/project-types.md)**: Stacks the engine can run, what your repository needs, how detection works, and the `panelalpha.yaml` a repository can add.
+- **[Getting Started](02-getting-started/install.md)**: Install, configure the engine, update, uninstall, how a deploy works, looking after a project, connecting to PanelAlpha Connect, telemetry and failed deploys.
+- **[Supported projects](07-supported-projects/project-types.md)**: Stacks the engine can run, what your repository needs, how detection works and the `panelalpha.yaml` a repository can add.
 - **[Capabilities](05-capabilities/connecting-with-git.md)**: Git, projects, backups, domains, databases, files, WordPress, monitoring, visitor statistics, security, Cloudflare and your own base images.

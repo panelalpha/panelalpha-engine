@@ -1,6 +1,6 @@
 # How a deploy works
 
-When you ask your assistant to put a project online, the engine runs one process from start to finish. That process is a **deploy**. You stay in the chat. You do not pick a webserver, write a Dockerfile, or create a database first unless you want to.
+When you ask your assistant to put a project online, the engine runs one process from start to finish. That process is a **deploy**. You stay in the chat. You do not pick a webserver, write a Dockerfile or create a database first unless you want to.
 
 ```text
 Deploy my application https://github.com/org/app on this PanelAlpha Engine.
@@ -16,9 +16,9 @@ What you should see: progress in the chat, then a web address to open.
 
 **2. The engine fetches the code.** For git, it clones the repository and fetches its submodules. A submodule that cannot be fetched fails the deploy, and the message says why. For a zip, it unpacks the files you pointed at. A private repository needs a git token first, pasted on a page the assistant sends you, not in the chat: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
-**3. It works out what the application is.** Laravel, Next.js, Django, Rails, Go, WordPress, a plain `Dockerfile` or `Containerfile`, and many more. It also reads which language versions your project asks for. The file that identifies the application (`package.json`, `composer.json`, `go.mod`, and so on) has to sit at the top level of the repository: [What your repository needs](../07-supported-projects/what-your-repo-needs.md).
+**3. It works out what the application is.** Laravel, Next.js, Django, Rails, Go, WordPress, a plain `Dockerfile` or `Containerfile` and many more. It also reads which language versions your project asks for. The file that identifies the application (`package.json`, `composer.json`, `go.mod`, and so on) has to sit at the top level of the repository: [What your repository needs](../07-supported-projects/what-your-repo-needs.md).
 
-**4. It builds and starts the application.** Dependencies are installed, the application is built, and it is started inside that container.
+**4. It builds and starts the application.** Dependencies are installed, the application is built and it is started inside that container.
 
 **5. It gives the project an address and HTTPS.** The engine's webserver sends that hostname to the container and requests a free Let's Encrypt certificate. If you did not name a domain, it picks a public name and tells you what it chose. Do not name a domain unless that domain already points at this VPS. Naming one that is not set up yet turns a working deploy into a failed one: [Looking after your project](looking-after-your-project.md).
 
@@ -44,7 +44,7 @@ systemctl restart sysbox
 
 Open the address in a browser.
 
-- **It opens and looks right.** The first deploy is done. Add your own domain, take a backup, or make a test copy: [Looking after your project](looking-after-your-project.md).
+- **It opens and looks right.** The first deploy is done. Add your own domain, take a backup or make a test copy: [Looking after your project](looking-after-your-project.md).
 - **The address ends in `.local`.** Nobody on the internet can open that project. The application is fine; it has no public name. Point DNS at your VPS, then add a domain: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md).
 - **The deploy failed, or came back "partial".** [When a deploy fails](what-happens.md). Each failure, warning and refusal carries a short code and a list of what to do next, which your assistant reads and acts on: [Codes and hints](reading-errors.md#codes-and-hints).
 - **It opens but is not your application** (a placeholder, a directory listing, an error page). Ask:
@@ -56,11 +56,11 @@ actually serving, and tell me what is wrong.
 
 ## A project that waits for its files
 
-A container project created without a repository has nothing to build yet. Its first deploy sets the account up, gives the project its address, and stops on `Environment ready, waiting for project files`. Nothing has failed: the project waits for the files you send, and one that never receives any keeps waiting.
+A container project created without a repository has nothing to build yet. Its first deploy sets the account up, gives the project its address and stops on `Environment ready, waiting for project files`. Nothing has failed: the project waits for the files you send, and one that never receives any keeps waiting.
 
 While it waits, every client sees the same thing. The deploy history lists one deploy, `running`, kind `install`, source `template`, with no task and no finish time, and its log ends on that line. There is no process behind it, so there is nothing to cancel.
 
-The deploy that brings the files - an archive upload or a rebuild - does not continue that one. It opens a deploy of its own, with its own id and log, and the waiting deploy is closed first as `cancelled` with the sentence `The project waited for its files, and a later deploy brought them.` The history then lists both: the install that waited, and the deploy that came next. `cancelled` is the engine's word for a deploy that ended before it finished; nothing about the project is wrong.
+The deploy that brings the files, an archive upload or a rebuild, does not continue that one. It opens a deploy of its own, with its own id and log, and the waiting deploy is closed first as `cancelled` with the sentence `The project waited for its files, and a later deploy brought them.` The history then lists both: the install that waited, and the deploy that came next. `cancelled` is the engine's word for a deploy that ended before it finished; nothing about the project is wrong.
 
 ## Deploying again later
 
@@ -90,7 +90,7 @@ The engine keeps the log of the last 10 deploys of each project, a limit the ser
 List the recent deploys of this project and show the log of the last failed one.
 ```
 
-Each deploy is listed with its result, the branch and commit, and what started it: your assistant, your own software through the API, a command on the server, or a push to your git host.
+Each deploy is listed with its result and the branch and commit it ran. It also says what started it: your assistant, your own software through the API, a command on the server or a push to your git host.
 
 ## More requests to try
 
@@ -99,7 +99,7 @@ Each deploy is listed with its result, the branch and commit, and what started i
 **Why a deploy failed, and what to do next**
 
 ```text
-The last deploy of tshop failed. Read its log, tell me the code and the reason, and list what I can do about it.
+The last deploy of tshop failed. Read its log, tell me the code and the reason and list what I can do about it.
 ```
 
 Mode: read. Tools: `deploy_list`, `deploy_log_get` or `deploy_log_read`. Check: the answer quotes the failure sentence and its code, and lists the next steps the log gives, not guesses of its own.

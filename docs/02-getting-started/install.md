@@ -1,10 +1,10 @@
 # Install
 
-This is the one-time setup. Check your VPS against the list below, log in as `root` over SSH, run one command, and wait for it to print your engine's addresses and a command to connect your assistant.
+This is the one-time setup. Check your VPS against the list below, log in as `root` over SSH, run one command and wait for it to print your engine's addresses and a command to connect your assistant.
 
 Expect it to take several minutes. It asks you nothing along the way.
 
-When it is done, the software lives in `/opt/panelalpha/shared-hosting`, the `pae` command is available from anywhere, and nginx-proxy is running as the public webserver that serves your sites. That is the only supported webserver.
+When it is done, the software lives in `/opt/panelalpha/shared-hosting`, the `pae` command is available from anywhere and nginx-proxy is running as the public webserver that serves your sites. That is the only supported webserver.
 
 ## Before you start
 
@@ -22,9 +22,9 @@ The installer checks the operating system and refuses anything else. It does not
 
 > **Why the VPS has to be brand new.** The installer takes the machine over: it installs Docker, a firewall and a watchdog, turns on disk quota and mounts `/home` with `nosuid,nodev` (see [Troubleshooting](#troubleshooting)), and it takes over how the machine looks up domain names. That is fine on an empty VPS and destructive on one already doing a job. Do not use your laptop, a VPS already running a website or control panel, or anything you would mind reinstalling.
 
-**No public IPv4 address?** The engine still works, but the install command is different. Read [Troubleshooting](#troubleshooting) before you install.
+**With no public IPv4 address,** the engine still works, but the install command is different. Read [Troubleshooting](#troubleshooting) before you install.
 
-**Does your provider put a firewall in front of the VPS?** Some do, for example Hetzner Cloud Firewalls or AWS security groups. The engine cannot see or change that firewall, so open the ports in [A firewall in front of the VPS](#a-firewall-in-front-of-the-vps) yourself.
+**Your provider may put a firewall in front of the VPS.** Some do, for example Hetzner Cloud Firewalls or AWS security groups. The engine cannot see or change that firewall, so open the ports in [A firewall in front of the VPS](#a-firewall-in-front-of-the-vps) yourself.
 
 ## 1. Run the installer
 
@@ -32,7 +32,7 @@ The installer checks the operating system and refuses anything else. It does not
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
+A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. For a name of your own, or a VPS the internet cannot reach by IP, read [Troubleshooting](#troubleshooting) before you install.
 
 ## One-line app installation command
 
@@ -53,12 +53,13 @@ When it finishes, it prints the web address of your new site (it starts with `ht
 
 | Flag | What it does |
 |---|---|
-| `--repo URL` | Git repository to deploy. Its `https://` address, or just `owner/repo` for a repository on GitHub. Addresses that start with `git@` do not work. |
-| `--branch REF` | Branch, tag, or commit to deploy. Omit to use the repository default. |
+| `--repo URL` | Git repository to deploy. Its `https://` address, or `owner/repo` for a repository on GitHub. Addresses that start with `git@` do not work. |
+| `--branch REF` | Branch, tag or commit to deploy. Omit to use the repository default. |
 | `--git-token TOKEN` | Access token that lets the installer read a private repository. Without it, a private or missing repository is refused before the install starts. |
 | `--password PASS` | Site password for the new project. |
 | `--no-password` | Do not set a site password on the project. |
-| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end; `--hub-code` goes to the panel, which connects itself to PanelAlpha Hub on its first start (the engine is not connected). No site password is set unless you pass `--password`. It needs `--repo`. Run the install again with the same `--repo` and `--full-privileges` and it deploys that project again instead of making a second one. The project keeps its admin, settings and data, so no new password is printed. Give it only to an application you trust with the whole server. |
+| `--email ADDR` | Contact email for install and monitoring notices. With `--full-privileges` it is also the panel's admin. |
+| `--full-privileges` | Trust the project with this engine: it is the PanelAlpha panel. The project gets an Engine API token for every project, may take the server's own name and its public ports, and is protected from API tokens once it is live. `--email` becomes the panel's admin, with a generated password printed at the end; `--hub-code` goes to the panel, which connects itself to PanelAlpha Hub on its first start (the engine is not connected), and it needs `--email` too. No site password is set unless you pass `--password`. It needs `--repo`. Run the install again with the same `--repo` and `--full-privileges` and it deploys that project again instead of making a second one. The project keeps its admin, settings and data, so no new password is printed. Give it only to an application you trust with the whole server. |
 | `--env-var KEY=VALUE` | An environment variable for the project. Repeat it for more. It needs `--repo`, and the value is never printed. |
 
 If the deploy fails, the engine is still installed and usable. The installer prints what went wrong. Deploy again from the VPS:
@@ -98,6 +99,8 @@ If your assistant refuses to connect and mentions a certificate, see [If connect
 ## What happens afterwards
 
 The installer keeps downloading commonly-used software in the background so your first deploy is fast. You can start using the engine straight away.
+
+The installer also creates a local backup store and makes it the default, so a backup that names no store goes there: [Backups](../05-capabilities/backups.md#first-somewhere-to-put-them).
 
 Telemetry is on: anonymous reports about deploys and later health checks leave your VPS unless you turn it off. Those reports include the public names of your sites. [What is collected](what-is-collected.md) · [How to turn it off](how-to-turn-it-off.md).
 
@@ -147,6 +150,8 @@ Show me this engine's outgoing email settings, then send a test message to me@ex
 
 To send through a provider, tell the assistant which one and give it your details. Avoid pasting live passwords or keys into a chat you might share later.
 
+Applications in container projects send through the engine's own mail relay, which the engine hands them as `PA_SMTP_HOST` and `PA_SMTP_PORT`. By default a project cannot send mail straight to other servers on port 25: [Sending mail through the server](../05-capabilities/projects.md#sending-mail-through-the-server) · [Security](../05-capabilities/security.md).
+
 ## A firewall in front of the VPS
 
 The engine runs its own firewall on the VPS (see [Security](../05-capabilities/security.md)). Some providers add a second one in front of the VPS, set in their control panel: Hetzner Cloud Firewalls, AWS security groups, DigitalOcean Cloud Firewalls and similar. The engine does not see that one. When it blocks a port, everything works from your own address and times out from everywhere else.
@@ -157,7 +162,7 @@ Open these inbound ports in the provider's firewall:
 |---|---|---|
 | 80 | Visitors, and Let's Encrypt checking that a domain is yours | Everyone, if you want Let's Encrypt certificates |
 | 443 | Visitors to your sites | Everyone who should see your sites |
-| 2011 | Your AI assistant, REST API clients, PanelAlpha Connect, and git hosts calling a [push-to-deploy](../05-capabilities/push-to-deploy.md) hook | Your own addresses, plus the addresses of those services |
+| 2011 | Your AI assistant, REST API clients, PanelAlpha Connect and git hosts calling a [push-to-deploy](../05-capabilities/push-to-deploy.md) hook | Your own addresses, plus the addresses of those services |
 | 22 | You, over SSH | Your own addresses |
 | 2222 | SFTP clients | Whoever uploads files over SFTP |
 | 21 and 30000-30009 | FTP clients | Whoever uploads files over FTP |
@@ -178,11 +183,11 @@ The engine's own firewall also lets a blocked connection time out, so check it f
 
 [Put your project online](../README.md#3-put-your-project-online).
 
-Need another token later, or one for a second computer? [Create a token](../04-connecting-your-ai/create-a-token.md).
+Another token later, or one for a second computer: [Create a token](../04-connecting-your-ai/create-a-token.md).
 
 ## If connecting asks you to trust a certificate
 
-Most installs do not need this. You copy the command, run it on your computer, and the assistant connects.
+Most installs do not need this. You copy the command, run it on your computer and the assistant connects.
 
 Sometimes the assistant refuses and talks about a certificate. That means the engine is using a temporary certificate your computer does not know yet. It is normal on a VPS with no public address. The engine still runs.
 
@@ -200,7 +205,7 @@ curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domai
 ```
 
 **My VPS has no public IPv4 address.**
-This covers offices, home connections, some cloud providers, and a VPS with only an IPv6 address. Point a name at the VPS, then tell the installer that the address on its network card is not how the world reaches it. The `--domain` part is what gets you a real certificate.
+This covers offices, home connections, some cloud providers and a VPS with only an IPv6 address. Point a name at the VPS, then tell the installer that the address on its network card is not how the world reaches it. The `--domain` part is what gets you a real certificate.
 
 ```bash
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --domain panel.example.com --no-local-ip --enable-nat
@@ -242,7 +247,7 @@ EGRESS_ALLOW_HOSTS=git.internal,files.internal
 
 The first allows every private address. The second allows only the names you list, and it takes names, not addresses. Loopback, link-local and other reserved addresses stay refused either way.
 
-A WordPress import follows the same rule for its source: the site's URL, every address it redirects to, and `source_ip`. It also refuses the engine's own addresses. A refused URL gets the same answer, "Source WordPress URL must lead to a public address", whatever is listening there.
+A WordPress import follows the same rule for its source: the site's URL, every address it redirects to and `source_ip`. It also refuses the engine's own addresses. A refused URL gets the same answer, "Source WordPress URL must lead to a public address", whatever is listening there.
 
 The source site sends the import to the engine's default IPv4, or to the public address the IPv4 NAT map gives it (`pae system:nat:build` fills that map on a server behind 1:1 NAT). When that address is private, an import is refused with `engine_address_private` before anything is installed on the source, because a site on the internet cannot reach it. Set the engine's public address as its default IPv4 or map it in the NAT map, or, with the source on the same private network, set `EGRESS_ALLOW_PRIVATE=true`.
 

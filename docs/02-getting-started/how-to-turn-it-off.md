@@ -1,6 +1,6 @@
 # How to turn telemetry off
 
-Telemetry is on by default, so reports do leave your VPS unless you change something. What it is, why it is there, and what it gives you: [Telemetry](what-is-collected.md).
+Telemetry is on by default, so reports do leave your VPS unless you change something. What it is, why it is there and what it gives you: [Telemetry](what-is-collected.md).
 
 The usual switch is a `pae` command. It takes effect immediately. You do not restart the engine. The options further down are lines in `/opt/panelalpha/shared-hosting/.env-core`, and those do nothing until you restart: [Change a setting](install.md#change-a-setting).
 

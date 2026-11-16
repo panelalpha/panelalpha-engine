@@ -6,7 +6,7 @@ Use the same command as [Install](install.md). If Engine is already on this VPS,
 
 Update when PanelAlpha releases a fix. If a deploy failed for a reason PanelAlpha has since fixed, updating is how that fix reaches your VPS.
 
-The update restarts the engine, so a connected assistant will disconnect for under a minute and then reconnect.
+The update restarts the engine, so a connected assistant will disconnect for about a minute and then reconnect.
 
 An update installs only a newer release than the one running. This holds for an update started from the engine (the API or your assistant) and for the updater on the server.
 
@@ -25,7 +25,7 @@ An update installs only a newer release than the one running. This holds for an 
 - While the engine's database is being migrated, its scheduler and background workers wait, so no job runs new code against the old database.
 - The engine's own images are downloaded for the version being installed, and a newer build of them for the same version, such as one with operating system security fixes, is downloaded on the next update. An image is built on the server only when none is published for exactly that version's sources.
 
-**Existing projects are brought up to date too.** When a release changes how projects are set up, the update applies it to the projects you already have: CPU limits on running containers, the web server settings of traditional PHP hosting projects, the permissions of `wp-config.php`, read-only configuration mounts and clean-up of old address maps. You do nothing. If one of these steps fails for some project, the update still finishes and prints a warning that names the command to run again, for example `pae projects:wp-config:restrict --all`.
+**Existing projects are brought up to date too.** When a release changes how projects are set up, the update applies it to the projects you already have: CPU limits on running containers, the web server settings of traditional PHP hosting projects, the permissions of `wp-config.php` and clean-up of old address maps. You do nothing. The engine's configuration mounts of traditional PHP hosting projects also become read-only, but each takes effect only when its container is next recreated. To apply it at once, which restarts those sites, run `pae projects:config-mounts:restrict --all --recreate`. If one of these steps fails for some project, the update still finishes and prints a warning that names the command to run again, for example `pae projects:wp-config:restrict --all`.
 
 ## If an update fails
 
@@ -45,6 +45,12 @@ Read this if you update from 2.2 or earlier.
 - **A paste page opened before the update must be opened again.** The engine's browser cookie on port 2011 changed, so a paste page for a secret that was already open cannot be saved. Open its link again. If `.env-core` has `SESSION_SECURE_COOKIE=false`, remove that line: with it, browsers refuse the new cookie and no paste page can be saved. [Change a setting](install.md#change-a-setting) shows how.
 - **The engine has a new container, the root broker.** It does every step that needs root, so the engine's own container no longer has `sudo` or the Docker socket. It has its own memory cap, 4 GB by default: [Install](install.md#memory-the-engine-keeps-for-itself). How it protects the server: [Security](../05-capabilities/security.md).
 - **The engine's scripts and settings files must belong to root and not be writable by anyone else.** The installer sets this. If you changed ownership or permissions by hand, the broker refuses the file and the message names the `chown` and `chmod` that fix it.
+- **A command that used `sudo` inside the engine's container now fails**, because that container has no `sudo`. Run it on the VPS as `root`.
+- **A hand edit to a project's `docker-compose.yml` under `users/` is refused.** The root broker starts only compose files shaped like the ones the engine writes.
+- **Scripts that pass `--username=` or `--user=` to a `pae` command must pass `--project=`.** The old options are removed from those commands. The recovery script that was in `/usr/local/sbin` is gone. Use the recovery command for a stuck project: [The pae command](../06-commands/pae-cli.md). `pae wordpress:command` now exits with the exit code of WP-CLI.
+- **A Cloudflare API token needs Zone · Zone · Read and must be scoped to one Cloudflare account.** [Cloudflare](../05-capabilities/cloudflare.md).
+- **A new local backup store is refused inside `/opt/panelalpha/shared-hosting`, and at `/home`, `/opt/panelalpha` or `/var/www/html/storage` themselves.** [Backups](../05-capabilities/backups.md).
+- **A project whose `panelalpha.yaml` asks for the server's own name or for public ports must be allowed first.** Run `pae system:public-routing:allow <project> --host-domain` for the name or `--ports` for the ports. The install flag `--full-privileges` does this for the panel it deploys.
 - **A Railpack project must ask for Railpack again.** The general build is no longer chosen on its own, and the choice is not saved. Each redeploy of a project first deployed with Railpack has to ask for it again. A push to your git host cannot ask, so it replaces such a project with the "Project not configured" page. Before you update, give these projects a `Dockerfile`, a Compose file or a `panelalpha.yaml`: [How detection works](../07-supported-projects/how-detection-works.md). A failed Railpack redeploy keeps the running app online.
 - **A project the engine could not recognise answers 404.** Its "Project not configured" page now carries that status and counts as not serving. Software that checks a project's address will see the change.
 
@@ -98,7 +104,7 @@ It runs on its own for a few minutes and finishes with:
 PanelAlpha engine has been successfully updated!
 ```
 
-While it runs, your AI assistant loses its connection for under a minute and reconnects on its own. The websites you host stay up throughout.
+While it runs, your AI assistant loses its connection for about a minute and reconnects on its own. The websites you host stay up throughout.
 
 ### 3. Check it worked
 
@@ -117,8 +123,8 @@ Name it after `sh -s --`. Check your spelling before pressing Enter: a typo in t
 curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --version 2.0.1
 ```
 
-**"Another instance is already running."**
-An update is already in progress; only one can run at a time. Wait for it to finish.
+**"Update script is already running."**
+An update started from the engine (the API or your assistant) is already in progress, and only one can run at a time. Wait for it to finish.
 
 **The version number did not change.**
 You already had the newest version (`Already up to date`), the newest release is older than yours (`Refusing to install`), or the update failed. The log is in `/opt/panelalpha/log/engine-updates/`. If you start updates from your assistant, the engine information it reads reports what the last update did, the version it ran on and the version it was installing, and for a run that failed or never finished, the reason and the last lines of the updater's output.
@@ -175,7 +181,7 @@ There is no automatic way back from an update that succeeded, because the update
 What did the last engine update do? Tell me the version it ran on, the version it installed and how it ended.
 ```
 
-Mode: read. Tools: `system_info`. Check: the answer gives both versions and a result of updated, up_to_date, rolled_back, refused or failed, and for a failed run the reason.
+Mode: read. Tools: `system_info`. Check: the answer gives both versions and a result of updated, up_to_date, rolled_back, refused or failed and, for a failed run, the reason.
 
 **Update and follow it**
 
