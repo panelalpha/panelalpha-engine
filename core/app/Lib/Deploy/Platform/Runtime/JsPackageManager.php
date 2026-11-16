@@ -434,7 +434,7 @@ class JsPackageManager
         array $package,
         ?string $projectDir = null
     ): string {
-        $spec = self::corepackPnpmSpec($package);
+        $spec = self::corepackPnpmSpec($package, $projectDir);
         $install = $frozenLockfile ? 'pnpm install --frozen-lockfile' : 'pnpm install';
         if (
             self::pnpmSupportsDangerouslyAllowAllBuilds($spec)
@@ -678,16 +678,18 @@ class JsPackageManager
     }
 
     /**
+     * `packageManager`'s pnpm as pinned, else the major {@see PnpmMajor} reads from `engines.pnpm` and the lockfile.
+     *
      * @param  array<string, mixed>  $package
      */
-    private static function corepackPnpmSpec(array $package): string
+    private static function corepackPnpmSpec(array $package, ?string $projectDir): string
     {
         $field = $package['packageManager'] ?? '';
         if (is_string($field) && preg_match('/^pnpm@(\d+(?:\.\d+){0,2})/', $field, $matches) === 1) {
             return 'pnpm@'.$matches[1];
         }
 
-        return 'pnpm@10';
+        return 'pnpm@'.PnpmMajor::forProject($package, $projectDir);
     }
 
     /** pnpm@10 with no minor resolves to the latest 10.x, which includes 10.9+. */
