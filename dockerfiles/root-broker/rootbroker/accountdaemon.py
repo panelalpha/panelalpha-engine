@@ -24,22 +24,27 @@ class Daemon(dockerapi.Daemon):
     """One account's daemon: the account's container checked once, its socket held open as an O_PATH descriptor,
     or a dialler that returns a connected socket."""
 
-    def __init__(self, name, socket_fd=None, seconds=SECONDS, dial=None, init_pid=None, proc='/proc', address=None):
+    def __init__(self, name, socket_fd=None, seconds=SECONDS, dial=None, init_pid=None, proc='/proc', address=None,
+                 network_fd=None):
         super().__init__(name, dial or address or f'/proc/self/fd/{socket_fd}', seconds, WORDING)
         self.socket_fd = socket_fd
+        self.network = network_fd
+        self.network_fd = network_fd
         self.init_pid = init_pid
         self.proc = proc
 
     def bounded(self, seconds):
-        """This daemon with `seconds` as its default bound, reaching the same socket but not owning it."""
+        """This daemon with `seconds` as its default bound, reaching the same socket and network but owning neither."""
         bounded = super().bounded(seconds)
         bounded.socket_fd = None
+        bounded.network_fd = None
         return bounded
 
     def close(self):
-        if self.socket_fd is not None:
-            os.close(self.socket_fd)
-            self.socket_fd = None
+        for owned in ('socket_fd', 'network_fd'):
+            if getattr(self, owned) is not None:
+                os.close(getattr(self, owned))
+                setattr(self, owned, None)
 
 
 def open_daemon(account, accounts_directory, host_socket=dockerapi.SOCKET, proc='/proc', seconds=SECONDS):
@@ -48,19 +53,22 @@ def open_daemon(account, accounts_directory, host_socket=dockerapi.SOCKET, proc=
     container = account_container(account.name, host_socket, accounts_directory, seconds=seconds)
     pid = container['State']['Pid']
     pidfd = process(account.name, pid)
+    opened = []
     try:
-        socket_fd = inner_socket(account.name, proc, pid)
-        try:
-            same = account_container(account.name, host_socket, accounts_directory, seconds=seconds)
-            seen_again = (same['State']['Pid'], same['State'].get('StartedAt'))
-            if not peer.still_alive(pidfd) or seen_again != (pid, container['State'].get('StartedAt')):
-                raise Unavailable(f'container {account.name} is restarting')
-        except BaseException:
-            os.close(socket_fd)
-            raise
+        opened.append(inner_socket(account.name, proc, pid))
+        opened.append(network_namespace(account.name, proc, pid))
+        same = account_container(account.name, host_socket, accounts_directory, seconds=seconds)
+        seen_again = (same['State']['Pid'], same['State'].get('StartedAt'))
+        if not peer.still_alive(pidfd) or seen_again != (pid, container['State'].get('StartedAt')):
+            raise Unavailable(f'container {account.name} is restarting')
+    except BaseException:
+        for fd in opened:
+            os.close(fd)
+        raise
     finally:
         os.close(pidfd)
-    return Daemon(account.name, socket_fd, seconds=seconds, init_pid=pid, proc=proc)
+    socket_fd, network_fd = opened
+    return Daemon(account.name, socket_fd, seconds=seconds, init_pid=pid, proc=proc, network_fd=network_fd)
 
 
 def open_container(account, accounts_directory, host_socket=dockerapi.SOCKET):
@@ -156,6 +164,14 @@ def inner_socket(name, proc, pid):
         os.close(socket_fd)
         raise Failed(f'{INNER_SOCKET} in container {name} is not a socket')
     return socket_fd
+
+
+def network_namespace(name, proc, pid):
+    """The network namespace of the account's container, held open while its init is checked to still be the one."""
+    try:
+        return os.open(f'{proc}/{pid}/ns/net', os.O_RDONLY | os.O_CLOEXEC)
+    except (FileNotFoundError, ProcessLookupError) as e:
+        raise Unavailable(f'container {name} is restarting') from e
 
 
 def linkless(root, relative):

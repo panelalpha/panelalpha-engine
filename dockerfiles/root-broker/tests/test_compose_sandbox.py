@@ -15,7 +15,7 @@ import time
 import unittest
 
 import support
-from rootbroker import sandbox
+from rootbroker import accountdaemon, sandbox
 from test_account_compose import Compose
 
 INTERPRETER = os.path.realpath(sys.executable)
@@ -25,7 +25,7 @@ PROBE = '''
 import ctypes, errno, json, os, shutil, socket, subprocess, sys, time
 
 LIBC = ctypes.CDLL(None, use_errno=True)
-MODE, ABSTRACT, LEFT, INTERPRETER, *LISTED = sys.argv[2:]
+MODE, ABSTRACT, LEFT, LOOPBACK, INTERPRETER, *LISTED = sys.argv[2:]
 FLAGS = {'rdonly': os.ST_RDONLY, 'nosuid': os.ST_NOSUID, 'nodev': os.ST_NODEV, 'noexec': os.ST_NOEXEC}
 
 
@@ -50,7 +50,7 @@ def failure(attempt):
     try:
         attempt()
     except OSError as e:
-        return errno.errorcode[e.errno]
+        return errno.errorcode.get(e.errno, type(e).__name__)
     return None
 
 
@@ -69,6 +69,13 @@ def pinged():
         conn.connect(os.environ['DOCKER_HOST'][len('unix://'):])
         conn.sendall(b'GET /_ping HTTP/1.1\\r\\nHost: docker\\r\\nConnection: close\\r\\n\\r\\n')
         return conn.makefile('rb').readline().decode().strip()
+
+
+def resolver():
+    try:
+        return open('/etc/resolv.conf').read()
+    except FileNotFoundError:
+        return None
 
 
 def copied():
@@ -108,6 +115,8 @@ print(json.dumps({
     'interfaces': socket.if_nameindex(),
     'network': failure(lambda: connected(('192.0.2.1', 80), socket.AF_INET)),
     'abstract': failure(lambda: connected('\\0' + ABSTRACT)),
+    'loopback': failure(lambda: connected(('127.0.0.1', int(LOOPBACK)), socket.AF_INET)),
+    'resolver': resolver(),
     'daemon': pinged(),
 }))
 '''
@@ -146,8 +155,9 @@ def waited(condition, seconds):
     return condition()
 
 
-@support.needs_root
-class ConfinedComposeTest(Compose):
+class ConfinedCompose(Compose):
+    """The probe as the client in the confined sandbox, and a TCP listener on the loopback of the test's own network."""
+
     settings = {'CONFINED': True, 'DOCKER': INTERPRETER}
 
     def setUp(self):
@@ -163,6 +173,11 @@ class ConfinedComposeTest(Compose):
         listener.bind('\0' + self.abstract)
         listener.listen(1)
         self.addCleanup(listener.close)
+        loopback = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        loopback.bind(('127.0.0.1', 0))
+        loopback.listen(1)
+        self.addCleanup(loopback.close)
+        self.loopback = str(loopback.getsockname()[1])
 
     def listed(self):
         """What the probe lists in the sandbox, and what each must hold."""
@@ -178,14 +193,17 @@ class ConfinedComposeTest(Compose):
         }
 
     def probe(self, mode='see', as_whom='', timeout=30):
-        return self.compose(self.project, [], 'compose', 'ps', mode, self.abstract, self.left, INTERPRETER,
-                            *self.listed(), as_whom=as_whom, timeout=timeout)
+        return self.compose(self.project, [], 'compose', 'ps', mode, self.abstract, self.left, self.loopback,
+                            INTERPRETER, *self.listed(), as_whom=as_whom, timeout=timeout)
 
     def seen(self, as_whom):
         result = self.probe(as_whom=as_whom)
         self.assertEqual((result.returncode, result.stderr), (0, b''))
         return json.loads(result.stdout)
 
+
+@support.needs_root
+class ConfinedComposeTest(ConfinedCompose):
     def test_the_client_sees_only_its_sandbox_as_the_account(self):
         for as_whom in ('', 'root'):
             with self.subTest(as_whom=as_whom):
@@ -223,6 +241,7 @@ class ConfinedComposeTest(Compose):
         self.assertEqual(seen['interfaces'], [[1, 'lo']])
         self.assertEqual(seen['network'], 'ENETUNREACH')
         self.assertEqual(seen['abstract'], 'ECONNREFUSED')
+        self.assertEqual((seen['loopback'], seen['resolver']), ('ENETUNREACH', None))
 
     def test_the_client_is_the_child_of_the_namespace_s_init_and_nothing_it_started_outlives_the_request(self):
         seen = self.seen('')
@@ -248,6 +267,30 @@ class ConfinedComposeTest(Compose):
         os.kill(requests[0], signal.SIGKILL)
         self.assertTrue(waited(lambda: not named(self.left), 5))
         held.join(10)
+
+
+@support.needs_root
+class AccountNetworkComposeTest(ConfinedCompose):
+    """A daemon that holds its account's network namespace, the test's own here, puts the client in it."""
+
+    def open_daemon(self, account, accounts_directory):
+        return accountdaemon.Daemon(account.name, os.open(self.daemon_socket, os.O_PATH | os.O_CLOEXEC),
+                                    network_fd=os.open('/proc/self/ns/net', os.O_RDONLY | os.O_CLOEXEC))
+
+    def listed(self):
+        bundled = os.path.isfile(sandbox.CERTIFICATES)
+        listed = {**super().listed(), '/etc': ['group', 'passwd', 'resolv.conf', *(['ssl'] if bundled else [])]}
+        if bundled:
+            listed[os.path.dirname(sandbox.CERTIFICATES)] = [os.path.basename(sandbox.CERTIFICATES)]
+        return listed
+
+    def test_the_client_shares_the_account_s_network_and_looks_names_up_through_its_dns(self):
+        seen = self.seen('')
+        self.assertEqual(seen['listed'], self.listed())
+        self.assertIsNone(seen['loopback'])
+        self.assertEqual(seen['resolver'], sandbox.RESOLVER)
+        self.assertEqual(seen['ids'], [support.UID, support.UID, support.GID, support.GID, []])
+        self.assertEqual(seen['daemon'], 'HTTP/1.1 200 OK')
 
 
 if __name__ == '__main__':

@@ -91,8 +91,9 @@ def connector(daemon):
 def run(daemon, output, account, files, workdir, environment, argv):
     """`docker compose …` or `docker buildx build …` as the account in the sandbox, against its own daemon.
 
-    With `root`, the client stands in for root in the account, and keeps root's reach over the home's files."""
-    return sandbox.run(connector(daemon), account, workdir, environment, argv, output, files)
+    With `root`, the client stands in for root in the account, and keeps root's reach over the home's files. It shares
+    the account container's network, which the daemon holds."""
+    return sandbox.run(connector(daemon), account, workdir, environment, argv, output, files, daemon.network)
 
 
 ACTIONS = {

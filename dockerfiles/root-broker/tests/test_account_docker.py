@@ -431,6 +431,8 @@ class OpenDaemonTest(unittest.TestCase):
         self.pid = os.getpid()
         self.root = os.path.join(self.proc, str(self.pid), 'root')
         os.makedirs(os.path.join(self.root, 'run'))
+        os.makedirs(os.path.join(self.proc, str(self.pid), 'ns'))
+        os.symlink(f'/proc/{self.pid}/ns/net', os.path.join(self.proc, str(self.pid), 'ns', 'net'))
         self.inner = os.path.join(self.root, 'run', 'docker.sock')
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.listener.bind(self.inner)
@@ -460,6 +462,24 @@ class OpenDaemonTest(unittest.TestCase):
         finally:
             daemon.close()
         self.assertEqual(len(self.asked), 2)
+
+    def test_the_network_namespace_of_the_account_init_held_until_the_daemon_is_closed(self):
+        daemon = self.open()
+        held = daemon.network
+        try:
+            self.assertEqual(os.fstat(held).st_ino, os.stat(f'/proc/{self.pid}/ns/net').st_ino)
+            self.assertIsNone(daemon.bounded(5).network_fd)
+            self.assertEqual(daemon.bounded(5).network, held)
+        finally:
+            daemon.close()
+        self.assertIsNone(daemon.network_fd)
+        with self.assertRaises(OSError):
+            os.fstat(held)
+
+    def test_a_container_whose_namespace_is_gone_is_restarting(self):
+        os.unlink(os.path.join(self.proc, str(self.pid), 'ns', 'net'))
+        with self.assertRaisesRegex(accountdaemon.Unavailable, 'container alice is restarting'):
+            self.open()
 
     def test_a_link_on_the_way_is_refused(self):
         os.unlink(self.inner)

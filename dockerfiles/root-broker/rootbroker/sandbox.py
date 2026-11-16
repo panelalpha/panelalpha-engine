@@ -2,6 +2,9 @@
 
 It runs as the account's uid with no new privileges in namespaces of its own, chrooted into a read-only tmpfs with
 the docker binaries, the home, `/tmp` and a relay to the account's dockerd; nothing in the home or `/tmp` executes.
+Its network is the account container's when the daemon holds that, so it reaches what the account does and looks
+names up as the account does, with the CA bundle, since BuildKit has the client fetch a registry's token. Else it
+has none.
 """
 
 import ctypes
@@ -16,6 +19,7 @@ import tempfile
 import threading
 import time
 
+from . import hostns
 from .dockerapi import Unavailable
 from .libc import LIBC
 from .protocol import CHUNK, exit_code
@@ -27,6 +31,8 @@ PLUGINS = '/usr/libexec/docker/cli-plugins'
 LIBRARIES = ('/usr/lib', '/usr/lib64')
 DEVICES = ('null', 'zero', 'random', 'urandom')
 SOCKET = '/run/docker.sock'
+RESOLVER = 'nameserver 127.0.0.11\noptions ndots:0\n'
+CERTIFICATES = '/etc/ssl/certs/ca-certificates.crt'
 STOP_SECONDS = 10
 DEADLINE_SECONDS = 7200
 CONNECTIONS = 128
@@ -216,11 +222,11 @@ def keep_file_capabilities():
             raise OSError(ctypes.get_errno(), 'ambient capability')
 
 
-def enter(account, relay_path, root, files=False):
+def enter(account, relay_path, root, files=False, joined=False):
     """In the child: the namespaces, the tmpfs root and its few mounts, then the account's uid, with $files only the
-    file capabilities."""
-    os.unshare(NAMESPACES)
-    build_root(root, account, relay_path)
+    file capabilities; $joined keeps the account's network the child already entered."""
+    os.unshare(NAMESPACES & ~os.CLONE_NEWNET if joined else NAMESPACES)
+    build_root(root, account, relay_path, joined)
     os.chroot(root)
     drop_bounding_set(files)
     become(account, files)
@@ -230,7 +236,7 @@ def inside(root, path):
     return os.path.join(root, path.lstrip('/'))
 
 
-def build_root(root, account, relay_path):
+def build_root(root, account, relay_path, joined=False):
     """The tmpfs root in a mount tree private to the namespace, and all it holds, read-only once it holds it."""
     mount(None, '/', None, MS_REC | MS_PRIVATE)
     mount('tmpfs', root, 'tmpfs', MS_NOSUID | MS_NODEV, 'mode=0755,size=16m')
@@ -240,6 +246,9 @@ def build_root(root, account, relay_path):
     bind_socket(root, relay_path)
     bind_home(root, account)
     write_identity(root, account)
+    if joined:
+        bind_certificates(root)
+        write_resolver(root)
     mount(None, root, None, MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV)
 
 
@@ -288,6 +297,19 @@ def write_identity(root, account):
         group.write(f'{account.name}:x:{account.gid}:\n')
 
 
+def bind_certificates(root):
+    """The CA bundle, read-only, for the client's TLS to a registry; nothing when the image has none."""
+    if os.path.isfile(CERTIFICATES):
+        placeholder(inside(root, CERTIFICATES), False)
+        bind(CERTIFICATES, inside(root, CERTIFICATES), MS_RDONLY)
+
+
+def write_resolver(root):
+    """`/etc/resolv.conf` naming Docker's DNS on the account's network, as the account's own does."""
+    with open(inside(root, '/etc/resolv.conf'), 'w') as resolver:
+        resolver.write(RESOLVER)
+
+
 def drop_bounding_set(files):
     """Every capability out of the bounding set, with $files all but the file capabilities."""
     for cap in range(CAP_LAST + 1):
@@ -323,9 +345,9 @@ def limit():
         score.write(str(OOM_SCORE_ADJ))
 
 
-def spawn(account, relay, workdir, given, argv, files=False):
-    """Forks the process that starts the client under its init; returns its pid, which leads the client's process
-    group, and the read ends of the client's stdout and stderr."""
+def spawn(account, relay, workdir, given, argv, files=False, network=None):
+    """Forks the process that starts the client under its init, in the network namespace `network` holds when it holds
+    one; returns its pid, which leads the client's process group, and the read ends of the client's stdout and stderr."""
     out_r, out_w = os.pipe()
     err_r, err_w = os.pipe()
     parent = os.getpid()
@@ -334,6 +356,9 @@ def spawn(account, relay, workdir, given, argv, files=False):
         try:
             os.close(out_r)
             os.close(err_r)
+            joined = CONFINED and network is not None
+            if joined:
+                hostns.setns(network)
             null = os.open('/dev/null', os.O_RDONLY)
             os.dup2(null, 0)
             os.dup2(out_w, 1)
@@ -342,7 +367,7 @@ def spawn(account, relay, workdir, given, argv, files=False):
             os.setsid()
             limit()
             if CONFINED:
-                enter(account, relay.path, relay.root, files)
+                enter(account, relay.path, relay.root, files, joined)
             die_with(parent)
             os.chdir(workdir)
             os._exit(under_init(['docker', *argv], environment(account, given, relay.path)))
@@ -407,13 +432,14 @@ def stop(pid):
         pass
 
 
-def run(connect, account, workdir, given, argv, output, files=False):
-    """`docker <argv>` as the account against its daemon, with $files root's reach over files, streamed to `output`;
-    returns its exit code. A client hanging up stops it, and DEADLINE_SECONDS raises Unavailable."""
+def run(connect, account, workdir, given, argv, output, files=False, network=None):
+    """`docker <argv>` as the account against its daemon, with $files root's reach over files, in the network
+    namespace `network` holds, streamed to `output`; returns its exit code. A client hanging up stops it, and
+    DEADLINE_SECONDS raises Unavailable."""
     relay = Relay(connect, account)
     words = {'client': argv[0], 'name': account.name}
     try:
-        pid, out_r, err_r = spawn(account, relay, workdir, given, argv, files)
+        pid, out_r, err_r = spawn(account, relay, workdir, given, argv, files, network)
         relay.start()
         code = follow(pid, out_r, err_r, output, time.monotonic() + DEADLINE_SECONDS)
     except TimeoutError as e:

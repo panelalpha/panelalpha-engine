@@ -113,7 +113,7 @@ The broker reaches Docker through the Engine API, never a docker CLI, except for
 |---|---|---|
 | An account's own daemon | `account-docker` | `accountdocker.asking`: the DinD socket below the account container's root, opened without links once the host's daemon names the container; every reply is the tenant's, read up to a size and type-checked |
 | A command in an account's container | `account-container` | an exec through the host's daemon, once its inspect shows the account's own container; the command ends with the caller's connection |
-| An account's compose and buildx | `account-compose` | the CLI as the account in a sandbox (`sandbox.py`) that sees only the home and a relay to the account's daemon |
+| An account's compose and buildx | `account-compose` | the CLI as the account in a sandbox (`sandbox.py`) that sees only the home and a relay to the account's daemon, on the account container's network |
 | The host's own daemon | `docker`, `lines`, `build-cache`, `probes`, `host`, `scripts` | `hostapi.asking` on `/var/run/docker.sock` (`hostdaemon.py`), errors in the CLI's words |
 | A command in an engine service | `compose` | an exec in the service's running container on the host's daemon, found by the broker's own compose project (`engineservices.py`) |
 | `up`, `down`, `build`, `pull` of a project | `compose`, `lines` | `docker compose`, an Engine API client run by the broker; a project's file is checked (`composefiles.py`) and an account's rendered against the templates' shape (`composepolicy.py`) |
