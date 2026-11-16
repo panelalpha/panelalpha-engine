@@ -38,7 +38,13 @@ test.describe('pae-artisan token commands', () => {
 
   test('mcp token create, list, revoke and delete agree with REST', async ({ hostExec, api }) => {
     const name = uniqueId('cli-mcp-');
-    const created = await hostExec!.pae(['mcp:token:create', name, '--short', '--no-register']);
+    const created = await hostExec!.pae([
+      'mcp:token:create',
+      name,
+      '--short',
+      '--no-register',
+      '--expires=1h',
+    ]);
     expect(created.exitCode).toBe(0);
     const token = created.stdout
       .split('\n')

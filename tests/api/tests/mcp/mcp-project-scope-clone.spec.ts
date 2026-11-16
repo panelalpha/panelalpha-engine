@@ -107,6 +107,7 @@ test.describe('project scope: clone and staging', () => {
       '--short',
       '--api',
       '--no-register',
+      '--expires=1h',
     ]);
     expect(minted.exitCode, minted.stderr).toBe(0);
     const plain = minted.stdout

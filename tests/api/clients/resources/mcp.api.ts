@@ -9,6 +9,12 @@ import {
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
 
+/**
+ * How long a token a test mints lasts. A token never outlives the one that mints it, so a suite run with an
+ * expiring API token could mint none that never expires.
+ */
+const TEST_TOKEN_LIFETIME = '1h';
+
 export class McpApi extends EngineApiBase {
   async listMcpTokens(project?: string): Promise<ApiListResponse<McpToken>> {
     const suffix = project === undefined ? '' : `?project=${encodeURIComponent(project)}`;
@@ -19,7 +25,10 @@ export class McpApi extends EngineApiBase {
 
   async createMcpToken(name: string, projects?: string[]): Promise<ApiResponse<McpToken>> {
     const response = await this.api.post('mcp-tokens', {
-      data: projects === undefined ? { name } : { name, projects },
+      data:
+        projects === undefined
+          ? { name, expires_in: TEST_TOKEN_LIFETIME }
+          : { name, projects, expires_in: TEST_TOKEN_LIFETIME },
     });
     await this.assertStatus(response, 201);
     return response.json();
@@ -30,7 +39,10 @@ export class McpApi extends EngineApiBase {
     projects?: string[]
   ): Promise<{ status: number; body: any }> {
     const response = await this.api.post('mcp-tokens', {
-      data: projects === undefined ? { name } : { name, projects },
+      data:
+        projects === undefined
+          ? { name, expires_in: TEST_TOKEN_LIFETIME }
+          : { name, projects, expires_in: TEST_TOKEN_LIFETIME },
     });
     return this.rawCall(response);
   }
