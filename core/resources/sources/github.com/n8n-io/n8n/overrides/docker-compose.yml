@@ -12,5 +12,21 @@ services:
       - ./docker:/home/node/panelalpha:ro
     ports:
       - "5678:5678"
+    # `/` answers "starting up", then 404, before the editor routes exist; readiness is 200 only after.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz/readiness').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+  # No-op gate: `compose up -d` returns only once n8n is ready.
+  ready:
+    image: docker.n8n.io/n8nio/n8n
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      n8n:
+        condition: service_healthy
+    mem_limit: 32m
 volumes:
   n8n_data: {}
