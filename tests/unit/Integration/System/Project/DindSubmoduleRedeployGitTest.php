@@ -14,9 +14,8 @@ use Tests\TestCase;
 use Tests\Support\TestableGitRepository;
 
 /**
- * A redeploy after a pull, with real git: a submodule the deployed commit already declared
- * and that cannot be fetched now keeps whatever checkout it had with a warning; one the new
- * commit adds fails the redeploy.
+ * A redeploy after a pull, with real git: a submodule that cannot be fetched keeps whatever
+ * checkout it had, or is left out, and the warning says which.
  */
 class DindSubmoduleRedeployGitTest extends TestCase
 {
@@ -81,24 +80,24 @@ class DindSubmoduleRedeployGitTest extends TestCase
 
         $this->assertCount(1, $warnings);
         $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
-        $this->assertStringContainsString('the submodule checkout the previous deploy had', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on with the submodule checkout it has.', $warnings[0]);
         $this->assertSame("lib\n", file_get_contents($this->projectDir() . '/lib/a.txt'));
     }
 
-    public function test_a_submodule_the_new_commit_adds_that_cannot_be_fetched_fails_the_redeploy(): void
+    public function test_a_submodule_the_new_commit_adds_that_cannot_be_fetched_is_left_out(): void
     {
         $this->addUnreachableSubmodule('vendor/gone');
         $this->pullCommit('add gone');
 
-        try {
-            $warnings = $this->redeploy();
-            $this->fail('the redeploy went on: ' . implode(' | ', $warnings));
-        } catch (\RuntimeException $e) {
-            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
-        }
+        $warnings = $this->redeploy();
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on without vendor/gone.', $warnings[0]);
+        $this->assertSame("lib\n", file_get_contents($this->projectDir() . '/lib/a.txt'));
     }
 
-    /** The deployed commit declared it and the deploy went on without it, as 2.1.1 did; it still cannot be fetched. */
+    /** The deployed commit declared it and the deploy went on without it; it still cannot be fetched. */
     public function test_a_declared_submodule_that_was_never_fetched_goes_on_without_it(): void
     {
         $this->addUnreachableSubmodule('vendor/gone');
@@ -113,8 +112,23 @@ class DindSubmoduleRedeployGitTest extends TestCase
 
         $this->assertCount(1, $warnings);
         $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
-        $this->assertStringContainsString('The deploy goes on without vendor/gone: there is no earlier checkout of it to keep.', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on without vendor/gone.', $warnings[0]);
         $this->assertSame("lib\n", file_get_contents($this->projectDir() . '/lib/a.txt'));
+    }
+
+    /** Git stops at the first submodule that fails twice; the ones after it still come down. */
+    public function test_a_submodule_after_one_that_cannot_be_fetched_still_comes_down(): void
+    {
+        $this->addUnreachableSubmodule('a-gone');
+        $this->git($this->author, ['submodule', 'add', 'file://' . $this->root . '/lib.git', 'z-lib']);
+        $this->pullCommit('add a-gone and z-lib');
+
+        $warnings = $this->redeploy();
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('gone.git\' does not appear to be a git repository', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on without a-gone.', $warnings[0]);
+        $this->assertSame("lib\n", file_get_contents($this->projectDir() . '/z-lib/a.txt'));
     }
 
     /** Staged in the author's checkout at lib's commit, with a URL nothing answers. */
@@ -139,7 +153,7 @@ class DindSubmoduleRedeployGitTest extends TestCase
         $logger = DeployLogger::start('alice');
         try {
             (new TestableGitRepository($this->dind(), $this->realGit()))
-                ->fetchSubmodules('file://' . $this->root . '/origin.git', null, keepPrevious: true);
+                ->fetchSubmodules('file://' . $this->root . '/origin.git', null);
 
             return array_values(array_map(
                 static fn (array $l): string => $l['msg'],

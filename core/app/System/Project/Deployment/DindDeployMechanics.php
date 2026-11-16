@@ -307,17 +307,14 @@ final class DindDeployMechanics implements DeployMechanics
         (new AccountMapping($this->dind))->ensureMapped();
     }
 
-    /**
-     * A pull, a branch change or a push moves the checkout, and with it the submodule commits it records.
-     * Once the project has deployed, one the deployed commit already declared keeps its checkout when it cannot be fetched.
-     */
+    /** A pull, a branch change or a push moves the checkout, and with it the submodule commits it records. */
     private function fetchSubmodulesOfCheckout(): void
     {
         $user = $this->user();
         if (! $user->hasGitProject()) {
             return;
         }
-        (new GitRepository($this->dind))->fetchSubmodules((string) $user->getGitRepo(), $user->getGitToken(), $user->deploysAsUpgrade());
+        (new GitRepository($this->dind))->fetchSubmodules((string) $user->getGitRepo(), $user->getGitToken());
     }
 
     /** A pull or an archive builds on a copy; the running app keeps the tree it was deployed from. */

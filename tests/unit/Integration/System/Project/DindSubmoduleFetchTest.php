@@ -19,7 +19,7 @@ use Tests\Support\TestableGitRepository;
 /**
  * Submodules come down after the clone and after every change of the checkout,
  * limited by the app config when it names them, and one that cannot be
- * fetched fails the deploy with its own rule.
+ * fetched is left out with a warning naming it.
  */
 class DindSubmoduleFetchTest extends TestCase
 {
@@ -87,20 +87,30 @@ class DindSubmoduleFetchTest extends TestCase
         $this->assertSame([], $runner->commands);
     }
 
-    public function test_a_submodule_that_cannot_be_fetched_fails_the_deploy_with_its_cause(): void
+    public function test_a_submodule_that_cannot_be_fetched_is_left_out_with_a_warning_naming_it(): void
     {
-        try {
-            $this->repository($this->failingSubmodules())->fetchSubmodules('https://github.com/org/panel.git', 'pat');
-            $this->fail('a submodule fetch failure must fail the deploy');
-        } catch (\RuntimeException $e) {
-            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
+        $failing = $this->failingCheckout(now: [self::SUBMODULE], checkedOut: []);
 
-            $match = DeployFailureExplainer::match($e->getMessage());
-            $this->assertSame('submodule-fetch-failed', $match['rule'] ?? null);
-            $this->assertStringContainsString('could not read Username', $match['message']);
-            $this->assertStringContainsString('git: {submodules: [...]}', $match['message']);
-            $this->assertStringContainsString('A submodule addressed over SSH (git@host:...)', $match['message']);
-        }
+        $warnings = $this->warningsOf(fn () => $this->repository($failing)->fetchSubmodules('https://github.com/org/panel.git', 'pat'));
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
+        $this->assertSame(
+            DeployFailureExplainer::SUBMODULE_FAILURE . ": could not read Username for 'https://github.com': terminal prompts disabled. "
+            . 'The deploy goes on without packages/client-area.',
+            $warnings[0]
+        );
+    }
+
+    /** A rebuild that refuses to drop a checkout is still explained, the SSH case included. */
+    public function test_the_submodule_failure_keeps_its_rule_and_advice(): void
+    {
+        $match = DeployFailureExplainer::match(DeployFailureExplainer::SUBMODULE_FAILURE
+            . ": fatal: could not read Username for 'https://github.com': terminal prompts disabled");
+
+        $this->assertSame('submodule-fetch-failed', $match['rule'] ?? null);
+        $this->assertStringContainsString('git: {submodules: [...]}', $match['message']);
+        $this->assertStringContainsString('A submodule addressed over SSH (git@host:...)', $match['message']);
     }
 
     /** @return callable(list<string>): string */
@@ -118,83 +128,46 @@ class DindSubmoduleFetchTest extends TestCase
         };
     }
 
-    /** A redeploy of a checkout that deployed before keeps the submodule checkout it had, and says so. */
-    public function test_a_redeploy_keeps_the_previous_submodule_checkout_and_warns(): void
+    /** A pull whose moved submodule pointer cannot be fetched keeps the checkout it had, and says so. */
+    public function test_a_redeploy_keeps_the_submodule_checkout_it_has_and_warns(): void
     {
-        $failing = $this->failingCheckout(now: [self::SUBMODULE], before: [self::SUBMODULE], checkedOut: [self::SUBMODULE]);
+        $failing = $this->failingCheckout(now: [self::SUBMODULE], checkedOut: [self::SUBMODULE]);
 
-        $warnings = $this->warningsOf(fn () => $this->repository($failing, ['git_commit' => self::DEPLOYED])
-            ->fetchSubmodules('https://github.com/org/panel.git', 'pat', keepPrevious: true));
+        $warnings = $this->warningsOf(fn () => $this->repository($failing, ['git_commit' => self::DEPLOYED, 'deployment_status' => 'success'])
+            ->fetchSubmodules('https://github.com/org/panel.git', 'pat'));
 
         $this->assertCount(1, $warnings);
-        $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
-        $this->assertStringContainsString('the submodule checkout the previous deploy had', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on with the submodule checkout it has.', $warnings[0]);
     }
 
-    /** One the deployed commit declared but never got (2.1.1 went on without it) still goes on, and the warning says so. */
-    public function test_a_redeploy_goes_on_without_a_declared_submodule_it_never_had_and_says_so(): void
+    /** When git cannot tell which submodules have files, the warning cannot name them but the deploy still goes on. */
+    public function test_a_deploy_goes_on_when_git_cannot_read_the_submodule_checkouts(): void
     {
-        $failing = $this->failingCheckout(now: [self::SUBMODULE], before: [self::SUBMODULE], checkedOut: []);
+        $failing = $this->failingCheckout(now: [self::SUBMODULE], checkedOut: null);
 
-        $warnings = $this->warningsOf(fn () => $this->repository($failing, ['git_commit' => self::DEPLOYED])
-            ->fetchSubmodules('https://github.com/org/panel.git', 'pat', keepPrevious: true));
+        $warnings = $this->warningsOf(fn () => $this->repository($failing)->fetchSubmodules('https://github.com/org/panel.git', 'pat'));
 
         $this->assertCount(1, $warnings);
-        $this->assertStringContainsString(
-            'The deploy goes on without packages/client-area: there is no earlier checkout of it to keep.',
-            $warnings[0]
-        );
-        $this->assertStringNotContainsString('the previous deploy had', $warnings[0]);
-    }
-
-    /** A pull whose commit adds a submodule that cannot be fetched fails, as a first deploy does. */
-    public function test_a_redeploy_whose_commit_adds_a_submodule_it_cannot_fetch_fails(): void
-    {
-        foreach (['new in the commit' => ['git_commit' => self::DEPLOYED], 'no recorded commit' => []] as $case => $details) {
-            $failing = $this->failingCheckout(now: [self::SUBMODULE], before: [], checkedOut: []);
-            try {
-                $warnings = $this->warningsOf(fn () => $this->repository($failing, $details)
-                    ->fetchSubmodules('https://github.com/org/panel.git', 'pat', keepPrevious: true));
-                $this->fail("{$case}: the redeploy went on: " . implode(' | ', $warnings));
-            } catch (\RuntimeException $e) {
-                $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage(), $case);
-            }
-        }
-    }
-
-    /** When git cannot tell which submodules have files, it cannot tell what a redeploy would keep either. */
-    public function test_a_redeploy_fails_when_git_cannot_read_the_submodule_checkouts(): void
-    {
-        $failing = $this->failingCheckout(now: [self::SUBMODULE], before: [self::SUBMODULE], checkedOut: null);
-
-        try {
-            $warnings = $this->warningsOf(fn () => $this->repository($failing, ['git_commit' => self::DEPLOYED])
-                ->fetchSubmodules('https://github.com/org/panel.git', 'pat', keepPrevious: true));
-            $this->fail('the redeploy went on: ' . implode(' | ', $warnings));
-        } catch (\RuntimeException $e) {
-            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
-        }
+        $this->assertStringEndsWith('The deploy goes on without the submodules that did not come down.', $warnings[0]);
     }
 
     /**
-     * A checkout whose submodule fetch fails: `.gitmodules` declares $now at HEAD and $before at
-     * the deployed commit, and $checkedOut have files (null: git cannot list them).
+     * A checkout whose submodule fetch fails: `.gitmodules` declares $now at HEAD, and $checkedOut
+     * have files (null: git cannot list them).
      *
      * @param list<string> $now
-     * @param list<string> $before
      * @param ?list<string> $checkedOut
      * @return callable(list<string>): string
      */
-    private function failingCheckout(array $now, array $before, ?array $checkedOut): callable
+    private function failingCheckout(array $now, ?array $checkedOut): callable
     {
         $failing = $this->failingSubmodules();
 
-        return static function (array $command) use ($now, $before, $checkedOut, $failing): string {
+        return static function (array $command) use ($now, $checkedOut, $failing): string {
             $joined = implode(' ', $command);
 
             return match (true) {
                 str_contains($joined, 'config --blob HEAD:.gitmodules') => self::gitmodulesPaths($now),
-                str_contains($joined, 'config --blob ' . self::DEPLOYED . ':.gitmodules') => self::gitmodulesPaths($before),
                 str_contains($joined, 'ls-files --recurse-submodules') && $checkedOut === null
                     => throw new GitException("fatal: not a git repository: 'packages/client-area/.git'", 128),
                 str_contains($joined, 'ls-files --recurse-submodules') => implode('', array_map(

@@ -300,11 +300,12 @@ abstract class WorkTree
      * checkout change, so a moved submodule pointer deploys the new commit; required where dependencies are vendored so.
      *
      * @param  ?list<string>  $paths  only these submodules (and theirs, recursively); null for every one
+     * @param  bool  $checkout  check each one out even at the commit it already has, as a clone an aborted update left is not
      * @return bool whether submodules were declared and asked for (not whether they all came down)
      *
      * @throws GitException when the checkout has no repository at all
      */
-    public function initSubmodules(?string $token = null, ?array $paths = null): bool
+    public function initSubmodules(?string $token = null, ?array $paths = null, bool $checkout = false): bool
     {
         $this->requireRepository();
 
@@ -318,6 +319,7 @@ abstract class WorkTree
             ...$this->submoduleUrlRewrites(),
             '-C', $this->absolutePath,
             'submodule', 'update', '--init', '--recursive', '--depth=1',
+            ...($checkout ? ['--force'] : []),
             ...($paths === null ? [] : ['--', ...$paths]),
         ], $token);
 

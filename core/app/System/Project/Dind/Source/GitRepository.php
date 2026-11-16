@@ -26,7 +26,7 @@ class GitRepository extends WorkTree
 
     private ?ShellOperations $shell = null;
 
-    /** @var ?array{declared: list<string>, checkedOut: list<string>} the submodules of the checkout a re-clone replaces */
+    /** @var ?list<string> the submodules with files in the checkout a re-clone replaces */
     private ?array $replacedCheckout = null;
 
     public function __construct(
@@ -80,7 +80,7 @@ class GitRepository extends WorkTree
             $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
             $this->rethrowingGitFailure(fn () => $this->fetchFullHistory($gitToken));
         }
-        $this->fetchSubmodules($gitRepo, $gitToken, $beforeReplacing !== null && $user->deploysAsUpgrade());
+        $this->fetchSubmodules($gitRepo, $gitToken);
     }
 
     private function cloningMessage(string $gitRepo, ?string $branch): string
@@ -151,7 +151,7 @@ class GitRepository extends WorkTree
             throw $e;
         }
 
-        $this->replacedCheckout = $this->submodulesOfHead();
+        $this->replacedCheckout = $this->checkedOutSubmodulesOfHead();
         $beforeReplacing();
         $this->emptyDirectoryFor($gitProjectDir);
         $this->tree()->moveStagingInto($stagingDir, $gitProjectDir);
@@ -185,10 +185,10 @@ class GitRepository extends WorkTree
     }
 
     /**
-     * The submodules the checkout records or the app config names; one not fetched fails the deploy, as the build
-     * would later on a file naming no submodule. $keepPrevious keeps one the deployed commit declared as it was, warned.
+     * The submodules the checkout records or the app config names. One not fetched is left out with a warning naming it,
+     * unless a rebuild's re-clone would drop the checkout of it the running app has.
      */
-    public function fetchSubmodules(string $gitRepo, ?string $gitToken, bool $keepPrevious = false): void
+    public function fetchSubmodules(string $gitRepo, ?string $gitToken): void
     {
         if (! is_file($this->absolutePath.'/.gitmodules')) {
             return;
@@ -206,7 +206,7 @@ class GitRepository extends WorkTree
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            $this->submodulesNotFetched($e, $keepPrevious, $paths);
+            $this->fetchEachSubmodule($gitToken, $paths, $e);
 
             return;
         }
@@ -215,43 +215,101 @@ class GitRepository extends WorkTree
     }
 
     /**
-     * Only a submodule the deployed commit already declared may stay as it was. One new in this commit fails the
-     * deploy as on a first deploy, and so do one a re-clone would drop and a checkout git cannot read.
+     * Git gives up on the remaining submodules once one fails twice, leaving those it cloned unchecked-out, so each
+     * is fetched and checked out on its own, and the ones that still fail are reported.
      *
      * @param  ?list<string>  $paths
-     *
-     * @throws \RuntimeException unless $keepPrevious and every submodule left behind was declared before
      */
-    private function submodulesNotFetched(\Throwable $e, bool $keepPrevious, ?array $paths): void
+    private function fetchEachSubmodule(?string $gitToken, ?array $paths, \Throwable $failure): void
     {
-        $failure = DeployFailureExplainer::SUBMODULE_FAILURE.': '.GitUrl::sanitize($e->getMessage());
-        $missing = $keepPrevious ? $this->submodulesWithoutCheckout($paths) : null;
-        if ($missing === null) {
-            throw new \RuntimeException($failure, 0, $e);
+        $declared = $this->declaredSubmodules('HEAD', $paths);
+        if ($declared === null || $declared === []) {
+            $this->submodulesNotFetched($failure, $paths);
+
+            return;
         }
-        $previous = $this->previousSubmodules();
-        $lost = array_values(array_intersect($missing, $previous['checkedOut']));
-        if ($lost !== [] || array_diff($missing, $previous['declared']) !== []) {
+        $failures = array_filter(array_map(fn (string $path): ?\Throwable => $this->fetchOneSubmodule($gitToken, $path), $declared));
+        if ($failures === []) {
+            $this->project->shell()->logger()?->ok('Submodules fetched');
+
+            return;
+        }
+        $this->submodulesNotFetched(reset($failures), $paths);
+    }
+
+    private function fetchOneSubmodule(?string $gitToken, string $path): ?\Throwable
+    {
+        try {
+            $this->initSubmodules($gitToken, [$path], checkout: true);
+
+            return null;
+        } catch (\Throwable $e) {
+            if ($e instanceof DeployCancelledException) {
+                throw $e;
+            }
+
+            return $e;
+        }
+    }
+
+    /**
+     * @param  ?list<string>  $paths
+     *
+     * @throws \RuntimeException when a rebuild would drop a submodule checkout the running app has
+     */
+    private function submodulesNotFetched(\Throwable $e, ?array $paths): void
+    {
+        $failure = DeployFailureExplainer::SUBMODULE_FAILURE.': '.self::gitReason(GitUrl::sanitize($e->getMessage()));
+        $missing = $this->submodulesWithoutCheckout($paths);
+        $lost = $this->droppedByReclone($missing);
+        if ($lost !== []) {
             throw new \RuntimeException($failure.self::lostByReclone($lost), 0, $e);
         }
         $this->project->shell()->logger()?->warn($failure.'. '.self::goesOnWithout($missing));
     }
 
+    /**
+     * The submodules the running app has checked out that this re-clone came without.
+     *
+     * @param  ?list<string>  $missing
+     * @return list<string>
+     */
+    private function droppedByReclone(?array $missing): array
+    {
+        if ($this->replacedCheckout === null || $missing === null || ! $this->user()->deploysAsUpgrade()) {
+            return [];
+        }
+
+        return array_values(array_intersect($missing, $this->replacedCheckout));
+    }
+
+    /** The line git explained the failure in (its own output is already in the deploy log): `fatal:` first, then `error:`. */
+    private static function gitReason(string $output): string
+    {
+        foreach (['fatal', 'error'] as $prefix) {
+            if (preg_match('/^\s*'.$prefix.': ([^\n]+)/m', $output, $m) === 1) {
+                return rtrim(trim($m[1]), '.');
+            }
+        }
+
+        return rtrim(trim(strtok($output, "\n") ?: $output), '.');
+    }
+
     /** @param list<string> $lost */
     private static function lostByReclone(array $lost): string
     {
-        return $lost === []
-            ? ''
-            : '. A rebuild clones the repository afresh, so the checkout of '.implode(', ', $lost)
-                .' the previous deploy had cannot be kept';
+        return '. A rebuild clones the repository afresh, so the checkout of '.implode(', ', $lost)
+            .' the running app has cannot be kept';
     }
 
-    /** @param list<string> $missing */
-    private static function goesOnWithout(array $missing): string
+    /** @param ?list<string> $missing */
+    private static function goesOnWithout(?array $missing): string
     {
-        return $missing === []
-            ? 'The deploy goes on with the submodule checkout the previous deploy had.'
-            : 'The deploy goes on without '.implode(', ', $missing).': there is no earlier checkout of it to keep.';
+        return match (true) {
+            $missing === null => 'The deploy goes on without the submodules that did not come down.',
+            $missing === [] => 'The deploy goes on with the submodule checkout it has.',
+            default => 'The deploy goes on without '.implode(', ', $missing).'.',
+        };
     }
 
     /**
@@ -271,28 +329,12 @@ class GitRepository extends WorkTree
         return $checkedOut === null ? null : array_values(array_diff($declared, $checkedOut));
     }
 
-    /**
-     * What the checkout had before this deploy: the one a re-clone replaced, else the commit
-     * the previous deploy recorded, whose submodules a pull leaves in place.
-     *
-     * @return array{declared: list<string>, checkedOut: list<string>}
-     */
-    private function previousSubmodules(): array
-    {
-        if ($this->replacedCheckout !== null) {
-            return $this->replacedCheckout;
-        }
-        $commit = $this->user()->getGitCommit();
-
-        return ['declared' => $commit === null ? [] : ($this->declaredSubmodules($commit, null) ?? []), 'checkedOut' => []];
-    }
-
-    /** @return array{declared: list<string>, checkedOut: list<string>} */
-    private function submodulesOfHead(): array
+    /** @return list<string> */
+    private function checkedOutSubmodulesOfHead(): array
     {
         $declared = $this->declaredSubmodules('HEAD', null) ?? [];
 
-        return ['declared' => $declared, 'checkedOut' => $this->checkedOutSubmodules($declared) ?? $declared];
+        return $this->checkedOutSubmodules($declared) ?? $declared;
     }
 
     /**

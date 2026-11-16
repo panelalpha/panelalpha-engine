@@ -15,9 +15,9 @@ use Tests\TestCase;
 use Tests\Support\TestableGitRepository;
 
 /**
- * A rebuild clones ~/project afresh, so it has no submodule checkout to keep:
- * one the replaced checkout declared but never had is left out with a warning,
- * one it had checked out, or one new in the commit, fails the rebuild.
+ * A rebuild clones ~/project afresh: a submodule it cannot fetch is left out
+ * with a warning naming it, unless the running app has a checkout of it the
+ * re-clone would drop, which fails the rebuild and leaves that app running.
  */
 class DindSubmoduleRebuildTest extends TestCase
 {
@@ -48,53 +48,68 @@ class DindSubmoduleRebuildTest extends TestCase
 
     public function test_a_rebuild_goes_on_without_a_submodule_the_previous_checkout_declared_but_never_had(): void
     {
-        $logger = DeployLogger::start('alice');
-        try {
-            $this->repository('success', before: ['lib'], checkedOut: [])->cloneConfiguredRepository(static function (): void {});
-            $warnings = $this->warnings($logger);
-        } finally {
-            $logger->finish(DeployLogger::STATUS_SUCCESS);
-        }
+        $warnings = $this->warningsOf(fn () => $this->repository('success', before: ['lib'], checkedOut: [])
+            ->cloneConfiguredRepository(static function (): void {}));
 
         $this->assertCount(1, $warnings);
         $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $warnings[0]);
-        $this->assertStringContainsString('The deploy goes on without lib: there is no earlier checkout of it to keep.', $warnings[0]);
+        $this->assertStringEndsWith('The deploy goes on without lib.', $warnings[0]);
     }
 
-    public function test_a_rebuild_that_would_lose_a_submodule_checkout_fails(): void
+    public function test_a_rebuild_that_would_lose_the_running_apps_submodule_checkout_fails(): void
     {
         try {
             $this->repository('success', before: ['lib'], checkedOut: ['lib'])->cloneConfiguredRepository(static function (): void {});
             $this->fail('a rebuild that drops a submodule the app had must fail');
         } catch (\RuntimeException $e) {
             $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
-            $this->assertStringContainsString('the checkout of lib the previous deploy had cannot be kept', $e->getMessage());
+            $this->assertStringContainsString('the checkout of lib the running app has cannot be kept', $e->getMessage());
             $this->assertSame('submodule-fetch-failed', DeployFailureExplainer::match($e->getMessage())['rule'] ?? null);
         }
     }
 
-    public function test_a_rebuild_whose_commit_adds_a_submodule_it_cannot_fetch_fails(): void
+    public function test_a_rebuild_whose_commit_adds_a_submodule_it_cannot_fetch_goes_on_without_it(): void
     {
-        try {
-            $this->repository('success', before: [], checkedOut: [])->cloneConfiguredRepository(static function (): void {});
-            $this->fail('a submodule new in the commit must fail the rebuild');
-        } catch (\RuntimeException $e) {
-            $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage());
-            $this->assertStringNotContainsString('cannot be kept', $e->getMessage());
-        }
+        $warnings = $this->warningsOf(fn () => $this->repository('success', before: [], checkedOut: [])
+            ->cloneConfiguredRepository(static function (): void {}));
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringEndsWith('The deploy goes on without lib.', $warnings[0]);
+    }
+
+    /** A project whose app never ran has no checkout to protect, so even one it had checked out is left out. */
+    public function test_a_rebuild_of_a_project_that_never_ran_goes_on_without_the_submodule(): void
+    {
+        $warnings = $this->warningsOf(fn () => $this->repository('failed', before: ['lib'], checkedOut: ['lib'])
+            ->cloneConfiguredRepository(static function (): void {}));
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringEndsWith('The deploy goes on without lib.', $warnings[0]);
     }
 
     /** A clone into an emptied ~/project has no checkout to keep, the first deploy's or any other. */
-    public function test_a_clone_into_an_emptied_project_still_fails_on_a_submodule_it_cannot_fetch(): void
+    public function test_a_clone_into_an_emptied_project_goes_on_without_a_submodule_it_cannot_fetch(): void
     {
         foreach (['first deploy' => null, 'deployed project' => 'success'] as $case => $deploymentStatus) {
             $this->wiped = false;
-            try {
-                $this->repository($deploymentStatus, before: ['lib'], checkedOut: [])->cloneConfiguredRepository();
-                $this->fail("{$case}: the clone went on without lib");
-            } catch (\RuntimeException $e) {
-                $this->assertStringStartsWith(DeployFailureExplainer::SUBMODULE_FAILURE . ': ', $e->getMessage(), $case);
-            }
+            $warnings = $this->warningsOf(fn () => $this->repository($deploymentStatus, before: ['lib'], checkedOut: ['lib'])
+                ->cloneConfiguredRepository());
+
+            $this->assertCount(1, $warnings, $case);
+            $this->assertStringEndsWith('The deploy goes on without lib.', $warnings[0], $case);
+        }
+    }
+
+    /** @return list<string> */
+    private function warningsOf(callable $deploy): array
+    {
+        $logger = DeployLogger::start('alice');
+        try {
+            $deploy();
+
+            return $this->warnings($logger);
+        } finally {
+            $logger->finish(DeployLogger::STATUS_SUCCESS);
         }
     }
 

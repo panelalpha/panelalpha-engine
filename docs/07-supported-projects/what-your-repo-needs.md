@@ -97,7 +97,7 @@ A server that needs a signing secret, such as `JWT_SECRET` or `SESSION_SECRET`, 
 
 ## Git submodules
 
-Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched fails the first deploy. After that, a submodule the last deployed commit already had keeps whatever copy it had and the deploy log warns, while one the new commit adds fails the deploy. A rebuild clones the repository afresh, so it cannot keep a copy: a submodule the previous deploy had checked out fails the rebuild instead of deploying the app without it. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
+Submodules are fetched with the repository, and again on every pull, branch change and push, at the commit the repository records. A submodule that cannot be fetched is left out, or keeps the copy it had, and the deploy log warns with its name and git's reason; the deploy goes on. A rebuild clones the repository afresh, so it cannot keep a copy: a submodule the running app has checked out fails the rebuild instead of deploying the app without it. A submodule addressed over SSH (`git@host:...`) is fetched over HTTPS unless the project has a deploy key. If the application needs only some of them, for example because the others are private, name those in `.panelalpha/panelalpha.yaml` at the top of the repository:
 
 ```yaml
 git:

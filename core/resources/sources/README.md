@@ -218,7 +218,7 @@ git:
 
 After the clone the engine fetches the whole history of the branch and every tag (`git fetch --unshallow --tags`), on every deploy. It works from the engine's per-repository directory and from a repository's own `.panelalpha/`. Leave it out for every other repository: the full history of a large project is tens of megabytes and many seconds.
 
-Submodules come down after the clone and again on every redeploy (a pull, a branch change, a push), at the commits the checkout records, so a pull that moves a submodule pointer deploys the new commit. A submodule that cannot be fetched (a private one the project's git token cannot read, a commit that is gone) fails the deploy as `submodule-fetch-failed`. When the application needs only some of them, name those:
+Submodules come down after the clone and again on every redeploy (a pull, a branch change, a push), at the commits the checkout records, so a pull that moves a submodule pointer deploys the new commit. A submodule that cannot be fetched (a private one the project's git token cannot read, a commit that is gone) is left out with a warning naming it, and the deploy goes on; only a rebuild that would drop a copy the running app has fails, as `submodule-fetch-failed`. When the application needs only some of them, name those:
 
 ```yaml
 git:
