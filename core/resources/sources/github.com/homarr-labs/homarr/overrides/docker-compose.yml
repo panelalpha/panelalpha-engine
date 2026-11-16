@@ -1,5 +1,5 @@
 # The stack for a repository that ships no compose file of any kind: Homarr is
-# a pnpm/turbo monorepo with one Dockerfile, and `docker compose` has nothing
+# a turbo monorepo with one Dockerfile, and `docker compose` has nothing
 # to load. Without this file the engine generates one that builds that
 # Dockerfile, and within an ordinary account's memory limit the
 # `pnpm turbo build` layer dies with "ResourceExhausted: cannot allocate

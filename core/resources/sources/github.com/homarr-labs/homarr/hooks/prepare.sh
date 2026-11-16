@@ -23,8 +23,9 @@ FALLBACK_IMAGE="ghcr.io/homarr-labs/homarr:v1.77.2"
 
 say() { echo "[panelalpha] homarr: $*"; }
 
-if [ ! -f Dockerfile ] || [ ! -f nginx.conf ] || [ ! -f pnpm-workspace.yaml ]; then
-    echo "[panelalpha] homarr: no Dockerfile/nginx.conf/pnpm-workspace.yaml -- this is not a homarr checkout" >&2
+# A bun workspace (bun.lock) or, on older tags, a pnpm one (pnpm-workspace.yaml).
+if [ ! -f Dockerfile ] || [ ! -f nginx.conf ] || { [ ! -f bun.lock ] && [ ! -f pnpm-workspace.yaml ]; }; then
+    echo "[panelalpha] homarr: no Dockerfile/nginx.conf/bun.lock or pnpm-workspace.yaml -- this is not a homarr checkout" >&2
     exit 1
 fi
 
@@ -80,7 +81,7 @@ chmod 600 "${PW_FILE}"
 # The image
 # ---------------------------------------------------------------------------
 # This recipe does not build the checkout. Upstream's Dockerfile is a
-# pnpm/turbo monorepo build that dies with "ResourceExhausted: cannot allocate
+# turbo monorepo build that dies with "ResourceExhausted: cannot allocate
 # memory" within an ordinary account's memory limit -- and, because the engine's generated compose file
 # sits in the build context and changes every redeploy, it would
 # be paid again on every rebuild.

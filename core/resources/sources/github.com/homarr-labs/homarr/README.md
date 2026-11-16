@@ -2,7 +2,8 @@
 
 Homarr — a self-hosted dashboard: boards of draggable tiles, widgets that poll
 other applications, and integrations that hold API keys for them. Apache-2.0,
-a pnpm/turbo monorepo that builds one Next.js standalone server.
+a turbo monorepo (bun, pnpm on older tags) that builds one Next.js standalone
+server.
 
 ## What the repository is, and what goes wrong without this recipe
 

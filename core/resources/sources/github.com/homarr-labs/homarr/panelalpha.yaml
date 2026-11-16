@@ -5,14 +5,14 @@ description: >-
   them. Apache-2.0, a real runnable application with its own account system --
   nothing here is a scope question.
 
-  It is a pnpm/turbo monorepo that builds one Next.js standalone server, and it
-  publishes that build as ghcr.io/homarr-labs/homarr. The recipe runs the
-  published image; the only thing it takes from the checkout is the version
-  number in package.json, which it turns into the image tag. That is stated
-  plainly rather than hidden: after hooks/prepare.sh has read one field out of
-  one file, this checkout contributes nothing -- not the compose file (there
-  isn't one), not the runtime, not a single byte of the image. The same choice
-  the Seafile and Zabbix recipes make, for a different reason.
+  It is a turbo monorepo (bun, pnpm on older tags) that builds one Next.js
+  standalone server, and it publishes that build as ghcr.io/homarr-labs/homarr.
+  The recipe runs the published image; the only thing it takes from the
+  checkout is the version number in package.json, which it turns into the
+  image tag. That is stated plainly rather than hidden: after hooks/prepare.sh
+  has read one field out of one file, this checkout contributes nothing -- not
+  the compose file (there isn't one), not the runtime, not a single byte of the
+  image. The same choice the Seafile and Zabbix recipes make, for a different reason.
 
   The reason is the build. Stock, the engine detects `dockerfile` and builds
   the monorepo, and its one `pnpm turbo build` layer does not finish:
