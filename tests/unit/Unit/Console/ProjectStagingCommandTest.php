@@ -7,6 +7,7 @@ use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /** `pae project:staging` refuses a busy source in CLI words, never the sentence the HTTP API answers with. */
@@ -19,6 +20,13 @@ class ProjectStagingCommandTest extends TestCase
         parent::setUp();
         $this->bootInMemoryDatabase();
         $this->makeUser('source', ['template' => 'dind']);
+        LocalRoot::answerLocally();
+    }
+
+    protected function tearDown(): void
+    {
+        LocalRoot::answerByBroker();
+        parent::tearDown();
     }
 
     public function test_a_busy_source_is_refused_with_the_plain_message(): void

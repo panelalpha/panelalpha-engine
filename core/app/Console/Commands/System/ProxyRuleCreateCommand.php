@@ -34,7 +34,7 @@ class ProxyRuleCreateCommand extends Command
         {--upstream-port= : Upstream port - interactive if not provided}
         {--upstream-protocol=http : Upstream protocol (for HTTP: http, https; for stream: leave empty)}
         {--scope=system : Owner scope (system or user)}
-        {--project= : Username (required for user-owned rules)}
+        {--project= : Project username (required for user-owned rules)}
         {--force : Skip confirmation}';
 
     protected $description = 'Create a new proxy rule';
@@ -145,7 +145,7 @@ class ProxyRuleCreateCommand extends Command
     {
         $username = $this->option('project');
         if ($scope === 'user' && ! is_string($username)) {
-            $username = $this->ask('Username (for user-owned rule)');
+            $username = $this->ask('Project username (for user-owned rule)');
         }
 
         return is_string($username) && $username !== '' ? $username : null;

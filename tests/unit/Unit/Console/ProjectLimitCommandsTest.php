@@ -262,7 +262,7 @@ class ProjectLimitCommandsTest extends TestCase
         $this->assertSame(0, Artisan::call('project:limit:get', ['--project' => 'alice']));
 
         $output = Artisan::output();
-        $this->assertStringContainsString('User `alice`:', $output);
+        $this->assertStringContainsString('Project `alice`:', $output);
         // The labels exactly as this command has always printed them.
         $this->assertStringContainsString("  disk_space_limit: 1024 MB\n", $output);
         $this->assertStringContainsString("  memory_limit:     512 MB\n", $output);
@@ -312,13 +312,13 @@ class ProjectLimitCommandsTest extends TestCase
         $this->makeUser('alice');
 
         $this->artisan('project:limit:set --project=alice --inodes-limit=900')
-            ->expectsOutput('Following limits will be set for user `alice`:')
+            ->expectsOutput('Following limits will be set for project `alice`:')
             ->expectsOutput('  inodes_limit:     900')
             ->expectsConfirmation('Do you wish to continue?', 'no')
             ->assertExitCode(0);
 
         $this->artisan('project:limit:set --all --inodes-limit=900')
-            ->expectsOutput('Following limits will be set for all (1) users:')
+            ->expectsOutput('Following limits will be set for all (1) projects:')
             ->expectsOutput('  inodes_limit: 900')
             ->expectsConfirmation('Do you wish to continue?', 'no')
             ->assertExitCode(0);

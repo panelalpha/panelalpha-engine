@@ -50,6 +50,7 @@ final class SystemBrokerCases
         yield 'users.gid' => [fn () => $u()->gid('alice'), true];
         yield 'users.setQuota' => [fn () => $u()->setQuota('alice', 1048576, 50000, '/'), true];
         yield 'users.setQuota, no limit' => [fn () => $u()->setQuota('alice', 0, 0, '/home'), true];
+        yield 'users.hostingAccounts' => [fn () => $u()->hostingAccounts(), true];
     }
 
     /** @return iterable<string, array{\Closure(): list<string>, bool}> */

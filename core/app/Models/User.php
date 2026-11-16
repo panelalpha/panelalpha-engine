@@ -48,6 +48,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property Collection<array-key, SftpAccount> $sftpAccounts
  * @property int $sftp_accounts_count
  * @property Collection<array-key, MysqlUser> $mysqlUsers
+ * @property Collection<array-key, MysqlSsoUser> $mysqlSsoUsers
  * @property Collection<array-key, MysqlSsoToken> $mysqlSsoTokens
  * @property Collection<array-key, MysqlDatabase> $mysqlDatabases
  * @property int $mysql_databases_count
@@ -819,6 +820,11 @@ class User extends Authenticatable
     public function mysqlSsoTokens(): HasMany
     {
         return $this->hasMany(MysqlSsoToken::class);
+    }
+
+    public function mysqlSsoUsers(): HasMany
+    {
+        return $this->hasMany(MysqlSsoUser::class);
     }
 
     public function deployHooks(): HasMany

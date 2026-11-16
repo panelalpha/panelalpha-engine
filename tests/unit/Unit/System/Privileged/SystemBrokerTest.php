@@ -31,6 +31,7 @@ final class SystemBrokerTest extends TestCase
         yield 'users.gid' => [fn () => Privileged::users()->gid('alice'), self::onHost('users.gid', 'alice')];
         yield 'users.setQuota' => [fn () => Privileged::users()->setQuota('alice', 1048576, 50000, '/'), self::onHost('users.setQuota', 'alice', '1048576', '50000', '/')];
         yield 'users.setQuota, no limit' => [fn () => Privileged::users()->setQuota('alice', 0, 0, '/home'), self::onHost('users.setQuota', 'alice', '0', '0', '/home')];
+        yield 'users.hostingAccounts' => [fn () => Privileged::users()->hostingAccounts(), self::onHost('users.hostingAccounts')];
         yield 'network.defaultRoute' => [fn () => Privileged::network()->defaultRoute(4), self::onHost('network.defaultRoute', '4')];
         yield 'network.defaultRoute, IPv6' => [fn () => Privileged::network()->defaultRoute(6), self::onHost('network.defaultRoute', '6')];
         yield 'network.addresses' => [fn () => Privileged::network()->addresses(), self::onHost('network.addresses')];

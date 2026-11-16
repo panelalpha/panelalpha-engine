@@ -58,7 +58,7 @@ class ProxyRuleListCommand extends Command
         }
 
         $this->table(
-            ['ID', 'Scope', 'User', 'Transport', 'Listen', 'Server Name', 'Upstream', 'Enabled', 'Generated'],
+            ['ID', 'Scope', 'Project', 'Transport', 'Listen', 'Server Name', 'Upstream', 'Enabled', 'Generated'],
             $rows
         );
 

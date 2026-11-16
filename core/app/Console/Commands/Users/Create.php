@@ -7,6 +7,7 @@ use App\Console\Commands\Concerns\ParsesEnvVarOptions;
 use App\Console\Commands\Concerns\PrintsFindings;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
+use App\Exceptions\ProblemException;
 use App\Http\Resources\UserResource;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Domains\PublicUrl;
@@ -113,7 +114,13 @@ class Create extends Command
 
         // Validated and provisioned first, as POST /users does: a refused
         // create prints only its reason, not a progress line and a log hint.
-        $user = $creator->provisionForDeploy(NewProjectInput::fromArray($params));
+        try {
+            $user = $creator->provisionForDeploy(NewProjectInput::fromArray($params));
+        } catch (ProblemException $refusal) {
+            $this->pointAtAHeldName($refusal);
+
+            throw $refusal;
+        }
 
         if (! $this->option('json')) {
             $this->info(isset($params['git_repo'])
@@ -147,6 +154,19 @@ class Create extends Command
         }
 
         return $this->report($this->created($user, $creator), $creator);
+    }
+
+    /** The engine's own messages name no command, so the one that frees a held name is printed here. */
+    private function pointAtAHeldName(ProblemException $refusal): void
+    {
+        foreach ($refusal->problems as $problem) {
+            if (($problem['code'] ?? '') === 'name_unavailable') {
+                $this->line('A name this server still holds is listed by `pae project:orphan:list` and freed by '
+                    .'`pae project:orphan:delete <name> --force`.');
+
+                return;
+            }
+        }
     }
 
     /**

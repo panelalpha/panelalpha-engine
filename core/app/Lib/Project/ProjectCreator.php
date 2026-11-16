@@ -35,6 +35,7 @@ use App\Models\Task;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\Rules\ProjectName as ProjectNameRule;
+use App\System;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -545,7 +546,7 @@ class ProjectCreator
     private static function assertNameStillFree(User $user, string $domain): void
     {
         if ($user->project()->hostingExists()) {
-            throw ProblemException::one('username', 'name_unavailable', ProjectNameRefusal::unavailable($user->username));
+            throw ProblemException::one('username', 'name_unavailable', ProjectNameRefusal::heldOnHost($user->username, app(System::class)));
         }
 
         if (

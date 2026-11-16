@@ -44,6 +44,9 @@ class Project
     /** rsync's exit status when a file left the source while it was being copied. */
     public const int RSYNC_VANISHED_FILES = 24;
 
+    /** The directory every home the engine makes carries, so a home left without an account is still known as its own. */
+    public const string ENGINE_TRACE = '.panelalpha';
+
     private Runtime $runtime;
 
     private ?DeploymentWorkflow $templateDeployment = null;
@@ -409,14 +412,18 @@ class Project
 
     /**
      * Not best-effort: AppDatabase adopts an existing `<prefix>app` database,
-     * so one left behind is handed to the next project with this name.
+     * so one left behind is handed to the next project with this name. The
+     * phpMyAdmin sign-in account is one of the project's users on this server.
      */
     private function deleteMysqlDatabasesAndUsers(ModelsUser $user): void
     {
         /** @var string[] $mysqlDatabases */
         $mysqlDatabases = $user->mysqlDatabases->pluck('database')->all();
         /** @var string[] $mysqlUsers */
-        $mysqlUsers = $user->mysqlUsers->pluck('user')->all();
+        $mysqlUsers = [
+            ...$user->mysqlUsers->pluck('user')->all(),
+            ...$user->mysqlSsoUsers->pluck('username')->all(),
+        ];
         if ($mysqlDatabases === [] && $mysqlUsers === []) {
             return;
         }
@@ -438,6 +445,7 @@ class Project
     private function deleteOwnedRows(ModelsUser $user): void
     {
         $user->mysqlUsers()->delete();
+        $user->mysqlSsoUsers()->delete();
         $user->mysqlDatabases()->delete();
         $user->ftpAccounts()->delete();
         $user->deployHooks()->delete();
@@ -1118,8 +1126,9 @@ class Project
         if ($this->isDindTemplate() && $this->isRealDirectory($dockerDir)) {
             $this->system->runProcess(Privileged::files()->changeOwner('root:root', $dockerDir));
         }
-        if ($this->isRealDirectory("{$home}/.panelalpha")) {
-            $this->system->runProcess(Privileged::files()->changeMode('700', "{$home}/.panelalpha"));
+        $trace = $home.'/'.self::ENGINE_TRACE;
+        if ($this->isRealDirectory($trace)) {
+            $this->system->runProcess(Privileged::files()->changeMode('700', $trace));
         }
     }
 
@@ -1152,14 +1161,32 @@ class Project
 
     public function tearDownLinuxIsolation(): void
     {
-        if ($this->linuxUserExists()) {
-            $this->deleteLinuxUser();
-        }
+        $this->removeLinuxUser();
         if ($this->homeDirectoryExists()) {
             $this->deleteHomeDirectory();
         }
         if ($this->engineDirectoryExists()) {
             $this->deleteEngineDirectory();
+        }
+    }
+
+    /**
+     * The account goes first, and the home only once the host says the account is gone: a home removed for an account
+     * that is still there leaves the name refused and the files lost.
+     */
+    private function removeLinuxUser(): void
+    {
+        if (! $this->linuxUserExists()) {
+            return;
+        }
+
+        $this->deleteLinuxUser();
+
+        if ($this->linuxUserExists()) {
+            throw new \RuntimeException(
+                "The account '{$this->username()}' is still on this server after its removal was asked for, so nothing "
+                .'else was removed.'
+            );
         }
     }
 
@@ -1185,8 +1212,8 @@ class Project
         $files = Privileged::files();
         $this->system->exec($files->makeDirectories($home));
         $this->system->exec($files->changeOwner('root:root', $home));
-        $this->system->exec($files->makeDirectories("{$home}/.panelalpha"));
-        $this->system->exec($files->changeMode('700', "{$home}/.panelalpha"));
+        $this->system->exec($files->makeDirectories($home.'/'.self::ENGINE_TRACE));
+        $this->system->exec($files->changeMode('700', $home.'/'.self::ENGINE_TRACE));
         $this->createWpCliHome($home);
     }
 

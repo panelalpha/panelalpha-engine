@@ -58,6 +58,25 @@ class ProvisionChecksTest extends TestCase
         $this->assertSame('name_unavailable', $problems[0]['code']);
     }
 
+    /**
+     * The operator has to learn what still holds the name: a project row the create cannot see is gone, an account or a
+     * home left by an earlier delete is not.
+     */
+    public function test_a_name_the_host_still_holds_is_refused_with_what_holds_it(): void
+    {
+        $env = new FakeProvisionEnvironment();
+        $env->unavailableOnHost = ['alice'];
+        $env->holders = ['account', 'home directory'];
+
+        $problems = $this->checks($env)->problems($this->request());
+
+        $this->assertSame(
+            "'alice' is still held on this server by an account and a home directory. "
+            .'Remove what holds it, or choose another name.',
+            $problems[0]['message']
+        );
+    }
+
     public function test_the_row_check_wins_over_the_host_check(): void
     {
         $env = new FakeProvisionEnvironment();
@@ -224,6 +243,9 @@ final class FakeProvisionEnvironment implements ProvisionEnvironment
     public array $unavailableOnHost = [];
 
     /** @var list<string> */
+    public array $holders = [];
+
+    /** @var list<string> */
     public array $templates = [];
 
     /** @var list<string> */
@@ -240,6 +262,11 @@ final class FakeProvisionEnvironment implements ProvisionEnvironment
     public function usernameAvailableOnHost(string $username): bool
     {
         return !in_array($username, $this->unavailableOnHost, true);
+    }
+
+    public function usernameHolders(string $username): array
+    {
+        return $this->holders;
     }
 
     public function templateExists(string $template): bool

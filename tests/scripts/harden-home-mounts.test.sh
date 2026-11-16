@@ -227,7 +227,7 @@ for f in installer.sh bootstrap-from-source.sh; do
 done
 order=$(grep -nE '^[[:space:]]+configure_(quota|home_mounts)$' "$SCRIPT_DIR/installer.sh" | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')
 check "installer.sh runs it right after quota" "configure_quota configure_home_mounts " "$order"
-check "uninstall.sh deletes the unit" yes "$(grep -E '^[[:space:]]+rm -f ' "$SCRIPT_DIR/uninstall.sh" | grep -qF '/etc/systemd/system/panelalpha-home-mounts.service' && echo yes || echo no)"
+check "uninstall.sh deletes the unit" yes "$(grep -E '^[[:space:]]+rm -f ' "$SCRIPT_DIR/uninstall.sh" | grep -qE '(\$\{?SYSTEMD_UNIT_DIR\}?|/etc/systemd/system)/panelalpha-home-mounts\.service' && echo yes || echo no)"
 check "uninstall.sh runs that step" yes "$(grep -qx 'remove_boot_units' "$SCRIPT_DIR/uninstall.sh" && echo yes || echo no)"
 
 echo

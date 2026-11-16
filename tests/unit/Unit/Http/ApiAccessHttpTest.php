@@ -182,7 +182,7 @@ class ApiAccessHttpTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertExactJson(['data' => ['project' => 'alice', 'removed' => true]]);
-        $this->assertNotNull(PersonalAccessToken::findOrFail($tokenId)->revoked_at);
+        $this->assertNull(PersonalAccessToken::find($tokenId), 'no revoked row is left to list');
         $this->assertSame([], $this->getJson('/api/system/api-access')->json('data'));
     }
 

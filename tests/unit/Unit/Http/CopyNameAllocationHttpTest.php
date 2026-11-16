@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\FakeDomainAllocator;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,13 @@ class CopyNameAllocationHttpTest extends TestCase
         Queue::fake();
         $this->allocator = new FakeDomainAllocator;
         $this->app->instance(DomainAllocator::class, $this->allocator);
+        LocalRoot::answerLocally();
+    }
+
+    protected function tearDown(): void
+    {
+        LocalRoot::answerByBroker();
+        parent::tearDown();
     }
 
     public function test_a_refused_staging_copy_buys_no_name(): void

@@ -23,14 +23,14 @@ class ProjectPushCommand extends Command
 
         $from = User::findByUsername($fromUsername);
         if (! $from) {
-            $this->error("No such user: '{$fromUsername}'");
+            $this->error("No such project: '{$fromUsername}'");
 
             return 1;
         }
 
         $to = User::findByUsername($toUsername);
         if (! $to) {
-            $this->error("No such user: '{$toUsername}'");
+            $this->error("No such project: '{$toUsername}'");
 
             return 1;
         }

@@ -76,7 +76,7 @@ class DeployLogsShowCommand extends Command
 
         $latestMeta = DeployLogger::readLatestFor($username);
 
-        $this->line("User:    {$username}");
+        $this->line("Project: {$username}");
         $this->line('Deploy:  '.$logger->getDeployId());
         $this->line('Path:    '.$path);
         if ($latestMeta !== null && ($latestMeta['id'] ?? null) === $logger->getDeployId()) {

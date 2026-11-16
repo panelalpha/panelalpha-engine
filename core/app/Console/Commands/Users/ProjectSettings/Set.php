@@ -21,7 +21,7 @@ class Set extends Command
         {--value= : Setting value (alternative to the positional argument)}
         {--force : Skip confirmation}';
 
-    protected $description = 'Set an allowlisted project setting (stored on the project/user)';
+    protected $description = 'Set an allowlisted project setting (stored on the project)';
 
     public function handle(): int
     {

@@ -199,6 +199,7 @@ class ProjectLinuxLifecycleTest extends TestCase
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (str_contains($line, 'userdel')) {
                     $this->journal[] = 'userdel';
+                    $this->uidExistsFlag = false;
                 }
 
                 return "1001\n";

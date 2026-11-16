@@ -164,14 +164,24 @@ class ProjectFleetCommandTest extends TestCase
         $this->assertSame(0, SpyFleetCommand::$afterAllRuns);
     }
 
-    public function test_the_apache_commands_say_enabling_and_disabling(): void
+    /** Every per-project line an operator reads names a project, never a user. */
+    public function test_every_per_project_line_says_project(): void
     {
         foreach ([
-            [new \App\Console\Commands\Apache\EnableMod(), "Enabling mod 'rewrite' for user 'alice'...", '  Mod enabled.'],
-            [new \App\Console\Commands\Apache\DisableMod(), "Disabling mod 'rewrite' for user 'alice'...", '  Mod disabled.'],
+            [new \App\Console\Commands\Users\Rebuild(), "Rebuilding project 'alice'...", '  Finished rebuilding project.'],
+            [new \App\Console\Commands\Users\FixDomains(), "Fixing domains for project 'alice'...", '  Finished fixing domains for the project.'],
+            [new \App\Console\Commands\Users\RebuildDomains(), "Rebuilding domains for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Users\AddMissingWwwDomainAliases(), "Adding www. aliases for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Users\RebuildQuotas(), "Rebuilding quota for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Apache\EnableMod(), "Enabling mod 'rewrite' for project 'alice'...", '  Mod enabled.'],
+            [new \App\Console\Commands\Apache\DisableMod(), "Disabling mod 'rewrite' for project 'alice'...", '  Mod disabled.'],
         ] as [$command, $progress, $finished]) {
             $command->setLaravel($this->app);
-            $input = new \Symfony\Component\Console\Input\ArrayInput(['mod' => 'rewrite', '--project' => 'alice'], $command->getDefinition());
+            $arguments = ['--project' => 'alice'];
+            if ($command->getDefinition()->hasArgument('mod')) {
+                $arguments['mod'] = 'rewrite';
+            }
+            $input = new \Symfony\Component\Console\Input\ArrayInput($arguments, $command->getDefinition());
             (new \ReflectionProperty($command, 'input'))->setValue($command, $input);
 
             $user = new User();

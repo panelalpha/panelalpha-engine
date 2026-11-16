@@ -44,7 +44,7 @@ class DomainsUnsetProxy extends Command
         $domain->loadMissing('user');
         $user = $domain->user;
         if (! $user) {
-            $this->error('Domain has no project/user.');
+            $this->error('Domain has no project.');
 
             return 1;
         }
@@ -89,7 +89,7 @@ class DomainsUnsetProxy extends Command
 
         $toDelete = array_filter($changes, static fn (array $c): bool => $c['existing'] !== null);
         if ($toDelete === []) {
-            $this->warn("No user HTTP proxy rules for {$fqdn} on ports ".implode(', ', $listenPorts).'.');
+            $this->warn("No project HTTP proxy rules for {$fqdn} on ports ".implode(', ', $listenPorts).'.');
 
             return 0;
         }

@@ -92,10 +92,10 @@ class ApplyEnvVarsJobTest extends TestCase
     }
 
     /**
-     * A rotation hands the new token to the application first and retires the
+     * A rotation hands the new token to the application first and removes the
      * old one only once the stack is up on it.
      */
-    public function test_the_token_this_apply_replaces_is_revoked_once_the_stack_is_up(): void
+    public function test_the_token_this_apply_replaces_is_gone_once_the_stack_is_up(): void
     {
         $user = $this->dindUser([]);
         $replaced = $this->mintedToken($user);
@@ -104,7 +104,7 @@ class ApplyEnvVarsJobTest extends TestCase
         $task = $this->runJob($user, $this->runtimeExpecting([], [], 0), []);
 
         $this->assertSame(Task::STATUS_COMPLETED, $task->status);
-        $this->assertNotNull($this->refreshed($replaced)->revoked_at);
+        $this->assertGone($replaced);
     }
 
     /** A failed apply leaves both tokens valid, and the task says what happened. */
@@ -123,9 +123,9 @@ class ApplyEnvVarsJobTest extends TestCase
     }
 
     /**
-     * The apply that succeeds also revokes a token no entry tracks, and clears the record.
+     * The apply that succeeds also removes a token no entry tracks, and clears the record.
      */
-    public function test_a_successful_apply_retires_the_token_an_earlier_failure_left_tracked(): void
+    public function test_a_successful_apply_removes_the_token_an_earlier_failure_left_tracked(): void
     {
         $user = $this->dindUser([]);
         $left = $this->mintedToken($user);
@@ -136,14 +136,14 @@ class ApplyEnvVarsJobTest extends TestCase
         $task = $this->runJob($user, $this->runtimeExpecting([], [], 0), []);
 
         $this->assertSame(Task::STATUS_COMPLETED, $task->status);
-        $this->assertNotNull($this->refreshed($left)->revoked_at, 'the tracked token is retired');
-        $this->assertNotNull($this->refreshed($untracked)->revoked_at, 'and so is the one no entry tracked');
+        $this->assertGone($left, 'the tracked token is removed');
+        $this->assertGone($untracked, 'and so is the one no entry tracked');
         $this->assertNull($this->refreshed($current)->revoked_at, 'the token handed over stays');
         $this->assertNull((new ApiAccess(new RecordingSystem()))->entryFor($user)['pending_revoke_token_id'], 'and nothing is left tracked');
     }
 
     /**
-     * A job serialised with the token it replaced still runs and retires that token by what it delivers.
+     * A job serialised with the token it replaced still runs and removes that token by what it delivers.
      */
     public function test_a_job_queued_with_the_token_it_replaced_still_runs(): void
     {
@@ -161,13 +161,18 @@ class ApplyEnvVarsJobTest extends TestCase
         $job->handle();
 
         $this->assertSame(Task::STATUS_COMPLETED, $task->refresh()->status);
-        $this->assertNotNull($this->refreshed($replaced)->revoked_at);
+        $this->assertGone($replaced);
         $this->assertNull($this->refreshed($current)->revoked_at);
     }
 
     private function mintedToken(User $user): NewAccessToken
     {
         return Admin::rootAccount()->createToken('api-access:' . $user->username, ['api']);
+    }
+
+    private function assertGone(NewAccessToken $token, string $message = 'the token is no longer on the list'): void
+    {
+        $this->assertNull(PersonalAccessToken::query()->find($token->accessToken->getKey()), $message);
     }
 
     private function refreshed(NewAccessToken $token): PersonalAccessToken

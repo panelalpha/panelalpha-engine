@@ -19,7 +19,7 @@ use Tests\TestCase;
 
 /**
  * A project that goes away takes its Engine API allowance with it: the token is
- * revoked and the firewall stops admitting its address. Nothing else fails when
+ * deleted and the firewall stops admitting its address. Nothing else fails when
  * it was never allowed.
  */
 class ProjectDeleterApiAccessTest extends TestCase
@@ -50,7 +50,7 @@ class ProjectDeleterApiAccessTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_deleting_a_project_revokes_its_token_and_its_rule(): void
+    public function test_deleting_a_project_removes_its_token_and_its_rule(): void
     {
         $user = $this->makeUser($this->name, ['template' => 'dind']);
         $entry = $this->access->allow($user, ApiAccess::SCOPE_SELF, false);
@@ -58,7 +58,7 @@ class ProjectDeleterApiAccessTest extends TestCase
 
         $this->deleter()->delete($user);
 
-        $this->assertNotNull(PersonalAccessToken::findOrFail((int) $entry['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $entry['token_id']), 'no row is left to list');
         $this->assertNull($this->access->entryFor($user));
         $this->assertSame([], $this->firewall->last());
         Queue::assertNotPushed(ApplyEnvVars::class, static fn (ApplyEnvVars $job): bool => true);

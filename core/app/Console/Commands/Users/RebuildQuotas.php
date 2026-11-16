@@ -17,7 +17,7 @@ class RebuildQuotas extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return "Rebuilding quota for user '{$user->username}'...";
+        return "Rebuilding quota for project '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void

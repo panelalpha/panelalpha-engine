@@ -50,7 +50,7 @@ class SystemApiAccessController extends Controller
             .'containers reach the API port, and queues an apply that delivers the API address, the token and, '
             .'where a client needs one, the certificate to the running application without a rebuild. Allowing a '
             .'project that already carries this scope and this `mcp` flag changes nothing at all; a changed scope '
-            .'or flag replaces the token, and the old one is revoked once the new one is in use. `scope` is `self` '
+            .'or flag replaces the token, and the old one is revoked and deleted once the new one is in use. `scope` is `self` '
             .'(only this project), `all` (every project on this engine), or a list of existing project '
             .'usernames; an unknown one is refused with 422. Only a container project may be allowed: a classic '
             .'project has no container to receive the environment, so it is refused with 422 and the code '
@@ -109,7 +109,7 @@ class SystemApiAccessController extends Controller
         path: '/system/api-access/{project}/rotate',
         summary: 'Replace an allowed project\'s Engine API token',
         description: 'Mints a new token with the scope the project already carries and queues the apply that hands '
-            .'it to the running application without a rebuild; the token it replaces is revoked only once that '
+            .'it to the running application without a rebuild; the token it replaces is deleted only once that '
             .'apply has succeeded, and until then it stays valid and is reported as `pending_revoke_token_id` with '
             .'a warning. The apply is asynchronous: the answer names it in `task_id`. A project that is not '
             .'allowed, or not a container project, is refused with 422. Refused with 403 for a token scoped to '
@@ -143,13 +143,15 @@ class SystemApiAccessController extends Controller
     #[OA\Delete(
         path: '/system/api-access/{project}',
         summary: 'Stop a project using the Engine API',
-        description: 'Revokes every token the project was given at once, removes its firewall rule and queues an apply that '
-            .'takes the API address, the token and the certificate back out of the running application. A project '
-            .'that was not allowed is answered with `removed: false`; a token an earlier allowance left valid is '
-            .'revoked all the same. Refused with 403 for a token scoped to some projects.',
+        description: 'Revokes and deletes every token the project was given at once, removes its firewall rule and queues '
+            .'an apply that takes the API address, the token and the certificate back out of the running application. '
+            .'A project that was not allowed is answered with `removed: false`; a token an earlier allowance left '
+            .'valid is deleted all the same. Refused with 403 for a token scoped to some projects.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
-        x: ['mcp-description' => 'Revokes every Engine API token a project was given and closes the host firewall to its containers. Refused 403 for a project-scoped token.'],
+        x: ['mcp-description' => 'Revokes every Engine API token a project was given and closes the host firewall to its containers. Refused 403 for a project-scoped token. '
+            .'The tokens it revokes are gone and a new allowance issues new ones; this cannot be undone. Ask the '
+            .'operator to confirm first.'],
         parameters: [
             new OA\Parameter(name: 'project', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
         ],

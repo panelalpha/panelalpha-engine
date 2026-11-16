@@ -66,7 +66,7 @@ class ProjectDeleteStagingTest extends TestCase
 
         $this->deleteJson("/api/projects/{$this->live}")->assertStatus(409);
 
-        Log::shouldNotHaveReceived('warning', static fn (string $message): bool => str_starts_with($message, 'Could not delete user'));
+        Log::shouldNotHaveReceived('warning', static fn (string $message): bool => str_starts_with($message, 'Could not delete project'));
     }
 
     public function test_the_cli_prints_a_plain_line_and_exits_1(): void

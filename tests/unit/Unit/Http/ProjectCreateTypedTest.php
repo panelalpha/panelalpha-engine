@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -46,6 +47,7 @@ class ProjectCreateTypedTest extends TestCase
         Setting::clearRuntimeSettings();
         $this->withoutMiddleware(Authenticate::class);
         Queue::fake();
+        LocalRoot::answerLocally();
         $this->fakeTheRemote();
         $this->app->instance(ProvisionEnvironment::class, new class(new SystemProvisionEnvironment) implements ProvisionEnvironment
         {
@@ -59,6 +61,11 @@ class ProjectCreateTypedTest extends TestCase
             public function usernameAvailableOnHost(string $username): bool
             {
                 return $this->host->usernameAvailableOnHost($username);
+            }
+
+            public function usernameHolders(string $username): array
+            {
+                return $this->host->usernameHolders($username);
             }
 
             public function templateExists(string $template): bool
@@ -83,6 +90,7 @@ class ProjectCreateTypedTest extends TestCase
         Setting::clearRuntimeSettings();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
+        LocalRoot::answerByBroker();
         parent::tearDown();
     }
 

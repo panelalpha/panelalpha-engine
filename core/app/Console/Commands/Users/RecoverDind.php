@@ -48,7 +48,7 @@ class RecoverDind extends Command
                 return 1;
             }
             if ($user->getTemplate() !== 'dind') {
-                $this->error("User `{$username}` is not a DinD (sysbox) project.");
+                $this->error("Project `{$username}` is not a DinD (sysbox) project.");
 
                 return 1;
             }
@@ -115,7 +115,7 @@ class RecoverDind extends Command
         try {
             $user = User::findByUsername($username);
             if ($user) {
-                $this->info("Rebuilding user `{$username}` project config...");
+                $this->info("Rebuilding project `{$username}` config...");
                 $this->rebuild($user);
             }
         } catch (\Throwable $e) {

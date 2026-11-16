@@ -188,7 +188,7 @@ class ApiAccess
 
     /**
      * The apply that handed the application $env finished: every token minted for the project before the one it
-     * carries is revoked. That one stays the previous token when a newer one is still waiting for its apply.
+     * carries is deleted. That one stays the previous token when a newer one is still waiting for its apply.
      *
      * @param  array<string, string>  $env  what {@see envFor()} gave the apply
      */
@@ -200,7 +200,7 @@ class ApiAccess
         }
 
         $this->mutate(function () use ($project, $delivered): void {
-            self::validTokensOf($project)->where('id', '<', $delivered)->update(['revoked_at' => now()]);
+            self::tokensOf($project)->where('id', '<', $delivered)->delete();
 
             $entry = $this->entryOf($project);
             if ($entry !== null) {
@@ -378,12 +378,12 @@ class ApiAccess
     }
 
     /**
-     * Takes the entry away, revoking every token minted for the project; with no entry, still any token an earlier
+     * Takes the entry away, deleting every token minted for the project; with no entry, still any token an earlier
      * allowance left valid. True when there was an entry.
      */
     private function forgetAllowance(string $project): bool
     {
-        self::validTokensOf($project)->update(['revoked_at' => now()]);
+        self::tokensOf($project)->delete();
         if ($this->entryOf($project) === null) {
             return false;
         }
@@ -561,15 +561,24 @@ class ApiAccess
      */
     private static function validTokensOf(string $project): Builder
     {
+        return self::tokensOf($project)->whereNull('revoked_at');
+    }
+
+    /**
+     * Every token minted for the project, revoked by an earlier engine included, so a removal takes them all.
+     *
+     * @return Builder<PersonalAccessToken>
+     */
+    private static function tokensOf(string $project): Builder
+    {
         return PersonalAccessToken::query()
             ->whereMorphedTo('tokenable', Admin::rootAccount())
-            ->where('name', self::TOKEN_NAME.$project)
-            ->whereNull('revoked_at');
+            ->where('name', self::TOKEN_NAME.$project);
     }
 
     /**
      * The entry once $delivered is in use: nothing is pending when it is the entry's token, and otherwise it is the
-     * one previous token still valid, since every older one is revoked.
+     * one previous token still valid, since every older one is gone.
      *
      * @param  array<string, mixed>  $entry
      * @return array<string, mixed>

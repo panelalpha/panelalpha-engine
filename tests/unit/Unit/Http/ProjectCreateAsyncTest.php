@@ -9,6 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\LocalRoot;
 use Tests\Support\TaskSchema;
 use Tests\TestCase;
 
@@ -65,6 +66,7 @@ class ProjectCreateAsyncTest extends TestCase
         TaskSchema::migrate();
 
         $this->withoutMiddleware(Authenticate::class);
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
@@ -75,6 +77,7 @@ class ProjectCreateAsyncTest extends TestCase
         Schema::dropIfExists('domains');
         Schema::dropIfExists('users');
         \App\Models\Setting::clearRuntimeSettings();
+        LocalRoot::answerByBroker();
         parent::tearDown();
     }
 

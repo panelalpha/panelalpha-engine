@@ -36,6 +36,16 @@ final class RootUsers
     }
 
     /**
+     * Every hosting account, each as `name<TAB>uid<TAB>gid<TAB>home<TAB>shell<TAB>engine`, engine 1 for one `create` made.
+     *
+     * @return list<string>
+     */
+    public function hostingAccounts(): array
+    {
+        return $this->onHost(__FUNCTION__, []);
+    }
+
+    /**
      * Soft and hard limits alike, blocks in KiB. 0 is no limit.
      *
      * @return list<string>

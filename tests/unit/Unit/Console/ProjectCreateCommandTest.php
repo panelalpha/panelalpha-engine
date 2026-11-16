@@ -34,6 +34,7 @@ use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\ConsoleOutput;
 use Symfony\Component\Console\Output\StreamOutput;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\RecordingFirewall;
 use Tests\TestCase;
 
@@ -58,11 +59,13 @@ class ProjectCreateCommandTest extends TestCase
         config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         // Settings are cached statically, across tests.
         Setting::clearRuntimeSettings();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
     {
         Setting::clearRuntimeSettings();
+        LocalRoot::answerByBroker();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
         parent::tearDown();

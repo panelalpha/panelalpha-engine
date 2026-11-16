@@ -36,7 +36,7 @@ class DeployLogsListCommand extends Command
         }
 
         $this->table(
-            ['Username', 'Status', 'Stage', 'Deploy ID', 'Logs', 'Size', 'Started', 'Finished'],
+            ['Project', 'Status', 'Stage', 'Deploy ID', 'Logs', 'Size', 'Started', 'Finished'],
             array_map(static function (array $row): array {
                 return [
                     $row['username'],

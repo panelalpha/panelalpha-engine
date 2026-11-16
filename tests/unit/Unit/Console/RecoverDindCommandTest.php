@@ -70,7 +70,7 @@ class RecoverDindCommandTest extends TestCase
 
         $this->assertSame(0, $exit);
         $this->assertSame(['alice'], SpyRecoverDind::$rebuilt);
-        $this->assertStringContainsString('Rebuilding user `alice` project config...', Artisan::output());
+        $this->assertStringContainsString('Rebuilding project `alice` config...', Artisan::output());
     }
 
     public function test_another_account_done_is_not_this_one_recovered(): void

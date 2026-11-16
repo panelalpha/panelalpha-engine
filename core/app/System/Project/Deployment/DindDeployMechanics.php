@@ -8,6 +8,7 @@ use App\Lib\Findings\Finding;
 use App\Lib\Project\ProjectNameRefusal;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
+use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountMapping;
@@ -67,7 +68,7 @@ final class DindDeployMechanics implements DeployMechanics
     {
         $project = $this->aggregate();
         if ($project->hostingExists()) {
-            throw new \Exception(ProjectNameRefusal::unavailable($project->model()->username));
+            throw new \Exception(ProjectNameRefusal::heldOnHost($project->model()->username, app(System::class)));
         }
 
         $this->refuseNewAccountWhileSysboxIsDown();

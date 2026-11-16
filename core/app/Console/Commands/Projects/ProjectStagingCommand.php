@@ -26,7 +26,7 @@ class ProjectStagingCommand extends Command
         $username = (string) $this->argument('project');
         $source = User::findByUsername($username);
         if (! $source) {
-            $this->error("No such user: '{$username}'");
+            $this->error("No such project: '{$username}'");
 
             return 1;
         }
@@ -47,7 +47,8 @@ class ProjectStagingCommand extends Command
             }
 
             if ($this->hostingExists($source, $newUsername)) {
-                $this->error(ProjectNameRefusal::unavailable($newUsername));
+                $this->error(ProjectNameRefusal::heldOnHost($newUsername, app(System::class)));
+                $this->line(self::freeAName($newUsername));
 
                 return 1;
             }
@@ -66,6 +67,12 @@ class ProjectStagingCommand extends Command
 
             return 1;
         }
+    }
+
+    /** The engine's own messages name no command; a command's output may. */
+    private static function freeAName(string $name): string
+    {
+        return "Free it with `pae project:orphan:delete {$name} --force`, once `pae project:orphan:list` shows what holds it.";
     }
 
     /** The staging username from --new-username or generated, or null once a refusal has been printed. */
@@ -92,7 +99,7 @@ class ProjectStagingCommand extends Command
     /** The staging domain from --domain (without "www.") or planned, or null once a refusal has been printed. */
     private function stagingDomain(User $source, string $newUsername): ?CopyDomain
     {
-        $destDomain = CopyDomain::forCopy($source->domain, self::lowercaseOption($this->option('domain')));
+        $destDomain = CopyDomain::forStaging($source->domain, self::lowercaseOption($this->option('domain')));
         if ($destDomain === null) {
             $this->error('Could not generate an available staging domain.');
 

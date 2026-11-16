@@ -405,5 +405,89 @@ class FirewallScriptsTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.dirname(self.at(firewall.RULES))))
 
 
+
+class HostingAccountsTest(support.Tree):
+    """`users.hostingAccounts`: every hosting account, and which of them `create` made."""
+
+    def passwd_entries(self):
+        homes = self.roots['homes']
+        return [
+            *super().passwd_entries(),
+            f'marked:x:1020:1021:{users.MARK}:{homes}/marked:/usr/sbin/nologin',
+            f'admin:x:1000:1000:Ubuntu:{homes}/admin:/bin/bash',
+            f'traced:x:1022:1022::{homes}/traced:/usr/sbin/nologin',
+            f'directory:x:1023:1023::{homes}/directory:/usr/sbin/nologin',
+            f'regrouped:x:1024:1025::{homes}/regrouped:/usr/sbin/nologin',
+            f'bashy:x:1026:1026::{homes}/bashy:/bin/bash',
+            f'renamed:x:1027:1027:{users.MARK}:{homes}/other:/usr/sbin/nologin',
+            f'linked:x:1028:1028::{homes}/linked:/usr/sbin/nologin',
+        ]
+
+    def setUp(self):
+        super().setUp()
+        for name in ('traced', 'regrouped', 'bashy'):
+            self.directory('homes', os.path.join(name, users.TRACE))
+        self.directory('engine', os.path.join(users.PROJECTS, 'directory'))
+        self.directory('homes', 'linked')
+        os.symlink(self.base, self.path('homes', 'linked', users.TRACE))
+
+    def lines(self):
+        action = registry()['users.hostingAccounts']
+        plan = action.plan(action.check([]), self.policy, True)
+        output = Captured()
+        self.assertEqual(plan.native(output), 0)
+        return {name: fields for name, *fields in (line.split('\t') for line in output.data.decode().splitlines())}
+
+    def test_a_marked_account_is_the_engines_whatever_group_useradd_gave_it(self):
+        accounts = self.lines()
+
+        self.assertEqual(
+            accounts['marked'], ['1020', '1021', self.path('homes', 'marked'), '/usr/sbin/nologin', '1'],
+        )
+
+    def test_an_unmarked_account_is_the_engines_only_in_the_old_shape_with_an_engine_trace(self):
+        accounts = self.lines()
+
+        self.assertEqual(accounts['traced'][-1], '1')
+        self.assertEqual(accounts['directory'][-1], '1')
+        self.assertEqual(accounts['v'][-1], '0')
+        self.assertEqual(accounts['u'][-1], '0')
+        self.assertEqual(accounts['regrouped'][-1], '0')
+        self.assertEqual(accounts['bashy'][-1], '0')
+        self.assertEqual(accounts['linked'][-1], '0')
+
+    def test_the_hosts_own_admin_is_never_the_engines(self):
+        self.assertEqual(self.lines()['admin'][-1], '0')
+
+    def test_a_mark_on_a_home_create_would_not_name_is_not_the_engines(self):
+        self.assertEqual(self.lines()['renamed'][-1], '0')
+
+    def test_no_system_account_a_quota_never_touches_and_no_home_outside_the_homes_root_is_listed(self):
+        accounts = self.lines()
+
+        for name in ('root', 'daemon', 'www-data', 'low', 'outside', 'deep', 'nobody'):
+            self.assertNotIn(name, accounts)
+
+    def test_an_unreadable_passwd_is_a_refusal(self):
+        self.accounts.passwd = self.base + '/missing'
+        action = registry()['users.hostingAccounts']
+        plan = action.plan(action.check([]), self.policy, True)
+
+        self.assertEqual(plan.native(Captured()), 77)
+
+
+class Captured:
+    """A native action's output, kept."""
+
+    def __init__(self):
+        self.data = b''
+
+    def stdout(self, data):
+        self.data += data
+
+    def stderr(self, data):
+        self.data += data
+
+
 if __name__ == '__main__':
     unittest.main()

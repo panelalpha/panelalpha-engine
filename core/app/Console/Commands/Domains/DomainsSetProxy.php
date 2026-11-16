@@ -101,7 +101,7 @@ class DomainsSetProxy extends Command
         $domain->loadMissing('user');
         $user = $domain->user;
         if (! $user) {
-            $this->error('Domain has no project/user.');
+            $this->error('Domain has no project.');
 
             return null;
         }

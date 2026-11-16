@@ -28,6 +28,14 @@ use Symfony\Component\Process\Process;
 
 class System implements ProcessRunner
 {
+    public const HOLDER_ACCOUNT = 'account';
+
+    public const HOLDER_HOME = 'home directory';
+
+    public const HOLDER_PROJECT_DIRECTORY = 'project directory';
+
+    public const HOLDER_CONTAINER = 'container';
+
     /**
      * The two roots every other path derives from; methods rather than
      * constants so a test subclass can redirect every derived path at once.
@@ -266,15 +274,38 @@ class System implements ProcessRunner
     /**
      * Whether this host could take a project by that name: the name itself has
      * to be acceptable ({@see UsernamePolicy}) and nothing here may hold it
-     * already -- an OS user, a home directory, or a project directory.
+     * already ({@see usernameHolders}).
      */
     public function isUsernameAvailable(string $username): bool
     {
-        return UsernamePolicy::isAcceptable($username)
-            && ! $this->isUidExists($username)
-            && ! is_dir($this->projectHomeDirPath($username))
-            && ! is_dir($this->projectDirPath($username))
-            && ! $this->isContainerNameTaken($username);
+        return UsernamePolicy::isAcceptable($username) && $this->usernameHolders($username) === [];
+    }
+
+    /**
+     * What keeps the host from taking $username, in the order an operator looks: the account, its home, the
+     * project directory, a container. Empty when nothing holds it.
+     *
+     * @return list<string>
+     *
+     * @throws Exception
+     */
+    public function usernameHolders(string $username): array
+    {
+        $holders = [];
+        if ($this->isUidExists($username)) {
+            $holders[] = self::HOLDER_ACCOUNT;
+        }
+        if (is_dir($this->projectHomeDirPath($username))) {
+            $holders[] = self::HOLDER_HOME;
+        }
+        if (is_dir($this->projectDirPath($username))) {
+            $holders[] = self::HOLDER_PROJECT_DIRECTORY;
+        }
+        if ($this->isContainerNameTaken($username)) {
+            $holders[] = self::HOLDER_CONTAINER;
+        }
+
+        return $holders;
     }
 
     /**
@@ -289,7 +320,8 @@ class System implements ProcessRunner
     }
 
     /**
-     * Whether the host has that user. A host the broker cannot enter raises instead of answering no.
+     * Whether the host has that user. `id -u` answers 0 for one and 1 for none; any other answer leaves the question
+     * open, so it raises instead of reading as "no account".
      *
      * @throws Exception
      */
@@ -302,7 +334,45 @@ class System implements ProcessRunner
             throw new Exception($error);
         }
 
-        return $result->getExitCode() === 0;
+        $code = $result->getExitCode();
+
+        return match ($code) {
+            0 => true,
+            1 => false,
+            default => throw new Exception(
+                "The host did not answer whether the account '{$username}' exists (exit code "
+                .($code === null ? 'none' : (string) $code).'): '.trim($error)
+            ),
+        };
+    }
+
+    /**
+     * The host's hosting accounts, by name, with whether this engine made each one.
+     *
+     * @return array<string, array{uid: int, gid: int, home: string, shell: string, engine: bool}>
+     *
+     * @throws DockerErrorException
+     * @throws Exception
+     */
+    public function hostingAccounts(): array
+    {
+        $accounts = [];
+        $lines = preg_split('/\R/', trim($this->execOnHost(Privileged::users()->hostingAccounts()))) ?: [];
+        foreach ($lines as $line) {
+            $fields = explode("\t", $line);
+            if (count($fields) !== 6) {
+                continue;
+            }
+            $accounts[$fields[0]] = [
+                'uid' => (int) $fields[1],
+                'gid' => (int) $fields[2],
+                'home' => $fields[3],
+                'shell' => $fields[4],
+                'engine' => $fields[5] === '1',
+            ];
+        }
+
+        return $accounts;
     }
 
     public function isComposeServiceRunning(string $service): bool

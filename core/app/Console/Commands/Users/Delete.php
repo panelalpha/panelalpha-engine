@@ -85,18 +85,18 @@ class Delete extends Command
     {
         $user = User::findByUsername($username);
         if (! $user) {
-            $this->failLine("User `{$username}` not found in database.");
+            $this->failLine("Project `{$username}` not found in database.");
 
             return false;
         }
 
-        if (! $forced && ! $this->confirm("User `{$username}` will be completely deleted from server, are you sure?")) {
+        if (! $forced && ! $this->confirm("Project `{$username}` will be completely deleted from server, are you sure?")) {
             return true;
         }
 
         try {
-            (new ProjectDeleter)->delete($user);
-            $this->info("User `{$username}` deleted.");
+            app(ProjectDeleter::class)->delete($user);
+            $this->info("Project `{$username}` deleted.");
 
             return true;
         } catch (ProjectBusyException $e) {
@@ -109,10 +109,10 @@ class Delete extends Command
             return false;
         } catch (\Throwable $e) {
             Log::warning(
-                "Could not delete user '{$user->username}': ".$e->getMessage(),
+                "Could not delete project '{$user->username}': ".$e->getMessage(),
                 ['exception' => $e],
             );
-            $this->failLine("ERROR deleting user `{$username}`: ".$e->getMessage());
+            $this->failLine("ERROR deleting project `{$username}`: ".$e->getMessage());
 
             return false;
         }

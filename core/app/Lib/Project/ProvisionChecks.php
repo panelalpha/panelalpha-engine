@@ -49,7 +49,7 @@ final class ProvisionChecks
             return [
                 'field' => $nameField,
                 'code' => 'name_unavailable',
-                'message' => ProjectNameRefusal::unavailable($username),
+                'message' => ProjectNameRefusal::unavailable($username, $this->env->usernameHolders($username)),
             ];
         }
 

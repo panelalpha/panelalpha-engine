@@ -1,10 +1,11 @@
 [
-{"name":"users.create","host":true,"sudo":["sudo","nsenter","--target","1","--all","useradd","-M","-d","/home/alice","-s","/usr/sbin/nologin","-U","alice"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.create","--","alice","/home/alice"]},
+{"name":"users.create","host":true,"sudo":["sudo","nsenter","--target","1","--all","useradd","-M","-d","/home/alice","-s","/usr/sbin/nologin","-c","PanelAlpha project","-U","alice"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.create","--","alice","/home/alice"]},
 {"name":"users.delete","host":true,"sudo":["sudo","nsenter","--target","1","--all","userdel","alice"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.delete","--","alice"]},
 {"name":"users.uid","host":true,"sudo":["sudo","nsenter","--target","1","--all","id","-u","alice"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.uid","--","alice"]},
 {"name":"users.gid","host":true,"sudo":["sudo","nsenter","--target","1","--all","id","-g","alice"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.gid","--","alice"]},
 {"name":"users.setQuota","host":true,"sudo":["sudo","nsenter","--target","1","--all","setquota","-u","alice","1048576","1048576","50000","50000","/"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.setQuota","--","alice","1048576","50000","/"]},
 {"name":"users.setQuota, no limit","host":true,"sudo":["sudo","nsenter","--target","1","--all","setquota","-u","alice","0","0","0","0","/home"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.setQuota","--","alice","0","0","/home"]},
+{"name":"users.hostingAccounts","host":true,"broker":["/usr/local/lib/panelalpha/pa-root","--host","users.hostingAccounts","--"]},
 {"name":"network.defaultRoute","host":true,"sudo":["sudo","nsenter","--target","1","--all","ip","route","show","default"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","network.defaultRoute","--","4"]},
 {"name":"network.defaultRoute, IPv6","host":true,"sudo":["sudo","nsenter","--target","1","--all","ip","-6","route","show","default"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","network.defaultRoute","--","6"]},
 {"name":"network.addresses","host":true,"sudo":["sudo","nsenter","--target","1","--all","ip","-4","addr","show"],"broker":["/usr/local/lib/panelalpha/pa-root","--host","network.addresses","--"]},

@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -41,6 +42,7 @@ class ProjectCreateHttpTest extends TestCase
         Setting::clearRuntimeSettings();
         $this->withoutMiddleware(Authenticate::class);
         Queue::fake();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
@@ -49,6 +51,7 @@ class ProjectCreateHttpTest extends TestCase
         Setting::clearRuntimeSettings();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
+        LocalRoot::answerByBroker();
         parent::tearDown();
     }
 

@@ -22,6 +22,12 @@ final class SystemProvisionEnvironment implements ProvisionEnvironment
         return $this->system()->isUsernameAvailable($username);
     }
 
+    /** @return list<string> */
+    public function usernameHolders(string $username): array
+    {
+        return $this->system()->usernameHolders($username);
+    }
+
     public function templateExists(string $template): bool
     {
         return is_dir($this->system()->projectFilesTemplateDirPath($template));

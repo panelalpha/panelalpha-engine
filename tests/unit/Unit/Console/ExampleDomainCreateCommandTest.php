@@ -41,6 +41,7 @@ class ExampleDomainCreateCommandTest extends TestCase
         // Settings are cached statically, across tests.
         Setting::clearRuntimeSettings();
         Queue::fake();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void

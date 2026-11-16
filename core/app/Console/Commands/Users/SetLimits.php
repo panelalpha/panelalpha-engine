@@ -92,8 +92,8 @@ class SetLimits extends Command
 
         $one = $this->option('project') ? $projects[0] : null;
         $this->warn($one !== null
-            ? "Following limits will be set for user `{$one->username}`:"
-            : 'Following limits will be set for all ('.count($projects).') users:');
+            ? "Following limits will be set for project `{$one->username}`:"
+            : 'Following limits will be set for all ('.count($projects).') projects:');
         // The two headings have always padded their rows differently.
         $this->announce($selection, $one !== null ? 20 : 16);
 

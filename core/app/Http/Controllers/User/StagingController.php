@@ -95,7 +95,7 @@ class StagingController extends Controller
             throw ValidationException::withMessages(['new_username' => $refusal]);
         }
 
-        $destDomain = CopyDomain::forCopy($source->domain, $params['domain'] ?? null);
+        $destDomain = CopyDomain::forStaging($source->domain, $params['domain'] ?? null);
         if ($destDomain === null) {
             throw ValidationException::withMessages([
                 'domain' => 'Could not generate an available staging domain for the clone.',
@@ -113,7 +113,7 @@ class StagingController extends Controller
         ]);
         if ($probe->project()->hostingExists()) {
             throw ValidationException::withMessages([
-                'new_username' => ProjectNameRefusal::unavailable($newUsername),
+                'new_username' => ProjectNameRefusal::heldOnHost($newUsername, $system),
             ]);
         }
 

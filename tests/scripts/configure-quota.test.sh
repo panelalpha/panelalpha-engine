@@ -324,7 +324,7 @@ done
 check "int-updater.sh hands updates to updater.sh, which runs installer.sh" yes "$(has "$SCRIPT_DIR/int-updater.sh" '/updater.sh"')"
 check "installer.sh has --no-quota" yes "$(has "$SCRIPT_DIR/installer.sh" '--no-quota)')"
 check "bootstrap-from-source.sh has --no-quota" yes "$(has "$SCRIPT_DIR/bootstrap-from-source.sh" '--no-quota)')"
-check "uninstall.sh deletes the unit" yes "$(grep -E '^[[:space:]]+rm -f ' "$SCRIPT_DIR/uninstall.sh" | grep -qF '/etc/systemd/system/panelalpha-quota.service' && echo yes || echo no)"
+check "uninstall.sh deletes the unit" yes "$(grep -E '^[[:space:]]+rm -f ' "$SCRIPT_DIR/uninstall.sh" | grep -qE '(\$\{?SYSTEMD_UNIT_DIR\}?|/etc/systemd/system)/panelalpha-quota\.service' && echo yes || echo no)"
 check "uninstall.sh runs that step" yes "$(grep -qx 'remove_boot_units' "$SCRIPT_DIR/uninstall.sh" && echo yes || echo no)"
 
 echo

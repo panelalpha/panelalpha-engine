@@ -22,7 +22,7 @@ class Attach extends Command
 
         $user = User::findByUsername($username);
         if (! $user) {
-            $this->error("User `{$username}` not found in database.");
+            $this->error("Project `{$username}` not found in database.");
 
             return 1;
         }
@@ -46,7 +46,7 @@ class Attach extends Command
         } else {
             $mainDomain = $user->getMainDomain();
             if (! $mainDomain) {
-                $this->error("User `{$username}` has no main domain.");
+                $this->error("Project `{$username}` has no main domain.");
 
                 return 1;
             }
@@ -63,7 +63,7 @@ class Attach extends Command
 
         $cmd = Privileged::compose($composeFile)->execWithTty($serviceName, ['bash'], user: $runAs, workDir: $workDir);
 
-        $this->line("Attaching to <info>{$serviceName}</info> for user <info>{$username}</info> (workdir: {$workDir})...");
+        $this->line("Attaching to <info>{$serviceName}</info> for project <info>{$username}</info> (workdir: {$workDir})...");
 
         $process = proc_open($cmd, [STDIN, STDOUT, STDERR], $pipes);
 

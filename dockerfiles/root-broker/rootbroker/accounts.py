@@ -22,6 +22,7 @@ class Account:
     gid: int
     home: str
     shell: str
+    comment: str = ''
 
     def sudo_environment(self):
         return {
@@ -72,7 +73,7 @@ def parse(line):
     fields = line.split(':')
     if len(fields) != 7 or not fields[2].isdigit() or not fields[3].isdigit():
         return None
-    return Account(fields[0], int(fields[2]), int(fields[3]), fields[5], fields[6])
+    return Account(fields[0], int(fields[2]), int(fields[3]), fields[5], fields[6], fields[4])
 
 
 def become(account, own_groups=False):

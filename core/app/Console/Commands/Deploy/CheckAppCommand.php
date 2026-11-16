@@ -35,7 +35,7 @@ class CheckAppCommand extends Command
 
         $user = User::findByUsername($username);
         if (! $user) {
-            $this->error("No such user: '{$username}'");
+            $this->error("No such project: '{$username}'");
 
             return 1;
         }

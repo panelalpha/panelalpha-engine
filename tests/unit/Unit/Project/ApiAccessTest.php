@@ -256,7 +256,7 @@ PEM;
         $this->assertSame([], $this->firewall->applied);
     }
 
-    public function test_denying_revokes_the_token_and_takes_the_rule_away(): void
+    public function test_denying_removes_the_token_and_takes_the_rule_away(): void
     {
         $access = $this->access();
         $alice = $this->user('alice');
@@ -264,7 +264,7 @@ PEM;
 
         $this->assertTrue($access->deny($alice));
 
-        $this->assertNotNull($this->token((int) $entry['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $entry['token_id']), 'no revoked row is left to list');
         $this->assertNull($access->entryFor($alice));
         $this->assertSame([], $access->all());
         $this->assertSame([], $this->firewall->last());
@@ -282,19 +282,23 @@ PEM;
     }
 
     /**
-     * The project's other tokens and every other project's stay as they are.
+     * The project's other tokens and every other project's stay as they are, and a row an earlier engine revoked
+     * goes with the rest.
      */
-    public function test_a_denial_without_an_entry_still_revokes_a_token_left_valid(): void
+    public function test_a_denial_without_an_entry_still_removes_a_token_left_valid(): void
     {
         $access = $this->access();
         $bob = $access->allow($this->user('bob'), ApiAccess::SCOPE_SELF, false);
         $left = Admin::rootAccount()->createToken('api-access:alice', ['api'])->accessToken;
+        $revoked = Admin::rootAccount()->createToken('api-access:alice', ['api'])->accessToken;
+        $revoked->forceFill(['revoked_at' => now()])->save();
         $other = Admin::rootAccount()->createToken('panel', ['api'])->accessToken;
         Queue::fake();
 
         $this->assertFalse($access->deny($this->user('alice')));
 
-        $this->assertNotNull($this->token((int) $left->getKey())->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $left->getKey()), 'a token an earlier allowance left valid is gone');
+        $this->assertNull(PersonalAccessToken::find((int) $revoked->getKey()), 'so is the row an earlier engine only revoked');
         $this->assertNull($this->token((int) $other->getKey())->revoked_at);
         $this->assertNull($this->token((int) $bob['token_id'])->revoked_at);
         $this->assertCount(1, $this->firewall->applied, 'only bob\'s allowance touched the firewall');
@@ -464,7 +468,7 @@ PEM;
 
     /**
      * A replacement whose apply fails leaves the old token where the application runs:
-     * the entry keeps it, the listing says so, and the next successful apply revokes it.
+     * the entry keeps it, the listing says so, and the next successful apply deletes it.
      */
     public function test_a_failed_apply_leaves_the_token_it_replaced_tracked(): void
     {
@@ -482,7 +486,7 @@ PEM;
 
         $access->confirmDelivery('alice', $access->envFor($alice));
 
-        $this->assertNotNull($this->token((int) $first['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $first['token_id']), 'the token it replaced is gone');
         $this->assertNull($this->token((int) $second['token_id'])->revoked_at, 'the token in force is untouched');
         $this->assertNull($access->entryFor($alice)['pending_revoke_token_id']);
         $this->assertNull($access->entryFor($alice)['warning']);
@@ -525,8 +529,8 @@ PEM;
         $this->assertSame('previous token still valid: the apply that replaces it failed', $third['warning']);
     }
 
-    /** The apply after an earlier failure carries two stale tokens, and retires both. */
-    public function test_the_next_successful_apply_revokes_the_tracked_token_too(): void
+    /** The apply after an earlier failure carries two stale tokens, and takes both away. */
+    public function test_the_next_successful_apply_removes_the_tracked_token_too(): void
     {
         $access = $this->access();
         $alice = $this->user('alice');
@@ -538,14 +542,14 @@ PEM;
 
         $access->confirmDelivery('alice', $access->envFor($alice));
 
-        $this->assertNotNull($this->token((int) $first['token_id'])->revoked_at);
-        $this->assertNotNull($this->token((int) $second['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $first['token_id']));
+        $this->assertNull(PersonalAccessToken::find((int) $second['token_id']));
         $this->assertNull($this->token((int) $third['token_id'])->revoked_at);
         $this->assertNull($access->entryFor($alice)['pending_revoke_token_id']);
     }
 
     /** A denial has to take every token the project holds, tracked or not. */
-    public function test_a_denial_revokes_the_tracked_token_too(): void
+    public function test_a_denial_removes_the_tracked_token_too(): void
     {
         $access = $this->access();
         $alice = $this->user('alice');
@@ -554,15 +558,15 @@ PEM;
 
         $this->assertTrue($access->deny($alice));
 
-        $this->assertNotNull($this->token((int) $first['token_id'])->revoked_at);
-        $this->assertNotNull($this->token((int) $second['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $first['token_id']));
+        $this->assertNull(PersonalAccessToken::find((int) $second['token_id']));
         $this->assertSame([], $access->all());
     }
 
     /**
-     * Two rotations before an apply leave the token between them in no entry; a denial still revokes it with the rest.
+     * Two rotations before an apply leave the token between them in no entry; a denial still removes it with the rest.
      */
-    public function test_a_denial_revokes_a_token_no_entry_tracks_any_more(): void
+    public function test_a_denial_removes_a_token_no_entry_tracks_any_more(): void
     {
         $access = $this->access();
         $alice = $this->user('alice');
@@ -574,7 +578,7 @@ PEM;
         $this->assertTrue($access->deny($alice));
 
         foreach ([$first, $between, $last] as $entry) {
-            $this->assertNotNull($this->token((int) $entry['token_id'])->revoked_at, (string) $entry['token_id']);
+            $this->assertNull(PersonalAccessToken::find((int) $entry['token_id']), (string) $entry['token_id']);
         }
     }
 
@@ -593,7 +597,7 @@ PEM;
 
         $access->confirmDelivery('alice', $running);
 
-        $this->assertNotNull($this->token((int) $first['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $first['token_id']));
         $this->assertNull($this->token((int) $second['token_id'])->revoked_at, 'the application holds it');
         $entry = $access->entryFor($alice);
         $this->assertSame((int) $second['token_id'], $entry['pending_revoke_token_id']);
@@ -601,7 +605,7 @@ PEM;
 
         $access->confirmDelivery('alice', $access->envFor($alice));
 
-        $this->assertNotNull($this->token((int) $second['token_id'])->revoked_at);
+        $this->assertNull(PersonalAccessToken::find((int) $second['token_id']));
         $this->assertNull($this->token((int) $third['token_id'])->revoked_at);
         $this->assertNull($access->entryFor($alice)['pending_revoke_token_id']);
     }

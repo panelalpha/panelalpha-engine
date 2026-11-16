@@ -120,7 +120,7 @@ class ProjectCopier
         $copyDomain = $this->copyDomain($source, $domain, $newUsername);
         ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()), Projects::isDind($source));
         Projects::assertDatabaseNamesFit($source, $newUsername.'_');
-        $this->assertHostingFree($source, $newUsername);
+        $this->assertHostingFree($source, $newUsername, $system);
 
         return $source->makeClone($newUsername, $copyDomain);
     }
@@ -162,16 +162,16 @@ class ProjectCopier
     }
 
     /**
-     * The requested domain without `www.`, or a planned one ({@see CopyDomain}).
+     * The requested domain without `www.`, or a planned one ({@see CopyDomain}), `clone.` for a clone.
      *
      * @throws ValidationException when none can be generated, or the copy may not take the domain
      */
     private function copyDomain(User $source, ?string $requested, string $newUsername): CopyDomain
     {
-        $copyDomain = CopyDomain::forCopy($source->domain, $requested);
+        $copyDomain = CopyDomain::forClone($source->domain, $requested);
         if ($copyDomain === null) {
             throw ValidationException::withMessages([
-                'domain' => 'Could not generate an available staging domain for the clone.',
+                'domain' => 'Could not generate an available name for the clone.',
             ]);
         }
 
@@ -184,11 +184,13 @@ class ProjectCopier
     }
 
     /** @throws ValidationException when an account by that name is already on the host */
-    private function assertHostingFree(User $source, string $newUsername): void
+    private function assertHostingFree(User $source, string $newUsername, System $system): void
     {
         $probe = new User(['username' => $newUsername, 'email' => $source->email]);
         if ($probe->project()->hostingExists()) {
-            throw ValidationException::withMessages(['new_username' => ProjectNameRefusal::unavailable($newUsername)]);
+            throw ValidationException::withMessages([
+                'new_username' => ProjectNameRefusal::heldOnHost($newUsername, $system),
+            ]);
         }
     }
 

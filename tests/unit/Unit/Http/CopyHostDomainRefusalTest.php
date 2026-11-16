@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -33,11 +34,13 @@ class CopyHostDomainRefusalTest extends TestCase
         Setting::setRuntimeSettings([PublicRoutingGrants::SETTING => '', 'cert_domain' => self::HOST]);
         $source = $this->makeUser('source', ['template' => 'dind']);
         $this->makeMainDomain($source, 'source.example.test');
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
     {
         Setting::clearRuntimeSettings();
+        LocalRoot::answerByBroker();
         parent::tearDown();
     }
 
