@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\Lib\Deploy\Source\ProjectArchive;
 use App\Lib\Deploy\Source\UploadedArchive;
+use App\Lib\Project\ArchiveDrop;
 use App\Models\User;
 use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
@@ -49,6 +50,7 @@ final class Files
 
         $archive = UploadedArchive::inHome($zipPath, $home, $this->project->project()->fileManager()->resolvedFile(...));
         [$uid, $gid] = $this->accountIds($user);
+        $stagedFolder = $this->stagedFolderOf($archive->path, $projectDir);
 
         $stageDir = $this->stageRoot.'/'.bin2hex(random_bytes(8));
         $staged = $stageDir.'/'.$archive->stagedName();
@@ -60,10 +62,36 @@ final class Files
             $this->logger()?->info('Unpacking the project archive');
             $this->extractAsAccount($archive, $staged, $tmp, $uid, $gid);
             $this->logger()?->info('Writing the project archive into ~/project');
-            $this->syncIntoProject($this->projectRootIn($tmp, $uid, $gid), $projectDir, $uid, $gid, $chown);
+            $this->syncIntoProject($this->projectRootIn($tmp, $uid, $gid), $projectDir, $uid, $gid, $chown, $stagedFolder);
+            $this->removeConsumedArchive($archive, $stagedFolder);
         } finally {
             $system->exec(Privileged::files()->removeTree($tmp, $stageDir));
         }
+    }
+
+    /**
+     * The folder below ~/project the deploy's archive was staged in, which holds files this deploy does not read;
+     * null for an archive in the home itself or at the top of ~/project, whose tree the import replaces as a whole.
+     */
+    private function stagedFolderOf(string $archivePath, string $projectDir): ?string
+    {
+        $projectDir = rtrim($projectDir, '/');
+        $folder = dirname($archivePath);
+
+        return $folder !== $projectDir && str_starts_with($folder, $projectDir.'/') ? $folder : null;
+    }
+
+    /**
+     * Gone by the end of the import, before the deploy reports anything: the folder of the engine's own drop, or the
+     * one archive a caller staged.
+     */
+    private function removeConsumedArchive(UploadedArchive $archive, ?string $stagedFolder): void
+    {
+        if ($stagedFolder === null) {
+            return;
+        }
+        $consumed = ArchiveDrop::isDropFolder($stagedFolder) ? $stagedFolder : $archive->path;
+        $this->project->system()->exec(Privileged::files()->removeTree($consumed), [], 120);
     }
 
     /**
@@ -143,15 +171,26 @@ final class Files
     /**
      * Compared by content, since archives often carry normalised mtimes: a changed file gets a
      * new mtime, or BuildKit's stat-based context sync keeps sending the old one into the image.
+     * $keep is a folder of ~/project the deploy did not bring: it still receives the archive's files, and loses none.
      */
-    private function syncIntoProject(string $source, string $projectDir, int $uid, int $gid, ?string $chown): void
+    private function syncIntoProject(string $source, string $projectDir, int $uid, int $gid, ?string $chown, ?string $keep = null): void
     {
         $system = $this->project->system();
         $system->exec(Privileged::scripts()->makeHomeEntry($projectDir, '0755', $uid.':'.$gid));
-        $system->exec(Privileged::files()->mirrorByContent($source, $projectDir));
+        $system->exec($keep === null
+            ? Privileged::files()->mirrorByContent($source, $projectDir)
+            : Privileged::files()->mirrorByContentProtecting($source, $projectDir, [self::keepPattern($projectDir, $keep)]));
         if ($chown) {
             $system->exec(Privileged::files()->changeOwnerRecursively($chown, $projectDir));
         }
+    }
+
+    /** A folder of ~/project and everything below it, anchored at its top and taken literally as the name it has. */
+    private static function keepPattern(string $projectDir, string $folder): string
+    {
+        $relative = substr($folder, strlen(rtrim($projectDir, '/')) + 1);
+
+        return '/'.preg_replace('~([\\\\*?\[\]])~', '\\\\$1', $relative).'/***';
     }
 
     /**

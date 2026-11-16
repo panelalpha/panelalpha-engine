@@ -279,25 +279,25 @@ class TaskCancellerTest extends SqliteTaskTestCase
 
         (new TaskCanceller($this->noKill()))->cancel($task);
 
-        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status'], 'the next archive deploy still resumes it');
+        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status'], 'the create log still waits for files');
     }
 
-    /** A running rebuild that resumed the create's log cancels that deploy: the log is its own by id. */
-    public function test_cancelling_a_running_rebuild_cancels_the_deploy_it_resumed(): void
+    /** A running rebuild on a waiting project cancels the deploy it started: the log is its own by id. */
+    public function test_cancelling_a_running_rebuild_cancels_the_deploy_it_started(): void
     {
         $username = $this->username();
-        $id = $this->waitingCreateLog($username);
-        $resumed = DeployLogger::resumeRunningOrStart($username);
-        $this->assertSame($id, $resumed->getDeployId());
+        $createId = $this->waitingCreateLog($username);
+        $deploy = DeployLogger::resumeRunningOrStart($username);
+        $this->assertNotSame($createId, $deploy->getDeployId(), 'the rebuild opens its own deploy');
         $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $username);
         $task->markRunning('h-1');
-        $task->details = ['deploy_id' => $id];
+        $task->details = ['deploy_id' => $deploy->getDeployId()];
         $task->save();
 
         (new TaskCanceller($this->noKill()))->cancel($task);
 
         $this->assertSame(DeployLogger::STATUS_CANCELLED, DeployLogger::readLatestFor($username)['status']);
-        unset($resumed);
+        unset($deploy);
     }
 
     public function test_a_running_task_does_not_cancel_a_deploy_that_is_not_its_own(): void

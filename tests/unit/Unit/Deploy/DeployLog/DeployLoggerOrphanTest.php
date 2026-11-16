@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployStartLine;
 use Tests\TestCase;
 
 /**
@@ -127,7 +128,6 @@ class DeployLoggerOrphanTest extends TestCase
 
         $this->assertNull(DeployLogger::settleOrphaned($username));
         $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status']);
-        $this->assertTrue(DeployLogger::resumeRunningOrStart($username)->isRunning(), 'the upload still continues it');
     }
 
     /** A git/connect on the waiting account streams its git output into the same log. */
@@ -147,14 +147,14 @@ class DeployLoggerOrphanTest extends TestCase
         $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($username)['status']);
     }
 
-    /** The upload's deploy continued the waiting one and then died: that one is an orphan. */
-    public function test_a_deploy_that_continued_a_waiting_one_and_died_is_closed(): void
+    /** The deploy that brought the waiting project its files and then died: that one is an orphan. */
+    public function test_a_deploy_that_took_a_waiting_project_over_and_died_is_closed(): void
     {
         $username = $this->waitingForFiles();
-        $resumed = DeployLogger::resumeRunningOrStart($username);
-        $resumed->info('Continuing deploy with project files');
-        $resumed->dim('Recreating home and project directories');
-        unset($resumed);
+        $deploy = DeployLogger::resumeRunningOrStart($username);
+        $deploy->info(DeployStartLine::text('archive'));
+        $deploy->dim('Recreating home and project directories');
+        unset($deploy);
         gc_collect_cycles();
 
         $this->assertSame(DeployLogger::STATUS_FAILED, DeployLogger::settleOrphaned($username));

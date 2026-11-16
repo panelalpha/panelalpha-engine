@@ -69,7 +69,8 @@ class DeployCompose
      * The nginx that serves a project directory as it stands. The config is
      * mounted because the image default serves only `index.html`, and the sites
      * that reach this recipe have a differently named front page. A missing mount
-     * source would make Docker create a directory where nginx expects a file.
+     * source would make Docker create a directory where nginx expects a file. It loads `.env`
+     * as the other recipes do, where the deploy writes the account's variables.
      */
     public static function staticNginx(): string
     {
@@ -80,6 +81,7 @@ class DeployCompose
                 './:/usr/share/nginx/html/:ro',
                 './'.NginxConfig::FILENAME.':/etc/nginx/conf.d/default.conf:ro',
             ],
+            'env_file' => ['.env'],
             'labels' => [GeneratedCompose::LABEL => DetectProjectStrategy::COMPOSE_GENERATED_LABEL],
         ]);
     }

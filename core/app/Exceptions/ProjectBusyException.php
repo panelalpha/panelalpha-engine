@@ -13,6 +13,7 @@ use App\Jobs\RebuildProject;
 use App\Jobs\RenameMysqlDatabase;
 use App\Jobs\RestoreBackup;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 
@@ -44,7 +45,7 @@ class ProjectBusyException extends \RuntimeException
 
     public static function taskRunning(string $project, Task $task): self
     {
-        $state = "Project '{$project}' is busy: ".self::kind($task)." task {$task->id} is ".self::progress($task).'.';
+        $state = "Project '{$project}' is busy: ".self::describe($task).'.';
 
         if (! self::canBeCancelled($task)) {
             return new self($state, self::WAIT);
@@ -87,6 +88,12 @@ class ProjectBusyException extends \RuntimeException
         return new self("Project '{$project}' is busy: a staging copy is running.", self::WAIT);
     }
 
+    /** The task as a refusal names it: its kind, its id and whether it is queued or running. */
+    public static function describe(Task $task): string
+    {
+        return self::kind($task)." task {$task->id} is ".self::progress($task);
+    }
+
     /**
      * TaskCanceller refuses a running job that records no pid, so a cancel must not be offered for it.
      */
@@ -117,7 +124,10 @@ class ProjectBusyException extends \RuntimeException
             PushState::class => 'push',
             RenameMysqlDatabase::class => 'database rename',
             CreateBackup::class => 'backup',
-            ApplyEnvVars::class => 'environment change',
+            ApplyEnvVars::class => match ($task->details['action'] ?? null) {
+                ApiAccess::TASK_ACTION => 'API access apply',
+                default => 'environment change',
+            },
             RestoreBackup::class => 'restore',
             DeleteBackup::class => 'backup delete',
             default => class_basename((string) $task->job_type),

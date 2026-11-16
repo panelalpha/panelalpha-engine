@@ -270,10 +270,12 @@ class Daemon:
     def hijack(self, path, body, seconds):
         return Hijacked.open(path, self.address, seconds, body)
 
-    def exec(self, output, container, argv, *, user='', workdir='', environment=(), stdin=None, seconds=EXEC_SECONDS):
+    def exec(self, output, container, argv, *, user='', workdir='', environment=(), stdin=None, watch_stdin=False,
+             seconds=EXEC_SECONDS):
         """`docker exec` of `argv` in `container`, its output relayed and its exit code returned; `stdin` is bytes or
-        CLIENT for the client's own, `seconds` bounds the start and each silence of the output."""
-        body = exec_body(argv, user, workdir, environment, stdin is not None)
+        CLIENT for the client's own, `watch_stdin` puts the stream on the command's stdin without a byte of it, so
+        the command's input ends with the client's connection, `seconds` bounds the start and each silence."""
+        body = exec_body(argv, user, workdir, environment, stdin is not None or watch_stdin)
         exec_id = replies.created(self.json('POST', f'/containers/{quoted(container)}/exec', missing=(), body=body))['Id']
         if not self.relayed_exec(exec_id, output, stdin, seconds):
             return 1

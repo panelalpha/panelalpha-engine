@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Deploy;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\Runtime\Images;
@@ -35,6 +37,21 @@ class DeployComposeTest extends TestCase
             $parsed['services']['app']['labels']['panelalpha.generated']
         );
         $this->assertArrayNotHasKey('build', $parsed['services']['app']);
+    }
+
+    /**
+     * A static site reads the account's variables from `.env`, which every deploy writes,
+     * so a rebuild keeps them; `.env.panelalpha` follows the same `env_file:` as elsewhere.
+     */
+    public function test_static_compose_loads_the_projects_env_files(): void
+    {
+        $parsed = Yaml::parse(DeployCompose::staticNginx());
+
+        $this->assertSame(['.env'], $parsed['services']['app']['env_file']);
+
+        [$attached, $services] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
+        $this->assertSame(['app'], $services);
+        $this->assertSame(['.env', '.env.panelalpha'], $attached['services']['app']['env_file']);
     }
 
     public function test_dockerfile_compose_builds_named_file(): void

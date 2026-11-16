@@ -20,10 +20,30 @@ BIND = 'bind'
 DOCKERD = 'dockerd'
 PS_ARGS = '-eo pid,comm'
 
+WATCHED_STDIN = '''set -m
+exec 3<&0
+"$@" </dev/null &
+child=$!
+( cat <&3 >/dev/null; kill -TERM -- -"$child" 2>/dev/null; sleep 3; kill -KILL -- -"$child" 2>/dev/null ) &
+watch=$!
+exec 2>/dev/null
+wait "$child"
+status=$?
+kill -KILL -- -"$watch" 2>/dev/null
+exit "$status"'''
+
 
 def in_container(daemon, output, user, workdir, environment, argv):
-    """`docker exec [-u] [-w] [-e]… <account> <argv>`; the exit code is the command's."""
-    return daemon.exec(output, daemon.name, argv, user=user, workdir=workdir, environment=environment)
+    """`docker exec -i [-u] [-w] [-e]… <account> <argv>`, the command ends with its caller's connection; the exit
+    code is the command's."""
+    return daemon.exec(output, daemon.name, watched(argv), user=user, workdir=workdir, environment=environment,
+                       watch_stdin=True)
+
+
+def watched(argv):
+    """`argv` under a shell that ends it, its process group too, once the exec's stdin does, which is the caller's
+    connection: a command must not outlive the client that asked for it."""
+    return ['/bin/bash', '-c', WATCHED_STDIN, 'bash', *argv]
 
 
 def host(account, accounts_directory):

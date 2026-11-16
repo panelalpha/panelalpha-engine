@@ -55,8 +55,11 @@ class DeployLogger
         'The deploy stopped without finishing — the engine process running it is gone. '
         .'This usually means the host restarted or ran out of memory. Deploy again to retry.';
 
-    /** The line a DinD account without git ends its first deploy on, `running`, until files arrive. */
+    /** The line a DinD account without git ends its first deploy on, `running`, until a deploy brings the files. */
     public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
+
+    /** How a deploy that waited for files is closed once another one brings them. */
+    public const WAITING_TAKEN_OVER = 'The project waited for its files, and a later deploy brought them.';
 
     /** Lines of a known problem's text written to the log, per section. */
     private const PROBLEM_MAX_LINES = 40;
@@ -153,8 +156,8 @@ class DeployLogger
     }
 
     /**
-     * Keep a zip follow-up on the same deploy as the account create: a create without git leaves latest.json running at
-     * "preparing", and a second id would rewind the UI to cloning.
+     * Continue the deploy latest.json has running, unless a create left it waiting for files: every deploy that brings
+     * files opens one of its own, and the waiting one is closed as taken over first.
      */
     public static function resumeRunningOrStart(string $username): self
     {
@@ -163,8 +166,26 @@ class DeployLogger
             return self::start($username);
         }
         $current->lock->acquire();
+        if ($current->closeIfWaitingForFiles()) {
+            return self::start($username);
+        }
 
         return $current;
+    }
+
+    /**
+     * Close this deploy when it only waited for files, so the one that brings them can open its own. False when it is not
+     * waiting any more; the caller then keeps the lock, as for any deploy it continues.
+     */
+    private function closeIfWaitingForFiles(): bool
+    {
+        if (! $this->isWaitingForFiles()) {
+            return false;
+        }
+        $this->close(self::STATUS_CANCELLED, self::WAITING_TAKEN_OVER, []);
+        $this->lock->releaseQuietly();
+
+        return true;
     }
 
     /**

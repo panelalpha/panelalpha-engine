@@ -71,7 +71,13 @@ class ArchiveDrop
     {
         $folder = dirname($zipPath);
 
-        return str_starts_with(basename($folder), self::DROP_PREFIX) ? $folder : $zipPath;
+        return self::isDropFolder($folder) ? $folder : $zipPath;
+    }
+
+    /** Whether $folder is one {@see put()} made for an archive it drops into a project. */
+    public static function isDropFolder(string $folder): bool
+    {
+        return str_starts_with(basename($folder), self::DROP_PREFIX);
     }
 
     /** {@see remove()} once the deploy has ended, which a failure to remove it must not turn into a different outcome. */

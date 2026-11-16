@@ -163,8 +163,7 @@ final class DeployHistory
     }
 
     /**
-     * The newest task that ran each deploy: an archive upload continues the
-     * deploy its create left waiting for files.
+     * The newest task that ran each deploy.
      *
      * @param  list<string>  $ids
      * @return Collection<string, Task>

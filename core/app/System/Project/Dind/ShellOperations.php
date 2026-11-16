@@ -409,8 +409,8 @@ final class ShellOperations
     }
 
     /**
-     * The timeout runs inside the account: killing the exec on the host leaves the
-     * command running there, so the host only waits a little longer as a backstop.
+     * The timeout runs inside the account, so the command reports 124 there; the host only waits longer as a
+     * backstop, and its own kill ends the command too.
      */
     public function runShellAsUser(string $command, ?string $cwd = null, int $timeout = 300): Process
     {

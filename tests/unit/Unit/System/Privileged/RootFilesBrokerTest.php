@@ -77,6 +77,10 @@ final class RootFilesBrokerTest extends TestCase
         yield 'listAllNames' => [fn (RootFiles $f) => $f->listAllNames('/d'), self::asked('listAllNames', '/d')];
         yield 'mirror' => [fn (RootFiles $f) => $f->mirror('/src//', '/dst'), self::asked('mirror', '/src//', '/dst')];
         yield 'mirrorByContent' => [fn (RootFiles $f) => $f->mirrorByContent('/src', '/dst/'), self::asked('mirrorByContent', '/src', '/dst/')];
+        yield 'mirrorByContentProtecting' => [
+            fn (RootFiles $f) => $f->mirrorByContentProtecting('/src', '/dst/', ['/.panelalpha-upload/***']),
+            self::asked('mirrorByContentProtecting', '/src', '/dst/', '/.panelalpha-upload/***'),
+        ];
         yield 'mirrorExcluding' => [
             fn (RootFiles $f) => $f->mirrorExcluding('/home/a', '/home/my b/.incoming/', ['.incoming', 'docker/']),
             self::asked('mirrorExcluding', '/home/a', '/home/my b/.incoming/', '.incoming', 'docker/'),

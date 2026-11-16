@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\WritableProjectBinds;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Support\JobBudget;
 use App\System\Filesystem;
 use App\System\Project\Dind as DindProject;
 
@@ -17,6 +18,9 @@ use App\System\Project\Dind as DindProject;
 final class BindSourceOwners
 {
     private const TIMEOUT_SECONDS = 60;
+
+    /** An inner command's own budget: a hand-over chowns whatever a bind mount holds. */
+    private const HAND_OVER_SECONDS = JobBudget::COMMAND_SECONDS;
 
     /**
      * Run as root in the account: $1 the checkout, $2 uid:gid, then the paths. One resolving outside the
@@ -156,7 +160,7 @@ final class BindSourceOwners
             $handed = $this->project->shell()->execQuiet(
                 ['sh', '-c', self::HAND_OVER, 'sh', $projectDir, "{$uid}:{$accountGid}", ...$sources],
                 [],
-                self::TIMEOUT_SECONDS
+                self::HAND_OVER_SECONDS
             );
         } catch (\Throwable $e) {
             $logger?->warn("Could not hand the paths service {$service} writes to uid {$uid}: ".trim($e->getMessage()));

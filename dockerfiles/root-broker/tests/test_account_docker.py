@@ -57,6 +57,10 @@ class HijackHolding(Hijack):
     """A hijack that keeps its stream open and silent for HOLD_SECONDS after its bytes."""
 
 
+class HijackUntilClosed(Hijack):
+    """A hijack that keeps its stream open until the broker closes it, which it records."""
+
+
 class Raw(bytes):
     """The whole reply as it goes on the wire, its status line and headers included."""
 
@@ -101,6 +105,8 @@ def handler(answer, asked, sent=None):
                 if isinstance(body, HijackReadingStdin) and sent is not None:
                     sent.append(('STDIN', self.path, self.rfile.read(), {}))
                 self.wfile.write(body)
+                if isinstance(body, HijackUntilClosed) and sent is not None:
+                    sent.append(('CLOSED', self.path, self.rfile.read(), {}))
                 if isinstance(body, HijackHolding):
                     self.wfile.flush()
                     time.sleep(HOLD_SECONDS)

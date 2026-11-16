@@ -14,7 +14,8 @@ import urllib.parse
 
 import support
 from rootbroker import accountdaemon, dockerapi, innerprocesses, paths, protocol, registrylogin
-from test_account_docker import Chunks, Hijack, HijackReadingStdin, Raw, frame, serve
+from rootbroker.actions import accountcontainer
+from test_account_docker import Chunks, Hijack, HijackReadingStdin, HijackUntilClosed, Raw, frame, serve
 
 EXEC_ID = 'e' * 64
 CONTAINER_ID = 'c' * 64
@@ -140,14 +141,95 @@ class AccountContainerTest(FakeDaemon):
                               'git', 'rev-parse', 'HEAD')
         self.assertEqual((result.returncode, result.stdout), (0, b'ok\n'), result.stderr)
         self.assertEqual(self.body_of('POST', '/containers/u/exec'), {
-            'AttachStdout': True, 'AttachStderr': True, 'AttachStdin': False, 'Tty': False, 'Cmd': ['git', 'rev-parse', 'HEAD'],
+            'AttachStdout': True, 'AttachStderr': True, 'AttachStdin': True, 'Tty': False,
+            'Cmd': ['/bin/bash', '-c', accountcontainer.WATCHED_STDIN, 'bash', 'git', 'rev-parse', 'HEAD'],
             'Env': ['DOCKER_CONFIG=/home/u/.panelalpha-docker'], 'User': '1004:1005',
         })
+
+    def test_a_caller_that_hangs_up_closes_the_command_s_stdin(self):
+        self.routes[('POST', '/containers/u/exec')] = (201, {'Id': EXEC_ID})
+        self.routes[('POST', f'/exec/{EXEC_ID}/start')] = (101, HijackUntilClosed(b''))
+        self.routes[('GET', f'/exec/{EXEC_ID}/json')] = (200, {'ExitCode': 0, 'Running': False})
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.pa_root('account-container.exec', 'u', '', '', '0', 'sleep', '30', timeout=2)
+        closed = lambda: [entry[:3] for entry in self.sent if entry[0] == 'CLOSED']
+        deadline = time.monotonic() + support.SECONDS
+        while not closed() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(closed(), [('CLOSED', f'/exec/{EXEC_ID}/start', b'')],
+                         'the daemon is still waiting on a stream the caller left')
 
     def test_only_a_hosting_account_and_something_to_run(self):
         self.assertEqual(self.pa_root('account-container.exec', 'root', '', '', '0', 'id').returncode, protocol.EXIT_REFUSED)
         self.assertEqual(self.pa_root('account-container.exec', 'u', '', '', '0').returncode, protocol.EXIT_REFUSED)
         self.assertEqual(self.asked, [])
+
+
+class WatchedStdinTest(unittest.TestCase):
+    """The shell an exec runs a command under: the command ends when the stream on its stdin does, which is the
+    caller's connection, and not before."""
+
+    def started(self, script):
+        process = subprocess.Popen(['/bin/bash', '-c', accountcontainer.WATCHED_STDIN, 'bash', '/bin/bash', '-c', script],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(stop, process)
+        return process
+
+    def test_the_command_runs_while_the_caller_is_connected(self):
+        process = self.started('sleep 30')
+        time.sleep(1)
+        self.assertIsNone(process.poll(), 'the command ended while its caller was still there')
+        process.stdin.close()
+        self.assertNotEqual(ended(process), 0)
+
+    def test_the_command_and_its_own_children_end_with_the_caller(self):
+        marker = os.path.join(tempfile.mkdtemp(prefix='broker-watch-'), 'grandchild.pid')
+        self.addCleanup(shutil.rmtree, os.path.dirname(marker), True)
+        process = self.started(f'sleep 60 & echo $! > {marker}; wait')
+        deadline = time.monotonic() + support.SECONDS
+        while not os.path.exists(marker) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        with open(marker) as f:
+            grandchild = int(f.read())
+        self.assertTrue(alive(grandchild))
+        process.stdin.close()
+        self.assertNotEqual(ended(process), 0)
+        deadline = time.monotonic() + support.SECONDS
+        while alive(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(alive(grandchild), 'the command\'s own child outlived the caller')
+
+    def test_the_command_s_streams_and_exit_code_are_the_caller_s(self):
+        process = self.started('echo out; echo err >&2; exit 7')
+        self.assertEqual(process.wait(timeout=support.SECONDS), 7)
+        self.assertEqual(process.communicate(), (b'out\n', b'err\n'))
+
+
+def ended(process, seconds=support.SECONDS):
+    """The process's exit code, waiting no longer than `seconds`."""
+    return process.wait(timeout=seconds)
+
+
+def stop(process):
+    """Ends a wrapper a test started, and closes the streams it was given."""
+    if process.poll() is None:
+        process.kill()
+    try:
+        process.communicate(timeout=support.SECONDS)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if not stream.closed:
+            stream.close()
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    with open(f'/proc/{pid}/stat') as stat:
+        return stat.read().split()[2] != 'Z'
 
 
 class RegistryConfigTest(FakeDaemon):

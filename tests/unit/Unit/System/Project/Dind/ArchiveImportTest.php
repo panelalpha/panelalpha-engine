@@ -257,6 +257,161 @@ class ArchiveImportTest extends TestCase
         $this->files($system)->importProjectArchive('/site.zip');
     }
 
+    /**
+     * A caller stages the next version in a folder of its own, beside the one being deployed: the deploy replaces the
+     * project tree, so the mirror leaves that folder alone and only the archive it read goes.
+     */
+    public function test_a_deploy_keeps_the_other_archives_in_the_folder_it_staged_in(): void
+    {
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $project = $this->root.'/home/alice/project';
+        $extract = $this->extractFind($system)[4];
+        $this->assertSame(
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--filter=P /.panelalpha-upload/***', '--', $extract.'/', $project.'/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
+        );
+        $removals = $this->removals($system);
+        $this->assertContains([...self::AS_ROOT, 'rm', '-rf', '--', $project.'/.panelalpha-upload/site-v1.tar.gz'], $removals);
+        $this->assertNotContains([...self::AS_ROOT, 'rm', '-rf', '--', $project.'/.panelalpha-upload'], $removals);
+    }
+
+    /** The archive it read is gone when the import returns, so no cleanup step is left to run once the deploy has ended. */
+    public function test_the_archive_it_read_is_removed_by_the_import(): void
+    {
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $this->assertContains(
+            [...self::AS_ROOT, 'rm', '-rf', '--', $this->root.'/home/alice/project/.panelalpha-upload/site-v1.tar.gz'],
+            $this->removals($system)
+        );
+    }
+
+    /** The engine's own drop goes with the folder it made, and it goes with the import too. */
+    public function test_the_engines_own_drop_folder_is_removed_by_the_import(): void
+    {
+        $drop = $this->root.'/home/alice/project/.deploy-archive-abc123abc123';
+        mkdir($drop, 0777, true);
+        file_put_contents($drop.'/site.tar.gz', gzencode('dropped by the engine'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.deploy-archive-abc123abc123/site.tar.gz');
+
+        $this->assertContains([...self::AS_ROOT, 'rm', '-rf', '--', $drop], $this->removals($system));
+    }
+
+    /** An archive at the top of ~/project is the replaced tree's to delete, as before: nothing is kept for it. */
+    public function test_an_archive_at_the_top_of_the_project_is_not_excluded_from_the_mirror(): void
+    {
+        file_put_contents($this->root.'/home/alice/project/app.tar.gz', gzencode('deployed now'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/app.tar.gz');
+
+        $this->assertSame(
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--', $this->extractFind($system)[4].'/', $this->root.'/home/alice/project/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
+        );
+        $this->assertSame([], $this->removals($system), 'the mirror took it with the tree');
+    }
+
+    /** The archive staged beside the one deployed outlives a real mirror; the one it read does not. */
+    public function test_a_real_mirror_keeps_the_archive_staged_beside_the_one_deployed(): void
+    {
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            $this->markTestSkipped('rsync is not installed');
+        }
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $rsync = $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0];
+        $extract = rtrim($rsync[count($rsync) - 2], '/');
+        $project = rtrim($rsync[count($rsync) - 1], '/');
+        mkdir($extract, 0777, true);
+        file_put_contents($extract.'/index.php', 'v2');
+        file_put_contents($project.'/stale.php', 'old');
+
+        exec(implode(' ', array_map('escapeshellarg', array_slice($rsync, 1))), $out, $code);
+        $this->assertSame(0, $code);
+        $removal = $this->removals($system)[0];
+        exec(implode(' ', array_map('escapeshellarg', array_slice($removal, 1))), $out, $code);
+
+        $this->assertSame(0, $code);
+        $this->assertSame('v2', file_get_contents($project.'/index.php'));
+        $this->assertFileDoesNotExist($project.'/stale.php');
+        $this->assertFileExists($project.'/.panelalpha-upload/site-v2.tar.gz', 'an archive staged for the next deploy is not this deploy\'s');
+        $this->assertFileDoesNotExist($project.'/.panelalpha-upload/site-v1.tar.gz', 'the archive this deploy read goes');
+    }
+
+    /** The folder an archive was staged in is a folder of the archive's too: what the archive holds there is written. */
+    public function test_a_real_mirror_writes_the_archives_files_into_the_folder_it_was_staged_in(): void
+    {
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            $this->markTestSkipped('rsync is not installed');
+        }
+        $public = $this->root.'/home/alice/project/public';
+        mkdir($public, 0777, true);
+        file_put_contents($public.'/site.tar.gz', gzencode('deployed now'));
+        file_put_contents($public.'/index.php', 'v1');
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/project/public/site.tar.gz');
+
+        $rsync = $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0];
+        $this->assertContains('--filter=P /public/***', $rsync);
+        $extract = rtrim($rsync[count($rsync) - 2], '/');
+        mkdir($extract.'/public', 0777, true);
+        file_put_contents($extract.'/public/index.php', 'v2');
+        file_put_contents($extract.'/public/app.js', 'new');
+
+        exec(implode(' ', array_map('escapeshellarg', array_slice($rsync, 1))), $out, $code);
+        $this->assertSame(0, $code);
+        $removal = $this->removals($system)[0];
+        exec(implode(' ', array_map('escapeshellarg', array_slice($removal, 1))), $out, $code);
+
+        $this->assertSame(0, $code);
+        $this->assertSame('v2', file_get_contents($public.'/index.php'));
+        $this->assertSame('new', file_get_contents($public.'/app.js'));
+        $this->assertFileDoesNotExist($public.'/site.tar.gz', 'the archive this deploy read goes');
+    }
+
+    /** A staged folder's name is matched literally, wildcards and all. */
+    public function test_the_staged_folders_name_is_escaped_in_the_protect_rule(): void
+    {
+        $dir = $this->root.'/home/alice/project/up[1]*?';
+        mkdir($dir, 0777, true);
+        file_put_contents($dir.'/site.tar.gz', gzencode('deployed now'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/up[1]*?/site.tar.gz');
+
+        $this->assertContains('--filter=P /up\\[1\\]\\*\\?/***', $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0]);
+    }
+
+    /** A caller's archive and the one it staged for later, in the folder the panel uploads into. */
+    private function stagedArchives(): void
+    {
+        $dir = $this->root.'/home/alice/project/.panelalpha-upload';
+        mkdir($dir, 0777, true);
+        file_put_contents($dir.'/site-v1.tar.gz', gzencode('deployed now'));
+        file_put_contents($dir.'/site-v2.tar.gz', gzencode('staged for later'));
+    }
+
+    /** @return list<list<string>> the removals of one path each */
+    private function removals(System $system): array
+    {
+        return array_values(array_filter(
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rm', '-rf']),
+            static fn (array $cmd): bool => count($cmd) === 5
+        ));
+    }
+
     /** @return list<list<string>> */
     private function extractions(System $system): array
     {

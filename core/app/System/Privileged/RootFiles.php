@@ -260,6 +260,18 @@ final class RootFiles
     }
 
     /**
+     * Compares by content and keeps $target's times on a changed file; the entries $protected names still receive
+     * $source's files, and nothing in them is deleted.
+     *
+     * @param  list<string>  $protected
+     * @return list<string>
+     */
+    public function mirrorByContentProtecting(string $source, string $target, array $protected): array
+    {
+        return $this->root(__FUNCTION__, [...Arguments::paths([$source, $target]), ...self::excluded($protected)]);
+    }
+
+    /**
      * @param  list<string>  $excluded
      * @return list<string>
      */

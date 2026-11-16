@@ -6,9 +6,8 @@ use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Models\Task;
 
 /**
- * A rebuild or archive deploy asked for while one of the project is queued or
- * running. HTTP answers 409 with the task to follow, or null when the deploy
- * holding the lock has none (the CLI, a push, POST /users, a delete).
+ * A deploy asked for while another task holds the project's account - a deploy, an apply, a push, a delete.
+ * HTTP answers 409 with the task to follow, or null when the holder has none (the deploy log follows it).
  */
 class DeployBusyException extends \RuntimeException
 {
@@ -31,8 +30,8 @@ class DeployBusyException extends \RuntimeException
         };
 
         parent::__construct(match (true) {
-            $task !== null => "A deploy of this project is already queued or running: task {$task->id}. Follow it, or "
-                .'cancel it if it is stuck.',
+            $task !== null => "Project '{$username}' is busy: ".ProjectBusyException::describe($task)
+                .'. Wait for it to finish, or cancel it if it is stuck.',
             $holder === DeployLock::HOLDER_DELETE => "Project '{$username}' is being deleted.",
             $holder !== null => "Project '{$username}' is busy: a {$holder} is running.",
             default => 'A deploy of this project is already running; its deploy log follows it.',

@@ -40,6 +40,10 @@ def excludes(patterns):
     return ['--exclude=' + pattern for pattern in patterns]
 
 
+def protects(patterns):
+    return ['--filter=P ' + pattern for pattern in patterns]
+
+
 def contents(operand):
     return operand if operand.endswith('/') else operand + '/'
 
@@ -77,9 +81,9 @@ def move(*options):
     return lambda source, target: ['mv', *options, *(['-T'] if isinstance(target, Onto) else []), '--', source, target]
 
 
-def mirror(*options):
+def mirror(*options, rules=excludes):
     return lambda source, target, *rest: [
-        'rsync', '-a', '--delete', *options, *(excludes(rest[0]) if rest else []), '--', contents(source), contents(target),
+        'rsync', '-a', '--delete', *options, *(rules(rest[0]) if rest else []), '--', contents(source), contents(target),
     ]
 
 
@@ -164,6 +168,10 @@ ACTIONS = {
     ),
     'mirrorByContent': Action(
         (path(EXISTING, HOMES, trim=True), path(NOFOLLOW, HOMES, trim=True)), mirror('--checksum', '--no-times'),
+    ),
+    'mirrorByContentProtecting': Action(
+        (path(EXISTING, HOMES, trim=True), path(NOFOLLOW, HOMES, trim=True), every(values.operand)),
+        mirror('--checksum', '--no-times', rules=protects),
     ),
     'mirrorExcluding': Action(
         (path(EXISTING, HOMES, trim=True), path(NOFOLLOW, HOMES, trim=True), every(values.operand)), mirror(),

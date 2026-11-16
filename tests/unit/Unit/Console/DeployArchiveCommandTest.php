@@ -5,11 +5,14 @@ namespace Tests\Unit\Console;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Http\Middleware\Authenticate;
+use App\Jobs\ApplyEnvVars;
+use App\Jobs\CreateBackup;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Project\ArchiveDrop;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Task\TaskTrigger;
 use App\Lib\Upload\ArchiveSource;
@@ -176,15 +179,52 @@ class DeployArchiveCommandTest extends TestCase
     public function test_a_busy_project_is_refused_at_once_and_the_archive_removed(): void
     {
         $this->makeUser('alice', ['template' => 'dind']);
-        $running = Task::start(jobType: RebuildProject::class, queue: 'default', username: 'alice');
+        $running = Task::start(
+            jobType: RebuildProject::class,
+            queue: 'default',
+            username: 'alice',
+            details: ['action' => ProjectRebuild::DEPLOY_ARCHIVE],
+        );
+        $running->forceFill(['status' => Task::STATUS_RUNNING])->save();
 
-        try {
-            $this->artisan('project:deploy-archive', ['--project' => 'alice', '--file' => $this->archive])->run();
-            $this->fail('A busy project should be refused.');
-        } catch (DeployBusyException $e) {
-            $this->assertSame($running->id, $e->task?->id);
-            $this->assertStringContainsString("already queued or running: task {$running->id}", $e->getMessage());
-        }
+        $this->artisan('project:deploy-archive', ['--project' => 'alice', '--file' => $this->archive])
+            ->expectsOutputToContain("Project 'alice' is busy: archive deploy task {$running->id} is running. Wait for it to finish, or cancel it if it is stuck.")
+            ->doesntExpectOutputToContain('DeployBusyException')
+            ->assertExitCode(1);
+
+        Queue::assertNothingPushed();
+        $this->assertSame(['put', 'assertArchive', 'remove'], array_column($this->calls, 0));
+    }
+
+    /** The apply `system:api-access:allow` queues holds the account: the refusal names it, as it is no deploy. */
+    public function test_the_apply_api_access_allow_queued_is_named_in_the_refusal(): void
+    {
+        $this->makeUser('alice', ['template' => 'dind']);
+        $apply = Task::start(
+            jobType: ApplyEnvVars::class,
+            queue: 'default',
+            username: 'alice',
+            details: ['action' => ApiAccess::TASK_ACTION, 'project' => 'alice'],
+        );
+        $apply->forceFill(['status' => Task::STATUS_RUNNING])->save();
+
+        $this->artisan('project:deploy-archive', ['--project' => 'alice', '--file' => $this->archive])
+            ->expectsOutputToContain("Project 'alice' is busy: API access apply task {$apply->id} is running. Wait for it to finish, or cancel it if it is stuck.")
+            ->doesntExpectOutputToContain('ApplyEnvVars')
+            ->assertExitCode(1);
+
+        Queue::assertNothingPushed();
+        $this->assertSame(['put', 'assertArchive', 'remove'], array_column($this->calls, 0));
+    }
+
+    public function test_a_pending_backup_is_refused_the_same_way(): void
+    {
+        $this->makeUser('alice', ['template' => 'dind']);
+        $backup = Task::start(jobType: CreateBackup::class, queue: 'default', username: 'alice');
+
+        $this->artisan('project:deploy-archive', ['--project' => 'alice', '--file' => $this->archive])
+            ->expectsOutputToContain("Project 'alice' is busy: backup task {$backup->id} is queued. Cancel task {$backup->id} or wait for it to finish.")
+            ->assertExitCode(1);
 
         Queue::assertNothingPushed();
         $this->assertSame(['put', 'assertArchive', 'remove'], array_column($this->calls, 0));
@@ -202,6 +242,8 @@ class DeployArchiveCommandTest extends TestCase
             $response = $this->postJson("/api/projects/alice/{$endpoint}", ['zip_path' => self::DROPPED]);
             $this->assertSame(409, $response->getStatusCode(), $endpoint);
             $response->assertJsonPath('task_id', $queued->id);
+            $response->assertJsonPath('code', DeployBusyException::TASK);
+            $response->assertJsonPath('message', "Project 'alice' is busy: archive deploy task {$queued->id} is queued. Wait for it to finish, or cancel it if it is stuck.");
         }
         Queue::assertPushed(RebuildProject::class, 1);
     }

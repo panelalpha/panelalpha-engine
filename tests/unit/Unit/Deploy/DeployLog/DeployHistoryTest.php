@@ -10,6 +10,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Lib\Deploy\DeployLog\DeployRequest;
 use App\Lib\Deploy\DeployLog\DeployStartLine;
+use App\Lib\Deploy\DeployLog\DeployStatus;
 use App\Lib\Deploy\DeployLog\LogStorage;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
@@ -317,6 +318,41 @@ class DeployHistoryTest extends TestCase
         $this->assertNotNull(DeployHistory::find($this->user, '20260101-000000-aaaaaa'));
         $this->assertNull(DeployHistory::find($this->user, '20260101-000000-ffffff'));
         $this->assertNull(DeployHistory::find($this->user, '../latest'));
+    }
+
+    /**
+     * A create without git waits for files: the deploy that brings them is listed beside the install that waited, and that
+     * one is closed as taken over rather than as a deploy whose process is gone.
+     */
+    public function test_the_deploy_that_brings_the_files_is_listed_beside_the_install_that_waited(): void
+    {
+        $waiting = '20260101-000000-aaaaaa';
+        $this->oldDeploy($waiting, ['Deploy started (source: dind template)', DeployLogger::WAITING_FOR_FILES], null);
+        (new DeployStatus(new DeployLogPaths($this->user->username)))->write([
+            'id' => $waiting,
+            'status' => DeployLogger::STATUS_RUNNING,
+            'stage' => DeployLogger::STAGE_PREPARING,
+            'pid' => null,
+            'started_at' => time() - 3600,
+            'finished_at' => null,
+            'error' => null,
+            'stages' => [['name' => DeployLogger::STAGE_PREPARING, 'started_at' => time() - 3600, 'finished_at' => null]],
+        ]);
+
+        $deploy = DeployLogger::resumeRunningOrStart($this->user->username);
+        $deploy->info('Deploy started (source: archive)');
+        $deploy->finish(DeployLogger::STATUS_SUCCESS);
+
+        $history = $this->byId();
+
+        $this->assertSame([$deploy->getDeployId(), $waiting], array_keys($history), 'the deploy that brought the files is the newest');
+        $this->assertSame([DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_CANCELLED], array_column($history, 'status'));
+        $this->assertSame([DeployStartLine::KIND_REDEPLOY, DeployStartLine::KIND_INSTALL], array_column($history, 'kind'));
+        $this->assertSame(['archive', 'template'], array_column($history, 'source'));
+        $this->assertSame(DeployLogger::WAITING_TAKEN_OVER, $history[$waiting]['error']);
+        $this->assertNotNull($history[$waiting]['finished_at']);
+        $this->assertNull($history[$waiting]['task_id']);
+        $this->assertStringNotContainsString('engine process', (string) $history[$waiting]['error']);
     }
 
     public function test_a_new_deploy_keeps_deploy_log_keep_logs(): void

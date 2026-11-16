@@ -3,6 +3,8 @@
 namespace App\Console\Commands\Deploy;
 
 use App\Console\Commands\Concerns\ParsesEnvVarOptions;
+use App\Exceptions\DeployBusyException;
+use App\Exceptions\ProjectBusyException;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Lib\Deploy\DeployLog\DeployLineFormat;
 use App\Lib\Deploy\DeployLog\DeployLogFollower;
@@ -53,7 +55,13 @@ class DeployArchiveCommand extends Command
         ProjectRebuild::refuseArchiveOnGitProject($user);
         $recipe = RecipeChoiceInput::parse($this->option('recipe'));
 
-        $task = $this->queue($rebuild, $drop, $user, $file, $envVars, $recipe);
+        try {
+            $task = $this->queue($rebuild, $drop, $user, $file, $envVars, $recipe);
+        } catch (DeployBusyException|ProjectBusyException $e) {
+            $this->error($e->getMessage());
+
+            return 1;
+        }
         $this->line("Queued the deploy of {$file} to {$user->username} as task {$task->id}.");
         if ($this->option('no-wait')) {
             return 0;

@@ -328,8 +328,7 @@ class DindApplicationOperationsTest extends TestCase
     }
 
     /**
-     * Killing `docker compose exec` on the host leaves the command running inside the
-     * account, so the timeout is enforced there and the host only waits longer.
+     * The in-account `timeout` ends the command, so the host only waits longer than it as a backstop.
      */
     public function test_a_shell_command_is_timed_inside_the_account_before_the_host_gives_up(): void
     {
