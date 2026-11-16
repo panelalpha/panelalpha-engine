@@ -27,15 +27,18 @@ final class PlatformValues
 {
     /**
      * The context a manifest's own application sits in, the project root unless `app_root` moved it: toolchains
-     * belong to the application, and phpBB's composer.json lives in phpBB/.
+     * belong to the application, and phpBB's composer.json lives in phpBB/. A probe's `app_root` counts too (Django's).
+     *
+     * @param  array<string, mixed>  $decision
      */
-    private static function appRootContext(PlatformManifest $manifest, ProjectContext $context): ProjectContext
+    private static function appRootContext(PlatformManifest $manifest, ProjectContext $context, array $decision = []): ProjectContext
     {
-        if ($manifest->appRoot === '') {
+        $appRoot = $manifest->appRoot !== '' ? $manifest->appRoot : AppRoot::relative($decision);
+        if ($appRoot === '') {
             return $context;
         }
 
-        $dir = $context->projectDir.'/'.$manifest->appRoot;
+        $dir = $context->projectDir.'/'.$appRoot;
 
         return is_dir($dir) ? ProjectContext::at($dir) : $context;
     }
@@ -75,7 +78,8 @@ final class PlatformValues
         ProjectContext $context,
         array $decision
     ): array {
-        $runtimeContext = self::appRootContext($manifest, $context);
+        $appContext = self::appRootContext($manifest, $context, $decision);
+        $runtimeContext = $appContext;
         $standalone = self::standaloneNextWorkspace($manifest, $context, $decision);
         if ($standalone !== null) {
             $decision = self::withStandaloneAppRoot($decision, $standalone);
@@ -87,7 +91,7 @@ final class PlatformValues
         $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
         $decision['runtime_image'] = self::runtimeImage($manifest, $runtimeContext);
         $decision = self::withDotnetNodeImage($manifest, $runtimeContext, $decision);
-        $decision['resolved_commands'] = self::resolvedCommands($manifest, $context);
+        $decision['resolved_commands'] = self::resolvedCommands($manifest, $appContext);
 
         if (self::isJsProject($manifest, $runtimeContext)) {
             return self::applyJs($manifest, $runtimeContext, $decision);
@@ -169,7 +173,7 @@ final class PlatformValues
     }
 
     /**
-     * Commands whose text a resolver supplies, keyed by command id.
+     * Commands whose text a resolver supplies, keyed by command id, resolved in the application's own directory.
      *
      * @return array<string, string>
      */
@@ -197,7 +201,7 @@ final class PlatformValues
                 'java.build-gradle' => JavaRuntime::gradleBuildCommand($dir),
                 'java.start' => JavaRuntime::startCommand(false),
                 'java.start-gradle' => JavaRuntime::startCommand(true),
-                'laravel.assets' => AssetPublish::buildCommand(self::appRootContext($manifest, $context)->composer()),
+                'laravel.assets' => AssetPublish::buildCommand($context->composer()),
                 default => throw new ManifestException(
                     "{$manifest->id}: unknown command resolver '{$resolver}' for '{$commandId}'"
                 ),

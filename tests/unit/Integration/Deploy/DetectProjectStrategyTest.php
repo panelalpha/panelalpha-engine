@@ -1368,6 +1368,61 @@ YAML
         $this->assertStringContainsString('--pythonpath=netbox netbox.wsgi:application', $result['start_command']);
     }
 
+    /**
+     * zane-ops, lesspass and lotus keep the whole Django backend, manifest
+     * included, in `backend/`, with nothing Python at the root. The runtime was
+     * resolved at the root, found nothing, and the deploy failed with
+     * "Runtime 'python' is required but could not be resolved".
+     */
+    public function test_django_with_its_manifest_below_the_root_builds_that_directory(): void
+    {
+        $this->writeFile('package.json', json_encode(['private' => true]));
+        $this->writeFile('backend/requirements.txt', "django\ngunicorn\n");
+        $this->writeFile('backend/.python-version', "3.13\n");
+        $this->writeFile('backend/manage.py', "#!/usr/bin/env python\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')\n");
+        $this->writeFile('backend/core/__init__.py', '');
+        $this->writeFile('backend/core/wsgi.py', "application = get_wsgi_application()\n");
+
+        $result = $this->detect();
+
+        $this->assertSame(Strategies::DJANGO, $result['strategy']);
+        $this->assertSame('backend', $result['app_root']);
+        $this->assertSame(['python 3.13 (from .python-version)'], $result['toolchain']);
+        $this->assertStringContainsString('pip install -r requirements.txt', $result['install_command']);
+        $this->assertStringContainsString('.venv/bin/python manage.py migrate', $result['resolved_commands']['migrate']);
+        $this->assertStringContainsString('core.wsgi:application', $result['start_command']);
+    }
+
+    /** tacticalrmm: `api/tacticalrmm/` holds both, two levels down. */
+    public function test_django_app_root_is_the_nearest_directory_with_a_manifest(): void
+    {
+        $this->writeFile('go.mod', "module example.com/agent\n");
+        $this->writeFile('api/tacticalrmm/requirements.txt', "django\n");
+        $this->writeFile('api/tacticalrmm/manage.py', "#!/usr/bin/env python\nfrom django.core.management import execute_from_command_line\n");
+
+        $result = $this->detect();
+
+        $this->assertSame(Strategies::DJANGO, $result['strategy']);
+        $this->assertSame('api/tacticalrmm', $result['app_root']);
+    }
+
+    /**
+     * highlight keeps a Django sample in `e2e/python/` beside its real (Go and
+     * TypeScript) application. Django cannot resolve Python for it, so it does
+     * not claim the project and detection moves on instead of failing.
+     */
+    public function test_django_that_cannot_resolve_python_does_not_claim_the_project(): void
+    {
+        $this->writeFile('index.html', '<h1>hi</h1>');
+        $this->writeFile('e2e/python/pyproject.toml', "[tool.poetry]\nname = \"sample\"\n[project]\nname = \"sample\"\n");
+        $this->writeFile('e2e/python/sample/manage.py', "#!/usr/bin/env python\nfrom django.core.management import execute_from_command_line\n");
+
+        $result = $this->detect();
+
+        $this->assertNotSame(Strategies::DJANGO, $result['strategy']);
+        $this->assertSame('', (string) ($result['app_root'] ?? ''));
+    }
+
     public function test_static_index_html(): void
     {
         $this->writeFile('index.html', '<h1>hi</h1>');

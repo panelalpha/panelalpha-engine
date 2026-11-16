@@ -2,6 +2,7 @@
 
 namespace Tests\Integration\Deploy\Platform;
 
+use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformSelector;
 use Tests\TestCase;
 
@@ -113,6 +114,50 @@ class PlatformSelectorTest extends TestCase
         $this->write('style.css', 'body{}');
 
         $this->assertSame('static', $this->selected());
+    }
+
+    /**
+     * A `manage.py` in a sample directory, with no Python manifest anywhere, is
+     * not a Django project the engine could build, so it does not keep the
+     * static site beside it from being served.
+     */
+    public function test_a_django_sample_with_nothing_to_install_leaves_a_static_site_static(): void
+    {
+        $this->write('index.html', '<h1>hello</h1>');
+        $this->write('docs/site/manage.py', "#!/usr/bin/env python\nfrom django.core.management import execute_from_command_line\n");
+
+        $this->assertSame('static', $this->selected());
+    }
+
+    /**
+     * A manifest whose detect block matches but whose required runtime does not
+     * resolve for the project does not claim it: the walk moves on to the next
+     * manifest instead of failing the whole detection.
+     */
+    public function test_a_platform_whose_required_runtime_cannot_resolve_does_not_claim_the_project(): void
+    {
+        $manifests = $this->dir . '/manifests';
+        mkdir($manifests);
+        file_put_contents(
+            $manifests . '/needs-python.yaml',
+            "id: needs-python\nlabel: Needs Python\npriority: 50\nruntime: command\nrequires:\n  python: runtime\ndetect:\n  file: marker.txt\n"
+        );
+        file_put_contents(
+            $manifests . '/plain.yaml',
+            "id: plain\nlabel: Plain\npriority: 10\nruntime: command\ndetect:\n  file: marker.txt\n"
+        );
+        $project = $this->dir . '/project';
+        mkdir($project);
+        file_put_contents($project . '/marker.txt', '');
+
+        PlatformRegistry::flush();
+        try {
+            $result = PlatformSelector::detect($project, ['marker.txt' => true], $manifests);
+        } finally {
+            PlatformRegistry::flush();
+        }
+
+        $this->assertSame('plain', $result['manifest']->id ?? null);
     }
 
     public function test_a_selection_carries_the_decision_the_manifest_describes(): void

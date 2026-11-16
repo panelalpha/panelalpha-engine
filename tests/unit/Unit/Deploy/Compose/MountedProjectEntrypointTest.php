@@ -76,6 +76,37 @@ class MountedProjectEntrypointTest extends TestCase
         $this->assertContains('8000:8000', $service['ports']);
     }
 
+    /**
+     * The host build mounts the whole checkout at /app and works in the
+     * app_root, so a virtualenv built for `backend/` names
+     * `/app/backend/.venv/bin/python` in every script's shebang. Mounted as
+     * /app, `.venv/bin/gunicorn` was "not found"; mounted as it was built, it runs.
+     */
+    public function test_a_django_app_root_runs_where_its_virtualenv_was_built(): void
+    {
+        $service = $this->service(['entrypoint' => StageScript::FILENAME, 'app_root' => 'backend']);
+
+        $this->assertSame(['./:/app'], $service['volumes']);
+        $this->assertSame('/app/backend', $service['working_dir']);
+        $this->assertSame(['sh', '-c', 'exec /app/backend/' . StageScript::FILENAME], $service['command']);
+    }
+
+    /** A Node app_root keeps the subtree as /app: node_modules holds no absolute paths. */
+    public function test_a_node_app_root_is_still_mounted_as_app(): void
+    {
+        $yaml = DeployCompose::framework([
+            'strategy' => 'nextjs',
+            'runtime' => 'node',
+            'start_command' => 'npm start',
+            'app_root' => 'web',
+            'entrypoint' => StageScript::FILENAME,
+        ], 3000, null);
+        $service = Yaml::parse($yaml)['services']['app'];
+
+        $this->assertSame(['./web:/app'], $service['volumes']);
+        $this->assertSame('/app', $service['working_dir']);
+    }
+
     public function test_an_empty_entrypoint_is_not_an_entrypoint(): void
     {
         $this->assertSame(

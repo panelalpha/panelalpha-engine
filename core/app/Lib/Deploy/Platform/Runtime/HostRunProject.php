@@ -33,6 +33,9 @@ final class HostRunProject
     /** Strategies whose interpreter is chosen from a lockfile. */
     private const NODE_STRATEGIES = ['nextjs', 'nestjs', 'astro', 'express', 'fastify', 'remix', 'sveltekit'];
 
+    /** Strategies whose host build leaves a virtualenv, whose scripts name the path it was built at in their shebang. */
+    private const VIRTUALENV_STRATEGIES = ['python', 'django'];
+
     /**
      * The host compile picks its image from the lockfile for these, since a tree installed by bun
      * and imported by node fails, and from the recipe's own `image` otherwise.
@@ -40,6 +43,12 @@ final class HostRunProject
     public static function isNode(?string $strategy): bool
     {
         return $strategy !== null && in_array($strategy, self::NODE_STRATEGIES, true);
+    }
+
+    /** Whether the build output only works at the path it was built at, the checkout's app_root under /app. */
+    public static function runsWhereBuilt(?string $strategy): bool
+    {
+        return $strategy !== null && in_array($strategy, self::VIRTUALENV_STRATEGIES, true);
     }
 
     /** nuxt and tanstack-start are left out: they stay on {@see StandaloneNodeServe}. */

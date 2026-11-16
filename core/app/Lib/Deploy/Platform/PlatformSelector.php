@@ -137,8 +137,8 @@ final class PlatformSelector
     }
 
     /**
-     * The manifests in `resources/platforms/` and `resources/apps/`, in
-     * descending priority: the first whose `detect` block claims the project.
+     * The manifests in `resources/platforms/` and `resources/apps/`, in descending priority: the first whose `detect`
+     * block claims the project and whose required runtimes resolve for it; one that cannot resolve them does not claim it.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
      */
@@ -150,13 +150,25 @@ final class PlatformSelector
             if (! $matcher->matches($manifest->detect, $context)) {
                 continue;
             }
-
-            return [
-                'manifest' => $manifest,
-                'decision' => $manifest->describe($context, $matcher->lastProbeData()),
-            ];
+            $decision = self::describedOrNull($manifest, $context, $matcher->lastProbeData());
+            if ($decision !== null) {
+                return ['manifest' => $manifest, 'decision' => $decision];
+            }
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $probeData
+     * @return array<string, mixed>|null
+     */
+    private static function describedOrNull(PlatformManifest $manifest, ProjectContext $context, array $probeData): ?array
+    {
+        try {
+            return $manifest->describe($context, $probeData);
+        } catch (UnresolvedRuntimeException) {
+            return null;
+        }
     }
 }

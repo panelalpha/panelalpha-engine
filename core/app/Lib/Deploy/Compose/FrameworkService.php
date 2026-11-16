@@ -159,15 +159,15 @@ final class FrameworkService
     {
         $service = [
             'image' => trim((string) ($this->decision['image'] ?? '')) ?: NodeRuntime::defaultImage(),
-            'working_dir' => self::WORKDIR,
-            'volumes' => [$this->appRoot().':'.self::WORKDIR],
+            'working_dir' => $this->mountedWorkdir(),
+            'volumes' => [$this->mountedVolume()],
             'ports' => ["{$this->port}:{$this->port}"],
         ];
 
         $provision = str_replace('$', '$$', HostRunProject::packageManagerPrefix($this->decision));
         $entrypoint = trim((string) ($this->decision['entrypoint'] ?? ''));
         if ($entrypoint !== '') {
-            $service['command'] = ['sh', '-c', $provision.'exec '.self::WORKDIR.'/'.$entrypoint];
+            $service['command'] = ['sh', '-c', $provision.'exec '.$this->mountedWorkdir().'/'.$entrypoint];
 
             return $service + $this->mountedIdentity();
         }
@@ -181,6 +181,26 @@ final class FrameworkService
         }
 
         return $service + $this->mountedIdentity();
+    }
+
+    /**
+     * The app_root mounted as /app, or, for a build that only works where it was built (a virtualenv), the checkout
+     * mounted as the host build mounts it, so the app_root is at /app/<app_root> as it was then.
+     */
+    private function mountedVolume(): string
+    {
+        return $this->runsWhereBuilt() ? './:'.self::WORKDIR : $this->appRoot().':'.self::WORKDIR;
+    }
+
+    private function mountedWorkdir(): string
+    {
+        return $this->runsWhereBuilt() ? self::WORKDIR.'/'.AppRoot::relative($this->decision) : self::WORKDIR;
+    }
+
+    private function runsWhereBuilt(): bool
+    {
+        return HostRunProject::runsWhereBuilt(is_string($this->decision['strategy'] ?? null) ? $this->decision['strategy'] : null)
+            && AppRoot::relative($this->decision) !== '';
     }
 
     /**

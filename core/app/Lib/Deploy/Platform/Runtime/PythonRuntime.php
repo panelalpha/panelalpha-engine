@@ -107,7 +107,7 @@ final class PythonRuntime implements Runtime
      *
      * @see declaresProject()
      */
-    private static function hasPythonManifest(ProjectContext $context): bool
+    public static function hasPythonManifest(ProjectContext $context): bool
     {
         $present = false;
         foreach (self::MANIFESTS as $manifest) {
