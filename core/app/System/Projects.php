@@ -10,6 +10,7 @@ use App\Jobs\PushState;
 use App\Jobs\RenameMysqlDatabase;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Project\ClassicAppType;
 use App\Lib\Project\ProjectRebuild;
 use App\Models\Domain as DomainModel;
 use App\Models\MysqlDatabase;
@@ -26,8 +27,11 @@ use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\ProvisionedAppDatabase;
 use App\System\Project\HomeSwap;
 use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
+use App\System\Project\PhpHosting\WordPress\Install;
+use App\System\Project\PhpHosting\WordPress\InstallLocator;
 use App\System\Project\PhpHosting\WordPress\KeptSite;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
+use App\System\Project\PhpHosting\WordPress\UnclearInstall;
 use App\System\Project\PhpHosting\WordPress\WordPress;
 use App\System\Project\PushAttempt;
 use App\System\Services\Mysql;
@@ -255,6 +259,34 @@ class Projects
         $push->toProject->fixPermissions();
         if ($push->keptSite !== null) {
             $this->keepTargetConfig($push->to, $push->keptSite, $push->toHome, $push->prePushDir);
+        }
+        if (! $push->isDindDest) {
+            $this->keepTargetDomainDirectives($push);
+        }
+    }
+
+    /** A domain's PHP settings are the target project's own configuration, not files a push brings or takes away. */
+    private function keepTargetDomainDirectives(PushAttempt $push): void
+    {
+        $uid = $push->to->getUid();
+        $gid = $push->to->getGid();
+        if ($uid === null || $gid === null) {
+            return;
+        }
+
+        foreach ($push->toProject->php()->domainDirectiveRelativePaths() as $relative) {
+            $path = $push->toHome.'/'.ltrim($relative, '/');
+            if (! $this->pathIsDirectoryAsRoot(dirname($path))) {
+                continue;
+            }
+
+            $aside = $push->prePushDir.'/'.ltrim($relative, '/');
+            $this->runPushProcess(
+                $this->pathExistsAsRoot($aside)
+                    ? Privileged::account()->copyReplacingAsAccount($uid, $gid, $aside, $path)
+                    : Privileged::accountFiles($uid, $gid)->removeIfExists($path),
+                "Failed to keep the target's domain PHP settings",
+            );
         }
     }
 
@@ -825,52 +857,100 @@ class Projects
      */
     private function keepTargetConfig(ModelsUser $to, KeptSite $kept, string $toHome, string $prePushDir): void
     {
-        if (! str_starts_with($kept->configPath, $toHome.'/')) {
-            throw new \RuntimeException("The target's wp-config.php is outside its home: {$kept->configPath}");
+        $config = $kept->install->configPath;
+        if (! str_starts_with($config, $toHome.'/')) {
+            throw new \RuntimeException("The target's wp-config.php is outside its home: {$config}");
         }
-        $relative = substr($kept->configPath, strlen($toHome) + 1);
+        $relative = substr($config, strlen($toHome) + 1);
 
         [$uid, $gid] = $to->linuxIds();
         $this->runPushProcess(
-            Privileged::account()->copyReplacingAsAccount($uid, $gid, $prePushDir.'/'.$relative, $kept->configPath),
+            Privileged::account()->copyReplacingAsAccount($uid, $gid, $prePushDir.'/'.$relative, $config),
             "Failed to keep the target's wp-config.php",
         );
     }
 
     private function keptWordPress(ModelsUser $from, ModelsUser $to, bool $isDindDest): ?KeptSite
     {
-        $targetConfig = $isDindDest ? null : $this->wordPressConfig($to);
-        if ($targetConfig === null || $this->wordPressConfig($from) === null) {
+        $targetInstall = $isDindDest ? null : $this->wordPressInstall($to);
+        if ($targetInstall === null) {
+            return null;
+        }
+        $sourceInstall = $this->wordPressInstall($from);
+        if ($sourceInstall === null) {
             return null;
         }
 
-        return $this->siteCopy()->beforePush($from, $to, $targetConfig);
+        return $this->siteCopy()->beforePush($from, $to, $targetInstall, $sourceInstall);
+    }
+
+    /** The project's WordPress: its own, or, for a copy with no record of its own yet, the source's under its home. */
+    private function wordPressInstall(ModelsUser $user): ?Install
+    {
+        $install = $this->ownWordPressInstall($user);
+        if ($install !== null) {
+            return $install;
+        }
+        $source = $user->liveUser;
+
+        return $source === null ? null : $this->copiedWordPressInstall($source, $user);
     }
 
     /**
-     * The wp-config.php of a WordPress at the project's main domain: in its
-     * document root, or the directory above, where WordPress also looks.
+     * The WordPress in the directory it was installed into, else at the main domain's document root, else the only one
+     * below it, which is then recorded as the project's install.
      */
-    private function wordPressConfig(ModelsUser $user): ?string
+    private function ownWordPressInstall(ModelsUser $user): ?Install
     {
         $domain = $user->getMainDomain();
         if ($domain === null) {
             return null;
         }
         $home = rtrim($this->system->project($user)->homeDirPath(), '/');
-        $documentRoot = $home.$domain->getDocumentRoot();
-        foreach ([$documentRoot, dirname($documentRoot)] as $dir) {
-            if (str_starts_with($dir, $home.'/') && $this->pathExistsAsRoot($dir.'/wp-config.php')) {
-                return $dir.'/wp-config.php';
-            }
+        $documentRoot = rtrim($home.$domain->getDocumentRoot(), '/');
+        $recorded = ClassicAppType::installPathOf($user);
+        $install = $this->wordPressInstalls()->find($home, $documentRoot, $recorded);
+        if ($install !== null && $install->dir !== rtrim($recorded ?? $documentRoot, '/')) {
+            $this->classicAppType()->recordInstall($user, $install->dir);
         }
 
-        return null;
+        return $install;
+    }
+
+    /** A copy's WordPress, which has no record of its own yet: the source's install, under the copy's home and domain. */
+    private function copiedWordPressInstall(ModelsUser $source, ModelsUser $copy): ?Install
+    {
+        $install = $this->ownWordPressInstall($source);
+        if ($install === null) {
+            return null;
+        }
+        $sourceHome = rtrim($this->system->project($source)->homeDirPath(), '/');
+        $copyHome = rtrim($this->system->project($copy)->homeDirPath(), '/');
+        if (! str_starts_with($install->dir, $sourceHome.'/')) {
+            return null;
+        }
+        $relative = self::rebasedDocumentRoot(
+            substr($install->dir, strlen($sourceHome)),
+            (string) $source->domain,
+            (string) $copy->domain,
+        );
+
+        return $this->wordPressInstalls()->at($copyHome, $copyHome.$relative);
     }
 
     protected function siteCopy(): SiteCopy
     {
         return new SiteCopy;
+    }
+
+    protected function wordPressInstalls(): InstallLocator
+    {
+        return new InstallLocator($this->system);
+    }
+
+    protected function classicAppType(): ClassicAppType
+    {
+        return app(ClassicAppType::class);
     }
 
     protected function containerSiteCopy(): ContainerSiteCopy
@@ -1055,7 +1135,7 @@ class Projects
         } else {
             self::assertCanCopyIntoStaging($copy->source, $copy->dest);
         }
-        $this->assertCopyGetsDatabases($copy->source, $copy->copyDatabases);
+        $this->assertWordPressCanBeCopied($copy->source, $copy->copyDatabases);
     }
 
     /** The destination account, its Linux user and its running containers, deployed as the source is. */
@@ -1178,9 +1258,29 @@ class Projects
     {
         $copy->destProject->syncGeneratedProxyRules();
         $this->system->project($copy->dest)->domain($domainModel)->create();
-        if (! $copy->isDindDest && $this->wordPressConfig($copy->dest) !== null) {
-            $this->siteCopy()->pointCopyAtItself($copy->dest, $copy->databaseResult);
+        if (! $copy->isDindDest) {
+            $this->pointCopiedWordPressAtItself($copy);
         }
+    }
+
+    /**
+     * A copy of a WordPress whose own wp-config.php cannot be found is refused: it
+     * would keep writing to the source's database. The copy records its own install.
+     */
+    private function pointCopiedWordPressAtItself(CopyAttempt $copy): void
+    {
+        $install = $this->copiedWordPressInstall($copy->source, $copy->dest);
+        if ($install === null) {
+            if ($this->wordPressInstall($copy->source) === null) {
+                return;
+            }
+            throw new \RuntimeException(
+                "The copy of '{$copy->source->username}' holds no wp-config.php of its WordPress, so it would keep using "
+                ."the source's database; the copy is not finished."
+            );
+        }
+        $this->siteCopy()->pointCopyAtItself($copy->dest, $copy->databaseResult, $install);
+        $this->classicAppType()->recordInstall($copy->dest, $install->dir);
     }
 
     private function startCopiedApp(CopyAttempt $copy): void
@@ -1222,14 +1322,22 @@ class Projects
     }
 
     /**
-     * A classic WordPress copy is pointed at the databases copied for it, so
-     * one without them is refused before anything is copied.
+     * A classic WordPress copy is pointed at the databases copied for it, so one without them, or of a source whose
+     * WordPress cannot be told apart, is refused before anything is copied.
      *
      * @return list<array{field: string, code: string, message: string}>
      */
-    public function copyDatabasesProblems(ModelsUser $source, bool $copyDatabases): array
+    public function wordPressCopyProblems(ModelsUser $source, bool $copyDatabases): array
     {
-        if ($copyDatabases || self::isDind($source) || $this->wordPressConfig($source) === null) {
+        if (self::isDind($source)) {
+            return [];
+        }
+        try {
+            $install = $this->wordPressInstall($source);
+        } catch (UnclearInstall $e) {
+            return [['field' => 'project', 'code' => 'wordpress_install_unclear', 'message' => $e->getMessage()]];
+        }
+        if ($copyDatabases || $install === null) {
             return [];
         }
 
@@ -1241,9 +1349,9 @@ class Projects
         ]];
     }
 
-    private function assertCopyGetsDatabases(ModelsUser $source, bool $copyDatabases): void
+    private function assertWordPressCanBeCopied(ModelsUser $source, bool $copyDatabases): void
     {
-        $problems = $this->copyDatabasesProblems($source, $copyDatabases);
+        $problems = $this->wordPressCopyProblems($source, $copyDatabases);
         if ($problems !== []) {
             throw ProblemException::of($problems);
         }

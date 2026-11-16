@@ -71,18 +71,48 @@ class ConfigTest extends TestCase
     public function test_get_a_variable(): void
     {
         $sequence = [];
-        $config = $this->configWithFakeRunner($sequence, results: [['exit_code' => 0, 'stdout' => "wp_\n", 'stderr' => '']]);
+        $config = $this->configWithFakeRunner($sequence, results: [['exit_code' => 0, 'stdout' => "\"wp_\"\n", 'stderr' => '']]);
 
         $body = $config->get('table_prefix', 'variable');
 
         $this->assertSame(
-            ['config', 'get', 'table_prefix', '--type=variable', '--path=/home/alice/example.test/public_html'],
+            ['config', 'get', 'table_prefix', '--type=variable', '--format=json', '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
         $this->assertSame(['constant' => 'table_prefix', 'value' => 'wp_'], $body);
     }
 
-    public function test_get_as_json_decodes_the_value(): void
+    public function test_get_keeps_the_type_wp_config_defines(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence, results: [
+            ['exit_code' => 0, 'stdout' => "false\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "\"\"\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "true\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "-1\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "0\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "\"256M\"\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "null\n", 'stderr' => ''],
+        ]);
+
+        $values = [];
+        foreach (['WP_DEBUG', 'EMPTY_CONST', 'WP_DEBUG_DISPLAY', 'WP_POST_REVISIONS', 'ZERO', 'WP_MEMORY_LIMIT', 'A_NULL'] as $name) {
+            $values[$name] = $config->get($name)['value'];
+        }
+
+        $this->assertSame([
+            'WP_DEBUG' => false,
+            'EMPTY_CONST' => '',
+            'WP_DEBUG_DISPLAY' => true,
+            'WP_POST_REVISIONS' => -1,
+            'ZERO' => 0,
+            'WP_MEMORY_LIMIT' => '256M',
+            'A_NULL' => null,
+        ], $values);
+        $this->assertNotSame($values['WP_DEBUG'], $values['EMPTY_CONST']);
+    }
+
+    public function test_get_decodes_an_array_value(): void
     {
         $sequence = [];
         $config = $this->configWithFakeRunner(
@@ -90,13 +120,30 @@ class ConfigTest extends TestCase
             results: [['exit_code' => 0, 'stdout' => '{"host":"'.TestNetwork::LOOPBACK.'","port":6379}', 'stderr' => '']],
         );
 
-        $body = $config->get('WP_REDIS_CONFIG', 'all', json: true);
+        $body = $config->get('WP_REDIS_CONFIG', 'all');
 
         $this->assertSame(
             ['config', 'get', 'WP_REDIS_CONFIG', '--type=all', '--format=json', '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
         $this->assertSame(['host' => TestNetwork::LOOPBACK, 'port' => 6379], $body['value']);
+    }
+
+    public function test_get_reads_a_value_json_cannot_carry_as_plain_output(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence, results: [
+            ['exit_code' => 0, 'stdout' => "\n", 'stderr' => ''],
+            ['exit_code' => 0, 'stdout' => "\xc3\x28\n", 'stderr' => ''],
+        ]);
+
+        $body = $config->get('SALT');
+
+        $this->assertSame(
+            ['config', 'get', 'SALT', '--type=constant', '--path=/home/alice/example.test/public_html'],
+            $sequence[1]
+        );
+        $this->assertSame("\xc3\x28", $body['value']);
     }
 
     public function test_set_an_empty_variable(): void
@@ -187,17 +234,17 @@ class ConfigTest extends TestCase
         $sequence = [];
         $config = $this->configWithFakeRunner(
             $sequence,
-            results: [['exit_code' => 0, 'stdout' => "true\n", 'stderr' => '']],
+            results: [['exit_code' => 0, 'stdout' => "\"https://other.test\"\n", 'stderr' => '']],
             path: '/home/alice/other.test/public_html',
         );
 
-        $body = $config->get('WP_DEBUG');
+        $body = $config->get('WP_HOME');
 
         $this->assertSame(
-            ['config', 'get', 'WP_DEBUG', '--type=constant', '--path=/home/alice/other.test/public_html'],
+            ['config', 'get', 'WP_HOME', '--type=constant', '--format=json', '--path=/home/alice/other.test/public_html'],
             $sequence[0]
         );
-        $this->assertSame(['constant' => 'WP_DEBUG', 'value' => 'true'], $body);
+        $this->assertSame(['constant' => 'WP_HOME', 'value' => 'https://other.test'], $body);
     }
 
     public function test_set_passes_raw_flag_and_returns_body(): void
@@ -230,6 +277,49 @@ class ConfigTest extends TestCase
             ['config', 'set', 'CUSTOM_KEY', 'hello', '--type=constant', '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
+    }
+
+    public function test_set_writes_a_value_of_the_longest_length(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence);
+        $value = str_repeat('a', Config::MAX_VALUE_LENGTH);
+
+        $body = $config->set('BIG', $value);
+
+        $this->assertSame($value, $sequence[0][3]);
+        $this->assertSame($value, $body['value']);
+    }
+
+    public function test_a_longer_value_is_refused_before_wp_cli_runs(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence);
+
+        try {
+            $config->set('BIG', str_repeat('a', Config::MAX_VALUE_LENGTH + 1));
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('at most 16384 bytes', $e->getMessage());
+            $this->assertStringContainsString('this one is 16385', $e->getMessage());
+            $this->assertSame([], $sequence);
+        }
+    }
+
+    public function test_a_longer_credential_is_refused_before_wp_cli_runs(): void
+    {
+        $sequence = [];
+        $config = $this->configWithFakeRunner($sequence);
+
+        try {
+            $config->create(['dbname' => 'db', 'dbuser' => 'u', 'dbhost' => 'db.test', 'dbpass' => str_repeat('p', Config::MAX_VALUE_LENGTH + 1)]);
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('at most 16384 bytes', $e->getMessage());
+            $this->assertSame([], $sequence);
+        }
     }
 
     public function test_a_value_starting_with_a_dash_goes_as_the_raw_php_that_writes_the_same_line(): void

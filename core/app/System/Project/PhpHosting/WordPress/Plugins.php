@@ -9,6 +9,8 @@ final class Plugins
 {
     use RunsExtensionCommands;
 
+    private const WITHOUT_LOADING = ['--skip-plugins', '--skip-themes'];
+
     public function __construct(
         private WpCli $cli,
     ) {}
@@ -95,11 +97,44 @@ final class Plugins
     }
 
     /**
+     * WordPress's own Delete: the plugin is deactivated and its uninstall runs before its files go, so it leaves no
+     * dropin or constant behind and can drop its settings. A slug that is not installed was already deleted. A plugin
+     * whose uninstall fails, such as one that breaks the site when loaded, has its files deleted without loading any
+     * plugin, and the answer says its uninstall did not run.
+     *
      * @return array{plugin: string, message: string}
      */
     public function delete(string $slug): array
     {
-        return $this->mutation($slug, ['plugin', 'delete', WpCli::positional($slug)]);
+        $uninstall = $this->cli->run(['plugin', 'uninstall', WpCli::positional($slug), '--deactivate']);
+        if ($uninstall['exit_code'] === 0) {
+            return $this->mutationBody($slug, $uninstall['stdout']);
+        }
+
+        if (! $this->isInstalledWithoutLoading($slug)) {
+            return ['plugin' => $slug, 'message' => "Plugin '{$slug}' is not installed, so nothing was deleted."];
+        }
+
+        return $this->deleteWithoutUninstall($slug, $uninstall);
+    }
+
+    private function isInstalledWithoutLoading(string $slug): bool
+    {
+        return $this->installedExitCode(['plugin', 'is-installed', WpCli::positional($slug), ...self::WITHOUT_LOADING]) === 0;
+    }
+
+    /**
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $uninstall
+     * @return array{plugin: string, message: string}
+     */
+    private function deleteWithoutUninstall(string $slug, array $uninstall): array
+    {
+        $this->cli->runOrFail(['plugin', 'delete', WpCli::positional($slug), ...self::WITHOUT_LOADING]);
+
+        return [
+            'plugin' => $slug,
+            'message' => "Plugin '{$slug}' was deleted, but its uninstall did not run: ".$this->cli->failureMessage($uninstall),
+        ];
     }
 
     /**

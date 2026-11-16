@@ -114,19 +114,19 @@ class Helper
     }
 
     /**
-     * `staging.<source>` when it is free, else `staging<random suffix>.<source>`. Null when ten suffixes were all taken.
+     * `$label.<source>` when it is free, else `$label<random suffix>.<source>`. Null when ten suffixes were all taken.
      *
      * @param  (callable(string): bool)|null  $available  defaults to {@see domainNameAvailable()}
      */
-    public static function generateCloneDomain(string $sourceDomain, ?callable $available = null): ?string
+    public static function generateCloneDomain(string $sourceDomain, ?callable $available = null, string $label = 'staging'): ?string
     {
         $available ??= self::domainNameAvailable(...);
-        $candidate = 'staging.'.$sourceDomain;
+        $candidate = $label.'.'.$sourceDomain;
         if ($available($candidate)) {
             return $candidate;
         }
         for ($attempt = 0; $attempt < self::SUFFIX_ATTEMPTS; $attempt++) {
-            $candidate = 'staging'.rand(1000, 9999).'.'.$sourceDomain;
+            $candidate = $label.rand(1000, 9999).'.'.$sourceDomain;
             if ($available($candidate)) {
                 return $candidate;
             }

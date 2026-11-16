@@ -12,6 +12,12 @@ final class Config
 {
     public const TYPES = ['constant', 'variable', 'all'];
 
+    /**
+     * The longest value WP-CLI writes and reads back: its wp-config reader stops at the PCRE limits, and its writer at
+     * the pattern size, before this length is reached.
+     */
+    public const MAX_VALUE_LENGTH = 16384;
+
     public function __construct(
         private WpCli $cli,
     ) {}
@@ -39,21 +45,17 @@ final class Config
     }
 
     /**
-     * @param  bool  $json  decode the value from `--format=json` (arrays, e.g. WP_REDIS_CONFIG)
+     * The value as wp-config.php defines it, read as JSON: a string, a boolean, a number, an array or null.
+     *
      * @return array{constant: string, value: mixed}
      */
-    public function get(string $name, string $type = 'constant', bool $json = false): array
+    public function get(string $name, string $type = 'constant'): array
     {
         $this->assertType($type);
-        $args = ['config', 'get', WpCli::positional($name), '--type='.$type];
-        if ($json) {
-            $args[] = '--format=json';
-        }
-        $result = $this->cli->runOrFail($args);
 
         return [
             'constant' => $name,
-            'value' => $json ? json_decode(trim($result['stdout']), true) : trim($result['stdout']),
+            'value' => $this->readValue(['config', 'get', WpCli::positional($name), '--type='.$type]),
         ];
     }
 
@@ -65,6 +67,7 @@ final class Config
     public function set(string $name, string $value, bool $raw = false, string $type = 'constant'): array
     {
         $this->assertType($type);
+        self::assertValueLength($value);
         [$written, $raw] = self::writableValue($value, $raw);
         $args = ['config', 'set', WpCli::positional($name), $written, '--type='.$type];
         if ($raw) {
@@ -103,6 +106,7 @@ final class Config
         $options = [];
         foreach (['dbname', 'dbuser', 'dbpass', 'dbhost', 'dbprefix', 'dbcharset', 'dbcollate', 'locale'] as $key) {
             if (isset($fields[$key])) {
+                self::assertValueLength((string) $fields[$key]);
                 $options[] = "--{$key}=".$fields[$key];
             }
         }
@@ -166,10 +170,35 @@ final class Config
         return [$raw ? '('.$value.')' : var_export($value, true), true];
     }
 
+    /**
+     * A value JSON cannot carry, such as a string that is not UTF-8, reads as the plain output prints it.
+     *
+     * @param  list<string>  $args
+     */
+    private function readValue(array $args): mixed
+    {
+        $value = json_decode(trim($this->cli->runOrFail([...$args, '--format=json'])['stdout']), true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $value;
+        }
+
+        return trim($this->cli->runOrFail($args)['stdout']);
+    }
+
     private function assertType(string $type): void
     {
         if (! in_array($type, self::TYPES, true)) {
             throw new Exception("Invalid wp-config type: {$type}.");
+        }
+    }
+
+    /** A longer value is one the list cannot read back, so it is refused before anything is written. */
+    private static function assertValueLength(string $value): void
+    {
+        if (strlen($value) > self::MAX_VALUE_LENGTH) {
+            throw new Exception(
+                'A wp-config.php value can be at most '.self::MAX_VALUE_LENGTH.' bytes; this one is '.strlen($value).'.'
+            );
         }
     }
 }

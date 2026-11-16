@@ -55,6 +55,14 @@ class HelperNameGeneratorsTest extends TestCase
         $this->assertTenSuffixed(array_slice($this->checked, 1), '/^staging\d{4}\.shop\.example\.test$/');
     }
 
+    public function test_a_clone_domain_tries_the_clone_name_and_ten_suffixes(): void
+    {
+        $this->assertNull(Helper::generateCloneDomain('shop.example.test', $this->nothingFree(...), 'clone'));
+
+        $this->assertSame('clone.shop.example.test', $this->checked[0]);
+        $this->assertTenSuffixed(array_slice($this->checked, 1), '/^clone\d{4}\.shop\.example\.test$/');
+    }
+
     private function nothingFree(string $name): bool
     {
         $this->checked[] = $name;

@@ -55,8 +55,11 @@ final class HostBrokerTest extends TestCase
     public function test_lists_travel_as_counted_values(): void
     {
         $this->assertSame(
-            [self::CLIENT, '--host', 'host.classicAppTypes', '--', '2', 'a', '/home/a', '/home/a/x', 'b', '/home/b', '/home/b/y'],
-            Privileged::host()->classicAppTypes(['a' => ['home' => '/home/a', 'docroot' => '/home/a/x'], 'b' => ['home' => '/home/b', 'docroot' => '/home/b/y']])
+            [self::CLIENT, '--host', 'host.classicAppTypes', '--', '2', 'a', '/home/a', '/home/a/x', '', 'b', '/home/b', '/home/b/y', '/home/b/y/blog'],
+            Privileged::host()->classicAppTypes([
+                'a' => ['home' => '/home/a', 'docroot' => '/home/a/x', 'install' => ''],
+                'b' => ['home' => '/home/b', 'docroot' => '/home/b/y', 'install' => '/home/b/y/blog'],
+            ])
         );
         $this->assertSame(
             [self::CLIENT, '--host', 'host.removeAccountDockerStore', '--', 'pa-nm-a', '1', 'redis:7'],
@@ -156,8 +159,9 @@ final class HostBrokerTest extends TestCase
         yield 'stats timeout of zero' => [fn (RootHost $host) => $host->projectStats(['shop'], 0)];
         yield 'disk home climbing out' => [fn (RootHost $host) => $host->projectDisk(['shop' => '/home/shop/../root'])];
         yield 'disk username that is an option' => [fn (RootHost $host) => $host->projectDisk(['-x' => '/home/x'])];
-        yield 'app type docroot climbing out' => [fn (RootHost $host) => $host->classicAppTypes(['shop' => ['home' => '/home/shop', 'docroot' => '/home/shop/../../etc']])];
-        yield 'app type relative home' => [fn (RootHost $host) => $host->classicAppTypes(['shop' => ['home' => 'home/shop', 'docroot' => '/home/shop/x']])];
+        yield 'app type docroot climbing out' => [fn (RootHost $host) => $host->classicAppTypes(['shop' => ['home' => '/home/shop', 'docroot' => '/home/shop/../../etc', 'install' => '']])];
+        yield 'app type install path climbing out' => [fn (RootHost $host) => $host->classicAppTypes(['shop' => ['home' => '/home/shop', 'docroot' => '/home/shop/x', 'install' => '/home/shop/../../etc']])];
+        yield 'app type relative home' => [fn (RootHost $host) => $host->classicAppTypes(['shop' => ['home' => 'home/shop', 'docroot' => '/home/shop/x', 'install' => '']])];
         yield 'edge domain with a space' => [fn (RootHost $host) => $host->edgeProbe('a.com b', TestNetwork::public(7), 4, false)];
         yield 'edge ip that is not one' => [fn (RootHost $host) => $host->edgeProbe('a.com', TestNetwork::public(7).';id', 4, false)];
         yield 'pid zero' => [fn (RootHost $host) => $host->processExists(0)];

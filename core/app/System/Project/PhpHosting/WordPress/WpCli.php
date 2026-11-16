@@ -3,6 +3,7 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 use App\Exceptions\ProblemException;
+use App\Lib\Project\ClassicAppType;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
@@ -26,6 +27,12 @@ final class WpCli
 
     /** Run by WP-CLI before its command, so a file the command creates is its owner's alone from the start. */
     private const OWNER_ONLY_FILES = '--exec=umask(0077);';
+
+    /**
+     * Flags for the PHP that runs WP-CLI: reading wp-config.php, it exhausts PCRE's JIT stack on a value of 4095 bytes
+     * and its recursion depth on a longer one, and then lists no entry at all.
+     */
+    public const PHP_FLAGS = ['-d', 'pcre.jit=0', '-d', 'pcre.recursion_limit=1000000'];
 
     public function __construct(
         private User $user,
@@ -126,12 +133,17 @@ final class WpCli
 
     /**
      * Absolute WP-CLI --path inside the project home: the bound path read as the file manager reads one (absolute or
-     * relative to the home), so no directory outside it is the WP-CLI container's own; else the main-domain docroot.
+     * relative to the home), else the directory WordPress was installed into, else the main-domain docroot.
      */
     public function resolvePath(): string
     {
         if (is_string($this->path) && $this->path !== '') {
             return $this->homePath($this->path);
+        }
+
+        $installed = ClassicAppType::installPathOf($this->user);
+        if ($installed !== null) {
+            return $installed;
         }
 
         $domain = $this->user->getMainDomain();
@@ -248,6 +260,15 @@ final class WpCli
     public function runsInContainer(): bool
     {
         return Projects::isDind($this->user);
+    }
+
+    /**
+     * The absolute directory WordPress is installed in on PHP hosting; null in the project's own containers, where the
+     * runner finds it.
+     */
+    public function installedPath(): ?string
+    {
+        return $this->runsInContainer() ? null : $this->resolvePath();
     }
 
     private function homePath(string $path): string

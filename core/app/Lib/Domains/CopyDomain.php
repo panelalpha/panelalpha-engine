@@ -11,8 +11,9 @@ use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
- * The name a copy is created under: `staging.` before its source's, or, below panelalpha.online (whose
- * certificate covers one label), a name {@see claim()} buys from {@see DomainAllocator} once local checks pass.
+ * The name a copy is created under: `staging.` before its source's for a staging copy and `clone.` for a clone, or,
+ * below panelalpha.online (whose certificate covers one label), a name {@see claim()} buys from
+ * {@see DomainAllocator} once local checks pass.
  */
 final class CopyDomain
 {
@@ -20,11 +21,25 @@ final class CopyDomain
 
     private function __construct(private ?string $name) {}
 
+    /** The staging copy's name, in front of its source's. Null when no free `staging` name is left there. */
+    public static function forStaging(string $sourceDomain, ?string $requested): ?self
+    {
+        return self::plan($sourceDomain, $requested, 'staging');
+    }
+
     /**
-     * Nothing is bought here. Null when no free `staging` name is left in
-     * front of the source's.
+     * A clone's own name, `clone.` in front of its source's: never `staging.<source>`, which its source's staging
+     * copy takes. Null when no free `clone` name is left there.
      */
-    public static function forCopy(string $sourceDomain, ?string $requested): ?self
+    public static function forClone(string $sourceDomain, ?string $requested): ?self
+    {
+        return self::plan($sourceDomain, $requested, 'clone');
+    }
+
+    /**
+     * Nothing is bought here.
+     */
+    private static function plan(string $sourceDomain, ?string $requested, string $label): ?self
     {
         if ($requested !== null && $requested !== '') {
             return new self(Str::startsWith($requested, 'www.') ? Str::after($requested, 'www.') : $requested);
@@ -32,7 +47,7 @@ final class CopyDomain
         if (DomainPlan::inOnlineZone($sourceDomain)) {
             return new self(null);
         }
-        $name = Helper::generateCloneDomain($sourceDomain);
+        $name = Helper::generateCloneDomain($sourceDomain, label: $label);
 
         return $name === null ? null : new self($name);
     }

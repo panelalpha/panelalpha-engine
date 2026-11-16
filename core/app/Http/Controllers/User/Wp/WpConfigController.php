@@ -5,12 +5,17 @@ namespace App\Http\Controllers\User\Wp;
 use App\Http\Requests\Wp\WpConfigCreateRequest;
 use App\Http\Requests\Wp\WpConfigPathRequest;
 use App\Http\Requests\Wp\WpConfigSetRequest;
+use App\System\Project\PhpHosting\WordPress\Config;
 use App\System\Project\PhpHosting\WordPress\WordPress;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
 class WpConfigController extends WordPressController
 {
+    private const VALUE_LIMIT = 'A value of more than '.Config::MAX_VALUE_LENGTH.' bytes is refused with a '
+        .'422 naming that limit, and nothing is written: WP-CLI cannot reliably write or read back a '
+        .'longer wp-config.php entry.';
+
     protected function failureField(): string
     {
         return 'config';
@@ -77,6 +82,7 @@ class WpConfigController extends WordPressController
         description: 'Writes a new wp-config.php from database credentials (WP-CLI `config create`), '
             .'e.g. after downloading core. An existing wp-config.php is a 422 unless `force`. WP-CLI '
             .'first connects to the database unless `skip_check`. Values reach WP-CLI untrimmed. '
+            .self::VALUE_LIMIT.' '
             .'Optional `path` selects the install; omitted, the main domain document root is used.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
@@ -126,7 +132,7 @@ class WpConfigController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, wp-config.php exists, or the database check failed', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, wp-config.php exists, the database check failed, or a value is longer than the limit', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function store(string $username, WpConfigCreateRequest $request): JsonResponse
@@ -142,9 +148,9 @@ class WpConfigController extends WordPressController
         path: '/projects/{username}/wp/config/{constant}',
         summary: 'Read a WordPress wp-config constant',
         description: 'Reads one constant (or, with `type`, a variable) from wp-config.php via `wp config '
-            .'get`. The value is evaluated, as WP-CLI prints it: true is "1", false is "". With '
-            .'`format=json` the value is decoded JSON instead. An entry that is not defined is a 422 '
-            .'whose message says it is not defined. Optional `path` selects the install.',
+            .'get`, read as JSON so the value keeps the type wp-config.php gives it: a string is a string, true '
+            .'and false are booleans, a number is a number, an array is a JSON array. An entry that is not defined '
+            .'is a 422 whose message says it is not defined. Optional `path` selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [
@@ -178,19 +184,12 @@ class WpConfigController extends WordPressController
                 schema: new OA\Schema(type: 'string', enum: ['constant', 'variable', 'all']),
                 description: 'Look the name up as a constant, a variable, or either. Omitted: constant.',
             ),
-            new OA\Parameter(
-                name: 'format',
-                in: 'query',
-                required: false,
-                schema: new OA\Schema(type: 'string', enum: ['json']),
-                description: 'json: return the value decoded from JSON, for arrays such as WP_REDIS_CONFIG. Omitted: the value as a string.',
-            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Constant value', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object', properties: [
                     new OA\Property(property: 'constant', type: 'string'),
-                    new OA\Property(property: 'value', description: 'A string, or with format=json any JSON value.'),
+                    new OA\Property(property: 'value', description: 'The value as wp-config.php defines it: a string, a boolean, a number, an array or null.'),
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -202,7 +201,6 @@ class WpConfigController extends WordPressController
         return $this->respond($username, $request, fn (WordPress $wp, array $validated) => $wp->config()->get(
             $constant,
             $validated['type'] ?? 'constant',
-            ($validated['format'] ?? null) === 'json',
         ));
     }
 
@@ -211,8 +209,8 @@ class WpConfigController extends WordPressController
         summary: 'Set a WordPress wp-config constant',
         description: 'Sets a constant (or, with `type`, a variable) in wp-config.php via `wp config '
             .'set`. The value is stored as sent, an empty string and surrounding whitespace '
-            .'included. Pass `raw=true` for unquoted PHP values such as true/false. Optional `path` '
-            .'selects the install.',
+            .'included. Pass `raw=true` for unquoted PHP values such as true/false. '
+            .self::VALUE_LIMIT.' Optional `path` selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [
@@ -258,7 +256,7 @@ class WpConfigController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, a value is longer than the limit, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function update(string $username, string $constant, WpConfigSetRequest $request): JsonResponse
@@ -275,7 +273,9 @@ class WpConfigController extends WordPressController
         path: '/projects/{username}/wp/config/{constant}',
         summary: 'Delete a WordPress wp-config constant',
         description: 'Removes a constant (or, with `type`, a variable) from wp-config.php via `wp '
-            .'config delete`. Optional `path` selects the install.',
+            .'config delete`. Optional `path` selects the install. '
+            .'The entry is removed from wp-config.php and its value is not kept anywhere; this cannot be undone. '
+            .'Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [

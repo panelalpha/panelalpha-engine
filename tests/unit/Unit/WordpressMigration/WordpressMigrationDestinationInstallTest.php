@@ -62,7 +62,7 @@ class WordpressMigrationDestinationInstallTest extends WordpressMigrationTestCas
         $path = '--path=/home/alice/dest.example.test/public_html/blog';
         $this->assertSame([
             ['plugin', 'deactivate', SourceWordpressClient::PLUGIN_SLUG, $path],
-            ['plugin', 'delete', SourceWordpressClient::PLUGIN_SLUG, $path],
+            ['plugin', 'uninstall', SourceWordpressClient::PLUGIN_SLUG, '--deactivate', $path],
         ], $this->wpCli);
     }
 
@@ -73,7 +73,7 @@ class WordpressMigrationDestinationInstallTest extends WordpressMigrationTestCas
         $migration = $this->manualPluginImport('https://wp.com/wp-admin/');
         (new RemovePluginsStep(new SourceConnection(fn () => new RoutedSourceHttpClient)))->run($migration);
 
-        $this->assertSame(['plugin', 'delete', SourceWordpressClient::PLUGIN_SLUG, '--path=/home/alice/custom/root'], $this->wpCli[1]);
+        $this->assertSame(['plugin', 'uninstall', SourceWordpressClient::PLUGIN_SLUG, '--deactivate', '--path=/home/alice/custom/root'], $this->wpCli[1]);
         $this->assertSame(WordpressMigration::STEP_STATUS_COMPLETED, $migration->fresh()->stepStatus(WordpressMigration::STEP_REMOVE_PLUGINS));
     }
 

@@ -12,8 +12,9 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * What a PHP hosting project is, stored so a list never looks inside an account: wordpress when its main docroot
- * holds WordPress core, otherwise php. Read in one host shell run; a project whose home is missing keeps its type.
+ * What a PHP hosting project is, stored so a list never looks inside an account: wordpress when its main docroot or the
+ * directory it was installed into holds WordPress core, otherwise php. Read in one host shell run; a project whose home
+ * is missing keeps its type.
  */
 class ClassicAppType
 {
@@ -30,7 +31,7 @@ class ClassicAppType
         $this->runOnHost = $runOnHost ?? fn (array $argv): string => (new System)->exec($argv);
     }
 
-    /** @return int projects whose stored type changed */
+    /** @return int projects whose stored type or install path changed */
     public function sweep(): int
     {
         return $this->store($this->docroots(User::query()->get()->all()));
@@ -49,23 +50,60 @@ class ClassicAppType
         return in_array($type, [self::WORDPRESS, self::PHP], true) ? $type : null;
     }
 
-    /** @return array<string, string> username => type */
+    /**
+     * The directory below the home a WordPress was installed into, or null when it is the main domain's document root.
+     */
+    public static function installPathOf(User $user): ?string
+    {
+        $path = $user->getAttribute('app_path');
+
+        return is_string($path) && $path !== '' ? $path : null;
+    }
+
+    /**
+     * Stores the directory WordPress was installed into and reads the type again; the main domain's document root needs
+     * no path, so it is recorded as none. Both are compared without doubled or trailing slashes.
+     */
+    public function recordInstall(User $user, string $path): void
+    {
+        $docroots = $this->docroots([$user]);
+        $docroot = $docroots[$user->username]['docroot'] ?? null;
+        if ($docroot === null) {
+            return;
+        }
+
+        $path = self::normalisedPath($path);
+        $this->writeInstallPath($user, $path === self::normalisedPath($docroot) ? null : $path);
+        $this->refresh($user);
+    }
+
+    private static function normalisedPath(string $path): string
+    {
+        $path = (string) preg_replace('~/+~', '/', $path);
+
+        return $path === '/' ? $path : rtrim($path, '/');
+    }
+
+    /**
+     * @return array<string, array{type: string, path: string}> username => type and the install directory below the
+     *                                                          home, empty for the main docroot or nothing
+     */
     public static function parse(string $out): array
     {
-        $types = [];
+        $found = [];
         foreach (preg_split('/\R/', $out) ?: [] as $line) {
             $fields = explode("\t", $line);
-            if (count($fields) === 3 && $fields[0] === 'T' && in_array($fields[2], [self::WORDPRESS, self::PHP], true)) {
-                $types[$fields[1]] = $fields[2];
+            if (count($fields) >= 3 && $fields[0] === 'T' && in_array($fields[2], [self::WORDPRESS, self::PHP], true)) {
+                $found[$fields[1]] = ['type' => $fields[2], 'path' => $fields[3] ?? ''];
             }
         }
 
-        return $types;
+        return $found;
     }
 
     /**
      * @param  list<User>  $users
-     * @return array<string, array{home: string, docroot: string}>
+     * @return array<string, array{home: string, docroot: string, install: string}>
      */
     private function docroots(array $users): array
     {
@@ -77,7 +115,11 @@ class ClassicAppType
             $domain = $mainDomains[$user->id] ?? null;
             if ($domain !== null && is_string($user->username) && $user->username !== '') {
                 $home = rtrim($system->projectHomeDirPath($user->username), '/');
-                $docroots[$user->username] = ['home' => $home, 'docroot' => $home.$domain->getDocumentRoot()];
+                $docroots[$user->username] = [
+                    'home' => $home,
+                    'docroot' => $home.$domain->getDocumentRoot(),
+                    'install' => self::installPathOf($user) ?? '',
+                ];
             }
         }
 
@@ -103,7 +145,7 @@ class ClassicAppType
             ->all();
     }
 
-    /** @param  array<string, array{home: string, docroot: string}>  $docroots */
+    /** @param  array<string, array{home: string, docroot: string, install: string}>  $docroots */
     private function store(array $docroots): int
     {
         if ($docroots === []) {
@@ -111,7 +153,7 @@ class ClassicAppType
         }
 
         try {
-            $types = array_intersect_key(self::parse(($this->runOnHost)(Privileged::host()->classicAppTypes($docroots))), $docroots);
+            $found = array_intersect_key(self::parse(($this->runOnHost)(Privileged::host()->classicAppTypes($docroots))), $docroots);
         } catch (Throwable $e) {
             Log::warning('Could not read the type of PHP hosting projects: '.$e->getMessage());
 
@@ -119,18 +161,30 @@ class ClassicAppType
         }
 
         $changed = 0;
-        foreach ($types as $username => $type) {
-            $changed += $this->storeOne($username, $type);
+        foreach ($found as $username => $facts) {
+            $changed += $this->storeOne($username, $facts['type'], $facts['path']);
         }
 
         return $changed;
     }
 
-    private function storeOne(string $username, string $type): int
+    private function storeOne(string $username, string $type, string $install): int
     {
-        return DB::table('users')
-            ->where('username', $username)
-            ->where(fn ($query) => $query->whereNull('app_type')->orWhere('app_type', '!=', $type))
-            ->update(['app_type' => $type]);
+        $path = $install === '' ? null : $install;
+        $stored = DB::table('users')->where('username', $username)->first(['app_type', 'app_path']);
+        if ($stored === null || ($stored->app_type === $type && $stored->app_path === $path)) {
+            return 0;
+        }
+
+        return DB::table('users')->where('username', $username)->update(['app_type' => $type, 'app_path' => $path]);
+    }
+
+    /** Stores the install directory, on the model too, so the read that follows sees it. */
+    private function writeInstallPath(User $user, ?string $path): void
+    {
+        if ($user->getAttribute('app_path') !== $path) {
+            DB::table('users')->where('id', $user->id)->update(['app_path' => $path]);
+        }
+        $user->setAttribute('app_path', $path);
     }
 }

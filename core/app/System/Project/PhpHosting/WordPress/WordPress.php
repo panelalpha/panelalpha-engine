@@ -54,7 +54,9 @@ final class WordPress
 
     public function core(): Core
     {
-        return new Core($this->cli, fn () => app(ClassicAppType::class)->refresh($this->user));
+        return new Core($this->cli, function (string $path): void {
+            app(ClassicAppType::class)->recordInstall($this->user, $path);
+        });
     }
 
     public function cache(): Cache

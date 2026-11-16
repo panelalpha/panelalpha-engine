@@ -61,13 +61,19 @@ exit 0'''
 CLASSIC_APP_TYPES = r'''set -u
 core=__CORE_FILE__
 set -- __ARGS__
-while [ $# -ge 3 ]; do
-    name=$1 home=$2 docroot=$3
-    shift 3
+while [ $# -ge 4 ]; do
+    name=$1 home=$2 docroot=$3 install=$4
+    shift 4
     [ -d "$home" ] || continue
     type=php
-    [ -f "$docroot/$core" ] && type=wordpress
-    printf 'T\t%s\t%s\n' "$name" "$type"
+    path=
+    if [ -f "$docroot/$core" ]; then
+        type=wordpress
+    elif [ -n "$install" ] && [ -f "$install/$core" ]; then
+        type=wordpress
+        path=$install
+    fi
+    printf 'T\t%s\t%s\t%s\n' "$name" "$type" "$path"
 done
 exit 0'''
 
@@ -78,7 +84,7 @@ def project_disk(homes):
 
 
 def classic_app_types(docroots):
-    args = ''.join(f'{escapeshellarg(name)} {escapeshellarg(home)} {escapeshellarg(docroot)} ' for name, home, docroot in docroots)
+    args = ''.join(f'{escapeshellarg(name)} {escapeshellarg(home)} {escapeshellarg(docroot)} {escapeshellarg(install)} ' for name, home, docroot, install in docroots)
     return CLASSIC_APP_TYPES.replace('__ARGS__', args).replace('__CORE_FILE__', escapeshellarg(WORDPRESS_VERSION_FILE))
 
 

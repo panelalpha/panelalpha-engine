@@ -99,6 +99,37 @@ class WpCliTest extends TestCase
         );
     }
 
+    public function test_a_recorded_install_directory_is_used_when_no_path_is_bound(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            installed: '/home/alice/example.test/public_html/blog',
+        );
+
+        $cli->run(['plugin', 'list']);
+
+        $this->assertSame(['plugin', 'list', '--path=/home/alice/example.test/public_html/blog'], $captured);
+    }
+
+    public function test_a_bound_path_beats_the_recorded_install_directory(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            path: 'other.test/public_html',
+            installed: '/home/alice/example.test/public_html/blog',
+        );
+
+        $cli->run(['plugin', 'list']);
+
+        $this->assertSame(['plugin', 'list', '--path=/home/alice/other.test/public_html'], $captured);
+    }
+
     public function test_a_relative_path_is_read_inside_the_home(): void
     {
         $captured = [];
@@ -241,9 +272,11 @@ class WpCliTest extends TestCase
         array $result = ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => ''],
         ?string $path = null,
         bool $skipPlugins = false,
+        ?string $installed = null,
     ): WpCli {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
+        $user->setAttribute('app_path', $installed);
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn($home);
         $project->shouldReceive('resolvePath')

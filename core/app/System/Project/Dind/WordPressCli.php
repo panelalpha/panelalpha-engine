@@ -6,6 +6,7 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Support\Str;
 
 /**
@@ -260,7 +261,7 @@ class WordPressCli
     {
         $allowRoot = explode(':', $owner, 2)[0] === '0' ? ['--allow-root'] : [];
         $result = $this->dind->accountDaemon()->exec($id, [
-            'php', '-d', 'memory_limit='.self::MEMORY_LIMIT, self::CONTAINER_PHAR, '--path='.$path,
+            'php', '-d', 'memory_limit='.self::MEMORY_LIMIT, ...WpCli::PHP_FLAGS, self::CONTAINER_PHAR, '--path='.$path,
             '--exec='.MustUsePlugin::MEND_ON_LOAD, ...$allowRoot, ...$rest,
         ], $owner, $path, self::ENVIRONMENT, self::TIMEOUT_SECONDS);
 

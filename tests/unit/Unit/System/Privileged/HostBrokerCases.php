@@ -49,13 +49,15 @@ final class HostBrokerCases
     {
         $h = static fn () => Privileged::host();
         $docroots = [
-            'shop' => ['home' => '/home/shop', 'docroot' => '/home/shop/shop.example.com/public_html'],
-            'blog' => ['home' => '/home/blog', 'docroot' => "/home/blog/it's here"],
+            'shop' => ['home' => '/home/shop', 'docroot' => '/home/shop/shop.example.com/public_html', 'install' => ''],
+            'blog' => ['home' => '/home/blog', 'docroot' => "/home/blog/it's here", 'install' => "/home/blog/it's here/blog"],
         ];
 
         yield from self::accountDockerCleanup();
         yield 'applyBuildNetworkFirewall' => fn () => BuildNetwork::firewallArgv('panelalpha-build');
         yield 'applyTenantNetworkFirewall' => fn () => TenantNetwork::firewallArgv();
+        yield 'egressReport' => fn () => $h()->egressReport();
+        yield 'egressUnblock' => fn () => $h()->egressUnblock('shop');
         yield 'ensureOwnImage' => fn () => $h()->ensureOwnImage('panelalpha/php:8.3-cli-bookworm-pa1234abcd');
         yield 'refreshPublicImage' => fn () => $h()->refreshPublicImage('node:22-bookworm-slim');
         yield 'projectStats' => fn () => $h()->projectStats(['shop', 'blog'], 45);

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Set a WordPress wp-config constant
 
-    Sets a constant (or, with `type`, a variable) in wp-config.php via `wp config set`. The value is stored as sent, an empty string and surrounding whitespace included. Pass `raw=true` for unquoted PHP values such as true/false. Optional `path` selects the install.
+    Sets a constant (or, with `type`, a variable) in wp-config.php via `wp config set`. The value is stored as sent, an empty string and surrounding whitespace included. Pass `raw=true` for unquoted PHP values such as true/false. A value of more than 16384 bytes is refused with a 422 naming that limit, and nothing is written: WP-CLI cannot reliably write or read back a longer wp-config.php entry. Optional `path` selects the install.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -37,23 +37,31 @@ final class FakeWordPressSite
      * @param array<string, string> $options   the database
      * @param array<string, string> $variables wp-config.php, such as table_prefix
      */
-    public function __construct(public array $constants, public array $options, public array $variables = [])
-    {
+    public function __construct(
+        public array $constants,
+        public array $options,
+        public array $variables = [],
+        public string $home = '/home/site',
+    ) {
     }
 
-    public function wordPress(): WordPress
+    public function wordPress(?string $path = null): WordPress
     {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'site';
         $project = Mockery::mock(Project::class);
-        $project->shouldReceive('homeDirPath')->andReturn('/home/site');
+        $home = $this->home;
+        $project->shouldReceive('homeDirPath')->andReturn($home);
+        $project->shouldReceive('resolvePath')->andReturnUsing(
+            static fn (string $path): string => str_starts_with($path, rtrim($home, '/').'/') ? $path : rtrim($home, '/').'/'.ltrim($path, '/'),
+        );
         $project->shouldReceive('runWpCli')->andReturnUsing(fn (array $args): array => $this->answer($args));
         $domain = Mockery::mock(Domain::class);
         $domain->shouldReceive('getDocumentRoot')->andReturn('/site.test/public_html');
         $user->shouldReceive('project')->andReturn($project);
         $user->shouldReceive('getMainDomain')->andReturn($domain);
 
-        return new WordPress($user, WpCli::for($user, system: $this->nginxHost(), skipPlugins: true));
+        return new WordPress($user, WpCli::for($user, $path, system: $this->nginxHost(), skipPlugins: true));
     }
 
     /** @return list<list<string>> the search-replace calls, in order */
@@ -83,10 +91,10 @@ final class FakeWordPressSite
         $words = array_values(array_filter($args, static fn (string $arg): bool => !str_starts_with($arg, '--')));
 
         return match ([$words[0] ?? '', $words[1] ?? '']) {
-            ['config', 'get'] => $this->read($this->constants, $words[2]),
+            ['config', 'get'] => $this->read($this->constants, $words[2], $args),
             ['config', 'set'] => $this->write($this->constants, $words[2], $words[3]),
             ['config', 'list'] => $this->ok((string) json_encode($this->constantRows())),
-            ['option', 'get'] => $this->read($this->options, $words[2]),
+            ['option', 'get'] => $this->read($this->options, $words[2], $args),
             ['option', 'update'] => $this->write($this->options, $words[2], $this->optionValue($args, $words[3])),
             ['search-replace', $words[1] ?? ''] => $this->searchReplace($words[1], $words[2], $args),
             ['db', 'query'] => $this->query($words[2]),
@@ -142,15 +150,22 @@ final class FakeWordPressSite
     }
 
     /**
+     * What `config get` or `option get` prints: the value as sent, or JSON under --format=json.
+     *
      * @param array<string, string> $store
+     * @param list<string> $args
      *
      * @return array{exit_code: int, stdout: string, stderr: string}
      */
-    private function read(array $store, string $name): array
+    private function read(array $store, string $name, array $args): array
     {
-        return isset($store[$name])
-            ? $this->ok($store[$name] . "\n")
-            : ['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: '{$name}' not found."];
+        if (!isset($store[$name])) {
+            return ['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: '{$name}' not found."];
+        }
+
+        $value = in_array('--format=json', $args, true) ? (string) json_encode($store[$name]) : $store[$name];
+
+        return $this->ok($value . "\n");
     }
 
     /**

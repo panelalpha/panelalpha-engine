@@ -42,16 +42,18 @@ final class ProjectOverview
 
     /**
      * @param  ?ProjectListFacts  $facts  loaded for the whole list the project is in; loaded for it alone when null
-     * @return array{type: ?string, framework: ?string, label: ?string, status: string, public_url: ?string, admin_sso: bool}
+     * @return array{type: ?string, path: ?string, framework: ?string, label: ?string, status: string, public_url: ?string, admin_sso: bool}
      */
     public static function for(User $user, ?ProjectListFacts $facts = null): array
     {
         $facts ??= ProjectListFacts::load([$user]);
         $details = $user->getDetails();
         $strategy = is_string($details['deploy_strategy'] ?? null) ? $details['deploy_strategy'] : null;
+        $type = self::type($details, $user->getGitRepo()) ?? self::classicType($user);
 
         return [
-            'type' => self::type($details, $user->getGitRepo()) ?? self::classicType($user),
+            'type' => $type,
+            'path' => self::installPath($user, $type),
             'framework' => $strategy,
             'label' => is_string($details['deploy_label'] ?? null) ? $details['deploy_label'] : null,
             'status' => self::status($user, $details, $facts),
@@ -95,6 +97,18 @@ final class ProjectOverview
     private static function classicType(User $user): ?string
     {
         return Projects::isDind($user) ? null : ClassicAppType::of($user);
+    }
+
+    /**
+     * Where WordPress is when it is not the main domain's document root; the documented rule needs no path.
+     *
+     * @param  ?string  $type  what the project was already reported as
+     */
+    private static function installPath(User $user, ?string $type): ?string
+    {
+        return $type === ClassicAppType::WORDPRESS && ! Projects::isDind($user)
+            ? ClassicAppType::installPathOf($user)
+            : null;
     }
 
     /**

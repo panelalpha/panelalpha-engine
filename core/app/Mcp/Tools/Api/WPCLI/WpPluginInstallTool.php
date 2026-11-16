@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Install a WordPress plugin
 
-    Installs a plugin by slug. Optional `force` reinstalls over an existing copy. Optional `path` selects the install.
+    Installs a plugin by slug. Optional `force` reinstalls over an existing copy. Optional `path` selects the install. A field the body does not take is refused with 422 (`unknown_field`), naming it, rather than ignored.
     MARKDOWN)]
 #[IsDestructive]
 class WpPluginInstallTool extends ApiTool

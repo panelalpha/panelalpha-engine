@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create wp-config.php
 
-    Writes a new wp-config.php from database credentials (WP-CLI `config create`), e.g. after downloading core. An existing wp-config.php is a 422 unless `force`. WP-CLI first connects to the database unless `skip_check`. Values reach WP-CLI untrimmed. Optional `path` selects the install; omitted, the main domain document root is used.
+    Writes a new wp-config.php from database credentials (WP-CLI `config create`), e.g. after downloading core. An existing wp-config.php is a 422 unless `force`. WP-CLI first connects to the database unless `skip_check`. Values reach WP-CLI untrimmed. A value of more than 16384 bytes is refused with a 422 naming that limit, and nothing is written: WP-CLI cannot reliably write or read back a longer wp-config.php entry. Optional `path` selects the install; omitted, the main domain document root is used.
     MARKDOWN)]
 #[IsDestructive]
 class WpConfigCreateTool extends ApiTool

@@ -52,10 +52,22 @@ final class Core
     /** PHP diagnostics WordPress may print under CLI without anything being wrong, with or without the error log's timestamp. */
     public const PHP_DIAGNOSTIC_PATTERN = '/^(?:\[[^\]]*\]\s*)?(?:PHP )?(?:Warning|Notice|Deprecated|Strict Standards):/';
 
-    /** @param  ?Closure(): void  $coreFilesChanged  told after core files were written */
+    /** WP-CLI's error when wordpress.org serves no release at the requested version. */
+    private const RELEASE_NOT_FOUND_MESSAGE = 'Release not found';
+
+    /**
+     * A version wordpress.org can publish, in WordPress's own format: a release number, which may name a beta or a
+     * release candidate (6.8-beta2, 6.8-RC1) or an alpha build (6.9-alpha-60123).
+     */
+    private const RELEASE_VERSION_PATTERN = '/^\d+\.\d+(\.\d+)?(-(alpha|beta\d+|RC\d+)(-[0-9A-Za-z]+)*)?$/D';
+
+    /** WP-CLI's own names for something other than a release: the newest one, and its nightly build. */
+    private const SPECIAL_VERSIONS = ['latest', 'nightly', 'trunk'];
+
+    /** @param  ?Closure(string): void  $installed  told the directory WordPress was installed into */
     public function __construct(
         private WpCli $cli,
-        private ?Closure $coreFilesChanged = null,
+        private ?Closure $installed = null,
     ) {}
 
     /**
@@ -173,7 +185,7 @@ final class Core
         $path = $this->cli->resolvePath();
         $this->refuseExistingCore($path);
         $result = $this->cli->runOrFail(self::downloadArgs($locale, $version));
-        $this->announceCoreFilesChanged();
+        $this->announceInstall($path);
         $reported = self::reportedDownload($result['stdout']);
 
         return [
@@ -209,6 +221,7 @@ final class Core
             $args[] = '--skip-email';
         }
         $result = $this->cli->runOrFail($args);
+        $this->announceInstall($this->cli->installedPath());
 
         return [
             'message' => trim($result['stdout']),
@@ -233,27 +246,116 @@ final class Core
     }
 
     /**
-     * The version the install has afterwards: WP-CLI answers "up to date" and updates nothing for a version it
-     * will not install, so the requested one is no answer.
+     * The version the install has afterwards, which must be the release the requested version names: WP-CLI answers
+     * "up to date" and installs nothing for a version it will not take, so a success means the version changed.
+     * `latest` updates to the newest release, `nightly` to WP-CLI's nightly build; a value WordPress cannot publish,
+     * and a release older than the installed one, are refused with 422 and nothing is installed.
      *
      * @return array{version: string, message: string}
      */
     public function update(string $version): array
     {
-        $result = $this->cli->runOrFail(
-            ['core', 'update', '--version='.$version],
-        );
+        $result = $this->runUpdate($version);
 
         return [
-            'version' => $this->version(true) ?? $version,
+            'version' => $this->reportedVersion($version),
             'message' => trim($result['stdout']),
         ];
     }
 
-    private function announceCoreFilesChanged(): void
+    /**
+     * @return array{exit_code: int, stdout: string, stderr: string}
+     */
+    private function runUpdate(string $version): array
     {
-        if ($this->coreFilesChanged !== null) {
-            ($this->coreFilesChanged)();
+        $this->refuseNotARelease($version);
+        $this->refuseOlderThanInstalled($version);
+        try {
+            return $this->cli->runOrFail(self::updateArgs($version));
+        } catch (Exception $e) {
+            if (! str_contains($e->getMessage(), self::RELEASE_NOT_FOUND_MESSAGE)) {
+                throw $e;
+            }
+
+            throw self::notPublished($version);
+        }
+    }
+
+    /** WordPress publishes release numbers and their pre-releases only, so no other value can be installed. */
+    private function refuseNotARelease(string $version): void
+    {
+        if (! self::isRelease($version) && ! in_array($version, self::SPECIAL_VERSIONS, true)) {
+            throw self::notPublished($version);
+        }
+    }
+
+    private static function notPublished(string $version): Exception
+    {
+        return new Exception("WordPress does not publish core version {$version}, so nothing was updated.");
+    }
+
+    /** @return list<string> */
+    private static function updateArgs(string $version): array
+    {
+        return $version === 'latest'
+            ? ['core', 'update']
+            : ['core', 'update', '--version='.$version];
+    }
+
+    private static function isRelease(string $version): bool
+    {
+        return preg_match(self::RELEASE_VERSION_PATTERN, $version) === 1;
+    }
+
+    /** The route updates: WordPress migrates its database up only, so an older core is refused, never forced on top. */
+    private function refuseOlderThanInstalled(string $version): void
+    {
+        if (! self::isRelease($version)) {
+            return;
+        }
+        $installed = $this->version(true);
+        if ($installed === null || version_compare($installed, $version) <= 0) {
+            return;
+        }
+
+        throw new Exception(
+            "WordPress {$installed} is newer than {$version} and core is not downgraded, so nothing was updated.",
+        );
+    }
+
+    /** A special version is answered by WP-CLI itself; a release number has to be the one installed afterwards. */
+    private function reportedVersion(string $version): string
+    {
+        $current = $this->version(true);
+        if (! self::isRelease($version)) {
+            return $current ?? $version;
+        }
+        if ($current !== null && self::namesSameRelease($current, $version)) {
+            return $current;
+        }
+
+        $found = $current ?? 'no version';
+
+        throw new Exception("WordPress did not install {$version}: the site runs {$found}, so nothing was updated.");
+    }
+
+    /** The release a version names: wordpress.org serves 6.7 for 6.7.0, so WP-CLI installs that one. */
+    private static function namesSameRelease(string $current, string $version): bool
+    {
+        return self::release($current) === self::release($version);
+    }
+
+    private static function release(string $version): string
+    {
+        return substr_count($version, '.') > 1 && str_ends_with($version, '.0')
+            ? substr($version, 0, -2)
+            : $version;
+    }
+
+    private function announceInstall(?string $path): void
+    {
+        if ($path !== null && $this->installed !== null) {
+            ($this->installed)($path);
         }
     }
 

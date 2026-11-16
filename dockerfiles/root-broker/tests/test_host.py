@@ -430,7 +430,9 @@ class ReadingsTest(Scratch):
         self.plan('host.projectDisk', '1', 'shop', self.path('homes', 'shop') + '/')
         self.refused('host.projectDisk', '1', 'shop', self.path('homes', 'shop', 'docker'))
         self.refused('host.projectDisk', '1', 'shop', self.path('engine', 'shop'))
-        self.refused('host.classicAppTypes', '1', 'shop', self.path('homes', 'shop'), self.path('homes', 'bob', 'public_html'))
+        self.refused('host.classicAppTypes', '1', 'shop', self.path('homes', 'shop'), self.path('homes', 'bob', 'public_html'), '')
+        self.refused('host.classicAppTypes', '1', 'shop', self.path('homes', 'shop'), self.path('homes', 'shop', 'public_html'),
+                     self.path('homes', 'bob', 'public_html', 'blog'))
 
     def test_the_edge_probe_takes_a_plain_name_and_an_address(self):
         self.plan('host.edgeProbe', 'shop.example.com', '::ffff:203.0.113.7', '4', '')

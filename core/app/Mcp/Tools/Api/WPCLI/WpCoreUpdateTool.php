@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Update WordPress core to a target version
 
-    Runs `wp core update --version=` with the given target version. Optional `path` selects the install.
+    Runs `wp core update --version=` with the given target version. A version WordPress does not publish is refused with 422 and nothing is installed; so is a release older than the installed one, because WordPress does not migrate its database down. Optional `path` selects the install.
     MARKDOWN)]
 #[IsDestructive]
 class WpCoreUpdateTool extends ApiTool
@@ -71,7 +71,7 @@ class WpCoreUpdateTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'version' => $schema->string()->description('Example: 6.7.1.')->required(),
+            'version' => $schema->string()->description('A release version such as 6.7.1, or `latest` for the newest release. Example: 6.7.1.')->required(),
             'path' => $schema->string()->description('WordPress directory. On PHP hosting it is inside the project home, read as the file manager reads a path: absolute, or relative to the home. Omitted: the main domain document root, or, on a project running in its own containers, the install the engine finds there. On such a project it is the directory as the container sees it, absolute or relative to its working directory.'),
             'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
             'skip_plugins' => $schema->boolean()->description('Run without loading plugins and themes (--skip-plugins --skip-themes), so a plugin or theme with a fatal error does not block the operation. Omitted: false.'),

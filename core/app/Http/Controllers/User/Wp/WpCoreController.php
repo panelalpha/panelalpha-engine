@@ -263,15 +263,16 @@ class WpCoreController extends WordPressController
     #[OA\Post(
         path: '/projects/{username}/wp/core/update',
         summary: 'Update WordPress core to a target version',
-        description: 'Runs `wp core update --version=` with the given target version. Optional '
-            .'`path` selects the install.',
+        description: 'Runs `wp core update --version=` with the given target version. A version WordPress does '
+            .'not publish is refused with 422 and nothing is installed; so is a release older than the installed '
+            .'one, because WordPress does not migrate its database down. Optional `path` selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['version'],
             properties: [
-                new OA\Property(property: 'version', type: 'string', example: '6.7.1'),
+                new OA\Property(property: 'version', type: 'string', example: '6.7.1', description: 'A release version such as 6.7.1, or `latest` for the newest release.'),
                 new OA\Property(
                     property: 'path',
                     type: 'string',
@@ -294,12 +295,12 @@ class WpCoreController extends WordPressController
         responses: [
             new OA\Response(response: 200, description: 'Core updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object', properties: [
-                    new OA\Property(property: 'version', type: 'string', description: 'The version installed after the update, which is the requested one only when it was installed.'),
+                    new OA\Property(property: 'version', type: 'string', description: 'The installed version afterwards, which is the release the requested version names.'),
                     new OA\Property(property: 'message', type: 'string'),
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'WP-CLI failed, the requested version is not published or is older than the installed one, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function update(string $username, WpCoreUpdateRequest $request): JsonResponse

@@ -13,7 +13,7 @@ use Symfony\Component\Process\Process;
  */
 final class FakeProcess extends Process
 {
-    private const ANSWERED = ['files.isFile', 'files.isDirectory', 'files.exists', 'files.existingRealPaths'];
+    private const ANSWERED = ['files.isFile', 'files.isDirectory', 'files.exists', 'files.existingRealPaths', 'files.listEntryTypes'];
 
     private function __construct(
         private readonly int $code,
@@ -39,8 +39,8 @@ final class FakeProcess extends Process
     }
 
     /**
-     * What a host would answer: a root `test -f|-d|-e` or `realpath -e` is read
-     * from the real filesystem, and everything else succeeds.
+     * What a host would answer: a root `test -f|-d|-e`, `realpath -e` or listing
+     * of entry types is read from the real filesystem, and everything else succeeds.
      *
      * @param string|list<string> $cmd
      */
@@ -51,6 +51,9 @@ final class FakeProcess extends Process
         }
         if (LocalRoot::action($cmd) === 'files.existingRealPaths') {
             return self::realPaths(LocalRoot::values($cmd));
+        }
+        if (LocalRoot::action($cmd) === 'files.listEntryTypes') {
+            return self::entryTypes((string) (LocalRoot::values($cmd)[0] ?? ''));
         }
         $argv = LocalRoot::plain($cmd);
         if (($argv[0] ?? '') !== 'test') {
@@ -65,6 +68,21 @@ final class FakeProcess extends Process
         };
 
         return $exists ? self::ok() : self::failed();
+    }
+
+    /** find's `%y %f` record of each entry, NUL-terminated, without following a link. */
+    private static function entryTypes(string $dir): self
+    {
+        if (is_link($dir) || ! is_dir($dir)) {
+            return self::ok();
+        }
+        $records = '';
+        foreach (array_diff(scandir($dir) ?: [], ['.', '..']) as $name) {
+            $path = $dir.'/'.$name;
+            $records .= (is_link($path) ? 'l' : (is_dir($path) ? 'd' : 'f')).' '.$name."\0";
+        }
+
+        return self::ok($records);
     }
 
     /** @param  list<string>  $paths */

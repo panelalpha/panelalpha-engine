@@ -126,17 +126,14 @@ test.describe('a WordPress site through the wp/ endpoints', () => {
         /define\(\s*'PA_TEST_RAW',\s*42\s*\)/
       );
       expect(
-        await api.wp(name, 'GET', 'config/PA_TEST_RAW?format=json'),
-        'format=json reads the PHP value'
+        await api.wp(name, 'GET', 'config/PA_TEST_RAW'),
+        'the read gives the PHP value, not its printed form'
       ).toMatchObject({ value: 42 });
       await api.wp(name, 'PUT', 'config/WP_DEBUG', { value: 'false', raw: true });
-      expect(await api.wp(name, 'GET', 'config/WP_DEBUG?format=json')).toMatchObject({
-        value: false,
-      });
       expect(
         await api.wp(name, 'GET', 'config/WP_DEBUG'),
-        'the plain read prints false as WP-CLI does'
-      ).toMatchObject({ value: '' });
+        'a false constant reads as false, not as an empty string'
+      ).toMatchObject({ value: false });
       await api.wp(name, 'DELETE', 'config/PA_TEST_RAW');
       await api.wp(name, 'DELETE', 'config/PA_TEST_CONSTANT');
       expectOneOf((await api.wpRaw(name, 'GET', 'config/PA_TEST_CONSTANT')).status, [404, 422]);

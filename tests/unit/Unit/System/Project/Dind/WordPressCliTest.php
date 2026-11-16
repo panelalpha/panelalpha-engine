@@ -11,6 +11,7 @@ use App\System\Project\Dind\WordPressCli;
 use App\System\Project\PhpHosting\WordPress\Core;
 use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
@@ -71,7 +72,7 @@ class WordPressCliTest extends TestCase
         $this->assertSame(['stdout' => "[]\n", 'stderr' => '', 'exit_code' => 0], $result);
         $this->assertSame(['probe wp1', 'copy wp1', 'run wp1'], $this->calls, 'the cli and db containers are never probed');
         $this->assertSame(
-            ['wp', 'wp1', '33:33', '/var/www/html', ...self::ENVIRONMENT, 'php', '-d', 'memory_limit=512M', WordPressCli::CONTAINER_PHAR,
+            ['wp', 'wp1', '33:33', '/var/www/html', ...self::ENVIRONMENT, 'php', '-d', 'memory_limit=512M', ...WpCli::PHP_FLAGS, WordPressCli::CONTAINER_PHAR,
                 '--path=/var/www/html', '--exec='.MustUsePlugin::MEND_ON_LOAD, 'plugin', 'list', '--format=json'],
             $this->lastExec()
         );

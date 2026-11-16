@@ -21,7 +21,7 @@ class UserCloneStatusTest extends TestCase
     {
         $live = $this->makeUser('shop', ['template' => 'dind'], 'shop.example.com');
 
-        $clone = $live->makeClone('shopcopy', CopyDomain::forCopy($live->domain, null));
+        $clone = $live->makeClone('shopcopy', CopyDomain::forClone($live->domain, null));
 
         $this->assertSame('active', $clone->status);
         $this->assertSame('active', $clone->refresh()->status);

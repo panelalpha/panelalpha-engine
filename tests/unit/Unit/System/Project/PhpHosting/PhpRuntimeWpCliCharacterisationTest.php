@@ -8,6 +8,7 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use App\System\Services\Webserver;
 use Mockery;
 use Symfony\Component\Process\Process;
@@ -46,7 +47,7 @@ class PhpRuntimeWpCliCharacterisationTest extends TestCase
         $this->assertSame('account-container.exec', LocalRoot::action($host->commands[0]));
         $this->assertSame('1001:1002', LocalRoot::values($host->commands[0])[1]);
         $this->assertSame([
-            '/usr/local/lsws/lsphp74/bin/php', '-d', 'memory_limit=768M', '/opt/wp-cli.phar',
+            '/usr/local/lsws/lsphp74/bin/php', '-d', 'memory_limit=768M', ...WpCli::PHP_FLAGS, '/opt/wp-cli.phar',
             '--exec='.MustUsePlugin::MEND_ON_LOAD,
             '--path=/home/alice/shop.test/public_html', 'option', 'get', 'home',
         ], LocalRoot::inAccount($host->commands[0]));
