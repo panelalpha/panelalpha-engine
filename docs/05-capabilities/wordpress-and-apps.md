@@ -64,7 +64,7 @@ Create a WordPress site called myblog on this PanelAlpha Engine, titled
 password for the administrator and tell me it once.
 ```
 
-The engine creates the project and its MySQL database, writes `wp-config.php` and installs WordPress. When the task finishes, the site is live and the administrator can sign in. The password must be at least 8 characters and does not appear in the engine's task records. If the install fails, the project is removed.
+The engine creates the project and its MySQL database, writes `wp-config.php` and installs WordPress. When the task finishes, the site is live and the administrator can sign in. The request needs all of these: the title (up to 255 characters), the administrator's login (1 to 60 letters, digits, spaces or `_ . @ -`), the email and a password of at least 8 characters. You can also ask for a language such as `de_DE` or a version such as `6.6.2`; without them you get the latest release in English. The password does not appear in the engine's task records. The `wp-config.php` it writes is readable by the project's own user only: [Security](security.md#what-a-project-cannot-touch-on-the-server). If the install fails, the project is removed.
 
 **In its own container.** Deploy the official WordPress repository:
 
@@ -81,10 +81,10 @@ On a project in its own container, give WordPress the details it needs for the f
 
 ```text
 Install WordPress on this project. Title: My Site. Admin user: admin.
-Admin email: admin@example.com. Admin password: <password>
+Admin email: admin@example.com. Choose a strong admin password and tell me it once.
 ```
 
-When it finishes, the site is live at its address.
+When it finishes, the site is live at its address. To choose the password yourself, ask the assistant for a paste page: you type the password there, so it never appears in the chat. The same works for the passwords of other users the assistant adds or resets.
 
 You can also finish the setup yourself by opening the site in a browser and completing WordPress's own first-run screens. Either way ends in the same place.
 
@@ -115,7 +115,7 @@ Reset the password for user 5 on this WordPress site.
 Delete WordPress user 5 on this site, reassigning their posts to user 1.
 ```
 
-Deleting a WordPress user **reassigns** their posts and pages rather than deleting them: they go to the user you name, or to the first other administrator when you give none. When the site has no other administrator and you name no one, the delete is refused and nothing is removed. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+**Name the user who takes over the content when you delete a WordPress user.** On WordPress in its own container, the posts and pages go to the user you name, or to the first other administrator when you give none; when the site has no other administrator and you name no one, the delete is refused and nothing is removed. On traditional PHP hosting the delete runs WP-CLI, which deletes the user's posts and pages too when you name no one. The assistant asks you to confirm either way, and the user's profile is not kept. Ask for the list of roles if you are not sure which one to give a new user. Changing or deleting a user that does not exist answers that no such user was found. Passwords shorter than 8 characters are refused, here and for FTP, SFTP and MySQL accounts. Listing a user's application passwords shows each one's name and when it was made, never the stored hash. If the assistant cannot do these, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 **Application passwords and the Authorization header.** An app or the WordPress REST API that signs in with an application password sends it in a request header. On traditional PHP hosting the webserver passes that header on to PHP, so those logins work for any PHP app there, not only WordPress.
 
@@ -276,7 +276,7 @@ On traditional PHP hosting the top level of the account belongs to root, so no n
 WordPress stores its site address in its own database. Changing the project's domain does not update it. Ask the assistant to run the WP-CLI command that updates the site URL.
 
 **The site shows a blank page or a PHP error.**
-On traditional PHP hosting, ask the assistant to read the project's PHP error log: [Monitoring and logs](monitoring-and-logs.md#3-domain-logs---what-are-visitors-doing). A WordPress site in its own container has no separate file, so the assistant reads what the app container printed instead.
+On traditional PHP hosting, ask the assistant to read the project's PHP error log: [Monitoring and logs](monitoring-and-logs.md#3-domain-logs-what-are-visitors-doing). A WordPress site in its own container has no separate file, so the assistant reads what the app container printed instead.
 
 **Every WordPress action fails with a PHP fatal error from one plugin or theme.**
 WordPress loads all active plugins first, so one broken plugin stops the rest. Ask the assistant to do it again without loading plugins and themes: listing plugins, themes, users or options, reading or changing `wp-config.php`, maintenance mode, the database and the core status all work that way. Then deactivate or delete the broken plugin. A site that fails to load is reported as an error, never as "WordPress is not installed".
@@ -360,7 +360,7 @@ List the users of twp. Delete the user jdoe and give their posts to user 1.
 Then delete a user that does not exist, id 9999.
 ```
 
-Mode: full. Tools: `app_user_list`, `app_user_delete` with `reassign` (or `wp_user_delete`). Check: the posts of jdoe now belong to user 1, and the delete of 9999 answers not found.
+Mode: full. Tools: `app_user_list`, `app_user_delete` with `reassign` (or `wp_user_delete`). Check: the posts of jdoe now belong to user 1, and the delete of 9999 answers not found. On traditional PHP hosting the posts are deleted unless `reassign` names a user.
 
 **Short passwords are refused**
 
@@ -409,7 +409,7 @@ Mode: modify. Tools: `wp_core_download` with `locale`, `mysql_database_create`, 
 
 ```text
 Inspect https://github.com/matomo-org/matomo and tell me whether the engine
-treats it as a known app or just as PHP.
+treats it as a known app or only as PHP.
 ```
 
 Mode: read. Tools: `source_inspect`. Check: the answer names the known app and the stack, and nothing is deployed.

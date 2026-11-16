@@ -101,9 +101,11 @@ pae system:build-cache:remove https://github.com/org/app
 ```
 
 - The repository must be public and reached over `https://`.
+- A cache belongs to one branch. `--branch=<name>` names it; without it, the repository's default branch is built. `remove` takes the same option and removes every branch when it is left out.
 - The cache helps a deploy of the same commit. Once the repository moves on, build it again.
 - A repository that deploys through a recipe or its own `panelalpha.yaml` is refused for now. So is one that builds nothing, such as a plain static site.
-- The weekly refresh keeps build caches. Only `remove` deletes them.
+- The weekly refresh keeps build caches. Only `remove` deletes them. The next build after a removal compiles every layer again.
+- A token limited to some projects is refused.
 
 The server builds the repository in an isolated container with no access to the server itself. Projects only read the cache.
 
@@ -119,7 +121,7 @@ pae system:image:remove whmcs-dev-base:php8.3
 - **`list`** shows your images and the engine's own, whether the image cache holds each right now, its size and when it was last refreshed. `--operator` shows only yours.
 - **`update`** replaces the Dockerfile (`--build`), the build arguments (`--build-arg`, or `--no-build-args` to drop them) or the note (`--why`). A changed build is built and published again straight away.
 - **`refresh`** does now what the weekly refresh does.
-- **`remove`** takes the image out of the image cache and forgets it. Projects that already have it keep their copy, but a new build `FROM` it fails, so change those projects' Dockerfiles first.
+- **`remove`** takes the image out of the image cache and forgets it. There is no undo. Projects that already have it keep their copy, but a new build `FROM` it fails, so change those projects' Dockerfiles first. An assistant asks you to confirm before it removes an image or a build cache.
 
 The next deploy of a project after a refresh or an update picks up the new image.
 

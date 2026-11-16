@@ -1,6 +1,6 @@
 # Backups
 
-A backup is a complete snapshot of one project. For a traditional PHP project that is its home folder and one dump of each of its databases. For a container project it is its files, its stored data volumes, and its databases.
+A backup is a complete snapshot of one project. For a traditional PHP project that is its home folder and one dump of each of its databases. For a container project it is its files, its stored data volumes and its databases.
 
 Two things to know before you rely on this:
 
@@ -55,7 +55,7 @@ To check the engine can actually reach a remote store before you depend on it:
 Test that backup store.
 ```
 
-When the test fails, the answer says what failed on one line: the kind of store, the host, the folder or bucket, and the reason the storage itself gave. Passwords and keys in it are hidden.
+When the test fails, the answer says what failed on one line: the kind of store, the host, the folder or bucket and the reason the storage itself gave. Passwords and keys in it are hidden.
 
 ## Taking a backup
 
@@ -63,7 +63,7 @@ When the test fails, the answer says what failed on one line: the kind of store,
 Create a backup of this project.
 ```
 
-You get a backup ID and a status. Wait for `completed`, because a backup of a large site takes a while.
+You get a backup ID, a status and the ID of the task that takes it (`backup_task_id`; a restore and a delete have `restore_task_id` and `delete_task_id`). Wait for `completed`, because a backup of a large site takes a while.
 
 A backup that names no store goes to the default one. On a server that has no default store it is refused with `no_default_container`: create a store, or name one.
 
@@ -84,11 +84,15 @@ List the backups for this project.
 Restore last backup onto this project.
 ```
 
-**A restore overwrites the live project.** Anything created since that backup was taken is gone. Always list the backups and check the date on the one you are about to restore before you confirm it. Your assistant will ask you to confirm; that confirmation is required and not a formality.
+**A restore overwrites the live project.** Anything created since that backup was taken is gone. Always list the backups and check the date on the one you are about to restore before you confirm it. Your assistant will ask you to confirm; that confirmation is required and not a formality. A backup that is not `completed` cannot be restored, and neither can a protected project: [Protecting](projects.md#protecting).
 
 On a traditional PHP project, a restore replaces the home folder with the backed-up one and puts the old one back if the restore fails. To keep the files that are there and only write the backed-up ones over them, say so. You can also restore only the databases or only the files, if the backup has them. Choosing parts by volume is for container projects only. On a traditional PHP project, a restore that fails puts the databases back as they were, and a restore of a classic WordPress site makes its `wp-config.php` private again.
 
-The parts are chosen with `only` or `exclude`, never both. Each is an object with up to three keys: `files` (true or false), `volumes` (a list of volume names) and `databases` (a list of database names). For example, `only` with `databases` set to the one database name restores just that database.
+The parts are chosen with `only` or `exclude`, never both. Each is an object with up to three keys: `files` (true or false), `volumes` (a list of volume names) and `databases` (a list of database names). For example, `only` with `databases` set to the one database name restores only that database.
+
+## Deleting
+
+**Deleting a backup removes its files, and that copy of the project can never be restored.** Deleting a store that still holds backups is refused unless you ask to delete the backups with it, and then they are gone for good. The assistant says what will be lost and asks you to confirm first.
 
 ## Download one part
 
@@ -102,7 +106,7 @@ The assistant can only read a small piece of a file at a time, so for a large it
 
 ## Scheduled backups
 
-Each project can have one automatic schedule. You give it a store, a time, and how many backups to keep. Without a store a new schedule uses the default one, and a changed schedule keeps the store it has.
+Each project can have one automatic schedule. You give it a store, a time and how many backups to keep. Without a store a new schedule uses the default one, and a changed schedule keeps the store it has.
 
 ```text
 Back up this project every night at 03:00 into the store local-main, and keep
@@ -126,7 +130,7 @@ The store name or ID is wrong. Ask to list the stores first and use the exact na
 Usually disk space on the destination, or a timeout to a remote store. Check free space on the target, and test the store.
 
 **How do I schedule these?**
-Ask the assistant to set a schedule: [Scheduled backups](#scheduled-backups). Do not use a project's own cron jobs for this - those run inside the project and cannot reach the engine's backup system.
+Ask the assistant to set a schedule: [Scheduled backups](#scheduled-backups). Do not use a project's own cron jobs for this: those run inside the project and cannot reach the engine's backup system.
 
 **"Project is busy: a backup is running" or "a restore is running".**
 A backup, a restore and a deploy do not run on the same project at the same time. Wait for the one that is running, then try again.
@@ -181,6 +185,14 @@ Back up tshop into the store local-main. Tell me when it is completed.
 
 Mode: modify. Tools: `backup_create` with `container`, `task_get`, `backup_get`. Check: an id and a status come back, and the assistant waits for `completed`. On a traditional PHP project the backup lists a home item and one item per database.
 
+**A backup without naming a store**
+
+```text
+Back up tshop. Which store did it go to?
+```
+
+Mode: modify. Tools: `backup_create`, `backup_get`, `backup_container_list`. Check: the backup is in the store marked `default` in the list. On a server with no default store the request is refused as `no_default_container`.
+
 **Only files or only databases**
 
 ```text
@@ -189,7 +201,7 @@ local-main with the note "before the update". Then try a backup with neither
 files nor databases.
 ```
 
-Mode: modify. Tools: `backup_create` with `databases`, `files` and `note`, `backup_get`. Check: the backup has database items and no home item, the note shows in `backup_list`, and the request with both off is refused as `nothing_to_back_up`.
+Mode: modify. Tools: `backup_create` with `databases`, `files` and `note`, `backup_get`. Check: the backup has database items and no home item, the note shows in `backup_list` and the request with both off is refused as `nothing_to_back_up`.
 
 **List and inspect**
 
@@ -206,7 +218,7 @@ Restore the newest backup onto tshop. Then restore only the database from an
 older one, leaving the files as they are.
 ```
 
-Mode: modify. Tools: `backup_restore` with `confirm`, then with `only` or `exclude`, and `delete_existing_files`. Check: the assistant says a restore overwrites the live project and asks first. After the partial restore the files are untouched and the site still serves the application (`app_health_check`). On a traditional PHP project, a volume filter is refused as `volumes_not_applicable`.
+Mode: modify. Tools: `backup_restore` with `confirm`, then with `only` or `exclude` and `delete_existing_files`. Check: the assistant says a restore overwrites the live project and asks first. After the partial restore the files are untouched and the site still serves the application (`app_health_check`). On a traditional PHP project, a volume filter is refused as `volumes_not_applicable`.
 
 **Download one item**
 
