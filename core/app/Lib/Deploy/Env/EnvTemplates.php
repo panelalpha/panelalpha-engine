@@ -4,7 +4,7 @@ namespace App\Lib\Deploy\Env;
 
 /**
  * The names a repository gives the `.env` template it expects copied (`.env.example`, `.env.sample`,
- * `.example.env`); one list, so seeding `.env` and the inspect report agree.
+ * `.example.env`, `.sample.env`); one list, so seeding `.env` and the inspect report agree.
  */
 final class EnvTemplates
 {
@@ -14,6 +14,7 @@ final class EnvTemplates
         '.env.sample',
         '.env.template',
         '.example.env',
+        '.sample.env',
         'example.env',
         '.env.dist',
     ];

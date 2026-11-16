@@ -58,6 +58,15 @@ class EnvExampleCopiesTest extends TestCase
         $this->assertSame(['.env'], $this->planned());
     }
 
+    /** openalgo ships `.sample.env` and bind-mounts `./.env`, which compose refuses to start without. */
+    public function test_a_root_sample_env_is_copied_to_the_file_the_app_reads(): void
+    {
+        $this->write('.sample.env', "BROKER_API_KEY=\n");
+
+        $this->assertSame(['.env'], $this->planned());
+        $this->assertStringEndsWith('/.sample.env', EnvExampleCopies::for($this->dir)[0]['example']);
+    }
+
     public function test_an_env_the_project_already_has_is_not_overwritten(): void
     {
         // It may carry the keys from a previous deploy of this same account.

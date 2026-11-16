@@ -61,6 +61,13 @@ class EnvironmentReportTest extends ReportTestCase
         $this->assertSame(['JWT_SECRET'], EnvironmentReport::of($this->tmpDir, [])['variables']);
     }
 
+    public function test_it_reads_the_sample_env_spelling(): void
+    {
+        $this->write('.sample.env', "BROKER_API_KEY=\n");
+
+        $this->assertSame(['.sample.env'], EnvironmentReport::of($this->tmpDir, [])['files']);
+    }
+
     public function test_names_are_sorted_so_the_report_is_stable(): void
     {
         $this->write('.env.example', "ZULU=\nALPHA=\nMIKE=\n");
