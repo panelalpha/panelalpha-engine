@@ -214,6 +214,17 @@ class LocalTest extends TestCase
         $this->assertFileDoesNotExist($this->brokerLog());
     }
 
+    public function test_a_location_that_is_a_file_is_kept_instead_of_failing(): void
+    {
+        $file = $this->root . '/not-a-directory';
+        file_put_contents($file, 'kept');
+
+        (new Local($file))->removeEmptyRoot();
+
+        $this->assertFileExists($file);
+        $this->assertFileDoesNotExist($this->brokerLog());
+    }
+
     public function test_test_succeeds_on_writable_root(): void
     {
         $storage = new Local($this->root);

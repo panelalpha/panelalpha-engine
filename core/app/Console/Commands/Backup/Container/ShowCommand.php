@@ -33,6 +33,7 @@ class ShowCommand extends Command
         $this->line("  Driver: {$container->driver}");
         $this->line("  Location: {$container->location}");
         $this->line('  Has credentials: '.($container->credentials !== null ? 'yes' : 'no'));
+        $this->line('  Default: '.($container->is_default ? 'yes' : 'no'));
         $this->line("  Created: {$container->created_at}");
         $this->line("  Updated: {$container->updated_at}");
 

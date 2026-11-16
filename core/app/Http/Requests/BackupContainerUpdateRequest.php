@@ -33,7 +33,14 @@ class BackupContainerUpdateRequest extends FormRequest
             'driver' => ['sometimes', Rule::in(['local', 's3', 'ftp', 'ftps', 'sftp'])],
             'location' => ['sometimes', 'string', 'max:1024'],
             'credentials' => ['nullable', 'array'],
+            'default' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /** Any truthy `default` the boolean rule accepts (true, 1, "1", "true") makes the store the default one. */
+    public function makesDefault(): bool
+    {
+        return $this->boolean('default');
     }
 
     public function withValidator(Validator $validator): void
@@ -46,6 +53,13 @@ class BackupContainerUpdateRequest extends FormRequest
             $container = BackupContainer::find((int) $this->route('id'));
             $driver = $this->input('driver');
             $resolvedDriver = is_string($driver) ? $driver : $container?->driver;
+
+            if ($this->has('default') && ! $this->boolean('default') && $container?->is_default) {
+                $validator->errors()->add(
+                    'default',
+                    'Make another store the default first; the host must keep one.',
+                );
+            }
 
             if ($resolvedDriver === 'local') {
                 $this->checkEffectiveLocalLocation($validator, $container);

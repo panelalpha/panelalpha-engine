@@ -1486,6 +1486,8 @@ prepare_config_files() {
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
     # Scripts are engine code, not host state: -n would keep the installed copy.
     cp /opt/panelalpha/shared-hosting/templates/config/sftp/{entrypoint.sh,sync-logins.sh} /opt/panelalpha/shared-hosting/config/sftp/
+    bash /opt/panelalpha/shared-hosting/scripts/refresh-sftp-entrypoint.sh /opt/panelalpha/shared-hosting ||
+        echo_warning "Could not recreate the sftp container for a changed entry point; SFTP keeps serving the old one"
     if [ ! -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key ]; then
         ssh-keygen -t ed25519 -N "" -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key < /dev/null
     fi
@@ -1577,6 +1579,13 @@ resume_core_background() {
     [ "${CORE_BACKGROUND_PAUSED:-0}" = 1 ] || return 0
     core_background -u || true
     CORE_BACKGROUND_PAUSED=0
+}
+
+# A fresh install, and an update on a server with no store, gets a local store to back up into.
+ensure_default_backup_store() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan backup:container:ensure-default ||
+        echo_warning "Could not create the default backup store; 'pae backup:container:ensure-default' retries"
 }
 
 # A pre-broker core loops re-applying the tenant firewall; its process group stops before the copy.
@@ -1971,6 +1980,7 @@ EOF
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan optimize:clear --except=cache
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
     resume_core_background
+    ensure_default_backup_store
     # Accounts from before it leave core's network for pash-tenants,
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
@@ -1988,7 +1998,8 @@ EOF
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:config-mounts:restrict --all ||
         echo_warning "Could not make the config mounts of every PHP hosting project read-only; 'pae projects:config-mounts:restrict --all' retries"
     # Exim listens on docker0's gateway, which differs per host (bip, or a
-    # 172.17 clash), and relays for pash-tenants; both are read from Docker.
+    # 172.17 clash), and on pash-tenants' gateway, the PA_SMTP_HOST container
+    # projects get, and relays for pash-tenants; all are read from Docker.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true
     # Stored NAT maps for docker0 and the engine's bridges go, whether or not NAT is rebuilt.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:prune || true

@@ -11,6 +11,10 @@ Two things to know before you rely on this:
 
 A backup has to be written somewhere, and that somewhere is called a **store**. You set one up once, and every future backup goes into it.
 
+**The engine sets one up for you.** An install creates a local store named `local` in `/opt/panelalpha/backups/local` and marks it the **default**: the store a panel uses when nobody has configured one. So a fresh install can back a project up without anyone creating a store first. An Engine update does the same on a server that has no store at all, and nothing on a server that has one: your stores are kept as they are, and the oldest is the default.
+
+The default is not fixed. `GET /system/info` reports it as `default_backup_container` and `GET /backup-containers` marks it `"default": true`; ask the assistant, or use `pae backup:container:update <store> --default`, to make another store the default. Deleting the default store works like deleting any other; the oldest store left takes the flag over, and `pae backup:container:ensure-default` (which the installer runs) creates `local` again on a server that has no store.
+
 | Kind | Where the files go |
 |---|---|
 | `local` | A folder on this VPS |
@@ -61,6 +65,8 @@ Create a backup of this project.
 
 You get a backup ID and a status. Wait for `completed`, because a backup of a large site takes a while.
 
+A backup that names no store goes to the default one. On a server that has no default store it is refused with `no_default_container`: create a store, or name one.
+
 A backup, a restore, a push and a staging copy never run on the same project at the same time. The second one is refused as busy, and a scheduled backup tries again.
 
 A backup or restore stops the app while it works and always starts it again, also when it fails. A long backup or restore has one time limit for all its steps, so it cannot hang with the app stopped.
@@ -96,14 +102,14 @@ The assistant can only read a small piece of a file at a time, so for a large it
 
 ## Scheduled backups
 
-Each project can have one automatic schedule. You give it a store, a time, and how many backups to keep.
+Each project can have one automatic schedule. You give it a store, a time, and how many backups to keep. Without a store a new schedule uses the default one, and a changed schedule keeps the store it has.
 
 ```text
 Back up this project every night at 03:00 into the store local-main, and keep
 the last 14.
 ```
 
-Times are in UTC, not the server's local time. A schedule can run at most once an hour, and the number to keep is from 1 to 365. Only the backups the schedule made are cleaned up when there are more than that. Backups you took yourself are never deleted by it. If the project is busy at the planned time, the engine tries again for up to an hour, then skips that run. On the server, `backups:run-scheduled` prints what it did for each schedule that was due. A store that a schedule uses cannot be deleted until the schedule is removed or pointed elsewhere.
+Times are in UTC, not the server's local time. A schedule can run at most once an hour, and the number to keep is from 1 to 365. Only the backups the schedule made are cleaned up when there are more than that. Backups you took yourself are never deleted by it. If the project is busy at the planned time, the engine tries again for up to an hour, then skips that run. On the server, `backups:run-scheduled` prints what it did for each schedule that was due. A store that a project's enabled schedule uses cannot be deleted; the refusal names those projects. Turning a schedule off is enough to release the store: a disabled schedule holds nothing, and deleting the store removes it.
 
 To look at the schedule, or turn it off:
 
@@ -158,6 +164,14 @@ Rename the store local-test to local-main, point it at
 ```
 
 Mode: full. Tools: `backup_container_update`, `backup_container_delete`. Check: the changes read back from `backup_container_get`, and the deleted store is gone.
+
+**Make a store the default**
+
+```text
+Make the store local-main the default one.
+```
+
+Mode: modify. Tools: `backup_container_update` with `default`. Check: `backup_container_list` marks `local-main` and no longer marks the store that was the default.
 
 **Take a backup and follow it**
 

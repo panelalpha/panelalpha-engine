@@ -18,6 +18,7 @@ use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
+use App\Models\BackupContainer;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
@@ -65,6 +66,7 @@ class SystemController extends Controller
             'default_ipv4' => Setting::get('default_ipv4'),
             'host' => HostFacts::hostFor($caller, $system),
             'default_ipv6' => Setting::get('default_ipv6'),
+            'default_backup_container' => self::defaultBackupContainer(),
             'ipv4_nat_mode' => Ipv4NatMap::isNatModeEnabled(),
             'ipv4_nat_maps' => Ipv4NatMap::all(),
             'webserver' => $webserver->getDetails(),
@@ -86,6 +88,27 @@ class SystemController extends Controller
     public static function defaultTunnel(): ?string
     {
         return Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL);
+    }
+
+    /**
+     * The store the host backs up into when a caller names none; null while the
+     * host has none. Credentials are never part of it.
+     *
+     * @return ?array{id: int, name: string, driver: string, location: string}
+     */
+    public static function defaultBackupContainer(): ?array
+    {
+        $container = BackupContainer::defaultContainer();
+        if ($container === null) {
+            return null;
+        }
+
+        return [
+            'id' => $container->id,
+            'name' => $container->name,
+            'driver' => $container->driver,
+            'location' => $container->location,
+        ];
     }
 
     /** The URL a client should use: APP_URL, which the certificate scripts keep on the name the served certificate was issued for. */

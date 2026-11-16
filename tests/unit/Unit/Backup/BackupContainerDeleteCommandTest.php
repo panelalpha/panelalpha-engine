@@ -34,10 +34,31 @@ class BackupContainerDeleteCommandTest extends TestCase
         ]);
 
         $this->artisan("backup:container:delete --no-interaction {$box->id} --force")
-            ->expectsOutputToContain('Cannot delete backup container while a backup schedule uses it.')
+            ->expectsOutputToContain("Cannot delete backup container while a project's automatic backup schedule uses it: alice. Disable or delete those schedules first.")
             ->assertExitCode(1);
 
         $this->assertNotNull($box->fresh());
+        $this->assertSame(1, BackupSchedule::query()->count());
+    }
+
+    public function test_a_disabled_schedule_does_not_keep_the_container(): void
+    {
+        $box = $this->container('box');
+        $user = $this->makeUser('alice', ['template' => 'dind']);
+        BackupSchedule::create([
+            'user_id' => $user->id,
+            'container_id' => $box->id,
+            'cron' => '0 3 * * *',
+            'keep_last' => 3,
+            'enabled' => false,
+        ]);
+
+        $this->artisan("backup:container:delete --no-interaction {$box->id} --force")
+            ->expectsOutputToContain('Backup container deleted successfully.')
+            ->assertExitCode(0);
+
+        $this->assertNull($box->fresh());
+        $this->assertSame(0, BackupSchedule::query()->count());
     }
 
     public function test_a_container_no_schedule_uses_is_deleted(): void

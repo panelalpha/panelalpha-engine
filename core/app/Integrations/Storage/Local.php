@@ -202,14 +202,15 @@ final class Local extends AbstractStorage
         return $parents;
     }
 
+    /** A location that cannot be listed holds something this driver must not remove. */
     private function holdsAnythingButDirectories(string $root): bool
     {
-        $entries = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
-        );
-
         try {
+            $entries = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+
             foreach ($entries as $entry) {
                 if ($entry->isLink() || ! $entry->isDir()) {
                     return true;

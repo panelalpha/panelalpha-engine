@@ -51,6 +51,7 @@ class BackupContainerUpdateTool extends ApiTool
             'driver',
             'location',
             'credentials',
+            'default',
         ];
     }
 
@@ -65,6 +66,7 @@ class BackupContainerUpdateTool extends ApiTool
             'driver' => $schema->string()->description('One of: local, s3, ftp, ftps, sftp.'),
             'location' => $schema->string(),
             'credentials' => $schema->object(),
+            'default' => $schema->boolean()->description('Make this store the default one the host backs up into; the store that was the default stops being it. Read back as `default`.'),
         ];
     }
 }

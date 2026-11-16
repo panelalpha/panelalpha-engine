@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ResolvesBackupContainer;
 use Illuminate\Foundation\Http\FormRequest;
 
 class BackupStoreRequest extends FormRequest
 {
+    use ResolvesBackupContainer;
+
     public function authorize(): bool
     {
         return true;
@@ -17,7 +20,7 @@ class BackupStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'container' => ['required', 'string'],
+            'container' => ['sometimes', 'nullable', 'string'],
             'files' => ['sometimes', 'boolean'],
             'databases' => ['sometimes', 'boolean'],
             'note' => ['sometimes', 'nullable', 'string', 'max:255'],

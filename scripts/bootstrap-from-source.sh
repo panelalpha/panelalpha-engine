@@ -264,6 +264,7 @@ seed_config_dirs() {
     touch pureftpd/pureftpd.passwd
     cp -Rn templates/config/sftp/. config/sftp/
     cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
+    bash scripts/refresh-sftp-entrypoint.sh "$PWD" || warn "Could not recreate the sftp container for a changed entry point"
     cp -Rn templates/config/logrotate/. config/logrotate/
     cp templates/config/logrotate/{apache,apache-users,nginx,nginx-proxy,php}.conf config/logrotate/
     cp -Rn templates/config/exim/. config/exim/
@@ -521,6 +522,9 @@ clear_cached_bootstrap_files() {
 update_core_state() {
     step "Running migrations"
     core_artisan migrate --force
+
+    step "Creating the default backup store when there is none"
+    core_artisan backup:container:ensure-default || warn "Could not create the default backup store; 'pae backup:container:ensure-default' retries"
 
     step "Moving accounts onto the tenant network"
     core_artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"

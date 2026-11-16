@@ -75,7 +75,7 @@ class BackupScheduleSetTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'container' => $schema->string()->description('Backup container id or name')->required(),
+            'container' => $schema->string()->description('Backup container id or name. Without it an existing schedule keeps its store, and a new one uses the default store (`default_backup_container` in GET /system/info); a new one on a host with no default answers 422 `no_default_container`.'),
             'cron' => $schema->string()->description('Five-field cron expression in UTC, at most hourly. Example: 0 3 * * *.')->required(),
             'keep_last' => $schema->integer()->min(1)->max(365)->description('Completed scheduled backups to keep (1-365).'),
             'files' => $schema->boolean(),

@@ -79,6 +79,20 @@ use OpenApi\Attributes as OA;
         ),
         new OA\Property(property: 'default_ipv4', type: 'string', example: '203.0.113.7', nullable: true),
         new OA\Property(property: 'default_ipv6', type: 'string', example: '2001:db8::1', nullable: true),
+        new OA\Property(
+            property: 'default_backup_container',
+            nullable: true,
+            description: 'Where a backup goes when the caller names no store: the store this host set up, or the one an '
+                .'operator made the default. Null when this host has no store. The same store answers `default: true` in '
+                .'GET /backup-containers.',
+            properties: [
+                new OA\Property(property: 'id', type: 'integer', example: 1),
+                new OA\Property(property: 'name', type: 'string', example: 'local'),
+                new OA\Property(property: 'driver', type: 'string', example: 'local'),
+                new OA\Property(property: 'location', type: 'string', example: '/opt/panelalpha/backups/local'),
+            ],
+            type: 'object',
+        ),
         new OA\Property(property: 'ipv4_nat_mode', type: 'boolean', example: false),
         new OA\Property(property: 'ipv4_nat_maps', type: 'array', items: new OA\Items(type: 'object')),
         new OA\Property(property: 'webserver', type: 'object', description: 'The active webserver\'s details, as getDetails() returns them.'),

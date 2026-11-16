@@ -18,6 +18,7 @@ class BackupContainerResource extends JsonResource
             'driver' => $container->driver,
             'location' => $container->location,
             'has_credentials' => $container->credentials !== null,
+            'default' => (bool) $container->is_default,
             'created_at' => $container->created_at->toIso8601String(),
             'updated_at' => $container->updated_at->toIso8601String(),
         ];

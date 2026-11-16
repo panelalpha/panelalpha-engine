@@ -7,6 +7,7 @@ use App\Http\Requests\BackupContainerUpdateRequest;
 use App\Http\Resources\BackupContainerCollection;
 use App\Http\Resources\BackupContainerResource;
 use App\Jobs\DeleteBackupContainer;
+use App\Lib\Backup\ContainerRemoval;
 use App\Lib\Backup\StorageProbe;
 use App\Models\BackupContainer;
 use App\Models\Task;
@@ -96,6 +97,7 @@ class BackupContainerController extends Controller
             'location' => $validated['location'],
             'credentials' => $request->credentials(),
         ]);
+        $container->claimDefaultWhenNone();
 
         return new BackupContainerResource($container);
     }
@@ -110,6 +112,7 @@ class BackupContainerController extends Controller
                 new OA\Property(property: 'driver', type: 'string', enum: ['local', 's3', 'ftp', 'ftps', 'sftp']),
                 new OA\Property(property: 'location', type: 'string'),
                 new OA\Property(property: 'credentials', type: 'object', nullable: true),
+                new OA\Property(property: 'default', type: 'boolean', description: 'Make this store the default one the host backs up into; the store that was the default stops being it. Read back as `default`.'),
             ],
         )),
         tags: ['Backup Containers'],
@@ -143,6 +146,10 @@ class BackupContainerController extends Controller
 
         $container->save();
 
+        if ($request->makesDefault()) {
+            $container->makeDefault();
+        }
+
         return new BackupContainerResource($container);
     }
 
@@ -166,7 +173,9 @@ class BackupContainerController extends Controller
     #[OA\Delete(
         path: '/backup-containers/{id}',
         summary: 'Delete a backup container',
-        description: 'A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id).',
+        description: 'A store a project\'s enabled automatic backup schedule uses is refused with 409 naming the projects; a disabled schedule does not hold it and is removed with the store. A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id). '
+            .'With `delete_backups` the backups it holds go for good; this cannot be undone. Ask the operator to '
+            .'confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Backup Containers'],
         parameters: [
@@ -189,7 +198,7 @@ class BackupContainerController extends Controller
                 ],
             )),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 409, description: 'Container has backups and delete_backups was not set', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Container is in use: an enabled schedule uses it, or it holds backups and delete_backups was not set', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function destroy(int $id, Request $request): BackupContainerResource|JsonResponse
@@ -197,21 +206,24 @@ class BackupContainerController extends Controller
         $container = BackupContainer::findOrFail($id);
         $deleteBackups = filter_var($request->query('delete_backups'), FILTER_VALIDATE_BOOL);
 
-        if ($container->schedules()->exists()) {
+        $projects = ContainerRemoval::projectsOnSchedule($container);
+        if ($projects !== []) {
             return new JsonResponse([
-                'message' => 'Cannot delete backup container while a backup schedule uses it.',
-                'code' => 'container_in_use',
+                'message' => ContainerRemoval::scheduleRefusal($projects),
+                'code' => ContainerRemoval::IN_USE,
             ], 409);
         }
 
-        if (! $container->backups()->exists()) {
+        $backups = $container->backups()->count();
+        if ($backups === 0) {
             $container->deleteWithEmptyLocation();
 
             return new BackupContainerResource($container);
         }
         if (! $deleteBackups) {
             return new JsonResponse([
-                'message' => 'Cannot delete backup container while backups exist. Pass delete_backups to remove them with the container.',
+                'message' => ContainerRemoval::backupsRefusal($backups, 'delete_backups'),
+                'code' => ContainerRemoval::HAS_BACKUPS,
             ], 409);
         }
 

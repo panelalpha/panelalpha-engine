@@ -334,6 +334,76 @@ class BackupHttpTest extends TestCase
         $unknownContainer->assertJsonPath('problems.0.code', 'container_not_found');
     }
 
+    public function test_a_backup_naming_no_container_goes_to_the_default_one(): void
+    {
+        $user = $this->classicUser();
+        $this->localContainer();
+        $default = $this->localContainer();
+        $default->makeDefault();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", []);
+
+        $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame($default->id, BackupRecord::query()->sole()->container_id);
+    }
+
+    public function test_a_backup_naming_no_container_on_a_host_without_a_default_is_refused(): void
+    {
+        $user = $this->classicUser();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", ['container' => null]);
+
+        $this->assertSame(422, $response->getStatusCode(), (string) $response->getContent());
+        $response->assertJsonPath('problems.0.field', 'container');
+        $response->assertJsonPath('problems.0.code', 'no_default_container');
+        $this->assertSame(0, BackupRecord::query()->count());
+    }
+
+    public function test_a_new_schedule_naming_no_container_uses_the_default_one(): void
+    {
+        $user = $this->classicUser();
+        $this->localContainer();
+        $default = $this->localContainer();
+        $default->makeDefault();
+
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 3 * * *']);
+
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame($default->id, BackupSchedule::query()->sole()->container_id);
+    }
+
+    public function test_a_schedule_change_naming_no_container_keeps_its_store(): void
+    {
+        $user = $this->classicUser();
+        $current = $this->localContainer();
+        $this->putJson("/api/projects/{$user->username}/backup-schedule", [
+            'container' => (string) $current->id,
+            'cron' => '0 3 * * *',
+        ])->assertOk();
+
+        $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 4 * * *'])->assertOk();
+        $this->assertSame($current->id, BackupSchedule::query()->sole()->container_id);
+
+        $this->localContainer()->makeDefault();
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 5 * * *']);
+
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+        $schedule = BackupSchedule::query()->sole();
+        $this->assertSame($current->id, $schedule->container_id);
+        $this->assertSame('0 5 * * *', $schedule->cron);
+    }
+
+    public function test_a_new_schedule_naming_no_container_on_a_host_without_a_default_is_refused(): void
+    {
+        $user = $this->classicUser();
+
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 3 * * *']);
+
+        $this->assertSame(422, $response->getStatusCode(), (string) $response->getContent());
+        $response->assertJsonPath('problems.0.code', 'no_default_container');
+        $this->assertSame(0, BackupSchedule::query()->count());
+    }
+
     public function test_deleting_a_schedule_is_idempotent(): void
     {
         $user = $this->classicUser();

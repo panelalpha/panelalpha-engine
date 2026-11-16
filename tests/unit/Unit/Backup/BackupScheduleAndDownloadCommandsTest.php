@@ -73,6 +73,29 @@ class BackupScheduleAndDownloadCommandsTest extends TestCase
         $this->assertFalse($schedule->fresh()->enabled);
     }
 
+    public function test_a_new_schedule_without_a_container_uses_the_default_one(): void
+    {
+        $this->makeUser('alice', ['template' => 'default']);
+        $this->localContainer();
+        $default = $this->localContainer();
+        $default->makeDefault();
+
+        $this->artisan("project:backup:schedule alice --cron='0 3 * * *'")->assertExitCode(0);
+
+        $this->assertSame($default->id, BackupSchedule::query()->sole()->container_id);
+    }
+
+    public function test_a_new_schedule_without_a_container_on_a_host_without_a_default_names_the_option(): void
+    {
+        $this->makeUser('alice', ['template' => 'default']);
+
+        $this->artisan("project:backup:schedule alice --cron='0 3 * * *'")
+            ->expectsOutputToContain('no default backup container; name one with --container')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, BackupSchedule::query()->count());
+    }
+
     public function test_schedule_command_refuses_a_too_frequent_cron(): void
     {
         $this->makeUser('alice', ['template' => 'default']);

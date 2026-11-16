@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ResolvesBackupContainer;
 use Illuminate\Foundation\Http\FormRequest;
 
 class BackupScheduleUpdateRequest extends FormRequest
 {
+    use ResolvesBackupContainer;
+
     public function authorize(): bool
     {
         return true;
@@ -17,7 +20,7 @@ class BackupScheduleUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'container' => ['required', 'string'],
+            'container' => ['sometimes', 'nullable', 'string'],
             'cron' => ['required', 'string', 'max:255'],
             'keep_last' => ['sometimes', 'integer', 'min:1', 'max:365'],
             'files' => ['sometimes', 'boolean'],
