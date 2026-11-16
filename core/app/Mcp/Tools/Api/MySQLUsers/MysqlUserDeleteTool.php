@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_user_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a MySQL user
+
+    Deletes the MySQL user and its grants; its password stops working at once and an application still using it starts failing. The databases and their data stay. This cannot be undone: ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

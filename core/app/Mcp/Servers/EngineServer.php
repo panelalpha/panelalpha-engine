@@ -33,14 +33,25 @@ use Laravel\Mcp\Transport\JsonRpcRequest;
 
     Many tools change server state and some destroy data: deleting a project
     removes its container, files and databases; suspending takes its sites
-    offline. Follow the annotations, and confirm destructive calls with the
-    operator on a production server.
+    offline. Follow the annotations, and before any destructive call ask the
+    operator what it will remove or overwrite and get an explicit yes -- on
+    every server, not only a production one. When a description says a change
+    cannot be undone, do not call it on an assumption.
 
     Deploys run in the background: `project_create`, `project_rebuild` and
     `project_deploy_archive` answer at once with a task `id`, and so do
     `git_pull`, `git_change_branch` and `git_revert` on a `managed_by: deploy`
     checkout. Follow it with `task_get` until it is completed, failed or
     cancelled; never start another deploy while it runs.
+
+    After a change, read the state back before reporting it: the object with
+    its `*_get` or `*_list` tool, the task with `task_get`, the app with
+    `app_health_check`. Report what the engine answered, not what was asked
+    for.
+
+    Never ask for a password or a token in the chat. Create a paste page with
+    `vault_secret_create` and give the operator its `url`; pass the returned
+    `vault:<key>` wherever the secret goes.
 
     Git on a project starts with `git_status`. On `managed_by: deploy` a
     pull, branch change or revert rebuilds the app after it, as the task

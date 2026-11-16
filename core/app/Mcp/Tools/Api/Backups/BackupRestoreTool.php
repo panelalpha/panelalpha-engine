@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Restore a project backup
 
-    Restores the whole backup, or the parts `only` names, or all but the parts `exclude` names; the two cannot be combined (422 on `only`). Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database.
+    Restores the whole backup, or the parts `only` names, or all but the parts `exclude` names; the two cannot be combined (422 on `only`). Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database. A restore writes over the live project: the home is swapped for the backup's copy unless `delete_existing_files` is false, and the databases it covers are replaced, so everything changed since the backup is lost. This cannot be undone: ask the operator to confirm first and say what will be overwritten.
     MARKDOWN)]
 #[IsDestructive]
 class BackupRestoreTool extends ApiTool

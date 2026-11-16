@@ -259,6 +259,8 @@ class IpController extends Controller
     #[OA\Delete(
         path: '/ip/subnets/{id}',
         summary: 'Delete an IP subnet',
+        description: 'The subnet goes from the engine\'s address management and is not kept; this cannot be undone. Ask '
+            .'the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['IP Management'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],

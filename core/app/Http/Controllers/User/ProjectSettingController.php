@@ -153,7 +153,9 @@ class ProjectSettingController extends Controller
         path: '/projects/{username}/settings/{key}',
         summary: 'Clear one project setting',
         description: 'Clearing a Cloudflare API token is refused while the project still has Cloudflare '
-            .'tunnels, unless `force` is true, which tears them down first.',
+            .'tunnels, unless `force` is true, which tears them down first. '
+            .'The stored value goes and is not kept anywhere; this cannot be undone. Ask the operator to confirm '
+            .'first.',
         security: [['bearerAuth' => []]],
         tags: ['Project Settings'],
         parameters: [

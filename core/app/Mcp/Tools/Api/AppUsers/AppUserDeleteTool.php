@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete an app user
 
-    WordPress hands the user's posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`.
+    WordPress hands the user's posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`. The user's profile and its settings go with the account and are not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

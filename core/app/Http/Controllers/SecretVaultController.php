@@ -255,7 +255,9 @@ class SecretVaultController extends Controller
         description: 'Removes the entry and its secret. References to it stop resolving. This is also how a '
             .'secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new '
             .'one. `ref` is its `vault:<key>`. A project that already used it keeps the '
-            .'copy it stored.',
+            .'copy it stored. '
+            .'The secret\'s value is gone and the engine keeps no copy of it; this cannot be undone. Ask the '
+            .'operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [

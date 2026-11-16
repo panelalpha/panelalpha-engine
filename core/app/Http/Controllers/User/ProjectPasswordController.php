@@ -45,6 +45,8 @@ class ProjectPasswordController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/password',
         summary: 'Remove site password protection from a project',
+        description: 'The stored password goes and is not kept, so the site answers anyone who reaches it; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

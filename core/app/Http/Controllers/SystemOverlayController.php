@@ -68,7 +68,9 @@ class SystemOverlayController extends Controller
     #[OA\Delete(
         path: '/system/overlay',
         summary: 'Remove the global overlay',
-        description: 'Stops writing the global overlay into pages. Projects\' own overlays stay.',
+        description: 'Stops writing the global overlay into pages. Projects\' own overlays stay. '
+            .'The global overlay text goes and is not kept, so it has to be written again; this cannot be undone. '
+            .'Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         responses: [

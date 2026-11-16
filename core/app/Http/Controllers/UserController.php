@@ -170,7 +170,8 @@ class UserController extends Controller
             .'{"type": "archive", "upload_id": "..."} from upload_create, {"type": "project", "from": "<name>"} to copy a '
             .'project, {"type": "wordpress", "title": "...", "admin": {"user", "email", "password"}}, or omit it for an '
             .'empty container project. Leave `domain` out unless the user has a domain of their own: then {"name": "...", '
-            .'"tunnel": "none"}. For a public github.com repository `data.inspection` says before the clone whether it may deploy.'],
+            .'"tunnel": "none"}. For a public github.com repository `data.inspection` says before the clone whether it may deploy. '
+            .'When the user wants one answer with the finished project and can wait, project_create_sync deploys inside the call and returns the project.'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
@@ -213,9 +214,10 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/users',
-        description: 'Legacy synchronous create. Takes the flat body POST /projects still accepts, so a body '
-            .'of only a name is classic hosting here unless `template` is dind. Runs the deploy inside the '
-            .'request and returns the project resource. Supports X-Deploy-Stream: ndjson. '
+        description: 'Synchronous create: runs the deploy inside the request and returns the finished project, '
+            .'for when the caller wants one answer with the result rather than a task to poll. Takes the flat '
+            .'body POST /projects still accepts, so a body of only a name is classic hosting here unless '
+            .'`template` is dind. Supports X-Deploy-Stream: ndjson. '
             .'Unless the caller has a domain of its own, the name to give a project is a free '
             .'label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online '
             .'proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to '
@@ -735,11 +737,12 @@ class UserController extends Controller
             .'With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is streamed '
             .'as NDJSON.',
         x: ['mcp-description' => 'Deploys an archive already in the account (put there with file_upload or FTP), '
-            .'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Answers at once with a '
-            .'task `id`: follow it with task_get until completed, failed or cancelled; a failure is in '
-            .'details.error and details.problems. A 409 means a deploy is already running: follow the task_id '
-            .'it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, '
-            .'instead of calling again.'],
+            .'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Extraction overwrites '
+            .'files of the same name in ~/project and that cannot be undone: ask the operator to confirm first. '
+            .'Answers at once with a task `id`: follow it with task_get until completed, failed or cancelled; a '
+            .'failure is in details.error and details.problems. A 409 means a deploy is already running: follow '
+            .'the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is '
+            .'null, instead of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -936,13 +939,14 @@ class UserController extends Controller
      * Clone a project.
      *
      * Creates a new project with the same resource limits and settings as the
-     * source, derives a staging domain when none is provided, and copies the
-     * source's home directory (including named Docker volumes) and project config
-     * files to the new project after provisioning completes. A source on a free
-     * panelalpha.online name gets a clone with a new name of its own there,
-     * since a name below it would not be served over HTTPS. An anonymous volume
-     * (an image's own VOLUME the compose file does not name) is not copied: the
-     * response's `warnings` names each one that held data.
+     * source, and copies the source's home directory (including named Docker
+     * volumes) and project config files to the new project after provisioning
+     * completes. A clone given no domain is named `clone.` in front of its
+     * source's, never the `staging.` address its source's staging copy takes.
+     * A source on a free panelalpha.online name gets a clone with a new name of
+     * its own there, since a name below it would not be served over HTTPS. An
+     * anonymous volume (an image's own VOLUME the compose file does not name) is
+     * not copied: the response's `warnings` names each one that held data.
      *
      * Subdomains, FTP/SFTP accounts and dedicated IP addresses are NOT copied.
      * MySQL databases are, under the clone's prefix, together with the users
@@ -1004,6 +1008,8 @@ class UserController extends Controller
     #[OA\Get(
         path: '/projects/{username}',
         summary: 'Get a project',
+        x: ['mcp-description' => 'The project\'s record: status, domain, template, limits and settings. '
+            .'For resource use - disk, bandwidth and the space its container logs take - call project_usage.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1035,7 +1041,8 @@ class UserController extends Controller
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'domain', type: 'string', nullable: true, description: 'Renames the main domain. Not to a name under panelalpha.online (add it as a tunnel instead). '
+                new OA\Property(property: 'domain', type: 'string', nullable: true, description: 'Renames the main domain. A name given as `www.example.org` becomes `example.org` with `www.example.org` as an alias, as adding a domain makes it. '
+                    .'Not to a name under panelalpha.online (add it as a tunnel instead). '
                     .'A PanelAlpha Online tunnel that is the old name itself is deleted with it; any other tunnel of the main domain has to be deleted first.'),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true, description: 'MB, -1 for unlimited; null clears the limit', x: ['mcp-nullable' => true]),
@@ -1234,6 +1241,9 @@ class UserController extends Controller
     #[OA\Delete(
         path: '/projects/{username}',
         summary: 'Delete a project and everything in it',
+        x: ['mcp-description' => 'Deletes the project and everything in it: its container, home files, MySQL '
+            .'databases and users, domains, FTP/SFTP accounts and cron jobs. This cannot be undone. Ask the '
+            .'operator to confirm first and say what will be lost; a backup is the only way back.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

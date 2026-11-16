@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('project_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a project and everything in it
+
+    Deletes the project and everything in it: its container, home files, MySQL databases and users, domains, FTP/SFTP accounts and cron jobs. This cannot be undone. Ask the operator to confirm first and say what will be lost; a backup is the only way back.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

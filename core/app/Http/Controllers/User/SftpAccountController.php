@@ -191,6 +191,8 @@ class SftpAccountController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/sftp-accounts/{sftpUser}',
         summary: 'Delete an SFTP account',
+        description: 'The login and its key or password are gone for good and the account stops working at once; the files '
+            .'it uploaded stay. This cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['SFTP Accounts'],
         parameters: [

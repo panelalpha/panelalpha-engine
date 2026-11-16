@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_privileges_revoke')]
 #[Description(<<<'MARKDOWN'
     Revoke all MySQL privileges for a user on a database
+
+    The grants go and the user's queries on that database start failing until they are granted again; the grants are not kept. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a WordPress user
 
-    Deletes a WordPress user by login or ID. Optional `reassign` moves their content to another user. Optional `path` selects the install.
+    Deletes a WordPress user by login or ID. Optional `reassign` moves their content to another user. Optional `path` selects the install. The user's profile and its settings go with the account and are not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

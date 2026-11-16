@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete an upload
 
-    Removes an upload no create has claimed. 409 when a create already claimed it: its deploy moves the file into the project.
+    Removes an upload no create has claimed. 409 when a create already claimed it: its deploy moves the file into the project. The uploaded file and its record go for good and the engine keeps no copy; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

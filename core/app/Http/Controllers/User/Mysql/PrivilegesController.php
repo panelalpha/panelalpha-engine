@@ -114,6 +114,8 @@ class PrivilegesController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/mysql/privileges/{dbuser}/{dbname}',
         summary: 'Revoke all MySQL privileges for a user on a database',
+        description: 'The grants go and the user\'s queries on that database start failing until they are granted again; '
+            .'the grants are not kept. This cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['MySQL Privileges'],
         parameters: [

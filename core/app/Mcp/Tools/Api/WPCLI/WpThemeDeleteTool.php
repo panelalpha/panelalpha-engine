@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a WordPress theme
 
-    Deletes an installed theme by slug. Optional `path` selects the install.
+    Deletes an installed theme by slug. Optional `path` selects the install. The theme's files are deleted from the install and the engine keeps no copy of them; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

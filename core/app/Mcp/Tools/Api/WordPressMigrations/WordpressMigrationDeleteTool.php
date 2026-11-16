@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a finished WordPress migration record
 
-    Removes the record of a completed, failed or cancelled migration. Only the record goes: a completed import's site stays, and a failed one's project and plugins stay too, so cancel a failed migration first to remove them. 409 while it is pending, running or cancelling.
+    Removes the record of a completed, failed or cancelled migration. Only the record goes: a completed import's site stays, and a failed one's project and plugins stay too, so cancel a failed migration first to remove them. 409 while it is pending, running or cancelling. The record goes and is not kept; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -210,7 +210,9 @@ class WpUserController extends WordPressController
         path: '/projects/{username}/wp/users/{user}',
         summary: 'Delete a WordPress user',
         description: 'Deletes a WordPress user by login or ID. Optional `reassign` moves their '
-            .'content to another user. Optional `path` selects the install.',
+            .'content to another user. Optional `path` selects the install. '
+            .'The user\'s profile and its settings go with the account and are not kept anywhere; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [

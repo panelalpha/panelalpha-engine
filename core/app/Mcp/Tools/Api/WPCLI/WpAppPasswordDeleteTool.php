@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete an application password for a WordPress user
 
-    Deletes an application password by UUID. Optional `path` selects the install.
+    Deletes an application password by UUID. Optional `path` selects the install. The password stops working at once and cannot be read back or restored; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

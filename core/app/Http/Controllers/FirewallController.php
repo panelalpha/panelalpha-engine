@@ -184,6 +184,8 @@ class FirewallController extends Controller
     #[OA\Delete(
         path: '/firewall/rules/{id}',
         summary: 'Delete a firewall rule',
+        description: 'The rule goes and is not kept anywhere, so the traffic it matched is no longer filtered by it. This '
+            .'cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -343,6 +345,8 @@ class FirewallController extends Controller
     #[OA\Delete(
         path: '/firewall/trusted/{id}',
         summary: 'Stop trusting an address',
+        description: 'The trusted entry goes and is not kept, so the address has to be trusted again. This cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

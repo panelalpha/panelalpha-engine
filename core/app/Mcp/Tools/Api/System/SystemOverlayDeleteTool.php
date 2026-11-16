@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Remove the global overlay
 
-    Stops writing the global overlay into pages. Projects' own overlays stay.
+    Stops writing the global overlay into pages. Projects' own overlays stay. The global overlay text goes and is not kept, so it has to be written again; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

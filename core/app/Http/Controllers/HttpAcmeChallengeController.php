@@ -140,6 +140,8 @@ class HttpAcmeChallengeController extends Controller
     #[OA\Delete(
         path: '/domains/{domain}/http-acme-challenges',
         summary: 'Delete all HTTP-01 ACME challenges for a domain',
+        description: 'The validation records go and an issuance in progress fails and has to be started again; this cannot '
+            .'be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Domain ACME'],
         parameters: [new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -167,6 +169,8 @@ class HttpAcmeChallengeController extends Controller
     #[OA\Delete(
         path: '/domains/{domain}/http-acme-challenges/{token}',
         summary: 'Delete a single HTTP-01 ACME challenge',
+        description: 'The validation record goes and an issuance using it fails and has to be started again; this cannot '
+            .'be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Domain ACME'],
         parameters: [

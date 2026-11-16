@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Remove a repository's build caches
 
-    Removes a repository's BuildKit caches from this host's cache registry, of one branch or all. Refused 403 for a project-scoped token.
+    Removes a repository's BuildKit caches from this host's cache registry, of one branch or all. Refused 403 for a project-scoped token. The cached layers go and the next build compiles them again; caches are not kept. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

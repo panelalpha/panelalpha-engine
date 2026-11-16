@@ -186,7 +186,9 @@ class SystemImageController extends Controller
             .'earlier operation is still running, and with 403 for a token scoped to some projects.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
-        x: ['mcp-description' => 'Removes an operator base image from this host\'s cache registry and forgets it, as a task. A new build FROM it fails afterwards. Refused 403 for a project-scoped token.'],
+        x: ['mcp-description' => 'Removes an operator base image from this host\'s cache registry and forgets it, as a task. A new build FROM it fails afterwards. Refused 403 for a project-scoped token. '
+            .'The registry entry is gone and is not kept; this cannot be undone. Ask the operator to confirm '
+            .'first.'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
         responses: [
             new OA\Response(response: 202, description: 'The image as it is being removed, and the task', content: new OA\JsonContent(

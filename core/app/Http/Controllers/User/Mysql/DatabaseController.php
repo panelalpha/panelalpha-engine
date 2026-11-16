@@ -179,6 +179,8 @@ class DatabaseController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/mysql/databases/{dbname}',
         summary: 'Delete a MySQL database',
+        x: ['mcp-description' => 'Deletes the database and every table and row in it; this cannot be undone. The '
+            .'project\'s MySQL users stay but lose access to it. Ask the operator to confirm first.'],
         security: [['bearerAuth' => []]],
         tags: ['MySQL Databases'],
         parameters: [

@@ -56,6 +56,10 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
     reason: 'issues and removes certificates on the shared user; reloads',
   },
   {
+    glob: 'domains/domains-primary-switch-certificate',
+    reason: 'installs a certificate on its own project and reloads the webserver',
+  },
+  {
     glob: 'domains/domains-request-ssl',
     reason: 'certificate requests on the shared user; reloads',
   },
@@ -107,6 +111,7 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
     reason: 'checks the shared site keeps serving after another project is removed',
   },
   { glob: 'backup/backup-containers', reason: 'global backup container list' },
+  { glob: 'backup/backup-container-disabled-schedule', reason: 'global backup container list' },
   { glob: 'mcp/mcp-tokens', reason: 'global token list' },
   { glob: 'mcp/mcp-activity-logs', reason: 'global activity log' },
   { glob: 'vault/vault-secrets', reason: 'global secret list' },

@@ -152,7 +152,9 @@ class AppUserController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/app/users/{userId}',
         summary: 'Delete an app user',
-        description: 'WordPress hands the user\'s posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`.',
+        description: 'WordPress hands the user\'s posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`. '
+            .'The user\'s profile and its settings go with the account and are not kept anywhere; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['App Users'],
         parameters: [

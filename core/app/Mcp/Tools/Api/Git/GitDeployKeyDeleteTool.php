@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a git deploy key
 
-    Delete the project's SSH deploy key and the host keys pinned with it. SSH remotes stop authenticating; remove the key from the repository too. 404 when the project has no deploy key.
+    Delete the project's SSH deploy key and the host keys pinned with it. SSH remotes stop authenticating; remove the key from the repository too. 404 when the project has no deploy key. The key pair is gone and the engine keeps no copy of the private half; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

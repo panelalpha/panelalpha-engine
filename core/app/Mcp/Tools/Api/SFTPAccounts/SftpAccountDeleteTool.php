@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('sftp_account_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an SFTP account
+
+    The login and its key or password are gone for good and the account stops working at once; the files it uploaded stay. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

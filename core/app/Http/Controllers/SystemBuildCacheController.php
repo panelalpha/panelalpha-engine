@@ -85,7 +85,9 @@ class SystemBuildCacheController extends Controller
             .'https URL (422). Refused with 403 for a token scoped to some projects.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
-        x: ['mcp-description' => 'Removes a repository\'s BuildKit caches from this host\'s cache registry, of one branch or all. Refused 403 for a project-scoped token.'],
+        x: ['mcp-description' => 'Removes a repository\'s BuildKit caches from this host\'s cache registry, of one branch or all. Refused 403 for a project-scoped token. '
+            .'The cached layers go and the next build compiles them again; caches are not kept. This cannot be '
+            .'undone. Ask the operator to confirm first.'],
         parameters: [
             new OA\Parameter(name: 'repository', in: 'query', required: true, description: 'The clone URL the caches were built from.', schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'branch', in: 'query', required: false, description: 'Only this branch; every branch when omitted.', schema: new OA\Schema(type: 'string')),

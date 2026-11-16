@@ -14,7 +14,6 @@ use App\Jobs\CreateBackup;
 use App\Jobs\DeleteBackup;
 use App\Jobs\RestoreBackup;
 use App\Models\Backup as BackupRecord;
-use App\Models\BackupContainer;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
@@ -67,9 +66,8 @@ class BackupController extends Controller
         description: 'Supported for PHP hosting and DinD projects alike. On DinD the `databases` flag also controls the project volumes. A request that selects neither files nor databases is refused with 422 `nothing_to_back_up`.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['container'],
             properties: [
-                new OA\Property(property: 'container', description: 'Backup container id or name', type: 'string'),
+                new OA\Property(property: 'container', description: 'Backup container id or name. Without it the default store is used (`default_backup_container` in GET /system/info); a host with no default answers 422 `no_default_container`.', type: 'string'),
                 new OA\Property(property: 'files', description: 'Include the project files (default true).', type: 'boolean'),
                 new OA\Property(property: 'databases', description: 'Include the databases; on DinD this also includes the volumes (default true).', type: 'boolean'),
                 new OA\Property(property: 'note', description: 'Free-form note shown with the backup.', type: 'string', nullable: true, maxLength: 255),
@@ -95,7 +93,7 @@ class BackupController extends Controller
             throw ProblemException::one('files', 'nothing_to_back_up', 'Choose files or databases to back up.');
         }
 
-        $container = BackupContainer::findByIdOrName((string) $request->validated('container'));
+        $container = $request->backupContainer();
         if ($container === null) {
             abort(new JsonResponse([
                 'message' => 'Backup container not found',
@@ -144,7 +142,11 @@ class BackupController extends Controller
         path: '/projects/{username}/backups/{id}/restore',
         summary: 'Restore a project backup',
         description: 'Restores the whole backup, or the parts `only` names, or all but the parts `exclude` names; the two cannot be combined (422 on `only`). '
-            .'Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database.',
+            .'Example: `{"confirm": true, "only": {"databases": ["shop"]}}` restores just that database. '
+            .'A restore writes over the live project: the home is swapped for the backup\'s copy unless '
+            .'`delete_existing_files` is false, and the databases it covers are replaced, so everything changed '
+            .'since the backup is lost. This cannot be undone: ask the operator to confirm first and say what '
+            .'will be overwritten.',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['confirm'],
@@ -218,6 +220,8 @@ class BackupController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/backups/{id}',
         summary: 'Delete a project backup',
+        x: ['mcp-description' => 'Deletes this backup and the files it holds; that copy of the project cannot be '
+            .'restored afterwards, and this cannot be undone. Ask the operator to confirm first.'],
         security: [['bearerAuth' => []]],
         tags: ['Backups'],
         parameters: [

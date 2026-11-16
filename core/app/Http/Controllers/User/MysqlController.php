@@ -48,6 +48,8 @@ class MysqlController extends Controller
     #[OA\Post(
         path: '/projects/{username}/mysql/phpmyadmin-sso-token',
         summary: 'Create a phpMyAdmin SSO token for a project',
+        x: ['mcp-description' => 'Creates a one-time URL that logs straight into phpMyAdmin as the project\'s '
+            .'database admin. It is single use and expires after 5 minutes; when it stops working, create a new one.'],
         security: [['bearerAuth' => []]],
         tags: ['MySQL Server'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

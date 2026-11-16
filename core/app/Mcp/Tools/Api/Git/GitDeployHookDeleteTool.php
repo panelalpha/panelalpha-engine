@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a push-to-deploy hook
 
-    Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 from then on; remove the webhook in the git host too. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.
+    Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 from then on; remove the webhook in the git host too. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook. The hook and its delivery history are not kept; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

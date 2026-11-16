@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Inspect a project's deployed application files
 
-    What the project's files are - stack, ports, services, the commands a deploy would run - next to what the last deploy recorded, and where the two differ. .env values are never returned, only their names.
+    What the project's files are - stack, ports, services, the commands a deploy would run - next to what the last deploy recorded, and where the two differ. Ports are read from the files present at this moment and are known for sure only after a deploy: call it again once the task is completed. .env values are never returned, only their names.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

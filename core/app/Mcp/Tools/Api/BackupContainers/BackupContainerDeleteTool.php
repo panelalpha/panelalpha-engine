@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a backup container
 
-    A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id).
+    A store a project's enabled automatic backup schedule uses is refused with 409 naming the projects; a disabled schedule does not hold it and is removed with the store. A store that still holds backups is refused with 409 unless `delete_backups` is set, which removes the backups with the store (as an asynchronous task, answered 202 with a task_id). With `delete_backups` the backups it holds go for good; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

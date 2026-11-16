@@ -73,7 +73,9 @@ class UploadController extends Controller
     #[OA\Delete(
         path: '/uploads/{id}',
         summary: 'Delete an upload',
-        description: 'Removes an upload no create has claimed. 409 when a create already claimed it: its deploy moves the file into the project.',
+        description: 'Removes an upload no create has claimed. 409 when a create already claimed it: its deploy moves the file into the project. '
+            .'The uploaded file and its record go for good and the engine keeps no copy; this cannot be undone. '
+            .'Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Uploads'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

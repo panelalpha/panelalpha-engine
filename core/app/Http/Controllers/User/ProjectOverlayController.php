@@ -65,7 +65,9 @@ class ProjectOverlayController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/overlay',
         summary: 'Remove a project\'s overlay',
-        description: 'Removes the project\'s own overlay and shows the global one on it again.',
+        description: 'Removes the project\'s own overlay and shows the global one on it again. '
+            .'The project\'s overlay text goes and is not kept, so it has to be written again; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Clear one project setting
 
-    Clearing a Cloudflare API token is refused while the project still has Cloudflare tunnels, unless `force` is true, which tears them down first.
+    Clearing a Cloudflare API token is refused while the project still has Cloudflare tunnels, unless `force` is true, which tears them down first. The stored value goes and is not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

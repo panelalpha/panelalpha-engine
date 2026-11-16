@@ -169,8 +169,9 @@ class SourceInspectionController extends Controller
             .'GET. The older spellings - the `/source-inspection` path and the `path` parameter - '
             .'still work and are deprecated.',
         x: ['mcp-description' => "What the project's files are - stack, ports, services, the commands a deploy "
-            .'would run - next to what the last deploy recorded, and where the two differ. .env values '
-            .'are never returned, only their names.'],
+            .'would run - next to what the last deploy recorded, and where the two differ. Ports are read from the '
+            .'files present at this moment and are known for sure only after a deploy: call it again once the task '
+            .'is completed. .env values are never returned, only their names.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [

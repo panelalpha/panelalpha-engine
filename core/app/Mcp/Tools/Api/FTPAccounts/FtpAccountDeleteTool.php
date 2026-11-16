@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('ftp_account_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an FTP account
+
+    The login stops working at once and the account and its password are gone for good; the files it uploaded stay. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

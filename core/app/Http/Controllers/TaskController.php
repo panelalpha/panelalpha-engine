@@ -175,6 +175,11 @@ class TaskController extends Controller
         summary: 'Poll a task status and new log lines after a cursor',
         description: 'Returns the task and a page of at most `limit` log rows after `after_id`. While `more` '
             .'is true there are rows after this page: ask again with `after_id` set to `next_after_id`.',
+        x: ['mcp-description' => 'Returns the task and a page of at most `limit` log rows after `after_id`. While '
+            .'`more` is true there are rows after this page: ask again with `after_id` set to `next_after_id`. '
+            .'A deploy or rebuild usually takes a few minutes, a clone or staging copy about as long as its files '
+            .'take to copy, and either can run past ten minutes on a large app: keep polling every 20-30 seconds '
+            .'until `status` is `completed` or `failed` (or `cancelled`) and do not answer the user before that.'],
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [

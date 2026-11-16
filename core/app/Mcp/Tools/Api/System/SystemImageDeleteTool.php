@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Remove an operator base image
 
-    Removes an operator base image from this host's cache registry and forgets it, as a task. A new build FROM it fails afterwards. Refused 403 for a project-scoped token.
+    Removes an operator base image from this host's cache registry and forgets it, as a task. A new build FROM it fails afterwards. Refused 403 for a project-scoped token. The registry entry is gone and is not kept; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

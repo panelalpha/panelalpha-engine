@@ -210,6 +210,8 @@ class ProxyRuleController extends Controller
     #[OA\Delete(
         path: '/proxy-rules/{id}',
         summary: 'Delete a proxy rule',
+        description: 'The rule goes and the traffic it matched is served as the rest of the domain is; the rule is not '
+            .'kept. This cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Proxy Rules'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
