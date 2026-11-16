@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List git commits
 
-    List git commits. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.
+    List git commits. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned. A branch the checkout has not fetched is fetched once for the listing, so every branch another call lists can be listed here before it is deployed; a branch the remote does not have is refused 422 with `problems[{field: git, code: git_branch_not_found}]`, and one that could not be fetched 422 `git_branch_not_fetched`. Neither answer carries git's own error.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

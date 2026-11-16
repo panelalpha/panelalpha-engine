@@ -18,5 +18,7 @@ interface IssuableDomain
 
     public function putCertificate(string $cert, string $key, string $ca = ''): void;
 
+    public function putIssuedCertificate(string $cert, string $key, string $ca = ''): void;
+
     public function publishCertificateToHostWebserver(): void;
 }

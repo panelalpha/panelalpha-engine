@@ -8,10 +8,8 @@ use App\System\Services\Mysql;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Renames one MySQL database in place: its data, the grants that pointed at it
- * and the row that records it. The old database is dropped only after all of
- * that succeeded; a failure before the drop moves any moved tables back,
- * removes the new database and puts the grants back where they were.
+ * Renames one MySQL database in place: its data, grants and row. The old one is dropped only after all of that
+ * succeeded; a failure before the drop moves tables back, removes the new database and puts the grants back.
  */
 class DatabaseRenamer
 {
@@ -29,7 +27,7 @@ class DatabaseRenamer
         $moved = [];
 
         try {
-            $moved = $this->copy($oldName, $newName, DefinerMap::between($user, $user));
+            $moved = $this->copy($oldName, $newName, array_keys($grants), DefinerMap::between($user, $user));
             $this->moveGrants($grants, $oldName, $newName);
         } catch (\Throwable $e) {
             throw $this->undo($grants, $oldName, $newName, $moved, $e);
@@ -47,15 +45,16 @@ class DatabaseRenamer
     }
 
     /**
-     * A database of only base tables moves by metadata alone, in one atomic
-     * statement. Anything else -- a view, trigger, routine or event -- cannot,
-     * and is streamed over by a dump and an import instead.
+     * A database of only base tables moves by metadata alone, in one atomic statement. Anything else -- a view,
+     * trigger, routine or event -- cannot, and is streamed over by a dump and an import instead.
      *
+     * @param  list<string>  $users  the project's MySQL users granted on $from
      * @return list<string> the tables moved out of $from, none for a copy
      */
-    private function copy(string $from, string $to, DefinerMap $definers): array
+    private function copy(string $from, string $to, array $users, DefinerMap $definers): array
     {
         if ($this->mysql->databases()->hasObjectsBeyondTables($from)) {
+            $this->closeToUsers($from, $users);
             $this->copier->copyDatabase($from, $to, $definers);
 
             return [];
@@ -68,6 +67,20 @@ class DatabaseRenamer
         }
 
         return $tables;
+    }
+
+    /**
+     * A dump copies a snapshot, so the users lose the database and their open
+     * sessions first: a write during the copy fails instead of being dropped.
+     *
+     * @param  list<string>  $users
+     */
+    private function closeToUsers(string $database, array $users): void
+    {
+        foreach ($users as $user) {
+            $this->mysql->privileges()->revokeIfExists($user, $database);
+            $this->mysql->users()->killSessions($user);
+        }
     }
 
     /**
@@ -98,9 +111,8 @@ class DatabaseRenamer
     }
 
     /**
-     * The new database is dropped only once it holds nothing of the old one: a
-     * copy, or tables already moved back. Tables that cannot be moved back stay
-     * in it, and the failure says where they are.
+     * The new database is dropped only once it holds nothing of the old one: a copy, or tables already moved
+     * back. Tables that cannot be moved back stay in it, and the failure says where they are.
      *
      * @param  array<string, string>  $grants
      * @param  list<string>  $moved

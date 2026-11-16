@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Detect;
 
 /**
- * Editor extensions (VS Code / Cursor / Theia) are Node packages but not HTTP
- * servers. Railpack builds them happily, then the container crashes on
- * `require('vscode')`.
+ * Editor extensions (VS Code / Cursor / Theia) are Node packages but not HTTP servers: Railpack builds
+ * them, then the container crashes on `require('vscode')`.
  */
 final class EditorExtension
 {

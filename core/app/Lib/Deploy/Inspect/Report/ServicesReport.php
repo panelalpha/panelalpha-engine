@@ -8,12 +8,8 @@ use App\Lib\Deploy\Sidecar\EnvSidecars;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
- * Backing services the application needs: the datastores a compose file
- * declares, plus the ones only a DATABASE_URL or REDIS_URL admits to.
- *
- * The second half is the one that catches people out. A framework template
- * ships no compose at all and points DATABASE_URL at localhost; deployed as
- * written it starts cleanly and 500s on the first request.
+ * Backing services the application needs: datastores a compose file declares, plus those only a DATABASE_URL
+ * or REDIS_URL admits to, as a template pointing at localhost starts cleanly and 500s on the first request.
  */
 final class ServicesReport
 {
@@ -91,6 +87,8 @@ final class ServicesReport
     }
 
     /**
+     * Read through ComposeYaml, which takes the anchor shapes Docker accepts and Symfony does not.
+     *
      * @return array<string, array<string, mixed>>
      */
     private function composeServices(): array
@@ -102,12 +100,6 @@ final class ServicesReport
             return [];
         }
 
-        // Through ComposeYaml, which reads the anchor shapes Docker accepts
-        // and Symfony does not. This had its own catch returning [], so a
-        // compose file the parser choked on came back as "no services" rather
-        // than as a problem -- which is how source_inspect reported Lychee as
-        // `deployable: true, issue: null, services: []` for a file declaring
-        // seven services, while the deploy path could read it perfectly well.
         $parsed = ComposeYaml::parseFile($path);
         if ($parsed === null || ! is_array($parsed['services'] ?? null)) {
             return [];

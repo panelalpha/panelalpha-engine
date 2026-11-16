@@ -7,23 +7,8 @@ use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 
 /**
- * Put an app config's `files/` and its replace-mode compose file into an
- * inspect clone, as the deploy's AppConfigBootstrap does.
- *
- * The deploy copies them into ~/project before detection runs, so a recipe can
- * supply what the repository lacks -- ESMira's root package.json shim is what
- * lets its runtime resolve at all. Inspect read the bare clone instead, and
- * reported a deployable app as undeployable. The compose file
- * is what detection reads ahead of the repository's own: without it inspect
- * called github.com/WordPress/WordPress `php` while the deploy ran compose.
- *
- * Only for a throwaway clone: a project's own directory already has the files,
- * and inspecting it must not write to it.
- *
- * Files land only in real folders of the clone. The repository may commit a
- * link anywhere on a file's path, even a chain of links that each stay inside
- * on paper, and following one would write wherever the engine can. A link on
- * the way, or at the file itself, stops the inspection with the reason.
+ * Copies an app config's `files/` and replace-mode compose into a throwaway inspect clone, never a project's own
+ * directory, so inspect detects what deploy does; a link on a file's path, which could write anywhere, stops it.
  */
 final class RecipeFileOverlay
 {

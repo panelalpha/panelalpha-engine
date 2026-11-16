@@ -70,9 +70,9 @@ class MagentoSourceRecipeTest extends TestCase
             StageResolver::commandsFor(PlatformStage::INSTALL, $recipe, $config)
         );
 
-        $this->assertSame(['writable-dirs', 'magento-install'], $ids);
+        $this->assertSame(['writable-dirs', 'database-login', 'magento-install'], $ids);
         $this->assertSame(
-            ['magento-upgrade'],
+            ['database-login', 'magento-upgrade'],
             array_map(
                 static fn ($c) => $c->id,
                 array_values(array_filter(
@@ -175,7 +175,7 @@ class MagentoSourceRecipeTest extends TestCase
         $this->assertMatchesRegularExpression('/php -d memory_limit=-1 bin\/magento/', (string) $install);
         foreach (['/app/panelalpha/app.php', 'bin/magento'] as $invoked) {
             $this->assertStringNotContainsString(
-                'exec -T app php ' . $invoked,
+                ' app php ' . $invoked,
                 (string) $app,
                 'a Magento command is being run with the default CLI memory limit'
             );

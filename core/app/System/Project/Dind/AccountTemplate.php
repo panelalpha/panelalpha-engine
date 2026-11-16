@@ -5,11 +5,13 @@ namespace App\System\Project\Dind;
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Models\Setting;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\ContainerLimits;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Services\SupervisordServiceManager;
@@ -43,9 +45,15 @@ final class AccountTemplate
         $system->filesystem()->makeDirFromTemplate($projectDir, $projectTemplateDir, $templateVars);
         $this->project->setupEntrypointInitScripts();
         $this->project->setupDaemonJson();
-        $system->runProcess(
-            "sudo test -f {$projectDir}/entrypoint.sh && sudo chmod +x {$projectDir}/entrypoint.sh"
-        );
+        $this->makeEntrypointExecutable($system, "{$projectDir}/entrypoint.sh");
+    }
+
+    /** Best effort: a missing entrypoint or a failed chmod stops nothing. */
+    private function makeEntrypointExecutable(System $system, string $entrypoint): void
+    {
+        if ($system->runProcess(Privileged::files()->isFile($entrypoint))->isSuccessful()) {
+            $system->runProcess(Privileged::files()->changeMode('+x', $entrypoint));
+        }
     }
 
     /**
@@ -73,11 +81,26 @@ final class AccountTemplate
      */
     public function entrypointInitScripts(bool $apiAccess = false): array
     {
+        $script = $this->useraddScript();
+
+        $script .= $this->cgroupNestingScript();
+
+        $scripts = ['useradd.sh' => $script];
+        if (TenantEgressGuard::enabled()) {
+            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses(), $apiAccess);
+        }
+
+        return $scripts;
+    }
+
+    private function useraddScript(): string
+    {
         $userModel = $this->project->userModel();
         $username = $userModel->username;
         [$uid] = $userModel->linuxIds();
         $dockerConfig = ShellOperations::DOCKER_CONFIG_DIR;
-        $script = <<<BASH
+
+        return <<<BASH
 # /run is a tmpfs (see the account's compose), so it starts empty on every
 # boot. Debian expects the directories its packages declare to be there —
 # /run/php owned by www-data, /run/lock, /run/dbus — and nothing else in this
@@ -99,15 +122,6 @@ chown {$uid}:{$uid} "/home/{$username}/.docker"
 echo "[init] created /home/{$username}/.docker"
 mkdir -p -m 700 "/home/{$username}/{$dockerConfig}"
 BASH;
-
-        $script .= $this->cgroupNestingScript();
-
-        $scripts = ['useradd.sh' => $script];
-        if (TenantEgressGuard::enabled()) {
-            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses(), $apiAccess);
-        }
-
-        return $scripts;
     }
 
     /**
@@ -124,7 +138,11 @@ BASH;
             'ip' => '0.0.0.0',
             'ipv6' => false,
             'group' => $username,
-            'insecure-registries' => [DindImageStore::CACHE_REGISTRY, DindImageStore::PROXY_REGISTRY],
+            'insecure-registries' => [
+                DindImageStore::CACHE_REGISTRY,
+                DindImageStore::PROXY_REGISTRY,
+                DindImageStore::GHCR_PROXY_REGISTRY,
+            ],
             'registry-mirrors' => ['http://'.DindImageStore::PROXY_REGISTRY],
             'log-driver' => 'json-file',
             'log-opts' => ServiceHardener::LOG_OPTIONS,
@@ -132,9 +150,8 @@ BASH;
     }
 
     /**
-     * Every address of the host, for the egress guard to refuse all but mail
-     * and the sites on. Best-effort: the guard adds the gateway and
-     * host.docker.internal itself, so an empty list still covers those.
+     * Every address of the host, for the egress guard to refuse all but mail and the sites on. Best-effort:
+     * the guard adds the gateway and host.docker.internal itself, so an empty list still covers those.
      *
      * @return list<string>
      */
@@ -177,6 +194,7 @@ BASH;
         [$uid, $gid] = $user->linuxIds();
 
         return [
+            'image' => AccountImage::REF,
             'isolation' => AccountRuntime::composeIsolation(),
             'user' => $user->username,
             'uid' => $uid,

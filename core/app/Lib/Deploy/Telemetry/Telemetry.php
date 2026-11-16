@@ -5,8 +5,10 @@ namespace App\Lib\Deploy\Telemetry;
 use App\Integrations\Monitoring\PanelAlphaMonitoring;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployStatus;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
+use App\Lib\Findings\Finding;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
@@ -15,23 +17,14 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Deploy telemetry: what the shape of failures across installs looks like, so
- * `resources/sources/` gains the app config that is needed next. Entry points
- * are `captureDeploy()`, `signal()`, `captureHealth()` and `captureBugReport()`.
- *
- * None may throw — a telemetry bug that fails a deploy costs more than every
- * report it sent, so each is wrapped and a failure is a debug line. A bug
- * report is the exception that answers back: an install that cannot ship it
- * returns an error instead of a quiet local write.
+ * Deploy telemetry through `captureDeploy()`, `signal()`, `captureHealth()` and `captureBugReport()`. None may throw,
+ * so each failure is a debug line, except a bug report, which answers an install that cannot ship it with an error.
  */
 class Telemetry
 {
     /**
-     * One event type per outcome, under `project.` — the API route, the CLI
-     * commands and the docs all call a hosting account that.
-     *
-     * The leaf is the outcome, so installs of any kind are a prefix match and
-     * failures an exact one.
+     * One event type per outcome under `project.`, the name the API, CLI and docs give a hosting account;
+     * installs of any kind are a prefix match and failures an exact one.
      */
     public const EVENT_SUCCESS = 'project.install.success';
 
@@ -47,20 +40,14 @@ class Telemetry
     public const EVENT_UNKNOWN = 'project.install';
 
     /**
-     * A bug somebody reported by hand.
-     *
-     * Its own family, not a leaf under `project.install.`: nothing was
-     * deployed, so it would otherwise land in every query that counts installs
-     * by prefix match.
+     * A bug somebody reported by hand: its own family, as nothing was deployed and a leaf under
+     * `project.install.` would land in every query that counts installs.
      */
     public const EVENT_BUG_REPORT = 'support.bug_report';
 
     /**
-     * An application that is up and not serving itself, found by the periodic
-     * sweep, not by a deploy.
-     *
-     * Its own family for the same reason: nothing was installed, and
-     * `recovered` would claim something was put right when it was not.
+     * An application up and not serving itself, found by the periodic sweep: its own family, as nothing was
+     * installed and `recovered` would claim something was put right.
      */
     public const EVENT_HEALTH = 'project.health.degraded';
 
@@ -80,12 +67,12 @@ class Telemetry
 
     private static ?Spool $spool = null;
 
+    /**
+     * Under test, only the config a test sets: on an installed host the operator's stored `telemetry:enable`
+     * would override phpunit.xml's TELEMETRY_ENABLED=false.
+     */
     public static function enabled(): bool
     {
-        // Under test, only the config a test sets. phpunit.xml's
-        // TELEMETRY_ENABLED=false is not enough on its own: on an installed
-        // host the tests read the live database, and the operator's
-        // `telemetry:enable` stored there overrides it.
         if (self::underTest()) {
             return (bool) config('telemetry.enabled', false);
         }
@@ -99,11 +86,8 @@ class Telemetry
     }
 
     /**
-     * Whether an operator may file a bug report from this install.
-     *
-     * A second switch under the first: an install happy to send anonymous
-     * deploy statistics may still not want a free-text field a person can type
-     * anything into leaving the box. Both have to be on.
+     * Whether an operator may file a bug report from this install: a second switch under the first, as anonymous
+     * deploy statistics are not a free-text field leaving the box.
      */
     public static function bugReportsEnabled(): bool
     {
@@ -111,24 +95,14 @@ class Telemetry
     }
 
     /**
-     * The route on the monitoring host that accepts a batch of reports.
-     *
-     * The literal lives here as well as in `config/telemetry.php` because the
-     * config file is the override and this is the answer: the fallback only
-     * applies when the config key is missing, so two disagreeing copies would
-     * be invisible in exactly the situation the fallback exists for. Config
-     * carries `Telemetry::EVENTS_PATH` and the env variable overrides that.
-     *
-     * `/api/v1/events` is the shared event route the ingest serves; an earlier
-     * `/v1/reports` default was posted at nothing.
+     * The ingest's shared event route for a batch of reports. Config carries this constant and the env overrides it,
+     * so the fallback cannot disagree with the config it stands in for.
      */
     public const EVENTS_PATH = '/api/v1/events';
 
     /**
-     * The configured route, or this engine's own answer when nothing set one.
-     *
-     * A blank override means "unset", not "post at the host root": an empty path
-     * would send reports to whatever that host serves at `/` — a web page.
+     * The configured route, or this engine's own answer when nothing set one: a blank override means "unset",
+     * not "post at the host root", which would send reports to a web page.
      */
     public static function eventsPath(): string
     {
@@ -138,11 +112,8 @@ class Telemetry
     }
 
     /**
-     * Where a batch of reports is POSTed, or '' when nothing is configured.
-     *
-     * {@see PanelAlphaMonitoring}, not Connect: Connect is an integration the
-     * engine calls to get something done. Addressing telemetry at Connect made
-     * it 405.
+     * Where a batch of reports is POSTed on {@see PanelAlphaMonitoring}, or '' when nothing is configured;
+     * Connect is an integration the engine calls to get something done, and answered telemetry 405.
      */
     public static function endpoint(): string
     {
@@ -155,11 +126,8 @@ class Telemetry
     }
 
     /**
-     * Source-bundle mode: `off`, `unexplained` or `failed`.
-     *
-     * Not a fourth tier. Tiers are increasing detail *about a failure*; a
-     * source bundle is the customer's intellectual property. Raising the tier
-     * must never turn this on as a side effect.
+     * Source-bundle mode: `off`, `unexplained` or `failed`. Not a fourth tier: a bundle is the customer's
+     * intellectual property, and raising the tier must never turn it on.
      */
     public static function sourceBundleMode(): string
     {
@@ -176,11 +144,8 @@ class Telemetry
     }
 
     /**
-     * The install id: the pinned value if there is one, otherwise derived from
-     * machine facts and pinned for next time.
-     *
-     * '' when neither is possible — the shipper holds the reports instead of
-     * sending them under an id that collides with every unprobeable install.
+     * The pinned install id, or one derived from machine facts and pinned; '' when neither is possible, so the
+     * shipper holds reports rather than send them under an id every unprobeable install shares.
      */
     public static function installId(): string
     {
@@ -217,13 +182,8 @@ class Telemetry
     }
 
     /**
-     * A deploy finished. Called from {@see DeployLogger::finish()}, the single
-     * choke point every terminal status passes through, before it publishes
-     * the final status (`$latest`).
-     *
-     * A failed deploy's report is sent straight away, and the fix monitoring
-     * answers with is returned so the failure can carry it. Anything else, or
-     * a send that does not get through, goes to the spool as before.
+     * A deploy finished, from {@see DeployLogger::finish()} before it publishes `$latest`. A failure is sent at once
+     * and monitoring's fix returned; anything else, or a send that does not get through, goes to the spool.
      *
      * @param  array<string, mixed>  $latest  the deploy's final status record
      * @return array<string, ?string>|null the fix, see {@see TelemetryShipper::problem()}
@@ -240,15 +200,9 @@ class Telemetry
             $reportId = (string) Str::ulid();
             $input = self::deployInput($fields, $logger, $outcome, $error, $reportId, $latest);
             $sendable = self::isSendable($fields, $outcome, $input['latest']);
-
-            if ($sendable) {
-                // Cut now, not at ship time: a failed account creation is rolled
-                // back the moment this returns, so there will be no source left
-                // to zip.
-                $bundle = self::captureSourceBundle($logger, $username, $outcome, $error, $reportId);
-                if ($bundle !== null) {
-                    $input['source_bundle'] = $bundle;
-                }
+            $bundle = $sendable ? self::captureSourceBundle($logger, $username, $outcome, $error, $reportId) : null;
+            if ($bundle !== null) {
+                $input['source_bundle'] = $bundle;
             }
 
             $report = DeployReport::build($input);
@@ -259,16 +213,7 @@ class Telemetry
                 return null;
             }
 
-            // A report carrying source waits for the scheduler: the server may
-            // ask for the bundle, and uploading it does not belong on this path.
-            if ($outcome === DeployReport::OUTCOME_FAILED && ! isset($input['source_bundle'])) {
-                $sent = (new TelemetryShipper)->sendNow($report);
-                if ($sent['sent']) {
-                    return $sent['problem'];
-                }
-            }
-
-            self::spool()->put($report);
+            return self::sendOrSpool($report, $outcome, isset($input['source_bundle']));
         } catch (\Throwable $e) {
             Log::debug('Telemetry capture failed: '.$e->getMessage());
         }
@@ -277,6 +222,29 @@ class Telemetry
     }
 
     /**
+     * A failure is sent at once, unless it carries source: then the server may ask for the bundle, and uploading
+     * it does not belong on the deploy's path.
+     *
+     * @param  array<string, mixed>  $report
+     * @return array<string, ?string>|null
+     */
+    private static function sendOrSpool(array $report, string $outcome, bool $hasBundle): ?array
+    {
+        if ($outcome === DeployReport::OUTCOME_FAILED && ! $hasBundle) {
+            $sent = (new TelemetryShipper)->sendNow($report);
+            if ($sent['sent']) {
+                return $sent['problem'];
+            }
+        }
+
+        self::spool()->put($report);
+
+        return null;
+    }
+
+    /**
+     * `latest` is passed in, as latest.json still says `running` at this point.
+     *
      * @param  array<string, mixed>  $latest
      * @return array<string, mixed>
      */
@@ -298,31 +266,29 @@ class Telemetry
             'tier' => $tier,
             'install_id' => self::safely(fn (): string => self::installId(), ''),
             'username' => $fields->username,
-            // Passed in: latest.json still says `running` at this point.
             'latest' => $latest,
             'details' => $details,
             'error' => $error,
-            // A partial deploy that a health check caused names the check
-            // instead of being fingerprinted on its own sentence: otherwise
-            // the same failing check grouped as two problems depending on the
-            // project's warning text.
-            'signal' => self::healthSignal($outcome, $details),
-            // No log tail on a clean success: successes are most of the traffic
-            // and 16 KB of build output ending in "Deploy finished
-            // successfully" answers nothing. The local log still records it.
-            'log_tail' => $tier >= DeployReport::TIER_LOG && $outcome !== DeployReport::OUTCOME_SUCCESS
-                ? $fields->logTail($logger, self::LOG_TAIL_LINES)
-                : [],
+            'signal' => self::healthSignal($outcome, $details) ?? self::warningSignal($outcome, $latest),
+            'log_tail' => self::deployLogTail($fields, $logger, $tier, $outcome),
         ] + self::projectFacts($fields, $details);
     }
 
     /**
-     * Everything that can stop a report being *sent* — none of it stops the
-     * report being written down. An install with telemetry off, one that cannot
-     * fingerprint its machine, or a template this pipeline does not report on
-     * still leaves the operator a record to hand over later. Neither does a
-     * deploy a precheck refused: the host failed the app's requirements
-     * before anything was deployed, so it is not a deploy failure.
+     * None on a clean success: successes are most of the traffic and their build output answers nothing.
+     *
+     * @return list<string>
+     */
+    private static function deployLogTail(TelemetryFields $fields, DeployLogger $logger, int $tier, string $outcome): array
+    {
+        return $tier >= DeployReport::TIER_LOG && $outcome !== DeployReport::OUTCOME_SUCCESS
+            ? $fields->logTail($logger, self::LOG_TAIL_LINES)
+            : [];
+    }
+
+    /**
+     * Everything that stops a report being sent, though never written down; a precheck refusal is no deploy
+     * failure, as the host failed the app's requirements before anything was deployed.
      *
      * @param  array<string, mixed>  $latest
      */
@@ -336,15 +302,23 @@ class Telemetry
     }
 
     /**
-     * The stable name of a deploy that finished partial because the
-     * application is not serving itself.
+     * A partial deploy is grouped by the code of its first warning, which stays the same whatever its sentence says.
      *
-     * The same slug the six-hourly sweep uses: the fact is the same whether it
-     * was noticed as the deploy finished or six hours later, and different
-     * fingerprints would split every such finding in half.
-     *
-     * Only errors count, because only errors make a deploy partial. Anything
-     * else falls through to {@see DeployFailureExplainer}.
+     * @param  array<string, mixed>  $latest
+     */
+    private static function warningSignal(string $outcome, array $latest): ?string
+    {
+        if ($outcome !== DeployReport::OUTCOME_PARTIAL) {
+            return null;
+        }
+        $first = DeployStatus::warningsOf($latest)[0] ?? null;
+
+        return $first !== null && $first->code !== Finding::UNCLASSIFIED ? $first->code : null;
+    }
+
+    /**
+     * The sweep's slug for a deploy left partial by a failing error check, so the fact groups the same whenever it
+     * was noticed; anything else falls through to {@see DeployFailureExplainer}.
      *
      * @param  array<string, mixed>  $details
      */
@@ -354,7 +328,7 @@ class Telemetry
             return null;
         }
 
-        if (AppHealth::errorCheckMessages($details) === []) {
+        if (AppHealth::errorCheckFindings($details) === []) {
             return null;
         }
 
@@ -364,15 +338,8 @@ class Telemetry
     }
 
     /**
-     * What this account's project is, on the terms every event states it.
-     *
-     * One block, not three copies: "which application was this?" is the same
-     * question for a failed deploy, a recovered signal and a health finding —
-     * and the three had already drifted, with the health event arriving with no
-     * `app` block and unable to be grouped by framework or manifest layout.
-     *
-     * Read at the moment the event is made, off the tree the account has.
-     * {@see DeployReport} decides what may be transmitted at which tier.
+     * What this account's project is, in the one block every event family states, read off the tree at the event:
+     * a failed deploy is rolled back moments later. {@see DeployReport} decides what may be sent at which tier.
      *
      * @param  array<string, mixed>  $details  the account's details
      * @return array<string, mixed>
@@ -383,22 +350,12 @@ class Telemetry
             'repo_url' => $fields->repoUrl(),
             'repo_private' => $fields->repoIsPrivate(),
             'repo_source' => $fields->repoSource(),
-            // Read off the tree, not the account record: what was actually
-            // checked out is what the build ran on, and it is the only thing
-            // naming a repository the record never heard of -- a
-            // `POST /git/connect`, or an archive carrying a `.git`.
             'checkout' => $fields->checkout(),
             'manifests' => $fields->manifests(),
-            // Which recipes could have run as well as which did: a failure rate
-            // per recipe is only actionable against the alternative.
             'candidates' => $fields->candidates(),
-            // Read while the account still exists. A failed deploy is rolled
-            // back moments after this returns, taking composer.json with it.
             'packages' => $fields->packages(self::runtimeOf($details)),
-            // The address the application is served at, which nothing else in a
-            // report states -- a degraded site nobody could open was reported
-            // without the name anyone would have tried.
             'domains' => $fields->domains(),
+            'server_names' => $fields->serverNames(),
         ];
     }
 
@@ -430,23 +387,13 @@ class Telemetry
     }
 
     /**
-     * Write one deploy to the local telemetry log, always.
-     *
-     * The live half of the pair: it lands the moment a deploy reaches a
-     * terminal state, so `tail -f storage/logs/telemetry.log` shows an install
-     * going wrong as it happens, over SSH, with no network and no ingest. The
-     * spool is the delayed half and may be empty; this file may not.
-     *
-     * Shaped as the event envelope the panel and the monitoring ingest use
-     * ({@see envelope()}), so the local record and anything sent later say the
-     * same thing.
+     * Write one report to the local telemetry log as its {@see envelope()}, except under test, where fixtures would
+     * land in an operator's log. The live half an operator can `tail -f`; losing the line costs the caller nothing.
      *
      * @param  array<string, mixed>  $report
      */
     private static function record(array $report): void
     {
-        // Run on a host, the suite would otherwise write its fixtures into the
-        // operator's telemetry log as if they were real deploys.
         if (self::underTest()) {
             return;
         }
@@ -459,20 +406,13 @@ class Telemetry
                 $event
             );
         } catch (\Throwable $e) {
-            // Losing the local line must not cost the caller anything either.
             Log::debug('Telemetry local record failed: '.$e->getMessage());
         }
     }
 
     /**
-     * A report as the shared event envelope.
-     *
-     * The type names the outcome, so counting failures is a count of one event
-     * type, not a filter over a blended stream, and an alert binds to
-     * the type instead of a boolean inside a payload.
-     *
-     * `status` still carries the exact outcome and `success` still marks only a
-     * failure — both kept because consumers already test them.
+     * A report as the shared event envelope, typed by its outcome. The payload is the report first: `+` keeps the
+     * left operand, so the derived fields are added only where the report is silent.
      *
      * @param  array<string, mixed>  $report
      * @return array<string, mixed>
@@ -485,19 +425,13 @@ class Telemetry
         return [
             'type' => self::eventType($outcome, self::kindOf($report)),
             'occurred_at' => gmdate('c', $occurredAt),
-            // $report first: `+` keeps the left operand, so the report's own
-            // values win and these are added only where it is silent. They are
-            // derived for the ingest and must not mask what the report measured.
             'payload' => $report + self::derived($report, $outcome),
         ];
     }
 
     /**
-     * What kind of thing this report is.
-     *
-     * A deploy report carries no `kind`: engines in the field have sent them
-     * without one and the receiving end reads a report with no kind as a
-     * deploy, so the absence is the answer.
+     * What kind of thing this report is; a deploy report carries no `kind`, and the receiving end reads its
+     * absence as a deploy.
      *
      * @param  array<string, mixed>  $report
      */
@@ -509,11 +443,8 @@ class Telemetry
     }
 
     /**
-     * The fields the ingest is handed on top of the report itself.
-     *
-     * Per kind, because they answer that kind's question. A deploy report gets
-     * `success`, which by the ingest spec marks only a failure; a bug report
-     * does not, because a boolean saying one worked would be fabricated.
+     * The fields the ingest is handed on top of the report, per kind. Only a deploy gets `success`, which marks
+     * a failed deploy: for a bug report or a health finding it would be fabricated.
      *
      * @param  array<string, mixed>  $report
      * @return array<string, mixed>
@@ -537,9 +468,6 @@ class Telemetry
             return [
                 'software_op' => 'health_check',
                 'status' => $outcome,
-                // No `success`: by the ingest spec that field marks a failed
-                // deploy, and this one succeeded — the application stopped
-                // serving afterwards, which is the distinction this event draws.
                 'serving' => $health['serving'] ?? null,
                 'severity' => self::worstSeverity($health['failed'] ?? []),
             ];
@@ -574,16 +502,8 @@ class Telemetry
     }
 
     /**
-     * The event type one outcome is reported as.
-     *
-     * An unrecognised outcome reports as the bare family, not a guessed leaf:
-     * an older ingest seeing `project.install` learns an install happened and
-     * that this engine is newer, where guessing `success` would be fabricated.
-     *
-     * `cancelled` is named though never sent — the local log records every
-     * outcome and a record that cannot name itself is worse.
-     *
-     * $kind short-circuits the table: a bug report has one type.
+     * The event type one outcome is reported as; $kind short-circuits the table. An unknown outcome is the bare
+     * family, not a guessed leaf, and `cancelled` is named though never sent, for the local log.
      */
     public static function eventType(string $outcome, string $kind = 'deploy'): string
     {
@@ -606,19 +526,14 @@ class Telemetry
     }
 
     /**
-     * Something went wrong and the pipeline handled it.
-     *
-     * Leading indicators — a wrong port guess, a build that only fit after a
-     * cache reclaim, a base image that fell back. None fails a deploy, so none
-     * reaches support, and each one is a recipe that could be better.
+     * Something went wrong and the pipeline handled it, such as a wrong port guess: a recipe that could be better.
+     * A malformed slug is a bug at the call site, recorded nowhere.
      *
      * @param  string  $signal  stable slug, e.g. 'port-realigned'
      */
     public static function signal(string $username, string $signal, string $detail = ''): void
     {
         try {
-            // A malformed slug is a bug at the call site, not an event: nothing
-            // worth recording locally or remotely.
             if (preg_match(self::SIGNAL_SLUG, $signal) !== 1) {
                 return;
             }
@@ -636,16 +551,8 @@ class Telemetry
     }
 
     /**
-     * A periodic health sweep found an application that is up and is not
-     * serving itself.
-     *
-     * What it adds over a deploy report is time: a deploy report is a
-     * photograph of the moment an install finished, and this is the only thing
-     * that says the site stopped working afterwards — a database that went
-     * away, a lapsed certificate, files somebody deleted over SFTP.
-     *
-     * Sent only for an application with something wrong: a fleet-wide "still
-     * fine" every six hours is the same fact four times a day per account.
+     * A periodic sweep found an application up and not serving itself, sent only when something is wrong. The kind
+     * is set on the built report, as BugReport sets its own: DeployReport knows nothing of the families over it.
      *
      * @param  array<string, mixed>  $details  the account's details, health verdict included
      */
@@ -657,9 +564,6 @@ class Telemetry
             }
 
             $fields = new TelemetryFields($username);
-            // The kind is set here, not passed through the builder, the same
-            // way BugReport sets its own: DeployReport describes a deploy and
-            // knows nothing about the families layered over it.
             $report = DeployReport::build(self::healthInput($fields, $details));
             $report['kind'] = self::KIND_HEALTH;
             self::record($report);
@@ -673,6 +577,9 @@ class Telemetry
     }
 
     /**
+     * Partial, as the account is deployed and not serving what it was deployed to serve, signed by the first
+     * failing check; the project facts are read fresh, since time has passed.
+     *
      * @param  array<string, mixed>  $details
      * @return array<string, mixed>
      */
@@ -684,9 +591,6 @@ class Telemetry
             'id' => (string) Str::ulid(),
             'occurred_at' => time(),
             'kind' => self::KIND_HEALTH,
-            // Partial: the account is deployed and running, and is not serving
-            // what it was deployed to serve. `failed` would claim the install
-            // never worked, which is the case this exists to tell apart.
             'outcome' => DeployReport::OUTCOME_PARTIAL,
             'tier' => self::safely(fn (): int => self::tier(), DeployReport::TIER_METADATA),
             'install_id' => self::safely(fn (): string => self::installId(), ''),
@@ -694,15 +598,13 @@ class Telemetry
             'latest' => self::safely(fn (): array => DeployLogger::readLatestFor($fields->username) ?? [], []),
             'details' => $details,
             'error' => '',
-            // The check that fires first is the fingerprint: a stable slug, and
-            // the same thing the failure `rule` means everywhere else here.
             'signal' => is_string($serving) && $serving !== '' ? 'health-'.$serving : 'health-degraded',
-            // Read fresh, not repeated out of the deploy report: the point of
-            // this event is that time has passed.
         ] + self::projectFacts($fields, $details);
     }
 
     /**
+     * No log tail: one line about one event, and the build log around it belongs to what the deploy does next.
+     *
      * @return array<string, mixed>
      */
     private static function signalInput(TelemetryFields $fields, string $signal, string $detail): array
@@ -720,31 +622,13 @@ class Telemetry
             'details' => $details,
             'error' => $detail,
             'signal' => $signal,
-            // One line about one event; the build log around it belongs to
-            // whatever the deploy does next.
             'log_tail' => [],
         ] + self::projectFacts($fields, $details);
     }
 
     /**
-     * Somebody is telling us the engine is wrong about one of their apps.
-     *
-     * The one entry point a person triggers on purpose, from the CLI, the REST
-     * API or an MCP client, and therefore the one that reports failure instead
-     * of swallowing it.
-     *
-     * **It is always about a project**: the engine inspects the application on
-     * disk the way `project_inspect` does, probes every port it publishes the
-     * way `app_health_check` does, and attaches its last deploy. The person
-     * supplies only what went wrong and what they expected.
-     *
-     * Refusals, each an error instead of a silent no-op: `disabled` (telemetry
-     * or bug reports off, so nothing would ship it), `invalid` (no project,
-     * title or description), `no-project`, `not-ready` (no monitoring host configured, or
-     * no fingerprint), `failed` (the spool could not be written).
-     *
-     * Only `queued` means it will be sent, by the next `telemetry:ship` run.
-     * `dry_run` answers with the report and writes nothing — `preview`.
+     * Somebody reports the engine is wrong about one of their apps: the one entry point that answers failure
+     * instead of swallowing it. Only `queued` will be sent, by the next `telemetry:ship`; `dry_run` is `preview`.
      *
      * @param array{
      *   title: string,
@@ -764,6 +648,39 @@ class Telemetry
      * }
      */
     public static function captureBugReport(array $input): array
+    {
+        $refusal = self::bugReportInputRefusal($input);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
+        $username = trim((string) ($input['project'] ?? ''));
+        if ($username === '') {
+            return self::bugReportError('invalid', 'A bug report is about one application: name the project it concerns.');
+        }
+
+        $endpoint = self::safely(fn (): string => self::endpoint(), '');
+        if ($endpoint === '') {
+            return self::bugReportError(
+                'not-ready',
+                'No monitoring host is configured (PANELALPHA_MONITORING is empty), '
+                .'so there is nowhere to send a bug report.'
+            );
+        }
+
+        $installId = self::safely(fn (): string => self::installId(), '');
+        if ($installId === '') {
+            return self::bugReportError('not-ready', 'This install could not derive its install id, so a report would arrive unattributable.');
+        }
+
+        return self::fileBugReport($input, $username, $installId, $endpoint);
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return ?array{status: string, queued: bool, id: null, reason: string, endpoint: string, report: null}
+     */
+    private static function bugReportInputRefusal(array $input): ?array
     {
         if (! self::enabled()) {
             return self::bugReportError(
@@ -787,38 +704,41 @@ class Telemetry
             );
         }
 
-        $username = trim((string) ($input['project'] ?? ''));
-        if ($username === '') {
-            return self::bugReportError(
-                'invalid',
-                'A bug report is about one application: name the project it concerns.'
-            );
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array{status: string, queued: bool, id: ?string, reason: ?string, endpoint: string, report: ?array<string, mixed>}
+     */
+    private static function fileBugReport(array $input, string $username, string $installId, string $endpoint): array
+    {
+        $refusal = self::projectRefusal($username);
+        if ($refusal !== null) {
+            return $refusal;
         }
 
-        $endpoint = self::safely(fn (): string => self::endpoint(), '');
-        if ($endpoint === '') {
-            return self::bugReportError(
-                'not-ready',
-                'No monitoring host is configured (PANELALPHA_MONITORING is empty), '
-                .'so there is nowhere to send a bug report.'
-            );
+        $fields = new TelemetryFields($username);
+
+        try {
+            $report = BugReport::build(self::bugReportInput($input, $fields, $installId));
+        } catch (\Throwable $e) {
+            Log::debug('Telemetry bug report could not be built: '.$e->getMessage());
+
+            return self::bugReportError('failed', 'The bug report could not be assembled: '.$e->getMessage());
         }
 
-        $installId = self::safely(fn (): string => self::installId(), '');
-        if ($installId === '') {
-            return self::bugReportError(
-                'not-ready',
-                'This install could not derive its install id, so a report would arrive unattributable.'
-            );
-        }
+        return self::deliverBugReport($input, $report, $endpoint);
+    }
 
-        // Last of the refusals, because it is the first that costs anything:
-        // everything above is a config read, and this is a database lookup
-        // leading to a directory walk and a probe inside a container.
-        //
-        // Direct lookup, not TelemetryFields, which swallows a failed query as
-        // "no such account": a database that is down would tell somebody their
-        // project does not exist.
+    /**
+     * Last of the refusals, as the first that costs anything. A direct lookup: TelemetryFields reads a failed
+     * query as "no such account", which would tell somebody their project does not exist.
+     *
+     * @return ?array{status: string, queued: bool, id: null, reason: string, endpoint: string, report: null}
+     */
+    private static function projectRefusal(string $username): ?array
+    {
         try {
             $user = User::findByUsername($username);
         } catch (\Throwable $e) {
@@ -835,19 +755,19 @@ class Telemetry
             );
         }
 
-        $fields = new TelemetryFields($username);
+        return null;
+    }
 
-        try {
-            $report = BugReport::build(self::bugReportInput($input, $fields, $installId));
-        } catch (\Throwable $e) {
-            Log::debug('Telemetry bug report could not be built: '.$e->getMessage());
-
-            return self::bugReportError('failed', 'The bug report could not be assembled: '.$e->getMessage());
-        }
-
-        // A preview stops here, having written nothing: it exists so somebody
-        // can read the exact bytes before agreeing to send them, and a copy in
-        // the local log would have sent half of what it was asked to show.
+    /**
+     * A preview writes nothing, so somebody can read the exact bytes before agreeing to send them. Otherwise the
+     * report is written to the local log before it is queued, which survives a spool the engine fails to drain.
+     *
+     * @param  array<string, mixed>  $input
+     * @param  array<string, mixed>  $report
+     * @return array{status: string, queued: bool, id: string, reason: ?string, endpoint: string, report: array<string, mixed>}
+     */
+    private static function deliverBugReport(array $input, array $report, string $endpoint): array
+    {
         if (($input['dry_run'] ?? false) === true) {
             return [
                 'status' => 'preview',
@@ -859,11 +779,17 @@ class Telemetry
             ];
         }
 
-        // Written down before it is queued, like a deploy report: the local log
-        // survives a spool the engine fails to drain, and is what an operator
-        // hands to support by hand.
         self::record($report);
 
+        return self::queueBugReport($report, $endpoint);
+    }
+
+    /**
+     * @param  array<string, mixed>  $report
+     * @return array{status: string, queued: bool, id: string, reason: ?string, endpoint: string, report: array<string, mixed>}
+     */
+    private static function queueBugReport(array $report, string $endpoint): array
+    {
         if (self::spool()->put($report) === null) {
             return [
                 'status' => 'failed',
@@ -902,16 +828,8 @@ class Telemetry
     }
 
     /**
-     * What a bug report is made of, in increasing order of cost:
-     * `details`/`latest` (the account's frozen deploy snapshot, two file
-     * reads), `inspect` (what `project_inspect` answers with — whether the
-     * engine understood the application at all), `log_tail` (the end of the
-     * deploy log at tier 2) and `health` (a live probe of every published port
-     * from inside the container, the only part with its own opt-out).
-     *
-     * Every one is best-effort: a project rolled back after a failed deploy has
-     * nothing to inspect and a wedged container cannot be probed, and neither
-     * is a reason to lose the report a person just wrote.
+     * What a bug report is made of, cheapest first, each part best-effort so none can lose the report. It names `domains`
+     * and `server_names` itself, as this path does not go through projectFacts(), where every other family picks them up.
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
@@ -940,10 +858,8 @@ class Telemetry
             'details' => $fields->accountDetails(),
             'repo_url' => $fields->repoUrl(),
             'repo_private' => $fields->repoIsPrivate(),
-            // The address the reporter is looking at, so the report says where
-            // the problem is. This path does not go through projectFacts(),
-            // which is where every other family picks it up.
             'domains' => $fields->domains(),
+            'server_names' => $fields->serverNames(),
             'latest' => self::safely(fn (): array => DeployLogger::readLatestFor($username) ?? [], []),
             'inspect' => self::inspectApp($fields),
             'health' => ($input['attach_health'] ?? true) === false ? null : self::probeApp($fields),
@@ -952,12 +868,8 @@ class Telemetry
     }
 
     /**
-     * What the application on disk is, as `project_inspect` would report it.
-     *
-     * Runs the deploy pipeline's own detection over the project directory, so
-     * this is what the *next* deploy would decide, not a second opinion
-     * about the last one — and `drift` is the two compared, which is often the
-     * answer to "why is it serving the old thing".
+     * What the next deploy would decide about the application on disk, as `project_inspect` reports it, with the
+     * two sections it adds for an account: what the last deploy froze, and the drift since.
      *
      * @return ?array<string, mixed>
      */
@@ -972,8 +884,6 @@ class Telemetry
             $report = AppInspector::inspect($fields->projectDir(), $fields->repoUrl());
             $details = $fields->accountDetails();
 
-            // The two sections the project inspect endpoint adds for an account:
-            // what its last deploy froze, and how the files moved on from it.
             return [
                 'deployment' => DeploymentSnapshot::describe($details),
                 'drift' => DeploymentSnapshot::drift($details, $report, null),
@@ -982,15 +892,8 @@ class Telemetry
     }
 
     /**
-     * Whether the application is answering, right now.
-     *
-     * The same probe `app_health_check` runs: every published port, from inside
-     * the container, over loopback — so a failure here is the application, not
-     * DNS, TLS or the proxy. `checks` asks whether what answered *is* the
-     * application, which is the case a person files a bug about.
-     *
-     * One attempt, not the endpoint's three: nobody is waiting on a retry loop,
-     * and a port that needs three tries is itself worth reporting.
+     * Whether the application answers, by `app_health_check`'s loopback probe in one attempt, not three.
+     * Null for the classic template, which has no container to probe.
      *
      * @return ?array<string, mixed>
      */
@@ -998,8 +901,6 @@ class Telemetry
     {
         return TelemetryFields::safely(function () use ($fields): ?array {
             $user = $fields->user();
-            // The classic template has no container to probe: not an error and
-            // not a failure, simply nothing there to ask.
             if ($user === null || ! $fields->isDindAccount()) {
                 return null;
             }
@@ -1019,15 +920,8 @@ class Telemetry
     }
 
     /**
-     * Zip the account's source, if the operator has asked for that.
-     *
-     * Writes the archive next to the report in the spool and returns the
-     * descriptor for the report. Null when bundling is off or this failure is
-     * not a candidate, so the field is absent, not false, on every report an
-     * install that never bundles sends.
-     *
-     * A line goes into the deploy log whenever a bundle is taken, because the
-     * customer is entitled to see that a copy of their code was made.
+     * Zip the account's source if the operator asked, at capture rather than at ship time: a failed creation is rolled back
+     * the moment captureDeploy() returns. A taken bundle is logged, as the customer may see a copy was made.
      *
      * @return ?array<string, mixed>
      */
@@ -1048,29 +942,47 @@ class Telemetry
             return null;
         }
 
-        $result = SourceBundle::create(
+        $result = self::createSourceBundle($username, $zipPath);
+        self::handBundleToCron($spool, $zipPath);
+        if ($result['available']) {
+            self::announceSourceBundle($logger, $result);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{available: bool, files?: int, bytes?: int, sha256?: string, skipped?: string}
+     */
+    private static function createSourceBundle(string $username, string $zipPath): array
+    {
+        return SourceBundle::create(
             (new TelemetryFields($username))->projectDir(),
             $zipPath,
             (int) config('telemetry.source_bundle.max_bytes', 25 * 1024 * 1024),
             (int) config('telemetry.source_bundle.max_files', 5000),
             (int) config('telemetry.source_bundle.max_file_bytes', 2 * 1024 * 1024)
         );
+    }
 
-        // SourceBundle writes the zip as the current uid (often root via pae);
-        // cron ships as www-data and must be able to read and delete it.
+    /** SourceBundle writes the zip as the current uid (often root via pae); cron ships it as www-data. */
+    private static function handBundleToCron(Spool $spool, string $zipPath): void
+    {
         if (is_file($zipPath)) {
             $spool->claimOwnership($zipPath);
         }
+    }
 
-        if ($result['available']) {
-            $logger->info(sprintf(
-                'Captured a source bundle for diagnostics (%d files, %s) — secrets, .env files and dependencies excluded',
-                $result['files'],
-                self::humanBytes((int) $result['bytes'])
-            ));
-        }
-
-        return $result;
+    /**
+     * @param  array{available: bool, files?: int, bytes?: int, sha256?: string, skipped?: string}  $result
+     */
+    private static function announceSourceBundle(DeployLogger $logger, array $result): void
+    {
+        $logger->info(sprintf(
+            'Captured a source bundle for diagnostics (%d files, %s) — secrets, .env files and dependencies excluded',
+            $result['files'],
+            self::humanBytes((int) $result['bytes'])
+        ));
     }
 
     /** Bundling is off, or this failure is not a candidate for it. */

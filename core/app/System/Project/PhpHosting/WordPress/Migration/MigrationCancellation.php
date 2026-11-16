@@ -7,12 +7,8 @@ use App\Models\WordpressMigration;
 use Throwable;
 
 /**
- * Undoes an import on request: stops the transfer on the source, removes the
- * source plugin (wp_admin only), the preview tunnel, and the project the
- * import created or the files and database it put into an existing one,
- * then clears the secrets. The source is best effort, since it may be
- * unreachable; anything left on this engine keeps the record cancelling
- * so the cancel can be asked again.
+ * Undoes an import: stops the source transfer, removes the source plugin (wp_admin), the preview tunnel and what it made
+ * here, then the secrets. The source may be unreachable, so is best effort; anything left here keeps it cancelling for a retry.
  */
 final class MigrationCancellation
 {
@@ -50,7 +46,7 @@ final class MigrationCancellation
 
     private function removeSourcePlugin(WordpressMigration $migration): void
     {
-        if ($migration->usesManualPlugin() || ! self::sourcePluginTried($migration)) {
+        if ($migration->keepsSourcePlugin() || ! self::mayHoldItsOwnPlugin($migration)) {
             return;
         }
 
@@ -107,9 +103,17 @@ final class MigrationCancellation
         return $migration->stepStatus(WordpressMigration::STEP_INSTALL_WORDPRESS) !== WordpressMigration::STEP_STATUS_PENDING;
     }
 
-    private static function sourcePluginTried(WordpressMigration $migration): bool
+    /**
+     * Once the install looked and found no copy, any attempt may have left this import's own. A record that never looked
+     * (its install failed before the check, or it predates it) counts as uploading only once its install completed.
+     */
+    private static function mayHoldItsOwnPlugin(WordpressMigration $migration): bool
     {
-        return $migration->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN) !== WordpressMigration::STEP_STATUS_PENDING;
+        $install = $migration->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN);
+
+        return $migration->source_plugin_preinstalled === false
+            ? $install !== WordpressMigration::STEP_STATUS_PENDING
+            : $install === WordpressMigration::STEP_STATUS_COMPLETED;
     }
 
     private function onSource(WordpressMigration $migration, string $what, callable $work): void

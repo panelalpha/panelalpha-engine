@@ -28,6 +28,15 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
   { glob: 'system/ssl-config*', reason: 'engine-wide certificate issuer settings' },
   { glob: 'system/network-config*', reason: 'engine-wide network settings' },
   { glob: 'system/ipv4-nat*', reason: 'engine-wide NAT map' },
+  {
+    glob: 'system/images',
+    reason:
+      'adds and removes images every project builds from; a removal garbage-collects the registry',
+  },
+  {
+    glob: 'system/build-caches',
+    reason: 'builds and removes build caches every project imports, under the cache registry lock',
+  },
   { glob: 'ip/ipam-*', reason: 'fixed subnets; unassigning frees addresses of every project' },
   {
     glob: 'proxy-rules/*',
@@ -45,6 +54,10 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
   {
     glob: 'domains/domains-ssl',
     reason: 'issues and removes certificates on the shared user; reloads',
+  },
+  {
+    glob: 'domains/domains-primary-switch-certificate',
+    reason: 'installs a certificate on its own project and reloads the webserver',
   },
   {
     glob: 'domains/domains-request-ssl',
@@ -98,9 +111,12 @@ export const SERIAL_SPECS: readonly SerialSpec[] = [
     reason: 'checks the shared site keeps serving after another project is removed',
   },
   { glob: 'backup/backup-containers', reason: 'global backup container list' },
+  { glob: 'backup/backup-container-disabled-schedule', reason: 'global backup container list' },
   { glob: 'mcp/mcp-tokens', reason: 'global token list' },
   { glob: 'mcp/mcp-activity-logs', reason: 'global activity log' },
   { glob: 'vault/vault-secrets', reason: 'global secret list' },
+  { glob: 'vault/vault-config', reason: 'lists every filled global secret' },
+  { glob: 'overlay/system-overlay', reason: 'the global overlay is written into every site' },
 ];
 
 /**

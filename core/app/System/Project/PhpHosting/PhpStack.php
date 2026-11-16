@@ -31,4 +31,10 @@ interface PhpStack
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void;
 
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void;
+
+    /**
+     * The next request reads a changed document root's .user.ini: php-fpm within its short user INI cache, or by
+     * replacing the workers of a handler that still caches it for five minutes; lsphp on its next restart.
+     */
+    public function reloadPhpHandler(PhpHosting $project, string $phpVersion): void;
 }

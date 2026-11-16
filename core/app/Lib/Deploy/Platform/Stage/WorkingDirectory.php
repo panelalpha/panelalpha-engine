@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Platform\Stage;
 
 /**
- * Running a command somewhere other than the app root.
- *
- * An ordinary step gets a subshell, so the `cd` does not leak into the next
- * one. The serve command must not: a subshell would put a shell between the
- * init process and the server and undo the point of `exec`.
+ * Running a command somewhere other than the app root: a step gets a subshell so the `cd` does not
+ * leak, but the serve command must not, or a shell would sit between init and the server.
  */
 final class WorkingDirectory
 {

@@ -5,10 +5,11 @@ namespace Tests\Unit\Files;
 use App\Http\Middleware\Authenticate;
 use App\Models\User;
 use App\System;
-use App\System\Project\FileManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -99,6 +100,16 @@ class FileListHttpTest extends TestCase
         $this->assertNotContains('.hidden', array_column($response->json('data'), 'name'));
     }
 
+    /** A query string carries a boolean as text: `true` and `false` mean what they say. */
+    public function test_show_hidden_takes_the_words_true_and_false(): void
+    {
+        $hidden = $this->getJson('/api/projects/alice/files/list?path=%2F&show_hidden=false')->assertOk();
+        $shown = $this->getJson('/api/projects/alice/files/list?path=%2F&show_hidden=true')->assertOk();
+
+        $this->assertNotContains('.hidden', array_column($hidden->json('data'), 'name'));
+        $this->assertContains('.hidden', array_column($shown->json('data'), 'name'));
+    }
+
     public function test_a_limit_truncates_and_flags_it(): void
     {
         mkdir($this->tmpRoot . '/home/alice/limited');
@@ -122,8 +133,8 @@ class FileListHttpTest extends TestCase
             ->assertJson(['message' => 'Invalid path']);
 
         $this->assertCount(2, $this->system->processJournal);
-        $this->assertContains(FileManager::CONFINE_SCRIPT, $this->system->processJournal[0]);
-        $this->assertContains(FileManager::ENTRY_TYPE_SCRIPT, $this->system->processJournal[1]);
+        $this->assertContains(BrokerScripts::confine(), $this->system->processJournal[0]);
+        $this->assertContains(BrokerScripts::entryType(), $this->system->processJournal[1]);
     }
 
     public function test_a_file_is_refused_with_not_a_directory(): void
@@ -188,9 +199,8 @@ class FileListHttpTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $this->processJournal[] = is_array($cmd) ? $cmd : [$cmd];
-                $argv = array_slice((array) $cmd, 7);
-                $process = new Process($argv);
+                $this->processJournal[] = LocalRoot::plain((array) $cmd);
+                $process = new Process(LocalRoot::argv((array) $cmd));
                 $process->run();
 
                 return $process;

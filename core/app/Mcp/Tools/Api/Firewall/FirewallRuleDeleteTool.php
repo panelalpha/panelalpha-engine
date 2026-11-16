@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('firewall_rule_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a firewall rule
+
+    The rule goes and is not kept anywhere, so the traffic it matched is no longer filtered by it. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

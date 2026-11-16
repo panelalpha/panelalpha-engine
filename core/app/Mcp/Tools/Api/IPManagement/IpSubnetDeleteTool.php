@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('ip_subnet_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an IP subnet
+
+    The subnet goes from the engine's address management and is not kept; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

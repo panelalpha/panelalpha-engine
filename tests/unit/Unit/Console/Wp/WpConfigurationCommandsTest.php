@@ -15,6 +15,7 @@ use App\Console\Commands\Wp\WpOptionSetCommand;
 use App\Http\Controllers\User\Wp\WpAutoUpdateController;
 use App\Http\Controllers\User\Wp\WpConfigController;
 use App\Http\Controllers\User\Wp\WpOptionController;
+use App\Http\Requests\Wp\WpConfigPathRequest;
 use Illuminate\Support\Facades\Route as RouteFacade;
 use Tests\TestCase;
 
@@ -52,6 +53,17 @@ class WpConfigurationCommandsTest extends TestCase
 
         $setConfig = new WpConfigSetCommand();
         $this->assertTrue($setConfig->getDefinition()->hasOption('raw'));
+
+        $getConfig = new WpConfigGetCommand();
+        $this->assertFalse(
+            $getConfig->getDefinition()->hasOption('json'),
+            'the single read is always JSON, so it takes no format option'
+        );
+    }
+
+    public function test_a_config_read_takes_no_format_option(): void
+    {
+        $this->assertArrayNotHasKey('format', (new WpConfigPathRequest())->rules());
     }
 
     public function test_configuration_http_routes_are_registered_under_wp_prefix(): void

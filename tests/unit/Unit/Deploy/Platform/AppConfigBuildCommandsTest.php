@@ -76,6 +76,41 @@ class AppConfigBuildCommandsTest extends TestCase
         $this->assertStringEndsWith('php bin/publish', $decision['build_command']);
     }
 
+    /** Pinned to a recipe that is not the stack the app config's own compose file is, the deploy runs none of its build. */
+    public function test_a_recipe_pinned_to_another_stack_takes_none_of_the_app_configs_build(): void
+    {
+        $this->config(<<<'YAML'
+            compose: |
+              services:
+                web:
+                  image: nginx
+            commands:
+              - id: publish-assets
+                stage: build
+                run: 'php bin/publish'
+            YAML);
+
+        $decision = DetectProjectStrategy::detect($this->project, 'https://github.com/acme/app', 'php');
+
+        $this->assertSame('php', $decision['strategy']);
+        $this->assertStringNotContainsString('php bin/publish', $decision['build_command']);
+    }
+
+    /** An app config that brings no stack of its own speaks for whichever recipe is pinned. */
+    public function test_a_pinned_recipe_takes_the_build_of_an_app_config_with_no_stack_of_its_own(): void
+    {
+        $this->config(<<<'YAML'
+            commands:
+              - id: publish-assets
+                stage: build
+                run: 'php bin/publish'
+            YAML);
+
+        $decision = DetectProjectStrategy::detect($this->project, 'https://github.com/acme/app', 'php');
+
+        $this->assertStringEndsWith('php bin/publish', $decision['build_command']);
+    }
+
     /** A recipe with no build command of its own gets exactly what it got before. */
     public function test_an_app_config_without_build_commands_changes_nothing(): void
     {

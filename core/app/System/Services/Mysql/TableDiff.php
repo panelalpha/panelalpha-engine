@@ -11,6 +11,8 @@ use App\System\Services\Mysql;
  */
 class TableDiff
 {
+    private const AUTO_INCREMENT_OPTION = '/ AUTO_INCREMENT=\d+/';
+
     public function __construct(
         private readonly Mysql $mysql,
     ) {}
@@ -73,8 +75,16 @@ class TableDiff
         }
 
         return [
-            'structure' => $tables->createStatement($from, $name) !== $tables->createStatement($to, $name),
+            'structure' => $this->definition($tables, $from, $name) !== $this->definition($tables, $to, $name),
             'data' => $tables->checksum($from, $name) !== $tables->checksum($to, $name),
         ];
+    }
+
+    /** The table's `SHOW CREATE TABLE` without its next AUTO_INCREMENT value, which is data state, not schema. */
+    private function definition(Tables $tables, string $database, string $name): ?string
+    {
+        $statement = $tables->createStatement($database, $name);
+
+        return $statement === null ? null : preg_replace(self::AUTO_INCREMENT_OPTION, '', $statement);
     }
 }

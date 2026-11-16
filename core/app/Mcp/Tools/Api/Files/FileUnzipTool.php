@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Extract a ZIP archive
 
-    Extracts a .zip, .tar.gz or .gz into path, which is created when missing. Nothing already in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level (for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted.
+    Extracts a .zip, .tar.gz or .tgz, or .gz into path, which is created when missing; any other name is refused with 422. Nothing already in path is replaced or merged into: when path holds any entry the archive unpacks to at its top level (for a .gz, the unpacked file), the request is refused with 409 and nothing is extracted. A zip made on Windows, whose folders are separated by backslashes, is extracted into those folders and answered with unzip's warning in warnings; a zip whose backslashes would stay part of its file names is refused. A zip_path with no archive, an archive refused or that cannot be unpacked, a path the project cannot write to, and a zip_path or path through a link out of the home are refused with 422.
     MARKDOWN)]
 #[IsDestructive]
 class FileUnzipTool extends ApiTool

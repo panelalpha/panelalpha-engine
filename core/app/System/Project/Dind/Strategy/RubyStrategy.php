@@ -17,16 +17,11 @@ use App\Lib\Deploy\Platform\Runtime\Ruby\RubyServer;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\DeployStrategy;
 
 /**
- * Rails and plain Rack applications.
- *
- * Most of what is special here is Rails' own boot contract rather than
- * anything about hosting: it aborts without a secret_key_base, its
- * production defaults force_ssl behind a proxy that terminates TLS itself,
- * and Host Authorization rejects the vhost it is served on unless told about
- * it. A Sinatra or Rack app has none of that, so everything Rails-shaped is
- * gated on {@see RubyApp::isRails()}.
+ * Rails and plain Rack applications. Rails' boot contract (secret_key_base, force_ssl, Host Authorization)
+ * is what is special here, so everything Rails-shaped is gated on {@see RubyApp::isRails()}.
  */
 class RubyStrategy
 {
@@ -57,11 +52,27 @@ class RubyStrategy
 
         $strategy->entrypoint()->write($decision, $projectDir, $chown, [], $appConfig);
 
-        // Mounted: our base image with the account's directory bind-mounted,
-        // gems in ~/project/vendor/bundle, and nothing built. The base image
-        // is still ours and still built on the host -- it carries the apt
-        // packages native gems need -- but it is now shared by every Ruby
-        // account instead of being the bottom layer of a per-project image.
+        $extra = $this->mountedOrBuilt($decision, $app, $port, $chown);
+        $decision = $strategy->sidecars()->mergeRuntimeSidecars(
+            $extra + [
+                'strategy' => $decision['strategy'] ?? null,
+                'runtime' => PlatformManifest::RUNTIME_NODE,
+                'env' => $this->serviceEnvironment($strategy, $app, $projectDir, $chown),
+            ],
+            $strategy->sidecars()->runtimeSidecarsFromProject($projectDir)
+        );
+        $this->writeCompose($strategy, $decision, $projectDir, $chown, $port);
+    }
+
+    /**
+     * A mounted project runs the shared Ruby base with gems in ~/project/vendor/bundle and nothing built;
+     * any other gets a per-project Dockerfile and no extra keys.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, string>
+     */
+    private function mountedOrBuilt(array $decision, RubyApp $app, int $port, ?string $chown): array
+    {
         $mounted = HostRunProject::isStrategy($decision['strategy'] ?? null);
         $extra = [];
         if ($mounted) {
@@ -77,18 +88,26 @@ class RubyStrategy
             $this->writeDockerfile($app, $port, $chown);
         }
 
-        $decision = $strategy->sidecars()->mergeRuntimeSidecars(
-            $extra + [
-                'strategy' => $decision['strategy'] ?? null,
-                'runtime' => PlatformManifest::RUNTIME_NODE,
-                'env' => array_merge(
-                    $this->environment($app, $projectDir, $chown),
-                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), $strategy->projectEnvFiles($projectDir)),
-                    $strategy->entrypoint()->deployPhaseEnvironment()
-                ),
-            ],
-            $strategy->sidecars()->runtimeSidecarsFromProject($projectDir)
+        return $extra;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function serviceEnvironment(DeployStrategy $strategy, RubyApp $app, string $projectDir, ?string $chown): array
+    {
+        return array_merge(
+            $this->environment($app, $projectDir, $chown),
+            ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), $strategy->projectEnvFiles($projectDir)),
+            $strategy->entrypoint()->deployPhaseEnvironment()
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     */
+    private function writeCompose(DeployStrategy $strategy, array $decision, string $projectDir, ?string $chown, int $port): void
+    {
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
             DeployCompose::framework(
@@ -111,9 +130,7 @@ class RubyStrategy
     }
 
     /**
-     * Prebuilt ruby base with the apt packages native gems need, so this
-     * build starts at `bundle install` instead of paying ~14s of apt-get
-     * that every account would otherwise repeat.
+     * On the prebuilt Ruby base carrying the apt packages native gems need, so the build starts at `bundle install`.
      */
     private function writeDockerfile(RubyApp $app, int $port, ?string $chown): void
     {
@@ -132,8 +149,7 @@ class RubyStrategy
     }
 
     /**
-     * A Sinatra or Rack app has no config/, no credentials and no host
-     * whitelist to extend, so everything Rails-shaped stops here.
+     * A Sinatra or Rack app has no config/, credentials or host whitelist, so everything Rails-shaped stops here.
      *
      * @return array<string, string>
      */
@@ -148,10 +164,8 @@ class RubyStrategy
     }
 
     /**
-     * Rails' own boot contract behind the hosting proxy: how to treat TLS,
-     * plus a secret_key_base when the clone brought no master.key. Rails
-     * aborts on boot without one, and deriving it per account keeps it
-     * across restarts and rebuilds instead of logging every session out.
+     * Rails' boot contract behind the hosting proxy: its TLS settings, and a secret_key_base derived per account
+     * when the clone brought no master.key, so sessions survive restarts and rebuilds.
      *
      * @return array<string, string>
      */
@@ -167,8 +181,7 @@ class RubyStrategy
     }
 
     /**
-     * Rails 6+ Host Authorization blocks the configured public vhost when the
-     * app keeps a host whitelist. Drop a tiny initializer that adds it.
+     * An initializer adding the public vhost, which Rails 6+ Host Authorization blocks when the app keeps a whitelist.
      */
     public function installHostInitializer(string $projectDir, ?string $chown): void
     {

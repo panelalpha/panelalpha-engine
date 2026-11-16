@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Http\Controllers\Concerns\ReadsDeployLogs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DeployCancelRequest;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployStatus;
 use App\Lib\Deploy\DeployLog\DeployTimings;
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Models\Task;
@@ -18,15 +21,7 @@ use OpenApi\Attributes as OA;
 
 class DeployLogController extends Controller
 {
-    private function getDindUser(string $username): User
-    {
-        $user = $this->projectOr404($username);
-        if ($user->getTemplate() !== 'dind') {
-            abort(new JsonResponse(['message' => 'Deploy logs work only on container projects (template dind).'], 403));
-        }
-
-        return $user;
-    }
+    use ReadsDeployLogs;
 
     #[OA\Get(
         path: '/projects/{username}/deploy-log',
@@ -36,9 +31,15 @@ class DeployLogController extends Controller
             .'as by line count.'
             ."\n\n"
             .'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
-            .'`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
+            .'`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.'
+            ."\n\n"
+            .'A deploy that serves with something wrong finishes `partial`: `error` stays null and `warnings` lists each '
+            .'finding (`code`, `message`, its facts) with the `hints` that resolve it, one per surface: `rest`, `mcp`, `cli`. '
+            .'A failed deploy has `error` and `failure`, the same sentence as a finding: a refusal\'s code, the rule that '
+            .'explains the failure, or `deploy_failed`.',
         x: ['mcp-description' => 'A page of the latest deploy log from `offset`. While `more` is true, call again '
-            .'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure.'],
+            .'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure. A `partial` deploy '
+            .'lists `warnings` and a failed one a `failure`; a hint with `type: mcp` is the tool call that resolves one.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -61,7 +62,7 @@ class DeployLogController extends Controller
     )]
     public function show(string $username, Request $request): JsonResponse
     {
-        $this->getDindUser($username);
+        $this->deployLogProject($username);
 
         $offset = max(0, (int) $request->query('offset', 0));
         $maxBytes = $request->filled('max_bytes') ? max(1024, (int) $request->query('max_bytes')) : null;
@@ -83,7 +84,9 @@ class DeployLogController extends Controller
             'lines' => $read['lines'],
             'next_offset' => $read['next_offset'],
             'more' => $read['more'],
-            'error' => $latest['error'] ?? null,
+            'error' => DeployStatus::errorOf($latest ?? []),
+            'warnings' => FindingPresenter::present(DeployStatus::warningsOf($latest ?? []), $username),
+            'failure' => FindingPresenter::presentOne(DeployStatus::failureOf($latest ?? []), $username),
             'started_at' => $latest['started_at'] ?? null,
             'finished_at' => $latest['finished_at'] ?? null,
             'timings' => DeployTimings::summarize(
@@ -104,6 +107,8 @@ class DeployLogController extends Controller
         'next_offset' => 0,
         'more' => false,
         'error' => null,
+        'warnings' => [],
+        'failure' => null,
         'started_at' => null,
         'finished_at' => null,
         'timings' => null,

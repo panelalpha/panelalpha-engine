@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Projects;
 
+use App\Exceptions\ProjectBusyException;
 use App\Models\User;
 use App\System;
 use App\System\Projects;
@@ -22,20 +23,21 @@ class ProjectPushCommand extends Command
 
         $from = User::findByUsername($fromUsername);
         if (! $from) {
-            $this->error("No such user: '{$fromUsername}'");
+            $this->error("No such project: '{$fromUsername}'");
 
             return 1;
         }
 
         $to = User::findByUsername($toUsername);
         if (! $to) {
-            $this->error("No such user: '{$toUsername}'");
+            $this->error("No such project: '{$toUsername}'");
 
             return 1;
         }
 
         try {
             Projects::assertCanPush($from, $to);
+            Projects::assertPushIdle($from, $to);
 
             $to->mergeAsyncStatus([
                 'push' => 'running',
@@ -49,6 +51,10 @@ class ProjectPushCommand extends Command
             $this->info("Push completed: {$fromUsername} -> {$toUsername}");
 
             return 0;
+        } catch (ProjectBusyException $e) {
+            $this->error($e->getMessage());
+
+            return 1;
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 

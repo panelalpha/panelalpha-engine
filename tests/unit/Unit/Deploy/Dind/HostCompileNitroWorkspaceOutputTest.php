@@ -3,12 +3,15 @@
 namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
+use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * wemux keeps its Vite root in apps/web, so its Nitro build wrote
@@ -36,12 +39,32 @@ class HostCompileNitroWorkspaceOutputTest extends TestCase
         $this->write('apps/web/.output/server/index.mjs');
         $this->write('apps/web/.output/public/index.html');
 
-        $this->invoke('assertBuildProduced', $this->dir, '.output', true);
+        $commands = $this->invoke('assertBuildProduced', $this->dir, '.output', true);
 
         $this->assertFileExists($this->dir . '/.output/server/index.mjs');
         $this->assertFileExists($this->dir . '/.output/public/index.html');
         $this->assertFileExists($this->dir . '/.output/' . StandaloneNodeServe::RELOCATED_MARKER);
         $this->assertDirectoryDoesNotExist($this->dir . '/apps/web/.output');
+        $owner = getmyuid().':'.getmygid();
+        $remove = Privileged::files()->removeTree($this->dir.'/.output');
+        $this->assertSame([
+            $remove,
+            Privileged::files()->rename($this->dir.'/apps/web/.output', $this->dir.'/.output'),
+            Privileged::files()->changeOwnerRecursively($owner, $this->dir.'/.output'),
+            Privileged::accountFiles(getmyuid(), getmygid())->touch($this->dir.'/.output/'.StandaloneNodeServe::RELOCATED_MARKER),
+        ], array_slice($commands, (int) array_search($remove, $commands, true), 4));
+    }
+
+    public function test_the_relocated_marker_is_touched_as_the_account(): void
+    {
+        $this->write('apps/web/.output/server/index.mjs');
+
+        $commands = $this->invoke('assertBuildProduced', $this->dir, '.output', true);
+
+        $touch = array_values(array_filter($commands, static fn (array $argv): bool => str_ends_with((string) LocalRoot::action($argv), '.touch')));
+        $this->assertCount(1, $touch);
+        $this->assertSame('account.touch', LocalRoot::action($touch[0]));
+        $this->assertNotContains(Privileged::files()->touch($this->dir.'/.output/'.StandaloneNodeServe::RELOCATED_MARKER), $commands);
     }
 
     public function test_a_root_output_is_used_as_it_is(): void
@@ -90,17 +113,23 @@ class HostCompileNitroWorkspaceOutputTest extends TestCase
         file_put_contents($path, 'x');
     }
 
-    private function invoke(string $method, mixed ...$args): void
+    /** @return list<list<string>> */
+    private function invoke(string $method, mixed ...$args): array
     {
         // Every command runs here, as ourselves.
         $system = new class () extends System {
+            /** @var list<list<string>> */
+            public array $commands = [];
+
             public function __construct()
             {
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(array_values(array_diff((array) $cmd, ['sudo'])));
+                $argv = array_values((array) $cmd);
+                $this->commands[] = $argv;
+                $process = new Process(LocalRoot::argv($argv));
                 $process->run();
 
                 return $process;
@@ -111,12 +140,17 @@ class HostCompileNitroWorkspaceOutputTest extends TestCase
                 return $this->runProcess($cmd)->getOutput();
             }
         };
+        $user = $this->createStub(User::class);
+        $user->method('linuxIds')->willReturn([getmyuid(), getmygid()]);
         $dind = $this->createStub(Dind::class);
+        $dind->method('userModel')->willReturn($user);
         $dind->method('system')->willReturn($system);
         $dind->method('username')->willReturn('acme');
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
 
         $compile = new HostCompile($dind);
         (new \ReflectionMethod($compile, $method))->invoke($compile, ...$args);
+
+        return $system->commands;
     }
 }

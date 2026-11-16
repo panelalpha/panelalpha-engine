@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\User;
+use App\Support\JobBudget;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project;
@@ -13,6 +14,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 use Tests\TestCase;
 
 class BackupRestoreTest extends TestCase
@@ -182,6 +184,62 @@ class BackupRestoreTest extends TestCase
         $this->assertContains('restoreDatabase:alice_app', $restore->calls);
         $this->assertFalse($this->hostCallsContain($restore->calls, 'extractHomeArchive:'));
         $this->assertFalse($this->hostCallsContain($restore->calls, 'mergeIntoHome:'));
+    }
+
+    public function test_classic_restore_dumps_each_database_before_importing_it(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage);
+        $restore->restore();
+
+        $this->assertSame('completed', $backup->fresh()->restoreStatus());
+        $dumpIndex = array_search('dumpDatabase', $restore->calls, true);
+        $importIndex = array_search('restoreDatabase:alice_app', $restore->calls, true);
+        $this->assertNotFalse($dumpIndex);
+        $this->assertNotFalse($importIndex);
+        $this->assertLessThan($importIndex, $dumpIndex);
+    }
+
+    public function test_a_failed_classic_database_import_puts_the_database_back_and_keeps_the_home(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage, restoreDatabaseThrows: true);
+        $restore->restore();
+
+        $backup->refresh();
+        $this->assertSame('failed', $backup->restoreStatus());
+        $this->assertSame('Restore failed: database restore failed', $backup->error);
+        $this->assertSame(2, $this->countCalls($restore->calls, 'restoreDatabase:alice_app'), 'the import, then the pre-restore dump');
+        $this->assertNotContains('swapHome:.restore-' . $backup->id . ':.pre-restore-' . $backup->id, $restore->calls);
+        $this->assertNotContains('discardHomeAside:.pre-restore-' . $backup->id, $restore->calls);
+    }
+
+    public function test_a_failed_classic_home_swap_puts_the_restored_databases_back(): void
+    {
+        $user = $this->makeUser('alice', template: 'default');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble($this->project($user), $backup, $storage, swapHomeThrows: true);
+        $restore->restore();
+
+        $backup->refresh();
+        $this->assertSame('failed', $backup->restoreStatus());
+        $this->assertSame('Restore failed: home swap failed', $backup->error);
+        $this->assertContains('rollbackHome:.restore-' . $backup->id . ':.pre-restore-' . $backup->id, $restore->calls);
+        $this->assertSame(2, $this->countCalls($restore->calls, 'restoreDatabase:alice_app'), 'the import, then the pre-restore dump');
     }
 
     public function test_incomplete_backup_cannot_restore(): void
@@ -382,6 +440,26 @@ class BackupRestoreTest extends TestCase
         $this->assertContains('composeStart', $restore->calls);
     }
 
+    public function test_a_database_restore_failure_rolls_back_on_the_cleanup_reserve(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $created = $this->makeCompletedBackup($user, $container, $storage);
+        $backup = $created->model()->fresh(['items']);
+
+        $restore = new BackupDouble(
+            $this->project($user),
+            $backup,
+            $storage,
+            restoreDatabaseThrows: true,
+        );
+        $restore->restore();
+
+        $this->assertSame('failed', $backup->fresh()->restoreStatus());
+        $this->assertSame([null, JobBudget::CLEANUP_SECONDS], $restore->databaseRestoreTimeouts);
+    }
+
     /**
      * @param list<string> $calls
      * @return list<string>
@@ -392,6 +470,14 @@ class BackupRestoreTest extends TestCase
             $calls,
             static fn (string $call): bool => preg_match('/^(removeHomeEntry|mergeIntoHome|extractHomeArchive|swapHome):/', $call) === 1,
         ));
+    }
+
+    /**
+     * @param list<string> $calls
+     */
+    private function countCalls(array $calls, string $call): int
+    {
+        return count(array_keys($calls, $call, true));
     }
 
     /**
@@ -461,6 +547,8 @@ class BackupRestoreTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 

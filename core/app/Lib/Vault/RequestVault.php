@@ -6,28 +6,14 @@ use App\Models\SecretVaultEntry;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The current request's fields, with `vault:<key>` read in place of a secret.
- *
- * The vault only proxies what a caller passes: a controller reads its request
- * parameter here and stores the secret it gets back. Nothing else reads the
- * vault -- no integration looks a secret up on a project's behalf.
+ * The current request's fields, with `vault:<key>` read in place of a secret. The vault only proxies what a caller passes:
+ * nothing else reads it, and no integration looks a secret up on a project's behalf.
  */
 class RequestVault
 {
     /**
-     * Request field `$field` as `$project` may use it. A literal (or null, or
-     * '') passes through; `vault:<key>` becomes its secret; an array field
-     * (`env_vars`) has each value read the same way.
-     *
-     * - the entry must have been created for `$type`, the field name unless
-     *   given -- so a Git token cannot be spent as a Cloudflare token;
-     * - a `global` entry is returned to anyone;
-     * - a `project` entry with no project yet is assigned to `$project` and
-     *   returned; one already assigned to another project is refused.
-     *
-     * `$project` null is a read outside any project (source_inspect): a
-     * project entry no project owns yet may be used there, and stays
-     * unassigned until a project reads it; one a project owns is refused.
+     * Request field `$field` as `$project` may use it: a literal (or null, or '') passes through, `vault:<key>` becomes
+     * its secret, and an array field (`env_vars`) has each value read the same way.
      *
      * @return mixed the field's value, with every reference read
      *
@@ -40,22 +26,25 @@ class RequestVault
 
     /**
      * {@see get()} for a value the caller already holds, such as a create
-     * that did not come in as a request.
+     * that did not come in as a request. `$type` may list several types the
+     * entry may have been created for.
      *
+     * @param  string|list<string>|null  $type
      * @return mixed the value, with every reference read
      *
      * @throws ValidationException naming `$field` when a reference cannot be used
      */
-    public static function resolve(string $field, mixed $value, ?string $project, ?string $type = null): mixed
+    public static function resolve(string $field, mixed $value, ?string $project, string|array|null $type = null): mixed
     {
-        $type ??= $field;
+        $types = (array) ($type ?? $field);
 
         return is_array($value)
-            ? array_map(fn (mixed $item) => self::read($item, $project, $type, $field), $value)
-            : self::read($value, $project, $type, $field);
+            ? array_map(fn (mixed $item) => self::read($item, $project, $types, $field), $value)
+            : self::read($value, $project, $types, $field);
     }
 
-    private static function read(mixed $value, ?string $project, string $type, string $field): mixed
+    /** @param  list<string>  $types */
+    private static function read(mixed $value, ?string $project, array $types, string $field): mixed
     {
         if (! self::isReference($value)) {
             return $value;
@@ -65,28 +54,11 @@ class RequestVault
         $ref = trim((string) $value);
 
         if ($entry === null) {
-            self::fail($field, "No vault entry for '{$ref}'. Use the `vault:<key>` vault_secret_create returned.");
+            self::fail($field, "No vault entry for '{$ref}'. Use the `vault:<key>` the vault returned when the secret was created.");
         }
-        if ($entry->type !== $type) {
-            self::fail($field, "Vault entry {$ref} holds a '{$entry->type}', not a '{$type}'.");
-        }
-        if ($entry->expired()) {
-            self::fail($field, "Vault entry {$ref} expired at {$entry->expires_at?->toIso8601String()}. Create a new one.");
-        }
-        if ($entry->filled_at === null) {
-            self::fail($field, "Vault entry {$ref} has no secret pasted yet. Open the URL vault_secret_create returned.");
-        }
+        self::assertUsable($entry, $ref, $types, $field);
 
-        if (! $entry->isGlobal()) {
-            if ($entry->project === null && $project !== null) {
-                // Conditional, so two projects racing for one entry cannot both win.
-                SecretVaultEntry::query()->whereKey($entry->id)->whereNull('project')->update(['project' => $project]);
-                $entry->refresh();
-            }
-            if ($entry->project !== null && $entry->project !== $project) {
-                self::fail($field, "Vault entry {$ref} belongs to project '{$entry->project}'.");
-            }
-        }
+        self::claim($entry, $project, $ref, $field);
 
         $secret = $entry->revealSecret();
         if ($secret === null || $secret === '') {
@@ -96,6 +68,42 @@ class RequestVault
         $entry->forceFill(['use_count' => $entry->use_count + 1, 'last_used_at' => now()])->save();
 
         return $secret;
+    }
+
+    /**
+     * The entry must have been created for `$type`, the field name unless given, so a Git token cannot be spent as a
+     * Cloudflare token.
+     *
+     * @param  list<string>  $types
+     */
+    private static function assertUsable(SecretVaultEntry $entry, string $ref, array $types, string $field): void
+    {
+        if (! in_array($entry->type, $types, true)) {
+            self::fail($field, "Vault entry {$ref} holds a '{$entry->type}', not a '".implode("' or '", $types)."'.");
+        }
+        if ($entry->expired()) {
+            self::fail($field, "Vault entry {$ref} expired at {$entry->expires_at?->toIso8601String()}. Create a new one.");
+        }
+        if ($entry->filled_at === null) {
+            self::fail($field, "Vault entry {$ref} has no secret pasted yet. Open the paste URL the vault returned when the secret was created.");
+        }
+    }
+
+    /**
+     * A global entry serves anyone. A project entry goes to the first project that reads it, conditionally so two racing
+     * cannot both win, and is refused to others; read with no project (source_inspect), an unowned one stays unassigned.
+     */
+    private static function claim(SecretVaultEntry $entry, ?string $project, string $ref, string $field): void
+    {
+        if (! $entry->isGlobal()) {
+            if ($entry->project === null && $project !== null) {
+                SecretVaultEntry::query()->whereKey($entry->id)->whereNull('project')->update(['project' => $project]);
+                $entry->refresh();
+            }
+            if ($entry->project !== null && $entry->project !== $project) {
+                self::fail($field, "Vault entry {$ref} belongs to project '{$entry->project}'.");
+            }
+        }
     }
 
     /** Whether `$value` is meant as a vault reference -- usable or not. */

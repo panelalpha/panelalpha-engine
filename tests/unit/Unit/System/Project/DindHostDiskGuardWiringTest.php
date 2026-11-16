@@ -7,6 +7,7 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 use Tests\TestCase;
 
 /**
@@ -85,6 +86,7 @@ class DindHostDiskGuardWiringTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $path = is_array($cmd) ? (string) end($cmd) : '';
 
                 return "Filesystem 1024-blocks Used Available Capacity Mounted on\n"

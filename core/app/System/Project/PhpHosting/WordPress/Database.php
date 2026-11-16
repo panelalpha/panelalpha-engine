@@ -3,18 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named database operations for a PHP hosting WordPress install.
- *
- * Export and import act on the install's own database (table prefix and
- * credentials from wp-config) via `wp db export|import`. They do not
- * administer MySQL users or databases through the engine account API.
- *
- * Import strips DEFINER clauses from the SQL file first (same sed pattern as
- * app-lite AbstractDatabase::removeDefinerFromSqlFile), as an internal step —
- * not a named operation.
- *
- * The file of either is held inside the project ({@see WpCli::projectFile()}),
- * so neither reads nor writes a file of the host or of WP-CLI's container.
+ * Named database operations for a PHP hosting WordPress install: `wp db export|import` on the install's own database
+ * (table prefix and credentials from wp-config), never MySQL users or databases through the engine account API.
  */
 final class Database
 {
@@ -23,6 +13,12 @@ final class Database
 
     /** Rejected statements named in an import failure; the rest are only counted. */
     private const REJECTED_STATEMENTS_SHOWN = 5;
+
+    /**
+     * A consistent dump that neither takes nor replays LOCK TABLES, which a WordPress database user need not hold:
+     * one transaction snapshot of the InnoDB tables, and no LOCK TABLES statements written around the inserts.
+     */
+    private const LOCK_FREE_DUMP = ['--single-transaction', '--skip-add-locks'];
 
     /** The field a file outside the project is refused on. */
     private const FILE_FIELD = 'file';
@@ -38,7 +34,7 @@ final class Database
     public function export(string $file, array $tables = []): array
     {
         $file = $this->projectFile($file);
-        $args = ['db', 'export', $file];
+        $args = ['db', 'export', $file, ...self::LOCK_FREE_DUMP];
         if ($tables !== []) {
             $args[] = '--tables='.implode(',', $tables);
         }
@@ -52,9 +48,8 @@ final class Database
     }
 
     /**
-     * PHP that WP-CLI runs before `db export`, in the same process: the dump
-     * is created readable and writable by the user that writes it only, and a
-     * file already there is narrowed the same way before it is overwritten.
+     * PHP that WP-CLI runs before `db export`, in the same process: the dump is created readable and writable by its
+     * writer only, and a file already there is narrowed the same way before it is overwritten.
      */
     private static function ownerOnlyCode(string $file): string
     {
@@ -80,15 +75,18 @@ final class Database
         ];
     }
 
+    /**
+     * Held inside the project ({@see WpCli::projectFile()}), so neither export nor import touches a file of the host or
+     * of WP-CLI's container.
+     */
     private function projectFile(string $file): string
     {
         return $this->cli->projectFile(self::FILE_FIELD, WpCli::positional($file));
     }
 
     /**
-     * WP-CLI imports with `mysql -e "SOURCE file"`, and the client then goes on
-     * past a statement MySQL rejects and still exits 0, so WP-CLI reports
-     * success. The client's own error lines are what tell.
+     * WP-CLI imports with `mysql -e "SOURCE file"`, and the client goes on past a statement MySQL rejects and still exits
+     * 0, so WP-CLI reports success. The client's own error lines are what tell.
      */
     private function refuseRejectedStatements(string $file, string $stderr): void
     {
@@ -107,11 +105,10 @@ final class Database
     }
 
     /**
-     * PHP that WP-CLI runs before `db import`, in the same process, so the
-     * file is rewritten in the container and as the user that then reads it.
-     * Strips DEFINER=`user`@`host` so the import does not fail when that MySQL
-     * user is absent (same sed as app-lite's removeDefinerFromSqlFile), and
-     * stops the import when the file has one and cannot be rewritten.
+     * PHP that WP-CLI runs before `db import`, in its process, so the file is rewritten in the container as its reader:
+     * DEFINER=`user`@`host` goes, since an absent MySQL user fails the import, which stops if one cannot be stripped.
+     *
+     * @see removeDefinerFromSqlFile() of app-lite's AbstractDatabase, which uses the same sed
      */
     private static function removeDefinerCode(string $sqlFile): string
     {

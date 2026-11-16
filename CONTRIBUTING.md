@@ -126,6 +126,16 @@ If a failure looks unrelated to your change, prove it: `git stash`, re-run, comp
 
 Changing detection, a recipe, or onboarding an application? Coding agents follow [`AGENTS.md`](AGENTS.md) — §2–§6 for the deploy tester, §11 for a new application.
 
+### Static analysis and code style
+
+```bash
+cd core
+composer analyse   # PHPStan with Larastan, level 5, against phpstan-baseline.neon
+composer lint      # Pint in test mode, changes nothing
+```
+
+Both must pass. The baseline holds the errors the code had when the analysis was introduced, so only new code is held to the level. When you fix a listed error, the analysis reports the baseline entry as unmatched: regenerate the baseline with `vendor/bin/phpstan analyse --memory-limit=1G --generate-baseline` and commit it. Never add new code to the baseline to make it pass.
+
 ### End-to-end API tests ([`tests/api/`](tests/api/README.md))
 
 The unit suite above covers the engine's logic in isolation. [`tests/api/`](tests/api/README.md) is a separate **Playwright** suite (TypeScript, Node ≥ 20) that drives a **live engine** over its REST API and MCP endpoint, creating real projects, domains, databases and deploys and asserting on the responses.

@@ -59,10 +59,8 @@ final class DomainLogFiles
     }
 
     /**
-     * A path the API can open, or null when the file is not there. The php
-     * error log lives in a directory the account owns, so it is opened as the
-     * account and confined to that directory; a link the account plants is
-     * refused rather than followed with the engine's privileges.
+     * A path the API can open, or null. The account-owned php error log is opened as the account, confined
+     * to its directory, so a link the account plants is refused rather than followed with engine privileges.
      */
     public function readablePath(string $filename, bool $allWebservers): ?string
     {
@@ -77,9 +75,9 @@ final class DomainLogFiles
 
         $files = $this->domain->project()->fileManager();
         FileStreamWrapper::register();
-        FileStreamWrapper::confineTo(dirname($path), $files->asAccount([]));
+        FileStreamWrapper::confineToAccount(dirname($path), ...$files->accountIds());
 
-        return 'sudophp://'.$path;
+        return 'rootfile://'.$path;
     }
 
     public function readablePathOrFail(string $filename, bool $allWebservers): string

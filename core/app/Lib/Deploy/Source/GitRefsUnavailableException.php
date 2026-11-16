@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * A remote whose refs could not be listed: missing, private, or unreachable.
- *
- * The outcome names which, so the API boundary can map it to a status and a
- * stable problem code.
+ * A remote whose refs could not be listed: missing, private or unreachable, named by the outcome so the
+ * API boundary can map it to a status and a stable problem code.
  */
 final class GitRefsUnavailableException extends \RuntimeException
 {

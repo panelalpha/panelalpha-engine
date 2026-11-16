@@ -58,8 +58,8 @@ class NoEntryPointNotDeployableTest extends TestCase
         ]);
 
         $this->assertFalse($report['deployable']);
-        $this->assertIsString($report['issue']);
-        $this->assertStringContainsString('entry point', $report['issue']);
+        $this->assertSame(ApplicationReport::PYTHON_ENTRY_POINT_MISSING, $report['issue']['code']);
+        $this->assertStringContainsString('entry point', $report['issue']['message']);
     }
 
     /** A project with a real entry point is untouched. */

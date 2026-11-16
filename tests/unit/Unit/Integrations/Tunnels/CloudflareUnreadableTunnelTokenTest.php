@@ -58,7 +58,7 @@ class CloudflareUnreadableTunnelTokenTest extends TestCase
             $this->fail('ensureTunnel went ahead with an unreadable tunnel token');
         } catch (CloudflareException $e) {
             $this->assertStringContainsString('cannot be decoded', $e->getMessage());
-            $this->assertStringContainsString('project:settings:unset --project=fx468 cloudflare-api-token --force', $e->getMessage());
+            $this->assertStringContainsString('clear its cloudflare-api-token setting', $e->getMessage());
         }
 
         Http::assertNothingSent();

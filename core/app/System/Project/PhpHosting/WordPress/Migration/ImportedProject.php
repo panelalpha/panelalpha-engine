@@ -12,9 +12,8 @@ use App\Models\WordpressMigration;
 final class ImportedProject
 {
     /**
-     * The project this import created: named on the record before it was
-     * created, and on the import's domain once that is known. A project of
-     * that name on another domain is someone else's.
+     * The project this import created: named on the record before it was created, and on the import's domain once
+     * that is known. A project of that name on another domain is someone else's.
      */
     public static function createdBy(WordpressMigration $migration): ?User
     {

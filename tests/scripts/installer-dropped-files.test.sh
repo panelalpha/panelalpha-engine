@@ -15,7 +15,7 @@ trap 'rm -rf "$W"' EXIT
 # installer.sh installs an engine when sourced, so cut out what the update's
 # download and unzip steps run.
 sed -n '/^ENGINE_HOST_STATE=(/,/^)$/p' "$SCRIPT_DIR/installer.sh" >"$W/funcs.sh"
-for fn in download_engine_from_repository engine_host_state list_dropped_engine_files \
+for fn in download_engine_from_repository engine_host_state list_dropped_engine_files list_shipped_modsecurity_rules \
     remove_dropped_engine_files unzip_panelalpha_engine; do
     sed -n "/^${fn}() {/,/^}\$/p" "$SCRIPT_DIR/installer.sh" >>"$W/funcs.sh"
 done
@@ -43,6 +43,8 @@ echo_error() {
     exit 101
 }
 redact_repo_url() { printf '%s' "$1"; }
+# installer-root-scripts.test.sh runs it.
+hand_engine_files_to_root() { :; }
 
 # The engine's repository: release 1, a side branch, release 2 dropping files,
 # a merge dropping the side branch's file, release 3 bringing one back.
@@ -224,6 +226,7 @@ check "so nothing is removed" "" "$(remove_dropped_engine_files "$W/list" "$ROOT
 check "a first install has nothing to remove" "" "$(list_dropped_engine_files "$W/blobless" "$W/list" && remove_dropped_engine_files "$W/list" "$W/none")"
 
 for p in .env .env-core version crt/server.key core/.env core/storage/logs/x.log config/sftp/entrypoint.sh docker-compose.override.yml \
+    config/tenant-api-access \
     tests/api/env/.env.local tests/coverage/123/dumps/request.rawcov users/a/b webserver-config; do
     check "host state: $p" "yes" "$(engine_host_state "$p" && echo yes || echo no)"
 done

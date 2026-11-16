@@ -209,6 +209,8 @@ class FtpAccountController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/ftp-accounts/{ftpUser}',
         summary: 'Delete an FTP account',
+        description: 'The login stops working at once and the account and its password are gone for good; the files it '
+            .'uploaded stay. This cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['FTP Accounts'],
         parameters: [

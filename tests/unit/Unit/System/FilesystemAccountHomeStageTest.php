@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Filesystem;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\LocalHostSystem;
 
@@ -16,6 +17,9 @@ use Tests\Unit\System\Project\LocalHostSystem;
  */
 class FilesystemAccountHomeStageTest extends TestCase
 {
+    /** Requests the broker answers itself, with no command to look at. */
+    private const NATIVE = ['account.renameInHome', 'account.readInHome'];
+
     private string $root;
 
     private string $homes;
@@ -31,10 +35,12 @@ class FilesystemAccountHomeStageTest extends TestCase
         $this->root = sys_get_temp_dir().'/pa-fs-stage-'.bin2hex(random_bytes(4));
         $this->homes = $this->root.'/home';
         mkdir($this->homes.'/alice/project', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['engine' => $this->root, 'homes' => $this->homes], JSON_THROW_ON_ERROR));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         exec('rm -rf '.escapeshellarg($this->root));
         parent::tearDown();
     }
@@ -50,6 +56,7 @@ class FilesystemAccountHomeStageTest extends TestCase
         $this->assertDirectoryExists($this->homes.'/alice/project/nested/dir');
         $this->assertNotEmpty($this->ownershipCommands());
         foreach ($this->ownershipCommands() as $argv) {
+            $argv = LocalRoot::plain($argv);
             $this->assertStringStartsWith($this->homes.'/'.Filesystem::WRITE_STAGE_NAME.'/', (string) end($argv), implode(' ', $argv));
         }
     }
@@ -101,8 +108,8 @@ class FilesystemAccountHomeStageTest extends TestCase
 
     public function test_a_path_outside_the_homes_is_still_staged_next_to_it(): void
     {
-        $dir = $this->root.'/engine';
-        mkdir($dir);
+        $dir = $this->root.'/users/alice';
+        mkdir($dir, 0777, true);
 
         $this->filesystem()->writeFileReplacingPath($dir.'/daemon.json', '{}', null, '644');
 
@@ -115,7 +122,9 @@ class FilesystemAccountHomeStageTest extends TestCase
     {
         return array_values(array_filter(
             $this->commands,
-            static fn (array $argv): bool => in_array($argv[1] ?? '', ['chown', 'chmod'], true)
+            static fn (array $argv): bool => LocalRoot::isRequest($argv)
+                && !in_array(LocalRoot::action($argv), self::NATIVE, true)
+                && in_array(LocalRoot::plain($argv)[0] ?? '', ['chown', 'chmod'], true)
         ));
     }
 
@@ -150,7 +159,7 @@ class FilesystemAccountHomeStageTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = (array) $cmd;
-                if ($this->devices !== null && array_slice((array) $cmd, 0, 4) === ['sudo', 'stat', '-c', '%d']) {
+                if ($this->devices !== null && array_slice(LocalRoot::plain((array) $cmd), 0, 3) === ['stat', '-c', '%d']) {
                     $process = new Process(['printf', '%s', $this->devices]);
                     $process->run();
 

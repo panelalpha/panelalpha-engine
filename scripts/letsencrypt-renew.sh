@@ -30,20 +30,14 @@ if [ "${1:-}" = "--always" ]; then
     shift
 fi
 
-# 0 when the lineage should be renewed now. Lifetime and remaining time come
-# from the certificate itself, so the rule holds for any profile.
-lineage_due() {
-    local cert="$(le_lineage_dir "$1")/fullchain.pem"
-    [ -f "$cert" ] || return 1
-    local not_before not_after now lifetime remaining threshold
-    not_before=$(date -d "$(openssl x509 -in "$cert" -noout -startdate | cut -d= -f2)" +%s 2>/dev/null) || return 0
-    not_after=$(date -d "$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2)" +%s 2>/dev/null) || return 0
-    now=$(date +%s)
-    lifetime=$((not_after - not_before))
-    remaining=$((not_after - now))
-    threshold=$((lifetime / 3))
-    [ "$threshold" -gt $((30 * 86400)) ] && threshold=$((30 * 86400))
-    [ "$remaining" -lt "$threshold" ]
+# certbot's random renewal delay, slept here while sites-http still serves; none from a terminal.
+renew_delay() {
+    [ -t 0 ] && return 0
+    local max="${LE_RENEW_MAX_DELAY:-480}"
+    [ "$max" -gt 0 ] || return 0
+    local delay=$((RANDOM % max + 1))
+    echo ">>> waiting ${delay}s before renewing, to spread the load on Let's Encrypt"
+    sleep "$delay"
 }
 
 main() {
@@ -60,16 +54,15 @@ main() {
     local -a due=()
     local name
     for name in "$LE_CERT_NAME" "$LE_IP_CERT_NAME"; do
-        if lineage_due "$name"; then
+        if le_lineage_due "$name"; then
             due+=("$name")
         fi
     done
 
     echo ">>> $(date -Is) renewal check: ${due[*]:-nothing due}"
     if [ "$ALWAYS" = 1 ] || [ "${#due[@]}" -gt 0 ]; then
-        le_release_port_80
-        le_certbot renew --non-interactive "$@"
-        le_restore_stack
+        renew_delay
+        le_certbot_standalone renew --non-interactive --no-random-sleep-on-renew "$@"
     fi
 
     # Nothing of ours is being served -- the installer's self-signed pair, or a

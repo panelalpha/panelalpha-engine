@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Process-local NDJSON tee for streamed deploy responses
- * (`X-Deploy-Stream: ndjson`).
- *
- * Static on purpose: Dind and friends bind their own logger instances through
- * {@see DeployLogger::current()}, but every line written during this request
- * has to reach the same HTTP stream.
+ * Process-local NDJSON tee for streamed deploy responses (`X-Deploy-Stream: ndjson`). Static because the
+ * loggers bound through {@see DeployLogger::current()} must all reach the same HTTP stream.
  */
 final class DeployLogStream
 {

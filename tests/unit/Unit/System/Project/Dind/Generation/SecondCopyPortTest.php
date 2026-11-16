@@ -10,6 +10,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\Generation\GenerationState;
@@ -22,6 +23,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -64,7 +66,7 @@ class SecondCopyPortTest extends TestCase
     /** @var list<int> */
     private array $probed = [];
 
-    /** What `docker inspect` says of a copy that went down; null for one that keeps running. */
+    /** A copy that went down, as "<status> <exit code> <restarts>"; null for one that keeps running. */
     private ?string $copyDown = null;
 
     /** Socket polls the copy is still up for, before it goes down. */
@@ -148,7 +150,7 @@ class SecondCopyPortTest extends TestCase
 
         $this->assertSame(ZeroDowntimeRedeploy::SWITCHED, $begun);
         $this->assertSame([$guessed, $bound], array_map(static fn (array $o): int => $o['services']['app']['ports']->getValue()[0]['target'], $this->overrides));
-        $this->assertCount(1, $this->ranMatching('--force-recreate app'), 'started again on the port it binds');
+        $this->assertCount(1, $this->ranMatching("'--force-recreate' 'app'"), 'started again on the port it binds');
         $this->assertNotContains(32768, $this->probed, 'never probed where nothing listens');
         $this->assertContains(32769, $this->probed);
         $this->assertSame(32769, ProxyRule::find($rule)->upstream_port);
@@ -194,7 +196,7 @@ class SecondCopyPortTest extends TestCase
         $this->assertSame("The new version did not become healthy: {$why}. The previous version is still serving.", $begun['stderr']);
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port, 'the site stays on the running version');
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::NEXT));
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'), 'the copy is removed');
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'), 'the copy is removed');
         $this->assertSame([], $this->ranMatching('--force-recreate'));
         $this->assertSame([], array_filter($this->logged(), static fn (string $line): bool => str_contains($line, 'in place')));
         $this->assertLessThanOrEqual($upFor + 1, $this->polls, 'the alignment stops waiting once the copy is down');
@@ -242,7 +244,7 @@ class SecondCopyPortTest extends TestCase
         $this->assertContains('Replacing the running app in place after all: the second copy did not start: ' . self::ADDRESS_IN_USE, $this->logged());
         $this->assertSame(8080, ProxyRule::find($proxy)->upstream_port);
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::NEXT));
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'), 'the copy is removed');
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'), 'the copy is removed');
     }
 
     /** @return iterable<string, array{0: ?string, 1: string, 2: string}> compose's error starting it again, its state then, why it is refused */
@@ -265,13 +267,13 @@ class SecondCopyPortTest extends TestCase
         $begun = $this->plan()->begin($this->alignment());
 
         $this->assertContains('Application is listening on port 8080, not 80; forwarding there instead', $this->logged());
-        $this->assertCount(1, $this->ranMatching('--force-recreate app'), 'started again on the port it binds');
+        $this->assertCount(1, $this->ranMatching("'--force-recreate' 'app'"), 'started again on the port it binds');
         $this->assertIsArray($begun, 'refused, not replaced in place');
         $this->assertTrue($begun[ZeroDowntimeRedeploy::PREVIOUS_KEPT]);
         $this->assertStringStartsWith("The new version did not become healthy: {$why}. The previous version is still serving.", $begun['stderr']);
         $this->assertSame(8080, ProxyRule::find($proxy)->upstream_port, 'the site stays on the running version');
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::NEXT));
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'), 'the copy is removed');
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'), 'the copy is removed');
         $this->assertSame([], array_filter($this->logged(), static fn (string $line): bool => str_contains($line, 'in place')));
         $this->assertSame([], array_filter($this->probed, static fn (int $port): bool => $port >= 32768), 'the copy never reached the gate');
     }
@@ -336,6 +338,9 @@ class SecondCopyPortTest extends TestCase
             if ($path === self::RUN_PATH) {
                 $this->runFile = $contents;
             }
+            if ($path === '/home/u/.panelalpha-next-generation.yml') {
+                $this->overrides[] = Yaml::parse($contents, Yaml::PARSE_CUSTOM_TAGS);
+            }
         });
         $webserver = $this->createStub(Webserver::class);
         $webserver->method('getCurrentWebserver')->willReturn('nginx-proxy');
@@ -373,6 +378,8 @@ class SecondCopyPortTest extends TestCase
         $project->method('userAppComposeFileToRun')->willReturn(self::RUN_PATH);
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return $project;
     }
@@ -380,54 +387,36 @@ class SecondCopyPortTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         $this->ran[] = $line;
-        if (str_contains($line, 'base64 -d')) {
-            $this->overrides[] = Yaml::parse((string) base64_decode($argv[array_search('override', $argv, true) + 1]), Yaml::PARSE_CUSTOM_TAGS);
-
-            return '';
-        }
         if (str_contains($line, "'config' '--format' 'json'")) {
             return (string) json_encode($this->config());
         }
-        if (str_contains($line, "'ps' '--quiet' '--status' 'running'")) {
-            return "old1\n";
+        if (preg_match('/account-docker\.listContainers .*label com\.docker\.compose\.project=project(?: |$)/', $line) === 1) {
+            return '[{"Id":"old1","Names":["/project-app-1"]}]';
         }
-        if (str_contains($line, 'project-next up -d --no-deps')) {
+        if (str_contains($line, "'project-next' 'up' '-d' '--no-deps'")) {
             $this->copies++;
 
             return '';
         }
-        if (str_contains($line, 'docker ps -aq') && str_contains($line, 'project-next')) {
-            return $this->upError !== null && !$this->created && $this->copies >= $this->failingCopy ? '' : "next{$this->copies}\n";
+        if (str_contains($line, 'account-docker.listContainers') && str_contains($line, 'project-next')) {
+            return $this->upError !== null && !$this->created && $this->copies >= $this->failingCopy ? '[]' : (string) json_encode([['Id' => "next{$this->copies}"]]);
         }
-        if (preg_match('/docker port (next\d+) (\d+)\/tcp/', $line, $m) === 1) {
-            if (!$this->portNamed) {
-                return '';
-            }
-            if ($this->copyIsDown()) {
-                // Nothing for a copy in restart back-off; one running again got a new port.
-                return str_starts_with((string) $this->copyDown, 'running') ? TestNetwork::ANY . ":32770\n" : '';
-            }
-
-            // Docker publishes whatever the copy was started with; only the second start is new.
-            return TestNetwork::ANY . ':' . ($m[1] === 'next1' ? 32768 : 32769) . "\n";
+        if (preg_match('/account-docker\.containers -- \S+ (.+)$/', $line, $m) === 1) {
+            return (string) json_encode(array_map($this->inspected(...), explode(' ', $m[1])));
         }
-        if (str_contains($line, 'net/tcp')) {
+        if (str_contains($line, 'account-docker.listeningSockets')) {
             $down = $this->copyIsDown();
             $this->polls++;
-            // The script prints nothing for a container that does not run; a crashing app binds nothing.
             if ($down || $this->bound === 0) {
                 return $down ? '' : self::HEADER . "\n";
             }
 
             return self::HEADER . "\n" . sprintf('   0: 00000000:%04X 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1000 1', $this->bound) . "\n";
         }
-        if (str_contains($line, 'NetworkSettings.Networks')) {
-            return preg_match('/ip:(\d+)\//', $line, $m) === 1 && (int) $m[1] === $this->bound ? '200' : '000';
-        }
-        if (str_contains($line, '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')) {
-            return preg_match('/ next\d+$/', $line) === 1 && $this->copyIsDown() ? (string) $this->copyDown : 'running 0 0';
+        if (str_contains($line, 'curl') && preg_match('/ probe 172\.18\.0\.9 (\d+)$/', $line, $m) === 1) {
+            return (int) $m[1] === $this->bound ? '200' : '000';
         }
         if (preg_match('/for port in ([\d ]+); do/', $line, $m) === 1) {
             $out = '';
@@ -445,6 +434,37 @@ class SecondCopyPortTest extends TestCase
         }
 
         return '';
+    }
+
+    /** @return array<string, mixed> the account daemon's inspect of $container */
+    private function inspected(string $container): array
+    {
+        $copy = preg_match('/\Anext(\d+)\z/', $container, $m) === 1;
+        [$status, $exitCode, $restarts] = explode(' ', $copy && $this->copyIsDown() ? (string) $this->copyDown : 'running 0 0');
+        $bindings = $copy ? $this->published((int) $m[1]) : null;
+        $ports = [];
+        foreach (array_unique(array_filter([$this->published, $this->bound, ...$this->mapping()])) as $target) {
+            $ports["{$target}/tcp"] = $bindings;
+        }
+
+        return [
+            'State' => ['Status' => $status, 'ExitCode' => (int) $exitCode],
+            'RestartCount' => (int) $restarts,
+            'NetworkSettings' => ['Networks' => ['project-next_default' => ['IPAddress' => '172.18.0.9']], 'Ports' => $ports],
+        ];
+    }
+
+    /** @return list<array{HostIp: string, HostPort: string}>|null where Docker published the $copy-th copy, whichever port of it */
+    private function published(int $copy): ?array
+    {
+        if (!$this->portNamed) {
+            return null;
+        }
+        if ($this->copyIsDown()) {
+            return str_starts_with((string) $this->copyDown, 'running') ? [['HostIp' => TestNetwork::ANY, 'HostPort' => '32770']] : null;
+        }
+
+        return [['HostIp' => TestNetwork::ANY, 'HostPort' => $copy === 1 ? '32768' : '32769']];
     }
 
     private function copyIsDown(): bool

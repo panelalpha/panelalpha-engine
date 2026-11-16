@@ -7,11 +7,8 @@ use App\Exceptions\DiskLimitException;
 use Symfony\Component\Process\Process;
 
 /**
- * Kills a deploy step that has gone silent for too long. Deploys share one
- * worker, so a hung step would otherwise block every account until its
- * overall timeout. Any output resets the clock, and so does a step that is
- * silent but still using CPU: rustc on a workspace's last crate prints nothing
- * for longer than the limit.
+ * Kills a deploy step silent for too long, since a hung step blocks the shared worker for every account.
+ * Output resets the clock, and so does a silent step still using CPU (rustc on a workspace's last crate).
  */
 class StepWatchdog
 {
@@ -78,8 +75,8 @@ class StepWatchdog
     }
 
     /**
-     * Wait for a process started with watch()'s callback. The overall timeout
-     * still applies; silence past the limit kills the tree and throws.
+     * Wait for a process started with watch()'s callback; silence past the limit kills the tree and throws.
+     * The message is taken before the kill, as what the process prints while dying would reset it.
      *
      * @throws BuildStalledException
      * @throws DiskLimitException
@@ -96,8 +93,6 @@ class StepWatchdog
 
                     continue;
                 }
-                // Before the kill: killTree() polls the process, and what it
-                // prints while dying would reset the silence and the last line.
                 $message = $this->message((int) round(microtime(true) - $this->lastPrintedAt));
                 self::killTree($process);
                 throw new BuildStalledException($message);
@@ -108,7 +103,11 @@ class StepWatchdog
         return $process->wait();
     }
 
-    /** @throws DiskLimitException */
+    /**
+     * A reading that cannot be taken is not a reason to stop a step.
+     *
+     * @throws DiskLimitException
+     */
     private function stopIfDiskFull(Process $process): void
     {
         if ($this->diskFull === null || microtime(true) - $this->lastDiskCheckAt < $this->diskCheckSeconds) {
@@ -118,7 +117,6 @@ class StepWatchdog
         try {
             $why = ($this->diskFull)();
         } catch (\Throwable) {
-            // A reading that cannot be taken is not a reason to stop a step.
             return;
         }
         if (! is_string($why) || $why === '') {
@@ -151,9 +149,8 @@ class StepWatchdog
     }
 
     /**
-     * SIGTERM the process, its descendants and every process group they lead,
-     * then SIGKILL whatever is left after a grace period. Our own group is
-     * skipped: it is the worker itself.
+     * SIGTERM the process, its descendants and the groups they lead, then SIGKILL what is left after a grace
+     * period. Our own group is skipped: it is the worker itself.
      */
     public static function killTree(Process $process): void
     {
@@ -185,9 +182,9 @@ class StepWatchdog
         $process->stop(0);
     }
 
+    /** \r-separated progress bars count as lines too. */
     private function remember(string $data): void
     {
-        // \r-separated progress bars count as lines too.
         $lines = preg_split('/[\r\n]+/', $this->partial.$data) ?: [];
         $this->partial = (string) array_pop($lines);
         foreach ([...$lines, $this->partial] as $line) {
@@ -251,7 +248,7 @@ class StepWatchdog
     }
 
     /**
-     * ppid, process group and state from /proc/<pid>/stat.
+     * ppid, process group and state from /proc/<pid>/stat, read after the last ')' of the command name.
      *
      * @param  list<int>|null  $only
      * @return array<int, array{ppid: int, pgrp: int, state: string}>
@@ -268,7 +265,6 @@ class StepWatchdog
             if (! is_string($stat) || ($close = strrpos($stat, ')')) === false) {
                 continue;
             }
-            // The command name may contain spaces and parens; fields follow the last ')'.
             $fields = explode(' ', trim(substr($stat, $close + 2)));
             if (count($fields) < 3) {
                 continue;

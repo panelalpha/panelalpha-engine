@@ -13,6 +13,8 @@ use Illuminate\Support\Carbon;
  *   description?: string,
  *   source?: string,
  *   original_port?: int,
+ *   to?: int,
+ *   port_scheme?: string,
  * }
  *
  * @property int $id
@@ -161,24 +163,49 @@ class ProxyRule extends Model
     }
 
     /**
-     * Upsert the domain's generated :80/:443 pair in place and drop every other
-     * generated row of the user (legacy *:appPort rows, a previous domain).
+     * Upsert each domain's generated :80/:443 pair in place and drop the user's
+     * other generated rows, such as *:appPort ones or a removed domain's.
+     *
+     * @param  list<string>  $fqdns
      */
-    public static function syncGeneratedHttpPair(
+    public static function syncGeneratedHttpPairs(
         string $username,
-        string $fqdn,
+        array $fqdns,
         int $upstreamPort,
         ?string $upstreamProtocol = null
     ): void {
         $keep = [];
-        foreach ([80, 443] as $listenPort) {
-            $rule = self::upsertGeneratedHttpRule($username, $fqdn, $listenPort, $upstreamPort, true, $upstreamProtocol);
-            if ($rule !== null) {
-                $keep[] = $rule->id;
+        foreach (array_values(array_unique($fqdns)) as $index => $fqdn) {
+            foreach ([80, 443] as $listenPort) {
+                $rule = self::upsertGeneratedHttpRule($username, $fqdn, $listenPort, $upstreamPort, $index === 0, $upstreamProtocol);
+                if ($rule !== null) {
+                    $keep[] = $rule->id;
+                }
             }
         }
 
         self::forUser($username)->where('is_generated', true)->whereNotIn('id', $keep)->delete();
+    }
+
+    /**
+     * The port and protocol the project's generated rules serve, which a redeploy beside the running version
+     * keeps on the running one; null before the first deploy routed anything.
+     *
+     * @return ?array{port: int, protocol: ?string}
+     */
+    public static function generatedUpstreamOf(string $username): ?array
+    {
+        /** @var ?self $rule */
+        $rule = self::forUser($username)
+            ->where('transport', 'http')
+            ->where('is_generated', true)
+            ->orderByDesc('listen_port')
+            ->first();
+
+        return $rule === null ? null : [
+            'port' => (int) $rule->upstream_port,
+            'protocol' => $rule->upstream_protocol === 'https' ? 'https' : null,
+        ];
     }
 
     /**

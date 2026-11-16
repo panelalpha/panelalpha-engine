@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Stop a project using the Engine API
 
-    Revokes a project's Engine API token and closes the host firewall to its containers. Refused 403 for a project-scoped token.
+    Revokes every Engine API token a project was given and closes the host firewall to its containers. Refused 403 for a project-scoped token. The tokens it revokes are gone and a new allowance issues new ones; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

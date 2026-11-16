@@ -5,25 +5,18 @@ namespace App\Lib\Deploy\DeployLog;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Telemetry\Telemetry;
-use App\Lib\DeployHook\Coalescing;
+use App\Lib\Findings\Finding;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Structured deploy log for DinD project deployments.
+ * A DinD deploy's structured log: a poller reads it while the deploy writes, so the status is replaced whole and the log is
+ * append-only JSON lines; the contract would survive the deploy moving to a background process.
  *
- * A deploy is a sequence of stages (preparing, cloning, running) run
- * synchronously inside an engine API request. Because PHP-FPM serves requests
- * concurrently, a polling request reads the log file while the deploy request
- * is still writing to it — which is why the status pointer is replaced whole
- * and the log itself is append-only JSON lines.
- *
- * This class is the deploy's view of that: it owns the deploy id and the
- * lock, and hands the actual work to {@see DeployLogPaths},
- * {@see DeployStatus}, {@see DeployLogReader}, {@see DeployLogArchive} and
- * {@see ProcessOutput}.
- *
- * The contract (payload shape, statuses, stages) is designed so the deploy
- * can later move to a background process without panel or frontend changes.
+ * @see DeployLogPaths
+ * @see DeployStatus
+ * @see DeployLogReader
+ * @see DeployLogArchive
+ * @see ProcessOutput
  */
 class DeployLogger
 {
@@ -56,12 +49,17 @@ class DeployLogger
     public const KEEP_LOGS = DeployLogArchive::KEEP_LOGS;
 
     /** Why a deploy whose process died before finish() is closed as failed. */
+    public const INTERRUPTED = 'deploy_interrupted';
+
     public const INTERRUPTED_MESSAGE =
         'The deploy stopped without finishing — the engine process running it is gone. '
         .'This usually means the host restarted or ran out of memory. Deploy again to retry.';
 
-    /** The line a DinD account without git ends its first deploy on, `running`, until files arrive. */
+    /** The line a DinD account without git ends its first deploy on, `running`, until a deploy brings the files. */
     public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
+
+    /** How a deploy that waited for files is closed once another one brings them. */
+    public const WAITING_TAKEN_OVER = 'The project waited for its files, and a later deploy brought them.';
 
     /** Lines of a known problem's text written to the log, per section. */
     private const PROBLEM_MAX_LINES = 40;
@@ -78,20 +76,14 @@ class DeployLogger
     private readonly ProcessOutput $output;
 
     /**
-     * Raw build output behind this deploy's failure, when the caller had it.
-     *
-     * finish() is handed the message a *customer* should read — usually the
-     * one sentence DeployFailureExplainer produced, with the BuildKit dump
-     * already thrown away. That is right for the panel and useless for
-     * telemetry: it has no rule slug left in it, so an already-diagnosed
-     * failure would be reported as one nobody has a rule for.
+     * Raw build output behind this deploy's failure, for telemetry: finish() gets the customer's sentence, which has no rule
+     * slug left in it, so an already-diagnosed failure would be reported as one nobody has a rule for.
      */
     private ?string $rawFailureOutput = null;
 
     /**
-     * Values this deploy must never write, by deploy id: a password the engine
-     * delivered can come back in whatever the app prints. Static so a second
-     * logger opened on the same deploy masks them too.
+     * Values this deploy must never write, by deploy id: a delivered password can come back in what the app prints. Static, so
+     * a second logger opened on the same deploy masks them too.
      *
      * @var array<string, array<string, true>>
      */
@@ -123,6 +115,11 @@ class DeployLogger
         return $this->deployId;
     }
 
+    public function getUsername(): string
+    {
+        return $this->username;
+    }
+
     public function getLogPath(): string
     {
         return $this->paths->log($this->deployId);
@@ -148,12 +145,8 @@ class DeployLogger
     }
 
     /**
-     * Start a deploy log, swallowing filesystem errors: a deploy must proceed
-     * even when logging is unavailable.
-     *
-     * The one exception is a lock conflict — that means another deploy owns
-     * this account, so the caller has to stop rather than carry on with
-     * logging disabled.
+     * Start a deploy log, swallowing filesystem errors, as a deploy must proceed without logging. Not a lock conflict: another
+     * deploy owns this account, so the caller has to stop rather than carry on with logging disabled.
      *
      * @throws DeployAlreadyRunningException
      */
@@ -163,9 +156,8 @@ class DeployLogger
     }
 
     /**
-     * Keep a zip follow-up on the same deploy as the account create. POST
-     * /users for dind-without-git leaves latest.json running at "preparing";
-     * a rebuild must not start a second id or the UI rewinds to cloning.
+     * Continue the deploy latest.json has running, unless a create left it waiting for files: every deploy that brings
+     * files opens one of its own, and the waiting one is closed as taken over first.
      */
     public static function resumeRunningOrStart(string $username): self
     {
@@ -174,8 +166,26 @@ class DeployLogger
             return self::start($username);
         }
         $current->lock->acquire();
+        if ($current->closeIfWaitingForFiles()) {
+            return self::start($username);
+        }
 
         return $current;
+    }
+
+    /**
+     * Close this deploy when it only waited for files, so the one that brings them can open its own. False when it is not
+     * waiting any more; the caller then keeps the lock, as for any deploy it continues.
+     */
+    private function closeIfWaitingForFiles(): bool
+    {
+        if (! $this->isWaitingForFiles()) {
+            return false;
+        }
+        $this->close(self::STATUS_CANCELLED, self::WAITING_TAKEN_OVER, []);
+        $this->lock->releaseQuietly();
+
+        return true;
     }
 
     /**
@@ -244,12 +254,8 @@ class DeployLogger
     }
 
     /**
-     * Whether a live process holds this account's deploy lock -- a deploy is
-     * actually in progress, whatever latest.json says. The status alone stays
-     * `running` forever after a deploy is killed before finish() (an OOM, a
-     * worker timeout, a container restart), while the kernel releases the
-     * lock with the process. And a cancelled deploy still winding down holds
-     * the lock under a status that is no longer `running`.
+     * Whether a live process holds this account's deploy lock, whatever latest.json says: a deploy killed before finish() stays
+     * `running` though the kernel released its lock, and a cancelled one winding down holds it under another status.
      */
     public static function isLockedFor(string $username): bool
     {
@@ -313,14 +319,8 @@ class DeployLogger
     }
 
     /**
-     * Close this account's deploy if its process is gone: latest.json says
-     * `running` and nothing holds the deploy lock, which the kernel released
-     * with the process (an OOM kill, a core or worker restart). Nothing else
-     * would ever write its status, and a client polling for one waits forever.
-     *
-     * A deploy that got as far as its finish line keeps that verdict; one that
-     * did not is failed with {@see INTERRUPTED_MESSAGE}. A DinD account waiting
-     * for its files is `running` with no lock by design and is left alone.
+     * Close this account's deploy if its process is gone (`running`, no lock holder): nothing else would write its status, and a
+     * poller waits forever. A DinD account waiting for its files is left alone; a coalesced push follows as the lock goes.
      *
      * @return ?string the status written (or, dry, that would be), null when left alone
      */
@@ -331,51 +331,65 @@ class DeployLogger
             return null;
         }
         if ($dryRun) {
-            return $logger->lock->isHeld() ? null : ($logger->finishLine()[0] ?? self::STATUS_FAILED);
+            return $logger->lock->isHeld() ? null : ($logger->finishLine()['status'] ?? self::STATUS_FAILED);
         }
 
-        // Held while the status is written, so a deploy starting now cannot be overwritten.
         try {
             $logger->lock->acquire();
         } catch (DeployAlreadyRunningException) {
             return null;
         }
         try {
-            $latest = $logger->readLatest() ?? [];
-            if (($latest['id'] ?? null) !== $logger->deployId || ($latest['status'] ?? null) !== self::STATUS_RUNNING) {
-                return null;
-            }
-            $finished = $logger->finishLine();
-            if ($finished === null) {
-                $finished = [self::STATUS_FAILED, self::INTERRUPTED_MESSAGE];
-                $logger->writeLine(self::LEVEL_ERROR, self::finishMessage(...$finished), $latest['stage'] ?? null);
-            }
-            [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
-            $logger->status->write(array_merge($latest, [
-                'status' => $finished[0],
-                'pid' => null,
-                'finished_at' => $now,
-                'error' => $finished[1],
-                'stages' => $stages,
-            ]));
+            $finished = self::closeOrphanedStatus($logger);
         } finally {
             $logger->lock->release();
         }
+        if ($finished === null) {
+            return null;
+        }
         Log::warning("Deploy {$logger->deployId} for {$username} was left running by a process that is gone; closed as {$finished[0]}.");
-        // What finish() would have done last. Cannot throw.
-        Coalescing::runPendingFor($username);
 
         return $finished[0];
     }
 
     /**
-     * The first deploy of a DinD account without git, stopped on purpose until files arrive.
-     * Git and file commands run on the waiting account stream their output into this log as
-     * dim lines, so it is the last line that is not dim that has to say so.
+     * Write the closed status under settleOrphaned()'s lock, so a deploy starting meanwhile cannot be overwritten.
+     * Null when latest.json moved on; a verdict the finish line announced is kept, else the deploy fails with {@see INTERRUPTED_MESSAGE}.
+     *
+     * @return array{0: string, 1: ?string}|null
+     */
+    private static function closeOrphanedStatus(self $logger): ?array
+    {
+        $latest = $logger->readLatest() ?? [];
+        if (($latest['id'] ?? null) !== $logger->deployId || ($latest['status'] ?? null) !== self::STATUS_RUNNING) {
+            return null;
+        }
+        $finished = $logger->finishLine();
+        if ($finished === null) {
+            $finished = ['status' => self::STATUS_FAILED, 'error' => self::INTERRUPTED_MESSAGE, 'warnings' => [], 'failure' => new Finding(self::INTERRUPTED, self::INTERRUPTED_MESSAGE)];
+            $logger->writeLine(self::LEVEL_ERROR, self::finishMessage(self::STATUS_FAILED, self::INTERRUPTED_MESSAGE), $latest['stage'] ?? null);
+        }
+        [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
+        $logger->status->write(array_merge($latest, [
+            'status' => $finished['status'],
+            'pid' => null,
+            'finished_at' => $now,
+            'error' => $finished['error'],
+            'warnings' => Finding::storable($finished['warnings']),
+            'failure' => isset($finished['failure']) ? $finished['failure']->toArray() : null,
+            'stages' => $stages,
+        ]));
+
+        return [$finished['status'], $finished['error']];
+    }
+
+    /**
+     * The first deploy of a DinD account without git, stopped on purpose until files arrive. Commands run on the waiting account
+     * stream into this log as dim lines, so it is the last line that is not dim that has to say so.
      */
     private function isWaitingForFiles(): bool
     {
-        if (($this->readLatest()['stage'] ?? null) !== self::STAGE_PREPARING) {
+        if (($this->ownLatest()['stage'] ?? null) !== self::STAGE_PREPARING) {
             return false;
         }
         foreach (array_reverse($this->entries()) as $line) {
@@ -399,17 +413,14 @@ class DeployLogger
     }
 
     /**
-     * The status and error a finish() line near the end of the log announced:
-     * finish() writes it before the status, so a process killed in between
-     * (telemetry's report is the slow part) leaves the verdict only there.
+     * The verdict a finish() line near the end of the log announced: it is written before the status, so a process
+     * killed in between (telemetry's report is the slow part) leaves the verdict only there.
      *
-     * @return array{0: string, 1: ?string}|null
+     * @return array{status: string, error: ?string, warnings: list<Finding>, ts: int}|null
      */
     private function finishLine(): ?array
     {
-        $finish = DeployFinishLine::find($this->tail(DeployFinishLine::LOOKBACK));
-
-        return $finish === null ? null : [$finish['status'], $finish['error']];
+        return DeployFinishLine::find($this->tail(DeployFinishLine::LOOKBACK));
     }
 
     /**
@@ -434,29 +445,48 @@ class DeployLogger
     }
 
     /**
-     * The deploy stopped at a precheck: validation that runs before the clone.
-     * Kept in latest.json because the logger that finishes the deploy is a
-     * different instance from the one the precheck saw.
+     * The deploy stopped at a precheck, the validation before the clone. Kept in latest.json, as the logger that finishes the
+     * deploy is a different instance from the one the precheck saw.
      */
     public function markPreCheckRejected(): void
     {
-        $this->status->update([self::PRECHECK_REJECTED => true]);
+        if ($this->ownLatest() !== null) {
+            $this->status->update([self::PRECHECK_REJECTED => true]);
+        }
     }
 
     public function isRunning(): bool
     {
-        return $this->status->is(self::STATUS_RUNNING);
+        return ($this->ownLatest()['status'] ?? null) === self::STATUS_RUNNING;
     }
 
     public function isCancelled(): bool
     {
-        return $this->status->is(self::STATUS_CANCELLED);
+        return ($this->ownLatest()['status'] ?? null) === self::STATUS_CANCELLED;
     }
 
-    /** finish() has run. A cancel request alone sets `cancelled` without it. */
+    /**
+     * finish() has run, or a deploy started since has taken latest.json over. A cancel request alone sets `cancelled`
+     * without it.
+     */
     public function isFinished(): bool
     {
-        return $this->status->value('finished_at') !== null;
+        $own = $this->ownLatest();
+
+        return $own === null || ($own['finished_at'] ?? null) !== null;
+    }
+
+    /**
+     * latest.json while it is this deploy's record, empty before it has one; null once a deploy started after this one
+     * finished has replaced it: the lock goes at finish(), and a logger kept past it must not read or write that deploy.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function ownLatest(): ?array
+    {
+        $latest = $this->readLatest() ?? [];
+
+        return ($latest['id'] ?? $this->deployId) === $this->deployId ? $latest : null;
     }
 
     /**
@@ -470,13 +500,12 @@ class DeployLogger
     }
 
     /**
-     * The stage this deploy is in, for a failure that has to say where it
-     * died. Read from the same status file `stage()` writes, so it cannot
-     * drift from what the log reports.
+     * The stage this deploy is in, for a failure that has to say where it died. Read from the status file `stage()` writes, so
+     * it cannot drift from what the log reports.
      */
     public function currentStage(): ?string
     {
-        $stage = ($this->readLatest() ?? [])['stage'] ?? null;
+        $stage = $this->ownLatest()['stage'] ?? null;
 
         return is_string($stage) && $stage !== '' ? $stage : null;
     }
@@ -485,8 +514,8 @@ class DeployLogger
     {
         $this->throwIfCancelled();
 
-        $latest = $this->readLatest() ?? [];
-        if (($latest['stage'] ?? null) === $stage) {
+        $latest = $this->ownLatest();
+        if ($latest === null || ($latest['stage'] ?? null) === $stage) {
             return;
         }
 
@@ -505,7 +534,7 @@ class DeployLogger
 
     public function log(string $level, string $message): void
     {
-        $this->writeLine($level, $message, $this->status->value('stage'));
+        $this->writeLine($level, $message, $this->ownLatest()['stage'] ?? null);
     }
 
     public function dim(string $message): void
@@ -552,7 +581,7 @@ class DeployLogger
 
     public function setPid(?int $pid): void
     {
-        if ($this->readLatest() === null) {
+        if (($this->ownLatest() ?? []) === []) {
             return;
         }
 
@@ -563,11 +592,8 @@ class DeployLogger
     }
 
     /**
-     * Keep the raw build output behind a failure, for telemetry only.
-     *
-     * Call this wherever the unabridged output is still in hand, before it is
-     * reduced to the one sentence finish() will be given. Nothing is written
-     * to the log file: the raw dump is already in there line by line.
+     * Keep the raw build output behind a failure, for telemetry only, while it is still unabridged. Nothing is written to the
+     * log file: the raw dump is already in there line by line.
      */
     public function recordFailureOutput(?string $raw): void
     {
@@ -591,67 +617,122 @@ class DeployLogger
         }
     }
 
+    /** Mask this deploy's values in $text, longest first so a value containing another is masked whole. */
     public function redact(string $text): string
     {
         $values = array_keys(self::$masked[$this->deployId] ?? []);
         if ($values === []) {
             return $text;
         }
-        // Longest first, so a value containing another is masked whole.
         usort($values, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
         return str_replace($values, '***', $text);
     }
 
+    /**
+     * Close the deploy, once: a caller catching a failure the workflow already finished writes no second line, report or status.
+     * A push that coalesced while it ran is followed up as the lock goes, once, whatever the outcome ({@see DeployLock::release()}).
+     */
     public function finish(string $status, ?string $error = null): void
+    {
+        $this->close($status, $error, []);
+    }
+
+    /** A deploy that failed: `error` is its sentence, and `failure` the same with the code a client branches on. */
+    public function finishFailed(Finding $failure): void
+    {
+        $this->close(self::STATUS_FAILED, $failure->message, [], $failure);
+    }
+
+    /**
+     * A deploy that serves with something wrong: its warnings say what, and `error` stays empty.
+     *
+     * @param  list<Finding>  $warnings
+     */
+    public function finishPartial(array $warnings): void
+    {
+        $this->close(self::STATUS_PARTIAL, null, $warnings);
+    }
+
+    /**
+     * A deploy already closed is left as it is, and so is the one that took latest.json over after it: a caller finishing
+     * again once a coalesced push has started its own deploy would otherwise end that one, and write a second verdict here.
+     *
+     * @param  list<Finding>  $warnings
+     */
+    private function close(string $status, ?string $error, array $warnings, ?Finding $failure = null): void
     {
         $this->flushBuffers();
 
-        $latest = $this->readLatest() ?? [];
-        // A caller that catches a failure the workflow already finished must not
-        // write a second terminal line, a second telemetry report or a new status.
-        if (($latest['id'] ?? null) === $this->deployId && ($latest['finished_at'] ?? null) !== null) {
+        $latest = $this->ownLatest();
+        if ($latest === null || ($latest['finished_at'] ?? null) !== null) {
             return;
         }
         [$status, $error] = $this->settleStatus($latest, $status, $error);
+        $warnings = $status === self::STATUS_PARTIAL ? $this->redactedFindings($warnings) : [];
         [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
         $error = $error === null ? null : LogLine::sanitize($this->redact($error));
+        $failure = $status === self::STATUS_FAILED && $error !== null
+            ? ($failure ?? new Finding(DeployFailureExplainer::DEPLOY_FAILED, $error))->withMessage($error)
+            : null;
+        $summary = $error ?? ($warnings !== [] ? Finding::sentence($warnings) : null);
         $rawFailure = $this->rawFailureOutput === null ? null : $this->redact($this->rawFailureOutput);
 
-        $final = array_merge($latest, [
+        $final = self::finishedStatus($latest, $status, $error, $warnings, $failure, $stages, $now);
+        $this->writeLine(DeployFinishLine::level($status), self::finishMessage($status, $summary), $latest['stage'] ?? null);
+
+        $problem = $this->captureProblem($status, $rawFailure ?? $summary, $final, $latest['stage'] ?? null);
+
+        $this->status->write(array_merge($final, ['problem' => $problem]));
+        unset(self::$masked[$this->deployId]);
+        $this->lock->release();
+    }
+
+    /**
+     * @param  list<Finding>  $findings
+     * @return list<Finding>
+     */
+    private function redactedFindings(array $findings): array
+    {
+        return array_map(fn (Finding $finding): Finding => $finding->withMessage(LogLine::sanitize($this->redact($finding->message))), $findings);
+    }
+
+    /**
+     * latest.json as a finished deploy leaves it, before monitoring's problem is added.
+     *
+     * @param  array<string, mixed>  $latest
+     * @param  list<Finding>  $warnings
+     * @param  list<array<string, mixed>>  $stages
+     * @return array<string, mixed>
+     */
+    private static function finishedStatus(array $latest, string $status, ?string $error, array $warnings, ?Finding $failure, array $stages, int $now): array
+    {
+        return array_merge($latest, [
             'status' => $status,
             'pid' => null,
             'finished_at' => $now,
             'error' => $error,
+            'warnings' => Finding::storable($warnings),
+            'failure' => $failure?->toArray(),
             'stages' => $stages,
         ]);
-        $this->writeLine(
-            $status === self::STATUS_SUCCESS ? self::LEVEL_OK : self::LEVEL_ERROR,
-            self::finishMessage($status, $error),
-            $latest['stage'] ?? null
-        );
+    }
 
-        // Every terminal status passes through here, which is why the
-        // telemetry hook lives at this one point rather than at each of
-        // UserController's exits. Capture cannot throw; see Telemetry. The raw
-        // output wins when a caller kept it: the explainer has to see what the
-        // build actually printed, not the sentence it already turned that into.
-        // It runs before the status is published so a failure's fix from
-        // monitoring is in the same answer as the failure.
-        $problem = Telemetry::captureDeploy($this, $this->username, $status, $rawFailure ?? $error, $final);
+    /**
+     * Report the deploy to telemetry at the one point every terminal status passes (capture cannot throw), with the raw output
+     * when kept, as the explainer needs what the build printed; before the status is published, so a fix answers with the failure.
+     *
+     * @param  array<string, mixed>  $final
+     * @return array<string, ?string>|null
+     */
+    private function captureProblem(string $status, ?string $failure, array $final, ?string $stage): ?array
+    {
+        $problem = Telemetry::captureDeploy($this, $this->username, $status, $failure, $final);
         if ($problem !== null) {
-            $this->writeProblem($problem, $latest['stage'] ?? null);
+            $this->writeProblem($problem, $stage);
         }
 
-        $this->status->write(array_merge($final, ['problem' => $problem]));
-        $this->lock->release();
-        unset(self::$masked[$this->deployId]);
-
-        // Same reasoning, same choke point: a push that coalesced while this
-        // deploy ran -- of any kind, for any reason -- is followed up from
-        // here, once, whatever this deploy's own outcome was. Cannot throw;
-        // see Coalescing.
-        Coalescing::runPendingFor($this->username);
+        return $problem;
     }
 
     /**
@@ -672,12 +753,8 @@ class DeployLogger
     }
 
     /**
-     * Monitoring's fix for this failure, as log lines, so every reader of the
-     * log sees it and not only the `problem` field.
-     *
-     * A fix released in this engine's version or earlier did not prevent this
-     * failure, so its "fixed in" and how-to-fix text would be a false claim:
-     * only the title and the cause are written then.
+     * Monitoring's fix as log lines, for every reader of the log. A fix released in this engine's version or earlier did not
+     * prevent this failure, so only the title and the cause are written then: "fixed in" and how-to-fix would be a false claim.
      *
      * @param  array<string, ?string>  $problem
      */
@@ -689,10 +766,7 @@ class DeployLogger
         $alreadyHere = $fixedIn !== null && self::engineHasRelease($fixedIn);
         $fields = $alreadyHere ? ['body_why' => 'Why'] : ['body_why' => 'Why', 'body_fix' => 'How to fix'];
         foreach ($fields as $field => $label) {
-            $lines = array_values(array_filter(
-                array_map('trim', explode("\n", (string) ($problem[$field] ?? ''))),
-                static fn (string $line): bool => $line !== ''
-            ));
+            $lines = self::problemLines($problem, $field);
             if ($lines === []) {
                 continue;
             }
@@ -711,6 +785,20 @@ class DeployLogger
         } elseif ($fixedIn !== null) {
             $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version '.$fixedIn, $stage);
         }
+    }
+
+    /**
+     * The non-blank lines of one of the problem's texts, trimmed.
+     *
+     * @param  array<string, ?string>  $problem
+     * @return list<string>
+     */
+    private static function problemLines(array $problem, string $field): array
+    {
+        return array_values(array_filter(
+            array_map('trim', explode("\n", (string) ($problem[$field] ?? ''))),
+            static fn (string $line): bool => $line !== ''
+        ));
     }
 
     /** Whether the running engine is $version or newer; false when either is not a version. */
@@ -774,7 +862,7 @@ class DeployLogger
 
     public function __destruct()
     {
-        $this->lock->release();
+        $this->lock->releaseQuietly();
     }
 
     private function reader(): DeployLogReader

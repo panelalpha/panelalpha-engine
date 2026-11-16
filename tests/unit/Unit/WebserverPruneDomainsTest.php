@@ -113,6 +113,17 @@ class WebserverPruneDomainsTest extends TestCase
         $this->assertSame(['last.test'], $this->webserver()->pruneDomainConfigs([]));
     }
 
+    public function test_the_main_nginx_config_is_never_a_candidate(): void
+    {
+        $this->vhost('nginx');
+        $this->vhost('stream');
+        $this->vhost('proxy-rule-443_shop');
+        $this->vhost('nginx.test');
+
+        $this->assertSame(['nginx.test'], $this->webserver()->pruneDomainConfigs([]));
+        $this->assertSame(['nginx.test'], $this->removed);
+    }
+
     /** A directory that is not there is not an error. */
     public function test_a_missing_directory_prunes_nothing(): void
     {

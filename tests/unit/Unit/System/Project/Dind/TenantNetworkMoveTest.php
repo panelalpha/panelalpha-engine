@@ -9,6 +9,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\TenantNetworkMove;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -45,6 +46,8 @@ class TenantNetworkMoveTest extends TestCase
     public array $networks = [];
 
     public int $upExit = 0;
+
+    public bool $nameRefused = false;
 
     /** @var list<string> paths the tenant replaced with a symlink */
     public array $links = [];
@@ -112,6 +115,18 @@ class TenantNetworkMoveTest extends TestCase
 
         $this->assertSame(EngineArtifacts::RUN_COMPOSE_MODE, $this->modes[self::RUN_FILE]);
         $this->assertSame('644', $this->modes[$override]);
+    }
+
+    /** The repin reads the compose files, not the script environment, which a name compose refuses fails. */
+    public function test_a_project_name_compose_refuses_does_not_stop_the_repin(): void
+    {
+        $this->networks = [TenantNetwork::LEGACY_NAME];
+        $this->nameRefused = true;
+
+        $this->assertSame(TenantNetworkMove::MOVED, (new TenantNetworkMove($this->dind(true)))->run());
+
+        $this->assertContains('write ' . self::RUN_FILE, $this->events);
+        $this->assertStringContainsString('palocal:' . TestNetwork::container(2), $this->files[self::RUN_FILE]);
     }
 
     /** A tenant's symlink at a compose file is never read or written through by root. */
@@ -191,15 +206,15 @@ class TenantNetworkMoveTest extends TestCase
 
                     return (string) json_encode($out);
                 }
-                if (array_slice($argv, 0, 4) === ['sudo', 'docker', 'network', 'connect']) {
+                if (LocalRoot::action($argv) === 'docker.connectNetwork') {
                     $this->test->events[] = 'connect';
-                    $this->test->networks[] = $argv[4];
+                    $this->test->networks[] = LocalRoot::values($argv)[0];
 
                     return '';
                 }
-                if (array_slice($argv, 0, 4) === ['sudo', 'docker', 'network', 'disconnect']) {
+                if (LocalRoot::action($argv) === 'docker.disconnectNetwork') {
                     $this->test->events[] = 'disconnect';
-                    $this->test->networks = array_values(array_diff($this->test->networks, [$argv[4]]));
+                    $this->test->networks = array_values(array_diff($this->test->networks, [LocalRoot::values($argv)[0]]));
 
                     return '';
                 }
@@ -260,10 +275,10 @@ class TenantNetworkMoveTest extends TestCase
         $dind->method('composeFilePath')->willReturn(self::ACCOUNT_FILE);
         $dind->method('system')->willReturn($system);
         $dind->method('userModel')->willReturn($user);
-        $dind->method('userAppComposeEnv')->willReturn([
-            'COMPOSE_FILE' => implode(':', $test->composeFiles),
-            'COMPOSE_PATH_SEPARATOR' => ':',
-        ]);
+        $dind->method('userAppComposeFiles')->willReturn($test->composeFiles);
+        if ($test->nameRefused) {
+            $dind->method('userAppComposeEnv')->willThrowException(new \InvalidArgumentException('invalid project name "My_App"'));
+        }
         $dind->method('projectAction')->willReturnCallback(function (string $action) use ($test): array {
             $test->events[] = 'app ' . $action;
 

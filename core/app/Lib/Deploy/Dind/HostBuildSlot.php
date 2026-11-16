@@ -5,39 +5,12 @@ namespace App\Lib\Deploy\Dind;
 use Illuminate\Support\Facades\Log;
 
 /**
- * One host build at a time, whatever the queue is doing.
- *
- * A host build is the one part of a deploy that competes for the *host's* RAM.
- * {@see DindEngine::buildMemory()} gives each one up to 8 GB, half the server's
- * RAM, and hands the runtime a heap cap at 70% of that.
- *
- * That sizing assumed one build at a time, which is what a single
- * queue worker used to guarantee. It is QUEUE_WORKERS now -- 2 by default and
- * up to 32 -- and `DeployLock` does not help: it is explicitly one deploy per
- * *account*, so that many accounts build together by design. Two builds each
- * entitled to half the host exhaust it, and the heap cap is not a
- * ceiling that shrinks demand, it is an instruction to grow, so they will try.
- * What the kernel does then is pick a victim by badness, which can be another
- * tenant's container or the engine's own.
- *
- * So the build serialises and the rest of the deploy does not. Cloning,
- * `compose up`, migrations and health checks still run QUEUE_WORKERS wide,
- * which is where the batch speedup actually comes from -- a deploy mostly
- * waits on a container rather than on the host. Raising the count trades RAM
- * for batch throughput and costs nothing at the build itself, which this lock
- * holds at one regardless.
- *
- * **Fails open.** If the slot cannot be taken within {@see WAIT_SECONDS} the
- * build runs anyway, with a line in the log saying so. A queued build is better
- * than an OOM-killed host; a build blocked for ever behind a stuck lock is
- * worse than either, and that is the failure this refuses to introduce.
+ * One host build at a time, whatever the queue is doing, since each may take half the host's RAM; the rest
+ * of a deploy still runs QUEUE_WORKERS wide. Fails open after {@see WAIT_SECONDS}, with a line in the log.
  */
 final class HostBuildSlot
 {
-    /**
-     * Long enough for a real build ahead of this one (PHP and Node host builds
-     * cap at 1800s and 3600s). Passing it is not fatal.
-     */
+    /** Long enough for a real build ahead of this one (PHP and Node host builds cap at 1800s and 3600s). */
     private const WAIT_SECONDS = 1800;
 
     private const POLL_MICROSECONDS = 250000;
@@ -68,6 +41,8 @@ final class HostBuildSlot
     }
 
     /**
+     * Nowhere to put the lock is not a reason to refuse to build.
+     *
      * @param  ?callable(): void  $onWait
      * @return resource|null the held lock, or null when the build proceeds unslotted
      */
@@ -79,7 +54,6 @@ final class HostBuildSlot
         }
         $handle = @fopen($path, 'c');
         if ($handle === false) {
-            // Nowhere to put the lock is not a reason to refuse to build.
             Log::warning('Host build slot unavailable; building without it.');
 
             return null;

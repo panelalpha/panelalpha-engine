@@ -64,6 +64,23 @@ class FirewallRuleTest extends TestCase
         $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '80:443'])->problems());
     }
 
+    public function test_more_ports_than_one_rule_takes_are_refused_a_range_counting_as_two(): void
+    {
+        $fifteen = implode(',', range(8001, 8015));
+        $sixteen = implode(',', range(8001, 8016));
+        $fourteenWithARange = implode(',', range(8001, 8014)).',9000:9010';
+
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => $fifteen])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => implode(',', range(8001, 8013)).',9000:9010'])->problems());
+        foreach ([$sixteen => 16, $fourteenWithARange => 16] as $port => $count) {
+            $this->assertSame(
+                ['port' => "A rule takes at most 15 ports, a range counting as two; this one has {$count}. Split it into several rules."],
+                FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => (string) $port])->problems(),
+                (string) $port
+            );
+        }
+    }
+
     public function test_an_address_that_is_every_address_is_refused(): void
     {
         // ufw would take it for the rule on any address, the engine's own included.
@@ -247,7 +264,7 @@ class FirewallRuleTest extends TestCase
             $this->assertSame([], $denyOut->with(['comment' => $comment])->problems(), $comment);
         }
         $stored = ['IN', 'LOG', 'let them in', 'keep out', "a\tin\tb", 'x in on y', 'x app in y', 'block IN office',
-            'do not delete this', 'delete 1', 'comment', 'on', 'from', 'turn on now', 'a log b', 'zażółć 日本',
+            'do not delete this', 'delete 1', 'delete everything', 'comment', 'on', 'from', 'turn on now', 'a log b', 'zażółć 日本',
             'see --rootdir=x', '--ROOTDIR=x', 'login', 'inside'];
         foreach ($stored as $comment) {
             foreach ([$host, $published, $deny, $denyOut] as $rule) {

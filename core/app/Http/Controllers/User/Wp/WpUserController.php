@@ -187,7 +187,7 @@ class WpUserController extends WordPressController
             new OA\Response(response: 200, description: 'User updated', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found, or no WordPress user matches that login or ID', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
@@ -210,7 +210,9 @@ class WpUserController extends WordPressController
         path: '/projects/{username}/wp/users/{user}',
         summary: 'Delete a WordPress user',
         description: 'Deletes a WordPress user by login or ID. Optional `reassign` moves their '
-            .'content to another user. Optional `path` selects the install.',
+            .'content to another user. Optional `path` selects the install. '
+            .'The user\'s profile and its settings go with the account and are not kept anywhere; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [
@@ -249,7 +251,7 @@ class WpUserController extends WordPressController
             new OA\Response(response: 200, description: 'User deleted', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found, or no WordPress user matches that login or ID', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
@@ -299,7 +301,7 @@ class WpUserController extends WordPressController
             new OA\Response(response: 200, description: 'Password set', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found, or no WordPress user matches that login or ID', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]

@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Engine;
 
 /**
- * The container engine a hosting account's application runs on.
- *
- * Implementations build commands; running them is System's job, which is what
- * keeps them unit-testable without a daemon. The one implementation today is
- * DindEngine — per-account Docker-in-Docker on sysbox.
+ * The container engine a hosting account's app runs on. Implementations build commands and System runs
+ * them, so they are testable without a daemon; the one today is DindEngine (Docker-in-Docker on sysbox).
  */
 interface ContainerEngine
 {

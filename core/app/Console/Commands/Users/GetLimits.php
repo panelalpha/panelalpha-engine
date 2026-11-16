@@ -33,7 +33,7 @@ class GetLimits extends Command
     private function getLimits($users): int
     {
         foreach ($users as $user) {
-            $this->info("User `{$user->username}`:");
+            $this->info("Project `{$user->username}`:");
             foreach (ResourceLimit::all() as $limit) {
                 $value = $user->limit($limit);
                 // A limit that cannot be removed reads back as the default when it is unset.

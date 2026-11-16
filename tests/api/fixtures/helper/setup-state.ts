@@ -206,6 +206,18 @@ export function isLeaseActive(lease: Lease, now = Date.now(), ttlMs?: number): b
   return now - lease.heartbeatAt < (ttlMs ?? leaseTtlFor(lease));
 }
 
+/** The projects every lease still active at `now` holds, trimmed and lower-cased. */
+export function activeLeaseUsernames(
+  leases: readonly Lease[],
+  now = Date.now(),
+  ttlMs?: number
+): string[] {
+  const usernames = leases
+    .filter((lease) => isLeaseActive(lease, now, ttlMs))
+    .flatMap((lease) => lease.usernames.map((username) => username.trim().toLowerCase()));
+  return [...new Set(usernames)];
+}
+
 export interface LeaseHeartbeat {
   /** Stops the timer and stamps the lease one last time. */
   stop(): void;

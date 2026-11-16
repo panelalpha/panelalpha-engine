@@ -6,19 +6,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\System;
 
 /**
- * Throwaway build containers on the **host**, working on an account's
- * ~/project.
- *
- * The host already has the base image and a warm package cache, while a fresh
- * account has neither and reaches a registry through nested NAT. Output is
- * written straight back into ~/project, which the account's own stack serves.
- *
- * A host-daemon container with the customer's repository in it, so every
- * implementation owes the same guarantees: run as the account's uid:gid, no
- * new privileges with all capabilities dropped, bounded memory and pids, and a
- * project directory that is exactly the account's own ~/project.
- *
- * Every method returns argv for {@see System} to run on the host.
+ * Builds on the host, which has the base image and a warm cache a fresh account lacks; argv for {@see System}.
+ * Customer code on the host daemon: the account's uid:gid, no new privileges or caps, bounded, its ~/project only.
  */
 interface HostBuilder
 {
@@ -48,12 +37,8 @@ interface HostBuilder
     ): array;
 
     /**
-     * Run a PHP project's own build — its manifest's build-stage commands —
-     * on the host, in the shared base image the account will be served from.
-     *
-     * There is no per-project image to put `composer install` in, so it runs
-     * here and writes `vendor/` into ~/project, which *is* the document root:
-     * the running container picks it up without a restart.
+     * Run a PHP project's build-stage commands on the host in its shared base, there being no per-project image;
+     * `vendor/` lands in ~/project, the document root, so the running container picks it up without a restart.
      *
      * @param  string  $image  the shared PHP base assigned to this account
      * @param  string  $script  build steps, already ordered
@@ -74,11 +59,8 @@ interface HostBuilder
     ): array;
 
     /**
-     * Resolve vendor/ for a PHP project whose frontend build imports from it.
-     *
-     * Scripts and plugins stay disabled: both execute arbitrary PHP out of the
-     * customer's repository, and this runs on the host daemon, outside the
-     * account's sandbox.
+     * Resolve vendor/ for a PHP project whose frontend build imports from it, scripts and plugins disabled:
+     * both run the customer's PHP, and this runs on the host daemon outside the account's sandbox.
      *
      * @return list<string>
      */

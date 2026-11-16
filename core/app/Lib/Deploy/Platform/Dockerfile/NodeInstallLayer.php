@@ -6,12 +6,8 @@ use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * The layer that turns a lockfile into node_modules.
- *
- * Manifests are copied ahead of the source so BuildKit can reuse the install
- * when only application code changed. Workspaces are the exception: npm and bun
- * need every workspace `package.json` before they can link, so those copy the
- * tree first and give the cache up. So does a root install script.
+ * The layer that turns a lockfile into node_modules, manifests copied ahead of the source for the cache;
+ * workspaces and a root install script need the whole tree first and give the cache up.
  */
 final class NodeInstallLayer
 {
@@ -19,10 +15,7 @@ final class NodeInstallLayer
 
     public function __construct(private readonly BuildRecipe $recipe, private readonly string $installCommand) {}
 
-    /**
-     * The flag goes between `RUN` and the command, which is where the template
-     * interpolates this string.
-     */
+    /** The flag goes between `RUN` and the command, which is where the template interpolates this string. */
     private function install(): string
     {
         return PackageManagerCache::mountFor($this->recipe->packageManager).$this->installCommand;
@@ -36,9 +29,8 @@ final class NodeInstallLayer
     }
 
     /**
-     * A root install script the strip keeps runs during the install and may
-     * read the repository (teikei's `lerna exec` needs lerna.json, jitsi-meet's
-     * patch-package needs patches/), so it needs the tree as workspaces do.
+     * A root install script the strip keeps may read the repository during the install (teikei's `lerna exec`,
+     * jitsi-meet's patch-package), so it needs the tree as workspaces do.
      */
     private function runsRootLifecycleScript(): bool
     {
@@ -58,22 +50,20 @@ final class NodeInstallLayer
         return false;
     }
 
+    /** `COPY . .` comes first, so a lifecycle script can run a repository file: only git-hook tools are stripped. */
     private function wholeTree(): string
     {
         return Template::named('dockerfile/node-install-workspace')->render([
-            // `COPY . .` comes first here, so a lifecycle script can run a
-            // repository file: only the git-hook tools are stripped.
             'strip_git_hooks' => $this->stripGitHooks(sourcePresent: true),
             'install_command' => $this->install(),
         ]);
     }
 
+    /** Only package.json and the lockfile are present, so a script naming a repository file cannot run. */
     private function manifestsFirst(): string
     {
         return Template::named('dockerfile/node-install')->render([
             'manifest_copies' => $this->manifestCopies(),
-            // Only package.json and the lockfile are present, so a script
-            // naming a repository file cannot run.
             'strip_git_hooks' => $this->stripGitHooks(sourcePresent: false),
             'install_command' => $this->install(),
         ]);
@@ -93,6 +83,8 @@ final class NodeInstallLayer
     }
 
     /**
+     * Leaves out what the project's .dockerignore drops: COPYing a file missing from the context fails the build.
+     *
      * @return list<string>
      */
     private function copiedManifests(): array
@@ -106,8 +98,6 @@ final class NodeInstallLayer
             }
         }
 
-        // A file the project's .dockerignore drops is not in the build
-        // context, and COPYing it fails the whole build.
         return array_values(array_filter(
             $manifests,
             fn (string $name): bool => ! DockerIgnore::excludes($this->recipe->projectDir, $name)

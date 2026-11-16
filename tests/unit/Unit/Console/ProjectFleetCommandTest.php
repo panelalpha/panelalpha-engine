@@ -6,6 +6,7 @@ use App\Console\Commands\Concerns\ProjectOptions;
 use App\Console\Commands\ProjectFleetCommand;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
+use Symfony\Component\Console\Exception\InvalidOptionException;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -27,6 +28,8 @@ class ProjectFleetCommandTest extends TestCase
         SpyFleetCommand::$failOn = [];
         SpyFleetCommand::$beforeAllThrows = false;
         SpyFleetCommand::$beforeAllSawTouched = null;
+        SpyFleetCommand::$deletes = [];
+        SpyFleetCommand::$recreateDeleted = false;
 
         $this->app[\Illuminate\Contracts\Console\Kernel::class]
             ->registerCommand(new SpyFleetCommand());
@@ -67,13 +70,17 @@ class ProjectFleetCommandTest extends TestCase
         $this->assertSame(['alice', 'bob'], SpyFleetCommand::$touched);
     }
 
-    /** `--username` is the old spelling and still answers. */
-    public function test_the_deprecated_username_option_still_works(): void
+    public function test_the_retired_username_option_is_refused(): void
     {
         $this->makeUser('alice');
 
-        $this->assertSame(0, Artisan::call('spy:fleet', ['--username' => 'alice']));
-        $this->assertSame(['alice'], SpyFleetCommand::$touched);
+        $this->expectException(InvalidOptionException::class);
+
+        try {
+            Artisan::call('spy:fleet', ['--username' => 'alice']);
+        } finally {
+            $this->assertSame([], SpyFleetCommand::$touched);
+        }
     }
 
     public function test_the_progress_and_finished_lines_are_printed(): void
@@ -157,14 +164,24 @@ class ProjectFleetCommandTest extends TestCase
         $this->assertSame(0, SpyFleetCommand::$afterAllRuns);
     }
 
-    public function test_the_apache_commands_say_enabling_and_disabling(): void
+    /** Every per-project line an operator reads names a project, never a user. */
+    public function test_every_per_project_line_says_project(): void
     {
         foreach ([
-            [new \App\Console\Commands\Apache\EnableMod(), "Enabling mod 'rewrite' for user 'alice'...", '  Mod enabled.'],
-            [new \App\Console\Commands\Apache\DisableMod(), "Disabling mod 'rewrite' for user 'alice'...", '  Mod disabled.'],
+            [new \App\Console\Commands\Users\Rebuild(), "Rebuilding project 'alice'...", '  Finished rebuilding project.'],
+            [new \App\Console\Commands\Users\FixDomains(), "Fixing domains for project 'alice'...", '  Finished fixing domains for the project.'],
+            [new \App\Console\Commands\Users\RebuildDomains(), "Rebuilding domains for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Users\AddMissingWwwDomainAliases(), "Adding www. aliases for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Users\RebuildQuotas(), "Rebuilding quota for project 'alice'...", '  Finished.'],
+            [new \App\Console\Commands\Apache\EnableMod(), "Enabling mod 'rewrite' for project 'alice'...", '  Mod enabled.'],
+            [new \App\Console\Commands\Apache\DisableMod(), "Disabling mod 'rewrite' for project 'alice'...", '  Mod disabled.'],
         ] as [$command, $progress, $finished]) {
             $command->setLaravel($this->app);
-            $input = new \Symfony\Component\Console\Input\ArrayInput(['mod' => 'rewrite', '--project' => 'alice'], $command->getDefinition());
+            $arguments = ['--project' => 'alice'];
+            if ($command->getDefinition()->hasArgument('mod')) {
+                $arguments['mod'] = 'rewrite';
+            }
+            $input = new \Symfony\Component\Console\Input\ArrayInput($arguments, $command->getDefinition());
             (new \ReflectionProperty($command, 'input'))->setValue($command, $input);
 
             $user = new User();
@@ -174,6 +191,37 @@ class ProjectFleetCommandTest extends TestCase
             $this->assertSame($progress, $call('progress'));
             $this->assertSame($finished, $call('finished'));
         }
+    }
+
+    /** A long run must not recreate the account of a project deleted after the list was read. */
+    public function test_a_project_deleted_while_the_run_goes_is_skipped_and_said_so(): void
+    {
+        $this->makeUser('alice');
+        $this->makeUser('bob');
+        $this->makeUser('carol');
+        SpyFleetCommand::$deletes = ['alice' => 'bob'];
+
+        $exit = Artisan::call('spy:fleet', ['--all' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exit);
+        $this->assertSame(['alice', 'carol'], SpyFleetCommand::$touched);
+        $this->assertStringContainsString("Skipping 'bob': the project no longer exists.", $output);
+        $this->assertStringNotContainsString("Touching 'bob'", $output);
+    }
+
+    /** The project the run read is the one it acts on, never a newer one that took its name. */
+    public function test_a_project_replaced_under_its_name_while_the_run_goes_is_skipped(): void
+    {
+        $this->makeUser('alice');
+        $this->makeUser('bob');
+        SpyFleetCommand::$deletes = ['alice' => 'bob'];
+        SpyFleetCommand::$recreateDeleted = true;
+
+        Artisan::call('spy:fleet', ['--all' => true]);
+
+        $this->assertSame(['alice'], SpyFleetCommand::$touched);
+        $this->assertStringContainsString("Skipping 'bob'", Artisan::output());
     }
 
     public function test_no_projects_at_all_is_a_clean_run(): void
@@ -197,6 +245,11 @@ class SpyFleetCommand extends ProjectFleetCommand
 
     public static bool $beforeAllThrows = false;
 
+    /** @var array<string, string> touching the key deletes the project named by the value */
+    public static array $deletes = [];
+
+    public static bool $recreateDeleted = false;
+
     /** @var ?list<string> what had been touched when beforeAll() ran */
     public static ?array $beforeAllSawTouched = null;
 
@@ -216,6 +269,19 @@ class SpyFleetCommand extends ProjectFleetCommand
         }
 
         self::$touched[] = $user->username;
+        $this->deleteBehindTheRun($user->username);
+    }
+
+    private function deleteBehindTheRun(string $touched): void
+    {
+        $doomed = self::$deletes[$touched] ?? null;
+        if ($doomed === null) {
+            return;
+        }
+        User::findByUsernameOrFail($doomed)->delete();
+        if (self::$recreateDeleted) {
+            User::make(['username' => $doomed, 'domain' => $doomed . '.example.test', 'details' => []])->save();
+        }
     }
 
     protected function beforeAll(): void

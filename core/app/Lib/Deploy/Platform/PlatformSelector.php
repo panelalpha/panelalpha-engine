@@ -9,15 +9,14 @@ use App\Lib\Deploy\Platform\Probes\DockerfileProbe;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 
 /**
- * Which manifest claims this project: the source recipe or app config written
- * for this repository if there is one, otherwise the first manifest whose
- * `detect` block matches, in descending `priority` order.
+ * Which manifest claims this project: the source recipe or app config written for this repository if there is one, otherwise
+ * the first manifest whose `detect` block matches, in descending `priority` order.
  */
 final class PlatformSelector
 {
     /**
      * The platform for this project, or null when no manifest claims it —
-     * the signal for the caller to fall through to Railpack.
+     * the signal for the caller to fall through to the placeholder page.
      *
      * @param  array<string, true>  $files  lowercase basename => true
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
@@ -32,9 +31,8 @@ final class PlatformSelector
     }
 
     /**
-     * A `$recipe` id pins the answer: the named manifest describes the
-     * project whether or not its `detect` block would have claimed it, and an
-     * id this engine does not ship is an error, not a fall-through.
+     * A `$recipe` id pins the answer: the named manifest describes the project whether or not its `detect` block would have
+     * claimed it, and an id this engine does not ship is an error, not a fall-through.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
      *
@@ -53,8 +51,8 @@ final class PlatformSelector
     }
 
     /**
-     * The recipe a request named, described for this project. Detection is
-     * skipped — only the existence of the recipe is still checked.
+     * The recipe a request named, described for this project: only its existence is checked, and detect runs just for the probes'
+     * fields. The source recipe comes first, as it usually shares a shipped manifest's id and pinning must reach the one inspected.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}
      *
@@ -62,8 +60,6 @@ final class PlatformSelector
      */
     private static function pinned(ProjectContext $context, ?string $directory, string $id): array
     {
-        // The source recipe first: a source recipe usually shares a shipped
-        // manifest's id, and pinning must reach the one inspection reported.
         $hit = self::fromSource($context);
         if ($hit !== null && $hit['manifest']->id === $id) {
             return $hit;
@@ -72,8 +68,6 @@ final class PlatformSelector
         foreach (PlatformRegistry::all($directory) as $manifest) {
             if ($manifest->id === $id) {
                 $matcher = new PlatformMatcher(ProbeRegistry::all());
-                // Run detect anyway, discarding the verdict: the probes supply
-                // fields a pinned deploy needs too.
                 $matcher->matches($manifest->detect, $context);
 
                 return [
@@ -83,14 +77,12 @@ final class PlatformSelector
             }
         }
 
-        throw new ManifestException(
-            "No recipe called '{$id}'. Inspect the source to see which recipes can deploy it."
-        );
+        throw new UnknownRecipeException($id);
     }
 
     /**
-     * The platform this project's own app config names — its `.panelalpha/`,
-     * or the engine's directory for the repository it was cloned from.
+     * The platform this project's own app config names (its `.panelalpha/` or the engine's directory for its repository), with the
+     * recipe's checks so a `check:` resolves as through SourceRecipes::at(); `source_recipe` tells logs and inspections why.
      *
      * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
      */
@@ -104,8 +96,6 @@ final class PlatformSelector
         $manifest = SourceRecipes::fromAppConfig(
             $hit['config'] ?? null,
             $hit === null ? '' : AppConfigLocator::describe($hit),
-            // The recipe's own checks, so a `check:` naming one resolves at
-            // selection time the same way it does through SourceRecipes::at().
             $hit === null ? null : SourceRecipes::checksDirectory($hit['path'])
         );
         if ($manifest === null || $hit === null) {
@@ -116,17 +106,15 @@ final class PlatformSelector
             $context,
             self::probeData($manifest, $context, $hit['config']->manifest() ?? [])
         );
-        // So a deploy log and an inspection say why this recipe was chosen.
         $decision['source_recipe'] = AppConfigLocator::describe($hit);
+        $decision['source_recipe_origin'] = AppConfigLocator::origin($hit);
 
         return ['manifest' => $manifest, 'decision' => $decision];
     }
 
     /**
-     * Where the compose file or Dockerfile is, for a recipe that runs one. A
-     * recipe is found by its path, so no detect ran and nothing else fills
-     * `compose_path` or `dockerfile`/`port_hint`. Other
-     * strategies' probes would change what existing recipes build.
+     * Where the compose file or Dockerfile is, for a recipe that runs one: found by its path, no detect filled it, and other
+     * strategies' probes would change what recipes build. A recipe's own `port:` outranks EXPOSE; an inherited one does not.
      *
      * @param  array<string, mixed>  $declared  the keys the recipe itself states
      * @return array<string, mixed>
@@ -141,7 +129,6 @@ final class PlatformSelector
         if (! is_array($found)) {
             return [];
         }
-        // A recipe's own `port:` outranks the Dockerfile's EXPOSE; an inherited one does not.
         if (($declared['port'] ?? null) !== null) {
             unset($found['port_hint']);
         }

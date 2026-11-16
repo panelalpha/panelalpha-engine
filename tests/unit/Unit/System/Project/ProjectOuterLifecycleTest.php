@@ -5,11 +5,13 @@ namespace Tests\Unit\System\Project;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project;
 use App\System\Services\Webserver;
 use LogicException;
 use Symfony\Component\Process\Process;
-use Tests\Support\StagedRename;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class ProjectOuterLifecycleTest extends TestCase
@@ -26,7 +28,7 @@ class ProjectOuterLifecycleTest extends TestCase
     {
         parent::setUp();
         $this->tmpRoot = sys_get_temp_dir() . '/pa-project-outer-' . bin2hex(random_bytes(4));
-        $this->homeRoot = $this->tmpRoot . '/home';
+        $this->homeRoot = $this->tmpRoot . '-home';
         $this->dindTemplateRoot = $this->tmpRoot . '/templates/user/dind/project';
         $this->phpTemplateRoot = $this->tmpRoot . '/templates/user/default/project';
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
@@ -35,12 +37,15 @@ class ProjectOuterLifecycleTest extends TestCase
         file_put_contents($this->dindTemplateRoot . '/docker-compose.yml', "services:\n  dind:\n    image: test\n");
         $this->seedPhpTemplate($this->phpTemplateRoot);
         $this->setCurrentWebserver('nginx');
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['homes' => $this->homeRoot, 'engine' => $this->tmpRoot]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->setCurrentWebserver(null);
         $this->removeTree($this->tmpRoot);
+        $this->removeTree($this->homeRoot);
         parent::tearDown();
     }
 
@@ -96,11 +101,8 @@ class ProjectOuterLifecycleTest extends TestCase
             $this->assertSame('compose up failed', $e->getMessage());
         }
 
-        $this->assertContains(
-            ['sudo', 'docker', 'compose', '-f', $composePath, 'down', '-v', '--remove-orphans'],
-            $this->executed
-        );
-        $this->assertContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+        $this->assertContains(Privileged::compose($composePath)->downWithVolumes(), $this->executed);
+        $this->assertContains(Privileged::docker()->forceRemoveContainer('alice'), $this->executed);
         $this->assertFalse(is_dir($this->homeRoot . '/alice'));
     }
 
@@ -112,19 +114,19 @@ class ProjectOuterLifecycleTest extends TestCase
 
         $project->delete();
 
-        $this->assertContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+        $this->assertContains(Privileged::docker()->forceRemoveContainer('alice'), $this->executed);
         $outerDown = array_filter($this->executed, static function ($cmd) use ($outerCompose): bool {
-            if (!is_array($cmd)) {
+            if (!is_array($cmd) || !LocalRoot::isRequest($cmd)) {
                 return false;
             }
+            $argv = LocalRoot::plain($cmd);
 
             // Outer stack teardown only — not `compose -f <outer> exec … down`.
-            return ($cmd[0] ?? null) === 'sudo'
-                && ($cmd[1] ?? null) === 'docker'
-                && ($cmd[2] ?? null) === 'compose'
-                && ($cmd[3] ?? null) === '-f'
-                && ($cmd[4] ?? null) === $outerCompose
-                && ($cmd[5] ?? null) === 'down';
+            return ($argv[0] ?? null) === 'docker'
+                && ($argv[1] ?? null) === 'compose'
+                && ($argv[2] ?? null) === '-f'
+                && ($argv[3] ?? null) === $outerCompose
+                && ($argv[4] ?? null) === 'down';
         });
         $this->assertSame([], array_values($outerDown));
         $this->assertFalse(is_dir($this->homeRoot . '/alice'));
@@ -139,11 +141,8 @@ class ProjectOuterLifecycleTest extends TestCase
 
         $project->delete();
 
-        $this->assertContains(
-            ['sudo', 'docker', 'compose', '-f', $composePath, 'down', '-v', '--remove-orphans'],
-            $this->executed
-        );
-        $this->assertContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+        $this->assertContains(Privileged::compose($composePath)->downWithVolumes(), $this->executed);
+        $this->assertContains(Privileged::docker()->forceRemoveContainer('alice'), $this->executed);
         $this->assertFalse(is_dir($this->homeRoot . '/alice'));
     }
 
@@ -285,6 +284,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (str_contains($line, 'useradd')) {
                     $this->journal[] = 'useradd';
@@ -299,16 +299,17 @@ class ProjectOuterLifecycleTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->executed[] = $cmd;
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $root = is_array($cmd) ? $this->asRoot($cmd) : [];
+                $line = is_array($cmd) ? implode(' ', $this->plain($cmd)) : $cmd;
 
-                if (is_array($cmd) && ($cmd[0] ?? '') === 'sudo' && ($cmd[1] ?? '') === 'cat') {
-                    $file = $cmd[2] ?? '';
+                if (($root[0] ?? '') === 'cat') {
+                    $file = $root[2] ?? '';
 
                     return is_file($file) ? (string) file_get_contents($file) : '';
                 }
 
-                if (is_array($cmd) && ($cmd[0] ?? '') === 'sudo' && ($cmd[1] ?? '') === 'touch') {
-                    $file = $cmd[2] ?? '';
+                if (($root[0] ?? '') === 'touch') {
+                    $file = $root[2] ?? '';
                     if ($file !== '') {
                         if (!is_dir(dirname($file))) {
                             mkdir(dirname($file), 0777, true);
@@ -336,54 +337,79 @@ class ProjectOuterLifecycleTest extends TestCase
                 if (str_contains($line, 'mkdir')) {
                     $this->simulateMkdir($line);
                 }
-                if (str_contains($line, 'sudo cp ')) {
-                    $this->simulateCp($line);
+                if (($root[0] ?? '') === 'cp') {
+                    $this->simulateCp($root);
                 }
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
-                if (preg_match('/^sudo mv -T (\S+) (\S+)$/', $line, $m) === 1 && file_exists($m[1])) {
+                if (preg_match('/^mv -T -- (\S+) (\S+)$/', implode(' ', $root), $m) === 1 && file_exists($m[1])) {
                     rename($m[1], $m[2]);
                 }
 
                 return '';
             }
 
+            /**
+             * @param  list<string>  $cmd
+             * @return list<string>
+             */
+            private function asRoot(array $cmd): array
+            {
+                return LocalRoot::isRequest($cmd) ? $this->plain($cmd) : [];
+            }
+
+            /**
+             * {@see LocalRoot::plain()}, except home entries, in-home renames and reads and real paths, which pa-root-local cannot name here.
+             *
+             * @param  list<string>  $cmd
+             * @return list<string>
+             */
+            private function plain(array $cmd): array
+            {
+                $values = LocalRoot::isRequest($cmd) ? LocalRoot::values($cmd) : [];
+
+                return match (LocalRoot::action($cmd)) {
+                    'scripts.makeHomeEntry' => ['mkdir', '-m', $values[1], '--', $values[0]],
+                    'account.renameInHome' => ['mv', '-T', '--', $values[1], $values[2]],
+                    'account.readInHome' => ['cat', '--', $values[1]],
+                    'files.existingRealPaths' => ['realpath', '-e', '--', ...$values],
+                    default => LocalRoot::plain($cmd),
+                };
+            }
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->executed[] = $cmd;
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $root = is_array($cmd) ? $this->asRoot($cmd) : [];
+                $line = is_array($cmd) ? implode(' ', $this->plain($cmd)) : $cmd;
 
                 if (str_contains($line, 'mkdir')) {
                     $this->simulateMkdir($line);
                 }
-                if (str_contains($line, 'sudo cp ') || (is_array($cmd) && ($cmd[1] ?? '') === 'cp')) {
-                    if (is_array($cmd) && ($cmd[1] ?? '') === 'cp') {
-                        $source = $cmd[2] ?? null;
-                        $target = $cmd[3] ?? null;
-                        if (is_string($source) && is_string($target) && is_file($source)) {
-                            if (!is_dir(dirname($target))) {
-                                mkdir(dirname($target), 0777, true);
-                            }
-                            copy($source, $target);
+                if (($root[0] ?? '') === 'cp') {
+                    $source = $root[2] ?? null;
+                    $target = $root[3] ?? null;
+                    if (is_string($source) && is_string($target) && is_file($source)) {
+                        if (!is_dir(dirname($target))) {
+                            mkdir(dirname($target), 0777, true);
                         }
-                    } else {
-                        $this->simulateCp($line);
+                        copy($source, $target);
                     }
                 }
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
-                if (($moved = StagedRename::of($cmd)) !== null && file_exists($moved[0])) {
-                    rename($moved[0], $moved[1]);
+                if (preg_match('/^mv -T -- (\S+) (\S+)$/', implode(' ', $root), $m) === 1 && file_exists($m[1])) {
+                    rename($m[1], $m[2]);
                 }
                 // The account's own container is on the host, under its Compose label.
-                $output = str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$') ? "alice\n" : '';
-                if (is_array($cmd) && array_slice($cmd, 0, 4) === ['sudo', 'stat', '-c', '%d']) {
-                    $output = str_repeat("1\n", count($cmd) - 4);
+                $output = LocalRoot::action((array) $cmd) === 'docker.containerNamedWithLabel' ? "alice\n" : '';
+                if (array_slice($root, 0, 4) === ['stat', '-c', '%d', '--']) {
+                    $output = str_repeat("1\n", count($root) - 4);
                 }
-                if (is_array($cmd) && array_slice($cmd, 0, 4) === ['sudo', 'realpath', '-e', '--']) {
-                    $output = implode("\n", array_slice($cmd, 4))."\n";
+                if (array_slice($root, 0, 3) === ['realpath', '-e', '--']) {
+                    $output = implode("\n", array_slice($root, 3))."\n";
                 }
 
                 return new class ($output) extends Process {
@@ -416,6 +442,8 @@ class ProjectOuterLifecycleTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return $this->runProcess($cmd, $env);
             }
 
@@ -518,11 +546,12 @@ class ProjectOuterLifecycleTest extends TestCase
                 };
             }
 
-            private function simulateCp(string $line): void
+            /** @param list<string> $argv */
+            private function simulateCp(array $argv): void
             {
-                $parts = preg_split('/\s+/', $line);
-                $source = $parts[2] ?? null;
-                $target = $parts[3] ?? null;
+                $parts = array_values(array_filter($argv, static fn (string $word): bool => $word !== '--'));
+                $source = $parts[1] ?? null;
+                $target = $parts[2] ?? null;
                 if (is_string($source) && is_string($target)) {
                     if (!is_dir(dirname($target))) {
                         mkdir(dirname($target), 0777, true);
@@ -539,7 +568,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
             private function simulateMkdir(string $line): void
             {
-                if (!preg_match('/mkdir(?: -p)?(?: -m \d+)? (.+)$/', $line, $m)) {
+                if (!preg_match('/mkdir(?: -p)?(?: -m \d+)?(?: --)? (.+)$/', $line, $m)) {
                     return;
                 }
                 $path = trim(explode(' &&', $m[1])[0]);
@@ -550,7 +579,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
             private function simulateRmRf(string $line): void
             {
-                if (!preg_match('/rm -rf (.+)$/', $line, $m)) {
+                if (!preg_match('/rm -rf(?: --)? (.+)$/', $line, $m)) {
                     return;
                 }
                 $path = trim($m[1]);

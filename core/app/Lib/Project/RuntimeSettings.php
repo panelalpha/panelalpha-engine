@@ -3,14 +3,16 @@
 namespace App\Lib\Project;
 
 /**
- * A project's PHP-FPM pool, LSPHP and Redis settings, read from the text the
- * API stores for each (one `key<separator>value` per line) and checked
- * against what the runtime will accept. Anything unset or unusable falls
- * back to the defaults below.
+ * A project's PHP-FPM pool, LSPHP and Redis settings, read from the stored `key<separator>value` lines
+ * and checked against what the runtime accepts; anything unset or unusable falls back to the defaults.
  */
 final class RuntimeSettings
 {
-    /** @return array<string,string> */
+    /**
+     * Keys not checked pass through as written.
+     *
+     * @return array<string,string>
+     */
     public static function phpFpmPool(mixed $raw): array
     {
         $default = [
@@ -40,11 +42,14 @@ final class RuntimeSettings
             }
         }
 
-        // Keys not checked above pass through as written.
         return array_merge($parsed, $validated);
     }
 
-    /** @return array<string,string> */
+    /**
+     * Keys not checked pass through as written.
+     *
+     * @return array<string,string>
+     */
     public static function lsphp(mixed $raw): array
     {
         $default = [
@@ -64,7 +69,6 @@ final class RuntimeSettings
             }
         }
 
-        // Keys not checked above pass through as written.
         return array_merge($parsed, $validated);
     }
 
@@ -75,7 +79,31 @@ final class RuntimeSettings
      */
     public static function redis(mixed $raw): array
     {
-        $default = [
+        $default = self::redisDefaults();
+        if (empty($raw) || ! is_string($raw)) {
+            return $default;
+        }
+
+        $parsed = self::lines($raw, ' ');
+
+        $validated = $default;
+        foreach (self::redisAllowedKeys() as $key) {
+            if (! array_key_exists($key, $parsed)) {
+                continue;
+            }
+            $value = $parsed[$key];
+            if (self::redisAccepts($key, $value)) {
+                $validated[$key] = $value;
+            }
+        }
+
+        return $validated;
+    }
+
+    /** @return array<string,string> */
+    private static function redisDefaults(): array
+    {
+        return [
             'maxmemory' => '128mb',
             'maxmemory-policy' => 'allkeys-lru',
             'maxmemory-samples' => '5',
@@ -88,13 +116,12 @@ final class RuntimeSettings
             'lfu-log-factor' => '10',
             'lfu-decay-time' => '1',
         ];
-        if (empty($raw) || ! is_string($raw)) {
-            return $default;
-        }
+    }
 
-        $parsed = self::lines($raw, ' ');
-
-        $allowedKeys = [
+    /** @return list<string> */
+    private static function redisAllowedKeys(): array
+    {
+        return [
             'maxmemory',
             'maxmemory-policy',
             'save',
@@ -107,8 +134,12 @@ final class RuntimeSettings
             'lfu-decay-time',
             'lfu-log-factor',
         ];
+    }
 
-        $allowedMaxmemoryPolicies = [
+    /** @return list<string> */
+    private static function redisMaxmemoryPolicies(): array
+    {
+        return [
             'noeviction',
             'allkeys-lru',
             'volatile-lru',
@@ -118,43 +149,26 @@ final class RuntimeSettings
             'allkeys-lfu',
             'volatile-lfu',
         ];
+    }
 
-        $validated = $default;
-        foreach ($allowedKeys as $key) {
-            if (! array_key_exists($key, $parsed)) {
-                continue;
-            }
-            $value = $parsed[$key];
-            if ($key === 'maxmemory-policy') {
-                if (in_array($value, $allowedMaxmemoryPolicies)) {
-                    $validated[$key] = $value;
-                }
-
-                continue;
-            }
-            if (in_array($key, ['hz', 'timeout', 'maxmemory-samples', 'lfu-decay-time', 'lfu-log-factor'])) {
-                if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
-                    $validated[$key] = $value;
-                }
-
-                continue;
-            }
-            if (in_array($key, ['lazyfree-lazy-eviction', 'lazyfree-lazy-expire', 'activedefrag'])) {
-                if (in_array($value, ['yes', 'no'])) {
-                    $validated[$key] = $value;
-                }
-
-                continue;
-            }
-            $validated[$key] = $value;
+    /** Whether an allowed key's value is one Redis accepts; `maxmemory` and `save` take anything. */
+    private static function redisAccepts(string $key, string $value): bool
+    {
+        if ($key === 'maxmemory-policy') {
+            return in_array($value, self::redisMaxmemoryPolicies());
+        }
+        if (in_array($key, ['hz', 'timeout', 'maxmemory-samples', 'lfu-decay-time', 'lfu-log-factor'])) {
+            return filter_var($value, FILTER_VALIDATE_INT) !== false;
+        }
+        if (in_array($key, ['lazyfree-lazy-eviction', 'lazyfree-lazy-expire', 'activedefrag'])) {
+            return in_array($value, ['yes', 'no']);
         }
 
-        return $validated;
+        return true;
     }
 
     /**
-     * `key<separator>value` per line, trimmed; a line without the separator
-     * is skipped and a repeated key keeps its last value.
+     * `key<separator>value` per line, trimmed; a line without the separator is skipped, a repeated key keeps its last.
      *
      * @return array<string,string>
      */

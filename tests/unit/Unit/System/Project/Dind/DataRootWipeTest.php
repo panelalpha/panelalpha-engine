@@ -2,11 +2,11 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Dind\DindAccountStorage;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
-use App\Lib\Deploy\Engine\ImageStore;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
@@ -21,6 +21,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Mockery\MockInterface;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,9 @@ use Tests\TestCase;
 class DataRootWipeTest extends TestCase
 {
     use MockeryPHPUnitIntegration;
+
+    /** @var list<array{0: string, 1: list<string>}> */
+    private array $asked = [];
 
     /** A delete that follows a cancelled deploy: latest.json still says cancelled. */
     public function test_a_cancelled_deploy_log_does_not_stop_the_wipe(): void
@@ -109,6 +113,33 @@ class DataRootWipeTest extends TestCase
         (new AccountTeardown($dind))->delete();
     }
 
+    /** The build cache goes with the aborted deploy, then everything, volumes included: they are the account's. */
+    public function test_deleting_an_account_prunes_its_daemon_down_to_the_volumes(): void
+    {
+        $dind = $this->teardownOf(outerStackExists: true, running: true);
+        $inner = Mockery::mock(InnerDocker::class);
+        $inner->shouldReceive('wipeDataRoot');
+        $dind->shouldReceive('innerDocker')->andReturn($inner);
+
+        (new AccountTeardown($dind))->delete();
+
+        $prunes = array_values(array_filter($this->asked, static fn (array $asked): bool => str_contains($asked[0], 'prune')));
+        $this->assertSame([
+            ['account-docker.pruneBuildCache', ['alice']],
+            ['account-docker.pruneSystem', ['alice', 'volumes']],
+        ], $prunes);
+    }
+
+    /** An aborted deploy takes only the build cache: the images and volumes may be the live version's. */
+    public function test_aborting_a_deploy_prunes_only_the_build_cache(): void
+    {
+        $dind = $this->teardownOf(outerStackExists: true, running: true);
+
+        (new AccountTeardown($dind))->abortRunningDeploy(stopInnerDocker: false);
+
+        $this->assertSame([['account-docker.pruneBuildCache', ['alice']]], $this->asked);
+    }
+
     private function teardownOf(bool $outerStackExists, bool $running): Dind&MockInterface
     {
         $filesystem = Mockery::mock(SystemFilesystem::class);
@@ -116,19 +147,24 @@ class DataRootWipeTest extends TestCase
         $system = Mockery::mock(System::class);
         $system->shouldReceive('homesDirPath')->andReturn('/home');
         $system->shouldReceive('filesystem')->andReturn($filesystem);
-        // isRunning() asks compose which of the account's services run.
-        $system->shouldReceive('exec')->andReturnUsing(
-            static fn (string|array $cmd): string => is_string($cmd) && str_contains($cmd, 'ps --services --filter status=running')
-                ? ($running ? "dind\n" : '')
-                : ''
-        );
+        $system->shouldReceive('exec')->andReturnUsing(function (string|array $cmd) use ($running): string {
+            $action = (string) LocalRoot::action((array) $cmd);
+            if ($action === 'compose.runningServices') {
+                return $running ? "dind\n" : '';
+            }
+            if (str_starts_with($action, 'account-docker.')) {
+                $this->asked[] = [$action, LocalRoot::values((array) $cmd)];
+                if (! $running) {
+                    throw new DockerErrorException('container alice is not running');
+                }
+            }
+
+            return '';
+        });
         $system->shouldReceive('runProcess')->andReturn(new Process(['true']));
 
-        $images = Mockery::mock(ImageStore::class);
-        $images->shouldReceive('listImagesArgv')->andReturn(['docker', 'images']);
         $engine = Mockery::mock(ContainerEngine::class);
         $engine->shouldReceive('storage')->andReturn(new DindAccountStorage());
-        $engine->shouldReceive('images')->andReturn($images);
         $owner = Mockery::mock(ModelsUser::class);
         $owner->shouldReceive('getChownString')->andReturn('1000:1000');
 
@@ -153,7 +189,7 @@ class DataRootWipeTest extends TestCase
         $dind->shouldReceive('userAppComposeFilePath')->andReturn('/home/alice/project/docker-compose.panelalpha.yml');
         $dind->shouldReceive('userAppExistingComposeFilePath')->andReturnNull();
         $dind->shouldReceive('userAppComposeCommand')->andReturn(['docker', 'compose', 'down']);
-        $dind->shouldReceive('engineAccount')->andReturn(new EngineAccount('alice', '/home/alice', '1000:1000', $compose));
+        $dind->shouldReceive('engineAccount')->andReturn(new EngineAccount('alice', '/home/alice', '1000:1000'));
         $shell = new ShellOperations($dind);
         $dind->shouldReceive('shell')->andReturn($shell);
 

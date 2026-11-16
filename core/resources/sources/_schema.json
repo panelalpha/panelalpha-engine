@@ -606,6 +606,83 @@
           "type": "null"
         }
       ]
+    },
+    "domain": {
+      "description": "The name the application answers on. `generated`, the default, is the project's own domain; `host` asks for the server's own name, the `cert_domain` setting, served with the engine's own certificate. The file only asks: the project gets the name once an administrator allows it (`pae system:public-routing:allow <project> --host-domain`).",
+      "anyOf": [
+        {
+          "enum": [
+            "generated",
+            "host"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "public_ports": {
+      "description": "Host ports the application is reached on besides its domain's :80/:443, each a TCP or UDP proxy rule to the account container. An entry is a port number, short for `{listen: <port>}`, or `{listen, to, transport}`: `to` is the application's port and defaults to `listen`, `transport` is tcp or udp and defaults to tcp. A port may be listed once per transport. 80 and 443 are the webserver's own and the engine's listeners are reserved. The file only asks: the ports open once an administrator allows them (`pae system:public-routing:allow <project> --ports`), and a port another project holds is skipped at deploy.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/properties/public_ports/anyOf/0/items/oneOf/1/properties/listen"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "listen"
+                ],
+                "properties": {
+                  "listen": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535,
+                    "not": {
+                      "enum": [
+                        80,
+                        443,
+                        21,
+                        22,
+                        2011,
+                        2222,
+                        30000,
+                        30001,
+                        30002,
+                        30003,
+                        30004,
+                        30005,
+                        30006,
+                        30007,
+                        30008,
+                        30009
+                      ]
+                    }
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "transport": {
+                    "enum": [
+                      "tcp",
+                      "udp"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {
@@ -796,10 +873,11 @@
           "description": "Stable name shown in deploy logs. Derived from `run` when omitted."
         },
         "stage": {
-          "description": "build = image build. install = first deploy only. upgrade = redeploy over existing data. start = every boot. A list means every listed stage — ['install','upgrade'] is how a migration says 'whenever the code changed, never on a restart'.",
+          "description": "prepare = the account's shell after the clone, before anything is built (a check that refuses a checkout belongs here). build = image build. install = first deploy only. upgrade = redeploy over existing data. start = every boot. A list means every listed stage — ['install','upgrade'] is how a migration says 'whenever the code changed, never on a restart'.",
           "oneOf": [
             {
               "enum": [
+                "prepare",
                 "build",
                 "install",
                 "upgrade",
@@ -810,6 +888,7 @@
               "type": "array",
               "items": {
                 "enum": [
+                  "prepare",
                   "build",
                   "install",
                   "upgrade",
@@ -824,6 +903,7 @@
           "type": "array",
           "items": {
             "enum": [
+              "prepare",
               "build",
               "install",
               "upgrade",

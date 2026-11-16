@@ -143,4 +143,35 @@ class SourceRecipesResilienceTest extends TestCase
         $this->expectExceptionMessageMatches("/strategy 'larvel' is not one this engine deploys/");
         SourceRecipes::at($dir, 'github.com/acme/override');
     }
+
+    /**
+     * The strategy a manifest defaults to its id is checked exactly like a stated one.
+     */
+    public function test_a_manifest_with_no_strategy_whose_id_is_unknown_is_refused(): void
+    {
+        $dir = $this->recipe(
+            'github.com/acme/no-strategy',
+            "id: acme-no-strategy\nlabel: No Strategy\nruntime: node\nport: 3000\n"
+        );
+
+        $this->expectException(ManifestException::class);
+        $this->expectExceptionMessageMatches("/strategy 'acme-no-strategy' is not one this engine deploys/");
+        SourceRecipes::at($dir, 'github.com/acme/no-strategy');
+    }
+
+    /** An id that is itself a known strategy is the default the engine intends, and it stands. */
+    public function test_a_manifest_with_no_strategy_whose_id_is_known_keeps_it(): void
+    {
+        $dir = $this->recipe('github.com/acme/known-id', "id: express\nlabel: Express\nruntime: node\n");
+
+        $this->assertSame('express', SourceRecipes::at($dir, 'github.com/acme/known-id')?->strategy);
+    }
+
+    /** Extending a recipe with no stated strategy keeps the strategy it inherits. */
+    public function test_a_manifest_with_no_strategy_keeps_the_strategy_it_extends(): void
+    {
+        $dir = $this->recipe('github.com/acme/based', "id: acme-based\nextends: php\nlabel: Based\n");
+
+        $this->assertSame('php', SourceRecipes::at($dir, 'github.com/acme/based')?->strategy);
+    }
 }

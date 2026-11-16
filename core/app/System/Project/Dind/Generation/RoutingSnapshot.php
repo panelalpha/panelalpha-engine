@@ -5,16 +5,14 @@ namespace App\System\Project\Dind\Generation;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\AppManager;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\ProjectBindMounts;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The port the site is routed to, and the deploy details a later down/up
- * reads, as they were before a redeploy prepared the new version. The
- * proxy rules stay on that port until the new version takes traffic; a
- * failed redeploy puts the details back, a successful one routes to the
- * port the new version answers on.
+ * The routed port and the deploy details a later down/up reads, as they were before a redeploy: the rules
+ * stay there until the new version takes traffic, and a failed redeploy puts the details back.
  */
 final class RoutingSnapshot
 {
@@ -26,12 +24,15 @@ final class RoutingSnapshot
         'app_port', 'app_port_scheme', 'git_commit',
         'deploy_source', 'deploy_strategy', 'deploy_label', 'deploy_port', 'deploy_runtime',
         'deploy_platform', 'deploy_checks_dir', 'deploy_image', AppHealth::DETAIL_START_PERIOD,
-        SidecarPasswords::DETAILS_KEY,
+        'deploy_admin_sso', AppManager::DETAIL_APP_CONFIG_FITS, SidecarPasswords::DETAILS_KEY,
     ];
 
     public function __construct(private readonly DindProject $project) {}
 
-    /** Before a redeploy prepares anything; nothing when no app is running. */
+    /**
+     * Before a redeploy prepares anything; nothing when no app is running. The operator's rules are noted,
+     * so a restore puts them back whichever way the redeploy moves them.
+     */
     public function take(): void
     {
         $state = new GenerationState($this->project->username());
@@ -49,7 +50,6 @@ final class RoutingSnapshot
         $state->put(GenerationState::ROUTES, [
             'details' => self::pick($details),
             'containers' => $read['running'],
-            // Whichever way the redeploy moves them, a restore puts these back.
             'hand' => $served === null ? [] : (new RouteSwitch($this->project->system(), $this->project->username()))->handRulesTo((int) $served),
             'applied' => false,
             'gated' => false,
@@ -96,10 +96,7 @@ final class RoutingSnapshot
         return (new GenerationState($this->project->username()))->get(GenerationState::ROUTES);
     }
 
-    /**
-     * True when the deploy that took this snapshot closed as a success, false
-     * when it closed otherwise, null when that is not known.
-     */
+    /** True when the deploy that took this snapshot closed as a success, false otherwise, null when not known. */
     public function verdict(): ?bool
     {
         $id = $this->entry()['deploy'] ?? null;
@@ -129,13 +126,15 @@ final class RoutingSnapshot
         return $entry !== null && ($entry['applied'] ?? false) !== true;
     }
 
-    /** The new version takes traffic: route to the port it answers on, the operator's rules to it too. */
+    /**
+     * The new version takes traffic: route to the port it answers on, the operator's rules to it too.
+     * While an earlier redeploy's copy holds the site, it leaves the copy only for a version that answers.
+     */
     public function apply(): void
     {
         $state = new GenerationState($this->project->username());
         $user = $this->project->userModel();
         $port = $user->getAppPort();
-        // An earlier redeploy's copy holds the site: it leaves the copy only for a version that answers.
         if ($port !== null && ZeroDowntimeRedeploy::copyHeld($this->project->username())
             && ! GenerationSweep::settleNext($this->project, to: $port, wait: self::COPY_HANDOVER_SECONDS)) {
             return;
@@ -171,9 +170,8 @@ final class RoutingSnapshot
     }
 
     /**
-     * After the deploy: the details back when it failed and its containers
-     * still run, otherwise the routes on the new version's port. Null when
-     * nothing was taken, or the containers could not be asked about.
+     * After the deploy: the details back when it failed with its containers still running, else the routes on the
+     * new version's port, never away from a second copy that alone answers. Null when nothing was taken or asked.
      */
     public function settle(?bool $succeeded): ?string
     {
@@ -185,7 +183,6 @@ final class RoutingSnapshot
             return null;
         }
         if (ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
-            // Nothing routes the site away from a second copy while it is all that answers.
             $state->forget(GenerationState::ROUTES);
 
             return 'routes left on the second copy';
@@ -198,21 +195,29 @@ final class RoutingSnapshot
         }
 
         try {
-            if (CheckoutAside::outcome($succeeded, $running) === 'restored') {
-                $user = $this->project->userModel();
-                $user->setDetails((array) ($entry['details'] ?? []));
-                $user->save();
-                $outcome = 'deploy details restored';
-            } else {
-                $this->apply();
-                $outcome = null;
-            }
+            $outcome = $this->restoreOrApply($succeeded, $running, $entry);
         } catch (\Throwable $e) {
             Log::warning("Could not settle the routing of {$this->project->username()}: ".$e->getMessage());
 
             return null;
         }
         $state->forget(GenerationState::ROUTES);
+
+        return $outcome;
+    }
+
+    /** @param  array<string, mixed>  $entry */
+    private function restoreOrApply(?bool $succeeded, bool $running, array $entry): ?string
+    {
+        if (CheckoutAside::outcome($succeeded, $running) === 'restored') {
+            $user = $this->project->userModel();
+            $user->setDetails((array) ($entry['details'] ?? []));
+            $user->save();
+            $outcome = 'deploy details restored';
+        } else {
+            $this->apply();
+            $outcome = null;
+        }
 
         return $outcome;
     }
@@ -234,7 +239,10 @@ final class RoutingSnapshot
         return $port === null ? null : (int) $port;
     }
 
-    /** The previous version is back: the site, and the operator's rules the redeploy moved, on its port. */
+    /**
+     * The previous version is back: the site, and the operator's rules the redeploy moved, on its port.
+     * While a second copy holds the site the previous version does not answer, and the site stays there.
+     */
     public function routeBack(): void
     {
         $state = new GenerationState($this->project->username());
@@ -243,14 +251,9 @@ final class RoutingSnapshot
             return;
         }
         $served = $entry['details']['app_port'] ?? null;
-        // The previous version does not answer and the copy does: the site stays on the copy.
         if ($served !== null && ! ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
             try {
-                // The new version's port, and a second copy's should its routes not have gone back yet.
-                $from = [(int) ($entry['left'] ?? $this->project->userModel()->getAppPort())];
-                foreach ((array) ($state->get(GenerationState::NEXT)['routes'] ?? []) as $copy) {
-                    $from[] = (int) $copy;
-                }
+                $from = $this->portsRoutedAway($entry, $state);
                 $this->putHandRulesBack($entry, $from);
                 $this->project->networking()->applyRoutes($this->project->userModel(), (int) $served);
             } catch (\Throwable $e) {
@@ -258,6 +261,22 @@ final class RoutingSnapshot
             }
         }
         $state->forget(GenerationState::ROUTES);
+    }
+
+    /**
+     * The new version's port, and a second copy's should its routes not have gone back yet.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return list<int>
+     */
+    private function portsRoutedAway(array $entry, GenerationState $state): array
+    {
+        $from = [(int) ($entry['left'] ?? $this->project->userModel()->getAppPort())];
+        foreach ((array) ($state->get(GenerationState::NEXT)['routes'] ?? []) as $copy) {
+            $from[] = (int) $copy;
+        }
+
+        return $from;
     }
 
     /**

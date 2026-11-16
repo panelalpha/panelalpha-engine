@@ -4,6 +4,7 @@ import { expectStatus } from '@/helpers/expect-status';
 import { privilegesAsText } from '@/helpers/mysql-helpers';
 import { rand, randomUsername } from '@/helpers/random';
 import { stagingUserPayload, waitUntilStagingActive } from '@/helpers/staging-helpers';
+import { skipTest } from '@/helpers/test-helpers';
 
 test.describe('user staging', () => {
   test('staging a PHP user is accepted or refused as unsupported', async ({ api, userFactory }) => {
@@ -130,6 +131,59 @@ test.describe('user staging', () => {
       await expectStatus(await api.getUserRaw(newUsername), 404);
     } finally {
       await api.deleteUserSafe(newUsername);
+      await userFactory.deleteUser(source.username);
+    }
+  });
+
+  test('deleting a live project that still has a staging copy is refused', async ({
+    api,
+    userFactory,
+    hostExec,
+  }) => {
+    const source = await userFactory.createSimpleUser();
+    let stagingUsername: string | undefined;
+
+    try {
+      const created = await api.createStagingRaw(source.username, {});
+      if (created.status === 422) {
+        skipTest('this engine refuses to stage a project created from the default template.');
+        return;
+      }
+      await expectStatus(created, 202);
+      stagingUsername = stagingUserPayload(created.body as unknown).username;
+      expect(stagingUsername, 'staging username').toBeTruthy();
+      await waitUntilStagingActive(api, stagingUsername!);
+
+      const refused = await api.deleteUserRaw(source.username);
+      await expectStatus(refused, 409);
+      const refusal = refused.body as { message?: string; problems?: { code?: string }[] };
+      expect(refusal.message, 'the refusal names the copy to delete first').toContain(
+        'Delete the staging project first.'
+      );
+      expect(
+        refusal.problems?.map((problem) => problem.code),
+        'problems carries the staging code'
+      ).toContain('staging');
+      await expectStatus(await api.getUserRaw(source.username), 200);
+
+      if (hostExec === null) {
+        test.info().annotations.push({
+          type: 'note',
+          description: 'pae-artisan is not reachable: the CLI refusal was not checked',
+        });
+        return;
+      }
+
+      const cli = await hostExec.pae(['project:delete', source.username, '--force']);
+      expect(cli.exitCode, cli.stderr || cli.stdout).toBe(1);
+      expect(cli.stderr.trim(), 'pae prints the sentence, not a status code').toBe(
+        `Cannot delete project '${source.username}' while staging '${stagingUsername}' exists. ` +
+          'Delete the staging project first.'
+      );
+    } finally {
+      if (stagingUsername) {
+        await api.deleteUserSafe(stagingUsername);
+      }
       await userFactory.deleteUser(source.username);
     }
   });

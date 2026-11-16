@@ -4,6 +4,7 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 
 use App\Models\User;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
+use App\System\Project\PhpHosting\WordPress\Install;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use Mockery;
@@ -75,7 +76,7 @@ class SiteCopyTest extends TestCase
             'about' => 'Visit https://staging.shop.test/about',
         ]);
         $siteCopy = $this->siteCopy(['live' => $live, 'stg' => $staging]);
-        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), '/home/live/wp-config.php');
+        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), new Install('/home/live', '/home/live/wp-config.php'), new Install('/home/stg', '/home/stg/wp-config.php'));
         $live->options = $staging->options;
 
         $siteCopy->afterPushedDatabase($this->user('live', 'shop.example'), $kept);
@@ -86,7 +87,7 @@ class SiteCopyTest extends TestCase
             'blog_public' => '1',
             'about' => 'Visit https://www.shop.example/about',
         ], $live->options);
-        $this->assertSame('/home/live/wp-config.php', $kept->configPath);
+        $this->assertSame('/home/live/wp-config.php', $kept->install->configPath);
     }
 
     public function test_a_copy_rewrites_only_addresses_on_the_source_host_then_flushes_the_cache(): void
@@ -116,7 +117,7 @@ class SiteCopyTest extends TestCase
         $live->constants['table_prefix'] = 'wp_';
         $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test', 'siteurl' => 'https://staging.shop.test', 'blog_public' => '0']);
         $siteCopy = $this->siteCopy(['live' => $live, 'stg' => $staging]);
-        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), '/home/live/wp-config.php');
+        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), new Install('/home/live', '/home/live/wp-config.php'), new Install('/home/stg', '/home/stg/wp-config.php'));
 
         $siteCopy->afterPushedDatabase($this->user('live', 'shop.example'), $kept, [
             ['database' => 'live_wp', 'name' => 'wp_posts'],
@@ -125,6 +126,69 @@ class SiteCopyTest extends TestCase
 
         $this->assertSame(['wp_posts', '--regex'], array_slice($live->searchReplaces()[0], 3, 2));
         $this->assertSame(['cache', 'flush'], array_slice((array) end($live->calls), 0, 2));
+    }
+
+    public function test_a_subdirectory_copy_uses_its_own_database_and_addresses_at_the_install_directory(): void
+    {
+        $copy = $this->liveSite();
+        $copy->options = [
+            'home' => 'https://shop.example/blog',
+            'siteurl' => 'https://shop.example/blog',
+            'blog_public' => '1',
+        ];
+        $copy->constants['WP_HOME'] = 'https://shop.example/blog';
+        $install = '/home/site/staging.shop.test/public_html/blog';
+
+        $this->siteCopy(['stg' => $copy])->pointCopyAtItself(
+            $this->user('stg', 'staging.shop.test'),
+            $this->copiedDatabases(),
+            new Install($install, $install.'/wp-config.php'),
+        );
+
+        $this->assertSame('stg_wp', $copy->constants['DB_NAME']);
+        $this->assertSame('stg_wpuser', $copy->constants['DB_USER']);
+        $this->assertSame('fresh-secret', $copy->constants['DB_PASSWORD']);
+        $this->assertSame('https://staging.shop.test/blog', $copy->constants['WP_HOME']);
+        $this->assertSame('https://staging.shop.test/blog', $copy->options['home']);
+        $this->assertSame('https://staging.shop.test/blog', $copy->options['siteurl']);
+        foreach ($copy->calls as $args) {
+            $this->assertContains('--path='.$install, $args, 'WP-CLI reads the copied install, not the document root');
+        }
+    }
+
+    public function test_a_root_install_copy_is_pointed_at_its_own_database_at_the_document_root(): void
+    {
+        $copy = $this->liveSite();
+        $install = '/home/site/staging.shop.test/public_html';
+
+        $this->siteCopy(['stg' => $copy])->pointCopyAtItself(
+            $this->user('stg', 'staging.shop.test'),
+            $this->copiedDatabases(),
+            new Install($install, $install.'/wp-config.php'),
+        );
+
+        $this->assertSame('stg_wp', $copy->constants['DB_NAME']);
+        $this->assertSame('https://staging.shop.test', $copy->options['home']);
+        foreach ($copy->calls as $args) {
+            $this->assertContains('--path='.$install, $args);
+        }
+    }
+
+    public function test_a_copy_whose_wp_config_is_above_its_wordpress_runs_wp_cli_in_the_wordpress_directory(): void
+    {
+        $copy = $this->liveSite();
+        $docroot = '/home/site/staging.shop.test/public_html';
+
+        $this->siteCopy(['stg' => $copy])->pointCopyAtItself(
+            $this->user('stg', 'staging.shop.test'),
+            $this->copiedDatabases(),
+            new Install($docroot.'/blog', $docroot.'/wp-config.php'),
+        );
+
+        $this->assertSame('stg_wp', $copy->constants['DB_NAME']);
+        foreach ($copy->calls as $args) {
+            $this->assertContains('--path='.$docroot.'/blog', $args);
+        }
     }
 
     private function liveSite(): FakeWordPressSite
@@ -152,7 +216,7 @@ class SiteCopyTest extends TestCase
     /** @param array<string, FakeWordPressSite> $sites username => site */
     private function siteCopy(array $sites): SiteCopy
     {
-        return new SiteCopy(static fn (User $user) => $sites[$user->username]->wordPress());
+        return new SiteCopy(static fn (User $user, ?string $path = null) => $sites[$user->username]->wordPress($path));
     }
 
     private function user(string $username, string $domain): User

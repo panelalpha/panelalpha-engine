@@ -5,23 +5,12 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 
 /**
- * A framework the project depends on, at the version it depends on.
- *
- * Separate from {@see Requirement}, which
- * answers "which PHP goes in the image". This answers "which Laravel is this",
- * and the two are unrelated: a project can pin PHP 8.3 and run Laravel 9 or
- * Laravel 12 on it, and only the second decides whether `php artisan optimize`
- * is a sensible thing to run.
- *
- * `version` is the resolved one when a lockfile could supply it and null when
- * only a range was declared, which is why `constraint` is kept alongside
- * rather than being overwritten by it. Reporting `^11.0` as though it were an
- * installed version would be a guess dressed as a fact.
- *
- * No Laravel dependencies — unit-testable.
+ * A framework the project depends on: "which Laravel", unlike {@see Requirement}'s "which PHP".
+ * No Laravel dependencies: unit-testable.
  */
 final class Framework
 {
+    /** `$version` is null unless a lockfile resolved it, which is why `$constraint` is kept beside it. */
     public function __construct(
         public readonly string $id,
         public readonly string $name,
@@ -45,11 +34,8 @@ final class Framework
     }
 
     /**
-     * The major version as an integer, or null when nothing resolved it.
-     *
-     * The one part of a version that reliably changes what a deploy should
-     * run. Whoever generates a per-project manifest wants "Laravel 11", not
-     * "11.31.0".
+     * The major version as an integer, or null when nothing resolved it: the one part of a
+     * version that reliably changes what a deploy should run.
      */
     public function major(): ?int
     {

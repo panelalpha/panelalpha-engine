@@ -3,25 +3,8 @@
 namespace App\Lib\Deploy\Template;
 
 /**
- * The text of a generated deploy file, with its variable parts left open.
- *
- * Dockerfiles, entrypoints and helper scripts are files, not expressions, so
- * they live under `resources/deploy/templates/` where they can be read and
- * diffed as the thing they become. A generator's job is to answer the
- * questions a stub asks, never to concatenate one line at a time.
- *
- *   {{ name }}            the value, or nothing when it is null or false
- *   {{# name }}…{{/ name }}   kept when the value is present and non-empty
- *   {{^ name }}…{{/ name }}   kept when it is not
- *
- * A tag alone on its line takes the line with it when it renders to nothing,
- * and a multi-line value inherits that line's indentation, so a stub reads
- * like its output rather than like a string with holes in it.
- *
- * An unanswered placeholder is an error: a Dockerfile with `{{ port }}` still
- * in it fails at build time, on a host, hours later.
- *
- * No Laravel dependencies — unit-testable.
+ * A deploy file's text with `{{ name }}`, `{{# name }}…{{/ name }}` and `{{^ name }}…{{/ name }}` parts left open.
+ * A lone empty tag takes its line; an unanswered one throws, not a build hours later. No Laravel dependencies.
  */
 final class Template
 {
@@ -31,9 +14,8 @@ final class Template
     private const BLOCK_INLINE = '/\{\{([#^])\s*([A-Za-z0-9_]+)\s*\}\}([^\r\n]*?)\{\{\/\s*\2\s*\}\}/';
 
     /**
-     * Both variable forms in one alternation, so a single pass fills them.
-     * Two passes would re-scan what the first one inserted, and a value that
-     * happens to look like a tag is a value, not a tag.
+     * Both variable forms in one alternation, so a single pass fills them and a value that looks like a tag
+     * stays a value.
      */
     private const VARIABLE = '/^([^\S\r\n]*)\{\{\s*([A-Za-z0-9_]+)\s*\}\}[^\S\r\n]*(\R|\z)'
         .'|\{\{\s*([A-Za-z0-9_]+)\s*\}\}/m';

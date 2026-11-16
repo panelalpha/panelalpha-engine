@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Sidecar;
 
 /**
- * One Compose service, answering the questions the sidecar logic keeps
- * asking: what image, what ports, what variables, what it depends on.
- *
- * Compose accepts several spellings for each of those — `environment` as a
- * map or a list, `ports` as a string, a mapping or a long-form object — and
- * this is the one place that has to know.
+ * One Compose service: its image, ports, variables and dependencies, in whichever of Compose's
+ * spellings they were written. The one place that has to know them all.
  */
 final class ComposeService
 {
@@ -33,11 +29,8 @@ final class ComposeService
     }
 
     /**
-     * The bare image name, with registry, tag and digest removed.
-     *
-     * Order matters: the digest goes first because it contains a colon of its
-     * own (postgres@sha256:abc…), and the repository path is split before the
-     * tag because a private registry may carry a port (registry:5000/postgres).
+     * The bare image name, with registry, tag and digest removed: digest first (it has a colon of its own),
+     * then the path before the tag, since a registry may carry a port.
      */
     public static function familyOf(string $image): string
     {
@@ -53,9 +46,7 @@ final class ComposeService
     }
 
     /**
-     * Ports the service declares for itself, from `expose:` and from the
-     * container side of `ports:`, merged with whatever the caller observed on
-     * the image so both sources feed the same decision.
+     * Ports the service declares (`expose:`, the container side of `ports:`), merged with those observed on the image.
      *
      * @param  list<int>  $observedPorts
      * @return list<int>
@@ -68,8 +59,7 @@ final class ComposeService
     }
 
     /**
-     * Env keys in either Compose form, uppercased. Values are irrelevant here
-     * — the presence of the name is the evidence.
+     * Env keys in either Compose form, uppercased; the presence of the name is the evidence.
      *
      * @return list<string>
      */
@@ -113,6 +103,8 @@ final class ComposeService
     }
 
     /**
+     * A link (`jackett` or `db:alias`) is a dependency just as depends_on is.
+     *
      * @return list<string> lowercase service names
      */
     public function dependencyNames(): array
@@ -126,7 +118,6 @@ final class ComposeService
         foreach ($dependsOn as $key => $value) {
             $names[] = strtolower((string) (is_int($key) ? $value : $key));
         }
-        // A link (`jackett` or `db:alias`) is a dependency just as depends_on is.
         foreach ((array) ($this->service['links'] ?? []) as $link) {
             if (is_string($link)) {
                 $names[] = strtolower(trim(explode(':', $link, 2)[0]));
@@ -178,10 +169,7 @@ final class ComposeService
         return is_int($target) || (is_string($target) && $target !== '') ? (int) $target : null;
     }
 
-    /**
-     * "5432", "5432:5432", "127.0.0.1:15432:5432/tcp" — the container port is
-     * always the last colon-separated field.
-     */
+    /** "5432", "5432:5432", "127.0.0.1:15432:5432/tcp": the container port is always the last field. */
     private static function shortFormPort(string $mapping): ?int
     {
         $fields = explode(':', $mapping);

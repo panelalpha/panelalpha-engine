@@ -6,15 +6,15 @@ Instead of asking the assistant to pull every time, you can have your git host c
 Set up a push-to-deploy hook for this project. I'll be pushing from GitHub.
 ```
 
-The assistant creates the hook and gives you a URL and a secret. The secret is shown this one time. Copy both before you move on. Name the git host (GitHub, GitLab, Bitbucket Cloud, or Bitbucket Data Center) and the certificate notes are only for that one.
+The assistant creates the hook and gives you a URL and a secret. The secret is shown this one time. Copy both before you move on. Name the git host (GitHub, GitLab, Bitbucket Cloud or Bitbucket Data Center) and the certificate notes are only for that one.
 
 Asking again later returns the same URL and does not show the secret again. It does not create a second hook. The project, or the folder you name, has to be connected to git already, or the assistant refuses.
 
 ## Register the hook in your git host
 
-You do this in your git host. The assistant cannot open your GitHub, GitLab, or Bitbucket account.
+You do this in your git host. The assistant cannot open your GitHub, GitLab or Bitbucket account.
 
-The assistant can ask your git host to add the webhook for you, with the token the project clones with. If the git host refuses, because the project has no token or the token may not manage webhooks, the hook is still created and the refusal still gives you its URL and secret, this one time. Copy them and add the webhook yourself as below. The token needs the right to manage webhooks: `admin:repo_hook` on GitHub, Maintainer on GitLab, admin on Bitbucket. The refusal says why: `provider_token_missing` when the project has no token, `provider_permission_denied` when the token may not do it, `host_refused` when the git host is not on a public address, and 502 when the git host could not be reached. A git host the engine has no webhook API for gets the hook without a registration and a `registration_warning`. Deleting the hook also removes the webhook the assistant registered; disconnecting the repository does not.
+The assistant can ask your git host to add the webhook for you, with the token the project clones with. If the git host refuses, because the project has no token or the token may not manage webhooks, the hook is still created and the refusal still gives you its URL and secret, this one time. Copy them and add the webhook yourself as below. The token needs the right to manage webhooks: Webhooks read and write on a GitHub fine-grained token, `admin:repo_hook` on a classic one, Maintainer on GitLab, admin on Bitbucket. The refusal says why: `provider_token_missing` when the project has no token, `provider_permission_denied` when the token may not do it, `host_refused` when the git host is not on a public address, and 502 when the git host could not be reached. A git host the engine has no webhook API for gets the hook without a registration and a `registration_warning`. Deleting the hook also removes the webhook the assistant registered, and so does disconnecting the repository.
 
 - **GitHub**: repository or organization **Settings > Webhooks > Add webhook**. Payload URL: the hook's URL. Content type: `application/json`. Secret: the hook's secret. Trigger: "Just the push event".
 - **GitLab**: project **Settings > Webhooks**. URL: the hook's URL. Trigger: "Push events". On GitLab 19.0 or later, put the hook's secret in **Signing token** if GitLab lets you paste one there: every call is then signed, and a recorded call cannot be sent again with another body. Otherwise put it in **Secret token**. Never put it in both: the secret token travels in every call as plain text. A hook the assistant registers for you is set up signed, unless the hook was made before engine 2.2: rotate such a hook to have its calls signed. On a self-managed GitLab served under a path, such as `https://git.example.com/gitlab`, the engine finds that path by asking the instance where its API answers.
@@ -27,7 +27,7 @@ Save it, then push a commit to the branch the project follows and check the proj
 
 ## What a push does
 
-The hook follows the branch that copy is on now. A later change of branch is followed too. A test ping, a tag, a deleted branch, or a push to any other branch does nothing. The same delivery sent again does not deploy a second time, and neither does the same signed push sent again under a new delivery id.
+The hook follows the branch that copy is on now. A later change of branch is followed too. A test ping, a tag, a deleted branch or a push to any other branch does nothing. The same delivery sent again does not deploy a second time, and neither does the same signed push sent again under a new delivery id.
 
 What the push changes depends on which copy the hook is for:
 
@@ -39,6 +39,8 @@ Show me the push-to-deploy hook for this project's public_html folder.
 ```
 
 A push that arrives while a deploy is already running waits. When that deploy finishes, the engine runs one more, from the latest push that waited. An earlier waiting push does not get a deploy of its own.
+
+A push also waits while a backup or another job holds the project, and runs when that ends. A push to a project that is stopped starts it first.
 
 If the site was already running and the new version fails, or the deploy is cancelled, the site keeps serving the previous version and the copy on the server goes back to the commit it was on: [Deploying again later](../02-getting-started/how-a-deploy-works.md#deploying-again-later). If the site was not running, the new commit stays in the copy on the server. If the engine stops in the middle of the deploy, that push is marked failed and says it was interrupted. Push again, or ask for a rebuild.
 
@@ -59,7 +61,7 @@ If the engine has no public address, the assistant says so separately. No git ho
 
 A firewall in your provider's control panel can block the hook too, and the engine cannot see it. GitHub then shows `failed to connect to host` on the delivery. Allow port 2011 from your git host's webhook addresses: [A firewall in front of the VPS](../02-getting-started/install.md#a-firewall-in-front-of-the-vps) says where each host lists them.
 
-The lasting fix, once a domain points at the VPS, is a trusted certificate: [Install](../02-getting-started/install.md#troubleshooting), under "I want a real certificate on an engine that is already self-signed". Trusting the certificate on your own computer only tells your assistant to accept it. It does nothing for GitHub, GitLab, or Bitbucket.
+The lasting fix, once a domain points at the VPS, is a trusted certificate: [Install](../02-getting-started/install.md#troubleshooting), under "I want a real certificate on an engine that is already self-signed". Trusting the certificate on your own computer only tells your assistant to accept it. It does nothing for GitHub, GitLab or Bitbucket.
 
 ## Did the push actually deploy?
 
@@ -110,7 +112,7 @@ I pushed a commit to the branch tshop follows. Show me the last deliveries on
 its hook. Did that push deploy?
 ```
 
-Mode: read. Tools: `git_deploy_hook_show`, `deploy_log_get`. Check: the delivery is listed with its outcome. A push to another branch, a tag, or the same delivery sent twice does not start a second deploy.
+Mode: read. Tools: `git_deploy_hook_show`, `deploy_log_get`. Check: the delivery is listed with its outcome. A push to another branch, a tag or the same delivery sent twice does not start a second deploy.
 
 **Replace and remove**
 
@@ -120,6 +122,24 @@ delete it.
 ```
 
 Mode: full. Tools: `git_deploy_hook_rotate`, `git_deploy_hook_delete`. Check: after the rotate the old URL answers 404 and a new URL and secret are given once. After the delete the URL answers 404, and the assistant reminds the user to remove the webhook in the git host.
+
+**A parked push runs**
+
+```text
+I pushed twice while tshop was deploying. Show the last deliveries on its hook.
+Did the latest push deploy after the first one ended?
+```
+
+Mode: read. Tools: `git_deploy_hook_show`, `deploy_log_get`. Check: one more deploy ran for the latest waiting push, and the earlier waiting push has none of its own.
+
+**Disconnect removes the webhook**
+
+```text
+Disconnect git from tsitegit. Then check that the webhook is gone at the git
+host.
+```
+
+Mode: full. Tools: `git_disconnect`, `git_deploy_hook_show`. Check: the hook no longer exists on the engine and the webhook the engine registered is no longer listed in the git host.
 
 ## From the server
 

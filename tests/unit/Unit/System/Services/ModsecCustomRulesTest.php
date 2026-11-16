@@ -5,8 +5,11 @@ namespace Tests\Unit\System\Services;
 use App\Models\Setting;
 use App\System;
 use App\System\EnginePaths;
+use App\System\Privileged;
 use App\System\Services\Modsec;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -29,10 +32,12 @@ class ModsecCustomRulesTest extends TestCase
             $this->root . '/templates/config/modsecurity-main.conf.blade.php'
         );
         $this->modsecSettings('on', ['owasp-crs']);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->root]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         Setting::clearRuntimeSettings();
         exec('rm -rf ' . escapeshellarg($this->root));
         parent::tearDown();
@@ -49,7 +54,7 @@ class ModsecCustomRulesTest extends TestCase
         return $this->root . '/config/modsecurity/rulesets/custom/rules/custom.conf';
     }
 
-    /** A System whose commands run for real minus sudo, inside a temp engine dir. */
+    /** A System whose commands run for real, the broker's through pa-root-local, inside a temp engine dir. */
     private function system(): System
     {
         return new class ($this->root) extends System {
@@ -64,11 +69,7 @@ class ModsecCustomRulesTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $cmd = (array) $cmd;
-                if (($cmd[0] ?? null) === 'sudo') {
-                    array_shift($cmd);
-                }
-                $process = new Process($cmd);
+                $process = new Process(LocalRoot::argv((array) $cmd), null, ['PA_ROOT_LOCAL_ROOTS' => (string) getenv('PA_ROOT_LOCAL_ROOTS')]);
                 $process->run();
 
                 return $process;
@@ -333,24 +334,20 @@ class ModsecCustomRulesTest extends TestCase
 
     public function test_the_config_test_loads_only_modsecurity_and_the_candidate(): void
     {
-        $dir = '/opt/panelalpha/shared-hosting/config/modsecurity/.custom-rules-test-ab';
+        $dir = $this->root . '/config/modsecurity/.custom-rules-test-ab';
+        $services = Privileged::engineServices($this->root . '/docker-compose.yml');
 
-        foreach (['nginx-proxy', 'nginx'] as $webserver) {
-            $command = (string) Modsec::configTestCommand($webserver, $dir);
-            $this->assertStringStartsWith('sh -c ', $command);
-            $this->assertStringContainsString('nginx -t -q -c "$T/nginx.conf" || exit', $command);
-            $this->assertStringEndsWith(" sh '{$dir}' '/panelalpha-modsecurity-check/' 'panelalpha_check'", $command);
-            $this->assertStringContainsString('for p in first phase1 phase2 phase3; do', $command);
-            $this->assertStringContainsString('ask --data "$3=1" "http://localhost$2body"', $command);
-            // Last, a request like a browser's for a site's front page, which no check rule denies.
-            $this->assertStringContainsString('Gecko/20100101 Firefox/128.0', $command);
-            $this->assertStringContainsString('Accept-Language: en', $command);
-            $this->assertStringContainsString(' http://localhost/; }', $command);
-            $this->assertStringContainsString('echo "modsecurity-check plain $(plain)"', $command);
-        }
-        $this->assertSame("httpd -t -f '{$dir}/httpd.conf'", Modsec::configTestCommand('apache', $dir));
-        $this->assertNull(Modsec::configTestCommand('litespeed', $dir));
-        $this->assertNull(Modsec::configTestCommand('openlitespeed', $dir));
+        $this->assertTrue(Modsec::canTestOn('nginx-proxy'));
+        $this->assertTrue(Modsec::canTestOn('nginx'));
+        $this->assertSame([
+            LocalRoot::CLIENT, 'compose.modsecurityNginxCheck', '--', $this->root . '/docker-compose.yml', $dir,
+        ], $services->modsecurityNginxCheck($dir));
+        $this->assertTrue(Modsec::canTestOn('apache'));
+        $this->assertSame([
+            LocalRoot::CLIENT, 'compose.modsecurityApacheCheck', '--', $this->root . '/docker-compose.yml', $dir,
+        ], $services->modsecurityApacheCheck($dir));
+        $this->assertFalse(Modsec::canTestOn('litespeed'));
+        $this->assertFalse(Modsec::canTestOn('openlitespeed'));
 
         $nginx = Modsec::configTestConfig('nginx-proxy', $dir);
         $this->assertStringContainsString('load_module modules/ngx_http_modsecurity_module.so;', $nginx);
@@ -394,6 +391,10 @@ class ModsecCustomRulesTest extends TestCase
         $this->assertStringContainsString("modsecurity_rules_file {$dir}/main.conf", $apache);
     }
 
+    /**
+     * @param  list<string>  $request
+     * @return list<string>
+     */
     public function test_a_webserver_without_a_config_test_refuses_the_rules(): void
     {
         $modsec = new class ($this->system()) extends Modsec {
@@ -846,7 +847,7 @@ class ModsecCustomRulesTest extends TestCase
         $this->assertSame([], glob($this->root . '/config/modsecurity/.custom-rules-test-*') ?: []);
         // One run in sites-http, over the files the check needs, and no live test.
         $this->assertCount(1, $seen);
-        $this->assertStringContainsString('exec -T sites-http sh -c ', $seen[0]['command']);
+        $this->assertSame('compose.modsecurityNginxCheck', $seen[0]['command']);
         $this->assertStringContainsString('Include ' . $seen[0]['dir'] . '/main.conf', $seen[0]['check.conf']);
         $this->assertStringContainsString("modsecurity_rules_file {$seen[0]['dir']}/check.conf;", $seen[0]['nginx.conf']);
         $this->assertStringContainsString('SecRuleEngine On', $seen[0]['main.conf']);
@@ -861,7 +862,7 @@ class ModsecCustomRulesTest extends TestCase
         $this->assertSame('SecMarker NEW', (string) file_get_contents($this->live()));
         $this->assertSame(1, $restarts);
         $this->assertCount(2, $seen);
-        $this->assertStringEndsWith('exec -T sites-http nginx -t', $seen[1]['command']);
+        $this->assertSame('compose.nginxConfigTest', $seen[1]['command']);
     }
 
     public function test_rules_that_deny_ordinary_requests_never_reach_the_live_file(): void
@@ -904,7 +905,7 @@ class ModsecCustomRulesTest extends TestCase
         $this->assertSame($attackOnly, (string) file_get_contents($this->live()));
         $this->assertSame(1, $restarts);
         $this->assertCount(2, $seen);
-        $this->assertStringEndsWith('exec -T sites-http nginx -t', $seen[1]['command']);
+        $this->assertSame('compose.nginxConfigTest', $seen[1]['command']);
     }
 
     /**
@@ -939,7 +940,7 @@ class ModsecCustomRulesTest extends TestCase
     }
 
     /**
-     * A System that runs file commands for real minus sudo, and answers the
+     * A System that runs file commands for real through pa-root-local, and answers the
      * scratch check with $answers, recording each sites-http command and the
      * test dir's files as it found them.
      *
@@ -967,11 +968,7 @@ class ModsecCustomRulesTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $cmd = (array) $cmd;
-                if (($cmd[0] ?? null) === 'sudo') {
-                    array_shift($cmd);
-                }
-                $process = new Process($cmd);
+                $process = new Process(LocalRoot::argv((array) $cmd), null, ['PA_ROOT_LOCAL_ROOTS' => (string) getenv('PA_ROOT_LOCAL_ROOTS')]);
                 $process->run();
 
                 return $process;
@@ -979,7 +976,9 @@ class ModsecCustomRulesTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $seen = ['command' => (string) $cmd];
+                $argv = (array) $cmd;
+                $action = LocalRoot::action($argv);
+                $seen = ['command' => (string) $action, 'request' => implode(' ', $argv)];
                 $dirs = glob($this->root . '/config/modsecurity/.custom-rules-test-*') ?: [];
                 if ($dirs !== []) {
                     $seen['dir'] = $dirs[0];
@@ -988,7 +987,7 @@ class ModsecCustomRulesTest extends TestCase
                     }
                 }
                 $this->seen[] = $seen;
-                $output = str_contains((string) $cmd, ' sh -c ') ? $this->answers : '';
+                $output = $action === 'compose.modsecurityNginxCheck' ? $this->answers : '';
                 $process = new Process(['sh', '-c', 'printf %s "$0"', $output]);
                 $process->run();
 
@@ -1017,6 +1016,7 @@ class ModsecCustomRulesTest extends TestCase
 
                 public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
                 {
+                    $cmd = HostCommand::argv($cmd);
                     $process = new Process(['sh', '-c', 'printf %s "$0" >&2; exit 1', $this->output]);
                     $process->run();
 
@@ -1046,9 +1046,9 @@ class ModsecCustomRulesTest extends TestCase
 
     public function test_the_live_config_test_is_the_webservers_own(): void
     {
-        $this->assertSame('nginx -t', Modsec::liveConfigTestCommand('nginx-proxy'));
-        $this->assertSame('nginx -t', Modsec::liveConfigTestCommand('nginx'));
-        $this->assertSame('apachectl -t', Modsec::liveConfigTestCommand('apache'));
+        $this->assertSame(['nginx', '-t'], Modsec::liveConfigTestCommand('nginx-proxy'));
+        $this->assertSame(['nginx', '-t'], Modsec::liveConfigTestCommand('nginx'));
+        $this->assertSame(['apachectl', '-t'], Modsec::liveConfigTestCommand('apache'));
         $this->assertNull(Modsec::liveConfigTestCommand('litespeed'));
     }
 

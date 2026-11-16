@@ -74,7 +74,10 @@ class ProjectPushTool extends ApiTool
             'target' => $schema->string()->required(),
             'files' => $schema->boolean()->description('Replace the target home directory with the source files, and the target\'s deploy settings (strategy, image, commit) with the source\'s. Defaults to true.'),
             'databases' => $schema->boolean()->description('Replace the target MySQL databases with the source data. Defaults to true. On a container project that is the application database the engine made, plus the data volumes when `files` is true too: with `files` false and no such database on the source, the push is refused (nothing_to_push).'),
-            'tables' => $schema->array()->description('Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item names a source database and table.'),
+            'tables' => $schema->array()->items($schema->object(fn ($schema): array => [
+                'database' => $schema->string()->description('Example: johndoe_wp.')->required(),
+                'name' => $schema->string()->description('Example: wp_posts.')->required(),
+            ]))->description('Replace only these source tables, leaving the target\'s other tables untouched. Only valid for a classic project with `databases` true. Each item is an object with `database`, the source database, and `name`, the table in it.'),
         ];
     }
 }

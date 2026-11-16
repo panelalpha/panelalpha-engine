@@ -10,15 +10,26 @@ yellow_color='\e[33m'
 
 die() {
     exit_code=$?
+    # A second signal must not cut a rollback short.
+    trap '' HUP INT TERM
     if [[ ${exit_code} -ne 0 ]]; then
         echo -e "${yellow_color}${BASH_COMMAND} ${red_color}command failed with exit code ${yellow_color}${exit_code}${default_color}"
     fi
+    ! declare -F rollback_engine_update >/dev/null || rollback_engine_update "$exit_code" || true
+    ! declare -F resume_core_background >/dev/null || resume_core_background
+    ! declare -F start_core_tenant_network >/dev/null || start_core_tenant_network
+    ! declare -F resume_broker_rotation >/dev/null || resume_broker_rotation
+    ! declare -F record_run_outcome >/dev/null || record_run_outcome "$exit_code" || true
     send_update_status "$exit_code" || true
 }
 
 set -e
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
 trap die EXIT
+# Killed without these, the exit trap would see status 0 and take the run for a success.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # A caller's umask 077 (panelalpha-installer.sh sets one) would leave the whole tree
 # root-only, and php-fpm (www-data) then answers every request "File not found".
@@ -118,6 +129,9 @@ DEPLOY_ONLY=0
 DEPLOY_PROJECT_NAME=''
 DEPLOY_PROJECT_URL=''
 DEPLOY_FAILED=0
+# 1 when project:create --update-existing found the project already deploying --repo and
+# deployed it again instead of creating another (a second run of the same install).
+DEPLOY_UPDATED=0
 # Short reason from a failed project:create (stderr/stdout), for logs + outro.
 DEPLOY_ERROR=''
 # Site password for the --repo project. Empty + DEPLOY_NO_PASSWORD=0 → generate.
@@ -125,6 +139,14 @@ DEPLOY_SITE_PASSWORD=''
 DEPLOY_NO_PASSWORD=0
 # 1 after project:set-password succeeded (outro shows the password).
 DEPLOY_PASSWORD_SET=0
+# 1 when --full-privileges: the --repo project is trusted with this engine, like the panel.
+DEPLOY_FULL_PRIVILEGES=0
+# --env-var KEY=VALUE pairs for the --repo project; values may be secrets, never printed.
+DEPLOY_ENV_VARS=()
+# With --full-privileges the project is the panel: --email is its admin, --hub-code its Hub code.
+PANEL_ADMIN_EMAIL=''
+PANEL_ADMIN_PASSWORD=''
+PANEL_HUB_CODE=''
 # 1 when --update-engine: with --repo on an existing host, update the engine
 # and deploy without asking.
 UPDATE_ENGINE=0
@@ -138,12 +160,30 @@ HUB_ONLY=0
 HUB_FAILED=0
 HUB_ERROR=''
 HUB_ACCOUNT=''
+# An update installs only a newer release than the running one; these let it
+# install an older one, or the running one again.
+ALLOW_DOWNGRADE="${PANELALPHA_ALLOW_DOWNGRADE:-0}"
+REINSTALL="${PANELALPHA_REINSTALL:-0}"
+# 1 once the files an update replaces are saved: a failure after that puts them back.
+ENGINE_SNAPSHOT_ARMED=0
+# What a rollback after a failure achieved, for the run's record.
+ENGINE_ROLLBACK=''
+ENGINE_ROLLBACK_RESULT=''
+# Set when an update stays on the running version but moves to another commit of it, for the run's record.
+UPDATE_NOTE=''
 
 usage() {
     cat <<'USAGE'
 Usage: bash installer.sh [options]
 
   -v, --version REF        git ref (default: main)
+      --reinstall          on an update, install the target even when it is
+                           the running release (or PANELALPHA_REINSTALL=1)
+      --allow-downgrade    on an update, install the target even when it is
+                           older than the running release (or
+                           PANELALPHA_ALLOW_DOWNGRADE=1). Without either an
+                           update of an engine already at the target changes
+                           nothing, and an older target is refused.
   -host, --hostname HOST   hostname to install under
       --domain FQDN        serve the engine on your own name. Point an A
                            record at this host first; the certificate is
@@ -171,6 +211,17 @@ Usage: bash installer.sh [options]
       --password PASS      site password for the --repo project (default: generate
                            an alphanumeric password and print it with the URL)
       --no-password        do not set a site password on the --repo project
+      --full-privileges    trust the --repo project with this engine: an Engine
+                           API token for every project, the server's own name
+                           and public ports, and protection from API tokens once
+                           it is live (for a panel that manages the engine).
+                           The project is taken to be the PanelAlpha panel:
+                           --email becomes its admin, with a generated password
+                           printed at the end, --hub-code goes to the panel
+                           (not to the engine), and no site password is set
+                           unless --password is given
+      --env-var KEY=VALUE  environment variable for the --repo project
+                           (repeatable); the value is never printed
       --update-engine      with --repo on an existing install, update the engine
                            and deploy without prompting (non-interactive too)
       --deploy-only        with --repo on an existing install, create the project
@@ -323,6 +374,19 @@ while true; do
         DEPLOY_NO_PASSWORD=1
         shift
         ;;
+    --full-privileges)
+        DEPLOY_FULL_PRIVILEGES=1
+        shift
+        ;;
+    --env-var)
+        DEPLOY_ENV_VARS+=("$2")
+        shift
+        shift
+        ;;
+    --env-var=*)
+        DEPLOY_ENV_VARS+=("${1#*=}")
+        shift
+        ;;
     --update-engine)
         UPDATE_ENGINE=1
         shift
@@ -416,6 +480,14 @@ while true; do
     --software=* | --entry=* | --self-update-url=* | --get-base=* | --background | --no-tui | --no-self-update | --no-script-update | --attach | --ask-email)
         shift
         ;;
+    --reinstall)
+        REINSTALL=1
+        shift
+        ;;
+    --allow-downgrade)
+        ALLOW_DOWNGRADE=1
+        shift
+        ;;
     -h | --help)
         usage
         ;;
@@ -439,12 +511,47 @@ if [ "$DEPLOY_NO_PASSWORD" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
     exit 1
 fi
 
+if [ "$DEPLOY_FULL_PRIVILEGES" = 1 ] && [ -z "$DEPLOY_REPO" ]; then
+    echo "--full-privileges is for the --repo project; give --repo too." >&2
+    trap - EXIT
+    exit 1
+fi
+
 # Checked before anything is installed: a typo found after a ten-minute install
 # costs the code, which lives only ten minutes.
 if [ -n "$HUB_CODE" ] && ! printf '%s' "$HUB_CODE" | grep -Eq '^[A-Za-z0-9 -]{1,16}$'; then
     echo "--hub-code is not a connect code. Copy the command from Connect engine in PanelAlpha Connect." >&2
     trap - EXIT
     exit 1
+fi
+
+if [ "${#DEPLOY_ENV_VARS[@]}" -gt 0 ]; then
+    if [ -z "$DEPLOY_REPO" ]; then
+        echo "--env-var is for the --repo project; give --repo too." >&2
+        trap - EXIT
+        exit 1
+    fi
+    for pair in "${DEPLOY_ENV_VARS[@]}"; do
+        if ! printf '%s' "${pair%%=*}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || [ "${pair#*=}" = "$pair" ]; then
+            echo "--env-var takes KEY=VALUE with KEY a variable name, not '${pair%%=*}'." >&2
+            trap - EXIT
+            exit 1
+        fi
+    done
+fi
+
+# The panel, not the engine, pairs with the Hub; its admin comes from --email.
+if [ "$DEPLOY_FULL_PRIVILEGES" = 1 ]; then
+    if [ -n "$HUB_CODE" ] && [ -z "$INSTALL_EMAIL" ]; then
+        echo "--hub-code with --full-privileges needs --email: the panel's admin, whose PanelAlpha account made the code." >&2
+        trap - EXIT
+        exit 1
+    fi
+    PANEL_HUB_CODE="$HUB_CODE"
+    HUB_CODE=''
+    PANEL_ADMIN_EMAIL="$INSTALL_EMAIL"
+    # A site password would put HTTP auth in front of the panel's own login.
+    [ -n "$DEPLOY_SITE_PASSWORD" ] || DEPLOY_NO_PASSWORD=1
 fi
 
 # Sysbox needs host daemons and cannot nest, so accounts run privileged; nested
@@ -546,9 +653,23 @@ redact_repo_url() {
 }
 
 # Report install/update outcome to monitoring (Engine emails / probes).
+# --repo's deploy_result: deployed, updated, failed or not_run; empty without --repo.
+install_event_deploy_result() {
+    [ -n "${DEPLOY_REPO:-}" ] || return 0
+    if [ "${DEPLOY_FAILED:-0}" = 1 ]; then
+        echo failed
+    elif [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
+        echo updated
+    elif [ -n "${DEPLOY_PROJECT_NAME:-}" ]; then
+        echo deployed
+    else
+        echo not_run
+    fi
+}
+
 send_update_status() {
     local exit_code=${1:-0}
-    local finished_at started_at software_op email error_msg event_type ref repo
+    local finished_at started_at software_op email error_msg event_type ref repo software deploy_result
     started_at=${STARTED_AT:-$(date +%s || echo 0)}
     finished_at=$(date +%s || echo 0)
     software_op="${ENGINE_OP:-install}"
@@ -570,6 +691,13 @@ send_update_status() {
     if [ -n "${DEPLOY_REPO:-}" ]; then
         repo=$(redact_repo_url "$DEPLOY_REPO")
     fi
+    # The engine with the panel as its trusted project.
+    software="engine"
+    if [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && [ -n "${DEPLOY_REPO:-}" ]; then
+        software="single-server"
+    fi
+    # What became of --repo: the engine's own exit code stays 0 when only the project failed.
+    deploy_result=$(install_event_deploy_result)
     {
         jq -n \
             --arg type "$event_type" \
@@ -577,13 +705,14 @@ send_update_status() {
             --arg started_at "$started_at" \
             --arg finished_at "$finished_at" \
             --arg exit_code "$exit_code" \
-            --arg software "engine" \
+            --arg software "$software" \
             --arg software_op "$software_op" \
             --arg email "$email" \
             --arg error "$error_msg" \
             --arg to_version "${PANELALPHA_ENGINE_VERSION:-}" \
             --arg ref "$ref" \
             --arg repo "$repo" \
+            --arg deploy_result "$deploy_result" \
             '{events:[{
               type:$type,
               occurred_at:$occurred_at,
@@ -600,6 +729,7 @@ send_update_status() {
                 }
                 + (if $ref != "" then {ref:$ref} else {} end)
                 + (if $repo != "" then {repo:$repo} else {} end)
+                + (if $deploy_result != "" then {deploy_result:$deploy_result} else {} end)
               )
             }]}' \
         | curl -4 -sS -X POST "https://${MONITORING_HOST}/api/v1/events" \
@@ -613,6 +743,23 @@ send_update_status() {
 
 # engine | deploy — TUI two-step chrome for --repo install/update.
 INSTALLER_PHASE=engine
+
+# One field of this run's record in --run-dir, which core reads back as latest_update.
+record_run() { # <name> <value>
+    [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || return 0
+    printf '%s' "$2" >"$RUN_DIR/$1"
+}
+
+# What the run did, beside the exit code the wrapper writes: installed, updated, rolled_back or failed, and why.
+record_run_outcome() { # <exit code>
+    if [ "$1" = 0 ]; then
+        [ "$ENGINE_OP" = update ] && record_run result updated || record_run result installed
+        [ -z "${UPDATE_NOTE:-}" ] || record_run reason "$UPDATE_NOTE"
+        return 0
+    fi
+    record_run result "${ENGINE_ROLLBACK_RESULT:-failed}"
+    record_run reason "$(installer_error_message "$1")${ENGINE_ROLLBACK:+; $ENGINE_ROLLBACK}"
+}
 
 set_installer_phase() {
     INSTALLER_PHASE="$1"
@@ -667,6 +814,7 @@ define_variables() {
     mkdir -p $LOG_DIR
     PANELALPHA_DIR="/opt/panelalpha"
     INSTALL_DIR='/opt/panelalpha/tmp/engine'
+    ENGINE_SNAPSHOT_DIR='/opt/panelalpha/tmp/engine-previous'
 }
 
 detect_distro() {
@@ -909,6 +1057,7 @@ download_engine_from_repository() {
     local tip_sha
     tip_sha=$(git -C "$INSTALL_DIR/src" rev-parse HEAD 2>/dev/null | tr -d '\r\n' || true)
     list_dropped_engine_files "$INSTALL_DIR/src" "$INSTALL_DIR/dropped-files"
+    list_shipped_modsecurity_rules "$INSTALL_DIR/src" "$INSTALL_DIR/modsecurity-shipped"
     rm -rf "$INSTALL_DIR/src/.git"
     if [ -n "$tip_sha" ]; then
         printf '%s\n' "$tip_sha" >"$INSTALL_DIR/src/version"
@@ -954,6 +1103,7 @@ ENGINE_HOST_STATE=(
     scripts/monit.conf scripts/monit-script.sh
     docker-compose.yml-webserver docker-compose.override.yml
     config/logrotate config/exim config/modsecurity config/sftp config/pure-ftpd
+    config/tenant-api-access
     core/config/logrotate core/config/exim core/config/modsecurity
     core/config/sftp core/config/pure-ftpd
     core/vendor core/storage core/bootstrap/cache
@@ -1004,6 +1154,28 @@ list_dropped_engine_files() { # <clone> <list to write>
         done
     done <"$2.raw" >"$2"
     rm -f "$2.current" "$2.revs" "$2.raw"
+}
+
+# "<blob id> <path>" for every version of each ModSecurity ruleset file in the clone's history.
+list_shipped_modsecurity_rules() { # <clone> <list to write>
+    local rulesets=templates/config/modsecurity/rulesets meta path side
+    local -a f
+    rm -f "$2"
+    if [ "$(git -C "$1" rev-parse --is-shallow-repository 2>/dev/null)" != false ] ||
+        ! git -C "$1" rev-list HEAD >"$2.revs" 2>/dev/null ||
+        ! git -C "$1" diff-tree --stdin -r -m --root -z --raw --no-abbrev --no-commit-id \
+            -- "$rulesets" <"$2.revs" >"$2.raw" 2>/dev/null; then
+        rm -f "$2.revs" "$2.raw"
+        echo_warning "Could not read the engine's history; ModSecurity rule files an earlier release shipped are not brought up to date"
+        return 0
+    fi
+    while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+        f=(${meta#:})
+        for side in "${f[0]} ${f[2]}" "${f[1]} ${f[3]}"; do
+            case "$side" in 100644\ * | 100755\ *) printf '%s %s\n' "${side#* }" "${path#"$rulesets"/}" ;; esac
+        done
+    done <"$2.raw" | LC_ALL=C sort -u >"$2"
+    rm -f "$2.revs" "$2.raw"
 }
 
 # Copying a release over the old tree keeps every file the release dropped, and
@@ -1076,16 +1248,154 @@ unzip_panelalpha_engine() {
     if [ ! -d "$INSTALL_DIR/src" ]; then
         echo_error "Engine tree missing under ${INSTALL_DIR}/src (expected a git clone)"
     fi
-    # Before the copy: a file that became a folder, or the other way round,
-    # would stop cp.
-    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
     # The repository's agent setup is for people working on the engine, not for
     # a host, and a .claude/skills folder an older release left cannot take the
     # link this one has. The host's own .claude is host state and stays.
     rm -rf "$INSTALL_DIR/src/.claude"
+    if [ "${ENGINE_OP:-}" = update ]; then
+        snapshot_engine_tree "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting" "$INSTALL_DIR/dropped-files" "$ENGINE_SNAPSHOT_DIR" ||
+            echo_error "Could not save the files the update replaces; the engine was not changed"
+        ENGINE_SNAPSHOT_ARMED=1
+    fi
+    # Before the copy: a file that became a folder, or the other way round,
+    # would stop cp.
+    remove_dropped_engine_files "$INSTALL_DIR/dropped-files" "$PANELALPHA_DIR/shared-hosting"
+    replace_running_updaters "$INSTALL_DIR/src" "$PANELALPHA_DIR/shared-hosting"
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
     cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
+    hand_engine_files_to_root "$PANELALPHA_DIR"
+}
+
+# The root broker refuses engine files anyone but root can write, and runs its own code from dockerfiles/; links are
+# skipped, chown follows them.
+hand_engine_files_to_root() { # <panelalpha dir>
+    local engine="$1/shared-hosting"
+    {
+        chown root:root "$1" "$engine" && chmod go-w "$1" "$engine" &&
+            find "$engine/scripts" ! -type l -exec chown root:root {} + -exec chmod go-w {} + &&
+            { [ ! -d "$engine/dockerfiles" ] ||
+                find "$engine/dockerfiles" ! -type l -exec chown root:root {} + -exec chmod go-w {} +; } &&
+            find "$engine" -mindepth 1 -maxdepth 1 -type f \( -name '*.sh' -o -name '*compose*.y*ml*' -o -name .env \) \
+                -exec chown root:root {} + -exec chmod go-w {} + &&
+            hand_account_compose_files "$engine/users"
+    } || echo_warning "Could not leave the engine's scripts and compose files in ${engine} writable by root alone; the root broker refuses them until it is"
+}
+
+hand_account_compose_files() { # <users dir>
+    [ -d "$1" ] || return 0
+    find "$1" -maxdepth 1 -type d -exec chmod go-w {} + &&
+        find "$1" -mindepth 2 -maxdepth 2 -type f -name docker-compose.yml -exec chmod go-w {} +
+}
+
+# bash reads the running updater as it goes, so it is renamed in, never rewritten.
+replace_running_updaters() { # <src> <engine dir>
+    local f
+    for f in updater.sh scripts/updater.sh; do
+        [ -f "$1/$f" ] && [ -f "$2/$f" ] || continue
+        cp --preserve=mode "$1/$f" "$2/$f.new" && mv -f "$2/$f.new" "$2/$f"
+    done
+}
+
+# Rewritten by composer after the copy rather than by it, so kept whole.
+ENGINE_REBUILT_DIRS=(core/vendor core/bootstrap/cache)
+
+# Saves what copying <src> over <engine dir> replaces, and no more: every file the copy overwrites or the
+# dropped-file pass may remove, the files and folders the copy adds, and the folders composer rewrites.
+# Host state is not in a release, so storage, users and logs are never copied.
+snapshot_engine_tree() { # <src> <engine dir> <dropped list> <snapshot dir>
+    local path rec dir
+    local -a prune=()
+    rm -rf "$4"
+    mkdir -p "$4/dirs" || return 1
+    : >"$4/replaced"
+    : >"$4/added"
+    : >"$4/added-dirs"
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do prune+=(-path "./$dir" -prune -o); done
+    (cd "$1" && find . -mindepth 1 "${prune[@]}" -print0) | while IFS= read -r -d '' path; do
+        path=${path#./}
+        if [ -d "$1/$path" ] && [ ! -L "$1/$path" ]; then
+            [ -e "$2/$path" ] || [ -L "$2/$path" ] || printf '%s\0' "$path" >>"$4/added-dirs"
+        elif [ -f "$2/$path" ] || [ -L "$2/$path" ]; then
+            printf '%s\0' "$path" >>"$4/replaced"
+        elif [ ! -e "$2/$path" ]; then
+            printf '%s\0' "$path" >>"$4/added"
+        fi
+    done
+    if [ -s "$3" ]; then
+        while IFS= read -r -d '' rec; do
+            path=${rec#* } path=${path#* }
+            case "/$path/" in */../* | */./* | *//*) continue ;; esac
+            engine_host_state "$path" && continue
+            if [ -f "$2/$path" ] || [ -L "$2/$path" ]; then printf '%s\0' "$path" >>"$4/replaced"; fi
+        done <"$3"
+    fi
+    tar -C "$2" --null -T "$4/replaced" -cf "$4/files.tar" || return 1
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do
+        [ -d "$2/$dir" ] || continue
+        mkdir -p "$4/dirs/$(dirname "$dir")" && cp -a "$2/$dir" "$4/dirs/$dir" || return 1
+    done
+    touch "$4/armed"
+}
+
+# Undoes the copy a snapshot was taken for: what it added goes, and what it replaced or removed comes back.
+restore_engine_tree() { # <engine dir> <snapshot dir>
+    local path dir
+    [ -f "$2/armed" ] || return 0
+    while IFS= read -r -d '' path; do
+        rm -f -- "$1/$path"
+    done <"$2/added"
+    sort -zr "$2/added-dirs" | while IFS= read -r -d '' path; do
+        rmdir -- "$1/$path" 2>/dev/null || true
+    done
+    tar -C "$1" -xpf "$2/files.tar" || return 1
+    for dir in "${ENGINE_REBUILT_DIRS[@]}"; do
+        [ -d "$2/dirs/$dir" ] || continue
+        rm -rf -- "${1:?}/$dir" && mv -- "$2/dirs/$dir" "$1/$dir" || return 1
+    done
+    rm -rf -- "$2"
+}
+
+# From here a rollback restarts the stack on the restored release as well.
+mark_engine_stack_touched() {
+    [ "$ENGINE_SNAPSHOT_ARMED" = 1 ] || return 0
+    touch "$ENGINE_SNAPSHOT_DIR/stack-touched"
+}
+
+# Puts the release a snapshot holds back in place, and its stack once the new release's had started.
+restore_previous_release() {
+    local touched=0
+    [ ! -f "$ENGINE_SNAPSHOT_DIR/stack-touched" ] || touched=1
+    restore_engine_tree "$PANELALPHA_DIR/shared-hosting" "$ENGINE_SNAPSHOT_DIR" || return 1
+    [ "$touched" = 0 ] || start_engine_stack
+}
+
+# A failure after the copy leaves the previous release running, not half of each.
+rollback_engine_update() { # <exit code>
+    [ "$1" != 0 ] && [ "$ENGINE_SNAPSHOT_ARMED" = 1 ] || return 0
+    ENGINE_SNAPSHOT_ARMED=0
+    echo_warning "The update failed after replacing the engine's files; putting the previous release back"
+    if restore_previous_release; then
+        ENGINE_ROLLBACK='the previous release was restored'
+        ENGINE_ROLLBACK_RESULT=rolled_back
+    else
+        ENGINE_ROLLBACK="restoring the previous release failed as well; its files stay in ${ENGINE_SNAPSHOT_DIR} and the next update puts them back first"
+    fi
+    echo_warning "$ENGINE_ROLLBACK"
+}
+
+# An update killed after its copy leaves its snapshot behind, armed: the next one restores it before anything else.
+restore_interrupted_update() {
+    [ -f "$ENGINE_SNAPSHOT_DIR/armed" ] || return 0
+    echo_warning "An earlier update stopped after replacing the engine's files; putting its previous release back first"
+    restore_previous_release ||
+        echo_error "Could not put back the release an earlier update replaced; its files are in ${ENGINE_SNAPSHOT_DIR}"
+}
+
+# The new release runs and has migrated: a later failure leaves it in place rather than roll the code back under it.
+discard_engine_snapshot() {
+    ENGINE_SNAPSHOT_ARMED=0
+    rm -rf "$ENGINE_SNAPSHOT_DIR"
 }
 
 generate_ssl_cert() {
@@ -1176,6 +1486,8 @@ prepare_config_files() {
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
     # Scripts are engine code, not host state: -n would keep the installed copy.
     cp /opt/panelalpha/shared-hosting/templates/config/sftp/{entrypoint.sh,sync-logins.sh} /opt/panelalpha/shared-hosting/config/sftp/
+    bash /opt/panelalpha/shared-hosting/scripts/refresh-sftp-entrypoint.sh /opt/panelalpha/shared-hosting ||
+        echo_warning "Could not recreate the sftp container for a changed entry point; SFTP keeps serving the old one"
     if [ ! -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key ]; then
         ssh-keygen -t ed25519 -N "" -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key < /dev/null
     fi
@@ -1185,11 +1497,11 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/config/logrotate
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/logrotate/. /opt/panelalpha/shared-hosting/config/logrotate/.
     # Their postrotate reopens the webserver's logs: engine code, not host state.
-    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy,php}.conf /opt/panelalpha/shared-hosting/config/logrotate/
+    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,apache-users,nginx,nginx-proxy,php}.conf /opt/panelalpha/shared-hosting/config/logrotate/
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.
-    bash /opt/panelalpha/shared-hosting/scripts/seed-modsecurity.sh /opt/panelalpha/shared-hosting
+    bash /opt/panelalpha/shared-hosting/scripts/seed-modsecurity.sh /opt/panelalpha/shared-hosting "$INSTALL_DIR/modsecurity-shipped"
 }
 
 disable_systemd_resolved() {
@@ -1228,16 +1540,104 @@ harden_host() {
     bash /opt/panelalpha/shared-hosting/scripts/configure-monit.sh
     bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --install ||
         echo_warning "Could not set up the firewall; the firewall: lines above say what protects this host now"
-    # This is the fourth Docker restart in a minute or so (install, sysbox,
-    # daemon DNS, firewall); docker.service allows three, and on a fast host the
-    # fourth fails with start-limit-hit although the daemon stopped cleanly.
-    systemctl reset-failed docker.service 2>/dev/null || true
-    service docker restart
+    restart_docker_without_its_chains
     # Host builds run on panelalpha-build. Made here, while
     # Docker's chains are fresh: after a firewall flush the engine cannot create it.
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
     # The accounts' network, likewise; the stack names it.
-    bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
+    apply_tenant_network_firewall
+}
+
+# Only the root broker binds pash-tenants; an empty or missing network is made and closed here.
+apply_tenant_network_firewall() {
+    local compose=/opt/panelalpha/shared-hosting/docker-compose.yml
+    # A missing network prints an empty line.
+    local on_network
+    on_network=$(docker network inspect -f '{{len .Containers}}' pash-tenants 2>/dev/null | tr -d '[:space:]') || true
+    if [ "${on_network:-0}" = 0 ]; then
+        DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
+    elif [ -z "$(docker compose -f "$compose" ps -q --status running root-broker 2>/dev/null)" ] ||
+        ! docker compose -f "$compose" exec -T root-broker pa-broker --host host.applyTenantNetworkFirewall -- </dev/null; then
+        echo_info "The accounts' network keeps the firewall in force until the new root broker applies it"
+    fi
+}
+
+# Core's scheduler and queue workers stay down from the copy until migrate has run.
+CORE_BACKGROUND_PAUSED=0
+core_background() { # <s6-svc flag>
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core sh -c \
+        'for s in /run/service/scheduler /run/service/queue-*; do [ -d "$s" ] && s6-svc '"$1"' "$s"; done; true' \
+        >/dev/null 2>&1
+}
+
+pause_core_background() {
+    core_background -d && CORE_BACKGROUND_PAUSED=1 && echo_info "Core's scheduler and queue workers wait for the migrations"
+    return 0
+}
+
+resume_core_background() {
+    [ "${CORE_BACKGROUND_PAUSED:-0}" = 1 ] || return 0
+    core_background -u || true
+    CORE_BACKGROUND_PAUSED=0
+}
+
+# A fresh install, and an update on a server with no store, gets a local store to back up into.
+ensure_default_backup_store() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan backup:container:ensure-default ||
+        echo_warning "Could not create the default backup store; 'pae backup:container:ensure-default' retries"
+}
+
+# A pre-broker core loops re-applying the tenant firewall; its process group stops before the copy.
+CORE_TENANT_NETWORK_STOPPED=0
+core_tenant_network() { # <script run in core's container>
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core sh -c "$1" >/dev/null 2>&1
+}
+
+stop_core_tenant_network() {
+    core_tenant_network 'cd /run/service/tenant-network || exit 1
+        pid=$(s6-svstat -p .); s6-svc -d .
+        [ "$pid" -gt 0 ] 2>/dev/null && kill -TERM "-$pid" 2>/dev/null; true' &&
+        CORE_TENANT_NETWORK_STOPPED=1 && echo_info "Core's tenant firewall loop is stopped; the new root broker takes it over"
+    return 0
+}
+
+start_core_tenant_network() {
+    [ "${CORE_TENANT_NETWORK_STOPPED:-0}" = 1 ] || return 0
+    core_tenant_network 's6-svc -u /run/service/tenant-network' || true
+    CORE_TENANT_NETWORK_STOPPED=0
+}
+
+# The old broker's logrotate finishes its pass and starts no other until the new broker is up.
+BROKER_ROTATION_PAUSED=0
+broker_rotation() { # <script run in the broker's container>
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T root-broker sh -c "$1" >/dev/null 2>&1
+}
+
+pause_broker_rotation() {
+    broker_rotation 'cd /run/service/logrotate && s6-svc -O . && for _ in $(seq 1 120); do
+        pid=$(s6-svstat -p .); [ "$pid" -gt 0 ] 2>/dev/null || exit 0
+        [ "$(cat /proc/$pid/comm 2>/dev/null)" = sleep ] && exit 0
+        sleep 1
+    done' && BROKER_ROTATION_PAUSED=1 && echo_info "The broker's log rotation waits for the new broker"
+    return 0
+}
+
+resume_broker_rotation() {
+    [ "${BROKER_ROTATION_PAUSED:-0}" = 1 ] || return 0
+    broker_rotation 's6-svc -u /run/service/logrotate' || true
+    BROKER_ROTATION_PAUSED=0
+}
+
+# Only a restart restores Docker's chains after a full ruleset flush, such as CSF's uninstaller.
+restart_docker_without_its_chains() {
+    if iptables -w -n -L DOCKER >/dev/null 2>&1 && iptables -w -t nat -n -L DOCKER >/dev/null 2>&1; then
+        echo_info "Docker's iptables chains are in place; Docker keeps running"
+        return
+    fi
+    # docker.service allows three quick restarts; an install's fourth would hit start-limit-hit.
+    systemctl reset-failed docker.service 2>/dev/null || true
+    service docker restart
 }
 
 # Without it every setquota the engine runs is a no-op. Never fatal: a
@@ -1249,6 +1649,12 @@ configure_quota() {
     fi
     bash /opt/panelalpha/shared-hosting/scripts/configure-quota.sh ||
         echo_warning "Could not turn on filesystem quota; project disk limits will not be enforced"
+}
+
+# nosuid,nodev on the account homes, where a tenant's root container leaves host-root files. Never fatal.
+configure_home_mounts() {
+    bash /opt/panelalpha/shared-hosting/scripts/harden-home-mounts.sh ||
+        echo_warning "Could not mount the account homes nosuid,nodev"
 }
 
 # lxcfs gives each account its own /proc/meminfo, loadavg and CPUs. Never
@@ -1319,6 +1725,103 @@ check_engine_stack() {
         waited=$((waited + 5))
     done
     echo_error "These engine services are not running:${down}"
+}
+
+# --remove-orphans frees ports dropped services hold; sites-http is recreated last, on its own.
+start_engine_stack() {
+    local compose=/opt/panelalpha/shared-hosting/docker-compose.yml services others
+    services=$(docker compose -f "$compose" config --services)
+    mapfile -t others < <(grep -vx sites-http <<<"$services")
+    docker compose -f "$compose" up -d --remove-orphans "${others[@]}"
+    if grep -qx sites-http <<<"$services"; then
+        docker compose -f "$compose" up -d sites-http
+    fi
+}
+
+# The build context paths a Dockerfile's COPY and ADD read, skipping COPY --from and here-documents, which are text in
+# the Dockerfile itself.
+engine_image_inputs() { # <dockerfile>
+    awk '
+        heredoc != "" { if ($0 == heredoc) heredoc = ""; next }
+        /\\$/ { text = text substr($0, 1, length($0) - 1) " "; next }
+        {
+            $0 = text $0
+            text = ""
+            if (toupper($1) != "COPY" && toupper($1) != "ADD") next
+            for (i = 2; i <= NF; i++) if ($i ~ /^--from=/) next
+            for (i = 2; i < NF; i++) {
+                if ($i ~ /^<</) { heredoc = $i; sub(/^<<-?/, "", heredoc); gsub(/["\047]/, "", heredoc); continue }
+                if ($i !~ /^--/) print $i
+            }
+        }' "$1"
+}
+
+# Hash of an engine image's Dockerfile and context inputs, as its panelalpha.sources.sha256 label holds.
+engine_image_sources() { # <context> <dockerfile>
+    local -a inputs
+    mapfile -t inputs < <(cd "$1" && engine_image_inputs "$2")
+    (cd "$1" && set -o pipefail && find "$2" "${inputs[@]}" -name __pycache__ -prune -o -type f ! -name '*.pyc' -print |
+        LC_ALL=C sort -u | xargs sha256sum | sha256sum | cut -d' ' -f1)
+}
+
+engine_image_built_from() { # <image> <sources hash>
+    [ "$(docker image inspect --format '{{ index .Config.Labels "panelalpha.sources.sha256" }}' "$1" 2>/dev/null)" = "$2" ]
+}
+
+# Every image the compose project builds, once each: service, image, build context and Dockerfile, tab-separated.
+engine_built_images() { # <compose command...>
+    local config
+    config=$("$@" config --format json) || return
+    jq -er '[.services | to_entries[] | select(.value.build)] | unique_by(.value.image)[]
+        | [.key, .value.image, .value.build.context, (.value.build.dockerfile // "Dockerfile")] | @tsv' <<<"$config"
+}
+
+# The published image's source hash; empty when it is not published, carries none, or the registry cannot be asked.
+engine_published_sources() { # <image>
+    docker buildx imagetools inspect --format '{{ index .Image.Config.Labels "panelalpha.sources.sha256" }}' "$1" 2>/dev/null
+}
+
+# Another tag of the image's repository on the host built from these sources, e.g. the previous release's, tagged as it.
+engine_retag_built_from() { # <image> <sources hash>
+    local other
+    [ -n "$2" ] || return 1
+    other=$(docker images --filter "label=panelalpha.sources.sha256=$2" --format '{{.Repository}}:{{.Tag}}' "${1%:*}" 2>/dev/null |
+        grep -vx -- "$1" | head -n1)
+    [ -n "$other" ] && docker tag "$other" "$1"
+}
+
+# A published image built from these sources is pulled, so a rebuild of them reaches the host; one built from other
+# sources is never pulled; then the host's image counts only when built from these sources, else it is built here.
+ensure_engine_image() { # <service> <image> <sources> <compose command...>
+    local service="$1" image="$2" sources="$3" published
+    shift 3
+    published=$(engine_published_sources "$image")
+    if [ "$published" = "$sources" ] || { [ -z "$published" ] && ! engine_image_built_from "$image" "$sources"; }; then
+        "$@" pull --quiet --ignore-pull-failures "$service" >/dev/null 2>&1 || true
+    fi
+    engine_image_built_from "$image" "$sources" && return 0
+    engine_retag_built_from "$image" "$sources" && return 0
+    "$@" build --build-arg "PANELALPHA_SOURCES=${sources}" "$service"
+}
+
+# Before the copy: every image the release builds counts only when its label holds this release's source hash.
+prepare_engine_images() {
+    local src="$INSTALL_DIR/src" host="$PANELALPHA_DIR/shared-hosting" images service image context dockerfile sources webserver
+    local compose=(docker compose --project-directory "$src" -f "$src/docker-compose.yml")
+    [ -f "$host/.env" ] && compose+=(--env-file "$host/.env")
+    # docker-compose.yml includes it, and it is host state, not in the clone.
+    webserver="$host/docker-compose.yml-webserver"
+    [ -f "$webserver" ] || webserver="$src/docker-compose.yml-nginx-proxy"
+    cp "$webserver" "$src/docker-compose.yml-webserver"
+    images=$(engine_built_images "${compose[@]}") ||
+        echo_error "Could not read the engine images from the new docker-compose.yml"
+    while IFS=$'\t' read -r service image context dockerfile; do
+        sources=$(engine_image_sources "$context" "$dockerfile") ||
+            echo_error "Could not read the ${service} image's sources from the new release"
+        ensure_engine_image "$service" "$image" "$sources" "${compose[@]}" ||
+            echo_error "Could not build the ${service} image; the engine was not changed"
+    done <<<"$images"
+    rm -f "$src/docker-compose.yml-webserver"
 }
 
 install_panelalpha_engine() {
@@ -1392,6 +1895,8 @@ EOF
     cp -n /opt/panelalpha/shared-hosting/.env-core.example /opt/panelalpha/shared-hosting/.env-core
     # 0640 root:www-data before any secret goes in; sed -i keeps both.
     bash /opt/panelalpha/shared-hosting/scripts/secure-env-core.sh /opt/panelalpha/shared-hosting/.env-core
+    # retired settings
+    sed -i '/^PRIVILEGED_\(BROKER_AREAS\|TRANSPORT\)=/d' /opt/panelalpha/shared-hosting/.env-core
 
     # set APP_URL in .env-core if not set
     CORE_APP_URL=$(grep ^APP_URL= /opt/panelalpha/shared-hosting/.env-core | cut -d '=' -f2-)
@@ -1437,10 +1942,10 @@ EOF
     # create docker network if not exists
     bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
     # The accounts' network; sites-db and the registries join it.
-    DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
-    # Closed from boot until core binds it, not only from when core starts.
+    apply_tenant_network_firewall
+    # Closed before every Docker start until the root broker binds it.
     bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --install-units ||
-        echo_warning "Could not install the tenant network's boot units; after a reboot accounts run unfiltered until core starts"
+        echo_warning "Could not install the tenant network's boot unit; after a reboot accounts run unfiltered until the root broker starts"
 
     # make sure systemd-resolved is disabled / no conflicts with sites-dns
     disable_systemd_resolved || true
@@ -1455,6 +1960,7 @@ EOF
     # never runs `down`, so on a re-run over an existing install the old
     # host-networked `webserver` would still hold :80/:443 against the new
     # sites-http. Drop the old containers by service label before starting.
+    mark_engine_stack_touched
     remove_renamed_containers
     bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
@@ -1463,17 +1969,18 @@ EOF
     docker network inspect pash-tenants >/dev/null 2>&1 ||
         echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
 
-    # run docker stack. --remove-orphans drops containers of services this
-    # compose file does not define, which may hold a port one of its services
-    # needs: going to a release without cache-registry-writer, that container
-    # still holds 127.0.0.1:5000 against cache-registry.
     remove_unstarted_containers
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d --remove-orphans
+    start_engine_stack
     check_engine_stack
+    resume_broker_rotation
 
     # run database migrations
     wait_for_database
+    # A re-run keeps core/bootstrap/cache; the app cache stays, it holds scheduler locks.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan optimize:clear --except=cache
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
+    resume_core_background
+    ensure_default_backup_store
     # Accounts from before it leave core's network for pash-tenants,
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
@@ -1481,9 +1988,21 @@ EOF
     # PHP errors reach a project's own file only once its ini and pool carry the
     # directives; accounts from before that are rewritten here.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:php-config:refresh --all || true
+    # Puts each account's stored CPU limit on its compose file and container, live.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:cpu-limit:apply --all || true
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:domain-config:refresh --all ||
+        echo_warning "Could not rewrite the domain vhosts of every PHP hosting project; 'pae projects:domain-config:refresh --all' retries"
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:wp-config:restrict --all ||
+        echo_warning "Could not restrict the wp-config.php of every PHP hosting project; 'pae projects:wp-config:restrict --all' retries"
+    # Applies on each container's next recreate; no site restarts.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan projects:config-mounts:restrict --all ||
+        echo_warning "Could not make the config mounts of every PHP hosting project read-only; 'pae projects:config-mounts:restrict --all' retries"
     # Exim listens on docker0's gateway, which differs per host (bip, or a
-    # 172.17 clash), and relays for pash-tenants; both are read from Docker.
+    # 172.17 clash), and on pash-tenants' gateway, the PA_SMTP_HOST container
+    # projects get, and relays for pash-tenants; all are read from Docker.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true
+    # Stored NAT maps for docker0 and the engine's bridges go, whether or not NAT is rebuilt.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:prune || true
     if [ "$ENABLE_NAT" = 1 ]; then
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:build --replace-default-ipv4 || true
     fi
@@ -1494,13 +2013,7 @@ clean_installer() {
 }
 
 # The engine's served certificate, crt/server.cert on :2011.
-#
-# With --domain it is a Let's Encrypt certificate for that name, and the
-# short-lived IP lineage is kept beside it unserved as the fallback. Without
-# one it is a Let's Encrypt certificate for the host's public address, and no
-# name is requested at all -- see docs/internal/engine-tls.md. --no-cert-request asks
-# for neither.
-#
+# A name (--domain or the recorded cert_domain) gets Let's Encrypt, no name the IP certificate.
 # The name is a core setting either way, so `pae-artisan ssl:engine-cert:request`
 # and the renewal cron keep using it.
 request_certificates() {
@@ -1513,9 +2026,14 @@ request_certificates() {
             || echo_warning "Could not record the cert_email setting"
     fi
 
+    local cert_name="$DOMAIN"
+    if [ -z "$cert_name" ]; then
+        cert_name=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:get cert_domain 2>/dev/null | tr -d '\r' | tail -n 1)
+    fi
+
     if [ "$NO_CERT_REQUEST" = 1 ]; then
-        if [ -n "$DOMAIN" ]; then
-            echo_info "Not requesting a certificate (--no-cert-request). Point ${DOMAIN} at this host, then:"
+        if [ -n "$cert_name" ]; then
+            echo_info "Not requesting a certificate (--no-cert-request). Point ${cert_name} at this host, then:"
             echo_info "  pae-artisan ssl:engine-cert:request"
         else
             echo_info "Not requesting a certificate (--no-cert-request); staying on the self-signed one."
@@ -1538,7 +2056,7 @@ request_certificates() {
             [ -n "$IPV4" ] && ! ipcalc "$IPV4" | grep -q 'Private Internet' && private=0
         fi
     fi
-    if [ "$private" = 1 ] && [ -z "$DOMAIN" ]; then
+    if [ "$private" = 1 ] && [ -z "$cert_name" ]; then
         echo_warning "Skipping Let's Encrypt for ${IPV4:-an unknown address}: not a public address, and no --domain"
         return
     fi
@@ -1554,7 +2072,7 @@ request_certificates() {
     # The cost is the lifetime: Let's Encrypt issues IP certificates only
     # under the short-lived profile, about six days, so the six-hourly renewal
     # is not optional the way it is for a 90-day certificate.
-    if [ -z "$DOMAIN" ]; then
+    if [ -z "$cert_name" ]; then
         if [ "$private" = 0 ]; then
             if bash /opt/panelalpha/shared-hosting/scripts/letsencrypt-request-ip-cert.sh "$IPV4" --install; then
                 ENGINE_CERT_IP="$IPV4"
@@ -1577,7 +2095,7 @@ request_certificates() {
         if bash /opt/panelalpha/shared-hosting/scripts/letsencrypt-request-cert.sh $ip_arg; then
             ENGINE_CERT_DOMAIN=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:get cert_domain 2>/dev/null | tr -d '\r' | tail -n 1)
         else
-            echo_warning "Could not obtain a Let's Encrypt certificate for ${DOMAIN}"
+            echo_warning "Could not obtain a Let's Encrypt certificate for ${cert_name}"
             if [ "$private" = 0 ] && [ -f /etc/letsencrypt/live/panelalpha-engine-ip-cert/fullchain.pem ]; then
                 bash /opt/panelalpha/shared-hosting/scripts/letsencrypt-request-ip-cert.sh "$IPV4" --install \
                     && ENGINE_CERT_IP="$IPV4" \
@@ -1598,18 +2116,28 @@ request_certificates() {
     fi
 }
 
+# A hash of sites-http's config directory; fails when the webserver is unknown.
+webserver_config_state() {
+    local host="$PANELALPHA_DIR/shared-hosting" variant
+    variant=$(sed -n 's/.*com\.panelalpha\.webserver=\([a-z-]*\).*/\1/p' "$host/docker-compose.yml-webserver" 2>/dev/null | head -n1)
+    [ -n "$variant" ] && [ -d "$host/webserver-config/$variant" ] || return 1
+    (cd "$host/webserver-config/$variant" && set -o pipefail && find . -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum | sha256sum | cut -d' ' -f1)
+}
+
+webserver_running() {
+    docker compose -f "$PANELALPHA_DIR/shared-hosting/docker-compose.yml" ps --services --filter status=running 2>/dev/null | grep -qx sites-http
+}
+
+# A restart, as a reload cannot rebind nginx off `listen 80`; skipped on an update that changed nothing.
 render_webserver_config() {
-    # The engine's own addresses are known now, so render the real webserver
-    # config while nothing is hosted yet. Left to the first project, this render
-    # swaps the shipped wildcard `listen 80` for `listen <ip>:80` underneath a
-    # running nginx -- which cannot rebind on a reload (EADDRINUSE against its
-    # own wildcard socket), keeps serving the config it booted with, and reports
-    # success while no vhost ever loads.
+    local before
+    before=$(webserver_config_state) || before=''
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:domain:rebuild \
         || echo_warning "Could not rebuild the webserver configuration"
-    # Restart, not reload: nginx is already holding the wildcard sockets, and
-    # only a restart can move it onto the address-specific ones. Free here --
-    # nothing is being served yet.
+    if [ "$ENGINE_OP" = update ] && [ -n "$before" ] && [ "$(webserver_config_state)" = "$before" ] && webserver_running; then
+        echo_info "The webserver configuration did not change; sites-http keeps running"
+        return 0
+    fi
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml restart sites-http \
         || echo_warning "Could not restart the webserver"
 }
@@ -1618,6 +2146,7 @@ post_install_config() {
     # Hardening ran before the stack came up, in harden_host.
     set_default_ip
     configure_quota
+    configure_home_mounts
     configure_lxcfs
     configure_apparmor
     # Before request_certificates: an ACME HTTP-01 challenge is answered through
@@ -1867,6 +2396,12 @@ EOF
 #
 # A failed deploy is reported, not fatal: on an install the engine itself is up
 # and usable, and saying so beats rolling it back over a bad repository URL.
+# Whether the running core's project:create knows --update-existing (Engine 2.3.0 and later).
+core_create_updates_existing() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan project:create --help 2>/dev/null | grep -q -- '--update-existing'
+}
+
 deploy_repository() {
     local args=(project:create "--repo=${DEPLOY_REPO}" --json)
     if [ -n "$DEPLOY_BRANCH" ]; then
@@ -1877,6 +2412,25 @@ deploy_repository() {
     fi
     if [ -n "$INSTALL_EMAIL" ]; then
         args+=("--email=${INSTALL_EMAIL}")
+    fi
+    if [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ]; then
+        args+=(--full-privileges)
+        # The panel: run again, the install updates the one it made rather than adding a second. A deploy-only run
+        # talks to the core already running, which may be older than this script and not know the option.
+        if core_create_updates_existing; then
+            args+=(--update-existing)
+        fi
+    fi
+    local pair
+    for pair in "${DEPLOY_ENV_VARS[@]+"${DEPLOY_ENV_VARS[@]}"}"; do
+        args+=("--env-var=${pair}")
+    done
+    if [ -n "${PANEL_ADMIN_EMAIL:-}" ]; then
+        [ -n "$PANEL_ADMIN_PASSWORD" ] || PANEL_ADMIN_PASSWORD=$(generate_panel_admin_password)
+        args+=("--env-var=PANELALPHA_USER_EMAIL=${PANEL_ADMIN_EMAIL}" "--env-var=PANELALPHA_USER_PASSWORD=${PANEL_ADMIN_PASSWORD}")
+    fi
+    if [ -n "${PANEL_HUB_CODE:-}" ]; then
+        args+=("--env-var=PANELALPHA_HUB_CODE=${PANEL_HUB_CODE}")
     fi
 
     # --json: JSON on stdout; the live deploy log, then any failure reason, on
@@ -1928,6 +2482,13 @@ deploy_repository() {
         return 0
     fi
     DEPLOY_PROJECT_URL="https://${domain}"
+    if printf '%s' "$json" | grep -q '"updated":true'; then
+        # Its admin, environment and Hub pairing stay: what this run generated for a new one was not applied.
+        DEPLOY_UPDATED=1
+        PANEL_ADMIN_PASSWORD=''
+        PANEL_HUB_CODE=''
+        return 0
+    fi
     apply_deploy_site_password
 }
 
@@ -1974,6 +2535,26 @@ apply_deploy_site_password() {
     fi
 }
 
+# Two 8-character halves joined by a dash, drawn until both cases and a digit are in.
+generate_panel_admin_password() {
+    local pw=''
+    while :; do
+        pw=$(generate_deploy_site_password)
+        case "$pw" in *[A-Z]*) ;; *) continue ;; esac
+        case "$pw" in *[a-z]*) ;; *) continue ;; esac
+        case "$pw" in *[0-9]*) ;; *) continue ;; esac
+        break
+    done
+    printf '%s-%s' "${pw:0:8}" "${pw:8:8}"
+}
+
+# The command an operator retries a failed --repo deploy with.
+deploy_retry_command() {
+    local cmd="pae project:create --repo ${DEPLOY_REPO_LABEL}"
+    [ "${DEPLOY_FULL_PRIVILEGES:-0}" = 1 ] && cmd="${cmd} --full-privileges"
+    printf '%s' "$cmd"
+}
+
 # Where the repository ended up — stdout for logs, and the same lines in the
 # TUI's ready screen. The outro writers live inside finish_installation, so
 # this is called from there and nowhere else.
@@ -1990,26 +2571,38 @@ report_deployed_project() {
             outro_say 196 "  ${DEPLOY_ERROR}"
         else
             echo_warning "Try again with:"
-            echo_warning "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+            echo_warning "  $(deploy_retry_command)"
             outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
-            outro_c 15 "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+            outro_c 15 "  $(deploy_retry_command)"
             outro_nl
         fi
-        echo_warning "Try again with: pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        echo_warning "Try again with: $(deploy_retry_command)"
         outro_nl
         outro_c 247 'Try again: '
-        outro_c 15 "pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_c 15 "$(deploy_retry_command)"
         outro_nl
         outro_nl
         return 0
     fi
 
+    if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
+        echo_info "${DEPLOY_REPO_LABEL} was already deployed as ${DEPLOY_PROJECT_NAME}: updated it, its admin and settings unchanged"
+    fi
     echo_info "${DEPLOY_REPO_LABEL} available at: ${DEPLOY_PROJECT_URL}"
     echo_info "Project: ${DEPLOY_PROJECT_NAME}    logs: pae project:deploy:log ${DEPLOY_PROJECT_NAME}"
     if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
         echo_info "Password: ${DEPLOY_SITE_PASSWORD}"
     fi
+    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
+        echo_info "Log in as: ${PANEL_ADMIN_EMAIL}    password: ${PANEL_ADMIN_PASSWORD}"
+    fi
+    if [ -n "${PANEL_HUB_CODE:-}" ]; then
+        echo_info "The panel connects to PanelAlpha Hub on its first start; watch the Hub page you copied the command from."
+    fi
     echo_info ""
+    if [ "${DEPLOY_UPDATED:-0}" = 1 ]; then
+        outro_say 247 "Updated ${DEPLOY_PROJECT_NAME}, which already ran it; its admin and settings are unchanged."
+    fi
     outro_c 15 "${DEPLOY_REPO_LABEL}"
     outro_c 247 ' available at: '
     outro_c 39 "${DEPLOY_PROJECT_URL}"
@@ -2017,6 +2610,17 @@ report_deployed_project() {
     if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
         outro_c 247 'Password: '
         outro_c 15 "${DEPLOY_SITE_PASSWORD}"
+        outro_nl
+    fi
+    if [ -n "${PANEL_ADMIN_PASSWORD:-}" ]; then
+        outro_c 247 'Log in as: '
+        outro_c 15 "${PANEL_ADMIN_EMAIL}"
+        outro_c 247 '  password: '
+        outro_c 15 "${PANEL_ADMIN_PASSWORD}"
+        outro_nl
+    fi
+    if [ -n "${PANEL_HUB_CODE:-}" ]; then
+        outro_c 247 'Connects to PanelAlpha Hub on its first start; watch the Hub page.'
         outro_nl
     fi
     outro_nl
@@ -2076,6 +2680,67 @@ report_hub_connection() {
 # Strip a leading v so 2.0.1 and v2.0.1 compare equal.
 normalize_version() {
     printf '%s' "$1" | sed -E 's/^[vV]//'
+}
+
+# older, same or newer: a target release against the running one.
+release_order() { # <running> <target>
+    if [ "$1" = "$2" ]; then
+        echo same
+    elif [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; then
+        echo older
+    else
+        echo newer
+    fi
+}
+
+# Stops an update before anything changed. A deliberate stop, so monitoring hears nothing.
+stop_update() { # <exit code> <result> <reason>
+    record_run result "$2"
+    record_run reason "$3"
+    if [ "$1" = 0 ]; then
+        record_run outro "$3"
+        echo_info "$3"
+    else
+        echo -e ">>> ${red_color}$3${default_color}"
+    fi
+    clean_installer
+    trap - EXIT
+    exit "$1"
+}
+
+# Once the clone is in and before the live tree is touched: a newer release, or a newer commit of the running one,
+# is installed; an older release only when allowed, and the very same commit only when asked for again.
+check_update_target() {
+    local running target running_commit target_commit
+    running=$(normalize_version "$(detect_installed_engine_version)")
+    target=$(normalize_version "$(version_from_system_php "$(cat "$INSTALL_DIR/src/core/config/system.php" 2>/dev/null)")")
+    running_commit=$(detect_installed_engine_commit)
+    target_commit=$(printf '%.8s' "$(tr -d '\r\n' <"$INSTALL_DIR/src/version" 2>/dev/null)")
+    record_run from_version "$running"
+    record_run to_version "$target"
+    record_run from_commit "$running_commit"
+    record_run to_commit "$target_commit"
+    [ "$ENGINE_OP" = update ] || return 0
+    [ -n "$target" ] || [ "$ALLOW_DOWNGRADE" = 1 ] ||
+        stop_update 101 refused "Could not read the release version of ${PANELALPHA_ENGINE_VERSION}. Nothing was changed. Pass --allow-downgrade to install it anyway."
+    if [ -z "$running" ]; then
+        echo_warning "Could not read the running engine's version; installing ${target:-the target} without comparing"
+        return 0
+    fi
+    case "$(release_order "$running" "${target:-0}")" in
+    older)
+        [ "$ALLOW_DOWNGRADE" = 1 ] ||
+            stop_update 101 refused "Refusing to install ${target} (${PANELALPHA_ENGINE_VERSION}) over the running ${running}: it is an older release. Nothing was changed. Pass --allow-downgrade to install it anyway."
+        ;;
+    same)
+        if [ -z "$running_commit" ] || [ "$running_commit" != "$target_commit" ]; then
+            UPDATE_NOTE="Updating within ${running}: ${running_commit:-unknown} → ${target_commit:-unknown} (${PANELALPHA_ENGINE_VERSION})"
+            echo_info "$UPDATE_NOTE"
+        elif [ "$REINSTALL" != 1 ] && [ "$UPDATE_ENGINE" != 1 ]; then
+            stop_update 0 up_to_date "Already up to date: ${running} (${running_commit}) is running and ${PANELALPHA_ENGINE_VERSION} is the same commit. Nothing was changed. Pass --reinstall to install it again."
+        fi
+        ;;
+    esac
 }
 
 # Label like "2.0.1 (b9f8c105)" for update messages.
@@ -2384,6 +3049,10 @@ install | update) ;;
     ;;
 esac
 
+if [ "$ENGINE_OP" = update ]; then
+    restore_interrupted_update
+fi
+
 refuse_engine_v1_to_v2_upgrade
 
 if [ -n "$DEPLOY_REPO" ]; then
@@ -2472,6 +3141,16 @@ update_progress 25 "Download PanelAlpha engine package"
 echo_info "Download PanelAlpha engine package"
 download_panelalpha_engine
 warn_old_host_git
+check_update_target
+
+if [ "$ENGINE_OP" = update ]; then
+    update_progress 30 "Preparing PanelAlpha engine images"
+    echo_info "Preparing PanelAlpha engine images"
+    prepare_engine_images
+    pause_core_background
+    stop_core_tenant_network
+    pause_broker_rotation
+fi
 
 update_progress 35 "Unzip PanelAlpha engine package"
 echo_info "Unzip PanelAlpha engine package"
@@ -2502,6 +3181,7 @@ else
     echo_info "Installing PanelAlpha engine"
 fi
 install_panelalpha_engine
+discard_engine_snapshot
 
 update_progress 85 "Cleaning installation files"
 echo_info "Cleaning installation files"

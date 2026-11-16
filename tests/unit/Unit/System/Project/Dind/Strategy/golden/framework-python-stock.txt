@@ -1,0 +1,115 @@
+[1 log lines] ensurePythonBaseImage
+[
+    "python:3.12-slim",
+    [
+        "build-essential",
+        "pkg-config",
+        "git",
+        "curl",
+        "libpq-dev"
+    ]
+]
+
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "python",
+        "label": "Python",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 8000,
+        "runtime": "command",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
+        "build_command": "",
+        "start_command": ".venv/bin/gunicorn --bind 0.0.0.0:8000 --timeout 120 app:app",
+        "env": {
+            "PYTHONUNBUFFERED": "1",
+            "PA_DEPLOY_PHASE": "install"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "python:3.12-slim",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "python",
+        "requirements": [
+            {
+                "id": "python",
+                "version": "3.12",
+                "constraint": "",
+                "source": "engine default",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "python 3.12 (from engine default)"
+        ],
+        "build_images": [],
+        "resolved_commands": {
+            "pip-install": "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
+            "serve": ".venv/bin/gunicorn --bind 0.0.0.0:8000 --timeout 120 app:app"
+        }
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'python:3.12-slim'
+    working_dir: /app
+    volumes:
+      - './:/app'
+    ports:
+      - '8000:8000'
+    command:
+      - sh
+      - '-c'
+      - 'exec /app/panelalpha-entrypoint.sh'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '8000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      PYTHONUNBUFFERED: '1'
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

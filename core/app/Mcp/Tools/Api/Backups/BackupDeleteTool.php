@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('backup_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a project backup
+
+    Deletes this backup and the files it holds; that copy of the project cannot be restored afterwards, and this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

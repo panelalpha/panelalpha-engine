@@ -6,15 +6,13 @@ use App\Integrations\Tunnels\Cloudflare;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\ProcessRunner;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Per-project HTTP password gate for nginx-proxy vhosts.
- *
- * Password is stored (encrypted) on User.details; vhosts call an internal
- * check endpoint that accepts Authorization: Basic (any username) or a
- * browser-session cookie. Host-wide UX mode is SITE_PASSWORD_AUTH_MODE.
+ * Per-project HTTP password gate for nginx-proxy vhosts: the encrypted password lives on User.details, and vhosts ask an
+ * internal endpoint that takes Basic auth (any username) or a session cookie; SITE_PASSWORD_AUTH_MODE sets the host's UX.
  */
 class SitePasswordProtection
 {
@@ -211,9 +209,11 @@ class SitePasswordProtection
      */
     private static function gateLocations(string $mode, string $username): string
     {
-        $log = self::FAILED_PASSWORD_LOG;
-        $failBody = self::authFailureBody($mode, $username);
+        return self::gateLocationsTemplate(self::FAILED_PASSWORD_LOG, $mode, $username, self::authFailureBody($mode, $username));
+    }
 
+    private static function gateLocationsTemplate(string $log, string $mode, string $username, string $failBody): string
+    {
         return <<<NGINX
     set \$pa_site_password_basic_failed 0;
     access_log {$log} site_password if=\$pa_site_password_basic_failed;
@@ -330,7 +330,7 @@ NGINX;
         }
 
         try {
-            ($runner ?? new System)->runProcess(['sudo', 'chown', '-R', 'www-data:www-data', $path]);
+            ($runner ?? new System)->runProcess(Privileged::files()->changeOwnerRecursively('www-data:www-data', $path));
         } catch (\Throwable $e) {
             Log::warning(
                 'Could not reclaim framework cache ownership for site-password gate: '.$e->getMessage()

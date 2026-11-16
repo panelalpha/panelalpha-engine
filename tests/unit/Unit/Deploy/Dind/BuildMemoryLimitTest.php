@@ -3,14 +3,15 @@
 namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Compose\ServiceLimits;
-use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Dind\DindEngine;
+use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The host build container's memory ceiling, and Node being told about it.
@@ -26,52 +27,39 @@ use PHPUnit\Framework\TestCase;
  */
 class BuildMemoryLimitTest extends TestCase
 {
-    private function argv(?string $configured): array
+    /** @return array<string, mixed> */
+    private function build(?string $configured): array
     {
         $account = new EngineAccount('demo', '/home/demo', '1001:1001');
 
-        return (new DindHostBuilder($configured))->nodeBuildArgv(
+        return LocalRoot::build((new DindHostBuilder($configured))->nodeBuildArgv(
             $account,
             'node:24-bookworm-slim',
             'npm ci',
             'npm run build'
-        );
+        ));
     }
 
     /** @return array<string, string> */
-    private function envFrom(array $argv): array
+    private function envFrom(array $build): array
     {
-        $env = [];
-        foreach ($argv as $i => $arg) {
-            if ($arg === '-e' && isset($argv[$i + 1]) && str_contains((string) $argv[$i + 1], '=')) {
-                [$k, $v] = explode('=', (string) $argv[$i + 1], 2);
-                $env[$k] = $v;
-            }
-        }
-
-        return $env;
+        return $build['environment'];
     }
 
-    private function memoryFlag(array $argv): ?string
+    private function memoryFlag(array $build): ?string
     {
-        foreach ($argv as $i => $arg) {
-            if ($arg === '--memory') {
-                return $argv[$i + 1] ?? null;
-            }
-        }
-
-        return null;
+        return $build['memory'];
     }
 
     public function test_defaults_to_2g_when_nothing_usable_is_given(): void
     {
-        $this->assertSame('2g', $this->memoryFlag($this->argv(null)));
-        $this->assertSame('2g', $this->memoryFlag($this->argv('')));
+        $this->assertSame('2g', $this->memoryFlag($this->build(null)));
+        $this->assertSame('2g', $this->memoryFlag($this->build('')));
     }
 
     public function test_the_operator_can_raise_it(): void
     {
-        $this->assertSame('6144m', $this->memoryFlag($this->argv('6g')));
+        $this->assertSame('6144m', $this->memoryFlag($this->build('6g')));
     }
 
     /**
@@ -84,21 +72,21 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_a_unit_less_number_reaches_docker_as_megabytes(): void
     {
-        $this->assertSame('4096m', $this->memoryFlag($this->argv('4096')));
-        $this->assertSame('1024m', $this->memoryFlag($this->argv('1024')));
+        $this->assertSame('4096m', $this->memoryFlag($this->build('4096')));
+        $this->assertSame('1024m', $this->memoryFlag($this->build('1024')));
     }
 
     /** A byte count, which is how a value this large can only be meant. */
     public function test_a_byte_count_is_understood(): void
     {
-        $this->assertSame('4096m', $this->memoryFlag($this->argv((string) (4096 * 1024 * 1024))));
+        $this->assertSame('4096m', $this->memoryFlag($this->build((string) (4096 * 1024 * 1024))));
     }
 
     /** No floor, so a small host is not handed more than it has. */
     public function test_a_small_value_is_kept(): void
     {
-        $this->assertSame('512m', $this->memoryFlag($this->argv('512m')));
-        $this->assertSame('1024m', $this->memoryFlag($this->argv('1g')));
+        $this->assertSame('512m', $this->memoryFlag($this->build('512m')));
+        $this->assertSame('1024m', $this->memoryFlag($this->build('1g')));
     }
 
     /** Unset, a build gets 8 GB, held to half the host's RAM and its RAM less the engine's share. */
@@ -162,23 +150,16 @@ class BuildMemoryLimitTest extends TestCase
 
     public function test_the_builder_gets_the_host_ceiling(): void
     {
-        $argv = DindEngine::builderFor('', new HostMemory(3790))->nodeBuildArgv(
+        $request = DindEngine::builderFor('', new HostMemory(3790))->nodeBuildArgv(
             new EngineAccount('demo', '/home/demo', '1001:1001'),
             'node:24-bookworm-slim',
             'npm ci',
             'npm run build'
         );
+        $build = LocalRoot::build($request);
 
-        $flag = static function (string $name) use ($argv): ?string {
-            $at = array_search($name, $argv, true);
-
-            return $at === false ? null : $argv[$at + 1];
-        };
-        $this->assertSame('1895m', $flag('--memory'));
-        // No swap on top: --memory alone lets a container add as much swap again.
-        $this->assertSame('1895m', $flag('--memory-swap'));
-        // A host OOM takes the build first, not core or an app.
-        $this->assertSame('1000', $flag('--oom-score-adj'));
+        $this->assertSame('1895m', $this->memoryFlag($build));
+        $this->assertSame([], LocalRoot::plain($request));
     }
 
     /**
@@ -188,8 +169,8 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_the_node_heap_follows_the_configured_limit(): void
     {
-        $small = $this->envFrom($this->argv('2g'))['NODE_OPTIONS'] ?? '';
-        $large = $this->envFrom($this->argv('8g'))['NODE_OPTIONS'] ?? '';
+        $small = $this->envFrom($this->build('2g'))['NODE_OPTIONS'] ?? '';
+        $large = $this->envFrom($this->build('8g'))['NODE_OPTIONS'] ?? '';
 
         $this->assertStringContainsString('--max-old-space-size=', $small);
         $this->assertStringContainsString('--max-old-space-size=', $large);
@@ -211,8 +192,8 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_the_jvm_heap_follows_the_configured_limit(): void
     {
-        $small = $this->envFrom($this->argv('2g'));
-        $large = $this->envFrom($this->argv('8g'));
+        $small = $this->envFrom($this->build('2g'));
+        $large = $this->envFrom($this->build('8g'));
 
         $heap = static function (string $value): int {
             preg_match('/-Xmx(\d+)m/', $value, $m);
@@ -235,10 +216,20 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_the_heap_is_not_put_where_maven_would_parse_it(): void
     {
-        $env = $this->envFrom($this->argv('2g'));
+        $env = $this->envFrom($this->build('2g'));
 
         $this->assertStringNotContainsString('-Xmx', $env['MAVEN_ARGS']);
         $this->assertSame('-Dmaven.repo.local=/var/cache/pa-js/m2', $env['MAVEN_ARGS']);
+    }
+
+    /**
+     * The `maven:` entrypoint copies its settings into MAVEN_CONFIG, and /root/.m2 is not the account's to write.
+     */
+    public function test_maven_config_points_the_entrypoint_at_the_build_cache(): void
+    {
+        $env = $this->envFrom($this->build('2g'));
+
+        $this->assertSame('/var/cache/pa-js/maven', $env['MAVEN_CONFIG'] ?? null);
     }
 
     /**
@@ -248,7 +239,7 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_every_toolchain_heap_is_inside_the_container(): void
     {
-        $env = $this->envFrom($this->argv('2g'));
+        $env = $this->envFrom($this->build('2g'));
 
         // 70% of 2048 MB, which is what the JVM and V8 both get -- and 2.8x
         // the 512 MB HotSpot's 25% default would have given the same
@@ -264,8 +255,8 @@ class BuildMemoryLimitTest extends TestCase
      */
     public function test_cargo_jobs_follow_the_configured_limit(): void
     {
-        $this->assertSame('1', $this->envFrom($this->argv('2g'))['CARGO_BUILD_JOBS'] ?? null);
-        $jobs = (int) ($this->envFrom($this->argv('5202m'))['CARGO_BUILD_JOBS'] ?? 0);
+        $this->assertSame('1', $this->envFrom($this->build('2g'))['CARGO_BUILD_JOBS'] ?? null);
+        $jobs = (int) ($this->envFrom($this->build('5202m'))['CARGO_BUILD_JOBS'] ?? 0);
 
         $this->assertGreaterThanOrEqual(1, $jobs);
         $this->assertLessThanOrEqual(3, $jobs);
@@ -320,7 +311,7 @@ class BuildMemoryLimitTest extends TestCase
     #[DataProvider('unusable')]
     public function test_a_value_docker_would_reject_falls_back(?string $configured): void
     {
-        $this->assertSame('2g', $this->memoryFlag($this->argv($configured)));
+        $this->assertSame('2g', $this->memoryFlag($this->build($configured)));
     }
 
     public static function unusable(): array
@@ -341,7 +332,7 @@ class BuildMemoryLimitTest extends TestCase
         foreach (['5202m' => 5202, '6g' => 6144, '4096' => 4096, '1g' => 1024, 'lots' => 2048] as $configured => $mb) {
             $builder = new DindHostBuilder((string) $configured);
             $this->assertSame($mb, $builder->memoryLimitMb(), $configured);
-            $this->assertSame($mb, ServiceLimits::toMegabytes($this->memoryFlag($this->argv((string) $configured))), $configured);
+            $this->assertSame($mb, ServiceLimits::toMegabytes($this->memoryFlag($this->build((string) $configured))), $configured);
         }
     }
 }

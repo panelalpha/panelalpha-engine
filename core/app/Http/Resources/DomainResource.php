@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Lib\Domains\HttpsPorts;
 use App\Models\Domain;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -28,6 +29,8 @@ class DomainResource extends JsonResource
                 'redirect_url' => $domain->getRedirectUrl(),
                 'force_https_redirect' => $domain->forceHttpsRedirectEnabled(),
                 'aliases' => $domain->getAliases(),
+                'https_ports' => HttpsPorts::of($domain),
+                'https_port' => HttpsPorts::main($domain),
             ],
             'created_at' => $domain->created_at,
             'updated_at' => $domain->updated_at,

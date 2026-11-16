@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Telemetry;
 
 /**
- * Assembles one bug report. Always about one deployed application, whose
- * evidence the engine gathers itself: what the last deploy decided, what the
- * project is (inspection), what it is doing now (a live health probe), and the
- * log tail at tier 2. Grouped by a fingerprint of the area and normalised title,
- * so fifty installs reporting one bug collapse into one issue.
+ * One bug report about one deployed application, with evidence the engine gathers itself. Grouped by a
+ * fingerprint of the area and normalised title, so fifty installs reporting one bug collapse into one group.
  */
 class BugReport
 {
@@ -43,9 +40,8 @@ class BugReport
     public const DEFAULT_AREA = 'other';
 
     /**
-     * Suggested, not allowed: an open set, so a report about a part of the engine
-     * this list has not heard of is still accepted. This list is what the CLI
-     * offers and the API documents.
+     * Suggested, not allowed: an open set, so an area this list has not heard of is still accepted.
+     * It is what the CLI offers and the API documents.
      *
      * @var list<string>
      */
@@ -78,9 +74,8 @@ class BugReport
     public const MAX_CONTACT_BYTES = 190;
 
     /**
-     * Ceiling on the gathered evidence, in bytes of JSON. A backstop on top of the
-     * per-list caps in Redactor::tree() — busting it drops the section, since half
-     * of it would be misleading.
+     * Ceiling on the gathered evidence, in bytes of JSON, on top of Redactor::tree()'s caps.
+     * Busting it drops the section, since half of it would be misleading.
      */
     public const MAX_APP_BYTES = 65536;
 
@@ -114,6 +109,9 @@ class BugReport
     private const FOREIGN_PACKAGE_KEYS = ['framework', 'frameworks', 'platform', 'dependency_counts'];
 
     /**
+     * `account` is the salted hash a deploy report uses, so a bug report and that account's
+     * failed deploys line up without either naming the customer.
+     *
      * @param array{
      *   id: string,
      *   occurred_at: int,
@@ -131,6 +129,7 @@ class BugReport
      *   repo_url?: ?string,
      *   repo_private?: bool,
      *   domains?: list<array<string, mixed>>,
+     *   server_names?: list<?string>,
      *   inspect?: ?array<string, mixed>,
      *   health?: ?array<string, mixed>,
      *   log_tail?: list<string>
@@ -143,14 +142,48 @@ class BugReport
         $username = (string) $input['username'];
         $installId = (string) $input['install_id'];
         $area = self::normalizeArea($input['area'] ?? null);
+        $repoMask = self::repoMask($input);
 
+        $report = self::summary($input, $tier, $username, $installId, $area, $repoMask)
+            + self::deployContext($input, $username);
+
+        $app = self::app($input, $username, $tier, $installId);
+        if ($app !== []) {
+            $report['app'] = $app;
+        }
+
+        return DeployReport::withoutServerNames(
+            $report + self::logTail($input, $tier, $username, $repoMask),
+            $input['server_names'] ?? []
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private static function repoMask(array $input): ?PrivateRepoMask
+    {
         $details = is_array($input['details'] ?? null) ? $input['details'] : [];
-        $repoMask = PrivateRepoMask::for(
+
+        return PrivateRepoMask::for(
             (bool) ($input['repo_private'] ?? false),
             [is_string($input['repo_url'] ?? null) ? $input['repo_url'] : null],
             [is_string($details['git_branch'] ?? null) ? $details['git_branch'] : null]
         );
+    }
 
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private static function summary(
+        array $input,
+        int $tier,
+        string $username,
+        string $installId,
+        string $area,
+        ?PrivateRepoMask $repoMask
+    ): array {
         $title = self::title((string) $input['title'], $username, $repoMask);
         $description = Redactor::prose(
             (string) $input['description'],
@@ -158,67 +191,73 @@ class BugReport
             repo: $repoMask
         );
 
-        $report = [
+        return [
             'id' => (string) $input['id'],
             'schema' => self::SCHEMA,
             'kind' => self::KIND,
             'tier' => $tier,
             'occurred_at' => (int) $input['occurred_at'],
             'outcome' => self::OUTCOME,
-            // The same salted hash a deploy report uses, so a bug report and that
-            // account's failed deploys line up without either naming the customer.
             'account' => Fingerprint::account($installId, $username),
             'fingerprint' => self::fingerprint($area, $title),
             'bug' => self::bug($input, $area, $title, $description),
         ];
+    }
 
+    /**
+     * The last deploy, and the domain block a deploy report carries, which arrives even for a project
+     * whose deploy predates `details.domain`.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private static function deployContext(array $input, string $username): array
+    {
+        $context = [];
         $deploy = self::deploy($input['details'] ?? [], $input['latest'] ?? []);
         if ($deploy !== []) {
-            $report['deploy'] = $deploy;
+            $context['deploy'] = $deploy;
         }
 
-        // The same block a deploy report carries, and it arrives even for a project
-        // whose deploy predates `details.domain`.
         $domain = DeployReport::domainFacts(
             is_array($input['details'] ?? null) ? $input['details'] : [],
             $username,
             $input['domains'] ?? []
         );
         if ($domain !== []) {
-            $report['domain'] = $domain;
+            $context['domain'] = $domain;
         }
 
-        $app = self::app($input, $username, $tier, $installId);
-        if ($app !== []) {
-            $report['app'] = $app;
-        }
-
-        // Build output is tier-2 material, as in a deploy report.
-        if ($tier >= DeployReport::TIER_LOG) {
-            $tail = Redactor::tail($input['log_tail'] ?? [], $username ?: null, $repoMask);
-            if ($tail !== []) {
-                $report['log_tail'] = $tail;
-            }
-        }
-
-        return $report;
+        return $context;
     }
 
     /**
-     * The evidence: what the application is, and what it is doing. Gathered live
-     * and scrubbed by shape, not by an allow-list of known-safe keys; the
-     * whole section is dropped if it busts its budget. Either half may be absent —
-     * a classic-template project has no container to probe, a rolled-back one
-     * nothing to inspect — and absent says that.
+     * Build output is tier-2 material, as in a deploy report.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{log_tail?: list<string>}
+     */
+    private static function logTail(array $input, int $tier, string $username, ?PrivateRepoMask $repoMask): array
+    {
+        if ($tier >= DeployReport::TIER_LOG) {
+            $tail = Redactor::tail($input['log_tail'] ?? [], $username ?: null, $repoMask);
+            if ($tail !== []) {
+                return ['log_tail' => $tail];
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * The evidence, scrubbed by shape; either half may be absent. Below tier 1 or over its budget it is declared
+     * omitted rather than dropped, since an inspection is project identity and the reader should know it existed.
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     private static function app(array $input, string $username, int $tier, string $installId): array
     {
-        // An inspection *is* project identity, which tier 0 promises never leaves
-        // the machine. Declared, not silently dropped, so the reader knows evidence
-        // existed and was withheld.
         if ($tier < DeployReport::TIER_REPO) {
             return ['omitted' => 'tier'];
         }
@@ -231,10 +270,9 @@ class BugReport
             if (! is_array($value) || $value === []) {
                 continue;
             }
-            $app[$section] = self::guardPrivateIdentity(
-                Redactor::tree($value, $username ?: null),
-                $private,
-                $installId
+            $app[$section] = Redactor::tree(
+                self::guardPrivateIdentity($value, $private, $installId),
+                $username ?: null
             );
         }
 
@@ -243,7 +281,6 @@ class BugReport
         }
 
         if (strlen((string) json_encode($app)) > self::MAX_APP_BYTES) {
-            // Say it was too big and let the reader ask.
             return ['omitted' => 'too-large'];
         }
 
@@ -251,11 +288,8 @@ class BugReport
     }
 
     /**
-     * The deploy report's privacy rules applied to the gathered evidence, since an
-     * inspection would otherwise quote in the clear what DeployReport and AppFacts
-     * take care to hash: a private repository URL keeps its host and hashes its
-     * path, a private package name is hashed and its descriptive fields dropped —
-     * only where they describe the customer's own package. Salted by install id.
+     * DeployReport's privacy rules, salted by install id and taken before redaction renames the account: a private
+     * repository URL keeps its host and hashes its path, the own package name is hashed and its descriptive fields go.
      *
      * @param  bool  $ownPackage  whether this subtree describes the project itself
      */
@@ -268,44 +302,51 @@ class BugReport
         if (! $private || ! is_array($value)) {
             return $value;
         }
+        if ($ownPackage && is_string($value['name'] ?? null)) {
+            $value['name'] = AppFacts::nameHash($installId, self::ecosystemOf($value), $value['name']);
+        }
 
         $guarded = [];
         foreach ($value as $key => $item) {
-            $name = (string) $key;
-
-            if (is_string($item) && in_array($name, self::REPO_URL_KEYS, true)) {
-                $guarded[$key] = self::hashRepo($item, $installId);
-
-                continue;
-            }
-
-            if ($ownPackage && $name === 'name' && is_string($item)) {
-                $guarded[$key] = substr(hash('sha256', $installId.'|'.$item), 0, 16);
-
-                continue;
-            }
-
-            if ($ownPackage && in_array($name, self::OWN_PACKAGE_DETAILS, true)) {
-                $guarded[$key] = is_array($item) ? [] : null;
-
-                continue;
-            }
-
-            $guarded[$key] = self::guardPrivateIdentity(
-                $item,
-                $private,
-                $installId,
-                self::describesOwnPackage($name, $item, $ownPackage)
-            );
+            $guarded[$key] = self::guardItem((string) $key, $item, $private, $installId, $ownPackage);
         }
 
         return $guarded;
     }
 
     /**
-     * Does this subtree describe the project itself, not a dependency?
-     * `metadata` opens the question and a `frameworks` entry closes it again. A
-     * list inside an open subtree stays open, so `metadata.packages[]` inherits it.
+     * A package entry's own ecosystem, or for `metadata` its primary package's, which the inspection lists first.
+     *
+     * @param  array<array-key, mixed>  $package
+     */
+    private static function ecosystemOf(array $package): string
+    {
+        $ecosystem = $package['ecosystem'] ?? $package['packages'][0]['ecosystem'] ?? '';
+
+        return is_string($ecosystem) ? $ecosystem : '';
+    }
+
+    private static function guardItem(string $name, mixed $item, bool $private, string $installId, bool $ownPackage): mixed
+    {
+        if (is_string($item) && in_array($name, self::REPO_URL_KEYS, true)) {
+            return self::hashRepo($item, $installId);
+        }
+
+        if ($ownPackage && in_array($name, self::OWN_PACKAGE_DETAILS, true)) {
+            return is_array($item) ? [] : null;
+        }
+
+        return self::guardPrivateIdentity(
+            $item,
+            $private,
+            $installId,
+            self::describesOwnPackage($name, $item, $ownPackage)
+        );
+    }
+
+    /**
+     * Does this subtree describe the project itself, not a dependency? `metadata` opens the question,
+     * a `frameworks` entry closes it, and a list inside an open subtree (`metadata.packages[]`) stays open.
      */
     private static function describesOwnPackage(string $key, mixed $item, bool $ownPackage): bool
     {
@@ -335,7 +376,8 @@ class BugReport
     }
 
     /**
-     * The report itself, as the reporter wrote it.
+     * The report itself, as the reporter wrote it. `contact` is absent unless somebody typed one:
+     * present-and-null would read as "we looked and found none".
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
@@ -350,8 +392,6 @@ class BugReport
             'via' => self::normalizeVia($input['via'] ?? null),
         ];
 
-        // Absent unless somebody typed one: present-and-null reads as "we looked
-        // and found none".
         $contact = self::contact($input['contact'] ?? null);
         if ($contact !== null) {
             $bug['contact'] = $contact;
@@ -361,9 +401,8 @@ class BugReport
     }
 
     /**
-     * What the named project's last deploy was, when there is one: the same fields
-     * a deploy report carries. Empty, not a husk of nulls, when the account has
-     * never deployed.
+     * The named project's last deploy, in the fields a deploy report carries; empty, not a husk of nulls,
+     * when the account has never deployed.
      *
      * @param  array<string, mixed>  $details
      * @param  array<string, mixed>  $latest
@@ -383,9 +422,8 @@ class BugReport
     }
 
     /**
-     * The grouping key: area plus the normalised title, not the description —
-     * two people describe one bug in two paragraphs and the same headline.
-     * Normalisation keeps numbers, paths and ids from splitting a group.
+     * The grouping key: area plus the normalised title, not the description, since two people describe one bug
+     * in two paragraphs and the same headline. Normalisation keeps numbers, paths and ids from splitting a group.
      */
     public static function fingerprint(string $area, string $title): string
     {

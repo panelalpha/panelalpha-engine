@@ -6,3 +6,6 @@ RUN pip install psutil mysql-connector-python
 
 WORKDIR /scripts
 CMD ["python", "server_metrics.py"]
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

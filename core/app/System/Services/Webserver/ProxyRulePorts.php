@@ -9,16 +9,10 @@ use App\System\Firewall\FirewallRule;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Host firewall allows for the ports the custom proxy rules listen on.
+ * Host firewall allows for the host ports custom proxy rules listen on, each carrying the managed prefix:
+ * only allows carrying it are ever removed, so an operator's own rule for the same port is left alone.
  *
- * sites-http runs on the host's network, so a tcp or udp rule's port, and an
- * http rule's port other than 80 and 443, is a host port, closed by the
- * default incoming policy until something allows it. Each allow carries the
- * managed prefix, so the firewall API lists it as the engine's, and only
- * allows carrying it are ever removed here: an operator's own rule for the
- * same port is left alone.
- *
- * @psalm-type PortRule = array{id: int, transport: string, listen_ip: string, listen_port: int, is_generated: bool}
+ * @psalm-type PortRule = array{id: int|string, transport: string, listen_ip: string, listen_port: int, is_generated: bool}
  */
 class ProxyRulePorts
 {
@@ -27,12 +21,8 @@ class ProxyRulePorts
     public function __construct(private ?Firewall $firewall = null) {}
 
     /**
-     * Allow every custom rule's port, and drop the allows of rules that are
-     * gone or disabled. A port another rule already holds, such as an
-     * operator's deny, is left as that rule has it while the others open;
-     * every sync tries it again while its proxy rule exists. A firewall that
-     * cannot be read or changed never fails the caller; false tells it to
-     * try again next time.
+     * Allow every custom rule's port and drop the allows of rules gone or disabled; false asks to try again. A port
+     * another rule holds stays as it is and the sync still succeeds, so the ports opened beside it close later.
      *
      * @psalm-param list<PortRule> $rules
      */
@@ -56,7 +46,6 @@ class ProxyRulePorts
                 try {
                     $firewall->addRule($rule);
                 } catch (FirewallClash $e) {
-                    // Still synced: the caller's marker has to hold the ports opened beside it, so they close later.
                     Log::warning('Could not update the firewall for the proxy rules: '.$e->getMessage());
                 }
             }
@@ -70,6 +59,8 @@ class ProxyRulePorts
     }
 
     /**
+     * Custom rules only, and none for an http rule on the webserver's own ports, which are open already.
+     *
      * @psalm-param list<PortRule> $rules
      *
      * @return array<string, FirewallRule> by rule id
@@ -81,7 +72,6 @@ class ProxyRulePorts
             if ($rule['is_generated'] !== false) {
                 continue;
             }
-            // The webserver's own ports are open already.
             if ($rule['transport'] === 'http' && in_array($rule['listen_port'], ProxyListenPort::WEBSERVER, true)) {
                 continue;
             }

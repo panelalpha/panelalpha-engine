@@ -6,7 +6,7 @@ Cloudflare lets visitors reach a site through Cloudflare's network instead of po
 
 Use Cloudflare when your domain is already managed at Cloudflare and you would rather not point an A record directly at this VPS, or when you want Cloudflare's HTTPS and protection sitting in front of the site.
 
-If you just want your own domain with a padlock and no Cloudflare in the middle, you do not need any of this. Point an A record at your VPS and use Let's Encrypt: [Domains and HTTPS](domains-and-ssl.md).
+If you want your own domain with a padlock and no Cloudflare in the middle, you do not need any of this. Point an A record at your VPS and use Let's Encrypt: [Domains and HTTPS](domains-and-ssl.md).
 
 ## Before you start
 
@@ -16,9 +16,10 @@ Three things must be true:
 - The project was deployed from a repository, so it runs in its own container. A site on another kind of hosting account cannot use a Cloudflare tunnel.
 - The hostname you want is in a zone in your Cloudflare account, and is not already in use on this engine.
 
-You also need a **Cloudflare API token**. A tunnel needs these two permissions:
+You also need a **Cloudflare API token**. A tunnel needs these three permissions:
 
 - **Account · Cloudflare Tunnel · Edit**
+- **Zone · Zone · Read**, so the engine can find the hostname's zone
 - **Zone · DNS · Edit**
 
 If you also want to purge the cache or change the security level from the engine, add these two to the same token:
@@ -26,7 +27,7 @@ If you also want to purge the cache or change the security level from the engine
 - **Zone · Cache Purge · Purge**
 - **Zone · Zone Settings · Edit**
 
-Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. The engine's paste page repeats those steps when you open the link. A token with only the first two drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
+Create it in your Cloudflare dashboard, with the account and the zones selected under Resources. **Scope the token to one Cloudflare account.** A token that can see zones in more than one account is refused, and the answer names the accounts it found. Under Account Resources select the one account. The token may cover any number of zones in it. The engine's paste page repeats those steps when you open the link. A token with only the first three drives tunnels and DNS; the cache and security endpoints answer that the token is missing a permission until you add the other two.
 
 ## What you do, and what the engine does
 
@@ -64,13 +65,13 @@ Cloudflare caches your site at its edge. After a content change you can ask it t
 
 - **Purge everything.** Clears the whole cache for the zone the domain is in. The next visitor gets a fresh copy from the engine. Refused while another project on this engine has a name in the same zone (the project's own staging copy does not count): purge single files then.
 - **Purge single files.** Clears up to 30 URLs, for example the stylesheet and the page that changed. Each URL must be on one of the project's own names: its domains, their aliases or its tunnel hostnames.
-- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high`, or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over. The level applies to the whole zone, so it is refused while another project on this engine has a name in the same zone (the project's own staging copy does not count); change it in the Cloudflare dashboard then.
+- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high` or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over. The level applies to the whole zone, so it is refused while another project on this engine has a name in the same zone (the project's own staging copy does not count); change it in the Cloudflare dashboard then.
 
 Each action names one of the project's domains or aliases, and works on the Cloudflare zone that exact name is in: an alias in another zone acts on that zone, not on the main domain's.
 
 The engine reads the current value first, so a page can show the level before you change it. The same page reports whether the domain's DNS record is proxied through Cloudflare; if it is not, visitors are going straight to the engine and the cache is not in the way.
 
-These actions use the project's Cloudflare API token, and only a project deployed from a repository into its own container can hold one, as for tunnels. Traditional PHP hosting cannot use them. They are refused until the token has **Zone · Cache Purge · Purge** and **Zone · Zone Settings · Edit**. A refusal names the permission the call needed: reading the status needs Zone Settings Read and Zone DNS Read, which the **Edit** permissions above include.
+These actions use the project's Cloudflare API token, and only a project deployed from a repository into its own container can hold one, as for tunnels. Traditional PHP hosting cannot use them. They are refused until the token has **Zone · Cache Purge · Purge** and **Zone · Zone Settings · Edit**, and every one of them first finds the domain's zone, which needs **Zone · Zone · Read**. A refusal names the permission the call needed: reading the status needs Zone Settings Read and Zone DNS Read, which the **Edit** permissions above include.
 
 ## Check it worked
 
@@ -84,7 +85,7 @@ List the tunnel hostnames on this project's domain.
 
 ## Remove a hostname or the token
 
-A hostname stays until you remove it, unless you gave it a lifetime when you attached it ("for 7 days", from 5 minutes to 30 days). The engine then removes it, including the DNS record at Cloudflare. For a short-lived address without a Cloudflare account, ask for a preview address instead: [A preview address](domains-and-ssl.md#a-preview-address).
+A hostname stays until you remove it, unless you gave it a lifetime when you attached it ("for 7 days", from 5 minutes to 30 days). When that time is up the engine removes it, to within a few seconds, including the DNS record at Cloudflare. For a short-lived address without a Cloudflare account, ask for a preview address instead: [A preview address](domains-and-ssl.md#a-preview-address).
 
 To stop serving a name through Cloudflare:
 
@@ -108,7 +109,7 @@ If tunnel hostnames still exist, clearing the token is refused, so you are not l
 Save the token first, then attach the hostname. Two steps, in that order.
 
 **Saving the token fails.**
-The token is missing one of the two required permissions, or it belongs to a different Cloudflare account than the one that owns the zone.
+The token is missing one of the three required permissions, or it belongs to a different Cloudflare account than the one that owns the zone. If the answer lists several accounts, the token sees more than one: edit it in Cloudflare so Account Resources names a single account, then save it again.
 
 **"That hostname is already in use."**
 The name already exists on this engine. Pick a free name in your Cloudflare zone, and do not add it as a normal domain first: attach it to the domain the project already has.
@@ -117,7 +118,7 @@ The name already exists on this engine. Pick a free name in your Cloudflare zone
 The site is not running in a container. Deploy it from a repository, or point an A record at your VPS and use Let's Encrypt instead.
 
 **A cache purge or security-level change says Cloudflare is rate-limiting the token, or could not be reached.**
-Nothing was changed. Wait a few minutes and try again. A missing permission is named instead, and a request Cloudflare refused for another reason carries Cloudflare's own message.
+Nothing was changed. Wait a few minutes and try again. A missing permission is named instead of a general "invalid token" message, and a request Cloudflare refused for another reason carries Cloudflare's own message.
 
 **Visitors see a Cloudflare certificate, not my project's.**
 Expected. HTTPS terminates at Cloudflare, so the project's own certificate is not the one visitors see.
@@ -130,7 +131,7 @@ Do not. Ask it to send a paste link on the engine instead.
 
 ## More requests to try
 
-These need a Cloudflare account with a zone and a token with the two permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
+These need a Cloudflare account with a zone and a token with the three permissions named above. **Mode** is the lowest permission mode that allows it: read, modify or full ([Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do)).
 
 **Save the token without pasting it**
 
@@ -157,6 +158,15 @@ Clear the Cloudflare token on tshop while a tunnel hostname still exists.
 ```
 
 Mode: full. Tools: `project_setting_delete`. Check: the call is refused, and the assistant offers removing the hostnames first. `force` is used only when asked for.
+
+**Check the token before attaching**
+
+```text
+Save a Cloudflare API token on tshop, then tell me which Cloudflare account it
+belongs to and whether it is missing a permission.
+```
+
+Mode: modify. Tools: `vault_secret_create`, `project_setting_set`, `project_setting_get`. Check: the answer names the token's Cloudflare account, and a token that sees several accounts is refused with the accounts named.
 
 ## From the server
 

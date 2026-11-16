@@ -22,10 +22,10 @@ final class RecordingMechanics implements DeployMechanics
     public bool $hasGit = false;
     public ?string $envHint = null;
 
-    /** @var list<string> */
+    /** @var list<\App\Lib\Findings\Finding> */
     public array $serving = [];
 
-    /** @var list<string> */
+    /** @var list<\App\Lib\Findings\Finding> */
     public array $publicUrl = [];
 
     /** @var list<string> */
@@ -34,7 +34,7 @@ final class RecordingMechanics implements DeployMechanics
     /** @var list<string> the order of recording and syncing on a redeploy */
     public array $runningVersionOrder = [];
 
-    /** @var list<string> */
+    /** @var list<\App\Lib\Findings\Finding> */
     public array $partialWarnings = [];
 
     public function __construct(
@@ -89,6 +89,11 @@ final class RecordingMechanics implements DeployMechanics
     public function recordRunningVersion(): void
     {
         $this->runningVersionOrder[] = 'record';
+    }
+
+    public function repairAccountMapping(): void
+    {
+        $this->calls[] = 'repairAccountMapping';
     }
 
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void

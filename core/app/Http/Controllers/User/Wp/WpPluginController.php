@@ -250,7 +250,8 @@ class WpPluginController extends WordPressController
         path: '/projects/{username}/wp/plugins/install',
         summary: 'Install a WordPress plugin',
         description: 'Installs a plugin by slug. Optional `force` reinstalls over an existing copy. '
-            .'Optional `path` selects the install.',
+            .'Optional `path` selects the install. A field the body does not take is refused with 422 '
+            .'(`unknown_field`), naming it, rather than ignored.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -286,7 +287,7 @@ class WpPluginController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The body has a field this call does not take (`unknown_field`), WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function install(string $username, WpPluginInstallRequest $request): JsonResponse
@@ -432,7 +433,13 @@ class WpPluginController extends WordPressController
     #[OA\Delete(
         path: '/projects/{username}/wp/plugins/{plugin}',
         summary: 'Delete a WordPress plugin',
-        description: 'Deletes an installed plugin by slug. Optional `path` selects the install.',
+        description: 'Deletes an installed plugin by slug the way WordPress\'s own Delete does: the plugin is '
+            .'deactivated and its uninstall runs before its files are deleted, so a page-cache plugin takes its '
+            .'dropin and its `WP_CACHE` with it. The settings the plugin\'s uninstall removes are gone and whatever '
+            .'it leaves stays. A plugin whose uninstall fails, such as one that breaks the site when loaded, has its '
+            .'files deleted without loading any plugin, and the answer says its uninstall did not run. The engine '
+            .'keeps no copy of the files; this cannot be undone. Ask the operator to confirm first. Optional `path` '
+            .'selects the install.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [

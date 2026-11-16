@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('firewall_trusted_delete')]
 #[Description(<<<'MARKDOWN'
     Stop trusting an address
+
+    The trusted entry goes and is not kept, so the address has to be trusted again. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

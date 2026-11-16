@@ -3,31 +3,19 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * A compose file kept in a subdirectory (`docker/compose.yml`,
- * `deploy/docker-compose.yml`), run from the project root.
- *
- * Compose resolves a file's relative paths against its own directory, but the
- * engine runs every stack with `--project-directory ~/project` and writes the
- * run file there. So the nested file's paths are rewritten to mean the same
- * thing from the root: WikiDocs' `context: ..` becomes `.`, a `./data` bind
- * becomes `./docker/data`.
- *
- * No Laravel dependencies — unit-testable.
+ * A compose file kept in a subdirectory (`docker/compose.yml`), run from the project root, with its
+ * relative paths rewritten to mean the same from there (`context: ..` becomes `.`).
  */
 final class NestedCompose
 {
     /**
-     * Directories a repository keeps its deployment compose in. A closed list:
-     * an open walk finds test stacks (`ws-tests/`), dev containers and docs.
+     * Directories a repository keeps its deployment compose in; closed, as an open walk finds test stacks.
      *
      * @var list<string>
      */
     public const DIRECTORIES = ['docker', '.docker', 'deploy', 'deployment', 'docker-compose', 'compose'];
 
-    /**
-     * $composePath's directory relative to $projectDir (`docker`), or null
-     * when the file sits at the root or outside the project.
-     */
+    /** $composePath's directory relative to $projectDir (`docker`), or null at the root or outside it. */
     public static function relativeDir(string $composePath, string $projectDir): ?string
     {
         $root = rtrim($projectDir, '/').'/';
@@ -57,6 +45,17 @@ final class NestedCompose
                 }
             }
         }
+        $compose = self::withFilesRebased($compose, $relativeDir);
+
+        return self::withIncludesRebased($compose, $relativeDir);
+    }
+
+    /**
+     * @param  array<string, mixed>  $compose
+     * @return array<string, mixed>
+     */
+    private static function withFilesRebased(array $compose, string $relativeDir): array
+    {
         foreach (['configs', 'secrets'] as $section) {
             if (! is_array($compose[$section] ?? null)) {
                 continue;
@@ -67,6 +66,16 @@ final class NestedCompose
                 }
             }
         }
+
+        return $compose;
+    }
+
+    /**
+     * @param  array<string, mixed>  $compose
+     * @return array<string, mixed>
+     */
+    private static function withIncludesRebased(array $compose, string $relativeDir): array
+    {
         if (is_array($compose['include'] ?? null)) {
             foreach ($compose['include'] as $i => $include) {
                 if (is_string($include)) {
@@ -86,11 +95,35 @@ final class NestedCompose
      */
     private static function rebaseService(array $service, string $relativeDir): array
     {
+        $service = self::withBuildRebased($service, $relativeDir);
+
+        if (is_array($service['volumes'] ?? null)) {
+            foreach ($service['volumes'] as $i => $volume) {
+                $service['volumes'][$i] = self::rebaseVolume($volume, $relativeDir);
+            }
+        }
+
+        $service = self::withEnvFileRebased($service, $relativeDir);
+
+        if (is_array($service['extends'] ?? null) && is_string($service['extends']['file'] ?? null)) {
+            $service['extends']['file'] = self::path($service['extends']['file'], $relativeDir);
+        }
+
+        return $service;
+    }
+
+    /**
+     * `dockerfile` is relative to the context, so it moves with it.
+     *
+     * @param  array<string, mixed>  $service
+     * @return array<string, mixed>
+     */
+    private static function withBuildRebased(array $service, string $relativeDir): array
+    {
         $build = $service['build'] ?? null;
         if (is_string($build)) {
             $service['build'] = self::path($build, $relativeDir);
         } elseif (is_array($build)) {
-            // `dockerfile` is relative to the context, so it moves with it.
             $service['build']['context'] = self::path(is_string($build['context'] ?? null) ? $build['context'] : '.', $relativeDir);
             if (is_array($build['additional_contexts'] ?? null)) {
                 foreach ($build['additional_contexts'] as $key => $context) {
@@ -101,12 +134,15 @@ final class NestedCompose
             }
         }
 
-        if (is_array($service['volumes'] ?? null)) {
-            foreach ($service['volumes'] as $i => $volume) {
-                $service['volumes'][$i] = self::rebaseVolume($volume, $relativeDir);
-            }
-        }
+        return $service;
+    }
 
+    /**
+     * @param  array<string, mixed>  $service
+     * @return array<string, mixed>
+     */
+    private static function withEnvFileRebased(array $service, string $relativeDir): array
+    {
         $envFile = $service['env_file'] ?? null;
         if (is_string($envFile)) {
             $service['env_file'] = self::path($envFile, $relativeDir);
@@ -120,17 +156,10 @@ final class NestedCompose
             }
         }
 
-        if (is_array($service['extends'] ?? null) && is_string($service['extends']['file'] ?? null)) {
-            $service['extends']['file'] = self::path($service['extends']['file'], $relativeDir);
-        }
-
         return $service;
     }
 
-    /**
-     * Only a bind whose source starts with `.` is relative; anything else is a
-     * named volume, an absolute path or `~`, and means the same from anywhere.
-     */
+    /** Only a bind whose source starts with `.` is relative; anything else means the same from anywhere. */
     private static function rebaseVolume(mixed $volume, string $relativeDir): mixed
     {
         if (is_string($volume)) {
@@ -150,10 +179,7 @@ final class NestedCompose
         return $volume;
     }
 
-    /**
-     * $path as written in the nested file, as a `./`-relative path from the
-     * root. Absolute paths, URLs and interpolations are left alone.
-     */
+    /** $path as written in the nested file, `./`-relative from the root; absolute paths, URLs and interpolations stay. */
     public static function path(string $path, string $relativeDir): string
     {
         $trimmed = trim($path);

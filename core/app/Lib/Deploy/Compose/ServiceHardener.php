@@ -11,23 +11,17 @@ use App\Lib\Deploy\Sidecar\SidecarEngine;
 use Symfony\Component\Yaml\Tag\TaggedValue;
 
 /**
- * Makes one service from a customer's compose file safe to run inside an
- * account: removes what would escape the isolation boundary or reach the inner
- * Docker daemon, and caps what it may consume.
+ * Makes one service from a customer's compose file safe to run inside an account: removes what would
+ * escape the isolation boundary or reach the inner Docker daemon, and caps what it may consume.
  */
 final class ServiceHardener
 {
     /**
-     * Options that escape isolation, hand over the daemon, or opt out of the
-     * account's cgroup view, runtime or OOM handling. None of them is ever
-     * needed by an application service; `privileged` means little while the
-     * capabilities it implies can be asked for one at a time.
+     * Escapes and cgroup/runtime/OOM opt-outs, denied so new keys survive; `privileged`: its caps go singly.
+     * An `extends` here skipped the file reader and merges unhardened; `storage_opt` fails off xfs+pquota.
      *
-     * A denylist on purpose: an allowlist would drop every Compose key added
-     * since (`post_start`, `gpus`, ...). Bind sources are an allowlist
-     * ({@see isForbiddenSource()}), `cap_add` too ({@see withSafeCapabilities()}).
-     * An `extends` left here came through a path with no file reader and would
-     * merge in an unhardened service. `storage_opt` only fails off xfs+pquota.
+     * @see MountSourcePolicy bind sources, an allowlist
+     * @see withSafeCapabilities() `cap_add`, an allowlist
      *
      * @var list<string>
      */
@@ -52,11 +46,8 @@ final class ServiceHardener
     ];
 
     /**
-     * Docker's default capability set, plus NET_ADMIN. Re-adding one after
-     * `cap_drop: [ALL]` never exceeds a default container's reach, so these
-     * are all `cap_add` may keep. NET_ADMIN only administers the service's own
-     * network namespace, and binaries carrying it as a file capability fail
-     * execve without it.
+     * Docker's defaults, which `cap_add` may re-add without exceeding a default container's reach, and
+     * NET_ADMIN, safe in the service's own netns and needed by binaries carrying it as a file capability.
      *
      * @var list<string>
      */
@@ -75,23 +66,10 @@ final class ServiceHardener
     private const NAMESPACED_SYSCTLS = ['net.ipv4.ping_group_range', 'net.ipv4.ip_unprivileged_port_start'];
 
     /**
-     * Docker's default lets any group open ICMP sockets, but a daemon in a user
-     * namespace (the account's) skips it, so non-root ping fails. The upper end
-     * is the account's own gid range.
+     * Docker's default lets any group open ICMP sockets, but a daemon in the account's user namespace
+     * skips it, so non-root ping fails. The upper end is the account's own gid range.
      */
     private const PING_GROUP_RANGE = '0 65535';
-
-    /** @var list<string> */
-    private const DOCKER_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock'];
-
-    /**
-     * The socket itself, and the directories it sits in: `- /var/run:/var/run`
-     * mounts the socket without naming it.
-     */
-    private const DOCKER_SOCKET_PATTERN = '#(^|:)\s*/(?:var/)?run(?:/docker\.sock)?(?:/)?(?::|$)#';
-
-    /** The account's own writable tree, trusted like `leavesProject()` documents. */
-    private const PANELALPHA_DIR = '.panelalpha';
 
     /**
      * The account's hard RLIMIT_NOFILE (Docker's default, measured in an
@@ -122,9 +100,8 @@ final class ServiceHardener
     public const LOG_OPTIONS = ['max-size' => '10m', 'max-file' => '3'];
 
     /**
-     * Thread pools sized from the visible core count (OpenMP, MKL, OpenBLAS).
-     * A CPU quota does not hide the host's cores, so without these a pool runs
-     * one thread per host core under a fraction of one.
+     * Thread pools sized from the visible core count (OpenMP, MKL, OpenBLAS): a CPU quota does not hide
+     * the host's cores, so without these a pool runs a thread per host core under a fraction of one.
      *
      * @var list<string>
      */
@@ -134,9 +111,6 @@ final class ServiceHardener
 
     /** The tag in `name:tag@digest`, which only fails the reference checks. */
     private const TAG_BEFORE_DIGEST = '#:[\w][\w.-]*(?=@sha256:)#';
-
-    /** `~` and $HOME are root's home, or the account's, which holds ~/docker. */
-    private const HOME_REFERENCE = '#^(~|\$HOME\b|\$\{HOME\})#';
 
     /** A short-syntax port's `[::]:` host prefix. */
     private const IPV6_WILDCARD = '/^\s*\[\s*::\s*\]:/';
@@ -162,8 +136,8 @@ final class ServiceHardener
         $service = self::withRestartPolicy($service);
         $service = self::withLogRotation($service);
         $service = self::withoutDeployResources($service);
-        $service = self::withMemoryLimit($name, $service, $accountMemoryMb);
-        $service = self::withNodeHeapCap($name, $service, $accountMemoryMb, $imageEnvironment);
+        $service = self::withMemoryLimit($name, $service, $accountMemoryMb, $env);
+        $service = self::withNodeHeapCap($name, $service, $accountMemoryMb, $imageEnvironment, $env);
         $service = self::withReachablePublishedPorts($service, $keepLoopbackPorts);
         $service = self::withLegacyPostgresDataDir($service);
         $service = self::withPingGroupRange($service);
@@ -199,9 +173,8 @@ final class ServiceHardener
     }
 
     /**
-     * `network_mode: host` is removed by {@see withoutEscapes()}, and a service
-     * that relied on it publishes nothing, so the port its `PORT` env names is
-     * published instead.
+     * `network_mode: host` is removed by {@see withoutEscapes()}, leaving a service that relied on it
+     * publishing nothing, so the port its `PORT` env names is published instead.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -241,12 +214,8 @@ final class ServiceHardener
     }
 
     /**
-     * postgres 18+ keeps its data under /var/lib/postgresql/18/docker and
-     * refuses to start when /var/lib/postgresql/data is a mount point.
-     * Files written for 17 and earlier mount
-     * exactly there, and an unpinned `postgres` tag now resolves to 18. Naming
-     * the mount as PGDATA skips that check and keeps the data where the volume
-     * is; on 17 and earlier it is the image's own default, so nothing changes.
+     * postgres 18+ refuses to start when /var/lib/postgresql/data, where files for 17 mount, is a mount
+     * point; naming it as PGDATA skips that check, and on 17 and earlier it is the default anyway.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -284,13 +253,8 @@ final class ServiceHardener
     }
 
     /**
-     * A loopback host in a port entry means "unreachable" here, not "private":
-     * the account container is the boundary and the proxy reaches the app across
-     * its own network. PortMapping discards the binding, so the app publishes no
-     * port the engine can find and detection falls back to a dead default.
-     *
-     * With $keepLoopback (another service in the file publishes a web port) a
-     * loopback binding is a sidecar kept local on purpose, and stays.
+     * A loopback host is dropped, as the account container is the boundary: PortMapping would discard the
+     * binding, leaving detection a dead default. With $keepLoopback (another web port published) it stays.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -330,9 +294,8 @@ final class ServiceHardener
     }
 
     /**
-     * Docker publishes `[::]` on IPv6 only, and the proxy and the health check
-     * reach the account over IPv4, so such a port is published on every
-     * address unless another entry already publishes it there.
+     * Docker publishes `[::]` on IPv6 only while the proxy and health check use IPv4, so such a port
+     * is published on every address unless another entry already publishes it there.
      *
      * @param  array<int, true>  $publishedOutsideIpv6
      */
@@ -384,9 +347,8 @@ final class ServiceHardener
     }
 
     /**
-     * `${HTTP_WEB_PORT}:80` with the variable unset publishes 80 on a random
-     * host port the engine cannot know. It defaults to the container port,
-     * `${HTTP_WEB_PORT:-80}:80`, so an operator who sets it still chooses.
+     * `${HTTP_WEB_PORT}:80` with the variable unset publishes on a random host port, so it defaults to
+     * the container port, `${HTTP_WEB_PORT:-80}:80`, and an operator who sets it still chooses.
      */
     private static function withDefaultedHostPort(string $port): string
     {
@@ -433,9 +395,8 @@ final class ServiceHardener
     }
 
     /**
-     * A short-syntax entry without its loopback host; the ports stay as the
-     * file wrote them, so an operator who sets `${PORT}` still chooses. Only a
-     * bracketed IPv6 host or the brace-aware three-field form carries a host.
+     * A short-syntax entry without its loopback host, ports as written. Only a bracketed IPv6 host or
+     * the brace-aware three-field form carries a host.
      */
     private static function withoutLoopbackHost(string $port): string
     {
@@ -466,14 +427,6 @@ final class ServiceHardener
     private static function isLoopbackHost(string $host): bool
     {
         return PortMapping::isLoopbackHost($host);
-    }
-
-    /** A source compose reads as a path, spelled so it is checked as one: `data` is `./data`. */
-    private static function asPath(string $source): string
-    {
-        $source = trim($source);
-
-        return $source === '' || preg_match('#^[./~$]#', $source) === 1 ? $source : './'.$source;
     }
 
     /**
@@ -540,7 +493,7 @@ final class ServiceHardener
         }
         $kept = array_values(array_filter(
             $service['volumes'],
-            static fn ($volume): bool => ! self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
+            static fn ($volume): bool => ! MountSourcePolicy::isForbiddenMount($volume, $env, $accountUser, $projectDir)
         ));
 
         return self::withListOrWithout($service, 'volumes', $kept);
@@ -575,7 +528,7 @@ final class ServiceHardener
     {
         $forbidden = [];
         foreach (is_array($service['volumes'] ?? null) ? $service['volumes'] : [] as $volume) {
-            if (self::isForbiddenMount($volume, $env, $accountUser, $projectDir)) {
+            if (MountSourcePolicy::isForbiddenMount($volume, $env, $accountUser, $projectDir)) {
                 $forbidden[] = is_string($volume) ? $volume : (string) json_encode($volume, JSON_UNESCAPED_SLASHES);
             }
         }
@@ -584,10 +537,8 @@ final class ServiceHardener
     }
 
     /**
-     * Top-level secrets and configs whose `file:` is a forbidden source, or
-     * interpolates to one, removed: Compose bind-mounts that file into every
-     * service that names the entry. The services' references to a removed
-     * entry go too, or Compose refuses the file as "refers to undefined secret".
+     * Secrets/configs whose `file:` is or interpolates to a forbidden source, which Compose bind-mounts into
+     * each service naming it; removed with their references, or Compose fails "refers to undefined secret".
      *
      * @param  array<string, mixed>  $compose
      * @param  array<string, list<?string>|string>  $env
@@ -623,7 +574,7 @@ final class ServiceHardener
         $removed = [];
         foreach ($entries as $name => $entry) {
             $file = self::fileOfEntry($entry);
-            if ($file !== null && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
+            if ($file !== null && MountSourcePolicy::isForbiddenSourceIn(MountSourcePolicy::asPath($file), $env, $accountUser, $projectDir)) {
                 unset($entries[$name]);
                 $names[] = (string) $name;
                 $removed[] = rtrim($section, 's')." {$name}: file {$file}";
@@ -721,10 +672,8 @@ final class ServiceHardener
     }
 
     /**
-     * An account cannot raise RLIMIT_MEMLOCK above its own 8 MB, so runc refuses
-     * to start a service asking for Elasticsearch's documented `memlock: -1`.
-     * Dropping it leaves the account's limit, which is what any lower request
-     * would have got anyway.
+     * An account cannot raise RLIMIT_MEMLOCK above its own 8 MB, so runc refuses Elasticsearch's
+     * documented `memlock: -1`; dropping it leaves the account's limit, which any request gets anyway.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -741,9 +690,8 @@ final class ServiceHardener
     }
 
     /**
-     * `nofile` above the account's own hard limit lowered to it, as the
-     * memlock request is dropped: the service gets what it could have anyway
-     * instead of a raw OCI error. -1 (unlimited) counts as above.
+     * `nofile` above the account's own hard limit lowered to it, so the service gets what it could have
+     * anyway instead of a raw OCI error. -1 (unlimited) counts as above.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -773,9 +721,8 @@ final class ServiceHardener
     }
 
     /**
-     * Keeps the `cap_add` entries in {@see DEFAULT_CAPABILITIES}, so a service
-     * that drops everything and adds back CHOWN/SETUID/SETGID can still drop to
-     * its own user. ALL, SYS_ADMIN and the rest are removed.
+     * Keeps the `cap_add` entries in {@see DEFAULT_CAPABILITIES}, so a service that drops everything and
+     * adds back CHOWN/SETUID/SETGID can still drop to its own user. ALL, SYS_ADMIN and the rest go.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -888,11 +835,10 @@ final class ServiceHardener
     }
 
     /**
-     * `unless-stopped` for a service that publishes a port and names no policy.
-     * One that publishes none keeps compose's own default, so a helper such as
-     * a `wp shell` container exits once instead of restarting forever. A
-     * service others depend on or reach by name was given the policy before
-     * this, by {@see ComposeHarden::applyReporting()}.
+     * `unless-stopped` for a service that publishes a port and names no policy; one publishing none,
+     * such as a `wp shell` helper, keeps compose's default and exits instead of restarting forever.
+     *
+     * @see ComposeHarden::applyReporting() which gives the policy to services others depend on
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -913,9 +859,8 @@ final class ServiceHardener
     }
 
     /**
-     * Docker's json-file driver keeps a container's log forever, inside the
-     * account's quota, so a chatty app fills it. A service that names another
-     * driver, or sizes its own, is left as it is.
+     * Docker's json-file driver keeps a container's log forever, inside the account's quota. A service
+     * naming another driver, or sizing its own, is left as it is.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -941,11 +886,8 @@ final class ServiceHardener
     }
 
     /**
-     * `deploy.resources` says the same thing as `mem_limit` / `cpus` /
-     * `pids_limit`, and a service carrying both with different values fails the
-     * whole project with `can't set distinct values on 'pids_limit' and
-     * 'deploy.resources.limits.pids'`. The author's numbers move into the keys
-     * used above; other `deploy:` keys are Swarm's and inert here.
+     * `deploy.resources` moved into `mem_limit` / `cpus` / `pids_limit`: both with different values fail
+     * the project with `can't set distinct values`. Other `deploy:` keys are Swarm's and inert here.
      *
      * @param  array<string, mixed>  $service
      * @return array<string, mixed>
@@ -990,29 +932,95 @@ final class ServiceHardener
 
     /**
      * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
      * @return array<string, mixed>
      */
-    private static function withMemoryLimit(string $name, array $service, ?int $accountMemoryMb = null): array
+    private static function withMemoryLimit(string $name, array $service, ?int $accountMemoryMb = null, array $env = []): array
     {
         if (! isset($service['mem_limit']) && ! isset($service['mem_reservation'])) {
             $service['mem_limit'] = ServiceLimits::memoryFor($name, $service, $accountMemoryMb);
+        }
+
+        return self::withMemoryHeldToAccount($service, $accountMemoryMb, $env);
+    }
+
+    /**
+     * A limit or reservation above the account's is held to what the account leaves its services, so the
+     * container's own cgroup, and the heap sized from it, match what it can really use.
+     *
+     * @param  array<string, mixed>  $service
+     * @param  array<string, list<?string>|string>  $env
+     * @return array<string, mixed>
+     */
+    private static function withMemoryHeldToAccount(array $service, ?int $accountMemoryMb, array $env): array
+    {
+        foreach (['mem_limit', 'mem_reservation'] as $key) {
+            if (isset($service[$key])) {
+                $service[$key] = self::memoryHeldToAccount($service[$key], $accountMemoryMb, $env);
+            }
         }
 
         return $service;
     }
 
     /**
-     * Applied when the service is recognisably Node or builds from source (no
-     * `image:` to match on): a stray NODE_OPTIONS on a non-Node process is inert.
+     * An interpolated size is held only when every value Compose can give it is above the ceiling.
      *
-     * A service's `environment:` replaces the image's own NODE_OPTIONS (which
-     * may load the app, e.g. `--require` for Yarn PnP), so the cap is appended to it.
+     * @param  mixed  $limit
+     * @param  array<string, list<?string>|string>  $env
+     * @return mixed
+     */
+    private static function memoryHeldToAccount($limit, ?int $accountMemoryMb, array $env)
+    {
+        if (! self::isInterpolated($limit)) {
+            return ServiceLimits::heldToAccount($limit, $accountMemoryMb);
+        }
+
+        $candidates = ComposeInterpolation::candidates($limit, $env) ?? [];
+        $held = array_map(static fn (string $size) => ServiceLimits::heldToAccount($size, $accountMemoryMb), $candidates);
+        foreach ($candidates as $i => $size) {
+            if ($held[$i] === $size) {
+                return $limit;
+            }
+        }
+
+        return $held[0] ?? $limit;
+    }
+
+    /**
+     * The smallest size an interpolated limit can take, so the heap fits whichever one Compose picks.
+     *
+     * @param  mixed  $limit
+     * @param  array<string, list<?string>|string>  $env
+     * @return mixed
+     */
+    private static function smallestMemory($limit, array $env)
+    {
+        if (! self::isInterpolated($limit)) {
+            return $limit;
+        }
+
+        $sizes = array_map(ServiceLimits::toMegabytes(...), ComposeInterpolation::candidates($limit, $env) ?? []);
+
+        return $sizes === [] || in_array(null, $sizes, true) ? $limit : min($sizes).'m';
+    }
+
+    /** @param  mixed  $value */
+    private static function isInterpolated($value): bool
+    {
+        return is_string($value) && str_contains($value, '$');
+    }
+
+    /**
+     * For a Node service or a local build (stray NODE_OPTIONS elsewhere are inert), appended to the
+     * image's own NODE_OPTIONS (Yarn PnP's `--require`), since an `environment:` one replaces it.
      *
      * @param  array<string, mixed>  $service
      * @param  (callable(string): list<string>)|null  $imageEnvironment  an image's `Config.Env`
+     * @param  array<string, list<?string>|string>  $env
      * @return array<string, mixed>
      */
-    private static function withNodeHeapCap(string $name, array $service, ?int $accountMemoryMb = null, ?callable $imageEnvironment = null): array
+    private static function withNodeHeapCap(string $name, array $service, ?int $accountMemoryMb = null, ?callable $imageEnvironment = null, array $env = []): array
     {
         if (ServiceEnvironment::hasKey($service['environment'] ?? null, 'NODE_OPTIONS')) {
             return $service;
@@ -1028,7 +1036,7 @@ final class ServiceHardener
 
         $limit = $service['mem_limit'] ?? $service['mem_reservation']
             ?? ServiceLimits::memoryFor($name, $service, $accountMemoryMb);
-        $cap = '--max-old-space-size='.ServiceLimits::nodeHeapMbFor($limit);
+        $cap = '--max-old-space-size='.ServiceLimits::nodeHeapMbFor(self::smallestMemory($limit, $env));
         $service['environment'] = ServiceEnvironment::withDefaults(
             $service['environment'] ?? [],
             ['NODE_OPTIONS' => self::nodeOptionsWithCap($own, $cap)]
@@ -1044,8 +1052,7 @@ final class ServiceHardener
     }
 
     /**
-     * NODE_OPTIONS the service's image sets for itself; null when it sets none,
-     * the service builds its own, or the image could not be read. A
+     * NODE_OPTIONS the service's image sets, or null when none, built locally or unreadable. A
      * `name:tag@digest` reference is looked up by its digest alone.
      *
      * @param  array<string, mixed>  $service
@@ -1085,9 +1092,8 @@ final class ServiceHardener
     }
 
     /**
-     * A healthcheck tuned for an unthrottled container, on a service the CPU cap
-     * will slow down (`retries: 1` and no start period may never pass under
-     * 0.5 CPU). Probes failing in a start period do not count.
+     * A healthcheck tuned for an unthrottled container on a CPU-capped service (`retries: 1`, no start
+     * period may never pass under 0.5 CPU); a start period fixes it, as probes failing in it do not count.
      *
      * @param  array<string, mixed>  $service
      */
@@ -1131,9 +1137,8 @@ final class ServiceHardener
     }
 
     /**
-     * An `image:` naming a runtime that is definitely not Node. Absence of
-     * `image:` means the service builds locally and tells us nothing. The
-     * sidecar catalogue already knows which images are datastores.
+     * An `image:` naming a runtime that is definitely not Node; no `image:` means a local build, which
+     * tells us nothing.
      *
      * @param  array<string, mixed>  $service
      */
@@ -1154,244 +1159,5 @@ final class ServiceHardener
     private static function isDatabase(string $name, array $service = []): bool
     {
         return SidecarEngine::isKnownDatastore($name, $service);
-    }
-
-    /**
-     * {@see isForbiddenSource()} for a source Compose will interpolate: every
-     * value it can take is checked, and one that cannot be told is refused.
-     * `${DATA_DIR:-./data}` stays allowed; `${X:-/var/run}` does not.
-     *
-     * @param  array<string, list<?string>|string>  $env
-     */
-    private static function isForbiddenSourceIn(string $source, array $env, ?string $accountUser = null, ?string $projectDir = null): bool
-    {
-        if (! str_contains($source, '$')) {
-            return self::isForbiddenSource($source, $accountUser, $projectDir);
-        }
-        $candidates = ComposeInterpolation::candidates($source, $env);
-        if ($candidates === null) {
-            return true;
-        }
-        foreach ($candidates as $candidate) {
-            if (preg_match(self::DOCKER_SOCKET_PATTERN, trim($candidate)) === 1 || self::isForbiddenSource($candidate, $accountUser, $projectDir)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param  array<string, list<?string>|string>  $env
-     */
-    private static function isForbiddenMount(mixed $volume, array $env = [], ?string $accountUser = null, ?string $projectDir = null): bool
-    {
-        if (is_string($volume)) {
-            return self::isForbiddenShortMount($volume, $env, $accountUser, $projectDir);
-        }
-
-        return is_array($volume) && self::isForbiddenLongMount($volume, $env, $accountUser, $projectDir);
-    }
-
-    /**
-     * Compose interpolates the whole entry and only then splits it, so each
-     * value it can take is split as Compose splits it ({@see ShortVolume}):
-     * `- /var/lib/mysql` is an anonymous volume, `- /{/../etc:/x}` binds /etc.
-     *
-     * @param  array<string, list<?string>|string>  $env
-     */
-    private static function isForbiddenShortMount(string $volume, array $env, ?string $accountUser, ?string $projectDir): bool
-    {
-        if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
-            return true;
-        }
-        $entries = ComposeInterpolation::candidates(trim($volume), $env);
-        if ($entries === null) {
-            return true;
-        }
-        foreach ($entries as $entry) {
-            if (self::isForbiddenShortEntry($entry, $accountUser, $projectDir)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /** Only the source side is a host path; a named volume has no leading slash and is not one of these. */
-    private static function isForbiddenShortEntry(string $entry, ?string $accountUser, ?string $projectDir): bool
-    {
-        if (preg_match(self::DOCKER_SOCKET_PATTERN, $entry) === 1) {
-            return true;
-        }
-        $source = ShortVolume::source($entry);
-
-        return $source !== null
-            && (ShortVolume::isWindowsPath($source) || self::isForbiddenSource($source, $accountUser, $projectDir));
-    }
-
-    /**
-     * A bind source is a path even without a leading `./`, and the socket's
-     * directory counts here too: `source: /var/run` hands over the daemon.
-     *
-     * @param  array<mixed>  $volume
-     * @param  array<string, list<?string>|string>  $env
-     */
-    private static function isForbiddenLongMount(array $volume, array $env, ?string $accountUser, ?string $projectDir): bool
-    {
-        $source = (string) ($volume['source'] ?? '');
-        $target = (string) ($volume['target'] ?? '');
-        if (($volume['type'] ?? null) === 'bind') {
-            $source = self::asPath($source);
-        }
-
-        return in_array($source, self::DOCKER_SOCKETS, true)
-            || in_array($target, self::DOCKER_SOCKETS, true)
-            || preg_match(self::DOCKER_SOCKET_PATTERN, trim($source)) === 1
-            || self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
-    }
-
-    /**
-     * A host path the account's own services never get. An absolute source is
-     * allowed only in the checkout or the account's ~/.panelalpha: everything
-     * else is the account container's own (its /home holds the inner daemon's
-     * data-root, /run its init's state, /usr the binaries its init runs as root),
-     * and a list of what to refuse would miss paths such as /tmp or /srv.
-     */
-    private static function isForbiddenSource(string $source, ?string $accountUser = null, ?string $projectDir = null): bool
-    {
-        $source = trim($source);
-        if (self::escapesThroughSymlink($source, $accountUser, $projectDir)) {
-            return true;
-        }
-        if (preg_match(self::HOME_REFERENCE, $source) === 1) {
-            return true;
-        }
-        if (str_starts_with($source, '.')) {
-            return self::leavesProject($source);
-        }
-        if (! str_starts_with($source, '/')) {
-            return false;
-        }
-
-        return self::isForbiddenAbsoluteSource(self::normalisedAbsolute($source), $accountUser, $projectDir);
-    }
-
-    /**
-     * Docker follows symlinks in a bind source, and a checkout keeps them.
-     * Not checked inside ~/.panelalpha: the account owns that tree, and being
-     * 0700 the engine often cannot stat into it, so {@see LinkedSource::escapes()}
-     * would refuse a bind that is allowed.
-     */
-    private static function escapesThroughSymlink(string $source, ?string $accountUser, ?string $projectDir): bool
-    {
-        return $projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
-            && ! self::isInOwnPanelalpha($source, $accountUser)
-            && LinkedSource::escapes($source, $projectDir);
-    }
-
-    /** Whether $source, relative or absolute, resolves into the account's ~/.panelalpha. */
-    private static function isInOwnPanelalpha(string $source, ?string $accountUser): bool
-    {
-        return str_starts_with($source, '/')
-            ? self::isOwnPanelalpha(self::normalisedAbsolute($source), $accountUser)
-            : self::relativeFirstSegment($source) === self::PANELALPHA_DIR;
-    }
-
-    /**
-     * $source is normalised, so `/home/u/.panelalpha/../docker` is /home/u/docker.
-     * The filesystem root is refused; ~/.panelalpha, the one writable tree a
-     * rebuild keeps, is allowed; anything else only inside the checkout.
-     */
-    private static function isForbiddenAbsoluteSource(string $source, ?string $accountUser, ?string $projectDir): bool
-    {
-        if ($source === '/') {
-            return true;
-        }
-        if (self::isOwnPanelalpha($source, $accountUser)) {
-            return false;
-        }
-        if ($projectDir === null || ! str_starts_with($projectDir, '/')) {
-            return true;
-        }
-        $checkout = self::checkoutInAccount($projectDir);
-
-        return $source !== $checkout && ! str_starts_with($source, $checkout.'/');
-    }
-
-    /** The checkout as the account container sees it, as LinkedSource maps it. */
-    private static function checkoutInAccount(string $projectDir): string
-    {
-        $projectDir = rtrim($projectDir, '/');
-
-        return '/home/'.basename(dirname($projectDir)).'/'.basename($projectDir);
-    }
-
-    /** Whether normalised absolute $source is the account's ~/.panelalpha or under it. */
-    private static function isOwnPanelalpha(string $source, ?string $accountUser): bool
-    {
-        if ($accountUser === null || preg_match('/^[a-z_][a-z0-9_.-]*$/i', $accountUser) !== 1) {
-            return false;
-        }
-        $keep = "/home/{$accountUser}/.panelalpha";
-
-        return $source === $keep || str_starts_with($source, $keep.'/');
-    }
-
-    private static function normalisedAbsolute(string $source): string
-    {
-        $segments = [];
-        foreach (explode('/', $source) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
-            }
-            if ($segment === '..') {
-                array_pop($segments);
-
-                continue;
-            }
-            $segments[] = $segment;
-        }
-
-        return '/'.implode('/', $segments);
-    }
-
-    /**
-     * A relative bind resolves against ~/project (the run file sits there), so
-     * `../../../etc` is /etc. One level up is the account's home: allowed
-     * (`../.panelalpha/...`, WeTTY's `../:/account`), except its docker/
-     * data-root; past `~` itself is not.
-     */
-    private static function leavesProject(string $source): bool
-    {
-        $first = self::relativeFirstSegment($source);
-
-        return $first === false || $first === 'docker';
-    }
-
-    /**
-     * The first path component once `.`/`..` are resolved against `~/project`:
-     * a name, null for `~` itself (e.g. `../`), or false for more `..` than
-     * there were parts to pop (past `~`).
-     */
-    private static function relativeFirstSegment(string $source): string|false|null
-    {
-        $segments = ['project'];
-        foreach (explode('/', $source) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
-            }
-            if ($segment === '..') {
-                if ($segments === []) {
-                    return false;
-                }
-                array_pop($segments);
-
-                continue;
-            }
-            $segments[] = $segment;
-        }
-
-        return $segments[0] ?? null;
     }
 }

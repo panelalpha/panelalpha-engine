@@ -15,7 +15,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('system_update')]
 #[Description(<<<'MARKDOWN'
-    Trigger a system update
+    Update the engine to its newest release
+
+    Replaces the engine's code with the newest release and restarts the engine stack: API and MCP clients disconnect for about a minute, while hosted sites keep running. It runs in the background and answers at once; read how it ended from `latest_update` in GET /system/info. A release older than the running one is refused (`result: refused`); a newer commit of the running version is installed as an update within the release, and when the newest release is the running commit nothing changes (`result: up_to_date`). A run that fails after replacing the engine's files puts the previous release back (`result: rolled_back`); database migrations the new release ran stay.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -47,7 +49,7 @@ class SystemUpdateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'license_key' => $schema->string(),
+            'license_key' => $schema->string()->description('Accepted for older callers; ignored'),
         ];
     }
 }

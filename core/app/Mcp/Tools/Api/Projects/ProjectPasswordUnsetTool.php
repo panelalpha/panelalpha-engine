@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('project_password_unset')]
 #[Description(<<<'MARKDOWN'
     Remove site password protection from a project
+
+    The stored password goes and is not kept, so the site answers anyone who reaches it; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

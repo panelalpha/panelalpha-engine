@@ -7,13 +7,17 @@ use App\Exceptions\ProblemException;
 use App\Http\Resources\UserResource;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogStream;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Host\ProjectMemory;
+use App\Jobs\ApplyEnvVars;
+use App\Lib\Project\ApiAccess;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
+use App\Lib\Project\PublicRouting\PublicRoutingGrants;
 use App\Models\Admin;
 use App\Models\Domain;
 use App\Models\Setting;
@@ -24,11 +28,14 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\ConsoleOutput;
 use Symfony\Component\Console\Output\StreamOutput;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
+use Tests\Support\RecordingFirewall;
 use Tests\TestCase;
 
 /**
@@ -52,11 +59,13 @@ class ProjectCreateCommandTest extends TestCase
         config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         // Settings are cached statically, across tests.
         Setting::clearRuntimeSettings();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
     {
         Setting::clearRuntimeSettings();
+        LocalRoot::answerByBroker();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
         parent::tearDown();
@@ -198,9 +207,8 @@ class ProjectCreateCommandTest extends TestCase
 
         $this->assertSame('', $out);
         $this->assertSame(['An SSH remote clones only with a project\'s deploy key, and a project has none until it '
-            . 'exists. Create the project without a repository, create its key with POST '
-            . '/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
-            . 'then connect the SSH remote with POST /projects/{name}/git/connect. '
+            . 'exists. Create the project without a repository, create its deploy key, add the public key to the '
+            . 'repository as a deploy key, then connect the SSH remote. '
             . 'Or use https://github.com/a/b.git, with a token if it is private.'], $errors);
         $this->assertNothingCreated();
     }
@@ -391,6 +399,162 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame('username', $input->nameField);
     }
 
+    public function test_full_privileges_without_a_container_project_is_refused_before_anything_is_created(): void
+    {
+        [$code, $out] = $this->create(['--project' => 'acme', '--domain' => 'acme.example.test', '--full-privileges' => true]);
+
+        $this->assertSame(1, $code);
+        $this->assertSame("--full-privileges needs a container project: give --repo, or --template=dind.\n", $out);
+        $this->assertNothingCreated();
+    }
+
+    public function test_full_privileges_are_granted_before_the_deploy_and_the_project_protected_after_it(): void
+    {
+        Queue::fake();
+        $firewall = new RecordingFirewall();
+        $this->app->instance(ApiAccess::class, new ApiAccess(firewall: $firewall));
+        $atDeploy = [];
+        $this->stubCreate(function (User $user) use (&$atDeploy): void {
+            $atDeploy = [
+                'scope' => app(ApiAccess::class)->entryFor($user)['scope'] ?? null,
+                'routing' => app(PublicRoutingGrants::class)->of($user->username),
+                'protected' => $user->fresh()->isProtected(),
+            ];
+            $this->deployed($user);
+        });
+
+        [$code, $out] = $this->create(['--project' => 'acme', '--domain' => 'acme.example.test', '--template' => 'dind', '--full-privileges' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertSame(ApiAccess::SCOPE_ALL, $atDeploy['scope'], 'the first deploy already delivers an all-projects token');
+        $this->assertEqualsCanonicalizing([PublicRoutingGrants::PORTS, PublicRoutingGrants::HOST_DOMAIN], $atDeploy['routing']);
+        $this->assertFalse($atDeploy['protected'], 'protected only once the application is live');
+        $this->assertSame(['acme'], $firewall->last());
+        Queue::assertNotPushed(ApplyEnvVars::class);
+        $this->assertTrue(User::findByUsername('acme')->isProtected());
+        $this->assertSame(self::INTRO . "\n"
+            . "Allowed acme to use the Engine API for every project, and to take the server's own name and public ports.\n"
+            . "    0:00 Deploy started (source: dind template)\n"
+            . "Project 'acme' is protected from API and MCP tokens: they can no longer delete, stop or redeploy it.\n"
+            . "Project acme created.\n"
+            . "Live at https://acme.example.test\n", $this->plain($out));
+    }
+
+    public function test_a_failed_deploy_with_full_privileges_leaves_the_project_unprotected(): void
+    {
+        Queue::fake();
+        $this->app->instance(ApiAccess::class, new ApiAccess(firewall: new RecordingFirewall()));
+        $this->stubCreate(fn () => throw ValidationException::withMessages(['deploy' => 'The build failed.']));
+
+        [, $errors] = $this->refused(['--project' => 'acme', '--domain' => 'acme.example.test', '--template' => 'dind', '--full-privileges' => true]);
+
+        $this->assertSame(['The build failed.'], $errors);
+        $this->assertFalse(User::findByUsername('acme')->isProtected());
+    }
+
+    public function test_update_existing_deploys_the_project_that_already_runs_the_repository_again(): void
+    {
+        Queue::fake();
+        $this->app->instance(ApiAccess::class, new ApiAccess(firewall: new RecordingFirewall()));
+        $panel = $this->makeUser('panel', ['template' => 'dind', 'git_repo' => 'https://github.com/panelalpha/panel.git'], 'panel.example.test');
+        $this->makeMainDomain($panel, $panel->domain);
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
+
+        [$code, $out] = $this->create([
+            '--repo' => 'github.com/PanelAlpha/panel', '--full-privileges' => true, '--update-existing' => true,
+            '--env-var' => ['PANELALPHA_USER_PASSWORD=new'], '--json' => true,
+        ]);
+
+        $this->assertSame(0, $code, $out);
+        $stub = app(ProjectCreator::class);
+        $this->assertNull($stub->input, 'nothing is provisioned');
+        $this->assertSame('panel', $stub->redeployed?->username);
+        $this->assertSame(1, User::query()->count());
+        $this->assertSame(ApiAccess::SCOPE_ALL, app(ApiAccess::class)->entryFor($panel)['scope'] ?? null);
+        $this->assertTrue($panel->fresh()->isProtected());
+        Queue::assertNotPushed(ApplyEnvVars::class);
+        $json = json_decode((string) collect(explode("\n", $this->plain($out)))->last(fn (string $line) => str_starts_with($line, '{"data":')), true);
+        $this->assertSame('panel', $json['data']['username']);
+        $this->assertSame('panel.example.test', $json['data']['domain']);
+        $this->assertTrue($json['data']['updated']);
+    }
+
+    public function test_update_existing_says_which_project_it_updated(): void
+    {
+        $panel = $this->makeUser('panel', ['template' => 'dind', 'git_repo' => 'https://github.com/panelalpha/panel'], 'panel.example.test');
+        $this->makeMainDomain($panel, $panel->domain);
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/panelalpha/panel.git', '--update-existing' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertSame("Updating project panel, which already deploys https://github.com/panelalpha/panel.git — this takes a few minutes.\n"
+            . "    0:00 Deploy started (source: dind template)\n"
+            . "Project panel updated.\n"
+            . "Live at https://panel.example.test\n", $this->plain($out));
+    }
+
+    public function test_update_existing_creates_a_project_when_none_deploys_the_repository(): void
+    {
+        $this->makeUser('other', ['template' => 'dind', 'git_repo' => 'https://github.com/panelalpha/other']);
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/panelalpha/panel', '--project' => 'acme', '--domain' => 'acme.example.test', '--update-existing' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $stub = app(ProjectCreator::class);
+        $this->assertNotNull($stub->input);
+        $this->assertNull($stub->redeployed);
+        $this->assertStringContainsString('Project acme created.', $this->plain($out));
+    }
+
+    public function test_update_existing_refuses_when_more_than_one_project_deploys_the_repository(): void
+    {
+        $this->makeUser('panel', ['template' => 'dind', 'git_repo' => 'https://github.com/panelalpha/panel']);
+        $this->makeUser('panel2', ['template' => 'dind', 'git_repo' => 'git@github.com:panelalpha/panel.git']);
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/panelalpha/panel', '--update-existing' => true]);
+
+        $this->assertSame(1, $code);
+        $this->assertSame("More than one project deploys https://github.com/panelalpha/panel (panel, panel2): update the one you mean with pae project:rebuild --project=<name>.\n", $out);
+        $stub = app(ProjectCreator::class);
+        $this->assertNull($stub->input);
+        $this->assertNull($stub->redeployed);
+    }
+
+    public function test_without_update_existing_a_second_project_is_created_for_the_same_repository(): void
+    {
+        $this->makeUser('panel', ['template' => 'dind', 'git_repo' => 'https://github.com/panelalpha/panel']);
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/panelalpha/panel', '--project' => 'acme', '--domain' => 'acme.example.test']);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertNull(app(ProjectCreator::class)->redeployed);
+        $this->assertNotNull(User::findByUsername('acme'));
+    }
+
+    public function test_projects_deploying_a_repository_match_it_however_its_address_is_written(): void
+    {
+        foreach ([
+            'a' => 'https://github.com/PanelAlpha/Panel.git',
+            'b' => 'git@github.com:panelalpha/panel.git',
+            'c' => 'https://x-access-token:secret@github.com/panelalpha/panel',
+            'd' => 'github.com/panelalpha/panel/',
+            'other-owner' => 'https://github.com/someone/panel',
+            'other-host' => 'https://gitlab.com/panelalpha/panel',
+            'no-repo' => null,
+        ] as $name => $repo) {
+            $this->makeUser($name, array_filter(['template' => 'dind', 'git_repo' => $repo]));
+        }
+
+        $found = array_map(static fn (User $user): string => $user->username, app(ProjectCreator::class)->projectsDeploying('https://github.com/panelalpha/panel'));
+
+        $this->assertSame(['a', 'b', 'c', 'd'], $found);
+        $this->assertSame([], app(ProjectCreator::class)->projectsDeploying('not a repository'));
+    }
+
     /** The CLI no longer goes through the HTTP router, so no root admin row is minted either. */
     public function test_the_command_does_not_touch_the_router(): void
     {
@@ -409,20 +573,20 @@ class ProjectCreateCommandTest extends TestCase
     public function test_a_repository_that_may_not_deploy_is_warned_about_and_created(): void
     {
         $this->stubInspectedCreate(CreateInspection::fromReport([
-            'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'deployable' => true, 'issue' => null],
+            'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'deployable' => false, 'issue' => DeployVerdict::UNRECOGNISED],
         ]));
 
         [$code, $out] = $this->create(['--repo' => 'https://github.com/acme/lib', '--project' => 'acme', '--domain' => 'acme.example.test', '--quiet-deploy' => true]);
 
         $this->assertSame(0, $code, $out);
         $this->assertStringContainsString('Project acme created.', $out);
-        $this->assertStringContainsString('The repository may not deploy as it stands: No recipe and no runtime recognises it', $out);
+        $this->assertStringContainsString('The repository may not deploy as it stands: No recipe recognises it', $out);
     }
 
     public function test_json_mode_carries_the_inspection(): void
     {
         $this->stubInspectedCreate(CreateInspection::fromReport([
-            'application' => ['strategy' => 'static', 'label' => 'Static', 'deployable' => true, 'issue' => null],
+            'application' => ['strategy' => 'static', 'label' => 'Static', 'verdict' => DeployVerdict::DEPLOYABLE, 'deployable' => true, 'issue' => null],
         ]));
 
         [$code, $out] = $this->create(['--repo' => 'https://github.com/acme/site', '--project' => 'acme', '--domain' => 'acme.example.test', '--json' => true, '--quiet-deploy' => true]);
@@ -521,6 +685,14 @@ class ProjectCreateCommandTest extends TestCase
 
             public function deploy(User $user, ?DeployLogger $deployLogger): void
             {
+                ($this->deploy)($user);
+            }
+
+            public ?User $redeployed = null;
+
+            public function redeploy(User $user): void
+            {
+                $this->redeployed = $user;
                 ($this->deploy)($user);
             }
         });

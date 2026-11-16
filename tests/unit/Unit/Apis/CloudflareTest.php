@@ -5,6 +5,7 @@ namespace Tests\Unit\Apis;
 use App\Lib\Apis\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Apis\Cloudflare\ZoneNotFoundException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
@@ -82,6 +83,38 @@ class CloudflareTest extends TestCase
 
         $this->assertSame('zone-sub', $zone['id']);
         $this->assertSame('sub.example.com', $zone['name']);
+    }
+
+    /** A token that sees more zones than one page holds still finds the hostname's zone. */
+    public function test_the_zone_is_asked_for_by_name_not_found_in_a_listing(): void
+    {
+        Http::fake(function (Request $request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $name = $query['name'] ?? null;
+            $result = match (true) {
+                $name === null => array_map(static fn (int $i): array => ['id' => "zone-{$i}", 'name' => "site{$i}.test"], range(1, 50)),
+                $name === 'example.com' => [['id' => 'zone-com', 'name' => 'example.com']],
+                default => [],
+            };
+
+            return Http::response(['success' => true, 'result' => $result], 200);
+        });
+
+        $zone = (new Cloudflare('test-token'))->findZoneForHostname('shop.example.com');
+
+        $this->assertSame(['id' => 'zone-com', 'name' => 'example.com'], $zone);
+        Http::assertSent(fn (Request $r): bool => str_contains($r->url(), 'name=shop.example.com'));
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), '/zones') && ! str_contains($r->url(), 'name='));
+    }
+
+    public function test_a_hostname_in_no_readable_zone_names_the_zone_read_permission(): void
+    {
+        Http::fake(['api.cloudflare.com/client/v4/zones*' => Http::response(['success' => true, 'result' => []], 200)]);
+
+        $this->expectException(ZoneNotFoundException::class);
+        $this->expectExceptionMessage('Zone > Zone > Read');
+
+        (new Cloudflare('test-token'))->findZoneForHostname('shop.example.com');
     }
 
     public function test_find_zone_for_hostname_errors_when_no_match(): void

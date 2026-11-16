@@ -6,7 +6,8 @@ use App\Lib\Deploy\SafeName;
 use InvalidArgumentException;
 
 /**
- * Which deploys are kept per account: the newest DEPLOY_LOG_KEEP log files.
+ * Which deploys are kept per account: the newest DEPLOY_LOG_KEEP log files,
+ * and the newest install's log whatever its age.
  *
  * `latest.json` is never pruned — it is the pointer the panel polls.
  */
@@ -64,7 +65,8 @@ final class DeployLogArchive
     }
 
     /**
-     * Delete all but the newest $keep log files for one account.
+     * Delete all but the newest $keep log files for one account, sparing the
+     * newest install's log.
      *
      * @return list<string> deleted absolute paths
      */
@@ -80,7 +82,11 @@ final class DeployLogArchive
         }
 
         rsort($files);
-        $deleted = array_slice($files, $keep);
+        $install = self::newestInstall($files);
+        $deleted = array_filter(
+            array_slice($files, $keep),
+            static fn (string $file): bool => $file !== $install
+        );
         foreach ($deleted as $old) {
             if (! $dryRun) {
                 @unlink($old);
@@ -88,6 +94,29 @@ final class DeployLogArchive
         }
 
         return array_values($deleted);
+    }
+
+    /**
+     * The log a later failure is most often read against: how the project was first set up.
+     *
+     * @param  list<string>  $files  newest first
+     */
+    private static function newestInstall(array $files): ?string
+    {
+        foreach ($files as $file) {
+            if (self::isInstall($file)) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    private static function isInstall(string $file): bool
+    {
+        $start = DeployStartLine::read((new DeployLogReader($file))->head(DeployStartLine::HEAD));
+
+        return $start['kind'] === DeployStartLine::KIND_INSTALL;
     }
 
     /**
@@ -106,11 +135,9 @@ final class DeployLogArchive
         return $result;
     }
 
-    /** Remove every trace of a deleted account. */
+    /** Remove every trace of a deleted account, by the SafeName rule as everywhere else, so a dotted name's logs go too. */
     public static function forget(string $username): void
     {
-        // The SafeName rule as everywhere else: a dotless pattern here left a deleted
-        // `acme.shop`'s logs on disk forever.
         if (! SafeName::isSafe($username)) {
             return;
         }

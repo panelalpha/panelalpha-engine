@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * Reads one field out of a manifest and reports which manifest and which
- * field when it cannot. A new field in `PlatformManifest::fromArray()` is one
- * line here, not another four-line validation block.
+ * Reads one field out of a manifest and reports which manifest and which field when it cannot,
+ * so a new field in `PlatformManifest::fromArray()` is one line rather than a validation block.
  */
 final class ManifestReader
 {
@@ -109,9 +108,8 @@ final class ManifestReader
     }
 
     /**
-     * The same check without a default: absent stays absent, so a manifest
-     * that says nothing about a key is distinguishable from one that picked
-     * the default.
+     * The same check without a default: absent stays absent, so a manifest that says nothing
+     * about a key is distinguishable from one that picked the default.
      *
      * @param  list<string>  $allowed
      *

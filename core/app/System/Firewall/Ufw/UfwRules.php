@@ -5,14 +5,8 @@ namespace App\System\Firewall\Ufw;
 use App\System\Firewall\FirewallRule;
 
 /**
- * ufw's rule store to {@see FirewallRule} and back.
- *
- * ufw keeps one `### tuple ###` line per rule in /etc/ufw/user.rules and
- * user6.rules: `action proto dport dst sport src [dapp sapp] direction[_iface]
- * [comment=<hex>]`. A rule added for any address is written to both files,
- * once with 0.0.0.0/0 and once with ::/0; it is one rule here. A route rule
- * (`ufw route ...`, ufw-user-forward) has its action as route:<action>; it is
- * a rule for published ports.
+ * ufw's `### tuple ###` lines in user.rules and user6.rules to {@see FirewallRule} and back. A rule for any
+ * address, written to both files, is one rule here; a `route:<action>` rule is one for published ports.
  */
 final class UfwRules
 {
@@ -44,9 +38,8 @@ final class UfwRules
     }
 
     /**
-     * A host deny and a route deny, otherwise alike, are one deny in `both`
-     * scopes, as the API and fail2ban write it; listed once, where the host
-     * half is.
+     * A host and a route deny, otherwise alike, are one deny in `both` scopes, listed where the host half is,
+     * whichever comes first; a deny both ways has its route half on the inbound side only.
      *
      * @param  list<FirewallRule>  $rules
      * @return list<FirewallRule>
@@ -61,14 +54,12 @@ final class UfwRules
             }
         }
 
-        // Either half can come first; the rule is listed where the host half is.
         $both = [];
         $taken = [];
         foreach ($rules as $i => $rule) {
             if (! $rule->editable || $rule->scope !== FirewallRule::HOST || $rule->action !== FirewallRule::DENY || $rule->direction === FirewallRule::OUT) {
                 continue;
             }
-            // A deny both ways has its route half on the inbound side only.
             $inbound = $rule->direction === FirewallRule::BOTH ? $rule->with(['direction' => FirewallRule::IN]) : $rule;
             if (isset($routed[$k = $key($inbound)])) {
                 $both[$i] = true;
@@ -91,9 +82,8 @@ final class UfwRules
     }
 
     /**
-     * An inbound rule from an address and an outbound rule to it, otherwise
-     * alike, are the two halves of one `both` rule; listed once, where the
-     * first half is.
+     * An inbound rule from an address and an outbound one to it, otherwise alike, are one `both` rule, listed
+     * where the first half is: a deny is prepended, so its outbound half, written second, can come first.
      *
      * @param  list<FirewallRule>  $rules
      * @return list<FirewallRule>
@@ -106,8 +96,6 @@ final class UfwRules
                 $outbound[self::halfKey($rule, $rule->destination)] = $i;
             }
         }
-        // Either half can come first: a deny is prepended, so its outbound half,
-        // written second, ends up above the inbound one.
         $partner = [];
         foreach ($rules as $i => $rule) {
             if ($rule->editable && $rule->direction === FirewallRule::IN && $rule->source !== null && $rule->destination === null
@@ -146,13 +134,7 @@ final class UfwRules
         if (! str_starts_with($line, '### tuple ###')) {
             return null;
         }
-        $tuple = trim(substr($line, strlen('### tuple ###')));
-        $comment = null;
-        if (str_contains($tuple, ' comment=')) {
-            [$tuple, $hex] = explode(' comment=', $tuple, 2);
-            $decoded = ctype_xdigit(trim($hex)) ? hex2bin(trim($hex)) : false;
-            $comment = $decoded === false ? null : $decoded;
-        }
+        [$tuple, $comment] = self::withoutComment(trim(substr($line, strlen('### tuple ###'))));
 
         $f = preg_split('/\s+/', trim($tuple)) ?: [];
         if (count($f) !== 7 && count($f) !== 9) {
@@ -161,17 +143,9 @@ final class UfwRules
         [$action, $proto, $dport, $dst, $sport, $src] = $f;
         $direction = $f[count($f) - 1];
         $any = static fn (string $v): ?string => in_array($v, ['any', ...self::ANY_ADDRESS], true) ? null : $v;
-        $scope = FirewallRule::HOST;
-        if (str_starts_with($action, 'route:')) {
-            $scope = FirewallRule::PUBLISHED;
-            $action = substr($action, strlen('route:'));
-        }
+        [$scope, $action] = self::scopeOf($action);
 
-        // A route rule names a direction only with an interface, which the model does not carry.
-        $editable = count($f) === 7
-            && in_array($action, [FirewallRule::ALLOW, FirewallRule::DENY], true)
-            && in_array($direction, $scope === FirewallRule::HOST ? [FirewallRule::IN, FirewallRule::OUT] : [FirewallRule::IN], true)
-            && $sport === 'any';
+        $editable = self::isEditable(count($f), $action, $direction, $scope, $sport);
         $raw = str_replace(self::ANY_ADDRESS, 'any', $tuple);
 
         return new FirewallRule(
@@ -189,9 +163,46 @@ final class UfwRules
     }
 
     /**
-     * The words after `ufw` (or `ufw delete`) for each ufw rule this one is:
-     * one, or two for a rule in both directions, and the route rule of a
-     * deny in both scopes.
+     * The tuple and the comment it carries as hex, or null when it carries none or the hex does not decode.
+     *
+     * @return array{0: string, 1: ?string}
+     */
+    private static function withoutComment(string $tuple): array
+    {
+        $comment = null;
+        if (str_contains($tuple, ' comment=')) {
+            [$tuple, $hex] = explode(' comment=', $tuple, 2);
+            $decoded = ctype_xdigit(trim($hex)) ? hex2bin(trim($hex)) : false;
+            $comment = $decoded === false ? null : $decoded;
+        }
+
+        return [$tuple, $comment];
+    }
+
+    /** @return array{0: string, 1: string} the scope, and the action without its `route:` prefix */
+    private static function scopeOf(string $action): array
+    {
+        $scope = FirewallRule::HOST;
+        if (str_starts_with($action, 'route:')) {
+            $scope = FirewallRule::PUBLISHED;
+            $action = substr($action, strlen('route:'));
+        }
+
+        return [$scope, $action];
+    }
+
+    /** A route rule names a direction only with an interface, which the model does not carry. */
+    private static function isEditable(int $fields, string $action, string $direction, string $scope, string $sport): bool
+    {
+        return $fields === 7
+            && in_array($action, [FirewallRule::ALLOW, FirewallRule::DENY], true)
+            && in_array($direction, $scope === FirewallRule::HOST ? [FirewallRule::IN, FirewallRule::OUT] : [FirewallRule::IN], true)
+            && $sport === 'any';
+    }
+
+    /**
+     * The words after `ufw` (or `ufw delete`) for each ufw rule this one is: one, two for a rule in both
+     * directions, and the route rule of a deny in both scopes.
      *
      * @return list<list<string>>
      */
@@ -217,9 +228,8 @@ final class UfwRules
     }
 
     /**
-     * The rule in $rules that ufw would take $rule for. ufw keeps one rule
-     * per match: adding one that differs from a rule already there only in
-     * its action or comment writes over that rule, or, inserted, is skipped.
+     * The rule in $rules that ufw would take $rule for: one differing only in action or comment is written
+     * over, or, inserted, skipped.
      *
      * @param  list<FirewallRule>  $rules
      */
@@ -236,10 +246,8 @@ final class UfwRules
     }
 
     /**
-     * The rule in $rules that $rule would be listed as one with. An inbound rule
-     * from an address and an outbound one to it, or a host and a published deny,
-     * otherwise alike, are how one rule both ways or on both scopes is written;
-     * ufw keeps nothing that tells them apart, so they read back as that rule.
+     * The rule in $rules that $rule would be listed as one with: the halves of a rule both ways or in both
+     * scopes, which ufw keeps nothing to tell apart from two rules.
      *
      * @param  list<FirewallRule>  $rules
      */
@@ -305,8 +313,8 @@ final class UfwRules
     }
 
     /**
-     * What ufw tells its rules apart by, per ufw rule: the tuple without
-     * the action and the comment.
+     * What ufw tells its rules apart by, per ufw rule: the tuple without the action and the comment,
+     * with 0.0.0.0/0 and ::/0 taken for any, as ufw stores them.
      *
      * @return list<string>
      */
@@ -318,7 +326,6 @@ final class UfwRules
             return [(str_starts_with($f[0] ?? '', 'route:') ? 'route ' : '').implode(' ', array_slice($f, 1))];
         }
 
-        // ufw stores any address as 0.0.0.0/0 and ::/0, so it takes those for any.
         $address = static fn (?string $a): string => $a === null || in_array($a, self::ANY_ADDRESS, true) ? 'any' : $a;
 
         return array_map(static fn (FirewallRule $h): string => implode(' ', [

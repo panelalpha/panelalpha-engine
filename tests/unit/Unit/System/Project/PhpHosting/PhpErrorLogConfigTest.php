@@ -5,11 +5,14 @@ namespace Tests\Unit\System\Project\PhpHosting;
 use App\Lib\Project\PhpErrorLog;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\PhpErrorLogConfig;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class PhpErrorLogConfigTest extends TestCase
 {
@@ -46,9 +49,9 @@ class PhpErrorLogConfigTest extends TestCase
         }
 
         $logDir = $this->root . '/engine/users/alice/log/php';
-        $this->assertContains(['sudo', 'mkdir', '-p', $logDir], $system->commands);
-        $this->assertContains(['sudo', 'chown', '1001:1001', $logDir], $system->commands);
-        $this->assertContains(['sudo', 'chmod', '755', $logDir], $system->commands);
+        $this->assertContains(Privileged::files()->makeDirectories($logDir), $system->commands);
+        $this->assertContains(Privileged::files()->changeOwner('1001:1001', $logDir), $system->commands);
+        $this->assertContains(Privileged::files()->changeMode('755', $logDir), $system->commands);
     }
 
     public function test_php_8_4_gets_no_jit_buffer_and_older_versions_are_not_touched(): void
@@ -102,9 +105,68 @@ class PhpErrorLogConfigTest extends TestCase
         $ini = $this->accountFile('8.3', 'default.ini');
         $this->assertSame(1, substr_count($ini, 'log_errors'));
         $this->assertSame(1, substr_count($ini, 'error_log'));
+        $this->assertSame(1, substr_count($ini, 'user_ini.cache_ttl'));
         $pool = $this->accountFile('8.3', 'fpm/pool.d/www.conf');
         $this->assertSame(1, substr_count($pool, 'catch_workers_output'));
         $this->assertSame(1, substr_count($pool, 'decorate_workers_output'));
+        $this->assertSame(1, substr_count($pool, 'user_ini.cache_ttl'));
+    }
+
+    /** A saved document root's user INI is read again within this window; a worker keeps its own copy for 5 minutes. */
+    public function test_an_existing_project_gets_a_three_second_user_ini_cache(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        $this->account('8.2', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        foreach (['8.3', '8.2'] as $version) {
+            $this->assertStringContainsString("user_ini.cache_ttl = 3\n", $this->accountFile($version, 'default.ini'), $version);
+        }
+    }
+
+    /** A longer cache in the file is rewritten, not duplicated, so one edit cannot slow a saved setting down again. */
+    public function test_a_longer_user_ini_cache_in_the_file_is_rewritten(): void
+    {
+        $this->account('8.3', "user_ini.cache_ttl = 60\nmax_execution_time = 600\n", "[www]\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $ini = $this->accountFile('8.3', 'default.ini');
+        $this->assertSame(1, substr_count($ini, 'user_ini.cache_ttl'));
+        $this->assertStringStartsWith("user_ini.cache_ttl = 3\nmax_execution_time = 600\n", $ini);
+    }
+
+    /** For php-fpm the pool holds the value as an admin value, which a project's own ini cannot raise. */
+    public function test_an_existing_project_gets_the_short_user_ini_cache_in_its_pool(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        $this->account('8.2', "max_execution_time = 600\n", "[www]\nuser = 1001\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        foreach (['8.3', '8.2'] as $version) {
+            $this->assertStringContainsString(
+                PhpErrorLogConfig::POOL_USER_INI_CACHE_TTL_LINE."\n",
+                $this->accountFile($version, 'fpm/pool.d/www.conf'),
+                $version
+            );
+        }
+    }
+
+    public function test_a_pool_that_carries_a_longer_user_ini_cache_is_rewritten(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\nphp_admin_value[user_ini.cache_ttl] = 300\n");
+        [$system, $project] = $this->hostingProject();
+
+        (new PhpErrorLogConfig())->apply($project);
+
+        $pool = $this->accountFile('8.3', 'fpm/pool.d/www.conf');
+        $this->assertSame(1, substr_count($pool, 'user_ini.cache_ttl'));
+        $this->assertStringStartsWith("[www]\n".PhpErrorLogConfig::POOL_USER_INI_CACHE_TTL_LINE."\n", $pool);
     }
 
     public function test_a_version_the_project_does_not_ship_is_left_alone(): void
@@ -115,7 +177,7 @@ class PhpErrorLogConfigTest extends TestCase
         (new PhpErrorLogConfig())->apply($project);
 
         $this->assertFileDoesNotExist($this->root . '/engine/users/alice/php/8.2/default.ini');
-        $this->assertContains(['sudo', 'mkdir', '-p', $this->root . '/engine/users/alice/log/php'], $system->commands);
+        $this->assertContains(Privileged::files()->makeDirectories($this->root . '/engine/users/alice/log/php'), $system->commands);
     }
 
     public function test_the_error_log_file_is_ensured_as_the_account(): void
@@ -126,8 +188,10 @@ class PhpErrorLogConfigTest extends TestCase
         (new PhpErrorLogConfig())->apply($project);
 
         $command = $this->accountCommand($system);
-        $this->assertSame(['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'sh', '-c'], array_slice($command, 0, 9));
-        $this->assertSame(['sh', $this->logFile(), '1001:1001'], array_slice($command, -3));
+        $this->assertSame(Privileged::account()->ensureLogFile(1001, 1001, $this->logFile(), '1001:1001'), $command);
+        $this->assertTrue(self::asAccount($command));
+        $this->assertSame(['sh', '-c'], array_slice(LocalRoot::plain($command), 0, 2));
+        $this->assertSame(['sh', $this->logFile(), '1001:1001'], array_slice(LocalRoot::plain($command), -3));
     }
 
     public function test_root_never_names_the_error_log_file(): void
@@ -140,7 +204,7 @@ class PhpErrorLogConfigTest extends TestCase
         (new PhpErrorLogConfig())->apply($project);
 
         foreach ($system->commands as $command) {
-            if (($command[1] ?? null) === 'setpriv') {
+            if (self::asAccount($command)) {
                 continue;
             }
             $this->assertNotContains($this->logFile(), $command, implode(' ', $command));
@@ -223,6 +287,31 @@ class PhpErrorLogConfigTest extends TestCase
         $this->assertSame([PhpErrorLog::FILE_NAME], array_values(array_diff(scandir(dirname($this->logFile())), ['.', '..'])));
     }
 
+    /** A file the account cannot read is reported and kept, never replaced by an empty copy. */
+    public function test_a_log_file_the_account_cannot_read_is_left_alone(): void
+    {
+        $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
+        mkdir($this->root . '/engine/users/alice/log/php', 0777, true);
+        file_put_contents($this->logFile(), "written by the master\n");
+        $inode = fileinode($this->logFile());
+        $path = (string) getenv('PATH');
+        $this->setPath($this->unreadingCat() . ':' . $path);
+
+        [$system, $project] = $this->hostingProject(true);
+        try {
+            (new PhpErrorLogConfig())->apply($project);
+            $this->fail('an unreadable log file must be reported');
+        } catch (ProcessFailedException $e) {
+            $this->assertStringContainsString('cannot read', $e->getMessage());
+        } finally {
+            $this->setPath($path);
+        }
+
+        $this->assertSame("written by the master\n", file_get_contents($this->logFile()));
+        $this->assertSame($inode, fileinode($this->logFile()));
+        $this->assertSame([PhpErrorLog::FILE_NAME], array_values(array_diff(scandir(dirname($this->logFile())), ['.', '..'])));
+    }
+
     public function test_a_directory_named_like_the_log_is_left_alone(): void
     {
         $this->account('8.3', "max_execution_time = 600\n", "[www]\n");
@@ -236,6 +325,17 @@ class PhpErrorLogConfigTest extends TestCase
     }
 
     /**
+     * @param list<string> $command
+     */
+    public static function asAccount(array $command): bool
+    {
+        $ids = array_slice(LocalRoot::values($command), 0, 2);
+
+        return str_starts_with((string) LocalRoot::action($command), 'account.')
+            && count($ids) === 2 && ctype_digit($ids[0]) && ctype_digit($ids[1]);
+    }
+
+    /**
      * @param object{commands: list<list<string>>} $system
      * @return list<string>
      */
@@ -245,6 +345,24 @@ class PhpErrorLogConfigTest extends TestCase
         $this->assertCount(1, $found);
 
         return $found[0];
+    }
+
+    /** A `cat` that fails as an account without read permission does; the suite runs as root, which reads anything. */
+    private function unreadingCat(): string
+    {
+        $dir = $this->root . '/bin';
+        mkdir($dir);
+        file_put_contents($dir . '/cat', "#!/bin/sh\necho 'cat: Permission denied' >&2\nexit 1\n");
+        chmod($dir . '/cat', 0755);
+
+        return $dir;
+    }
+
+    /** A child process takes PATH from $_ENV when PHP fills it, and from the environment otherwise. */
+    private function setPath(string $path): void
+    {
+        putenv('PATH=' . $path);
+        $_ENV['PATH'] = $path;
     }
 
     /** An account is never uid 0, so a run as root hands the file to a stand-in account first. */
@@ -304,8 +422,8 @@ class PhpErrorLogConfigTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->commands[] = (array) $cmd;
-                if ($this->runAsAccount && (((array) $cmd)[1] ?? null) === 'setpriv') {
-                    return (new Process(array_slice((array) $cmd, 7)))->mustRun()->getOutput();
+                if ($this->runAsAccount && PhpErrorLogConfigTest::asAccount((array) $cmd)) {
+                    return (new Process(LocalRoot::plain((array) $cmd)))->mustRun()->getOutput();
                 }
 
                 return '';

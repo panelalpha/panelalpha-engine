@@ -4,14 +4,13 @@ namespace App\System\Services\Webserver;
 
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\User;
 use App\System as EngineSystem;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Nginx-proxy routing compiler.
- *
- * Merges persisted custom rules with auto-generated domain defaults,
- * implements conflict suppression, and maintains separate HTTP and stream rule sets.
+ * Nginx-proxy routing: each domain's generated defaults, minus those a stored custom rule claims, plus those rules,
+ * as separate HTTP and stream rule sets.
  *
  * @psalm-type HttpRule = array{
  *   id: int,
@@ -46,8 +45,6 @@ class RoutingCompiler
     /** @var array<ProxyRule> */
     private array $persistedRules = [];
 
-    private array $generatedRules = [];
-
     /** @psalm-var list<HttpRule> */
     private array $finalHttpRules = [];
 
@@ -60,11 +57,11 @@ class RoutingCompiler
         $this->loadPersistedRules();
     }
 
+    /** A rule stored before its upstream and server name were checked is neither served nor given a port. */
     private function loadPersistedRules(): void
     {
         $owners = ProxyRuleServerName::owners();
         $this->persistedRules = array_values(array_filter(ProxyRule::getEnabled(), static function (ProxyRule $rule) use ($owners): bool {
-            // Stored before these were checked: neither served nor given a port.
             if (! ProxyRuleUpstream::serves($rule)) {
                 Log::warning("Proxy rule {$rule->id} of {$rule->username} is not served: "
                     ."its upstream {$rule->upstream_host} is not the project's own app.");
@@ -92,12 +89,10 @@ class RoutingCompiler
      */
     public function compile(array $domains): array
     {
-        // Generate default rules from domains
         foreach ($domains as $domain) {
             $this->generateDomainRules($domain);
         }
 
-        // Suppress conflicting generated defaults where custom rules exist
         $this->suppressConflictingDefaults();
 
         return [
@@ -121,15 +116,29 @@ class RoutingCompiler
             ...$aliases,
         ];
 
-        // Create rules for the primary domain and all aliases
-        // Port 80 (HTTP) rule
-        $port80Rule = [
+        $port80Rule = $this->port80Rule($user, $primaryHostname, $allHostnames, $appPort);
+        $this->finalHttpRules[] = $port80Rule;
+
+        if ($domain->sslEnabled()) {
+            $port443Rule = $this->port443Rule($user, $primaryHostname, $allHostnames, $appPort);
+            $this->finalHttpRules[] = $port443Rule;
+        }
+    }
+
+    /**
+     * @param  array<string>  $allHostnames
+     *
+     * @psalm-return HttpRule
+     */
+    private function port80Rule(User $user, string $primaryHostname, array $allHostnames, int $appPort): array
+    {
+        return [
             'id' => 0,
             'transport' => 'http',
             'listen_ip' => '*',
             'listen_port' => 80,
             'server_name' => $primaryHostname,
-            'server_names' => $allHostnames,  // Multiple Hostnames
+            'server_names' => $allHostnames,
             'upstream_host' => 'localhost',
             'upstream_port' => $appPort,
             'upstream_protocol' => 'http',
@@ -141,132 +150,120 @@ class RoutingCompiler
             'is_generated' => true,
             'conflict_key' => $this->buildConflictKey('http', '*', 80, null),
         ];
-        $this->generatedRules[] = $port80Rule;
-        $this->finalHttpRules[] = $port80Rule;
-
-        // Port 443 (HTTPS) rule if SSL is enabled
-        if ($domain->sslEnabled()) {
-            $port443Rule = [
-                'id' => 0,
-                'transport' => 'http',
-                'listen_ip' => '*',
-                'listen_port' => 443,
-                'server_name' => $primaryHostname,
-                'server_names' => $allHostnames,  // Multiple Hostnames
-                'upstream_host' => 'localhost',
-                'upstream_port' => $appPort,
-                'upstream_protocol' => 'http',
-                'ssl_enabled' => true,
-                'ssl_cert_pem_file' => "{$this->system->project($user)->projectDirPath()}/ssl-certs/{$primaryHostname}.pem",
-                'ssl_cert_key_file' => "{$this->system->project($user)->projectDirPath()}/ssl-certs/{$primaryHostname}.key",
-                'user' => $user->username,
-                'domain' => $primaryHostname,
-                'is_generated' => true,
-                'conflict_key' => $this->buildConflictKey('http', '*', 443, null),
-            ];
-            $this->generatedRules[] = $port443Rule;
-            $this->finalHttpRules[] = $port443Rule;
-        }
     }
 
     /**
-     * Suppress generated rules that conflict with persisted custom rules.
+     * @param  array<string>  $allHostnames
+     *
+     * @psalm-return HttpRule
+     */
+    private function port443Rule(User $user, string $primaryHostname, array $allHostnames, int $appPort): array
+    {
+        return [
+            'id' => 0,
+            'transport' => 'http',
+            'listen_ip' => '*',
+            'listen_port' => 443,
+            'server_name' => $primaryHostname,
+            'server_names' => $allHostnames,
+            'upstream_host' => 'localhost',
+            'upstream_port' => $appPort,
+            'upstream_protocol' => 'http',
+            'ssl_enabled' => true,
+            'ssl_cert_pem_file' => "{$this->system->project($user)->projectDirPath()}/ssl-certs/{$primaryHostname}.pem",
+            'ssl_cert_key_file' => "{$this->system->project($user)->projectDirPath()}/ssl-certs/{$primaryHostname}.key",
+            'user' => $user->username,
+            'domain' => $primaryHostname,
+            'is_generated' => true,
+            'conflict_key' => $this->buildConflictKey('http', '*', 443, null),
+        ];
+    }
+
+    /**
+     * Drops the generated rules each persisted http rule claims, then adds the persisted rules. Only http defaults
+     * are generated, so a tcp/udp rule has nothing to suppress ({@see RoutingCompilerTest::test_no_generated_stream_rules_exist_to_suppress}).
      */
     private function suppressConflictingDefaults(): void
     {
-        // For each persisted rule, remove conflicting generated rules
         foreach ($this->persistedRules as $persistedRule) {
-            $conflictKey = $this->buildConflictKeyFromRule($persistedRule);
-
             if ($persistedRule->transport === 'http') {
-                // For HTTP: remove generated rules with same port but any hostname
-                // (unless it's a specific domain override, not port-only)
-                $filteredHttpRules = [];
-                foreach ($this->finalHttpRules as $rule) {
-                    // Keep if: different port, different IP, or this rule is not generated
-                    if (
-                        $rule['listen_port'] !== $persistedRule->listen_port ||
-                        $rule['listen_ip'] !== $persistedRule->listen_ip
-                    ) {
-                        $filteredHttpRules[] = $rule;
-
-                        continue;
-                    }
-                    // If persisted rule has specific server_name, only suppress matching server_names
-                    if (! empty($persistedRule->server_name)) {
-                        // Only suppress if generated rule's server_names include this server_name
-                        if (! in_array($persistedRule->server_name, $rule['server_names'] ?? [])) {
-                            $filteredHttpRules[] = $rule;
-
-                            continue;
-                        }
-                    }
-                }
-                $this->finalHttpRules = $filteredHttpRules;
+                $this->finalHttpRules = $this->httpRulesNotClaimedBy($persistedRule);
             }
-
-            // No stream branch: generateDomainRules() only ever produces http
-            // defaults, so at this point finalStreamRules is always empty and
-            // there is nothing for a tcp/udp rule to suppress. There used to be
-            // a branch here that filtered it into a local and then dropped the
-            // result on the floor -- dead either way, but misleading.
-            // {@see RoutingCompilerTest::test_no_generated_stream_rules_exist_to_suppress}
         }
 
-        // Add persisted rules to final rule sets
         foreach ($this->persistedRules as $persistedRule) {
             if ($persistedRule['transport'] === 'http') {
-                $this->finalHttpRules[] = [
-                    'id' => $persistedRule->id,
-                    'transport' => $persistedRule->transport,
-                    'listen_ip' => $persistedRule->listen_ip ?? '*',
-                    'listen_port' => $persistedRule->listen_port,
-                    'server_name' => $persistedRule->server_name ?? '_',
-                    'server_names' => [],
-                    'upstream_host' => $persistedRule->upstream_host,
-                    'upstream_port' => $persistedRule->upstream_port,
-                    'upstream_protocol' => $persistedRule->upstream_protocol ?? '',
-                    'ssl_enabled' => false,
-                    'ssl_cert_pem_file' => null,
-                    'ssl_cert_key_file' => null,
-                    'user' => $persistedRule->username ?? '',
-                    'domain' => $persistedRule->user?->domain ?? '',
-                    'is_generated' => $persistedRule->is_generated,
-                    'conflict_key' => $this->buildConflictKey($persistedRule->transport, $persistedRule->listen_ip ?? '*', $persistedRule->listen_port, null),
-                ];
+                $this->finalHttpRules[] = $this->persistedHttpRule($persistedRule);
             } elseif (in_array($persistedRule['transport'], ['tcp', 'udp'])) {
-                $this->finalStreamRules[] = [
-                    'id' => $persistedRule->id,
-                    'transport' => $persistedRule->transport,
-                    'listen_ip' => $persistedRule->listen_ip ?? '*',
-                    'listen_port' => $persistedRule->listen_port,
-                    'upstream_host' => $persistedRule->upstream_host,
-                    'upstream_port' => $persistedRule->upstream_port,
-                    'is_generated' => $persistedRule->is_generated,
-                ];
+                $this->finalStreamRules[] = $this->persistedStreamRule($persistedRule);
             }
         }
     }
 
     /**
-     * Build conflict key for a persisted rule from the database record.
+     * The rules on another port or IP than $persistedRule, and, when it names a server, those whose names miss it.
+     *
+     * @psalm-return list<HttpRule>
      */
-    private function buildConflictKeyFromRule(ProxyRule $rule): string
+    private function httpRulesNotClaimedBy(ProxyRule $persistedRule): array
     {
-        if ($rule->transport === 'http') {
-            return implode(':', [
-                'http',
-                $rule->listen_ip ?? '*',
-                $rule->listen_port,
-                $rule->server_name ?? '*',
-            ]);
+        $filteredHttpRules = [];
+        foreach ($this->finalHttpRules as $rule) {
+            if (
+                $rule['listen_port'] !== $persistedRule->listen_port ||
+                $rule['listen_ip'] !== $persistedRule->listen_ip
+            ) {
+                $filteredHttpRules[] = $rule;
+
+                continue;
+            }
+            if (! empty($persistedRule->server_name)) {
+                if (! in_array($persistedRule->server_name, $rule['server_names'] ?? [])) {
+                    $filteredHttpRules[] = $rule;
+
+                    continue;
+                }
+            }
         }
 
-        return implode(':', [
-            $rule->transport,
-            $rule->listen_ip ?? '*',
-            $rule->listen_port,
-        ]);
+        return $filteredHttpRules;
+    }
+
+    /** @psalm-return HttpRule */
+    private function persistedHttpRule(ProxyRule $persistedRule): array
+    {
+        return [
+            'id' => $persistedRule->id,
+            'transport' => $persistedRule->transport,
+            'listen_ip' => $persistedRule->listen_ip ?? '*',
+            'listen_port' => $persistedRule->listen_port,
+            'server_name' => $persistedRule->server_name ?? '_',
+            'server_names' => [],
+            'upstream_host' => $persistedRule->upstream_host,
+            'upstream_port' => $persistedRule->upstream_port,
+            'upstream_protocol' => $persistedRule->upstream_protocol ?? '',
+            'ssl_enabled' => false,
+            'ssl_cert_pem_file' => null,
+            'ssl_cert_key_file' => null,
+            'user' => $persistedRule->username ?? '',
+            'domain' => $persistedRule->user?->domain ?? '',
+            'is_generated' => $persistedRule->is_generated,
+            'conflict_key' => $this->buildConflictKey($persistedRule->transport, $persistedRule->listen_ip ?? '*', $persistedRule->listen_port, null),
+        ];
+    }
+
+    /** @psalm-return StreamRule */
+    private function persistedStreamRule(ProxyRule $persistedRule): array
+    {
+        return [
+            'id' => $persistedRule->id,
+            'transport' => $persistedRule->transport,
+            'listen_ip' => $persistedRule->listen_ip ?? '*',
+            'listen_port' => $persistedRule->listen_port,
+            'upstream_host' => $persistedRule->upstream_host,
+            'upstream_port' => $persistedRule->upstream_port,
+            'is_generated' => $persistedRule->is_generated,
+        ];
     }
 
     /**

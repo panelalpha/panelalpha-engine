@@ -6,14 +6,15 @@ use App\Models\User;
 use App\System;
 use App\System\Project;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Dind\HeldImage;
 use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\InnerDocker;
-use App\System\Project\Dind\ShellOperations;
 use App\System\Projects;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -65,11 +66,11 @@ class ProjectsRailpackPushImageTest extends TestCase
 
         $this->assertSame(
             [
-                'tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
                 'provide images',
                 'start',
-                'tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
-                'rmi -f panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
+                'account-docker.removeImages force panelalpha-live-app:pre-push',
                 'start',
             ],
             $this->events
@@ -89,11 +90,11 @@ class ProjectsRailpackPushImageTest extends TestCase
 
         $this->assertSame(
             [
-                'tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
                 'provide images',
                 'start',
-                'tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
-                'rmi -f panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
+                'account-docker.removeImages force panelalpha-live-app:pre-push',
                 'start',
             ],
             $this->events
@@ -106,10 +107,10 @@ class ProjectsRailpackPushImageTest extends TestCase
 
         $this->assertSame(
             [
-                'tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
                 'provide images',
                 'start',
-                'rmi -f panelalpha-live-app:pre-push',
+                'account-docker.removeImages force panelalpha-live-app:pre-push',
             ],
             $this->events
         );
@@ -122,9 +123,10 @@ class ProjectsRailpackPushImageTest extends TestCase
         $inner = $this->createStub(InnerDocker::class);
         $inner->method('seeding')->willReturn($seeding);
         $dind = $this->createStub(Dind::class);
+        $dind->method('username')->willReturn('live');
         $dind->method('system')->willReturn($this->innerDockerSystem());
         $dind->method('innerDocker')->willReturn($inner);
-        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
 
         return HeldImage::hold($dind, self::IMAGE);
     }
@@ -138,7 +140,7 @@ class ProjectsRailpackPushImageTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $cmd = (array) $cmd;
-                ($this->record)(implode(' ', array_slice($cmd, (int) array_search('dind', $cmd, true) + 2)));
+                ($this->record)(implode(' ', [LocalRoot::action($cmd), ...array_slice(LocalRoot::values($cmd), 1)]));
 
                 return '';
             }
@@ -149,7 +151,7 @@ class ProjectsRailpackPushImageTest extends TestCase
     {
         return function (string $event): void {
             $this->events[] = $event;
-            if ($this->holdingTagStays && str_starts_with($event, 'rmi ')) {
+            if ($this->holdingTagStays && str_starts_with($event, 'account-docker.removeImages ')) {
                 throw new \RuntimeException('image is being used');
             }
         };
@@ -221,16 +223,16 @@ class ProjectsRailpackPushImageTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $argv = is_array($cmd) ? LocalRoot::plain($cmd) : [$cmd];
                 $path = (string) end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => new HeldImagePushProcess(is_dir($path) ? 0 : 1),
-                    ['sudo', 'test', '-e'] => new HeldImagePushProcess(file_exists($path) ? 0 : 1),
-                    ['sudo', 'test', '-f'] => new HeldImagePushProcess(is_file($path) ? 0 : 1),
-                    ['sudo', 'test', '-L'] => new HeldImagePushProcess(is_link($path) ? 0 : 1),
-                    ['sudo', 'ls', '-A'] => new HeldImagePushProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
-                    ['sudo', 'df', '-P'] => new HeldImagePushProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => new HeldImagePushProcess(is_dir($path) ? 0 : 1),
+                    ['test', '-e'] => new HeldImagePushProcess(file_exists($path) ? 0 : 1),
+                    ['test', '-f'] => new HeldImagePushProcess(is_file($path) ? 0 : 1),
+                    ['test', '-L'] => new HeldImagePushProcess(is_link($path) ? 0 : 1),
+                    ['ls', '-A'] => new HeldImagePushProcess(0, implode("\n", array_diff(scandir($path) ?: [], ['.', '..']))),
+                    ['df', '-P'] => new HeldImagePushProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
                     default => new HeldImagePushProcess($this->change($argv)),
                 };
             }
@@ -240,8 +242,8 @@ class ProjectsRailpackPushImageTest extends TestCase
              */
             private function change(array $argv): int
             {
-                $args = array_values(array_filter(array_slice($argv, 2), static fn (string $a): bool => ! str_starts_with($a, '-')));
-                match ($argv[1] ?? '') {
+                $args = array_values(array_filter(array_slice($argv, 1), static fn (string $a): bool => ! str_starts_with($a, '-')));
+                match ($argv[0] ?? '') {
                     'mkdir' => is_dir($args[0]) || mkdir($args[0], 0777, true),
                     'rm' => array_map(static fn (string $p) => exec('rm -rf '.escapeshellarg($p)), $args),
                     'rsync' => exec('cp -a '.escapeshellarg($args[0].'.').' '.escapeshellarg($args[1])),

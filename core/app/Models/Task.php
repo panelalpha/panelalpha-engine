@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Jobs\ApplyEnvVars;
+use App\Jobs\CopyProject;
 use App\Jobs\DeployProject;
 use App\Jobs\RebuildProject;
 use App\Lib\Task\TaskReconciler;
@@ -56,8 +57,8 @@ class Task extends Model
 
     /**
      * Jobs that run under the account's deploy lock: a deploy, and an env var
-     * apply that recreates its services. A delete or another deploy refuses
-     * while one is queued or running.
+     * apply that recreates its services, and a copy filling a new project. A
+     * delete or another deploy refuses while one is queued or running.
      *
      * @var list<class-string>
      */
@@ -65,6 +66,7 @@ class Task extends Model
         DeployProject::class,
         RebuildProject::class,
         ApplyEnvVars::class,
+        CopyProject::class,
     ];
 
     /** The message a refused `since` answers with, on the API and over MCP. */
@@ -205,6 +207,14 @@ class Task extends Model
     public function isDeploy(): bool
     {
         return in_array($this->job_type, self::DEPLOY_JOB_TYPES, true);
+    }
+
+    /** A `details` entry that is a non-empty string, or null. */
+    public function detailText(string $key): ?string
+    {
+        $value = $this->details[$key] ?? null;
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

@@ -18,7 +18,6 @@ class WpConfigPathRequest extends FormRequest
             'service' => ['sometimes', 'nullable', 'string', 'regex:/^[A-Za-z0-9][A-Za-z0-9_.-]*$/'],
             'skip_plugins' => 'sometimes|boolean',
             'type' => 'sometimes|string|in:constant,variable,all',
-            'format' => 'sometimes|string|in:json',
         ];
     }
 }

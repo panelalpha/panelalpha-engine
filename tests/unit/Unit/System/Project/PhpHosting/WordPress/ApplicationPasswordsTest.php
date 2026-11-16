@@ -41,7 +41,7 @@ class ApplicationPasswordsTest extends TestCase
 
         $this->assertSame(
             [
-                'user', 'application-password', 'list', 'admin', '--format=json',
+                'user', 'application-password', 'list', 'admin', '--fields=uuid,name,created', '--format=json',
                 '--path=/home/alice/example.test/public_html',
             ],
             $captured
@@ -61,11 +61,32 @@ class ApplicationPasswordsTest extends TestCase
 
         $this->assertSame(
             [
-                'user', 'application-password', 'list', 'admin', '--format=json',
+                'user', 'application-password', 'list', 'admin', '--fields=uuid,name,created', '--format=json',
                 '--path=/home/alice/other.test/public_html',
             ],
             $captured
         );
+    }
+
+    public function test_list_never_asks_for_the_stored_password_hash(): void
+    {
+        $captured = [];
+        $passwords = $this->passwordsWithFakeRunner(
+            $captured,
+            result: [
+                'exit_code' => 0,
+                'stdout' => '[{"uuid":"6633824d-c1d7-4f79-9dd5-4586f734d69e","name":"myapp","created":1638395611}]',
+                'stderr' => '',
+            ],
+        );
+
+        $passwords->list('admin');
+
+        $fields = array_values(array_filter(
+            $captured,
+            static fn (string $arg): bool => str_starts_with($arg, '--fields='),
+        ));
+        $this->assertSame(['--fields=uuid,name,created'], $fields);
     }
 
     public function test_create_returns_one_time_secret_from_porcelain_and_passes_path(): void

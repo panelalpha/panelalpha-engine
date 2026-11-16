@@ -9,41 +9,18 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Reads a compose file the way Docker reads it, not the way Symfony does.
- *
- * The two disagree on one construct, and a project is entitled to the Docker
- * answer: its file works, and the engine refusing it is the engine's problem.
- * Lychee declares an anchor on a line of its own —
- *
- *     x-base-lychee-setup:
- *       # a comment
- *       &base-lychee-setup
- *       image: ghcr.io/lycheeorg/lychee:latest
- *
- * — which is legal YAML, which `docker compose` accepts, and which Symfony's
- * parser rejects with "Mapping values are not allowed in multi-line blocks".
- * That exception reached the API verbatim and took the account with it: the
- * deploy failed at the `running` stage, the account was rolled back, and the
- * deploy log was deleted before anyone could read why.
- *
- * So the anchor is moved onto the key above it, which is the same node in
- * canonical form, and only ever as a **fallback**: a file Symfony already
- * parses is never rewritten, so this cannot change the meaning of a file that
- * was working.
+ * Reads a compose file the way Docker reads it: an anchor alone on its line, which Symfony rejects, is
+ * moved onto its key, and only as a fallback, so a file Symfony already parses is never rewritten.
  */
 final class ComposeYaml
 {
     private static ?\Closure $privilegedRead = null;
 
-    /**
-     * An anchor alone on its line, e.g. `&base-lychee-setup` -- a trailing
-     * comment included, because Baserow writes one there and an anchor with
-     * something said about it is still an anchor alone on its line.
-     */
+    /** An anchor alone on its line, e.g. `&base-lychee-setup`, a trailing comment included. */
     private const STANDALONE_ANCHOR = '/^&[A-Za-z0-9_][A-Za-z0-9_.\-]*(?:[ \t]+#.*)?$/';
 
     /**
-     * The parsed document, or null when it cannot be read at all.
+     * The parsed document, or null when it cannot be read at all, even with its anchors rescued.
      *
      * @return array<mixed>|null
      */
@@ -54,7 +31,6 @@ final class ComposeYaml
 
             return is_array($parsed) ? $parsed : null;
         } catch (ParseException) {
-            // Fall through to the one construct worth rescuing.
         }
 
         $rescued = self::anchorsOntoTheirKeys($raw);
@@ -84,9 +60,7 @@ final class ComposeYaml
     }
 
     /**
-     * The file's contents, through sudo when the core cannot open it: the run
-     * file is the account's, 0600 ({@see EngineArtifacts::RUN_COMPOSE_MODE}).
-     * Only in an account home, where the root read refuses a link out of it.
+     * Read as root when core cannot open it ({@see EngineArtifacts::RUN_COMPOSE_MODE}), and only in an account home.
      */
     public static function read(string $path): ?string
     {
@@ -98,19 +72,15 @@ final class ComposeYaml
         return (self::$privilegedRead ?? static fn (string $p): ?string => (new System)->filesystem()->cat($p))($path);
     }
 
-    /** For tests: what reads a file the core cannot open; null restores sudo. */
+    /** Test seam for the root read, null restores it. */
     public static function readPrivilegedWith(?\Closure $read): void
     {
         self::$privilegedRead = $read;
     }
 
     /**
-     * Write a parsed compose document back out, keeping `[]` and `{}` apart.
-     *
-     * Both parse to a PHP `[]`, and Symfony dumps that as `{}` -- so the
-     * documented `healthcheck: { test: [] }` came back as `test: {}`, which
-     * Compose rejects. An empty array is written as a sequence where $source
-     * had one, and as a map everywhere else, as before.
+     * Write a parsed compose document back out, keeping `[]` and `{}` apart: an empty array is a
+     * sequence where $source had one, and a map everywhere else.
      *
      * @param  array<mixed>  $compose
      * @param  string  ...$included  files merged into $source ({@see ComposeInclude})
@@ -131,8 +101,7 @@ final class ComposeYaml
     }
 
     /**
-     * Paths of every empty sequence in $raw, read with maps as objects so the
-     * two kinds of empty stay distinguishable.
+     * Paths of every empty sequence in $raw, read with maps as objects so the two kinds of empty differ.
      *
      * @return array<string, true>
      */
@@ -171,9 +140,7 @@ final class ComposeYaml
     }
 
     /**
-     * An empty map becomes an empty object, which DUMP_OBJECT_AS_MAP writes as
-     * `{}`; an empty sequence stays `[]`, which DUMP_EMPTY_ARRAY_AS_SEQUENCE
-     * writes as `[]`.
+     * An empty map becomes an empty object, dumped as `{}`; an empty sequence stays `[]`.
      *
      * @param  array<mixed>  $node
      * @param  array<string, true>  $sequences
@@ -194,13 +161,8 @@ final class ComposeYaml
     }
 
     /**
-     * Move an anchor that sits alone on its line up onto the key it belongs
-     * to, turning `key:\n  &a\n  x: 1` into `key: &a\n  x: 1`.
-     *
-     * Only a line that is nothing but an anchor is touched, and only when the
-     * nearest line above it — skipping blanks and comments — ends in a colon,
-     * which is the one shape where the move is unambiguous. Anything else is
-     * left exactly as written rather than guessed at.
+     * Move an anchor alone on its line onto its key (`key:\n  &a\n  x: 1` to `key: &a\n  x: 1`), only when the
+     * nearest line above, skipping blanks and comments, ends in a colon; anything else is left as written.
      */
     private static function anchorsOntoTheirKeys(string $raw): string
     {
@@ -215,18 +177,11 @@ final class ComposeYaml
                 continue;
             }
 
-            for ($j = $i - 1; $j >= 0; $j--) {
-                $above = $lines[$j];
-                $trimmed = trim($above);
-                if ($trimmed === '' || str_starts_with($trimmed, '#')) {
-                    continue;
-                }
-                if (str_ends_with($trimmed, ':')) {
-                    $lines[$j] = rtrim($above).' '.trim($line);
-                    $lines[$i] = null;
-                    $moved = true;
-                }
-                break;
+            $j = self::keyLineAbove($lines, $i);
+            if ($j !== null) {
+                $lines[$j] = rtrim($lines[$j]).' '.trim($line);
+                $lines[$i] = null;
+                $moved = true;
             }
         }
 
@@ -235,5 +190,26 @@ final class ComposeYaml
         }
 
         return implode("\n", array_filter($lines, static fn ($l): bool => $l !== null));
+    }
+
+    /**
+     * @param  array<int, ?string>  $lines
+     */
+    private static function keyLineAbove(array $lines, int $i): ?int
+    {
+        for ($j = $i - 1; $j >= 0; $j--) {
+            $above = $lines[$j];
+            if ($above === null) {
+                continue;
+            }
+            $trimmed = trim($above);
+            if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+                continue;
+            }
+
+            return str_ends_with($trimmed, ':') ? $j : null;
+        }
+
+        return null;
     }
 }

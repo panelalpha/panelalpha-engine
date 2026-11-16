@@ -4,13 +4,20 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-litespeed
-    image: ghcr.io/panelalpha/engine-litespeed:v2.2.0-20261028
+    image: ghcr.io/panelalpha/engine-litespeed:v2.3.0
     pull_policy: missing
+    # The entrypoint shell ignores SIGTERM as PID 1.
+    init: true
     labels:
       - com.panelalpha.webserver=litespeed
     depends_on:
       - core
     restart: always
+    # Log files stay open per site; at the default 1024 a reload past ~170 sites fails.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 524288
     hostname: webserver.shared-hosting.palocal
     network_mode: host
     dns:

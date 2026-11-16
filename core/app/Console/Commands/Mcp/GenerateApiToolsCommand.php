@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Mcp;
 
+use App\Mcp\Generator\SchemaReferences;
 use App\Mcp\Tools\Api\DownloadWindow;
 use App\Mcp\Tools\Api\UploadArguments;
 use Illuminate\Console\Command;
@@ -59,6 +60,8 @@ class GenerateApiToolsCommand extends Command
         // token, and reports what it found. Creates no record and changes
         // nothing on the source or the engine.
         'POST /wordpress/migrations/test',
+        // Loads one of this engine's own sites as a visitor would; stores nothing.
+        'POST /lighthouse/generate-report',
     ];
 
     /**
@@ -105,6 +108,9 @@ class GenerateApiToolsCommand extends Command
         'POST /wordpress/migrations/test' => ['username' => 'admin_username'],
     ];
 
+    /** Where a `$ref` property points: the document's component schemas. */
+    private SchemaReferences $references;
+
     /** What a renamed project parameter says about itself when the API said nothing. */
     public function handle(): int
     {
@@ -123,6 +129,8 @@ class GenerateApiToolsCommand extends Command
 
             return self::FAILURE;
         }
+
+        $this->references = new SchemaReferences((array) ($spec['components']['schemas'] ?? []));
 
         $namesPath = base_path($this->option('names'));
 
@@ -681,16 +689,22 @@ class GenerateApiToolsCommand extends Command
         array $definition,
         bool $required,
         ?string $description,
-        ?string $suffix = null
+        ?string $suffix = null,
+        int $depth = 0
     ): string {
-        $type = $definition['type'] ?? 'string';
+        $resolved = $this->references->resolved($definition);
+        if ($resolved !== $definition && $description === null && is_string($resolved['description'] ?? null)) {
+            $description = $resolved['description'];
+        }
+        $definition = $resolved;
+        $type = $definition['type'] ?? (isset($definition['properties']) ? 'object' : 'string');
 
         $call = match ($type) {
             'integer' => '$schema->integer()',
             'number' => '$schema->number()',
             'boolean' => '$schema->boolean()',
-            'array' => '$schema->array()',
-            'object' => '$schema->object()',
+            'array' => $this->arrayCall($definition, $depth),
+            'object' => $this->objectCall($definition, $depth),
             default => '$schema->string()',
         };
 
@@ -747,7 +761,48 @@ class GenerateApiToolsCommand extends Command
             $call .= '->nullable()';
         }
 
-        return "            '{$name}' => {$call},";
+        return str_repeat('    ', 3 + $depth)."'{$name}' => {$call},";
+    }
+
+    /**
+     * Lists the documented properties, so a model sees a nested body's keys
+     * (a create's `source`); an undocumented one (an env map) stays bare.
+     *
+     * @param  array<string, mixed>  $definition
+     */
+    private function objectCall(array $definition, int $depth): string
+    {
+        $properties = array_filter(
+            (array) ($definition['properties'] ?? []),
+            static fn (mixed $p): bool => is_array($p) && ($p['x-mcp-hide'] ?? false) !== true,
+        );
+        if ($properties === []) {
+            return '$schema->object()';
+        }
+
+        $required = (array) ($definition['required'] ?? []);
+        $lines = [];
+        foreach ($properties as $key => $prop) {
+            $lines[] = $this->schemaLine((string) $key, $prop, in_array($key, $required, true), $prop['description'] ?? null, null, $depth + 1);
+        }
+
+        return '$schema->object(fn ($schema): array => ['."\n".implode("\n", $lines)."\n".str_repeat('    ', 3 + $depth).'])';
+    }
+
+    /**
+     * An array of objects with documented properties, so a model sees the keys each item takes, as it does an
+     * object's; any other array stays bare.
+     *
+     * @param  array<string, mixed>  $definition
+     */
+    private function arrayCall(array $definition, int $depth): string
+    {
+        $items = $this->references->resolved((array) ($definition['items'] ?? []));
+        if (($items['properties'] ?? []) === []) {
+            return '$schema->array()';
+        }
+
+        return '$schema->array()->items('.$this->objectCall($items, $depth).')';
     }
 
     /**

@@ -53,6 +53,14 @@ class DeployLogArchiveTest extends TestCase
         return $username;
     }
 
+    private function startLine(string $username, string $id, string $message): void
+    {
+        $log = (new DeployLogPaths($username))->log($id);
+        $mtime = (int) filemtime($log);
+        file_put_contents($log, json_encode(['ts' => 1, 'level' => 'info', 'msg' => $message]) . "\n");
+        touch($log, $mtime);
+    }
+
     public function test_an_accounts_deploys_are_listed_newest_first(): void
     {
         $username = $this->account(['20260101-000000-aaa', '20260102-000000-bbb']);
@@ -109,6 +117,33 @@ class DeployLogArchiveTest extends TestCase
             ['20260105-000000-aaa', '20260104-000000-aaa'],
             array_column(DeployLogArchive::deploys($username), 'id')
         );
+    }
+
+    public function test_pruning_spares_the_newest_install_however_old(): void
+    {
+        $username = $this->account(['20260101-000000-aaa', '20260102-000000-bbb', '20260103-000000-ccc', '20260104-000000-ddd']);
+        $this->startLine($username, '20260101-000000-aaa', 'Deploy started (source: git, repo: https://github.com/acme/app.git)');
+        $this->startLine($username, '20260102-000000-bbb', 'Deploy started (source: dind template)');
+        $this->startLine($username, '20260103-000000-ccc', 'Deploy started (source: rebuild)');
+
+        $deleted = DeployLogArchive::prune($username, 1);
+
+        $this->assertSame(
+            [(new DeployLogPaths($username))->log('20260103-000000-ccc'), (new DeployLogPaths($username))->log('20260101-000000-aaa')],
+            $deleted
+        );
+        $this->assertSame(['20260104-000000-ddd', '20260102-000000-bbb'], array_column(DeployLogArchive::deploys($username), 'id'));
+    }
+
+    public function test_an_install_among_the_newest_is_not_kept_twice(): void
+    {
+        $username = $this->account(['20260101-000000-aaa', '20260102-000000-bbb', '20260103-000000-ccc']);
+        $this->startLine($username, '20260101-000000-aaa', 'Deploy started (source: dind template)');
+        $this->startLine($username, '20260103-000000-ccc', 'Deploy started (source: dind template)');
+
+        DeployLogArchive::prune($username, 1);
+
+        $this->assertSame(['20260103-000000-ccc'], array_column(DeployLogArchive::deploys($username), 'id'));
     }
 
     public function test_pruning_leaves_the_status_pointer_alone(): void

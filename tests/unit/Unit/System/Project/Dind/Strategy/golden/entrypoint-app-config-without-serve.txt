@@ -1,0 +1,8 @@
+[1 log lines] answer
+[
+    "acme-plain",
+    false
+]
+
+== log
+#0 info: Starting stage: running

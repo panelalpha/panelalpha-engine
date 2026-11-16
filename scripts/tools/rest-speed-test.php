@@ -967,9 +967,9 @@ function prewarm_verdict(array $timeline, array $build = []): string
         }
     }
 
-    $steps = (int) ($build['step_count'] ?? 0);
+    $steps = (int) ($build['cacheable_steps'] ?? 0);
     $cached = (int) ($build['cached_steps'] ?? 0);
-    if ($sawBuild && $steps > 0 && $cached / $steps >= 0.5) {
+    if ($sawBuild && (float) ($build['cache_hit_ratio'] ?? 0) >= 0.5) {
         return sprintf(
             'base image REBUILT from the host BuildKit cache (%d of %d layers cached) — the tag was gone, '
             . 'the layers were not, so this is NOT a true no-prewarm number; use --unprewarm-deep',
@@ -1139,9 +1139,10 @@ function print_timings(?array $timings): array
 
         if ($name === 'build' && (int) ($build['step_count'] ?? 0) > 0) {
             printf(
-                "          %d layer(s), %d cached, hit ratio %s\n",
+                "          %d step(s), %d of %d cacheable cached, hit ratio %s\n",
                 $build['step_count'],
                 $build['cached_steps'],
+                $build['cacheable_steps'] ?? 0,
                 $build['cache_hit_ratio'] ?? '-'
             );
             foreach ($build['steps'] ?? [] as $layer) {
@@ -1495,9 +1496,8 @@ foreach ($fixtures as $fixture) {
         if (($warm['deploy_status'] ?? null) !== 'success') {
             $failures[] = "{$name}: rebuild " . (string) ($warm['deploy_status'] ?? 'failed');
         } else {
-            $steps = (int) ($warm['server']['build']['step_count'] ?? 0);
             $ratio = $warm['server']['build']['cache_hit_ratio'] ?? null;
-            if ($steps > 0 && $ratio !== null && (float) $ratio < $minWarmRatio) {
+            if ($ratio !== null && (float) $ratio < $minWarmRatio) {
                 $failures[] = sprintf('%s: rebuild cache hit ratio %.3f < %.2f', $name, (float) $ratio, $minWarmRatio);
             }
         }

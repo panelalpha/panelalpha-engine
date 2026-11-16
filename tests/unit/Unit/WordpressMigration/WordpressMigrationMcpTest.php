@@ -3,6 +3,7 @@
 namespace Tests\Unit\WordpressMigration;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\File;
 
 /**
  * tool-names.php lists the migration operations, and a dry-run of
@@ -10,10 +11,26 @@ use Illuminate\Support\Facades\Artisan;
  */
 class WordpressMigrationMcpTest extends WordpressMigrationTestCase
 {
+    private string $dir;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->dir = 'storage/framework/testing/wp-migration-mcp-' . bin2hex(random_bytes(4));
+        File::makeDirectory(base_path($this->dir), 0755, true);
+    }
+
+    protected function tearDown(): void
+    {
+        File::deleteDirectory(base_path($this->dir));
+        parent::tearDown();
+    }
+
     public function test_dry_run_covers_the_migration_operations(): void
     {
-        $specPath = base_path('storage/api-docs/api-docs.json');
-        $this->assertFileExists($specPath, 'Run: php artisan l5-swagger:generate');
+        config(['l5-swagger.defaults.paths.docs' => base_path($this->dir)]);
+        $this->assertSame(0, Artisan::call('l5-swagger:generate'));
+        $specPath = base_path($this->dir . '/api-docs.json');
 
         /** @var mixed $spec */
         $spec = json_decode((string) file_get_contents($specPath), true);
@@ -50,7 +67,7 @@ class WordpressMigrationMcpTest extends WordpressMigrationTestCase
         $this->assertFileExists(app_path('Mcp/Tools/Api/WordPressMigrations/WordpressMigrationTestTool.php'));
         $this->assertFileExists(app_path('Mcp/Tools/Api/WordPressMigrations/WordpressMigrationPackageCreateTool.php'));
 
-        $exit = Artisan::call('mcp:tool:generate', ['--dry-run' => true]);
+        $exit = Artisan::call('mcp:tool:generate', ['--dry-run' => true, '--spec' => $this->dir . '/api-docs.json']);
         $this->assertSame(
             0,
             $exit,

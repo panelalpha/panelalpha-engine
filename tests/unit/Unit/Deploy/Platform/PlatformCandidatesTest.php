@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Platform;
 
 use App\Lib\Deploy\DetectProjectStrategy;
+use App\Lib\Deploy\Platform\UnknownRecipeException;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCandidates;
@@ -94,6 +95,33 @@ class PlatformCandidatesTest extends TestCase
         $this->assertSame([], $this->candidates());
     }
 
+    /**
+     * Fictiverse/Redream: Railpack publishes .NET as the engine does, so a WinForms app is no more its to
+     * run, and the list says so as the inspection's text does.
+     */
+    public function test_a_dotnet_repository_serving_nothing_offers_no_railpack(): void
+    {
+        $this->writeFile('Redream.sln', "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Redream\", \"Redream\\Redream.csproj\", \"{1}\"\nEndProject\n");
+        $this->writeFile('Redream/Redream.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>net6.0-windows</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertSame([], $this->candidates());
+
+        $this->writeFile('Server/Server.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+        $this->assertSame(['dotnet', 'railpack'], array_column($this->candidates(), 'id'));
+    }
+
+    /** An inspection writes a project it did not fetch empty, and that one may be the server. */
+    public function test_a_dotnet_project_left_unread_keeps_railpack_on_the_list(): void
+    {
+        $this->writeFile('Redream/Redream.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFramework>net6.0-windows</TargetFramework></PropertyGroup></Project>');
+        $this->writeFile('src/Web/Web.csproj', '');
+
+        $this->assertSame(['railpack'], array_column($this->candidates(), 'id'));
+    }
+
     /** The list travels with the inspection, which is where a caller reads it. */
     public function test_the_inspection_reports_the_candidates(): void
     {
@@ -163,7 +191,9 @@ class PlatformCandidatesTest extends TestCase
         $application = AppInspector::inspect($this->tmpDir, null, null, 'lavarel')['application'];
 
         $this->assertFalse($application['deployable']);
-        $this->assertStringContainsString("No recipe called 'lavarel'", (string) $application['issue']);
+        $this->assertSame(UnknownRecipeException::CODE, $application['issue']['code']);
+        $this->assertSame('lavarel', $application['issue']['recipe']);
+        $this->assertStringContainsString("No recipe called 'lavarel'", $application['issue']['message']);
     }
 
     /**

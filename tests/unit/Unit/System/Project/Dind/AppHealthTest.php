@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Lib\Findings\Finding;
 use App\System\Project\Dind\AppHealth;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TestNetwork;
@@ -237,7 +238,7 @@ class AppHealthTest extends TestCase
             ],
         ];
 
-        $this->assertSame(['Serving our own page.'], AppHealth::errorCheckMessages($details));
+        $this->assertSame(['Serving our own page.'], self::sentences(AppHealth::errorCheckFindings($details)));
     }
 
     /**
@@ -261,8 +262,11 @@ class AppHealthTest extends TestCase
 
         $this->assertSame(
             [AppHealth::NOT_ANSWERING, 'Nothing answered.'],
-            AppHealth::servingWarnings($details)
+            self::sentences(AppHealth::servingWarnings($details))
         );
+        $warnings = AppHealth::servingWarnings($details);
+        $this->assertSame([AppHealth::CODE_NOT_ANSWERING, AppHealth::CODE_CHECK_FAILED], [$warnings[0]->code, $warnings[1]->code]);
+        $this->assertSame(['check' => 'no-service-unreachable'], $warnings[1]->facts);
     }
 
     /**
@@ -278,7 +282,7 @@ class AppHealthTest extends TestCase
             AppHealth::DETAIL_PORTS => [['port' => 3000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => null]],
         ];
 
-        $this->assertSame([AppHealth::NOT_ANSWERING], AppHealth::servingWarnings($details));
+        $this->assertSame([AppHealth::NOT_ANSWERING], self::sentences(AppHealth::servingWarnings($details)));
     }
 
     /** A healthy application says nothing at all. */
@@ -293,7 +297,7 @@ class AppHealthTest extends TestCase
             ],
         ];
 
-        $this->assertSame([], AppHealth::servingWarnings($details));
+        $this->assertSame([], self::sentences(AppHealth::servingWarnings($details)));
     }
 
     /**
@@ -313,25 +317,28 @@ class AppHealthTest extends TestCase
         foreach ([502, 503, 504] as $code) {
             $this->assertSame(
                 ["The application answers inside the account, but the site answers {$code} through the webserver."],
-                AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, $code))
+                self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, $code)))
             );
         }
+        $gateway = AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 502))[0];
+        $this->assertSame([AppHealth::CODE_SITE_GATEWAY_ERROR, ['http_code' => 502]], [$gateway->code, $gateway->facts]);
+        $this->assertSame(AppHealth::CODE_SITE_UNREACHABLE, AppHealth::servingWarnings($details(AppHealth::REACH_UNREACHABLE, null))[0]->code);
         $this->assertSame(
             ['The application answers inside the account, but the webserver did not accept a connection for the site.'],
-            AppHealth::servingWarnings($details(AppHealth::REACH_UNREACHABLE, null))
+            self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_UNREACHABLE, null)))
         );
 
         // An app that varies by Host differs with an ordinary answer: still only a log line.
-        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 200)));
-        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 404)));
-        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_OK, 200)));
+        $this->assertSame([], self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 200))));
+        $this->assertSame([], self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 404))));
+        $this->assertSame([], self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_OK, 200))));
         // The app's own 5xx is the app's failure, which the checks already report.
-        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 502, 502)));
+        $this->assertSame([], self::sentences(AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 502, 502))));
     }
 
     public function test_an_account_with_no_check_verdict_contributes_no_warnings(): void
     {
-        $this->assertSame([], AppHealth::errorCheckMessages([]));
+        $this->assertSame([], self::sentences(AppHealth::errorCheckFindings([])));
     }
 
     /**
@@ -352,7 +359,7 @@ class AppHealthTest extends TestCase
             ['not-placeholder', 'no-welcome-page'],
             array_column(AppHealth::failedChecks($details), 'id')
         );
-        $this->assertSame(['Serving our own page.'], AppHealth::errorCheckMessages($details));
+        $this->assertSame(['Serving our own page.'], self::sentences(AppHealth::errorCheckFindings($details)));
     }
 
     public function test_an_account_never_swept_has_no_failed_checks(): void
@@ -470,7 +477,7 @@ class AppHealthTest extends TestCase
                 ['id' => 'no-server-error', 'severity' => 'error', 'message' => 'The site returned 500 instead of a page.'],
             ],
         ];
-        $this->assertSame(['The site returned 500 instead of a page.'], AppHealth::servingWarnings($details));
+        $this->assertSame(['The site returned 500 instead of a page.'], self::sentences(AppHealth::servingWarnings($details)));
     }
 
     public function test_a_worker_publishing_no_port_is_never_called_unhealthy(): void
@@ -912,5 +919,14 @@ class AppHealthTest extends TestCase
         $this->assertStringNotContainsString('https://', $calls);
         $verdict = AppHealth::compareFingerprints('shop.example.com', AppHealth::parseFingerprint($raw), self::fingerprint(200, 'x'));
         $this->assertStringStartsWith('Not reachable: http://shop.example.com/ answered 500', AppHealth::describeReach($verdict));
+    }
+
+    /**
+     * @param  list<Finding>  $findings
+     * @return list<string>
+     */
+    private static function sentences(array $findings): array
+    {
+        return array_map(static fn (Finding $finding): string => $finding->message, $findings);
     }
 }

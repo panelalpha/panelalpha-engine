@@ -2,21 +2,31 @@
 
 namespace Tests\Unit\System;
 
+use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Models\Setting;
+use App\Models\Tunnel;
 use App\System;
 use App\System\Filesystem;
+use App\System\Project\Dind\TenantEgressGuard;
 use App\System\Services\Exim;
 use Symfony\Component\Process\Process;
+use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 class EximRebuildTest extends TestCase
 {
+    use InMemoryDatabase;
+
     private string $tmpRoot;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->bootInMemoryDatabase();
         $this->tmpRoot = sys_get_temp_dir() . '/pa-exim-' . bin2hex(random_bytes(4));
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot]));
         mkdir($this->tmpRoot . '/config/exim', 0777, true);
         mkdir($this->tmpRoot . '/templates/config', 0777, true);
         $this->writeTemplates();
@@ -24,6 +34,7 @@ class EximRebuildTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -55,33 +66,18 @@ class EximRebuildTest extends TestCase
         $this->assertSame("*:apikey:sg-token-123\n", $passwd);
 
         $rewrite = file_get_contents($this->tmpRoot . '/config/exim/rewrite.conf');
-        $this->assertStringContainsString('example.com', $rewrite);
+        $this->assertStringContainsString('panelalpha/senders', $rewrite);
         $this->assertStringNotContainsString('${address:$header_from:}', $rewrite);
+        $this->assertSame("server example.com\n", file_get_contents($this->tmpRoot . '/config/exim/panelalpha/senders'));
 
         $transport = file_get_contents($this->tmpRoot . '/config/exim/transport.conf');
         $this->assertStringNotContainsString('REMOTE_SMTP_SMARTHOST_PROTOCOL', $transport);
 
-        $this->assertContains('update-exim4.conf', $system->journal);
-        $this->assertContains('exim4-restart', $system->journal);
-
-        $updateCmd = null;
-        $reloadCmd = null;
-        foreach ($system->execJournal as $cmd) {
-            if (str_contains($cmd, 'update-exim4.conf')) {
-                $updateCmd = $cmd;
-            }
-            if (str_contains($cmd, 'service exim4 start')) {
-                $reloadCmd = $cmd;
-            }
-        }
-        $this->assertNotNull($updateCmd);
-        $this->assertStringContainsString('docker compose -f', $updateCmd);
-        $this->assertStringContainsString('exec mail update-exim4.conf', $updateCmd);
-        $this->assertStringNotContainsString('exec -T mail', $updateCmd);
-
-        $this->assertNotNull($reloadCmd);
-        $this->assertStringContainsString('exec mail sh -c', $reloadCmd);
-        $this->assertStringNotContainsString('exec -T mail', $reloadCmd);
+        $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'compose.eximUpdateConfig', '--', $this->tmpRoot . '/docker-compose.yml'],
+            [LocalRoot::CLIENT, 'compose.eximRestart', '--', $this->tmpRoot . '/docker-compose.yml'],
+        ], $system->requests);
     }
 
     /**
@@ -196,10 +192,10 @@ class EximRebuildTest extends TestCase
         $this->assertSame("*::\n", $passwd);
 
         $rewrite = file_get_contents($this->tmpRoot . '/config/exim/rewrite.conf');
-        $this->assertStringContainsString('${address:$header_from:}', $rewrite);
+        $this->assertStringContainsString('panelalpha/senders', $rewrite);
     }
 
-    public function test_rebuild_listens_on_this_hosts_docker0_and_relays_for_the_tenant_network(): void
+    public function test_rebuild_listens_on_this_hosts_docker0_and_the_tenant_gateway_and_relays_for_the_tenant_network(): void
     {
         $system = $this->recordingSystem();
         $gateway = TestNetwork::container(1);
@@ -213,7 +209,10 @@ class EximRebuildTest extends TestCase
         $exim->rebuildEximConfig();
 
         $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
-        $this->assertStringContainsString(sprintf("dc_local_interfaces='%s ; %s'", TestNetwork::LOOPBACK, $gateway), $updateConf);
+        $this->assertStringContainsString(
+            sprintf("dc_local_interfaces='%s ; %s ; %s'", TestNetwork::LOOPBACK, $gateway, $tenantGateway),
+            $updateConf
+        );
         $this->assertStringNotContainsString(Exim::FALLBACK_BRIDGE_GATEWAY, $updateConf);
         $this->assertStringContainsString(
             sprintf("dc_relay_nets='%s ; %s ; %s'", TestNetwork::LOOPBACK_CIDR, TestNetwork::PRIVATE_172_CIDR, $tenants),
@@ -239,7 +238,8 @@ class EximRebuildTest extends TestCase
         );
     }
 
-    public function test_rebuild_networks_rewrites_only_the_listen_and_relay_lines(): void
+    /** The sending domain is the engine's line too: an install that still hides behind `panelalpha.engine` loses it. */
+    public function test_rebuild_networks_rewrites_the_lines_the_engine_owns(): void
     {
         $path = $this->tmpRoot . '/config/exim/update-exim4.conf.conf';
         $loopback = TestNetwork::LOOPBACK;
@@ -261,31 +261,177 @@ class EximRebuildTest extends TestCase
 
         $exim->rebuildNetworks();
 
-        $this->assertSame("dc_readhost='panelalpha.engine'\n"
-            . "dc_hide_mailname='true'\n"
-            . "dc_local_interfaces='{$loopback} ; {$gateway}'\n"
-            . "dc_relay_nets='{$relayed} ; {$tenants}'\n", file_get_contents($path));
+        $this->assertSame("dc_hide_mailname='true'\n"
+            . "dc_local_interfaces='{$loopback} ; {$gateway} ; {$tenantGateway}'\n"
+            . "dc_relay_nets='{$relayed} ; {$tenants}'\n"
+            . "dc_readhost=''\n", file_get_contents($path));
         $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
     }
 
-    /**
-     * The daemon a container start left retrying its bind has no pid file, so
-     * `service exim4 stop` misses it; the restart also stops every `exim4 -bd`
-     * before starting the new one.
-     */
-    public function test_the_restart_stops_a_daemon_the_init_script_missed(): void
+    /** With a sending domain configured it is what the mailname hides behind. */
+    public function test_rebuild_networks_takes_the_readhost_from_the_sending_domain(): void
     {
-        $script = Exim::RESTART_SCRIPT;
+        $path = $this->tmpRoot . '/config/exim/update-exim4.conf.conf';
+        file_put_contents($path, "dc_readhost='panelalpha.engine'\n");
+        $system = $this->recordingSystem();
 
-        $stop = strpos($script, 'service exim4 stop');
-        $kill = strpos($script, 'kill $left');
-        $start = strpos($script, 'service exim4 start');
-        $this->assertNotFalse($stop);
-        $this->assertNotFalse($kill);
-        $this->assertNotFalse($start);
-        $this->assertTrue($stop < $kill && $kill < $start);
-        $this->assertStringContainsString('-bd', $script);
-        $this->assertStringContainsString('kill -9', $script);
+        $this->eximWithConfig($system, ['sender_domain' => 'mail.host.example'])->rebuildNetworks();
+
+        $this->assertSame(
+            "dc_local_interfaces='" . TestNetwork::LOOPBACK . ' ; ' . Exim::FALLBACK_BRIDGE_GATEWAY . "'\n"
+            . "dc_relay_nets='" . TestNetwork::LOOPBACK_CIDR . ' ; ' . TestNetwork::PRIVATE_172_CIDR . "'\n"
+            . "dc_readhost='mail.host.example'\n",
+            file_get_contents($path)
+        );
+    }
+
+    /** The rule and the map are what a deploy of an older engine has to gain: it never rebuilds the mail settings. */
+    public function test_rebuild_networks_also_writes_the_rule_and_the_sender_map(): void
+    {
+        file_put_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf', "dc_readhost=''\n");
+        file_put_contents($this->tmpRoot . '/config/exim/rewrite.conf', "* \${address:\$header_from:} F\n");
+        $system = $this->recordingSystem();
+
+        $this->eximWithConfig($system, [])->rebuildNetworks();
+
+        $this->assertSame(
+            file_get_contents($this->tmpRoot . '/templates/config/exim/rewrite.conf'),
+            file_get_contents($this->tmpRoot . '/config/exim/rewrite.conf')
+        );
+        $this->assertFileExists($this->tmpRoot . '/config/exim/panelalpha/senders');
+    }
+
+    /** The map alone: a changed domain or a restarted account never needs Exim restarted. */
+    public function test_refreshing_the_senders_writes_the_map_and_applies_nothing(): void
+    {
+        $system = $this->recordingSystem();
+
+        $this->eximWithConfig($system, ['sender_domain' => 'mail.example.net'])->refreshSenderMap();
+
+        $this->assertSame([], $system->journal);
+        $this->assertSame([], $system->requests);
+        $this->assertSame("server mail.example.net\n", file_get_contents($this->tmpRoot . '/config/exim/panelalpha/senders'));
+    }
+
+    /**
+     * The whole rule, as Exim reads it beside the map written with it: a sender at `<address>/<domain>` in the map keeps
+     * its address, any other leaves at the map's `server` name, and at the server's name where the map has none.
+     */
+    public function test_the_written_rule_reads_the_map_written_with_it_and_falls_back_to_the_servers_name(): void
+    {
+        $alice = $this->makeUser('alice');
+        $domain = $this->makeMainDomain($alice, 'shop-ab12.panelalpha.online');
+        Tunnel::create([
+            'domain_id' => $domain->id,
+            'user_id' => $alice->id,
+            'provider' => Tunnel::PROVIDER_PANELALPHA,
+            'hostname' => 'shop-ab12.panelalpha.online',
+            'details' => [],
+        ]);
+        $system = $this->recordingSystem(['alice' => TestNetwork::container(17)]);
+
+        $this->eximWithConfig($system, ['sender_domain' => 'mail.host.example'])->rebuildEximConfig();
+
+        $map = '/etc/exim4/panelalpha/senders';
+        $this->assertSame(
+            '* "${if and{{exists{' . $map . '}}{eq{${lookup{$sender_host_address/${lc:$domain}}lsearch{' . $map . '}{allowed}{}}}{allowed}}}'
+            . '{$local_part@$domain}'
+            . '{$local_part@${if exists{' . $map . '}{${lookup{server}lsearch{' . $map . '}{$value}{mail.host.example}}}{mail.host.example}}}}" Ffrs',
+            $this->ruleLine((string) file_get_contents($this->tmpRoot . '/config/exim/rewrite.conf'))
+        );
+        $this->assertSame(
+            "server mail.host.example\n" . TestNetwork::container(17) . "/shop-ab12.panelalpha.online allowed\n",
+            file_get_contents($this->tmpRoot . '/config/exim/panelalpha/senders'),
+            'the keys the rule looks up: `server`, and the sending host\'s address with the lowercased domain'
+        );
+    }
+
+    /** A server with no name of its own never sends as the mail container's hostname. */
+    public function test_a_server_with_no_name_writes_the_rule_with_the_reserved_name(): void
+    {
+        Setting::set('cert_domain', '');
+        Setting::set('default_ipv4', '');
+        $system = $this->recordingSystem();
+
+        $this->eximWithConfig($system, [])->rebuildEximConfig();
+
+        $rule = $this->ruleLine((string) file_get_contents($this->tmpRoot . '/config/exim/rewrite.conf'));
+        $this->assertStringContainsString('{$value}{' . Exim::UNNAMED_SENDER . '}}}{' . Exim::UNNAMED_SENDER . '}}}}" Ffrs', $rule);
+        $this->assertStringNotContainsString('primary_hostname', $rule);
+        $this->assertStringNotContainsString('palocal', $rule);
+    }
+
+    private function ruleLine(string $rewrite): string
+    {
+        $rules = array_values(array_filter(
+            explode("\n", $rewrite),
+            static fn (string $line): bool => $line !== '' && ! str_starts_with($line, '#')
+        ));
+        $this->assertCount(1, $rules);
+
+        return $rules[0];
+    }
+
+    /**
+     * The files the installer copies are what Exim reads until a rebuild: they may not name a domain that does not
+     * exist or trust the message's own From header, which any submitter sets.
+     */
+    public function test_the_shipped_exim_samples_keep_a_project_its_own_domain_and_rewrite_the_rest(): void
+    {
+        $dir = dirname(__DIR__, 4) . '/templates/config/exim';
+
+        $updateConf = file_get_contents($dir . '/update-exim4.conf.conf');
+        $this->assertNotFalse($updateConf);
+        $this->assertStringContainsString("dc_readhost=''", $updateConf);
+        $this->assertStringNotContainsString('panelalpha.engine', $updateConf);
+
+        $rewrite = file_get_contents($dir . '/rewrite.conf');
+        $this->assertNotFalse($rewrite);
+        $this->assertStringContainsString('/etc/exim4/panelalpha/senders', $rewrite);
+        $this->assertStringContainsString('$sender_host_address', $rewrite);
+        $this->assertStringContainsString('$local_part@$domain', $rewrite);
+        $this->assertStringContainsString(Exim::UNNAMED_SENDER, $rewrite);
+        $this->assertStringNotContainsString('$primary_hostname', $rewrite, 'the mail container\'s own name is no one\'s domain');
+        $this->assertStringNotContainsString('$header_from', $rewrite);
+        $this->assertStringNotContainsString('panelalpha.engine', $rewrite);
+    }
+
+    /**
+     * The account's own Docker daemon gives its docker0 172.17.0.1, so docker0's gateway on a host with Docker's default
+     * address is the account itself; the tenant network's gateway is an address the account reaches the host on.
+     */
+    public function test_a_project_is_given_the_tenant_gateway_exim_listens_on(): void
+    {
+        $system = $this->recordingSystem();
+        $tenantGateway = TestNetwork::private(1);
+        $exim = $this->eximWithConfig($system, [], [
+            'bridge' => ['subnet' => '172.17.0.0/16', 'gateway' => Exim::FALLBACK_BRIDGE_GATEWAY],
+            'pash-tenants' => ['subnet' => TestNetwork::prefix($tenantGateway, 16), 'gateway' => $tenantGateway],
+        ]);
+
+        $this->assertSame(
+            [ComposeEnvironment::SMTP_HOST => $tenantGateway, ComposeEnvironment::SMTP_PORT => Exim::RELAY_PORT],
+            $exim->relayEnvironment()
+        );
+        $this->assertContains(Exim::RELAY_PORT, explode(' ', TenantEgressGuard::HOST_PORTS));
+
+        $exim->rebuildEximConfig();
+        $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
+        $this->assertStringContainsString(
+            sprintf("dc_local_interfaces='%s ; %s ; %s'", TestNetwork::LOOPBACK, Exim::FALLBACK_BRIDGE_GATEWAY, $tenantGateway),
+            $updateConf,
+            'the address a project is handed is one exim listens on'
+        );
+    }
+
+    /** Nothing to inspect is no relay: a stock address is another install's, and docker0's may be the account's own. */
+    public function test_no_relay_is_named_without_a_tenant_network(): void
+    {
+        $exim = $this->eximWithConfig($this->recordingSystem(), [], [
+            'bridge' => ['subnet' => TestNetwork::prefix(TestNetwork::container(1), 16), 'gateway' => TestNetwork::container(1)],
+        ]);
+
+        $this->assertSame([], $exim->relayEnvironment());
     }
 
     public function test_parse_network_addresses(): void
@@ -320,14 +466,9 @@ class EximRebuildTest extends TestCase
         $this->assertSame(0, $result['exit_code']);
 
         $this->assertEmpty($system->execJournal);
-        $this->assertCount(1, $system->processJournal);
-
-        $cmd = $system->processJournal[0];
-        $this->assertStringContainsString('docker compose -f', $cmd);
-        $this->assertStringContainsString('exec mail bash -c', $cmd);
-        $this->assertStringContainsString('exim4 -v -odf', $cmd);
-        $this->assertStringContainsString('probe@example.com', $cmd);
-        $this->assertStringNotContainsString('exec -T mail', $cmd);
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'compose.eximSendTestEmail', '--', $this->tmpRoot . '/docker-compose.yml', 'probe@example.com'],
+        ], $system->requests);
     }
 
     /**
@@ -390,13 +531,10 @@ class EximRebuildTest extends TestCase
             $dir . '/exim-passwd.blade.php',
             "*:{!! \$username !!}:{!! \$password !!}\n"
         );
-        file_put_contents(
-            $dir . '/exim-rewrite.blade.php',
-            "@if (!empty(\$sender_domain))\n"
-            . "*  \${local_part}_at_\${domain}{{ '@' }}{{ \$sender_domain }} Ffrs\n"
-            . "@else\n"
-            . "* \${address:\$header_from:} F\n"
-            . "@endif\n"
+        mkdir($dir . '/exim', 0777, true);
+        copy(
+            dirname(__DIR__, 4) . '/templates/config/exim/rewrite.conf',
+            $dir . '/exim/rewrite.conf'
         );
         file_put_contents(
             $dir . '/exim-transport.blade.php',
@@ -406,20 +544,23 @@ class EximRebuildTest extends TestCase
         );
     }
 
-    private function recordingSystem(): System
+    /** @param array<string, string> $accounts account container => its address on the tenant network */
+    private function recordingSystem(array $accounts = []): System
     {
-        return new class ($this->tmpRoot) extends System {
+        return new class ($this->tmpRoot, $accounts) extends System {
             /** @var list<string> */
             public array $journal = [];
 
             /** @var list<string> */
             public array $execJournal = [];
 
-            /** @var list<string> */
-            public array $processJournal = [];
+            /** @var list<list<string>> */
+            public array $requests = [];
 
+            /** @param array<string, string> $accounts */
             public function __construct(
                 private string $engineRoot,
+                private array $accounts,
             ) {
             }
 
@@ -435,12 +576,13 @@ class EximRebuildTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->execJournal[] = $line;
-                if (str_contains($line, 'update-exim4.conf')) {
+                $argv = (array) $cmd;
+                $this->requests[] = $argv;
+                $this->execJournal[] = implode(' ', $argv);
+                if (in_array('compose.eximUpdateConfig', $argv, true)) {
                     $this->journal[] = 'update-exim4.conf';
                 }
-                if (str_contains($line, 'service exim4 stop') && str_contains($line, 'service exim4 start')) {
+                if (in_array('compose.eximRestart', $argv, true)) {
                     $this->journal[] = 'exim4-restart';
                 }
 
@@ -449,18 +591,20 @@ class EximRebuildTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->processJournal[] = $line;
+                $argv = (array) $cmd;
+                $this->requests[] = $argv;
+                $address = $this->accounts[(string) end($argv)] ?? null;
+                $output = $address === null ? 'ok-stdout' : (string) json_encode(['pash-tenants' => ['IPAddress' => $address]]);
 
-                return new class extends Process {
-                    public function __construct()
+                return new class ($output) extends Process {
+                    public function __construct(private string $output)
                     {
                         parent::__construct(['true']);
                     }
 
                     public function getOutput(): string
                     {
-                        return 'ok-stdout';
+                        return $this->output;
                     }
 
                     public function getErrorOutput(): string
@@ -493,6 +637,13 @@ class EximRebuildTest extends TestCase
                     public function directoryExists(string $path): bool
                     {
                         return is_dir($path);
+                    }
+
+                    public function makeDirWithParents(string $target, ?string $chown = null): void
+                    {
+                        if (!is_dir($target)) {
+                            mkdir($target, 0777, true);
+                        }
                     }
 
                     /** Writes as `cp` does: into a directory found at the path. */

@@ -2,6 +2,8 @@
 
 namespace App\System\Project\PhpHosting;
 
+use App\System\Privileged;
+use App\System\Privileged\Exchange;
 use App\System\Project\ContainerLimits;
 use App\System\Project\PhpHosting;
 
@@ -20,7 +22,7 @@ final class EnvironmentSetup
         $stack->applySettings($project);
         $this->writeServices($project, $stack);
 
-        $system->exec("sudo chown -R www-data:www-data {$projectDir}");
+        $system->exec(Privileged::files()->changeOwnerRecursively('www-data:www-data', $projectDir));
 
         (new PhpErrorLogConfig)->apply($project);
 
@@ -34,11 +36,10 @@ final class EnvironmentSetup
         $confFile = "{$projectDir}/redis/conf.d/custom.conf";
         $conf = $this->redisConf($project->userModel()->getRedisConfig());
 
-        $system->runProcess("sudo mkdir -p {$projectDir}/redis/conf.d");
+        $system->runProcess(Privileged::files()->makeDirectories("{$projectDir}/redis/conf.d"));
 
-        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        file_put_contents($tmpFile, $conf);
-        $process = $system->runProcess(['sudo', 'cp', $tmpFile, $confFile]);
+        $tmpFile = Exchange::fileHolding('tmp_', $conf);
+        $process = $system->runProcess(Privileged::files()->copy($tmpFile, $confFile));
         unlink($tmpFile);
         if ($process->getExitCode() !== 0) {
             throw new \Exception("Could not update '{$confFile}': ".($process->getErrorOutput() ?: $process->getOutput()));
@@ -87,8 +88,8 @@ BASH;
     private function selectStackFiles(PhpHosting $project, PhpStack $stack, string $projectDir): void
     {
         $system = $project->system();
-        $system->exec("sudo cp {$projectDir}/{$stack->dockerfileTemplateName()} {$projectDir}/Dockerfile");
-        $system->exec("sudo cp {$projectDir}/{$stack->composeTemplateName()} {$projectDir}/docker-compose.yml");
+        $system->exec(Privileged::files()->copy("{$projectDir}/{$stack->dockerfileTemplateName()}", "{$projectDir}/Dockerfile"));
+        $system->exec(Privileged::files()->copy("{$projectDir}/{$stack->composeTemplateName()}", "{$projectDir}/docker-compose.yml"));
     }
 
     private function writeServices(PhpHosting $project, PhpStack $stack): void
@@ -124,7 +125,7 @@ BASH;
         );
         $system = $project->system();
         $dir = $system->projectDirPath($project->username()).'/entrypoint-init.d';
-        $system->runProcess("sudo rm {$dir}/*.sh");
+        $system->runProcess(Privileged::fileLines()->removeScripts($dir));
         foreach ($scriptFiles as $name => $script) {
             $file = "{$dir}/{$name}";
             $system->filesystem()->filePutContents($file, $script);
@@ -136,10 +137,11 @@ BASH;
         $system = $project->system();
         $file = $system->projectDirPath($project->username()).'/crontabs/www-data';
         if (! is_file($file)) {
-            $system->exec(['sudo', 'touch', $file]);
+            $system->exec(Privileged::files()->touch($file));
         }
         $chown = $project->userModel()->getChownString() ?? '33:33';
-        $system->exec(['sudo', 'chown', $chown, $file]);
-        $system->exec(['sudo', 'chmod', '600', $file]);
+        $system->exec(Privileged::files()->changeOwner($chown, $file));
+        $system->exec(Privileged::files()->changeMode('600', $file));
+        $project->project()->cron()->rewrite();
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Http;
 
 use App\Exceptions\DeployAlreadyRunningException;
+use App\Exceptions\ProjectBusyException;
 use App\Exceptions\DeployBusyException;
 use App\Http\Middleware\Authenticate;
 use App\Jobs\DeployProject;
@@ -13,17 +14,20 @@ use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Project\ProjectRebuild;
-use App\Models\Setting;
 use App\Models\SecretVaultEntry;
+use App\Models\Setting;
 use App\Models\Task;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\FileManager;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Queue;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -72,8 +76,8 @@ class ProjectRebuildHttpTest extends TestCase
     }
 
     /**
-     * The account's files in the test home: its commands run as ourselves, with the sudo
-     * setpriv prefix dropped, except for a path only the account can see.
+     * The account's files in the test home: its commands run as ourselves, as the broker
+     * would run them for the account, except for a path only the account can see.
      */
     private function accountFiles(User $user): FileManager
     {
@@ -97,7 +101,7 @@ class ProjectRebuildHttpTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = (array) $cmd;
-                $argv = array_slice((array) $cmd, 7);
+                $argv = LocalRoot::plain((array) $cmd);
                 if (in_array(end($argv), $this->accountOnly, true)) {
                     $argv = ['printf', '%s\n', end($argv)];
                 }
@@ -210,8 +214,12 @@ class ProjectRebuildHttpTest extends TestCase
         $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
         Queue::assertPushed(RebuildProject::class, static fn (RebuildProject $job): bool => $job->zipPath === '/.panelalpha/archives/app.zip');
         $this->assertSame(
-            [['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT, 'sh', $this->home . '/.panelalpha/archives/app.zip']],
+            [Privileged::accountFileManager(1001, 1001)->resolvedFile($this->home . '/.panelalpha/archives/app.zip')],
             $this->accountCommands
+        );
+        $this->assertSame(
+            ['sh', '-c', BrokerScripts::resolvedFile(), 'sh', $this->home . '/.panelalpha/archives/app.zip'],
+            LocalRoot::plain($this->accountCommands[0])
         );
     }
 
@@ -256,9 +264,12 @@ class ProjectRebuildHttpTest extends TestCase
             ]);
             $this->assertSame(409, $again->getStatusCode(), $endpoint);
             $again->assertJsonPath('task_id', $taskId);
-            $this->assertStringContainsString("GET /tasks/{$taskId}", (string) $again->json('message'));
+            $again->assertJsonPath('code', DeployBusyException::TASK);
             // A task whose job was lost would block for good: the answer says how to clear it.
-            $this->assertStringContainsString("POST /tasks/{$taskId}/cancel", (string) $again->json('message'));
+            $this->assertSame(
+                ['follow_task', 'cancel_task'],
+                array_values(array_unique(array_column($again->json('problems.0.hints'), 'action'))),
+            );
         }
 
         Queue::assertPushedTimes(RebuildProject::class, 1);
@@ -299,10 +310,9 @@ class ProjectRebuildHttpTest extends TestCase
         }
 
         $this->assertSame(409, $response->getStatusCode());
-        $this->assertSame([
-            'message' => "A deploy of this project is already running. Follow it with GET /projects/{$user->username}/deploy-log.",
-            'task_id' => null,
-        ], $response->json());
+        $this->assertSame('A deploy of this project is already running; its deploy log follows it.', $response->json('message'));
+        $this->assertNull($response->json('task_id'));
+        $this->assertSame(DeployBusyException::CODE, $response->json('code'));
         Queue::assertNothingPushed();
     }
 
@@ -319,10 +329,9 @@ class ProjectRebuildHttpTest extends TestCase
         }
 
         $this->assertSame(409, $response->getStatusCode());
-        $this->assertSame([
-            'message' => "Project '{$user->username}' is busy: a backup is running.",
-            'task_id' => null,
-        ], $response->json());
+        $this->assertSame("Project '{$user->username}' is busy: a backup is running.", $response->json('message'));
+        $this->assertNull($response->json('task_id'));
+        $this->assertSame([ProjectBusyException::CODE, []], [$response->json('code'), $response->json('problems.0.hints')]);
         Queue::assertNothingPushed();
     }
 
@@ -335,7 +344,7 @@ class ProjectRebuildHttpTest extends TestCase
             {
             }
 
-            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
+            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = [], ?\App\Lib\Upload\ArchiveSource $archive = null): array
             {
                 $this->ran[] = [$action, $zipPath, $logger !== null];
                 $logger?->info('built in the request');
@@ -421,10 +430,9 @@ class ProjectRebuildHttpTest extends TestCase
         $response = $this->postJson("/api/projects/{$user->username}/rebuild", [], ['X-Deploy-Stream' => 'ndjson']);
 
         $this->assertSame(409, $response->getStatusCode());
-        $this->assertSame([
-            'message' => "A deploy of this project is already running. Follow it with GET /projects/{$user->username}/deploy-log.",
-            'task_id' => null,
-        ], $response->json());
+        $this->assertSame('A deploy of this project is already running; its deploy log follows it.', $response->json('message'));
+        $this->assertNull($response->json('task_id'));
+        $this->assertSame(DeployBusyException::CODE, $response->json('code'));
     }
 
     /** Without the project's lock the check could race another request: refuse rather than go on. */

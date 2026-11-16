@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('app_user_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an app user
+
+    WordPress hands the user's posts and pages to `reassign`, or to the first other administrator when it is omitted or names no other user, and refuses the delete when there is no such administrator. Other apps ignore `reassign`. The user's profile and its settings go with the account and are not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -43,6 +45,16 @@ class AppUserDeleteTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'reassign',
+        ];
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function argumentNames(): array
@@ -60,6 +72,7 @@ class AppUserDeleteTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'userId' => $schema->string()->required(),
+            'reassign' => $schema->string()->description('WordPress: app user id that receives the deleted user\'s content. Omitted: the first other administrator.'),
         ];
     }
 }

@@ -21,7 +21,8 @@ use Tests\Support\TestNetwork;
  * bodies, and the WP-CLI argv the runner received including the resolved
  * --path. Status treats is-installed exit 1 as installed=false, not as a
  * failure; any other non-zero exit is a failure. Download never runs over
- * an existing core and never on a container project.
+ * an existing core and never on a container project, and an update to a
+ * release older than the installed one is refused before core update runs.
  */
 class CoreTest extends TestCase
 {
@@ -130,7 +131,7 @@ class CoreTest extends TestCase
                     'exit_code' => 1,
                     'stdout' => '',
                     'stderr' => "[26-Oct-2026 18:02:15 UTC] PHP Warning:  Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n"
-                        . "Warning: Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n",
+                        ."Warning: Undefined array key \"HTTP_HOST\" in /var/www/html/wp-includes/functions.php on line 6567\n",
                 ],
                 self::DB_REACHABLE,
                 ['exit_code' => 0, 'stdout' => "7.2\n", 'stderr' => ''],
@@ -448,7 +449,9 @@ class CoreTest extends TestCase
         $core = $this->coreWithFakeRunner(
             $sequence,
             results: [
-                ['exit_code' => 0, 'stdout' => 'Success: Updated WordPress to 6.7.1.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "6.6.2\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress updated successfully.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "6.7.1\n", 'stderr' => ''],
             ],
         );
 
@@ -456,12 +459,238 @@ class CoreTest extends TestCase
 
         $this->assertSame(
             ['core', 'update', '--version=6.7.1', '--path=/home/alice/example.test/public_html'],
-            $sequence[0]
+            $sequence[1]
         );
         $this->assertSame(
-            ['version' => '6.7.1', 'message' => 'Success: Updated WordPress to 6.7.1.'],
+            ['version' => '6.7.1', 'message' => 'Success: WordPress updated successfully.'],
             $body
         );
+    }
+
+    public function test_update_refuses_an_older_version_without_installing_it(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+            ],
+        );
+
+        try {
+            $core->update('6.9');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('WordPress 7.1.4 is newer than 6.9', $e->getMessage());
+            $this->assertStringContainsString('not downgraded', $e->getMessage());
+            $this->assertSame(
+                [['core', 'version', '--path=/home/alice/example.test/public_html']],
+                $sequence,
+                'the installed version is read and core update never runs'
+            );
+        }
+    }
+
+    public function test_update_refuses_a_value_wordpress_cannot_publish(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner($sequence);
+
+        try {
+            $core->update('bogus-9.9.9');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('bogus-9.9.9', $e->getMessage());
+            $this->assertStringContainsString('does not publish', $e->getMessage());
+            $this->assertSame([], $sequence, 'WP-CLI is never run for a value that is not a release');
+        }
+    }
+
+    /** wordpress.org publishes betas and release candidates under WordPress's own version format, and WP-CLI installs them. */
+    public function test_update_to_a_release_candidate_or_beta_runs_and_reports_it(): void
+    {
+        foreach (['6.8-RC1', '6.8-beta2', '6.7.2-RC1'] as $version) {
+            $sequence = [];
+            $core = $this->coreWithFakeRunner(
+                $sequence,
+                results: [
+                    ['exit_code' => 0, 'stdout' => "6.7.1\n", 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => 'Success: WordPress updated successfully.', 'stderr' => ''],
+                    ['exit_code' => 0, 'stdout' => "{$version}\n", 'stderr' => ''],
+                ],
+            );
+
+            $body = $core->update($version);
+
+            $this->assertSame(
+                ['core', 'update', '--version='.$version, '--path=/home/alice/example.test/public_html'],
+                $sequence[1]
+            );
+            $this->assertSame($version, $body['version']);
+        }
+    }
+
+    public function test_update_refuses_a_release_candidate_older_than_the_installed_release(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "6.8\n", 'stderr' => ''],
+            ],
+        );
+
+        try {
+            $core->update('6.8-RC1');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertStringContainsString('WordPress 6.8 is newer than 6.8-RC1', $e->getMessage());
+            $this->assertSame(1, count($sequence), 'core update never runs');
+        }
+    }
+
+    public function test_update_refuses_a_pre_release_name_wordpress_does_not_use(): void
+    {
+        foreach (['6.8-rc1', '6.8-RC', '6.8-gamma1', '6.8-RC1 '] as $version) {
+            $sequence = [];
+            $core = $this->coreWithFakeRunner($sequence);
+
+            try {
+                $core->update($version);
+                $this->fail("Expected WordPressException for {$version}");
+            } catch (WordPressException $e) {
+                $this->assertStringContainsString('does not publish', $e->getMessage());
+                $this->assertSame([], $sequence);
+            }
+        }
+    }
+
+    public function test_update_refuses_a_release_wordpress_does_not_publish(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: Release not found. Double-check locale or version.\n"],
+            ],
+        );
+
+        try {
+            $core->update('9.9.9');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('9.9.9', $e->getMessage());
+            $this->assertSame(
+                ['core', 'update', '--version=9.9.9', '--path=/home/alice/example.test/public_html'],
+                $sequence[1]
+            );
+            $this->assertSame(2, count($sequence), 'the version is never read back after a refusal');
+        }
+    }
+
+    public function test_update_to_latest_runs_without_a_version_and_reports_the_installed_one(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress updated successfully.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->update('latest');
+
+        $this->assertSame(['core', 'update', '--path=/home/alice/example.test/public_html'], $sequence[0]);
+        $this->assertSame(['version' => '7.1.4', 'message' => 'Success: WordPress updated successfully.'], $body);
+    }
+
+    public function test_update_to_nightly_reports_the_nightly_version_wp_cli_installed(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress updated successfully.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "7.2-alpha-60000\n", 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->update('nightly');
+
+        $this->assertSame(
+            ['core', 'update', '--version=nightly', '--path=/home/alice/example.test/public_html'],
+            $sequence[0]
+        );
+        $this->assertSame('7.2-alpha-60000', $body['version']);
+    }
+
+    public function test_update_refuses_when_the_install_kept_the_version_it_had(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress is up to date.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+            ],
+        );
+
+        try {
+            $core->update('8.0.0');
+            $this->fail('Expected WordPressException');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('did not install 8.0.0', $e->getMessage());
+            $this->assertStringContainsString('7.1.4', $e->getMessage());
+        }
+    }
+
+    public function test_update_of_the_installed_version_reports_it_without_reinstalling(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress is up to date.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->update('7.1.4');
+
+        $this->assertSame(
+            ['core', 'update', '--version=7.1.4', '--path=/home/alice/example.test/public_html'],
+            $sequence[1]
+        );
+        $this->assertSame(['version' => '7.1.4', 'message' => 'Success: WordPress is up to date.'], $body);
+    }
+
+    public function test_update_of_a_trailing_zero_release_reports_the_version_wordpress_installs(): void
+    {
+        $sequence = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => "6.6.2\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => 'Success: WordPress updated successfully.', 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "6.7\n", 'stderr' => ''],
+            ],
+        );
+
+        $body = $core->update('6.7.0');
+
+        $this->assertSame(
+            ['core', 'update', '--version=6.7.0', '--path=/home/alice/example.test/public_html'],
+            $sequence[1]
+        );
+        $this->assertSame('6.7', $body['version']);
     }
 
     public function test_check_update_lists_newer_versions(): void
@@ -535,6 +764,7 @@ class CoreTest extends TestCase
         $core = $this->coreWithFakeRunner(
             $sequence,
             results: [
+                ['exit_code' => 0, 'stdout' => "7.1.4\n", 'stderr' => ''],
                 [
                     'exit_code' => 1,
                     'stdout' => "Error: Can't find version 99.0.0",
@@ -639,6 +869,103 @@ class CoreTest extends TestCase
         }
     }
 
+    public function test_a_finished_download_announces_the_directory_it_downloaded_into(): void
+    {
+        $sequence = [];
+        $announced = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 0, 'stdout' => "Success: WordPress downloaded.\n", 'stderr' => '']],
+            installed: function (string $path) use (&$announced): void {
+                $announced[] = $path;
+            },
+        );
+
+        $core->download();
+
+        $this->assertSame(['/home/alice/example.test/public_html'], $announced);
+    }
+
+    public function test_a_finished_install_announces_the_directory_it_installed_into(): void
+    {
+        $sequence = [];
+        $announced = [];
+        $core = $this->coreWithFakeRunner(
+            $sequence,
+            path: 'other.test/public_html/blog',
+            installed: function (string $path) use (&$announced): void {
+                $announced[] = $path;
+            },
+        );
+
+        $core->install([
+            'url' => 'https://other.test/blog',
+            'title' => 'Blog',
+            'admin_user' => 'bob',
+            'admin_email' => 'bob@example.com',
+            'admin_password' => 'AnotherPass1',
+        ]);
+
+        $this->assertSame(['/home/alice/other.test/public_html/blog'], $announced);
+    }
+
+    public function test_an_install_into_the_projects_own_containers_announces_nothing(): void
+    {
+        $captured = [];
+        $announced = [];
+        $user = Mockery::mock(User::class)->makePartial();
+        $user->username = 'app';
+        $user->setDetails(['template' => 'dind']);
+        $project = Mockery::mock(Project::class);
+        $project->shouldReceive('runWpCli')
+            ->once()
+            ->andReturnUsing(function (array $args) use (&$captured): array {
+                $captured = $args;
+
+                return ['exit_code' => 0, 'stdout' => "Success: WordPress installed successfully.\n", 'stderr' => ''];
+            });
+        $user->shouldReceive('project')->andReturn($project);
+        $core = new Core(WpCli::for($user), function (string $path) use (&$announced): void {
+            $announced[] = $path;
+        });
+
+        $core->install([
+            'url' => 'https://app.test',
+            'title' => 'App',
+            'admin_user' => 'admin',
+            'admin_email' => 'admin@example.com',
+            'admin_password' => 'SecurePass123',
+        ]);
+
+        $this->assertSame([], $announced, 'the container runner finds the install itself');
+        $this->assertSame('core', $captured[0]);
+    }
+
+    public function test_a_refused_or_failed_download_announces_nothing(): void
+    {
+        $sequence = [];
+        $announced = 0;
+        $count = function (string $path) use (&$announced): void {
+            $announced++;
+        };
+        $refused = $this->coreWithFakeRunner($sequence, coreFilesPresent: true, installed: $count);
+        $failed = $this->coreWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: Can't find version 99.0.0"]],
+            installed: $count,
+        );
+
+        foreach ([$refused, $failed] as $core) {
+            try {
+                $core->download();
+                $this->fail('Expected WordPressException');
+            } catch (WordPressException) {
+            }
+        }
+
+        $this->assertSame(0, $announced);
+    }
+
     public function test_download_falls_back_to_the_request_when_wp_cli_does_not_name_the_version(): void
     {
         $sequence = [];
@@ -714,6 +1041,7 @@ class CoreTest extends TestCase
         bool $coreFilesPresent = false,
         array &$checkedFiles = [],
         ?string $notFound = null,
+        ?\Closure $installed = null,
     ): Core {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
@@ -746,7 +1074,7 @@ class CoreTest extends TestCase
         $user->shouldReceive('project')->andReturn($project);
         $user->shouldReceive('getMainDomain')->andReturn($this->domain('/example.test/public_html'));
 
-        return new Core(WpCli::for($user, $path));
+        return new Core(WpCli::for($user, $path), $installed);
     }
 
     private function domain(string $documentRoot): Domain

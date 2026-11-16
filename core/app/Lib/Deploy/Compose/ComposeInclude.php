@@ -3,13 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * A compose file's `include:`s merged into it, so the services Compose will
- * run are the ones the hardening, the port scan and the URL environment read.
- * Left as an `include:`, they started exactly as the repository wrote them.
- *
- * Each included file's relative paths are rewritten to mean the same from the
- * project root ({@see NestedCompose::rebase()}); the including file's own
- * entries win a name clash.
+ * A compose file's `include:`s merged into it, so the hardening reads the services Compose will run.
+ * Included paths are rebased onto the project root ({@see NestedCompose::rebase()}); own entries win.
  */
 final class ComposeInclude
 {
@@ -43,26 +38,58 @@ final class ComposeInclude
                 if (! is_string($path) || trim($path) === '') {
                     continue;
                 }
-                $relative = self::fromRoot($path);
-                $raw = str_starts_with($relative, '/') || str_starts_with($relative, '..') ? null : $read($relative);
-                $parsed = $raw === null ? null : ComposeYaml::parse($raw);
-                if (! is_array($parsed)) {
-                    throw new \InvalidArgumentException("The compose file includes {$path}, which could not be read.");
-                }
-                $dir = dirname($relative) === '.' ? '' : dirname($relative);
-                // Relative paths in it resolve against its own directory, or
-                // against project_directory when the include names one.
-                $parsed = NestedCompose::rebase($parsed, $base === null ? $dir : self::fromRoot($base));
-                $inner = self::flatten($parsed, $read, $depth + 1);
+                [$raw, $inner] = self::included($path, $base, $read, $depth);
                 $sources = array_merge($sources, [$raw], $inner['sources']);
-                foreach (self::SECTIONS as $section) {
-                    if (is_array($inner['compose'][$section] ?? null)) {
-                        $merged[$section] = array_merge($merged[$section] ?? [], $inner['compose'][$section]);
-                    }
-                }
+                $merged = self::withSections($merged, $inner['compose']);
             }
         }
 
+        return ['compose' => self::underOwnEntries($compose, $merged), 'sources' => $sources];
+    }
+
+    /**
+     * Relative paths in it resolve against its own directory, or against the include's project_directory.
+     *
+     * @param  callable(string): ?string  $read
+     * @return array{0: string, 1: array{compose: array<string, mixed>, sources: list<string>}}
+     */
+    private static function included(string $path, ?string $base, callable $read, int $depth): array
+    {
+        $relative = self::fromRoot($path);
+        $raw = str_starts_with($relative, '/') || str_starts_with($relative, '..') ? null : $read($relative);
+        $parsed = $raw === null ? null : ComposeYaml::parse($raw);
+        if (! is_array($parsed)) {
+            throw new \InvalidArgumentException("The compose file includes {$path}, which could not be read.");
+        }
+        $dir = dirname($relative) === '.' ? '' : dirname($relative);
+        $parsed = NestedCompose::rebase($parsed, $base === null ? $dir : self::fromRoot($base));
+
+        return [$raw, self::flatten($parsed, $read, $depth + 1)];
+    }
+
+    /**
+     * @param  array<string, mixed>  $merged
+     * @param  array<string, mixed>  $inner
+     * @return array<string, mixed>
+     */
+    private static function withSections(array $merged, array $inner): array
+    {
+        foreach (self::SECTIONS as $section) {
+            if (is_array($inner[$section] ?? null)) {
+                $merged[$section] = array_merge($merged[$section] ?? [], $inner[$section]);
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param  array<string, mixed>  $compose
+     * @param  array<string, mixed>  $merged
+     * @return array<string, mixed>
+     */
+    private static function underOwnEntries(array $compose, array $merged): array
+    {
         foreach (self::SECTIONS as $section) {
             if (isset($merged[$section])) {
                 $own = is_array($compose[$section] ?? null) ? $compose[$section] : [];
@@ -70,7 +97,7 @@ final class ComposeInclude
             }
         }
 
-        return ['compose' => $compose, 'sources' => $sources];
+        return $compose;
     }
 
     /** `./docker/x.yml` -> `docker/x.yml`; `..`-leading when it leaves the project. */

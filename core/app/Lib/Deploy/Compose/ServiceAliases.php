@@ -3,16 +3,14 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * Network aliases for `app`. A customer's proxy config names the service the
- * engine replaced (`fastcgi_pass php:9000`, `proxy_pass` to an `upstream`), and
- * removing the reference would leave a 502 that reads as the app's fault.
+ * Network aliases for `app`: a customer's proxy config names the service the engine replaced
+ * (`fastcgi_pass php:9000`), and losing that name leaves a 502 that reads as the app's fault.
  */
 final class ServiceAliases
 {
     /**
-     * The aliases a decision carries, ready to render. Compose accepts an
-     * unresolvable alias happily, so a bad one turns a loud start-up failure
-     * into a silent one at request time.
+     * The aliases a decision carries, ready to render. Compose accepts an unresolvable alias,
+     * so a bad one would turn a loud start-up failure into a silent one at request time.
      *
      * @param  array<string, mixed>  $decision
      * @return list<string>
@@ -50,9 +48,8 @@ final class ServiceAliases
     }
 
     /**
-     * A service's `networks:`, with `$aliases` added to its default network.
-     * Accepts both the list form and the map form. A `default` entry needs no
-     * top-level `networks:` declaration, so no extra key is written.
+     * A service's `networks:`, list or map form, with `$aliases` added to its default network,
+     * which needs no top-level `networks:` declaration.
      *
      * @param  mixed  $networks  the service's existing `networks:` value, or null
      * @param  list<string>  $aliases

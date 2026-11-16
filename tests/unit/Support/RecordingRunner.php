@@ -65,6 +65,7 @@ final class RecordingRunner implements ProcessRunner
 
     public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
     {
+        $cmd = HostCommand::argv($cmd);
         $this->commands[] = $cmd;
 
         return '';
@@ -79,6 +80,7 @@ final class RecordingRunner implements ProcessRunner
 
     public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
+        $cmd = HostCommand::argv($cmd);
         $this->commands[] = $cmd;
 
         return $this->canned();

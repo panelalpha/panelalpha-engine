@@ -89,7 +89,9 @@ class WpDatabaseController extends WordPressController
         path: '/projects/{username}/wp/database/import',
         summary: 'Import a SQL file into the WordPress install database',
         description: 'Strips DEFINER clauses from the SQL file when needed, then runs '
-            .'`wp db import {file}` against the install\'s own database. Both steps run in one WP-CLI '
+            .'`wp db import {file}` against the install\'s own database. A dump normally drops and recreates the '
+            .'tables it contains, so their current rows are lost and that cannot be undone: ask the operator to '
+            .'confirm first. Both steps run in one WP-CLI '
             .'run, as the same user, and a file with DEFINER clauses that cannot be rewritten in place '
             .'is not imported. Neither step loads '
             .'WordPress, so an empty database or a broken plugin does not block the import. '

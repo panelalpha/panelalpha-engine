@@ -5,11 +5,8 @@ namespace App\Lib\Deploy;
 use App\Lib\Helper;
 
 /**
- * The name to give a project nobody named: the repository, else the domain's
- * first label, else the recipe, else a plain "app". Whether that name is free
- * is {@see Helper::generateUsernameFrom()}'s question, not this one's.
- *
- * No Laravel dependencies -- unit-testable with a string.
+ * The name for a project nobody named: the repository, else the domain's first label, else the recipe,
+ * else "app"; whether it is free is {@see Helper::generateUsernameFrom()}'s question. No Laravel dependencies.
  */
 final class ProjectName
 {

@@ -34,6 +34,16 @@ class NpmMetadataTest extends MetadataTestCase
         $this->assertSame(['dependencies' => 2, 'devDependencies' => 1], $package->dependencyCounts);
     }
 
+    public function test_an_old_style_license_object_is_read_by_its_type(): void
+    {
+        $this->writeJson('package.json', [
+            'name' => 'shop-web',
+            'license' => ['type' => 'MIT', 'url' => 'https://opensource.org/licenses/MIT'],
+        ]);
+
+        $this->assertSame('MIT', (new NpmMetadata())->read($this->context())?->license);
+    }
+
     public function test_engines_are_read_as_the_platform(): void
     {
         $this->writeJson('package.json', [

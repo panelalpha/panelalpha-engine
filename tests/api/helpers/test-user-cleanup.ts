@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  isLeaseActive,
+  activeLeaseUsernames,
   readLeases,
   UNREFRESHED_LEASE_TTL_MS,
   type Lease,
@@ -138,14 +138,7 @@ export async function cleanupStaleTestUsers(
   const keep = new Set(
     (options.keepUsernames ?? []).map((username) => username.trim().toLowerCase()).filter(Boolean)
   );
-  const leased = new Set<string>();
-  for (const lease of options.leases ?? readLeases()) {
-    if (isLeaseActive(lease, now, options.ttlMs)) {
-      for (const username of lease.usernames) {
-        leased.add(username.trim().toLowerCase());
-      }
-    }
-  }
+  const leased = new Set(activeLeaseUsernames(options.leases ?? readLeases(), now, options.ttlMs));
   const result: CleanupStaleTestUsersResult = { removed: [], kept: [], listFailed: false };
 
   let users: { username: string; domain: string; createdAt?: string }[] = [];

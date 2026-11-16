@@ -72,7 +72,10 @@ return [
     |             the reads that hand out a live credential (the mail
     |             smarthost settings, app logins, app SSO) are held
     |             back too -- ToolPolicy::CREDENTIAL_TOOLS.
-    |   modify    reads, plus create and update. No deletes.
+    |   modify    reads, plus create and update; only DELETE routes are held
+    |             back. Not a "no destructive actions" setting: ssh_run,
+    |             wp_cli_run, backup_restore, file_write and the other
+    |             writes that are not plain creations still run.
     |   full      everything, including deletes.
     |
     | Derived from the HTTP verb behind each tool, with one exception: an

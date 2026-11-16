@@ -18,7 +18,9 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
 | Pipeline speed / caches | (none — operator does not measure this) | §1–§10 below |
+| Operator base images | [`docs/05-capabilities/base-images.md`](docs/05-capabilities/base-images.md) | §10a: what keeps them, how a deploy finds them |
 | REST + MCP behaviour | [`tests/api/README.md`](tests/api/README.md) | §1a: what it covers, what a green run does and does not prove |
+| Root broker | [`docs/05-capabilities/security.md`](docs/05-capabilities/security.md) | [`dockerfiles/root-broker/README.md`](dockerfiles/root-broker/README.md), every action in the generated [`ACTIONS.md`](dockerfiles/root-broker/ACTIONS.md) |
 
 > **Adding support for a third-party application?** §11 in this file is the
 > playbook: detect without paying for a deploy, when an app needs a manifest,
@@ -35,6 +37,8 @@ cd core
 ```
 
 The PHPUnit tests (Unit and Feature) live in [`tests/unit/`](tests/unit/README.md); `core/phpunit.xml` points at them.
+
+`composer analyse` (PHPStan level 5 against `core/phpstan-baseline.neon`) and `composer lint` (`pint --test`) must pass too; see [`CONTRIBUTING.md`](CONTRIBUTING.md#static-analysis-and-code-style). Never regenerate the baseline to hide an error your change introduced.
 
 Report a failure as pre-existing **only after proving it** — `git stash`, re-run,
 confirm the same tests fail on the baseline, `git stash pop`. Never wave a failure
@@ -94,7 +98,13 @@ php scripts/tools/dind-test/deploy.php <git-url|local-path> [flags]
 
 Runs the **real** engine code (`Dind`, `DetectProjectStrategy`,
 `FrameworkDockerfile`, `HostCompile`) against a real Docker-in-Docker account.
-`TestSystem` only strips `sudo`, neutralises `chown`, and redirects host paths.
+There is no root broker on the host the tester runs on. `TestSystem` answers
+every `pa-root` request with the broker's own action table, run as you
+(`dockerfiles/root-broker/local/pa-root-local`, with `PA_ROOT_LOCAL_ROOTS`
+pointing the homes, the engine directory and the project caches at the test's
+own directories). It plans the request, runs the command the broker would run,
+neutralises `chown`, and redirects host paths. A root line inside a script goes
+to pa-root-local too.
 
 ### Flags that change what you are measuring
 
@@ -223,17 +233,18 @@ is the name every account pulls from (`panelalpha-cache-registry:5000`): it runs
 published port, so anything but GET/HEAD answers 405.
 `panelalpha-cache-registry-writer` is the one that writes: `network_mode: host`,
 listening on the host's `127.0.0.1:5000` only, on no docker network an account is
-on. Core pushes and deletes through it (`CacheRegistry::hostArgv()`, which
-`nsenter`s into the host's netns); `system:image:prewarm` fills it and the
+on. Core pushes and deletes through it (`CacheRegistry::hostArgv()`, a
+`host.httpRequest` the root broker runs in the host's netns); `system:image:prewarm` fills it and the
 weekly trim removes what no catalogue tag needs. That reader/writer split is
 asserted by `tests/unit/Unit/Deploy/Dind/DindImageStoreTest.php::
 test_the_registry_accounts_reach_is_read_only_and_the_writer_is_not_theirs`,
 and the probe that decides whether either is up (`DindImageStore::REGISTRY_DOWN`)
-is `docker inspect` of the container, not a request over the network.
+is the container's inspect on the host daemon's Engine API (`lines.isRunning`), not a request over the network.
 
-**The engine keeps no per-tag cache statistics**, and **Railpack tenants do not
-write to this registry at all**: a Railpack build runs with no `--cache-from`
-and no `--cache-to` (see §6a). The registry serves base *images* by tag; a fresh
+**The engine keeps no per-tag cache statistics**, and **Railpack tenants only
+read this registry, never write it**: a Railpack build imports the project's
+plan cache with `--cache-from` when the host has published one, and passes no
+`--cache-to` (see §6a). The registry serves base *images* by tag; a fresh
 account showing 0 cached app layers is correct, not a bug.
 
 **2. The account's own BuildKit cache** — inside the account's DinD container.
@@ -253,49 +264,64 @@ package-manager caches for host compiles.
 > Baseline: [`docs/07-supported-projects/how-detection-works.md`](docs/07-supported-projects/how-detection-works.md).
 > This section is what reaches Railpack and how its build runs.
 
-Railpack is the catch-all just before `static`/`fallback`. It is reached when no
-platform manifest claims the project (`PlatformSelector::forContext()`) but some
-toolchain the engine knows recognises it (`RuntimeRegistry::anyRecognises()`).
-There is no `DetectProjectStrategy::RAILPACK_MANIFESTS` list in this tree: what
-counts is whatever the `<Something>Runtime` classes resolve to, plus
-`RuntimeRegistry::RAILPACK_ONLY_MARKERS` (`cmakelists.txt`, `meson.build`) for the
-toolchains Railpack has and the engine does not.
+Railpack builds a project only when the request names it: `recipe: railpack` on
+a create or deploy, which `application.candidates` offers whenever a toolchain
+the engine knows recognises the project (`RuntimeRegistry::anyRecognises()`:
+whatever the `<Something>Runtime` classes resolve to, plus
+`RuntimeRegistry::RAILPACK_ONLY_MARKERS`, `cmakelists.txt` and `meson.build`).
+Detection never picks it. A project no platform manifest claims
+(`PlatformSelector::forContext()`) is `fallback` and serves the "Project not
+configured" page, and inspect says so with `verdict: placeholder`.
 
-**Deno and Elixir reach it too — they are not a gap.** `deno.json`/`deno.jsonc`
-and `mix.exs` are read by a runtime, so a Deno or Elixir project is offered to
-Railpack; only a project with none of the markers lands on `fallback`.
+Detection does not pick it because almost nothing that reached it that way ran.
+Monitoring, 2026-09-10..11-03: 603 apps deployed as `railpack` (15 more rejected
+by hand), one of them served (a Vite single-page app), 584 ended `partial` and 18
+`failing`. The rest were libraries, CLIs and editor plugins that built, then
+restart-looped or served nothing, each after loading 1.87 GB of Railpack images
+into the account (builder 1.67 GB, runtime 150 MB, frontend 46 MB).
 
-### Real repos that do reach it
+Deno (`deno.json`) and Elixir (`mix.exs`) are read by no runtime, so Railpack is
+not offered for them either.
 
-Anything with a `package.json` whose framework we have no recipe for — Koa,
-hapi, Restify, Feathers, or a plain Node server.
+### What it does with a project it is asked to build
 
-For a library repo (`expressjs/express`, `hapijs/hapi`) Railpack builds the
-image fine, but there is no server and no `start` script, so nothing listens.
-Build success is the signal there, not HTTP.
+`railpack info --format json --error-missing-start <dir>` answers what a build
+would start without building: `success`, `detectedProviders`,
+`plan.deploy.startCommand`. Read `success`, not the exit code (0 even on a
+failure in 0.43.0). The account image carries the binary; core does not.
 
-A repo with dependencies but **no `start` script and no server** (`koajs/examples`,
-`lodash/lodash`) makes the Railpack build fail, and the chain falls back to
-`fallback`/static and still serves — degradation is graceful, and the recorded
-strategy becomes `fallback`, not `railpack`. Do not read that as "railpack was
-never tried": it was, and the build logged the failure.
+For a library (`lodash/lodash`) Railpack finds `main` and starts it; the process
+exits and the container restart-loops. Build success is not the signal there.
 
-### How a Railpack build runs — and why it does not use the registry cache
+A package.json with no start script, no `main` and no root index file
+(`airbnb/javascript`, `koajs/examples`) builds an image that starts nothing.
+The engine then serves a committed `dist/`, `public/` or `build/` index.html as
+a static site, else the placeholder page, and records `static` or `fallback`.
+Inspect predicts the second as `verdict: placeholder`.
+
+### How a Railpack build runs — and what it takes from the registry cache
 
 `RailpackStrategy::build()` runs `railpack prepare . --plan-out <plan>` inside
 the account, then `docker buildx build --build-arg BUILDKIT_SYNTAX=<frontend>
--f <plan> --output type=docker,name=<image>` — a script under the account's home
-via `Shell::execAsUser()`. **There is no `--cache-from` and no `--cache-to`.**
-Railpack tenants therefore neither read nor write `panelalpha-cache-registry`
-(the reader/writer split in §5 is not about Railpack). What is preloaded is the
-*base images* the plan names: `RailpackCache::preloadImages()` (the frontend plus
+-f <plan> --output type=docker,name=<image>`, which the root broker runs as the
+account against the account's own daemon (`account-compose.run`, from
+`Shell::execAsUser()`). `RailpackStrategy::buildCommand()` also passes one
+`--cache-from` for the project's plan cache when the registry has it:
+`ProjectBuildCache::cacheFrom($projectDir, BuildCache::RAILPACK)` asks whether
+`buildcache/<host>/<path>:<branch>-f<sha1>` is there and names it
+`type=registry,ref=panelalpha-cache-registry:5000/...` if it is. The host fills
+that tag (`BuildCacheBuilder::railpack()`, published by
+`scripts.publishBuildCache`); a deploy only reads it, and passes no
+`--cache-to`, so a tenant's build still writes nothing to the registry (§5).
+What is preloaded is the *base images* the plan names:
+`RailpackCache::preloadImages()` (the frontend plus
 `RailpackPlan::imageRefs()`) is handed to
 `InnerDocker::preloadRailpackBaseImages()` after `prepare` writes the plan,
 because the builder and runtime tags follow Railpack's own release calendar and
 the plan is the only thing that knows which it resolved to.
 
-The build's buildx progress never reaches the tester's stdout — it runs through
-`Shell::execAsUser()`. Read the account's own build result, not a registry log.
+The build's buildx progress goes to the deploy log, not the tester's stdout.
+Read the account's own build result, not a registry log.
 
 ---
 
@@ -326,12 +352,12 @@ Distinguish the two columns; conflating them is the easy mistake:
 - **BLOB PULLS / MB** — cached layer data actually transferred. This is real
   usage. A tag with reads and ~0 MB did nothing for that build.
 
-**Railpack does not use this script's railpack-* rows any more.** A Railpack
-build issues no `--cache-from` (§6a), so it neither reads nor writes those tags;
-if an old report showed them, it was measuring a build from before that change.
-The report is still useful for the base-image pulls an account makes when an
-image is loaded from the registry (`DindImageStore`), which is the transfer the
-registry exists for today.
+**Railpack reads its railpack-* row and writes none.** A Railpack build imports
+the plan cache with `--cache-from` when the host published it (§6a) and never
+exports, so a read carrying real MB is that cache being reused, and a write
+inside a deploy window is the host filling it. The report is still useful for
+the base-image pulls an account makes when an image is loaded from the registry
+(`DindImageStore`), which is the transfer the registry exists for today.
 
 Writes over the whole log are `system:image:prewarm` (and the weekly `--refresh`)
 filling the registry from synthetic projects, plus a deploy push of one of our
@@ -354,14 +380,19 @@ routine warming.
   disk still has room. The tester now uses
   `~/.cache/panelalpha-dind-test`; keep it on disk.
 - **Sysbox is not the blocker.** `sysbox-runc` is registered and
-  `sysbox-{fs,mgr}` run. If you see
-  `nsenter: stat /proc/1/ns/user: Permission denied`, that is the production
-  topology leaking into the tester: the engine normally runs inside the
-  privileged `core` container and reaches the host via
-  `sudo nsenter --target 1 --all`. Run natively on the host, that hop is
-  redundant and impossible. `TestSystem` strips it — but note
-  `HostBuilder::prepareCacheArgv()` bakes the prefix into its argv and
-  dispatches through plain `exec()`, so `execOnHost()` overrides never see it.
+  `sysbox-{fs,mgr}` run. If a run reports `pa-root: the root broker is not
+  reachable`, a request escaped `TestSystem`, usually a `Process` built outside
+  `System`. On an install the broker runs in the `root-broker` container and
+  enters the host's namespaces for a `--host` request. On the host itself
+  there is no broker, and pa-root-local runs the host action's command where
+  you are.
+- **`/home` is a mount point of its own after an install.**
+  `panelalpha-home-mounts.service` (`harden-home-mounts.sh --boot`) self-binds it
+  `nosuid,nodev` when it sits on `/`, so `df -P /home` and
+  `findmnt --target /home` name `/home`. Quota tools take only a filesystem's
+  root mount: `setquota … /home` then fails with `not found or has no quota
+  enabled`. `users.setQuota` and `configure-quota.sh` follow the bind to `/`.
+  `findmnt -o MAJ:MIN` pads its value unless `-r` is given.
 - **`getopt()` stops at the first non-option argument.** `deploy.php` parses
   argv by hand for this reason; before that fix, `deploy.php <path> --timeout=180`
   silently dropped every flag. If you add a flag elsewhere, do not reach for
@@ -394,10 +425,10 @@ anything.
     {"name": "running",   "started_at": …, "finished_at": …, "seconds": N}
   ],
   "build": {
-    "total_seconds": N, "step_count": N, "cached_steps": N,
-    "cache_hit_ratio": N,
+    "total_seconds": N, "step_count": N, "cacheable_steps": N,
+    "cached_steps": N, "cache_hit_ratio": N,
     "slowest": [{"step": "#8", "command": "RUN install-php-extensions imagick",
-                 "seconds": N, "cached": false}]
+                 "seconds": N, "cached": false, "cacheable": true}]
   }
 }
 ```
@@ -417,9 +448,13 @@ Polling a running deploy stays cheap.
 **CLI** — `php artisan project:deploy:timings <username> [--json]` prints the same thing.
 
 **The number that matters is `cache_hit_ratio`.** A first deploy is 0.0 by
-definition. A repeat of the same commit should be high; one that is not has lost
+definition. A repeat of the same commit should be 1.0; one that is not has lost
 its BuildKit cache, and no total will tell you that — a slow cold build and a
-cache regression look identical from the outside.
+cache regression look identical from the outside. It is `cached_steps /
+cacheable_steps`: only Dockerfile instructions after the `FROM` (`[x/y] RUN`,
+`COPY`, `ADD`, …) can be cached, so the `FROM` resolution, the Dockerfile read
+from stdin, `exporting to image` and the provenance step are listed and timed
+but not counted. With no cacheable layer the ratio is null.
 
 `DeployTimings` (`core/app/Lib/Deploy/DeployLog/`) is the whole implementation:
 it correlates `#N [x/y] <cmd>` with `#N DONE <s>` / `#N CACHED`, drops BuildKit's
@@ -455,7 +490,7 @@ Four fixtures, one per strategy that behaves differently under caching —
 | Column | What it measures |
 |---|---|
 | **cold** | first deploy into a fresh account; nothing about this repo is cached |
-| **warm** | `users:rebuild --username=…` on the same account — the production cache path |
+| **warm** | `users:rebuild --project=…` on the same account — the production cache path |
 | **restart** | the engine's own `down()` + `up()` + health probe; no build at all |
 
 `restart` is the engine's restart path, not a bare `docker compose up`. The
@@ -603,8 +638,19 @@ deploy's behalf. So cache-registry holds the prewarmed catalogue, which prewarm
 keeps, plus our images built on demand by a deploy, which the weekly trim
 removes.
 
+**Our PHP bases come from ghcr.io before they are compiled.** Where the ladder
+needs the host to build one of the catalogue's built entries,
+`DindImageStore::hostBuildCommand()` first pulls
+`<DEPLOY_BASE_IMAGE_REGISTRY>/php:<tag>` (default `ghcr.io/panelalpha`) and keeps
+it only when its `panelalpha.dockerfile.sha256` label equals
+`PublishedBaseImage::dockerfileSha()` of the Dockerfile this engine renders; any
+other copy is removed and the host builds. `--refresh` takes the same pull, so a
+host follows the weekly republish. `scripts/publish-base-images.sh` is what
+publishes them. A host-side pull, not the account's: one per host, and nothing
+on the ladder below the host changes.
+
 **Check the registry through the daemon, never over the network.** The probe is
-`docker inspect` of the container. A `curl 127.0.0.1:5000` run by
+the container's inspect, which the root broker asks the host's daemon for. A `curl 127.0.0.1:5000` run by
 `System::exec()` inside the core container hits core's own loopback, fails on
 every real install, and sends nothing to the registry; the dind-test harness
 runs on the host and cannot catch that.
@@ -629,8 +675,8 @@ mounted `:ro`): anything but GET/HEAD answers 405. The host pushes to
 runs inside it. The writer runs with `network_mode: host` and listens on the
 host's `127.0.0.1:5000` only (debug listener off), so no account can resolve or
 route to it, guard or no guard: accounts older than the egress guard have none,
-and a tenant can remove its own. Core reaches it with `nsenter --net` into the
-host's namespace (`CacheRegistry::hostArgv()`). To verify it with throwaway
+and a tenant can remove its own. Core reaches it through the root broker, which
+enters only the host's network namespace for it (`CacheRegistry::hostArgv()`). To verify it with throwaway
 copies: `docker push` to the writer, then `docker pull` from the read-only one
 works; a push, manifest PUT or DELETE against the read-only one is 405; a tag
 deleted and collected on the writer is 404 on the reader at once (the
@@ -651,8 +697,8 @@ than a week old. Accounts that already hold an image keep it; only new pulls see
 the refresh. It then removes every registry tag outside the catalogue (never
 one sharing a digest with a kept tag) and runs `garbage-collect
 --delete-untagged`, which also frees the layers a refresh left under a
-re-pushed tag. Both hold `/tmp/panelalpha-cache-registry.lock` exclusive in the
-core container; every deploy-time push holds it shared, because a GC during an
+re-pushed tag. Both hold `/run/panelalpha/cache-registry.lock` (the root
+broker's, shared with core) exclusive; every deploy-time push holds it shared, because a GC during an
 upload deletes that upload's layers. `--runtimes=` skips the trim, since a
 subset of the catalogue would delete the rest.
 
@@ -661,11 +707,11 @@ platform manifest and attestation, and the image still pulls and runs. The
 anonymous Docker Hub limit is **100 per hour per egress IP**
 (`ratelimit-limit: 100;w=3600`), shared by every machine behind the same NAT,
 when registry-proxy has no credentials, and test deploys can exhaust it. So the
-pull planner must not size items with `docker manifest inspect`, which runs in
-core's CLI and goes to Hub anonymously, around the host daemon's mirror. It
-asks cache-registry, then registry-proxy
+pull planner must not size items with `docker.inspectManifest`, which asks the
+image's own registry anonymously (the broker's own registry client), around the
+host daemon's mirror. It asks cache-registry, then registry-proxy
 (`RegistryImageConfig::downloadBytes()`), and falls back to
-`docker manifest inspect` only for what neither answers, such as an uncached
+`docker.inspectManifest` only for what neither answers, such as an uncached
 ghcr.io image.
 
 #### Baking extensions into the base is not free
@@ -709,21 +755,17 @@ panelalpha/php:<minor>-cli-bookworm-pa<hash>` — our image, with the standard
 extension set already baked in. Nothing on the PHP path pulls a stock `php:`
 image at deploy time.
 
-The phase is the cost of copying that image from the host into the account's own
-Docker daemon. Each DinD account has an isolated image store, so a fresh account
-holds nothing and the engine does `docker save | docker load` across the
-boundary: the PHP base
-plus `composer:2` (needed by the `COPY --from=composer:2` in the generated
-Dockerfile).
+The phase is the cost of getting that image into the account's own Docker
+daemon. Each DinD account has an isolated image store, so a fresh account holds
+nothing and the engine pulls into it: `DindImageStore::seedCommand()` is the
+ladder, and a PHP base is served by its first rung,
+`panelalpha-cache-registry` — the PHP base itself, and `composer:2` (needed by
+the `COPY --from=composer:2` in the generated Dockerfile). Nothing is copied
+across the boundary: the account's own daemon fetches compressed layers over
+the engine's docker network and unpacks them into its store.
 
 On a cold PHP deploy it can be the largest phase, larger than the build itself.
 Every new account pays it, however many accounts received the same bytes before.
-
-`panelalpha-cache-registry:5000` already runs on the host and a DinD daemon can
-pull from it directly (start command in §9, "Transferring base images"). Pushing
-the PHP base images there would turn an uncompressed save/load into a
-compressed pull over loopback. Not done; it is the obvious next lever on
-cold-deploy time.
 
 `composer install` is routinely blamed and is routinely not the problem;
 compiling PHP extensions is. An app that needs an extension outside the plain
@@ -774,6 +816,36 @@ These are not persisted across a reboot, and CSF (since replaced by ufw) is the 
 reason Docker's own rules went missing.
 
 ---
+
+## 10a. Operator base images
+
+`operator_images` rows (`OperatorImage`) are base images an operator keeps in
+`panelalpha-cache-registry` for every project. They are managed by
+`OperatorImages` (API `/system/images`, `pae system:image:*`, the weekly
+`--refresh`) and live through four paths that each read `OperatorImage::refs()`:
+
+- `PrewarmImages::trimRegistry()` keeps them. It **deletes nothing** when the
+  table cannot be read: a keep list missing the operator's rows would wipe them.
+- `PruneHostImages` protects them the same way, and fails closed too.
+- `ImageSeeding::preloadOperatorBases()` runs inside `preloadComposeImages()`:
+  it reads the `FROM` lines of every build service (`OperatorBaseImages`) and
+  fetches the matching ones with `operatorSeedCommand()`, cache registry first
+  even when the account has a copy, so a refresh reaches the next deploy.
+  BuildKit then resolves `FROM` from the account's daemon, the same way
+  generated Dockerfiles build `FROM panelalpha/php:…`. Only literal names match.
+- A `build` image is built from its Dockerfile alone, with no context, on purpose:
+  over the API a context path would put host files into an image every tenant
+  can pull. Do not add one.
+
+Names are the security boundary, since the seeding ladder asks the cache
+registry before Docker Hub. `OperatorImageRef` refuses our registries,
+`panelalpha/`, Railpack and any repository `images.yaml` names;
+`OperatorImages` refuses a `build`/`local` name Docker Hub publishes
+(`PublicImageLookup`, through registry-proxy) or one that carries a registry host.
+
+Proof a deploy used one is the deploy-log line `Pulled base image <ref> from
+the cache registry` and, in the registry log, GETs for that repository inside
+the deploy window (§6b's `cache-usage.php`).
 
 ## 11. Onboarding a third-party application
 
@@ -863,7 +935,7 @@ Ask which of the two the repository means: *where the application is built* is
 
 | Symptom | Cause / fix |
 |---|---|
-| `Strategy: Railpack` on an obviously-PHP repo | no root `composer.json`; a lint `package.json` claimed Node. Set `app_root`. |
+| `Strategy: fallback` on an obviously-PHP repo | no root `composer.json`, so no PHP recipe claims it. Set `app_root`. |
 | `Runtime 'php' is required but could not be resolved` | `PhpRuntime::resolve()` reads `composer.json` at the context root. Set `app_root` (prefer that over pinning `image:`). |
 | `PHP strategy selected but composer.json is missing` | same, after clone. Skipped when `namedByItsOwnManifest()` — osTicket has no Composer on purpose. |
 | `Strategy: fallback` on a PHP app without Composer | `php.yaml` matches on `composer.json`. Own `detect` rules + maybe `image: php:8.3-apache-bookworm`. |
@@ -911,3 +983,30 @@ Worked examples in the tree: `php.yaml` (DokuWiki), `matomo.yaml` (database +
 restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 (`app_root`), `opencart.yaml` (docroot below repo, outranks Dockerfile),
 `osticket.yaml` (PHP, no Composer).
+
+---
+
+## 12. Engine images and their tags
+
+No engine image carries engine code: core's app (`./core`) and the root broker with its client
+(`./dockerfiles/root-broker`, read-only at `/usr/local/lib/panelalpha` in both) are mounted from the tree the
+installer fetched, so a code change needs no image build.
+
+Every image a compose file builds is tagged with the engine version, `ghcr.io/panelalpha/<image>:v<version>` with the
+version from `core/config/system.php`; `tests/scripts/engine-image-tags.test.sh` fails a tag that differs, so a
+version bump moves every tag. Each Dockerfile ends with `ARG PANELALPHA_SOURCES=` and the label
+`panelalpha.sources.sha256`, the hash of its build inputs (`engine_image_sources` in `scripts/installer.sh`).
+
+An update (`prepare_engine_images`) and a source deploy (`ensure_engine_images`) treat every built image the same way:
+
+| Registry has `:v<version>` from | Host has it from these sources | What happens |
+|---|---|---|
+| these sources | either | pulled, so a rebuild of the same sources (newer base layers) reaches the host |
+| other sources (a develop host before the release) | yes | kept |
+| other sources | no | built here |
+| unknown (no buildx, registry out of reach) | no | pulled, then built if it still does not match |
+
+Before building, another tag of the same repository built from the same sources, such as the previous release's
+dated tag, is re-tagged instead. The images are published from PanelAlpha's release tooling when the engine is
+tagged; until a version is published, hosts build its images.
+

@@ -11,9 +11,8 @@ use App\Lib\Limits\ResourceLimit;
 use App\System\Project\Dind\AppHealth;
 
 /**
- * Assembles one deploy telemetry report: no username, repository token, host
- * address, absolute path or env var value. Tiers are cumulative — 0 metadata, 1
- * + repository identity (hashed when private), 2 + a redacted log tail.
+ * Assembles one deploy telemetry report: no username, repository token, server name or address, absolute path or env
+ * var value. Tiers are cumulative: 0 metadata, 1 + repository identity (hashed when private), 2 + a redacted log tail.
  */
 class DeployReport
 {
@@ -36,9 +35,8 @@ class DeployReport
     public const OUTCOME_RECOVERED = 'recovered';
 
     /**
-     * Outcomes worth sending: successes give the denominator the failures need.
-     * `cancelled` stays out — the customer stopping their own deploy is not an
-     * outcome of one.
+     * Outcomes worth sending: successes give the denominator the failures need. `cancelled` stays out: the customer
+     * stopping their own deploy is not an outcome of one.
      */
     public const REPORTABLE_OUTCOMES = [
         self::OUTCOME_FAILED,
@@ -63,6 +61,9 @@ class DeployReport
     public const MAX_NAMES = 50;
 
     /**
+     * A source bundle is not gated by tier: it is its own opt-in, off by default, and this field only describes it (the zip
+     * travels separately).
+     *
      * @param array{
      *   id: string,
      *   occurred_at: int,
@@ -82,6 +83,7 @@ class DeployReport
      *   candidates?: list<string>,
      *   packages?: list<AppPackage>,
      *   domains?: list<array<string, mixed>>,
+     *   server_names?: list<?string>,
      *   log_tail?: list<string>
      * } $input
      * @return array<string, mixed>
@@ -92,14 +94,7 @@ class DeployReport
         $username = (string) $input['username'];
         $installId = (string) $input['install_id'];
         $details = $input['details'];
-        $latest = $input['latest'];
-
-        $strategy = self::stringOrNull($details['deploy_strategy'] ?? null);
-        $runtime = self::stringOrNull($details['deploy_runtime'] ?? null);
-        $error = is_string($input['error'] ?? null) ? $input['error'] : '';
         $private = (bool) ($input['repo_private'] ?? false);
-        // What the tree on disk says, as opposed to what the account record
-        // remembers.
         $checkout = is_array($input['checkout'] ?? null) ? $input['checkout'] : [];
         $repoMask = PrivateRepoMask::for(
             $private,
@@ -107,16 +102,67 @@ class DeployReport
             [self::stringOrNull($details['git_branch'] ?? null), self::stringOrNull($checkout['branch'] ?? null)]
         );
 
-        $failure = self::failure(
-            (string) $input['outcome'],
-            self::stringOrNull($input['signal'] ?? null),
-            $error,
-            $latest,
-            $username,
-            $repoMask
-        );
+        $report = self::metadata($input, $tier, $username, $installId, $repoMask);
+        $report = self::withObservations($report, $input, $details, $username, $tier, $private, $installId);
+        $report = self::withRepository($report, $input, $details, $tier, $private, $installId, $checkout);
 
-        $report = [
+        if ($tier >= self::TIER_LOG) {
+            $report['log_tail'] = Redactor::tail($input['log_tail'] ?? [], $username, $repoMask);
+        }
+
+        if (isset($input['source_bundle']) && is_array($input['source_bundle'])) {
+            $report['source_bundle'] = $input['source_bundle'];
+        }
+
+        return self::withoutServerNames($report, $input['server_names'] ?? []);
+    }
+
+    /**
+     * Last, over every field but the hostnames: the server's own name and address can turn up in any of them, the host
+     * of a repository it serves included.
+     *
+     * @param  array<string, mixed>  $report
+     * @return array<string, mixed>
+     */
+    public static function withoutServerNames(array $report, mixed $serverNames): array
+    {
+        $mask = is_array($serverNames) ? ServerNames::for($serverNames) : null;
+
+        return $mask === null ? $report : self::withHostnamesOf($report, $mask->scrub($report));
+    }
+
+    /**
+     * The hostnames are the address a visitor types and what monitoring links the application by, so they stay as sent.
+     *
+     * @param  array<string, mixed>  $original
+     * @param  array<string, mixed>  $scrubbed
+     * @return array<string, mixed>
+     */
+    private static function withHostnamesOf(array $original, array $scrubbed): array
+    {
+        foreach (['primary', 'names'] as $key) {
+            if (isset($original['domain'][$key])) {
+                $scrubbed['domain'][$key] = $original['domain'][$key];
+            }
+        }
+
+        return $scrubbed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private static function metadata(array $input, int $tier, string $username, string $installId, ?PrivateRepoMask $repoMask): array
+    {
+        $details = $input['details'];
+        $latest = $input['latest'];
+        $strategy = self::stringOrNull($details['deploy_strategy'] ?? null);
+        $runtime = self::stringOrNull($details['deploy_runtime'] ?? null);
+        $error = is_string($input['error'] ?? null) ? $input['error'] : '';
+        $failure = self::failure((string) $input['outcome'], self::stringOrNull($input['signal'] ?? null), $error, $latest, $username, $repoMask);
+
+        return [
             'id' => (string) $input['id'],
             'schema' => self::SCHEMA,
             'tier' => $tier,
@@ -124,21 +170,7 @@ class DeployReport
             'outcome' => (string) $input['outcome'],
             'account' => Fingerprint::account($installId, $username),
             'fingerprint' => Fingerprint::of($failure['rule'], $strategy, $runtime, $failure['signature']),
-            'deploy' => [
-                'id' => self::stringOrNull($latest['id'] ?? null),
-                'source' => self::stringOrNull($details['deploy_source'] ?? null),
-                'strategy' => $strategy,
-                // The recipe, not the strategy it shares: `html` and `static` are
-                // both the static strategy and fail for different reasons.
-                'platform' => self::stringOrNull($details['deploy_platform'] ?? null),
-                'label' => self::stringOrNull($details['deploy_label'] ?? null),
-                'runtime' => $runtime,
-                'port_hint' => self::intOrNull($details['deploy_port'] ?? null),
-                'manifests' => self::manifests($input['manifests'] ?? []),
-                // What `platform` was chosen over. Recipe ids are the engine's own
-                // vocabulary, so this names nothing about the customer.
-                'candidates' => self::candidates($input['candidates'] ?? []),
-            ],
+            'deploy' => self::deployFacts($input, $details, $latest, $strategy, $runtime),
             'failure' => $failure,
             'timings' => self::timings($latest),
             'limits' => [
@@ -146,32 +178,86 @@ class DeployReport
                 'memory_mb' => self::intOrNull($details['memory_limit'] ?? null),
             ],
         ];
+    }
 
-        // The tier is passed in: a framework version is a fact about somebody
-        // else's package, the customer's own package name is not.
+    /**
+     * `platform` is the recipe, not the strategy it shares (`html` and `static` fail for different reasons); `candidates`
+     * what it was chosen over, in the engine's own recipe vocabulary, which names nothing about the customer.
+     *
+     * @param  array<string, mixed>  $input
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $latest
+     * @return array<string, mixed>
+     */
+    private static function deployFacts(array $input, array $details, array $latest, ?string $strategy, ?string $runtime): array
+    {
+        return [
+            'id' => self::stringOrNull($latest['id'] ?? null),
+            'source' => self::stringOrNull($details['deploy_source'] ?? null),
+            'strategy' => $strategy,
+            'platform' => self::stringOrNull($details['deploy_platform'] ?? null),
+            'label' => self::stringOrNull($details['deploy_label'] ?? null),
+            'runtime' => $runtime,
+            'port_hint' => self::intOrNull($details['deploy_port'] ?? null),
+            'manifests' => self::manifests($input['manifests'] ?? []),
+            'candidates' => self::candidates($input['candidates'] ?? []),
+        ];
+    }
+
+    /**
+     * The domain says whether anyone outside could open this install and under which name: without it, one that lost its
+     * `panelalpha.online` name to a licensing failure reads like a success. App facts take the tier: a package name is the customer's.
+     *
+     * @param  array<string, mixed>  $report
+     * @param  array<string, mixed>  $input
+     * @param  array<string, mixed>  $details
+     * @return array<string, mixed>
+     */
+    private static function withObservations(
+        array $report,
+        array $input,
+        array $details,
+        string $username,
+        int $tier,
+        bool $private,
+        string $installId
+    ): array {
         $health = self::health($details);
         if ($health !== []) {
             $report['health'] = $health;
         }
 
-        // Whether anyone outside could open this install, and under which name:
-        // without the first, one that lost its `panelalpha.online` name to a
-        // licensing failure reads like a success. Hostnames off the account rows.
         $domain = self::domainFacts($details, $username, $input['domains'] ?? []);
         if ($domain !== []) {
             $report['domain'] = $domain;
         }
 
-        $app = AppFacts::build(
-            self::packages($input['packages'] ?? []),
-            $tier,
-            $private,
-            $installId
-        );
+        $app = AppFacts::build(self::packages($input['packages'] ?? []), $tier, $private, $installId);
         if ($app !== []) {
             $report['app'] = $app;
         }
 
+        return $report;
+    }
+
+    /**
+     * `checkout` is what the tree on disk says, as opposed to what the account record remembers.
+     *
+     * @param  array<string, mixed>  $report
+     * @param  array<string, mixed>  $input
+     * @param  array<string, mixed>  $details
+     * @param  array<string, mixed>  $checkout
+     * @return array<string, mixed>
+     */
+    private static function withRepository(
+        array $report,
+        array $input,
+        array $details,
+        int $tier,
+        bool $private,
+        string $installId,
+        array $checkout
+    ): array {
         if ($tier >= self::TIER_REPO) {
             $report['repo'] = self::repo(
                 self::stringOrNull($input['repo_url'] ?? null),
@@ -182,16 +268,6 @@ class DeployReport
                 (int) $input['occurred_at']
             );
             $report['deploy']['git_commit'] = self::commit($details, $checkout, $private);
-        }
-
-        if ($tier >= self::TIER_LOG) {
-            $report['log_tail'] = Redactor::tail($input['log_tail'] ?? [], $username, $repoMask);
-        }
-
-        // Not gated by tier: a source bundle is its own opt-in, off by default, and
-        // this field only ever describes the bundle — the zip travels separately.
-        if (isset($input['source_bundle']) && is_array($input['source_bundle'])) {
-            $report['source_bundle'] = $input['source_bundle'];
         }
 
         return $report;
@@ -216,6 +292,9 @@ class DeployReport
     }
 
     /**
+     * A precheck runs inside `cloning`, before the clone itself. The signature is the failing region the customer's message
+     * is built from ({@see FailureOutput}): the head of a compose deploy's output is progress, cut off before the reason.
+     *
      * @param  array<string, mixed>  $latest
      * @return array{stage: ?string, rule: ?string, explained: bool, message: ?string, signature: string}
      */
@@ -227,28 +306,14 @@ class DeployReport
         string $username,
         ?PrivateRepoMask $repoMask
     ): array {
-        // A precheck runs inside `cloning`, before the clone itself.
         $stage = self::isPreCheckRejection($latest)
             ? PlatformStage::PRECHECK
             : self::stringOrNull($latest['stage'] ?? null);
 
-        // A named signal explains itself: the engine chose the name, so there is no
-        // build output for the explainer to read. Without it the fingerprint that
-        // groups a failure across installs keeps only the strategy and runtime.
         if ($outcome === self::OUTCOME_RECOVERED || ($signal !== null && $signal !== '')) {
-            return [
-                'stage' => $stage,
-                'rule' => $signal,
-                'explained' => true,
-                'message' => self::truncate(Redactor::text($error, $username, $repoMask), self::MAX_SIGNATURE_BYTES) ?: null,
-                'signature' => $signal ?? 'recovered',
-            ];
+            return self::signalled($stage, $signal, $error, $username, $repoMask);
         }
 
-        // The failing region, as the customer's message is built from it
-        // ({@see FailureOutput}). The head of the raw output is progress on
-        // any compose deploy: rero-ils reported 600 bytes of layer downloads
-        // and cut off before the line that said why.
         $region = FailureOutput::select($error);
         $focus = $region !== '' ? $region : $error;
         $match = DeployFailureExplainer::match($focus) ?? DeployFailureExplainer::match($error);
@@ -257,9 +322,51 @@ class DeployReport
             'stage' => $stage,
             'rule' => $match['rule'] ?? null,
             'explained' => $match !== null,
-            'message' => $match['message'] ?? null,
-            'signature' => self::truncate(Redactor::text($focus, $username, $repoMask), self::MAX_SIGNATURE_BYTES),
+            'message' => self::redactedMessage($match['message'] ?? null, $username, $repoMask),
+            'signature' => self::truncate(Redactor::text(self::signatureText($focus, $error, $match), $username, $repoMask), self::MAX_SIGNATURE_BYTES),
         ];
+    }
+
+    /** The explainer quotes what the build and the containers printed, so its sentence is redacted like the signature. */
+    private static function redactedMessage(?string $message, string $username, ?PrivateRepoMask $repoMask): ?string
+    {
+        if ($message === null) {
+            return null;
+        }
+
+        return self::truncate(Redactor::text($message, $username, $repoMask), self::MAX_SIGNATURE_BYTES) ?: null;
+    }
+
+    /**
+     * A named signal explains itself: the engine chose the name, so there is no build output for the explainer to read,
+     * and without it the fingerprint grouping a failure across installs keeps only the strategy and runtime.
+     *
+     * @return array{stage: ?string, rule: ?string, explained: bool, message: ?string, signature: string}
+     */
+    private static function signalled(?string $stage, ?string $signal, string $error, string $username, ?PrivateRepoMask $repoMask): array
+    {
+        return [
+            'stage' => $stage,
+            'rule' => $signal,
+            'explained' => true,
+            'message' => self::truncate(Redactor::text($error, $username, $repoMask), self::MAX_SIGNATURE_BYTES) ?: null,
+            'signature' => $signal ?? 'recovered',
+        ];
+    }
+
+    /**
+     * A build step the explainer can only say failed is told apart by what it
+     * printed last; its exit code alone would group every such failure as one.
+     *
+     * @param  array{rule: string, message: string}|null  $match
+     */
+    private static function signatureText(string $focus, string $error, ?array $match): string
+    {
+        $tail = ($match['rule'] ?? null) === DeployFailureExplainer::BUILD_STEP_FAILED
+            ? FailureOutput::failedStepTail($error)
+            : '';
+
+        return $tail === '' ? $focus : $tail."\n".$focus;
     }
 
     /**
@@ -299,10 +406,8 @@ class DeployReport
     }
 
     /**
-     * Repository identity and the checkout it produced: a public repo is named in
-     * the clear, a private one reduced to a salted hash. A tree with no remote is
-     * still a repository — it is cloned, checked out, and can carry the submodules
-     * and LFS pointers a build trips over — so `parsed: false` stands for "no remote".
+     * Repository identity and the checkout it produced: a public repo in the clear, a private one as a salted hash. A tree
+     * with no remote can still carry the submodules and LFS pointers a build trips over, so `parsed: false` means "no remote".
      *
      * @param  array<string, mixed>  $checkout  as CheckoutFacts::read() returns it
      * @param  ?string  $source  where the URL came from: `account` or `checkout`
@@ -329,6 +434,15 @@ class DeployReport
             return ['present' => true, 'parsed' => false, 'private' => $private] + $facts;
         }
 
+        return self::namedRepo($parts, $private, $installId, $source) + $facts;
+    }
+
+    /**
+     * @param  array{host: string, path: string}  $parts
+     * @return array<string, mixed>
+     */
+    private static function namedRepo(array $parts, bool $private, string $installId, ?string $source): array
+    {
         $repo = [
             'present' => true,
             'parsed' => true,
@@ -350,14 +464,12 @@ class DeployReport
             $repo['source'] = $source;
         }
 
-        return $repo + $facts;
+        return $repo;
     }
 
     /**
-     * The half of the repository answer that came off the disk. The branch is the
-     * customer's own string, so it travels only for a public repo; shallow,
-     * submodules and lfs describe the shape of the clone and travel either way.
-     * The commit date travels as an age in whole days, not as its timestamp.
+     * The half of the repository answer checked on disk (not merely named by the account record). The branch, the customer's
+     * own string, travels only for a public repo; the clone's shape either way; the commit date as an age in whole days.
      *
      * @param  array<string, mixed>  $checkout
      * @return array<string, mixed> empty when no tree was there to read
@@ -369,8 +481,6 @@ class DeployReport
         }
 
         $facts = [
-            // "the account record named a repo" and "a checkout was there when we
-            // looked" are different claims, and only the second is verified.
             'checked_out' => true,
             'shallow' => (bool) ($checkout['shallow'] ?? false),
             'submodules' => (bool) ($checkout['submodules'] ?? false),
@@ -395,7 +505,7 @@ class DeployReport
     }
 
     /**
-     * Host and owner/name from an https, ssh or scp-style git remote.
+     * Host and owner/name from an https, ssh or scp-style (`git@github.com:owner/repo.git`) git remote.
      *
      * @return ?array{host: string, path: string}
      */
@@ -403,7 +513,6 @@ class DeployReport
     {
         $url = trim($url);
 
-        // scp-style: git@github.com:owner/repo.git
         if (preg_match('#^(?:[^@/\s]+@)?([A-Za-z0-9.\-]+):(?!//)([^\s]+)$#', $url, $m) === 1) {
             return ['host' => strtolower($m[1]), 'path' => self::normalizeRepoPath($m[2])];
         }
@@ -430,10 +539,8 @@ class DeployReport
     }
 
     /**
-     * The commit only travels for public repositories: on a private one it is a
-     * fingerprint of the customer's own history. The deploy snapshot is preferred
-     * because it is what the deploy built; the checkout answers for every source
-     * the snapshot has no entry for.
+     * The commit travels for public repositories only: on a private one it fingerprints the customer's history. The deploy
+     * snapshot, what was built, is preferred; the checkout answers where the snapshot has no entry.
      *
      * @param  array<string, mixed>  $details
      * @param  array<string, mixed>  $checkout
@@ -508,11 +615,8 @@ class DeployReport
     }
 
     /**
-     * The name this project got, what it is worth, and what it actually is. The
-     * categories come from the deploy's own `details.domain` and `details.ssl`
-     * snapshots; the names are the real hostnames, in the clear, since an event
-     * about an application nobody can locate is a support thread. `fallback_reason`
-     * is the one free-text field and goes through the redactor.
+     * The name this project got, from the deploy's `details.domain` and `details.ssl`, and the hostnames it answers on,
+     * since an event about an application nobody can locate is a support thread.
      *
      * @param  array<string, mixed>  $details
      * @return array<string, mixed>
@@ -522,6 +626,10 @@ class DeployReport
         return self::domain($details, $username) + self::names($domains);
     }
 
+    /**
+     * `publicly_resolvable` is three-valued: null is "this engine does not control the DNS", not "no". A self-signed
+     * certificate's issuer is the name it was made for, so it is redacted like one.
+     */
     private static function domain(array $details, string $username): array
     {
         $allocation = is_array($details['domain'] ?? null) ? $details['domain'] : [];
@@ -533,7 +641,7 @@ class DeployReport
             'tunnel' => $allocation['tunnel'] ?? null,
             'tls_terminated_at' => $allocation['tls_terminated_at'] ?? null,
             'ssl_status' => $ssl['status'] ?? null,
-            'ssl_issuer' => $ssl['issuer'] ?? null,
+            'ssl_issuer' => is_string($ssl['issuer'] ?? null) ? Redactor::line($ssl['issuer'], $username) : null,
         ] as $key => $value) {
             $value = self::stringOrNull($value);
             if ($value !== null) {
@@ -541,11 +649,22 @@ class DeployReport
             }
         }
 
-        // Three-valued: null is "this engine does not control the DNS", not "no".
         if (is_bool($allocation['publicly_resolvable'] ?? null)) {
             $block['publicly_resolvable'] = $allocation['publicly_resolvable'];
         }
 
+        return self::withFallbackReason($block, $allocation, $username);
+    }
+
+    /**
+     * `fallback_reason` is the one free-text field, so it goes through the redactor.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, mixed>  $allocation
+     * @return array<string, mixed>
+     */
+    private static function withFallbackReason(array $block, array $allocation, string $username): array
+    {
         $reason = self::stringOrNull($allocation['fallback_reason'] ?? null);
         if ($reason !== null) {
             $redacted = Redactor::line($reason, $username, self::MAX_SIGNATURE_BYTES);
@@ -558,8 +677,7 @@ class DeployReport
     }
 
     /**
-     * The real hostnames the project answers on, primary first: the application's
-     * public address, not anything private, with the account name still a hash.
+     * The real hostnames the project answers on, primary first, in the clear, so an event locates its application.
      * Bounded and shape-checked, since a wildcard alias can carry hundreds.
      *
      * @return array<string, mixed>
@@ -570,6 +688,20 @@ class DeployReport
             return [];
         }
 
+        [$names, $primary] = self::hostnames($domains);
+        if ($names === []) {
+            return [];
+        }
+
+        return $primary === null ? ['names' => $names] : ['primary' => $primary, 'names' => $names];
+    }
+
+    /**
+     * @param  array<mixed>  $domains
+     * @return array{0: list<array<string, mixed>>, 1: ?string}
+     */
+    private static function hostnames(array $domains): array
+    {
         $names = [];
         $primary = null;
         foreach ($domains as $entry) {
@@ -582,16 +714,7 @@ class DeployReport
                 continue;
             }
 
-            $facts = ['domain' => $name];
-            foreach (['type' => 'type', 'tunnel' => 'tunnel'] as $from => $to) {
-                $value = self::stringOrNull($entry[$from] ?? null);
-                if ($value !== null && strlen($value) <= 64) {
-                    $facts[$to] = $value;
-                }
-            }
-            if (($entry['alias'] ?? false) === true) {
-                $facts['alias'] = true;
-            }
+            $facts = self::nameFacts($entry, $name);
             if (($entry['primary'] ?? false) === true) {
                 $primary ??= $name;
             }
@@ -602,13 +725,33 @@ class DeployReport
             }
         }
 
-        if ($names === []) {
-            return [];
-        }
-
-        return $primary === null ? ['names' => $names] : ['primary' => $primary, 'names' => $names];
+        return [$names, $primary];
     }
 
+    /**
+     * @param  array<mixed>  $entry
+     * @return array<string, mixed>
+     */
+    private static function nameFacts(array $entry, string $name): array
+    {
+        $facts = ['domain' => $name];
+        foreach (['type' => 'type', 'tunnel' => 'tunnel'] as $from => $to) {
+            $value = self::stringOrNull($entry[$from] ?? null);
+            if ($value !== null && strlen($value) <= 64) {
+                $facts[$to] = $value;
+            }
+        }
+        if (($entry['alias'] ?? false) === true) {
+            $facts['alias'] = true;
+        }
+
+        return $facts;
+    }
+
+    /**
+     * `reachable` is a different question from the port probe: every port can answer inside the container while the name
+     * a visitor types serves another site.
+     */
     private static function health(array $details): array
     {
         if (! array_key_exists('health_checked', $details)) {
@@ -620,13 +763,25 @@ class DeployReport
             'healthy' => is_bool($details['health_healthy'] ?? null) ? $details['health_healthy'] : null,
         ];
 
-        // A different question from the port probe: every port can answer inside
-        // the container while the name a visitor types serves another site.
         $reachable = self::stringOrNull($details[AppHealth::DETAIL_REACHABLE] ?? null);
         if ($reachable !== null) {
             $health['reachable'] = $reachable;
         }
 
+        $ports = self::healthPorts($details);
+        if ($ports !== []) {
+            $health['ports'] = $ports;
+        }
+
+        return self::withContentChecks($health, $details);
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     * @return list<array{port: ?int, status: string, http_code: ?int}>
+     */
+    private static function healthPorts(array $details): array
+    {
         $ports = [];
         foreach (is_array($details['health_ports'] ?? null) ? $details['health_ports'] : [] as $port) {
             if (! is_array($port) || ! is_string($port['status'] ?? null)) {
@@ -638,12 +793,20 @@ class DeployReport
                 'http_code' => self::intOrNull($port['http_code'] ?? null),
             ];
         }
-        if ($ports !== []) {
-            $health['ports'] = $ports;
-        }
 
-        // What the application was serving, as opposed to whether anything answered:
-        // a port probe cannot tell the engine's own placeholder from a homepage.
+        return $ports;
+    }
+
+    /**
+     * `serving` is what answered, which a port probe cannot tell from the engine's own placeholder. A failed check keeps
+     * its id and severity only: the message names the customer's own files, and the id makes it countable across installs.
+     *
+     * @param  array<string, mixed>  $health
+     * @param  array<string, mixed>  $details
+     * @return array<string, mixed>
+     */
+    private static function withContentChecks(array $health, array $details): array
+    {
         $serving = $details['health_serving'] ?? null;
         if (is_string($serving) && $serving !== '') {
             $health['serving'] = $serving;
@@ -654,8 +817,6 @@ class DeployReport
             if (! is_array($check) || ! is_string($check['id'] ?? null)) {
                 continue;
             }
-            // The id and its severity only: the message names the customer's own
-            // files, and the id is what makes a check countable across installs.
             $failed[] = [
                 'id' => $check['id'],
                 'severity' => is_string($check['severity'] ?? null) ? $check['severity'] : null,

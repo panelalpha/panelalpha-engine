@@ -4,12 +4,17 @@ namespace Tests\Unit\System\Project;
 
 use App\System;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
- * Host System that applies sudo file commands to the local tree (no Docker).
+ * Host System that applies the file commands of root broker requests to the local tree (no Docker).
  */
 final class LocalHostSystem extends System
 {
+    private const RUN_BY_THE_BROKER_ITSELF = ['account.renameInHome', 'account.readInHome', 'files.existingRealPaths'];
+
+    private const ROOTS = 'PA_ROOT_LOCAL_ROOTS';
+
     public function __construct(
         private string $engineRoot,
         private string $homesRoot,
@@ -28,28 +33,29 @@ final class LocalHostSystem extends System
 
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
     {
-        $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
-        $this->apply($argv);
+        $this->apply($this->requested($cmd));
 
         return '';
     }
 
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
-        $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
+        $command = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
+        if (in_array(LocalRoot::action($command), self::RUN_BY_THE_BROKER_ITSELF, true)) {
+            return $this->runAsCaller($command);
+        }
+        $argv = $this->requested($command);
         $exit = 0;
         $out = '';
-        if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'stat' && ($argv[3] ?? '') === '%a') {
+        if (($argv[0] ?? '') === 'stat' && ($argv[2] ?? '') === '%a') {
             clearstatcache();
-            $perms = @fileperms($argv[4] ?? '');
+            $perms = @fileperms($argv[3] ?? '');
             [$exit, $out] = $perms === false ? [1, ''] : [0, sprintf('%o', $perms & 07777) . "\n"];
-        } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'stat' && ($argv[3] ?? '') === '%d') {
-            [$exit, $out] = $this->devices(array_slice($argv, 4));
-        } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'realpath') {
-            [$exit, $out] = $this->realPaths(array_slice($argv, 4));
-        } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'test') {
-            $flag = $argv[2] ?? '';
-            $path = $argv[3] ?? '';
+        } elseif (($argv[0] ?? '') === 'stat' && ($argv[2] ?? '') === '%d') {
+            [$exit, $out] = $this->devices(array_slice($argv, 3));
+        } elseif (($argv[0] ?? '') === 'test') {
+            $flag = $argv[1] ?? '';
+            $path = $argv[2] ?? '';
             $ok = match ($flag) {
                 '-f' => is_file($path),
                 '-d' => is_dir($path),
@@ -57,8 +63,6 @@ final class LocalHostSystem extends System
                 default => false,
             };
             $exit = $ok ? 0 : 1;
-        } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'python3') {
-            return $this->runWithoutSudo($argv);
         } else {
             $this->apply($argv);
         }
@@ -92,17 +96,54 @@ final class LocalHostSystem extends System
     }
 
     /**
+     * The broker's command for a request without its `--`, [] for any other command.
+     *
+     * @param string|list<string> $cmd
+     * @return list<string>
+     */
+    private function requested(string|array $cmd): array
+    {
+        if (!is_array($cmd) || !LocalRoot::isRequest($cmd)) {
+            return [];
+        }
+
+        return array_values(array_filter($this->planned($cmd), static fn (string $word): bool => $word !== '--'));
+    }
+
+    /**
+     * The broker's plan with its engine and homes roots moved to this tree.
+     *
+     * @param list<string> $cmd
+     * @return list<string>
+     */
+    private function planned(array $cmd): array
+    {
+        $before = getenv(self::ROOTS);
+        putenv(self::ROOTS . '=' . $this->roots());
+        try {
+            return LocalRoot::plain($cmd);
+        } finally {
+            putenv($before === false ? self::ROOTS : self::ROOTS . '=' . $before);
+        }
+    }
+
+    private function roots(): string
+    {
+        return json_encode([
+            'engine' => rtrim($this->engineRoot, '/'),
+            'homes' => rtrim($this->homesRoot, '/'),
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    /**
      * @param list<string> $argv
      */
     private function apply(array $argv): void
     {
-        if (($argv[0] ?? '') !== 'sudo') {
-            return;
-        }
-        $op = $argv[1] ?? '';
+        $op = $argv[0] ?? '';
         if ($op === 'cp') {
-            $source = $argv[2] ?? '';
-            $target = $argv[3] ?? '';
+            $source = $argv[1] ?? '';
+            $target = $argv[2] ?? '';
             if ($source !== '' && $target !== '' && is_file($source)) {
                 if (!is_dir(dirname($target))) {
                     mkdir(dirname($target), 0777, true);
@@ -142,9 +183,9 @@ final class LocalHostSystem extends System
             return;
         }
         if ($op === 'chmod') {
-            $path = $argv[3] ?? '';
+            $path = $argv[2] ?? '';
             if ($path !== '' && file_exists($path)) {
-                chmod($path, (int) octdec((string) ($argv[2] ?? '')));
+                chmod($path, (int) octdec((string) ($argv[1] ?? '')));
             }
 
             return;
@@ -178,27 +219,6 @@ final class LocalHostSystem extends System
         return [0, $out];
     }
 
-    /**
-     * `realpath -e` over each path, one per line; fails when any is missing.
-     *
-     * @param  list<string>  $paths
-     * @return array{0: int, 1: string}
-     */
-    private function realPaths(array $paths): array
-    {
-        clearstatcache();
-        $out = '';
-        foreach ($paths as $path) {
-            $real = realpath($path);
-            if ($real === false) {
-                return [1, $out];
-            }
-            $out .= $real . "\n";
-        }
-
-        return [0, $out];
-    }
-
     private function removeTree(string $path): void
     {
         if (!is_dir($path)) {
@@ -215,14 +235,14 @@ final class LocalHostSystem extends System
     }
 
     /**
-     * The account-home helper itself, run for real: it walks the local tree
+     * A native action, run for real by pa-root-local: it walks the local tree
      * the same way it walks /home, and needs no root to do it.
      *
      * @param list<string> $argv
      */
-    private function runWithoutSudo(array $argv): Process
+    private function runAsCaller(array $argv): Process
     {
-        $process = new Process(array_slice($argv, 1));
+        $process = new Process(LocalRoot::argv($argv), null, [self::ROOTS => $this->roots()]);
         $process->run();
 
         return $process;

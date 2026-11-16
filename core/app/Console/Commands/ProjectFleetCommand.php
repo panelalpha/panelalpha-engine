@@ -49,7 +49,11 @@ abstract class ProjectFleetCommand extends Command
         $this->beforeAll();
 
         $ok = true;
-        foreach ($projects as $user) {
+        foreach ($projects as $selected) {
+            $user = $this->stillThere($selected);
+            if ($user === null) {
+                continue;
+            }
             try {
                 $this->output->write($this->progress($user)."\n");
                 $this->applyTo($user);
@@ -63,5 +67,19 @@ abstract class ProjectFleetCommand extends Command
         $this->afterAll();
 
         return (int) ! $ok;
+    }
+
+    /**
+     * The project as it is now, or null, said, when it was deleted since the run read the list: a long run would
+     * otherwise recreate the account of a project deleted while it ran.
+     */
+    private function stillThere(User $selected): ?User
+    {
+        $user = $selected->fresh();
+        if ($user === null) {
+            $this->warn("Skipping '{$selected->username}': the project no longer exists.");
+        }
+
+        return $user;
     }
 }

@@ -2,21 +2,16 @@
 
 namespace App\Lib\Ssl;
 
+use App\Exceptions\ProblemException;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
 use App\System\Project\Dind;
 use RuntimeException;
 
 /**
- * Obtaining a certificate for one project domain, on demand.
- *
- * The steps are few but none of them is optional, and there are two callers —
- * `ssl:project-cert:request` and `POST …/request-ssl-cert`. Issuing without
- * re-rendering leaves the old certificate being served; re-rendering without
- * recording the snapshot leaves `details.ssl` saying `self_signed` about a
- * certificate that is nothing of the sort, which is the field everything
- * downstream reads. A copy of that sequence in each caller is a copy that
- * will drift.
+ * A certificate for one project domain on demand: one sequence for `ssl:project-cert:request` and `POST …/request-ssl-cert`
+ * so neither drifts, and one for `ssl:project-cert:remove` and `DELETE …/installed-ssl-cert`.
  */
 final class ProjectCertificate
 {
@@ -45,10 +40,6 @@ final class ProjectCertificate
         $connection = $domain->projectDomain();
         $issuer->issue($connection);
 
-        // The vhost is re-rendered with the new certificate in place, and the
-        // project's snapshot updated: `details.ssl` is what an API caller
-        // reads, and it would otherwise describe the certificate this just
-        // replaced until the next deploy.
         $connection->rebuild();
         self::remember($domain->user);
 
@@ -61,10 +52,38 @@ final class ProjectCertificate
      */
     public static function remember(?User $user): void
     {
-        $runtime = $user?->project()->runtime();
+        $runtime = $user?->project(app(System::class))->runtime();
         if ($runtime instanceof Dind) {
             $runtime->appCertificate()->remember();
         }
+    }
+
+    /**
+     * Drop the certificate installed on a domain and give it the one a new domain gets: the engine's own where that
+     * covers the name, otherwise what the issuer setting names. The old one's ACME state goes with it. A domain already
+     * on a certificate the engine made keeps it, so nothing is issued again.
+     *
+     * @return array<string, mixed> the certificate the domain carries now, as `installed-ssl-cert` reports it
+     *
+     * @throws ProblemException ssl_disabled, when the domain has SSL turned off and so no certificate to put back
+     */
+    public static function remove(Domain $domain): array
+    {
+        if (! $domain->sslEnabled()) {
+            throw ProblemException::one(
+                'domain',
+                'ssl_disabled',
+                "{$domain->domain} has SSL turned off, so it has no certificate to put back."
+            );
+        }
+
+        $connection = $domain->getUser()->project(app(System::class))->domain($domain);
+        if (! $connection->carriesEngineCertificate()) {
+            $connection->resetCertificate();
+            self::remember($domain->getUser());
+        }
+
+        return $connection->getSslCertificateInfo();
     }
 
     /**
@@ -87,17 +106,11 @@ final class ProjectCertificate
     }
 
     /**
-     * Staging keeps its own accounting and its own trust, so it is the way to
-     * rehearse a request without spending anything that counts. Renewal asks
-     * here too, so it follows the same shared-zone rule as the first request.
+     * Staging keeps its own accounting and trust, so a request is rehearsed there without spending anything that counts.
+     * Renewal asks here too; the shared-zone setting is read here, as the constructor's default refuses names it allows.
      */
     public static function issuer(bool $staging): AcmeIssuer
     {
-        // The shared-zone decision comes from the setting here too. Building
-        // an AcmeIssuer directly is how this path skipped it once already:
-        // the constructor's default is "not allowed", so a deliberate
-        // `ssl:project-cert:request` refused a name the operator had just
-        // enabled. One setting, asked wherever an issuer is made.
         $allowed = Issuers::sharedZoneIssuanceAllowed();
 
         return $staging

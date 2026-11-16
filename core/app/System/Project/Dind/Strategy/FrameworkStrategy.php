@@ -15,22 +15,13 @@ use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\StageScript;
+use App\System;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\HostCompile;
 
 /**
- * A framework a manifest recognised: write the Dockerfile for it, plus a
- * compose file that builds it.
- *
- * Two shapes, and the split is about where the build happens. A recipe that
- * compiles to static files or to a standalone Node server is built on the
- * *host* (see {@see HostCompile}) and
- * then served from a stock image, so there is no build here at all. Everything
- * else gets a generated Dockerfile.
- *
- * The generated name is `panelalpha.Dockerfile` rather than `Dockerfile` so
- * that the next detect pass still sees the framework it is, instead of
- * mistaking the engine's own output for a Dockerfile the user wrote.
+ * A framework a manifest recognised: host-compiled ({@see HostCompile}) and served from a stock image, or built
+ * from a generated `panelalpha.Dockerfile`, a name the next detect pass does not take for the user's own.
  */
 class FrameworkStrategy
 {
@@ -46,6 +37,8 @@ class FrameworkStrategy
     }
 
     /**
+     * The deploy phase goes into the env once here, as both compose-writing paths read it.
+     *
      * @param  array<string, mixed>  $decision
      */
     public function apply(
@@ -55,8 +48,6 @@ class FrameworkStrategy
         ?AppConfig $appConfig = null
     ): void {
         $isNginx = ($decision['runtime'] ?? '') === PlatformManifest::RUNTIME_NGINX;
-        // Both compose-writing paths below read $decision['env'], so the phase
-        // goes in once here rather than at each of them.
         $decision['env'] = array_merge(
             is_array($decision['env'] ?? null) ? $decision['env'] : [],
             $this->dind->strategy()->entrypoint()->deployPhaseEnvironment()
@@ -72,8 +63,8 @@ class FrameworkStrategy
     }
 
     /**
-     * nginx-static and standalone-Node recipes are compiled on the host and
-     * served from a stock image — no build here.
+     * nginx-static and standalone-Node recipes are compiled on the host and served from a stock image, which has
+     * nothing baked in, so the staged entrypoint runs as the command or the recipe's migrate never runs.
      *
      * @param  array<string, mixed>  $decision
      */
@@ -96,64 +87,64 @@ class FrameworkStrategy
         }
         $port = (int) ($decision['port_hint'] ?? ($isNginx ? self::NGINX_PORT : self::NODE_PORT));
 
-        // Only a Node project's image is chosen from its lockfile. A command
-        // runtime keeps the image its own recipe resolved -- python:3.12-slim,
-        // golang, the JDK -- which is also what the host compile used.
-        if ($isNginx || HostRunProject::isNode($decision['strategy'] ?? null)) {
-            // Read where the host compile read: a host-run project's app_root.
-            $appDir = DeployCompose::isHostRunProject($decision) ? AppRoot::path($projectDir, $decision) : $projectDir;
-            $files = ProjectContext::listRootFiles($appDir);
-            $package = ProjectContext::readPackageJson($appDir) ?? [];
-            // Run under the interpreter the lockfile named, the same one the
-            // host compile used. A tree installed by one and imported by
-            // another fails on packages only the first can resolve.
-            $decision['image'] = HostNodeBuild::runtimeImage(
-                JsPackageManager::detectPackageManager($files, $package),
-                Images::nodeImage($appDir, $package)
-            );
-        } else {
-            // A command runtime keeps the version its recipe resolved, but a
-            // Python one may still swap the stock image for the shared base
-            // carrying the headers a source build needs. A no-op for Go, Rust
-            // and Java, whose images are not python tags.
-            $decision['image'] = PythonBase::imageFor(
-                $this->dind,
-                $projectDir,
-                (string) ($decision['image'] ?? '')
-            );
-        }
+        $decision['image'] = $this->runtimeImage($decision, $projectDir, $isNginx);
         if (DeployCompose::isStandaloneNodeOutput($decision)) {
-            // Only a bundled server needs the probe script; a mounted project
-            // is started by its own `package.json` script.
-            $system->filesystem()->writeFileReplacingPath(
-                $projectDir.'/'.StandaloneNodeServe::FILENAME,
-                StandaloneNodeServe::script(),
-                $chown,
-                '644'
-            );
+            $this->writeStandaloneServe($system, $projectDir, $chown);
         }
 
-        // The staged entrypoint, which this path used to skip entirely.
-        //
-        // A generated build bakes the script into the image
-        // ({@see EntrypointInstall}) and PHP's shared base carries a shim
-        // that runs it, so both of those get the platform's install and
-        // upgrade commands for free. A host-compiled project runs a stock
-        // image -- python:3.12-slim, the JDK, a node tag -- with the account
-        // bind-mounted and nothing baked in, so the compose command was the
-        // recipe's `start` and that was the whole of it. Django's `migrate`
-        // and `collectstatic` are declared in its recipe and simply never
-        // ran: the deploy went green, the health probe followed the redirect
-        // off the homepage, and the first real page was a 500 on a database
-        // with no tables.
-        //
-        // Writing the script here and running it as the command puts this
-        // path back on the same footing as the other two.
         if ($this->dind->strategy()->entrypoint()->write($decision, $projectDir, $chown, [], $appConfig)) {
             $decision['entrypoint'] = StageScript::FILENAME;
         }
 
         $this->writeCompose($decision, $projectDir, $chown, $port);
+    }
+
+    /**
+     * Only a Node project's image comes from its lockfile; a command runtime keeps its recipe's image,
+     * which is also what the host compile used, apart from a Python one's shared base.
+     *
+     * @param  array<string, mixed>  $decision
+     */
+    private function runtimeImage(array $decision, string $projectDir, bool $isNginx): string
+    {
+        if ($isNginx || HostRunProject::isNode($decision['strategy'] ?? null)) {
+            return $this->nodeImage($decision, $projectDir);
+        }
+
+        return PythonBase::imageFor(
+            $this->dind,
+            $projectDir,
+            (string) ($decision['image'] ?? '')
+        );
+    }
+
+    /**
+     * The interpreter the lockfile named, read where the host compile read (a host-run project's app_root):
+     * a tree installed by one runtime and imported by another fails on packages only the first resolves.
+     *
+     * @param  array<string, mixed>  $decision
+     */
+    private function nodeImage(array $decision, string $projectDir): string
+    {
+        $appDir = DeployCompose::isHostRunProject($decision) ? AppRoot::path($projectDir, $decision) : $projectDir;
+        $files = ProjectContext::listRootFiles($appDir);
+        $package = ProjectContext::readPackageJson($appDir) ?? [];
+
+        return HostNodeBuild::runtimeImage(
+            JsPackageManager::detectPackageManager($files, $package),
+            Images::nodeImage($appDir, $package)
+        );
+    }
+
+    /** Only a bundled server needs the probe script; a mounted project starts from its own `package.json`. */
+    private function writeStandaloneServe(System $system, string $projectDir, ?string $chown): void
+    {
+        $system->filesystem()->writeFileReplacingPath(
+            $projectDir.'/'.StandaloneNodeServe::FILENAME,
+            StandaloneNodeServe::script(),
+            $chown,
+            '644'
+        );
     }
 
     /**
@@ -188,15 +179,8 @@ class FrameworkStrategy
     {
         $strategy = $this->dind->strategy();
         $sidecars = $strategy->sidecars()->runtimeSidecarsFromProject($projectDir);
-        // A manifest's `database: mysql`: its DB_* sit under the manifest's
-        // own env, so a recipe that spells a variable itself keeps its value.
         $database = $strategy->database()->forService($decision, $sidecars['services']);
-        if ($database !== []) {
-            $decision['env'] = array_merge($database['env'] ?? [], is_array($decision['env'] ?? null) ? $decision['env'] : []);
-            if (isset($database['extra_hosts'])) {
-                $decision['extra_hosts'] = $database['extra_hosts'];
-            }
-        }
+        $decision = $this->withDatabase($decision, $database);
         $decision = $strategy->sidecars()->mergeRuntimeSidecars($decision, $sidecars);
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
@@ -207,5 +191,24 @@ class FrameworkStrategy
             ),
             $chown
         );
+    }
+
+    /**
+     * A manifest's `database: mysql`, its DB_* under the manifest's own env so a recipe's own spelling wins.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, mixed>  $database
+     * @return array<string, mixed>
+     */
+    private function withDatabase(array $decision, array $database): array
+    {
+        if ($database !== []) {
+            $decision['env'] = array_merge($database['env'] ?? [], is_array($decision['env'] ?? null) ? $decision['env'] : []);
+            if (isset($database['extra_hosts'])) {
+                $decision['extra_hosts'] = $database['extra_hosts'];
+            }
+        }
+
+        return $decision;
     }
 }

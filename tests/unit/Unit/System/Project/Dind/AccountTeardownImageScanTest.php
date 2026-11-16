@@ -2,15 +2,14 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
-use App\Lib\Deploy\Engine\ContainerEngine;
-use App\Lib\Deploy\Engine\ImageStore;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AccountTeardown;
-use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Tests\Support\LocalRoot;
 
 /**
  * Ticket 04: before an account is torn down, the engine scans compose files
@@ -66,7 +65,9 @@ class AccountTeardownImageScanTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                return '';
+                return LocalRoot::action((array) $cmd) === 'account-docker.listImages'
+                    ? '[{"Id":"sha256:' . str_repeat('a', 64) . '","RepoTags":["redis:7"]}]'
+                    : '';
             }
         };
     }
@@ -79,20 +80,14 @@ class AccountTeardownImageScanTest extends TestCase
         ];
         $system = $this->stubbedSystem($files);
 
-        $images = $this->createStub(ImageStore::class);
-        $images->method('listImagesArgv')->willReturn(['docker', 'images']);
-        $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('images')->willReturn($images);
-
         $dind = $this->createStub(Dind::class);
         $dind->method('system')->willReturn($system);
-        $dind->method('engine')->willReturn($engine);
+        $dind->method('username')->willReturn('acme');
         $dind->method('userAppComposeFilePath')->willReturn(self::RUN_PATH);
         $dind->method('userAppExistingComposeFilePath')->willReturn(self::CLIENT_PATH);
-        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
 
         $method = new ReflectionMethod(AccountTeardown::class, 'accountImageRefsForHostCleanup');
-        $method->setAccessible(true);
         /** @var list<string> $refs */
         $refs = $method->invoke(new AccountTeardown($dind));
 
@@ -104,5 +99,6 @@ class AccountTeardownImageScanTest extends TestCase
             array_filter($refs, static fn (string $ref): bool => str_contains($ref, 'client-app')),
             "the image the client's own file declares must also be in the preserve list: " . implode(', ', $refs)
         );
+        $this->assertContains('redis:7', $refs, 'and every image the inner daemon holds');
     }
 }

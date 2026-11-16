@@ -1,0 +1,27 @@
+put /opt/engine/webserver-config/litespeed/httpd_config.xml -
+<?xml version="1.0" encoding="UTF-8"?>
+<httpServerConfig>
+  <serverName>engine</serverName>
+  <security>
+    
+    <accessDenyDir>/</accessDenyDir>
+  <censorshipControl>
+  <enableCensorship>0</enableCensorship>
+  <logLevel>0</logLevel>
+  <defaultAction>deny,log,status:403</defaultAction>
+  <scanPOST>1</scanPOST>
+</censorshipControl><censorshipRuleSet>
+  <name>ModSec</name>
+  <enabled>1</enabled>
+  <ruleSet>include /opt/modsecurity/main.conf</ruleSet>
+</censorshipRuleSet></security>
+  <listenerList>
+    <listener><name>old</name></listener>
+  </listenerList>
+  <virtualHostList>
+    <virtualHost><name>old</name></virtualHost>
+  </virtualHostList>
+</httpServerConfig>
+
+<<< end of /opt/engine/webserver-config/litespeed/httpd_config.xml
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","fullrestart"]

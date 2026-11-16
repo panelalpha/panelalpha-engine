@@ -186,7 +186,7 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             'This token is limited to projects alice; GET /projects/{username} is outside it.',
-            $response->getData(true)['error'],
+            $response->getData(true)['message'],
         );
     }
 
@@ -203,7 +203,7 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             'This token is scoped to no project; GET /projects/{username} is outside it.',
-            $response->getData(true)['error'],
+            $response->getData(true)['message'],
         );
     }
 
@@ -214,7 +214,7 @@ class EnsureTokenMayUseApiTest extends TestCase
         $response = $this->dispatched($abilities, route: ['GET', 'api/firewall/status']);
 
         $this->assertSame(403, $response->getStatusCode());
-        $this->assertStringContainsString('outside it', $response->getData(true)['error']);
+        $this->assertStringContainsString('outside it', $response->getData(true)['message']);
     }
 
     /** The lists are filtered in their controller, and the two reads are not about a project. */
@@ -295,7 +295,7 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             'This token is limited to projects alice; POST /source/inspect is outside it.',
-            $response->getData(true)['error'],
+            $response->getData(true)['message'],
         );
     }
 
@@ -364,7 +364,7 @@ class EnsureTokenMayUseApiTest extends TestCase
             $this->assertSame(403, $response->getStatusCode(), $action);
             $this->assertSame(
                 'This token is limited to projects alice, alice2; POST /projects/{username}/' . $action . ' is outside it.',
-                $response->getData(true)['error'],
+                $response->getData(true)['message'],
             );
         }
     }
@@ -387,7 +387,7 @@ class EnsureTokenMayUseApiTest extends TestCase
                 $this->assertSame(
                     'This token is limited to projects alice; POST /projects/{username}/' . $action
                         . ' must name the project it creates.',
-                    $response->getData(true)['error'],
+                    $response->getData(true)['message'],
                 );
                 $this->assertSame(
                     [[
@@ -495,7 +495,7 @@ class EnsureTokenMayUseApiTest extends TestCase
             $this->assertSame(403, $response->getStatusCode(), $action);
             $this->assertSame(
                 'This token is limited to projects alice; only an unscoped token may call PUT /projects/{username}/' . $action . '.',
-                $response->getData(true)['error'],
+                $response->getData(true)['message'],
             );
         }
     }
@@ -528,7 +528,7 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(
             'This token is limited to projects alice; only an unscoped token may change '
                 . 'disk_space_limit, cpu_limit, redis_config on PUT /projects/{username}.',
-            $response->getData(true)['error'],
+            $response->getData(true)['message'],
         );
     }
 

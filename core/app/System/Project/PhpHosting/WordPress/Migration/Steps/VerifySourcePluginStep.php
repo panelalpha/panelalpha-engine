@@ -10,10 +10,8 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourcePluginTokenCheck;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 
 /**
- * manual_plugin in place of installing the source plugin: the plugin the user
- * installed must still answer, and still accept the token, before remote-sync.
- * One that answers its transfer routes without the token is recorded as a
- * warning ({@see SourcePluginTokenCheck}): its release is not known here.
+ * manual_plugin: the plugin the user installed must still answer and accept the token before remote-sync. One that
+ * answers without the token is only a warning ({@see SourcePluginTokenCheck}): its release is not known here.
  */
 final class VerifySourcePluginStep implements MigrationStep
 {

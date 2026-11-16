@@ -3,6 +3,8 @@
 namespace App\Support;
 
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\RootEngineCompose;
 use Throwable;
 
 /**
@@ -49,10 +51,8 @@ final class SitesDbCaches
      */
     public function running(): ?array
     {
-        $select = 'select '.implode(', ', array_map(fn (array $c) => '@@'.$c['variable'], self::CACHES));
         try {
-            $out = $this->system->exec([...$this->compose(), 'exec', '-T', self::SERVICE, 'sh', '-c',
-                'mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e "'.$select.'"'], [], 60);
+            $out = $this->system->exec($this->compose()->sitesDbCacheSizes(), [], 60);
         } catch (Throwable) {
             return null;
         }
@@ -111,15 +111,14 @@ final class SitesDbCaches
             return ['changed' => $changed, 'recreated' => false];
         }
 
-        $this->system->exec([...$this->compose(), 'up', '-d', '--no-deps', self::SERVICE], [], 300);
+        $this->system->exec($this->compose()->upWithoutDependencies(self::SERVICE), [], 300);
 
         return ['changed' => $changed, 'recreated' => true];
     }
 
-    /** @return list<string> */
-    private function compose(): array
+    private function compose(): RootEngineCompose
     {
-        return ['sudo', 'docker', 'compose', '--project-directory', $this->system->engineDirPath()];
+        return Privileged::engineCompose($this->system->engineDirPath());
     }
 
     private function env(): EnvFile

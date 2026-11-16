@@ -3,6 +3,7 @@
 namespace App\Lib\DeployHook;
 
 use App\Jobs\RunHookDelivery;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Telemetry\Telemetry;
 use App\Models\DeployHook;
@@ -12,42 +13,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * What happens to a Hook Delivery that arrives while its project already has
- * a deploy running, and how that project's next deploy hears about it.
- *
- * A push is never raced against the deploy already in progress -- whatever
- * kind of deploy that is: a manual rebuild, the deploy at account creation, a
- * Checkout Rebuild after someone else's pull, or an earlier push. It waits.
- * {@see defer()} is the arrival half, called from {@see HookReceiver} before
- * it answers the git host and from {@see DeliveryRunner} when a job lost the
- * race at the wire. {@see runPendingFor()} is the departure half, called from
- * {@see DeployLogger::finish()} -- the one place every one of those deploy
- * kinds passes through when it ends, success, partial, failure or cancel
- * alike.
- *
- * The two halves race: a deploy can finish between a delivery seeing it
- * running and the delivery being marked pending. So the arrival half checks
- * again once the mark is down, and whichever half gets there first claims the
- * delivery with a conditional update ({@see claim()}) -- it is dispatched
- * exactly once, never zero times, never twice.
- *
- * Only the most recent arrival survives: a second push while one is already
- * pending supersedes the first on the spot, because both would redeploy the
- * same tracked branch and only its current head at follow-up time matters.
- *
- * Static, like {@see Telemetry}: `finish()` calls it
- * unconditionally, for every deploy of every project, most of which have no
- * hook at all, so it must never throw and never cost a caller a dependency it
- * has no other reason to take.
+ * Parks a push that finds the account's deploy lock held until {@see DeployLock::release()} runs it. Static and never
+ * throwing, like {@see Telemetry}: every release calls it, most for an account with no hook at all.
  */
 final class Coalescing
 {
     /**
-     * Whether this account has a deploy in progress, of any kind -- read from
-     * its deploy lock, not latest.json. A status left `running` by a deploy
-     * that was killed before finish() must not count: no finish() would ever
-     * end the wait. And a push that is parked must be sure a finish() is
-     * still coming, which is exactly what a held lock promises.
+     * Whether this account has a deploy in progress of any kind, read from its deploy lock, not latest.json:
+     * a killed deploy's stale `running` must not count, and a held lock promises a release is coming.
      */
     public static function isRunning(User $user): bool
     {
@@ -55,8 +28,7 @@ final class Coalescing
     }
 
     /**
-     * Park a delivery until the account's running deploy finishes -- or, if
-     * that deploy finished while this was being decided, run it now.
+     * Park a delivery until the account's deploy lock is released, or run it at once if it already was.
      */
     public static function defer(HookDelivery $delivery, User $user): void
     {
@@ -68,9 +40,8 @@ final class Coalescing
     }
 
     /**
-     * Fold a delivery into whatever its hook is already waiting for. The
-     * delivery it replaces, if any, never gets its own deploy -- it is
-     * superseded here, not when the follow-up eventually runs.
+     * Fold a delivery into whatever its hook is already waiting for; the one it replaces is superseded here and never
+     * deployed, as both would deploy the same tracked branch's head.
      */
     public static function markPending(HookDelivery $delivery): void
     {
@@ -96,9 +67,8 @@ final class Coalescing
     }
 
     /**
-     * A deploy for this account just finished. Run whatever coalesced while
-     * it was in progress -- exactly once per hook that has something
-     * pending, and nothing when there is none.
+     * This account's deploy lock was just released: run whatever coalesced meanwhile, exactly once per hook with
+     * something pending.
      */
     public static function runPendingFor(string $username): void
     {
@@ -125,9 +95,8 @@ final class Coalescing
     }
 
     /**
-     * Take a pending delivery off its hook, if it is still the pending one.
-     * Only the caller that clears the pointer gets true, so a delivery both
-     * halves reach at once is dispatched by exactly one of them.
+     * Take a pending delivery off its hook if it is still the pending one. Only the caller that clears the
+     * pointer gets true, so a delivery both halves reach at once is dispatched by exactly one of them.
      */
     private static function claim(int $hookId, int $deliveryId): bool
     {

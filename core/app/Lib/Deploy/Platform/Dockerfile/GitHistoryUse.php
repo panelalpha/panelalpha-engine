@@ -3,28 +3,23 @@
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
 /**
- * Whether an image build may read `.git`, so the engine must leave it in the
- * build context and accept that `COPY . .` misses the cache on every deploy.
- *
- * Deliberately generous: a wrongly kept `.git` costs a slower build, a wrongly
- * dropped one breaks it. A project can always decide for itself with `!.git`
- * in its `.dockerignore` or its own `<Dockerfile>.dockerignore`.
+ * Whether an image build may read `.git`, so it stays in the context; deliberately generous, as a wrongly
+ * dropped `.git` breaks the build. A project can decide itself with `!.git` in its `.dockerignore`.
  */
 final class GitHistoryUse
 {
-    /** Manifest files read at the context root, and what in each means "reads git". */
+    /**
+     * Manifest files read at the context root, and what in each means "reads git": setuptools-scm tags, a
+     * gemspec's `git ls-files`, Mage targets running git from Go (Vikunja's `exec.Command("git", …)`).
+     */
     private const MANIFEST_SIGNALS = [
-        // setuptools-scm and friends derive the version from tags.
         'pyproject.toml' => '/setuptools[_-]scm|hatch-vcs|versioningit|dunamai|poetry-dynamic-versioning/i',
         'setup.cfg' => '/setuptools[_-]scm|versioningit|\bpbr\b/i',
         'setup.py' => '/setuptools[_-]scm|use_scm_version|versioningit|\bpbr\s*=/i',
         'Cargo.toml' => '/^\s*(vergen(-git2|-gitcl|-gix)?|git-version|shadow-rs|built)\s*=/m',
         'package.json' => '/"(git-rev-sync|git-revision-webpack-plugin|git-repo-info|git-describe|git-last-commit)"\s*:/',
-        // A gemspec's `git ls-files` lists the gem's files.
         'Gemfile' => '/^\s*gemspec\b/m',
         'Makefile' => self::HISTORY_COMMAND,
-        // Mage targets run git from Go: Vikunja's falls back to
-        // `exec.Command("git", ...)` with "describe" when no version is given.
         'magefile.go' => self::GO_GIT_CALL,
     ];
 
@@ -94,14 +89,36 @@ final class GitHistoryUse
     }
 
     /**
-     * A bundler config, a package.json script the build runs, or a script file
-     * one of those runs (and what it imports) calling git. Companion's
-     * postinstall runs tools/build_writefile.mts, whose ./lib.mts runs
-     * `git rev-parse`.
+     * A bundler config, a package.json script the build runs, or a script file those run (and its imports)
+     * calling git: Companion's postinstall runs tools/build_writefile.mts, whose ./lib.mts runs `git rev-parse`.
      *
      * @param  callable(string): ?string  $read
      */
     private static function jsBuildReason(string $packageJson, ?string $dockerfile, callable $read): ?string
+    {
+        $reason = self::bundlerConfigReason($read);
+        if ($reason !== null) {
+            return $reason;
+        }
+
+        $package = json_decode($packageJson, true);
+        $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
+
+        $pending = [];
+        $seen = [];
+        self::queueScripts(self::buildScriptNames($dockerfile), $scripts, $seen, $pending);
+
+        $files = [];
+        $reason = self::scriptReason($scripts, $pending, $seen, $files);
+        if ($reason !== null) {
+            return $reason;
+        }
+
+        return self::scriptFileReason($files, $read);
+    }
+
+    /** @param  callable(string): ?string  $read */
+    private static function bundlerConfigReason(callable $read): ?string
     {
         foreach (self::JS_BUILD_CONFIGS as $config) {
             $contents = $read($config);
@@ -110,16 +127,35 @@ final class GitHistoryUse
             }
         }
 
-        $package = json_decode($packageJson, true);
-        $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
+        return null;
+    }
+
+    /**
+     * The scripts an image build runs without naming them, then those the Dockerfile names.
+     *
+     * @return list<string>
+     */
+    private static function buildScriptNames(?string $dockerfile): array
+    {
         $names = self::JS_IMPLIED_SCRIPTS;
         if ($dockerfile !== null
             && preg_match_all('/\b(?:npm|pnpm|yarn|bun)\s+(?:run(?:-script)?\s+)?([\w:.-]+)/', $dockerfile, $m) > 0) {
             $names = array_merge($names, $m[1]);
         }
 
-        $pending = [];
-        $seen = [];
+        return $names;
+    }
+
+    /**
+     * Each named script with its `pre` and `post` hooks, once each, in the order they would run.
+     *
+     * @param  array<string>  $names
+     * @param  array<mixed>  $scripts
+     * @param  array<string, true>  $seen
+     * @param  list<string>  $pending
+     */
+    private static function queueScripts(array $names, array $scripts, array &$seen, array &$pending): void
+    {
         foreach ($names as $name) {
             foreach (["pre{$name}", $name, "post{$name}"] as $script) {
                 if (! isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
@@ -128,24 +164,27 @@ final class GitHistoryUse
                 }
             }
         }
+    }
 
-        $files = [];
+    /**
+     * A queued script that runs git, following `npm run x`, `yarn x` and Yarn 2+'s bare `run x` into the
+     * scripts they call, and collecting the script files each one runs.
+     *
+     * @param  array<mixed>  $scripts
+     * @param  list<string>  $pending
+     * @param  array<string, true>  $seen
+     * @param  list<string>  $files
+     */
+    private static function scriptReason(array $scripts, array $pending, array $seen, array &$files): ?string
+    {
         while ($pending !== []) {
             $name = array_shift($pending);
             $body = $scripts[$name];
             if (preg_match(self::HISTORY_COMMAND, $body) === 1) {
                 return "package.json script \"{$name}\" reads the version from git";
             }
-            // `npm run x`, `yarn x`, and Yarn 2+'s bare `run x` inside a script.
             preg_match_all('/(?:^|[\s;&|(])(?:(?:npm|pnpm|bun)\s+run(?:-script)?|yarn(?:\s+run)?|run)\s+([\w:.-]+)/', $body, $m);
-            foreach ($m[1] as $next) {
-                foreach (["pre{$next}", $next, "post{$next}"] as $script) {
-                    if (! isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
-                        $seen[$script] = true;
-                        $pending[] = $script;
-                    }
-                }
-            }
+            self::queueScripts($m[1], $scripts, $seen, $pending);
             preg_match_all('#(?:^|[\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx|zx)(?:\s+-[-\w=:.]+)*\s+'
                 .'(?:\./)?((?:[\w.-]+/)*[\w.-]+\.(?:cjs|mjs|js|cts|mts|ts|sh))\b#', $body, $m);
             foreach ($m[1] as $file) {
@@ -153,6 +192,17 @@ final class GitHistoryUse
             }
         }
 
+        return null;
+    }
+
+    /**
+     * A script file, or a relative import of one, calling git; at most {@see self::JS_FILE_BUDGET} files are read.
+     *
+     * @param  list<string>  $files
+     * @param  callable(string): ?string  $read
+     */
+    private static function scriptFileReason(array $files, callable $read): ?string
+    {
         $checked = [];
         while ($files !== [] && count($checked) < self::JS_FILE_BUDGET) {
             $file = self::normalisePath(array_shift($files));
@@ -205,10 +255,8 @@ final class GitHistoryUse
     }
 
     /**
-     * A `.git` path (copied, mounted) or a git command that reads the
-     * checkout's history, outside comments. Installing git does not count:
-     * builds install it to fetch dependencies, and `go build` only stamps VCS
-     * details when `.git` is there.
+     * A `.git` path (copied, mounted) or a history-reading git command, outside comments. Installing git does
+     * not count: builds fetch dependencies with it, and `go build` stamps VCS details only when `.git` is there.
      */
     private static function dockerfileMentionsGit(string $dockerfile): bool
     {

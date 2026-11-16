@@ -7,11 +7,8 @@ use App\Models\WordpressMigration;
 use RuntimeException;
 
 /**
- * Once resolve_source has stored the site's real home, a new project whose
- * domain the caller left to the source follows that home where it differs
- * from the URL the start was given: a `www.` home, a site found through its
- * login page, a named site given by its IP. A home whose domain is taken
- * fails the import rather than landing it somewhere else.
+ * A new project whose domain was left to the source follows the real home resolve_source stored where it differs from
+ * the URL given (a `www.` home, a login page, an IP); a home whose domain is taken fails rather than lands elsewhere.
  */
 final class HomeDomainTarget
 {

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect;
 
+use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Source\GitTransport;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
@@ -10,12 +11,8 @@ use Illuminate\Support\Facades\Http;
 use Symfony\Component\Process\Process;
 
 /**
- * A public GitHub repository written out for inspection without cloning it:
- * one trees API request for the file list, every file created empty, and only
- * the files detection reads ({@see DetectionFiles}) fetched from
- * raw.githubusercontent.com, which the API rate limit does not count.
- *
- * Anything it cannot do exactly is a TreeUnavailable, and the caller clones.
+ * A public GitHub repository written out for inspection without a clone: one trees request, every file empty,
+ * and only what {@see DetectionFiles} reads fetched from raw.githubusercontent.com. Anything inexact is a TreeUnavailable.
  */
 final class GitHubTree
 {
@@ -82,48 +79,23 @@ final class GitHubTree
         [$owner, $name] = $repository;
         $this->deadline = $this->budget === null ? null : microtime(true) + $this->budget;
 
-        try {
-            [$commit, $resolvedBranch] = $this->head !== null
-                ? ($this->head)($repoUrl, $branch)
-                : self::lsRemote($repoUrl, $branch, $this->timeout());
-        } catch (TreeUnavailable) {
-            // GitHub throttles unauthenticated git downloads, which fails the
-            // clone too; the API and the raw files still answer by name.
-            [$commit, $resolvedBranch] = [null, null];
-        }
+        [$commit, $resolvedBranch] = $this->resolveHead($repoUrl, $branch);
         $ref = $commit ?? ($branch !== null && $branch !== '' ? $branch : 'HEAD');
         $entries = $this->tree($owner, $name, $ref);
 
         $files = DetectionFiles::select($entries, $subdirectory);
-        $sizes = [];
-        foreach ($entries as $entry) {
-            if ($entry['type'] === 'blob') {
-                $sizes[$entry['path']] = (int) ($entry['size'] ?? 0);
-            }
-        }
+        $sizes = self::blobSizes($entries);
         $decisive = $files['decisive'];
         $links = $files['links'];
-        if (count($decisive) + count($links) > DetectionFiles::MAX_FILES) {
-            throw new TreeUnavailable('More files to read than a tree inspection fetches.');
-        }
-        foreach ($decisive as $path) {
-            if ($sizes[$path] > DetectionFiles::MAX_BYTES) {
-                throw new TreeUnavailable("{$path} is too large to fetch.");
-            }
-        }
+        self::assertFetchable($decisive, $links, $sizes);
 
         self::skeleton($dir, $entries);
         $base = self::RAW.'/'.rawurlencode($owner).'/'.rawurlencode($name).'/'.self::encodePath($ref).'/';
         $this->fetch($base, $dir, $decisive, $sizes, true);
         $this->link($base, $dir, $links, $sizes);
-
-        // What is left of the budget goes to the files that refine a build command.
-        $budget = DetectionFiles::MAX_FILES - count($decisive) - count($links);
-        $refining = array_values(array_filter(
-            $files['refining'],
-            static fn (string $p): bool => $sizes[$p] <= DetectionFiles::MAX_BYTES
-        ));
-        $this->fetch($base, $dir, array_slice($refining, 0, max(0, $budget)), $sizes, false);
+        $listed = $this->fetchSolutionListed($base, $dir, $entries, $files, $subdirectory, $sizes);
+        $budget = DetectionFiles::MAX_FILES - count($decisive) - count($links) - count($listed);
+        $this->fetchRefining($base, $dir, $files['refining'], $sizes, $budget);
 
         return [
             'repository' => $repoUrl,
@@ -133,8 +105,107 @@ final class GitHubTree
     }
 
     /**
-     * Every directory and every file of the tree under $dir, files empty, and
-     * an empty .git directory where a clone would have its own.
+     * The commit and branch $branch names, or none when git is refused: GitHub throttles unauthenticated
+     * git downloads, which fails the clone too, while the API and the raw files still answer by name.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolveHead(string $repoUrl, ?string $branch): array
+    {
+        try {
+            [$commit, $resolvedBranch] = $this->head !== null
+                ? ($this->head)($repoUrl, $branch)
+                : self::lsRemote($repoUrl, $branch, $this->timeout());
+        } catch (TreeUnavailable) {
+            [$commit, $resolvedBranch] = [null, null];
+        }
+
+        return [$commit, $resolvedBranch];
+    }
+
+    /**
+     * @param  list<array{path: string, type: string, mode: string, size: ?int}>  $entries
+     * @return array<string, int>
+     */
+    private static function blobSizes(array $entries): array
+    {
+        $sizes = [];
+        foreach ($entries as $entry) {
+            if ($entry['type'] === 'blob') {
+                $sizes[$entry['path']] = (int) ($entry['size'] ?? 0);
+            }
+        }
+
+        return $sizes;
+    }
+
+    /**
+     * @param  list<string>  $decisive
+     * @param  list<string>  $links
+     * @param  array<string, int>  $sizes
+     *
+     * @throws TreeUnavailable
+     */
+    private static function assertFetchable(array $decisive, array $links, array $sizes): void
+    {
+        if (count($decisive) + count($links) > DetectionFiles::MAX_FILES) {
+            throw new TreeUnavailable('More files to read than a tree inspection fetches.');
+        }
+        foreach ($decisive as $path) {
+            if ($sizes[$path] > DetectionFiles::MAX_BYTES) {
+                throw new TreeUnavailable("{$path} is too large to fetch.");
+            }
+        }
+    }
+
+    /**
+     * The second round: the projects the fetched root solutions list beyond the first one's reach, and the
+     * Directory.Build.props above them, within its budget.
+     *
+     * @param  list<array{path: string, type: string, mode: string, size: ?int}>  $entries
+     * @param  array{decisive: list<string>, refining: list<string>, links: list<string>}  $files
+     * @param  array<string, int>  $sizes
+     * @return list<string> the paths fetched
+     *
+     * @throws TreeUnavailable
+     */
+    private function fetchSolutionListed(
+        string $base,
+        string $dir,
+        array $entries,
+        array $files,
+        ?string $subdirectory,
+        array $sizes
+    ): array {
+        $listed = DetectionFiles::solutionListed($entries, $files, $subdirectory, static function (string $path) use ($dir): ?string {
+            $contents = AccountHomeRead::contents($dir.'/'.$path);
+
+            return is_string($contents) ? $contents : null;
+        });
+        self::assertFetchable([...$files['decisive'], ...$listed], $files['links'], $sizes);
+        $this->fetch($base, $dir, $listed, $sizes, true);
+
+        return $listed;
+    }
+
+    /**
+     * What is left of the file budget goes to the files that refine a build command.
+     *
+     * @param  list<string>  $refining
+     * @param  array<string, int>  $sizes
+     */
+    private function fetchRefining(string $base, string $dir, array $refining, array $sizes, int $budget): void
+    {
+        $refining = array_values(array_filter(
+            $refining,
+            static fn (string $p): bool => $sizes[$p] <= DetectionFiles::MAX_BYTES
+        ));
+        $this->fetch($base, $dir, array_slice($refining, 0, max(0, $budget)), $sizes, false);
+    }
+
+    /**
+     * Every directory and file of the tree under $dir, files empty, and an empty .git where a clone has
+     * its own: a Dockerfile that copies it (`COPY .git/ ...`) is only usable when it is there.
      *
      * @param  list<array{path: string, type: string, mode: string, size: ?int}>  $entries
      *
@@ -142,8 +213,6 @@ final class GitHubTree
      */
     public static function skeleton(string $dir, array $entries): void
     {
-        // A checkout has a .git directory, and a Dockerfile that copies it
-        // (`COPY .git/ ...`) is only usable when it is there.
         if (! is_dir($dir.'/.git') && ! @mkdir($dir.'/.git', 0755, true)) {
             throw new TreeUnavailable('Could not create the inspection workspace.');
         }
@@ -167,8 +236,8 @@ final class GitHubTree
     }
 
     /**
-     * The recursive tree at $ref, checked for everything that would make the
-     * written copy differ from a clone.
+     * The recursive tree at $ref, checked for anything that would make the written copy differ from a clone.
+     * 403 and 429 are the rate limit, 404 a private or missing repository.
      *
      * @return list<array{path: string, type: string, mode: string, size: ?int}>
      *
@@ -182,7 +251,6 @@ final class GitHubTree
         } catch (\Throwable $e) {
             throw new TreeUnavailable('GitHub could not be reached: '.$e->getMessage(), 0, $e);
         }
-        // 403 and 429 are the rate limit, 404 a private or missing repository.
         if ($response->status() !== 200) {
             throw new TreeUnavailable("GitHub answered {$response->status()} for the file list.");
         }
@@ -194,14 +262,26 @@ final class GitHubTree
             throw new TreeUnavailable('The file list is truncated.');
         }
 
+        return self::entries($body['tree']);
+    }
+
+    /**
+     * Each item as an entry; a path that cannot be written, or a submodule the clone would check out, is refused.
+     *
+     * @param  array<mixed>  $tree
+     * @return list<array{path: string, type: string, mode: string, size: ?int}>
+     *
+     * @throws TreeUnavailable
+     */
+    public static function entries(array $tree): array
+    {
         $entries = [];
-        foreach ($body['tree'] as $item) {
+        foreach ($tree as $item) {
             $path = is_array($item) ? ($item['path'] ?? null) : null;
             $type = is_array($item) ? ($item['type'] ?? null) : null;
             if (! is_string($path) || ! self::safePath($path) || ! in_array($type, ['blob', 'tree', 'commit'], true)) {
                 throw new TreeUnavailable('The file list holds an entry that cannot be written.');
             }
-            // The clone checks submodules out; a file list cannot.
             if ($type === 'commit') {
                 throw new TreeUnavailable('The repository has submodules.');
             }
@@ -232,7 +312,7 @@ final class GitHubTree
     }
 
     /**
-     * The files that arrived whole, by path.
+     * The files that arrived whole, by path; the tree states every blob's size, so a short read is caught.
      *
      * @param  list<string>  $paths
      * @param  array<string, int>  $sizes
@@ -262,7 +342,6 @@ final class GitHubTree
         foreach ($paths as $path) {
             $response = $responses[$path] ?? null;
             $body = $response instanceof Response && $response->status() === 200 ? $response->body() : null;
-            // The tree states every blob's size, so a short read is caught.
             if ($body === null || strlen($body) !== $sizes[$path]) {
                 if ($strict) {
                     throw new TreeUnavailable("Could not fetch {$path}.");
@@ -287,16 +366,24 @@ final class GitHubTree
      */
     private function link(string $base, string $dir, array $paths, array $sizes): void
     {
-        $targets = $this->download($base, $paths, $sizes, true);
-        foreach ($targets as $path => $target) {
-            $resolved = self::resolveLink($path, $target);
-            if ($resolved === null) {
-                continue;
-            }
-            $link = $dir.'/'.$path;
-            if (! @unlink($link) || ! @symlink($target, $link)) {
-                throw new TreeUnavailable("Could not write {$path}.");
-            }
+        foreach ($this->download($base, $paths, $sizes, true) as $path => $target) {
+            self::placeLink($dir, $path, $target);
+        }
+    }
+
+    /**
+     * The empty file at $path becomes a link to $target when that lands inside the repository.
+     *
+     * @throws TreeUnavailable
+     */
+    public static function placeLink(string $dir, string $path, string $target): void
+    {
+        if (self::resolveLink($path, $target) === null) {
+            return;
+        }
+        $link = $dir.'/'.$path;
+        if (! @unlink($link) || ! @symlink($target, $link)) {
+            throw new TreeUnavailable("Could not write {$path}.");
         }
     }
 
@@ -370,8 +457,8 @@ final class GitHubTree
     }
 
     /**
-     * The commit $branch names, and the default branch when it is null: one
-     * request over git's own protocol, which the API rate limit does not count.
+     * The commit $branch names, and the default branch when it is null, over git's own protocol, which the API
+     * rate limit does not count. Run outside any checkout: ls-remote reads the config of the one it runs in.
      *
      * @return array{0: string, 1: ?string}
      *
@@ -384,7 +471,6 @@ final class GitHubTree
             : ['refs/heads/'.$branch, 'refs/tags/'.$branch, 'refs/tags/'.$branch.'^{}'];
         $process = new Process(
             ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref', '--', $repoUrl, ...$refs],
-            // Outside any checkout: ls-remote reads the config of the one it runs in.
             sys_get_temp_dir(),
             [...GitTransport::env(GitTransport::schemes()), 'GIT_TERMINAL_PROMPT' => '0', 'GIT_ASKPASS' => '/bin/false', 'SSH_ASKPASS' => '/bin/false', 'LC_ALL' => 'C', 'LANG' => 'C'],
             null,
@@ -403,6 +489,8 @@ final class GitHubTree
     }
 
     /**
+     * A peeled tag is preferred: it is the commit, where the bare one may be a tag object.
+     *
      * @return array{0: string, 1: ?string}
      *
      * @throws TreeUnavailable
@@ -421,7 +509,6 @@ final class GitHubTree
 
         $wanted = $branch === null || $branch === ''
             ? ['HEAD']
-            // A peeled tag is the commit; the bare one may be a tag object.
             : ['refs/heads/'.$branch, 'refs/tags/'.$branch.'^{}', 'refs/tags/'.$branch];
         foreach ($wanted as $ref) {
             if (isset($shas[$ref])) {

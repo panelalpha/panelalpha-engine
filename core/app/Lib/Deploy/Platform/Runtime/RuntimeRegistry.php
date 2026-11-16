@@ -4,11 +4,11 @@ namespace App\Lib\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\UnresolvedRuntimeException;
 
 /**
- * Every `Runtime` the engine knows, discovered by convention: a class named
- * `<Something>Runtime` in this directory *is* a runtime, there is no list to
- * add it to.
+ * Every `Runtime` the engine knows, discovered by convention: a class named `<Something>Runtime` in this
+ * directory is a runtime, there is no list to add it to.
  */
 final class RuntimeRegistry
 {
@@ -60,15 +60,11 @@ final class RuntimeRegistry
     }
 
     /**
-     * Resolve a manifest's `requires` block against a project.
-     *
-     * A requirement marked optional that the runtime cannot find is absent
-     * (a Laravel app with no package.json needs no Node). A required one that
-     * cannot be resolved throws: the manifest claimed the project on it.
+     * A manifest's `requires` resolved against a project: an optional one not found is absent, a required one
+     * throws, as the manifest claimed the project on it.
      *
      * @param  array<string, array<string, mixed>>  $requires
-     * @param  bool  $lenient  substitute a runtime's default instead of throwing
-     *                         when the project says nothing
+     * @param  bool  $lenient  with no project in hand (the prewarmer), the runtime's default instead of throwing
      * @return list<Requirement>
      */
     public static function resolveAll(
@@ -84,7 +80,6 @@ final class RuntimeRegistry
                 if (($spec['optional'] ?? false) === true) {
                     continue;
                 }
-                // No project in hand (the prewarmer): the default, not an error.
                 if ($lenient) {
                     $resolved[] = $runtime->defaultRequirement()->withRole(
                         is_string($spec['role'] ?? null) ? $spec['role'] : Requirement::ROLE_RUNTIME
@@ -92,9 +87,7 @@ final class RuntimeRegistry
 
                     continue;
                 }
-                throw new ManifestException(
-                    "Runtime '{$id}' is required but could not be resolved for this project"
-                );
+                throw new UnresolvedRuntimeException($id);
             }
             $role = is_string($spec['role'] ?? null) ? $spec['role'] : Requirement::ROLE_RUNTIME;
             $resolved[] = $requirement->withRole($role);
@@ -104,23 +97,16 @@ final class RuntimeRegistry
     }
 
     /**
-     * Build systems Railpack has a provider for and the engine has no runtime
-     * for — C and C++ today. Railpack's `cpp` provider claims a project on
-     * `HasFile("CMakeLists.txt") || HasFile("meson.build")`, so a Makefile-only
-     * project is not here. They are detection facts only: no image, nothing to
-     * warm.
+     * Railpack's `cpp` markers, a toolchain the engine has no runtime for (a Makefile alone is not one);
+     * detection facts only, with no image to warm.
      *
      * @var list<string>
      */
     public const RAILPACK_ONLY_MARKERS = ['cmakelists.txt', 'meson.build'];
 
     /**
-     * Does any toolchain the engine knows recognise this project? The last gate
-     * before a project is written off as static or unknown: a runtime that can
-     * read a manifest here means Railpack should get a chance at it.
-     *
-     * Derived from the runtimes, plus `RAILPACK_ONLY_MARKERS` for a toolchain
-     * Railpack has and the engine does not.
+     * Does any known toolchain, or a `RAILPACK_ONLY_MARKERS` file, recognise this project? If so, and no recipe
+     * claims it, Railpack is offered as a recipe the request can choose.
      */
     public static function anyRecognises(ProjectContext $context): bool
     {
@@ -140,9 +126,8 @@ final class RuntimeRegistry
     }
 
     /**
-     * The same question `anyRecognises()` asks, answered in full instead of at
-     * the first hit, for telemetry: `node` distinguishes "somebody should write
-     * a recipe" from "somebody should write *which* recipe".
+     * `anyRecognises()` answered in full, for telemetry; Railpack's markers report as `cpp`, telling "nobody
+     * recognises this" from "Railpack has it and we do not".
      *
      * @return list<string> ids in the registry's order
      */
@@ -155,8 +140,6 @@ final class RuntimeRegistry
             }
         }
 
-        // Named `cpp` so telemetry can tell "nobody recognises this" from
-        // "Railpack has it and we do not".
         foreach (self::RAILPACK_ONLY_MARKERS as $marker) {
             if ($context->hasFile($marker)) {
                 $ids[] = 'cpp';

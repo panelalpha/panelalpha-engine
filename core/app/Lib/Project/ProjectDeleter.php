@@ -5,8 +5,10 @@ namespace App\Lib\Project;
 use App\Auth\TokenAbilities;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\ProjectBusyException;
+use App\Jobs\CopyProject;
 use App\Jobs\CreateStaging;
 use App\Lib\Deploy\DeployLog\DeployLock;
+use App\Lib\Project\PublicRouting\PublicRoutingGrants;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
 use App\Lib\Task\TaskReconciler;
@@ -15,16 +17,13 @@ use App\Models\Task;
 use App\Models\User;
 use App\Support\JobBudget;
 use App\System;
+use App\System\Projects;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Deleting a project (REST, MCP, `project:delete`) never overlaps a job that
- * works on its account. Queued jobs are cancelled before anything is torn
- * down; a running one -- a task, a deploy, a push -- refuses the delete.
- *
- * The account's deploy lock is held for the whole delete, so a deploy,
- * rebuild or push to deploy that arrives meanwhile is refused as well.
+ * Deleting a project never overlaps a job on its account: queued jobs are cancelled first, a running one refuses the
+ * delete, and the deploy lock held throughout refuses a deploy, rebuild or push that arrives meanwhile.
  */
 class ProjectDeleter
 {
@@ -34,6 +33,8 @@ class ProjectDeleter
     private TaskCanceller $canceller;
 
     private ApiAccess $apiAccess;
+
+    private PublicRoutingGrants $publicRouting;
 
     /** @var callable(Task): ?bool */
     private $inQueue;
@@ -46,10 +47,12 @@ class ProjectDeleter
         ?TaskCanceller $canceller = null,
         ?callable $inQueue = null,
         ?ApiAccess $apiAccess = null,
+        ?PublicRoutingGrants $publicRouting = null,
     ) {
         $this->canceller = $canceller ?? new TaskCanceller(new ProcessTreeKiller(new System));
         $this->inQueue = $inQueue ?? TaskReconciler::queueCheck();
         $this->apiAccess = $apiAccess ?? new ApiAccess;
+        $this->publicRouting = $publicRouting ?? new PublicRoutingGrants;
     }
 
     /**
@@ -72,6 +75,7 @@ class ProjectDeleter
             $this->cancelQueued($user);
             $this->releaseApiAccess($user);
             $this->removeFromApiAccessScopes($user);
+            $this->publicRouting->forget($user->username);
             $this->destroy($user);
             $this->forgetTokenScopes($user->username);
         } finally {
@@ -85,9 +89,8 @@ class ProjectDeleter
     }
 
     /**
-     * The account is going away, so its Engine API allowance and token go with
-     * it. Nothing is applied: the lock this delete holds is the one an apply
-     * would need, and the next firewall apply drops the rule anyway.
+     * The account's Engine API allowance and token go with it. Nothing is applied: the lock this delete holds is the one
+     * an apply would need, and the next firewall apply drops the rule anyway.
      */
     private function releaseApiAccess(User $user): void
     {
@@ -157,7 +160,7 @@ class ProjectDeleter
     {
         $this->assertNoTaskRunning($user, $lockHeldElsewhere);
         $this->assertNoCancelledTaskStopping($user, $lockHeldElsewhere);
-        $this->assertNoPushRunning($user);
+        Projects::assertNoPushInPair($user);
     }
 
     /**
@@ -196,23 +199,8 @@ class ProjectDeleter
     }
 
     /**
-     * A push has no task: its target carries the flag Projects::assertIdle() reads.
-     *
-     * @throws ProjectBusyException
-     */
-    private function assertNoPushRunning(User $user): void
-    {
-        foreach ([$user, $user->liveUser, $user->stagingUser] as $side) {
-            if ($side !== null && ($side->asyncStatus()['push'] ?? null) === 'running') {
-                throw ProjectBusyException::pushRunning($user->username);
-            }
-        }
-    }
-
-    /**
-     * A task whose worker died is stopped, though its row may still say running and its queue
-     * row stays reserved for a day. Unless the lock is held elsewhere: a build that worker
-     * started may be what holds it.
+     * A task whose worker died is stopped, though its row may say running and its queue row stays reserved for a day;
+     * unless the lock is held elsewhere, since a build that worker started may be what holds it.
      */
     private static function stillWorking(Task $task, bool $lockHeldElsewhere): bool
     {
@@ -226,8 +214,7 @@ class ProjectDeleter
      */
     private function cancelQueued(User $user): void
     {
-        $queued = Task::query()
-            ->where('username', $user->username)
+        $queued = $this->tasksOf($user)
             ->where('status', Task::STATUS_QUEUED)
             ->orderBy('id')
             ->get();
@@ -239,8 +226,8 @@ class ProjectDeleter
     }
 
     /**
-     * The project's own tasks, and a staging copy reading from it: the copy's
-     * task is the destination's, the source named in its details.
+     * The project's own tasks, and a staging copy or project copy reading from
+     * it: a copy's task is the destination's, the source named in its details.
      *
      * @return Builder<Task>
      */
@@ -251,6 +238,10 @@ class ProjectDeleter
                 ->orWhere(static function (Builder $copy) use ($user): void {
                     $copy->where('job_type', CreateStaging::class)
                         ->where('details->source', $user->username);
+                })
+                ->orWhere(static function (Builder $copy) use ($user): void {
+                    $copy->where('job_type', CopyProject::class)
+                        ->where('details->from', $user->username);
                 });
         });
     }

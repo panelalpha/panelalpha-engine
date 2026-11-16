@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Health;
 
 /**
- * What the application actually answered: the status, and enough of the body to
- * recognise it by. The sample is capped at 4096 bytes, which covers a
- * placeholder or debug page's opening `<title>` and a health endpoint's JSON.
+ * What the application actually answered: the status and up to 4096 bytes of body, enough for a
+ * placeholder or debug page's `<title>` or a health endpoint's JSON.
  */
 final class ProbedResponse
 {
@@ -17,12 +16,12 @@ final class ProbedResponse
 
     private bool $jsonRead = false;
 
+    /** @param  string  $path  the path that answered, after the probe followed redirects from `/` */
     public function __construct(
         public readonly int $status,
         public readonly string $body,
         public readonly string $url,
         public readonly float $time = 0.0,
-        // The path that answered, after the probe followed redirects from `/`.
         public readonly string $path = '/'
     ) {}
 
@@ -32,9 +31,8 @@ final class ProbedResponse
     }
 
     /**
-     * Answered faster than the given number of seconds, with a time actually
-     * measured. A proxy 502 with no upstream comes back in ~2ms; no
-     * application-generated 5xx does, which is how the two are told apart.
+     * Answered faster than $seconds, with a known time: a proxy 502 with no upstream takes ~2ms
+     * and no application-generated 5xx does, which tells the two apart.
      */
     public function respondedWithin(float $seconds): bool
     {

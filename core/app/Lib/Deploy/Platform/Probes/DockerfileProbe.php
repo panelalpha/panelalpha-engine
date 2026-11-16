@@ -7,15 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A Dockerfile the repository actually intends to be built.
- *
- * Not expressible as `{"file": "Dockerfile"}`, for three reasons the JSON
- * has no way to say: the name may be `Dockerfile.prod` or live under
- * `docker/`, the casing has to be preserved for the build context, and a
- * Dockerfile that maps the host's uid/gid through build args is a
- * workstation file rather than a deployable one.
- *
- * Contributes the Dockerfile's path and its EXPOSEd port.
+ * A Dockerfile the repository intends to be built, with its path and EXPOSEd port; a probe since
+ * the name varies, its casing must be kept, and a uid/gid-mapping one is a workstation file.
  */
 final class DockerfileProbe implements PlatformProbe
 {

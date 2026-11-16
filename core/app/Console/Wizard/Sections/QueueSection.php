@@ -77,7 +77,7 @@ class QueueSection implements Section
     {
         $lines = [
             sprintf('Configured: %d', $configured),
-            sprintf('Running:    %s', $running === null ? '(s6 not running)' : (string) $running),
+            sprintf('Running:    %s', $running === null ? '(unknown -- s6 did not answer)' : (string) $running),
         ];
 
         if ($running !== null && $running !== $configured) {
@@ -128,7 +128,7 @@ class QueueSection implements Section
 
         $running = QueueWorkers::running();
         note($running === null
-            ? 'Written, but s6 is not running to confirm it live. It takes effect on its next start regardless.'
+            ? 'Written, but s6 did not answer to confirm it live. It takes effect on its next start regardless.'
             : sprintf('Applied live -- %d workers running now.', $running));
         pause('Press enter to carry on...');
     }

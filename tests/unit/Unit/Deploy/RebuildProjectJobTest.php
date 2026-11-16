@@ -8,6 +8,7 @@ use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Project\ArchiveDrop;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
@@ -20,6 +21,7 @@ use App\System\Project;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use Illuminate\Validation\ValidationException;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 use Tests\Unit\System\Project\Deployment\RecordingDisposition;
@@ -76,7 +78,7 @@ class RebuildProjectJobTest extends TestCase
                 return $this->opens !== null ? ($this->opens)($user) : parent::openLog($user, $action);
             }
 
-            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
+            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = [], ?\App\Lib\Upload\ArchiveSource $archive = null): array
             {
                 ($this->runs)($user, $logger, $zipPath);
 
@@ -323,13 +325,17 @@ class RebuildProjectJobTest extends TestCase
     public function test_cancelling_a_running_rebuild_cancels_its_deploy(): void
     {
         $user = $this->dindUser();
+        $tornDown = [];
         $project = Mockery::mock(Project::class);
-        $project->shouldReceive('rebuildFromSource')->once()->andReturnUsing(function (?DeployLogger $logger): void {
+        $project->shouldReceive('rebuildFromSource')->once()->andReturnUsing(function (?DeployLogger $logger) use (&$tornDown): void {
             $logger->stage(DeployLogger::STAGE_RUNNING);
             $killer = Mockery::mock(ProcessTreeKiller::class);
             $killer->shouldNotReceive('kill');
             $running = Task::query()->where('job_type', RebuildProject::class)->firstOrFail();
-            $this->assertTrue((new TaskCanceller($killer))->cancel($running)['cancelled']);
+            $canceller = new TaskCanceller($killer, null, function (Task $task) use (&$tornDown): void {
+                $tornDown[] = $task->username;
+            });
+            $this->assertTrue($canceller->cancel($running)['cancelled']);
             // What the pipeline does at its next step once the log says cancelled.
             $logger->throwIfCancelled();
         });
@@ -342,5 +348,107 @@ class RebuildProjectJobTest extends TestCase
         $latest = DeployLogger::readLatestFor($user->username);
         $this->assertSame(DeployLogger::STATUS_CANCELLED, $latest['status']);
         $this->assertNotNull($latest['finished_at']);
+        $this->assertSame([$user->username], $tornDown, 'the half-started app is torn down once');
+    }
+
+    /** @return array<string, array{0: \Closure(): void, 1: string}> */
+    public static function archiveDeployEndings(): array
+    {
+        return [
+            'completed' => [static function (): void {
+            }, Task::STATUS_COMPLETED],
+            'failed' => [static function (): void {
+                throw new \RuntimeException('build failed');
+            }, Task::STATUS_FAILED],
+            'cancelled while running' => [static function (): void {
+                throw ProblemException::deploy('deploy_cancelled', 'Deploy cancelled by user', 'running');
+            }, Task::STATUS_CANCELLED],
+        ];
+    }
+
+    /** The archive the CLI put into the project is the job's: it goes once the deploy has ended, however it ended. */
+    #[DataProvider('archiveDeployEndings')]
+    public function test_an_archive_the_cli_dropped_is_removed_when_the_deploy_ends(\Closure $run, string $status): void
+    {
+        $user = $this->dindUser();
+        $removed = $this->recordArchiveRemovals();
+        $this->rebuildThat($run, static fn (): ?DeployLogger => null);
+
+        $task = $this->runJob($this->droppedArchiveDeploy($user), $user, ProjectRebuild::DEPLOY_ARCHIVE);
+
+        $this->assertSame($status, $task->status);
+        $this->assertSame(['/.panelalpha/archives/.deploy-archive-abc.zip'], $removed->getArrayCopy());
+    }
+
+    public function test_an_archive_the_cli_dropped_is_removed_when_its_task_was_cancelled_before_it_started(): void
+    {
+        $user = $this->dindUser();
+        $removed = $this->recordArchiveRemovals();
+        $this->rebuildThat(static function (): void {
+            throw new \LogicException('must not run');
+        });
+        $job = $this->droppedArchiveDeploy($user);
+        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $user->username);
+        $job->attachTask($task);
+        $this->assertTrue($task->cancelIfQueued());
+
+        $this->app->call([$job, 'handle']);
+
+        $this->assertSame(Task::STATUS_CANCELLED, $task->refresh()->status);
+        $this->assertSame(['/.panelalpha/archives/.deploy-archive-abc.zip'], $removed->getArrayCopy());
+    }
+
+    /** A worker that timed out never reaches the end of handle(); failed() is what runs then. */
+    public function test_an_archive_the_cli_dropped_is_removed_when_the_job_fails_outside_the_deploy(): void
+    {
+        $user = $this->dindUser();
+        $removed = $this->recordArchiveRemovals();
+        $job = $this->droppedArchiveDeploy($user);
+        $job->attachTask(Task::start(jobType: RebuildProject::class, queue: 'default', username: $user->username));
+
+        $job->failed(new \RuntimeException('The job has timed out.'));
+
+        $this->assertSame(Task::STATUS_FAILED, $job->task()?->status);
+        $this->assertSame(['/.panelalpha/archives/.deploy-archive-abc.zip'], $removed->getArrayCopy());
+    }
+
+    /** An API caller uploaded the zip_path themselves, and it stays where they put it, as it always has. */
+    #[DataProvider('archiveDeployEndings')]
+    public function test_an_archive_an_api_caller_uploaded_is_left_where_they_put_it(\Closure $run, string $status): void
+    {
+        $user = $this->dindUser();
+        $removed = $this->recordArchiveRemovals();
+        $this->rebuildThat($run, static fn (): ?DeployLogger => null);
+
+        $task = $this->runJob(new RebuildProject($user->username, ProjectRebuild::DEPLOY_ARCHIVE, '/project/app.zip'), $user, ProjectRebuild::DEPLOY_ARCHIVE);
+        $job = new RebuildProject($user->username, ProjectRebuild::DEPLOY_ARCHIVE, '/project/app.zip');
+        $job->failed(new \RuntimeException('The job has timed out.'));
+
+        $this->assertSame($status, $task->status);
+        $this->assertSame([], $removed->getArrayCopy());
+    }
+
+    private function droppedArchiveDeploy(User $user): RebuildProject
+    {
+        return new RebuildProject($user->username, ProjectRebuild::DEPLOY_ARCHIVE, '/.panelalpha/archives/.deploy-archive-abc.zip', userId: (int) $user->getKey(), ownsArchive: true);
+    }
+
+    /** @return \ArrayObject<int, string> the zip paths removed from a project */
+    private function recordArchiveRemovals(): \ArrayObject
+    {
+        $removed = new \ArrayObject();
+        $this->app->instance(ArchiveDrop::class, new class ($removed) extends ArchiveDrop {
+            /** @param \ArrayObject<int, string> $removed */
+            public function __construct(private \ArrayObject $removed)
+            {
+            }
+
+            public function remove(User $user, string $zipPath): void
+            {
+                $this->removed[] = $zipPath;
+            }
+        });
+
+        return $removed;
     }
 }

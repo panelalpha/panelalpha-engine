@@ -283,11 +283,85 @@ class DetectProjectStrategyTest extends TestCase
         $this->assertSame(8080, $result['port_hint']);
     }
 
-    public function test_railpack_from_package_json(): void
+    public function test_a_package_no_recipe_claims_is_unknown(): void
     {
         $this->writeFile('package.json', '{"name":"app"}');
 
         $result = $this->detect();
+
+        $this->assertSame(Strategies::FALLBACK, $result['strategy']);
+        $this->assertSame('Unknown', $result['label']);
+    }
+
+    /** qunarcorp/qmq: the C# client library two levels down is not the Maven server at the root. */
+    public function test_a_csharp_client_beside_a_maven_server_is_the_java_app(): void
+    {
+        $this->writeFile('pom.xml', '<project></project>');
+        $this->writeFile('clients/csharp/qmqclient.sln', 'Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "qmqclient", '
+            . '"qmqclient\\qmqclient.csproj", "{11111111-2222-3333-4444-555555555555}"' . "\nEndProject\n");
+        $this->writeFile('clients/csharp/qmqclient/qmqclient.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<TargetFramework>netstandard2.0</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertSame(Strategies::JAVA, $this->detect()['strategy']);
+    }
+
+    /**
+     * @return array<string, array{0: array<string, string>, 1: string}>
+     */
+    public static function stacksBesideADotnetFrameworkTool(): array
+    {
+        return [
+            'a Maven app (iterate-ch/cyberduck)' => [['pom.xml' => '<project></project>'], Strategies::JAVA],
+            'a Node server' => [
+                ['package.json' => '{"name":"app","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}', 'server.js' => ''],
+                Strategies::EXPRESS,
+            ],
+        ];
+    }
+
+    /**
+     * A Windows client or helper tool on .NET Framework beside the application another recipe deploys does not make
+     * the repository a .NET Framework refusal.
+     *
+     * @param  array<string, string>  $files
+     */
+    #[DataProvider('stacksBesideADotnetFrameworkTool')]
+    public function test_a_dotnet_framework_desktop_app_beside_another_stack_leaves_it_to_that_stack(array $files, string $strategy): void
+    {
+        foreach ($files as $path => $contents) {
+            $this->writeFile($path, $contents);
+        }
+        $this->writeFile('Cyberduck.sln', 'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyberduck", '
+            . '"windows\\Cyberduck.csproj", "{11111111-2222-3333-4444-555555555555}"' . "\nEndProject\n");
+        $this->writeFile('windows/Cyberduck.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
+            . '<OutputType>WinExe</OutputType><TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion></PropertyGroup></Project>');
+
+        $result = $this->detect();
+
+        $this->assertSame($strategy, $result['strategy']);
+        DeployabilityCheck::assert($result, $this->tmpDir);
+    }
+
+    /** linb/CrossUI: the ASP.NET backend sample under backend/ does not stop the site at the root being served. */
+    public function test_a_classic_aspnet_app_in_a_subfolder_leaves_the_site_to_its_recipe(): void
+    {
+        $this->writeFile('index.html', '<title>CrossUI</title>');
+        $this->writeFile('backend/CSharp/xuiService.csproj', '<Project ToolsVersion="4.0"><PropertyGroup>'
+            . '<OutputType>Library</OutputType><TargetFrameworkVersion>v4.0</TargetFrameworkVersion></PropertyGroup>'
+            . '<Import Project="$(MSBuildExtensionsPath32)\\Microsoft\\VisualStudio\\v10.0\\WebApplications\\Microsoft.WebApplication.targets" />'
+            . '</Project>');
+
+        $result = $this->detect();
+
+        $this->assertSame(Strategies::STATIC, $result['strategy']);
+        DeployabilityCheck::assert($result, $this->tmpDir);
+    }
+
+    public function test_railpack_only_when_the_request_names_it(): void
+    {
+        $this->writeFile('package.json', '{"name":"app"}');
+
+        $result = DetectProjectStrategy::detect($this->tmpDir, null, Strategies::RAILPACK);
 
         $this->assertSame(Strategies::RAILPACK, $result['strategy']);
         $this->assertSame('Railpack', $result['label']);
@@ -1291,7 +1365,7 @@ YAML
         );
         // A declared server beats `runserver`, run with the project on the
         // import path exactly as NetBox's own systemd unit spells it.
-        $this->assertStringContainsString("--pythonpath 'netbox' netbox.wsgi:application", $result['start_command']);
+        $this->assertStringContainsString('--pythonpath=netbox netbox.wsgi:application', $result['start_command']);
     }
 
     public function test_static_index_html(): void
@@ -1379,6 +1453,18 @@ YAML
         $this->assertSame(Strategies::STATIC, $result['strategy']);
         $this->assertSame('plan_podrozy_toskania(1).html', $result['static_index']);
         DeployabilityCheck::assert($result, $this->tmpDir);
+    }
+
+    /** The same image and root mount as the old bootstrap, in a file the client wrote with a volume of its own. */
+    public function test_a_client_compose_shaped_like_the_old_bootstrap_still_wins_over_html(): void
+    {
+        $this->writeFile('docker-compose.yml', "services:\n  app:\n    image: nginx:alpine\n    ports:\n      - '8080:80'\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n      - cache:/var/cache/nginx\nvolumes:\n  cache: {}\n");
+        $this->writeFile('index.html', '<h1>my site</h1>');
+
+        $result = $this->detect();
+
+        $this->assertSame(Strategies::COMPOSE, $result['strategy']);
+        $this->assertSame($this->tmpDir.'/docker-compose.yml', $result['compose_path']);
     }
 
     public function test_user_owned_compose_still_wins_over_html(): void
@@ -1473,13 +1559,13 @@ YAML
      * A Gemfile on its own says nothing about how to start the app, so it
      * still belongs to Railpack.
      */
-    public function test_gemfile_alone_falls_through_to_railpack(): void
+    public function test_gemfile_alone_is_unknown(): void
     {
         $this->writeFile('Gemfile', "source 'https://rubygems.org'\ngem 'rails'\n");
 
         $result = $this->detect();
 
-        $this->assertSame(Strategies::RAILPACK, $result['strategy']);
+        $this->assertSame(Strategies::FALLBACK, $result['strategy']);
     }
 
     public function test_rack_app_is_the_ruby_recipe_not_railpack(): void

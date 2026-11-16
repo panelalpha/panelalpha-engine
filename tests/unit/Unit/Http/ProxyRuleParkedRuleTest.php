@@ -27,13 +27,13 @@ class ProxyRuleParkedRuleTest extends TestCase
 
     public function test_a_parked_rule_leaves_the_generated_route_in_place(): void
     {
-        ProxyRule::syncGeneratedHttpPair('alice', 'shop.test', 3000);
+        ProxyRule::syncGeneratedHttpPairs('alice', ['shop.test'], 3000);
         $this->postJson('/api/proxy-rules', [
             'owner_scope' => 'user', 'username' => 'alice', 'transport' => 'http', 'listen_port' => 443,
             'server_name' => 'shop.test', 'upstream_host' => 'alice', 'upstream_port' => 8080, 'enabled' => false,
         ])->assertSuccessful();
 
-        ProxyRule::syncGeneratedHttpPair('alice', 'shop.test', 3000);
+        ProxyRule::syncGeneratedHttpPairs('alice', ['shop.test'], 3000);
 
         $this->assertSame(1, ProxyRule::query()->where('enabled', true)->where('listen_port', 443)->count());
     }

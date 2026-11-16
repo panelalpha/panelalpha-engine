@@ -1,0 +1,135 @@
+[7 log lines] write {dir}/docker-compose.panelalpha.client-override.yml chown=1001:1001 mode=644
+services:
+  app:
+    environment:
+      APP_ENV: production
+
+
+[14 log lines] exec /usr/local/lib/panelalpha/pa-root account-container.exec -- {user}   1 DOCKER_CONFIG /.panelalpha-docker sh -c for f in meminfo cpuinfo stat loadavg diskstats uptime swaps; do [ -f /var/lib/lxcfs/proc/$f ] && echo "$f"; done; true
+
+
+[14 log lines] write {dir}/docker-compose.panelalpha.yml chown=1001:1001 mode=600
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8080:80'
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - '-f'
+        - 'http://localhost'
+      start_period: 60s
+    env_file:
+      - .env
+      - .env.panelalpha
+    volumes:
+      - 'data-dir:/data'
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    mem_limit: 896m
+    environment:
+      NODE_OPTIONS: '--max-old-space-size=627'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      PA_PUBLIC_URL: 'https://acme.example.test'
+      PA_PUBLIC_HOST: acme.example.test
+    sysctls:
+      net.ipv4.ping_group_range: '0 65535'
+    cpus: '0.75'
+    pids_limit: 1024
+  setup:
+    image: busybox
+    command:
+      - sh
+      - '-c'
+      - 'mkdir -p /data/cache'
+    restart: 'no'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    mem_limit: 896m
+    environment:
+      NODE_OPTIONS: '--max-old-space-size=627'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      PA_PUBLIC_URL: 'https://acme.example.test'
+      PA_PUBLIC_HOST: acme.example.test
+    sysctls:
+      net.ipv4.ping_group_range: '0 65535'
+    cpus: '0.75'
+    pids_limit: 1024
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8080:80'
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - '-f'
+        - 'http://localhost'
+      start_period: 60s
+    env_file:
+      - .env
+      - .env.panelalpha
+    volumes:
+      - 'data-dir:/data'
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    command: 'php artisan migrate --force'
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    mem_limit: 896m
+    environment:
+      NODE_OPTIONS: '--max-old-space-size=627'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      PA_PUBLIC_URL: 'https://acme.example.test'
+      PA_PUBLIC_HOST: acme.example.test
+    sysctls:
+      net.ipv4.ping_group_range: '0 65535'
+    cpus: '0.75'
+    pids_limit: 1024
+volumes:
+  data-dir: null
+
+
+== log
+#0 info: Starting stage: running
+#1 info: Compose dockerfile Dockerfile.prod is missing; using Dockerfile
+#2 info: Compose dockerfile Dockerfile.prod is missing; using Dockerfile
+#3 info: Dropped service traefik (traefik:v3): the engine's proxy routes traffic to this app
+#4 info: Dropped external network proxy: it exists only on the host this compose file was written for
+#5 warn: Removed from docker-compose.override.yml, not allowed in hosting: app: privileged
+#6 info: Dropped service traefik from docker-compose.override.yml: the run file no longer has it
+#7 info: Service setup runs once and exits; not restarting it
+#8 info: Removed ulimits.memlock from service app: an account cannot raise its locked-memory limit
+#9 info: Gave app's healthcheck a 60s start period: its CPU is capped and the check allows no slow start
+#10 info: Removed ulimits.memlock from service migrate: an account cannot raise its locked-memory limit
+#11 info: Gave migrate's healthcheck a 60s start period: its CPU is capped and the check allows no slow start
+#12 info: A mount source variable is not set, so it is a named volume: app: DATA_DIR -> data-dir
+#13 info: A mount source variable is not set, so it is a named volume: migrate: DATA_DIR -> data-dir
+#14 info: Hardened compose for hosting (resource limits, restart policy, isolation)

@@ -13,6 +13,9 @@ class ProjectGitWorkingTreeTest extends TestCase
 {
     private string $tmpDir;
 
+    /** @var list<string> */
+    private array $remotes = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -27,6 +30,9 @@ class ProjectGitWorkingTreeTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->remotes as $remote) {
+            $this->removeDir($remote);
+        }
         $this->removeDir($this->tmpDir);
         parent::tearDown();
     }
@@ -103,6 +109,59 @@ class ProjectGitWorkingTreeTest extends TestCase
         $this->assertFileDoesNotExist($this->tmpDir . '/untracked.txt');
     }
 
+    /**
+     * The branch list reads the remote, so every branch it offers can be listed: one the checkout never
+     * fetched is fetched for the listing.
+     */
+    public function test_commits_fetches_a_branch_the_checkout_has_not_got(): void
+    {
+        $this->commit('On main');
+        $this->runGit(['checkout', '-b', 'test']);
+        $this->commit('On test');
+        $this->runGit(['checkout', 'main']);
+        $this->publish(['main', 'test']);
+        $this->runGit(['branch', '-D', 'test']);
+        $this->runGit(['update-ref', '-d', 'refs/remotes/origin/test']);
+
+        $commits = $this->makeGit()->commits(10, 'test');
+
+        $this->assertSame('On test', $commits[0]['subject']);
+    }
+
+    /** A branch the checkout fetched, but never checked out, is listed without asking the remote again. */
+    public function test_commits_lists_a_fetched_branch_the_checkout_has_not_checked_out(): void
+    {
+        $this->commit('On main');
+        $this->runGit(['checkout', '-b', 'test']);
+        $this->commit('On test');
+        $this->runGit(['checkout', 'main']);
+        $remote = $this->publish(['main', 'test']);
+        $this->runGit(['fetch', 'origin', 'refs/heads/test:refs/remotes/origin/test']);
+        $this->runGit(['branch', '-D', 'test']);
+        $this->removeDir($remote);
+        $this->remotes = [];
+        $this->runGit(['remote', 'set-url', 'origin', $remote.'-gone']);
+
+        $commits = $this->makeGit()->commits(10, 'test');
+
+        $this->assertSame('On test', $commits[0]['subject']);
+    }
+
+    public function test_commits_refuses_a_branch_the_remote_does_not_have(): void
+    {
+        $this->commit('On main');
+        $this->publish(['main']);
+
+        try {
+            $this->makeGit()->commits(10, 'nope');
+            $this->fail('A branch the remote does not have must be refused.');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('git_branch_not_found', $e->problemCode);
+            $this->assertSame("The remote has no branch named 'nope'. Its branches: main.", $e->getMessage());
+        }
+    }
+
     private function makeGit(): TestableProjectGit
     {
         $model = new ModelsUser();
@@ -139,6 +198,32 @@ class ProjectGitWorkingTreeTest extends TestCase
     private function runGit(array $args): void
     {
         ($this->localExecute())(['git', '-C', $this->tmpDir, ...$args], null);
+    }
+
+    /** A commit that adds a file named after its subject, so each branch lists its own. */
+    private function commit(string $subject): void
+    {
+        file_put_contents($this->tmpDir . '/' . $subject . '.txt', $subject . "\n");
+        $this->runGit(['add', '.']);
+        $this->runGit(['commit', '-m', $subject]);
+    }
+
+    /**
+     * A bare repository holding the local branches named, added as origin.
+     *
+     * @param list<string> $branches
+     */
+    private function publish(array $branches): string
+    {
+        $remote = sys_get_temp_dir() . '/pa-git-remote-' . bin2hex(random_bytes(8)) . '.git';
+        $this->runGit(['init', '--bare', $remote]);
+        $this->runGit(['remote', 'add', 'origin', $remote]);
+        foreach ($branches as $branch) {
+            $this->runGit(['push', 'origin', $branch . ':refs/heads/' . $branch]);
+        }
+        $this->remotes[] = $remote;
+
+        return $remote;
     }
 
     private function removeDir(string $dir): void

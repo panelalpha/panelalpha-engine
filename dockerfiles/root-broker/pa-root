@@ -1,0 +1,11 @@
+#!/usr/bin/python3 -I
+"""pa-root: run one of the engine's root actions through the root broker (see rootbroker.client)."""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from rootbroker.client import main  # noqa: E402
+
+sys.exit(main(sys.argv[1:]))

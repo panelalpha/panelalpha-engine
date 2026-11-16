@@ -8,19 +8,8 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Why the engine's own page is being served instead of an application.
- *
- * Two very different situations produce the same page. An account that has
- * never had an application deployed into it is *supposed* to show the welcome
- * page -- that is what it is for, and reporting it as a fault would make every
- * empty account look broken. An account whose ~/project holds files and still
- * shows a placeholder is the real failure: something was uploaded, nothing
- * claimed it, and the fallback recipe wrote over the top.
- *
- * The two are told apart by whether the directory holds anything but the
- * engine's own handwriting, which is the question
- * {@see PlaceholderPage::supersededIndex()} already
- * answers for the deploy pipeline.
+ * Why the engine's own page is served: an empty account is supposed to show it, while files nothing claimed are the real
+ * failure. Told apart by the engine's own scaffolding, as {@see PlaceholderPage::supersededIndex()} does for the pipeline.
  */
 final class PlaceholderPageExplainer implements Explainer
 {
@@ -52,7 +41,7 @@ final class PlaceholderPageExplainer implements Explainer
     private static function projectFiles(string $projectDir): int
     {
         $count = 0;
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($projectDir) as $entry) {
             if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
                 continue;
             }

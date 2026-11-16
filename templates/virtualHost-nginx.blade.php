@@ -13,6 +13,12 @@ server {
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/{{ $domain }}/error.log error;
 
     root /home/{{ $user }}{{ $relative_document_root }};
+@if (!empty($cookie_isolation_shared_parents))
+    js_var $pa_cookie_shared_parents "{!! $cookie_isolation_shared_parents !!}";
+@endif
+@if (!empty($cookie_isolation_server))
+    {!! $cookie_isolation_server !!}
+@endif
 @if (!empty($http_acme_challenges_enabled))
     location ^~ /.well-known/acme-challenge/ {
         alias {{ $http_acme_challenges_dir }}/;
@@ -21,6 +27,9 @@ server {
 @endif
     location ^~ /phpmyadmin {
         proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_location))
+        {!! $cookie_isolation_location !!}
+@endif
         set $pmapass 0;
         if ($arg_pmassotoken) {
             set $pmapass 1;
@@ -63,14 +72,23 @@ server {
         location / {
             index  index.php index.html index.htm;
             try_files $uri $uri/ /index.php?$args;
+@if (!empty($cookie_isolation_shared_parents))
+            js_header_filter pa_cookie_isolation.hostScopedCookies;
+@endif
         }
         location ~ \.php$ {
             resolver 127.0.0.54 valid=30s;
             set $userhost {{ $user }};
             include fastcgi_params;
             fastcgi_param  SCRIPT_FILENAME /home/{{ $user }}{{ $relative_document_root }}$fastcgi_script_name;
+@if (!empty($cookie_isolation_server))
+            fastcgi_param  HTTP_COOKIE $pa_cookie;
+@endif
             fastcgi_pass $userhost:{{ $php_port }};
             fastcgi_index index.php;
+@if (!empty($cookie_isolation_shared_parents))
+            js_header_filter pa_cookie_isolation.hostScopedCookies;
+@endif
         }
     @endif
 }
@@ -93,8 +111,17 @@ server {
         error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/{{ $domain }}/error.log error;
 
         root /home/{{ $user }}{{ $relative_document_root }};
+@if (!empty($cookie_isolation_shared_parents))
+        js_var $pa_cookie_shared_parents "{!! $cookie_isolation_shared_parents !!}";
+@endif
+@if (!empty($cookie_isolation_server))
+        {!! $cookie_isolation_server !!}
+@endif
         location ^~ /phpmyadmin {
             proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_location))
+            {!! $cookie_isolation_location !!}
+@endif
             set $pmapass 0;
             if ($arg_pmassotoken) {
                 set $pmapass 1;
@@ -133,14 +160,23 @@ server {
             location / {
                 index  index.php index.html index.htm;
                 try_files $uri $uri/ /index.php?$args;
+@if (!empty($cookie_isolation_shared_parents))
+                js_header_filter pa_cookie_isolation.hostScopedCookies;
+@endif
             }
             location ~ \.php$ {
                 resolver 127.0.0.54 valid=30s;
                 set $userhost {{ $user }};
                 include fastcgi_params;
                 fastcgi_param  SCRIPT_FILENAME /home/{{ $user }}{{ $relative_document_root }}$fastcgi_script_name;
+@if (!empty($cookie_isolation_server))
+                fastcgi_param  HTTP_COOKIE $pa_cookie;
+@endif
                 fastcgi_pass $userhost:{{ $php_port }};
                 fastcgi_index index.php;
+@if (!empty($cookie_isolation_shared_parents))
+                js_header_filter pa_cookie_isolation.hostScopedCookies;
+@endif
             }
         @endif
     }

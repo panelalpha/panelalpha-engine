@@ -10,6 +10,7 @@ use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\InnerBuildGuard;
 use App\System\Project\Dind\ShellOperations;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -20,6 +21,9 @@ class InnerBuildGuardTest extends TestCase
 {
     /** @var list<list<string>> */
     private array $commands = [];
+
+    /** @var list<list<string>> */
+    private array $requests = [];
 
     private ?\Throwable $failApply = null;
 
@@ -45,14 +49,13 @@ class InnerBuildGuardTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $apply[7]);
     }
 
-    /** Root in the account, through the account's own compose file. */
+    /** Root in the account's own container, through the host daemon. */
     public function test_it_runs_as_root_in_the_account(): void
     {
         (new InnerBuildGuard($this->project('8192m', 1024)))->during(static fn () => null);
 
-        $this->assertSame(['sudo', 'docker', 'compose', '-f', '/opt/users/alice/docker-compose.yml', 'exec'], array_slice($this->commands[0], 0, 6));
-        $this->assertNotContains('-u', $this->commands[0]);
-        $this->assertSame('dind', $this->commands[0][array_search('-T', $this->commands[0], true) + 1]);
+        $this->assertSame('account-container.exec', LocalRoot::action($this->requests[0]));
+        $this->assertSame(['alice', '', ''], array_slice(LocalRoot::values($this->requests[0]), 0, 3));
     }
 
     public function test_the_limit_is_the_ceiling_held_to_the_project(): void
@@ -107,14 +110,15 @@ class InnerBuildGuardTest extends TestCase
      */
     private function inner(array $argv): array
     {
-        return array_slice($argv, (int) array_search('dind', $argv, true) + 1);
+        return LocalRoot::inAccount($argv);
     }
 
     private function project(string $buildCeiling, int $projectMb): Dind
     {
         $system = $this->createStub(System::class);
         $system->method('exec')->willReturnCallback(function (string|array $cmd): string {
-            $this->commands[] = array_values((array) $cmd);
+            $this->requests[] = array_values((array) $cmd);
+            $this->commands[] = LocalRoot::plain(array_values((array) $cmd));
             if ($this->failApply !== null && in_array('build-guard', (array) $cmd, true)) {
                 throw $this->failApply;
             }
@@ -135,7 +139,6 @@ class InnerBuildGuardTest extends TestCase
         $project->method('userModel')->willReturn($user);
         $project->method('username')->willReturn('alice');
         $project->method('homeDirPath')->willReturn('/home/alice');
-        $project->method('composeFilePath')->willReturn('/opt/users/alice/docker-compose.yml');
         $project->method('shell')->willReturn(new ShellOperations($project));
 
         return $project;

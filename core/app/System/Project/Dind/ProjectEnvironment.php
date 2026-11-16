@@ -16,18 +16,24 @@ use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Project\ApiAccess;
 use App\Models\User;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 
 /**
- * The .env files the application is deployed with: `.env.default` is the base the project shipped,
- * `.env` what the container reads, and `.env.panelalpha` the engine's values (generated secrets,
- * and the env_vars when the repository tracks its own `.env`, which is then left as committed, ADR-0001).
+ * The .env files of a deploy: `.env.default` the base the project shipped, `.env` what the container reads, and
+ * `.env.panelalpha` the engine's: generated secrets, and env_vars when a tracked `.env` stays as committed (ADR-0001).
  */
 class ProjectEnvironment
 {
     /** Project detail: the env_vars keys the last deploy merged into .env. */
     private const MERGED_OVERRIDES = 'env_override_keys';
+
+    /** Project detail: the env_vars keys the app service receives outside .env, from `.env.panelalpha` or its own `environment:`. */
+    private const SERVICE_KEYS = 'env_service_keys';
+
+    /** Project detail: the app config's `env:` keys the last deploy merged into a compose project's .env. */
+    private const APP_CONFIG_KEYS = 'env_app_config_keys';
 
     /** Mode of files that can hold generated secrets: ~/project is traversable by every uid. */
     private const OWNER_ONLY = '600';
@@ -47,7 +53,8 @@ class ProjectEnvironment
 
     /**
      * Write .env.default from the current base, then merge the account's non-empty env_vars
-     * (an empty one keeps the base) over it, the env_vars winning over generated values.
+     * (an empty one keeps the base) over it, the env_vars winning over generated values. A project running its own
+     * compose file gets the app config's `env:` the same way, under the env_vars.
      *
      * @param  ?string  $composePath  the compose file detection chose, when it is not at the root
      */
@@ -62,34 +69,99 @@ class ProjectEnvironment
         $chown = $user->getChownString();
         $logger = $this->dind->shell()->logger();
         $overrides = self::nonEmptyValues($user->getEnvVars());
+        $declared = array_diff_key($this->appConfigValues(), $overrides);
+        $values = array_merge($declared, $overrides);
 
-        [$baseContents, $source, $removed] = $this->baseEnv($user, $projectDir, $exampleName, $overrides, $logger);
-        [$baseContents, $keyAdded] = $this->withLaravelAppKey($user, $baseContents, $source, $overrides, $logger);
-        [$baseContents, $requiredUrls, $generated] = $this->withComposeRequiredValues($baseContents, $overrides, $logger);
+        [$baseContents, $source, $removed] = $this->baseEnv($user, $projectDir, $exampleName, $values, $logger);
+        [$baseContents, $keyAdded] = $this->withLaravelAppKey($user, $baseContents, $source, $values, $logger);
+        [$baseContents, $requiredUrls, $generated] = $this->withComposeRequiredValues($baseContents, $values, $logger);
         if ($baseContents !== null) {
             $fs->writeFileReplacingPath($defaultPath, $baseContents, $chown, self::OWNER_ONLY);
         }
 
+        [$tracked, $services] = $this->writeEngineEnv($user, $values, $generated, $projectDir, $chown);
+
+        if ($tracked) {
+            $this->keepTrackedEnv($user, $overrides, $declared, $services, $projectDir, $chown, $logger);
+        } elseif ($values !== []) {
+            $this->mergeOverridesIntoEnv($user, $baseContents, $overrides, $declared, $projectDir, $composePath, $chown, $logger);
+        } else {
+            $this->useDefaultEnv($user, $baseContents, $source, $removed, $keyAdded, $requiredUrls, $envPath, $projectDir, $composePath, $chown, $logger);
+        }
+    }
+
+    /**
+     * @param  array<string, string>  $overrides
+     * @param  array<string, string>  $generated
+     * @return array{0: bool, 1: list<string>} whether `.env` is tracked, the services that load `.env.panelalpha`
+     */
+    private function writeEngineEnv(User $user, array $overrides, array $generated, string $projectDir, ?string $chown): array
+    {
         $tracked = $overrides !== [] && $this->envIsTracked();
         $services = $this->writeEngineValues(
-            (new ApiAccess($this->dind->system()))->envFor($user) + ($tracked ? $overrides + $generated : $generated),
+            $this->mailRelay()
+                + (new ApiAccess($this->dind->system()))->envFor($user)
+                + ($tracked ? $overrides + $generated : $generated),
             $projectDir,
             $chown
         );
 
-        if ($tracked) {
-            $this->keepTrackedEnv($user, $overrides, $services, $projectDir, $chown, $logger);
-        } elseif ($overrides !== []) {
-            $this->mergeOverridesIntoEnv($user, $baseContents, $overrides, $projectDir, $composePath, $chown, $logger);
-        } else {
-            if ($baseContents !== null && $this->baseEnvNeedsWriting($envPath, $removed !== [] || $keyAdded, $requiredUrls !== [])) {
-                $this->writeEnv($envPath, $baseContents, $chown);
-            }
-            $this->materializeNestedEnvExamples($projectDir, $chown);
-            $this->withNestedComposeEnv($projectDir, $composePath, $chown);
-            $logger?->info("Using default environment variables (source: {$source})");
-            self::recordOverrides($user, false, []);
+        return [$tracked, $services];
+    }
+
+    /**
+     * The server's mail relay for a project whose compose file is its own: the engine sets it in
+     * `.env.panelalpha`, which the generated file of every other project already carries.
+     *
+     * @return array<string, string>
+     */
+    protected function mailRelay(): array
+    {
+        if (! $this->usesComposeStrategy()) {
+            return [];
         }
+
+        try {
+            return $this->dind->system()->exim()->relayEnvironment();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @param  list<string>  $removed
+     * @param  array<string, string>  $requiredUrls
+     */
+    private function useDefaultEnv(
+        User $user,
+        ?string $baseContents,
+        string $source,
+        array $removed,
+        bool $keyAdded,
+        array $requiredUrls,
+        string $envPath,
+        string $projectDir,
+        ?string $composePath,
+        ?string $chown,
+        ?DeployLogger $logger
+    ): void {
+        if ($baseContents !== null && $this->baseEnvNeedsWriting($envPath, $removed !== [] || $keyAdded, $requiredUrls !== [])) {
+            $this->writeEnv($envPath, $baseContents, $chown);
+        }
+        $this->materializeNestedEnvExamples($projectDir, $chown);
+        $this->withNestedComposeEnv($projectDir, $composePath, $chown);
+        $logger?->info("Using default environment variables (source: {$source})");
+        self::recordOverrides($user, false, []);
+    }
+
+    /**
+     * The app config's `env:`, for a project whose compose file is its own: a generated one has it in `environment:`.
+     *
+     * @return array<string, string>
+     */
+    private function appConfigValues(): array
+    {
+        return $this->usesComposeStrategy() ? (new AppConfigEnvironment($this->dind))->values() : [];
     }
 
     /**
@@ -156,7 +228,7 @@ class ProjectEnvironment
         [$contents, $restored] = self::withoutMergedOverrides(
             (string) $contents,
             $fs->fileExists($defaultPath) ? (string) $fs->fileGetContents($defaultPath) : '',
-            self::mergedOverrideKeys($user)
+            [...self::mergedOverrideKeys($user), ...self::keysIn($user, self::APP_CONFIG_KEYS)]
         );
         $removed = array_values(array_diff($restored, array_keys($overrides)));
         if ($removed !== []) {
@@ -253,9 +325,8 @@ class ProjectEnvironment
     }
 
     /**
-     * What the compose file requires and nothing set: its own public URL goes into the base,
-     * secrets are returned for `.env.panelalpha`, since a non-empty `.env` stays in the build
-     * context and an image that copies its context into a docroot serves it.
+     * What the compose file requires and nothing set: its public URL goes into the base, secrets to `.env.panelalpha`,
+     * as a non-empty `.env` stays in the build context and an image copying that into a docroot serves it.
      *
      * @param  array<string, string>  $overrides
      * @return array{0: ?string, 1: array<string, string>, 2: array<string, string>} contents, the URL keys set, the generated secrets
@@ -301,7 +372,7 @@ class ProjectEnvironment
         }
 
         if ($fs->fileExists($path)) {
-            $system->exec(['sudo', 'rm', '-f', $path]);
+            $system->exec(Privileged::files()->removeIfExists($path));
         }
         $this->syncRunFileEnvOverrides(false);
 
@@ -310,43 +381,50 @@ class ProjectEnvironment
 
     /**
      * @param  array<string, string>  $overrides
+     * @param  array<string, string>  $declared  the app config's `env:`, under the overrides
      * @param  list<string>  $services
      */
-    private function keepTrackedEnv(User $user, array $overrides, array $services, string $projectDir, ?string $chown, ?DeployLogger $logger): void
+    private function keepTrackedEnv(User $user, array $overrides, array $declared, array $services, string $projectDir, ?string $chown, ?DeployLogger $logger): void
     {
         $keys = array_keys($overrides);
-        $logger?->info(
-            'The repository tracks .env, so it is left as committed. Using user-provided environment variables ('
-            .count($keys)
-            .' keys) from '.EngineArtifacts::ENV_OVERRIDES
-            .($services === [] ? '' : ', loaded after .env by: '.implode(', ', $services))
-            .': '.implode(', ', $keys)
-        );
+        $loadedBy = ' from '.EngineArtifacts::ENV_OVERRIDES
+            .($services === [] ? '' : ', loaded after .env by: '.implode(', ', $services));
+        $logger?->info('The repository tracks .env, so it is left as committed.'.($keys === []
+            ? ''
+            : ' Using user-provided environment variables ('.count($keys).' keys)'.$loadedBy.': '.implode(', ', $keys)));
+        self::logAppConfigKeys($declared, $loadedBy, $logger);
         $logger?->warn(
             'Code that reads .env from disk will not see these overrides, including build-time readers '
             .'such as Vite or Next.js. Only the container environment carries them.'
         );
         $this->materializeNestedEnvExamples($projectDir, $chown);
-        self::recordOverrides($user, true, []);
+        self::recordOverrides($user, $keys !== [], [], $services === [] ? [] : $keys);
     }
 
     /**
      * @param  array<string, string>  $overrides
+     * @param  array<string, string>  $declared  the app config's `env:`, under the overrides
      */
-    private function mergeOverridesIntoEnv(User $user, ?string $baseContents, array $overrides, string $projectDir, ?string $composePath, ?string $chown, ?DeployLogger $logger): void
+    private function mergeOverridesIntoEnv(User $user, ?string $baseContents, array $overrides, array $declared, string $projectDir, ?string $composePath, ?string $chown, ?DeployLogger $logger): void
     {
         $envPath = "{$projectDir}/.env";
-        $this->writeEnv($envPath, EnvFile::merge($baseContents ?? '', $overrides), $chown);
+        $this->writeEnv($envPath, EnvFile::merge($baseContents ?? '', array_merge($declared, $overrides)), $chown);
         $keys = array_keys($overrides);
-        $logger?->info(
-            'Using user-provided environment variables ('
-            .count($keys)
-            .' keys overridden): '
-            .implode(', ', $keys)
-        );
+        if ($keys !== []) {
+            $logger?->info('Using user-provided environment variables ('.count($keys).' keys overridden): '.implode(', ', $keys));
+        }
+        self::logAppConfigKeys($declared, ' in .env', $logger);
         $this->materializeNestedEnvExamples($projectDir, $chown);
         $this->withNestedComposeEnv($projectDir, $composePath, $chown);
-        self::recordOverrides($user, true, array_keys($overrides));
+        self::recordOverrides($user, $keys !== [], $keys, [], array_keys($declared));
+    }
+
+    /** @param array<string, string> $declared */
+    private static function logAppConfigKeys(array $declared, string $where, ?DeployLogger $logger): void
+    {
+        if ($declared !== []) {
+            $logger?->info("Using the app config's env: (".count($declared).' keys)'.$where.': '.implode(', ', array_keys($declared)));
+        }
     }
 
     /** Whether the base must replace `.env`: missing, changed above, or given its own URL while untracked. */
@@ -359,11 +437,40 @@ class ProjectEnvironment
 
     /**
      * @param  list<string>  $mergedKeys
+     * @param  list<string>  $serviceKeys
+     * @param  list<string>  $appConfigKeys
      */
-    private static function recordOverrides(User $user, bool $used, array $mergedKeys): void
+    private static function recordOverrides(User $user, bool $used, array $mergedKeys, array $serviceKeys = [], array $appConfigKeys = []): void
     {
-        $user->setDetails(['used_custom_env_vars' => $used, self::MERGED_OVERRIDES => $mergedKeys]);
+        $user->setDetails([
+            'used_custom_env_vars' => $used,
+            self::MERGED_OVERRIDES => $mergedKeys,
+            self::SERVICE_KEYS => $serviceKeys,
+            self::APP_CONFIG_KEYS => $appConfigKeys,
+        ]);
         $user->save();
+    }
+
+    /**
+     * The generated run file sets these in the app service's `environment:`, besides what .env carries.
+     *
+     * @param  list<string>  $keys
+     */
+    public static function recordServiceKeys(User $user, array $keys): void
+    {
+        $user->setDetails([self::SERVICE_KEYS => $keys]);
+        $user->save();
+    }
+
+    /**
+     * The env_vars keys the last deploy or env var apply delivered to the app: merged into .env,
+     * or set on its service outside it.
+     *
+     * @return list<string>
+     */
+    public static function appliedKeys(User $user): array
+    {
+        return array_values(array_unique([...self::mergedOverrideKeys($user), ...self::keysIn($user, self::SERVICE_KEYS)]));
     }
 
     private function writeEnv(string $path, string $contents, ?string $chown): void
@@ -419,9 +526,8 @@ class ProjectEnvironment
     }
 
     /**
-     * What compose may interpolate the project's files with, for the hardener
-     * to check mount sources against: it runs before {@see apply()} writes
-     * `.env`, so this is every value that can end up there.
+     * What compose may interpolate the project's files with, for the hardener to check mount sources against: it runs
+     * before {@see apply()} writes `.env`, so this is every value that can end up there.
      *
      * @return array<string, list<?string>>
      */
@@ -500,9 +606,8 @@ class ProjectEnvironment
     }
 
     /**
-     * A compose file kept under docker/ reads docker/.env when run on its own,
-     * but the run file is started from the root and reads the root .env. The
-     * nested file's keys go under the root's, the root's values winning.
+     * A compose file under docker/ reads docker/.env on its own, but the run file starts from the root and reads the
+     * root .env: the nested file's keys go under the root's, the root's values winning.
      */
     private function withNestedComposeEnv(string $projectDir, ?string $composePath, ?string $chown): void
     {
@@ -587,9 +692,8 @@ class ProjectEnvironment
     }
 
     /**
-     * Attach `.env.panelalpha` to the run file's services that load `.env`,
-     * or detach it from all of them. Rewrites the run file only when that
-     * changes it.
+     * Attach `.env.panelalpha` to the run file's services that load `.env`, or detach it from all of them. Rewrites
+     * the run file only when that changes it.
      *
      * @return list<string> the services it is attached to
      */
@@ -608,12 +712,7 @@ class ProjectEnvironment
             return [];
         }
 
-        if ($attach) {
-            [$updated, $services] = ComposeEnvFiles::attach($compose, EngineArtifacts::ENV_OVERRIDES);
-        } else {
-            [$updated] = ComposeEnvFiles::detach($compose, EngineArtifacts::ENV_OVERRIDES);
-            $services = [];
-        }
+        [$updated, $services] = self::withEnvOverridesAttached($compose, $attach);
 
         if ($updated !== $compose) {
             $fs->writeFileReplacingPath(
@@ -628,9 +727,24 @@ class ProjectEnvironment
     }
 
     /**
-     * Comment out the template keys the compose file defaults with `${VAR:-default}`: through
-     * `env_file:` even a template's value beats that default. Read from the project's own compose
-     * file, or the run file once a redeploy has produced one; the run file may not exist yet.
+     * @param  array<string, mixed>  $compose
+     * @return array{0: array<string, mixed>, 1: list<string>} the run file, the services it is attached to
+     */
+    private static function withEnvOverridesAttached(array $compose, bool $attach): array
+    {
+        if ($attach) {
+            [$updated, $services] = ComposeEnvFiles::attach($compose, EngineArtifacts::ENV_OVERRIDES);
+        } else {
+            [$updated] = ComposeEnvFiles::detach($compose, EngineArtifacts::ENV_OVERRIDES);
+            $services = [];
+        }
+
+        return [$updated, $services];
+    }
+
+    /**
+     * Comment out the template keys the compose file defaults with `${VAR:-default}`: through `env_file:` even a
+     * template's value beats that default. Read from the project's compose file, or the run file once one exists.
      */
     private function withoutComposeDefaultedKeys(string $contents): string
     {
@@ -692,9 +806,8 @@ class ProjectEnvironment
     }
 
     /**
-     * A template's APP_KEY, whatever it says, replaced: a key published in a repository is
-     * everybody's, and an injected blank beats the image's. Seeded so it is stable across
-     * redeploys; a null seed gives a random key.
+     * A template's APP_KEY, whatever it says, replaced: a key published in a repository is everybody's, and an
+     * injected blank beats the image's. Seeded so it is stable across redeploys; a null seed gives a random key.
      */
     private static function withGeneratedSecrets(string $contents, ?string $seed = null): string
     {
@@ -729,9 +842,8 @@ class ProjectEnvironment
     }
 
     /**
-     * Signing keys a `.env.example` sets to a well-known placeholder (Saleor's
-     * SECRET_KEY=changeme), with the same seed and rule as the compose path.
-     * APP_KEY is left to withGeneratedSecrets; keys the account set are left to its env_vars.
+     * Signing keys a `.env.example` sets to a well-known placeholder (SECRET_KEY=changeme), with the compose path's
+     * seed and rule. APP_KEY is left to withGeneratedSecrets; keys the account set are left to its env_vars.
      *
      * @param  array<string, string>  $overrides
      * @return array{0: string, 1: list<string>} contents, the keys replaced
@@ -879,7 +991,7 @@ class ProjectEnvironment
         $system = $this->dind->system();
         $fs = $system->filesystem();
         if (is_dir($copy['dest'])) {
-            $system->exec(['sudo', 'rm', '-rf', $copy['dest']]);
+            $system->exec(Privileged::files()->removeTree($copy['dest']));
         }
         $contents = $copy['example'] === ''
             ? ''
@@ -896,6 +1008,15 @@ class ProjectEnvironment
             );
         }
         $fs->writeFileReplacingPath($copy['dest'], $contents, $chown, $this->envMode($copy['dest'], self::NEW_NESTED_COPY));
+        self::logNestedCopy($copy, $replaced, $logger);
+    }
+
+    /**
+     * @param  array{example: string, dest: string, relative: string}  $copy
+     * @param  list<string>  $replaced
+     */
+    private static function logNestedCopy(array $copy, array $replaced, ?DeployLogger $logger): void
+    {
         $logger?->info(
             $copy['example'] === ''
                 ? 'Created empty '.$copy['relative'].' (required by compose env_file)'
@@ -946,7 +1067,15 @@ class ProjectEnvironment
      */
     private static function mergedOverrideKeys(User $user): array
     {
-        $keys = $user->getDetails()[self::MERGED_OVERRIDES] ?? [];
+        return self::keysIn($user, self::MERGED_OVERRIDES);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function keysIn(User $user, string $detail): array
+    {
+        $keys = $user->getDetails()[$detail] ?? [];
 
         return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
     }

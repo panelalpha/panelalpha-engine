@@ -86,7 +86,7 @@ class ValidationProblemsTest extends TestCase
             ->assertStatus(422)
             ->json('problems.0');
 
-        $this->assertSame(['field' => 'username', 'code' => 'username_regex', 'message' => 'The username format is invalid.'], $problem);
+        $this->assertSame(['field' => 'username', 'code' => 'username_regex', 'message' => 'The username format is invalid.', 'hints' => []], $problem);
     }
 
     public function test_mcp_reports_fields_under_the_tool_argument_names(): void

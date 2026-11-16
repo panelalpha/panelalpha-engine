@@ -15,9 +15,7 @@
  *   BLOB PULLS / MB  layer data actually transferred. This is the real usage
  *                   number: a tag with reads but ~0 MB did nothing.
  *
- * Note: Railpack builds no longer read or write these tags — RailpackStrategy
- * issues no --cache-from/--cache-to (see AGENTS.md §6a). Any railpack-* rows
- * here are from an older build.
+ * Railpack builds read only the plan-cache tag and never write one.
  *
  * Usage:
  *   php cache-usage.php --mark                 # print the current log offset

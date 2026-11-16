@@ -2,7 +2,7 @@
 
 When a deploy fails, the engine tries to turn the wall of build output into one plain sentence. This page lists those sentences and what to do about each.
 
-Start with your assistant. It reads the same log, matches the same causes, and can usually apply the fix:
+Start with your assistant. It reads the same log, matches the same causes and can usually apply the fix:
 
 ```text
 That deploy failed. Read the deploy log and tell me what went wrong, then fix
@@ -11,6 +11,10 @@ what you can.
 
 If PanelAlpha already knows the fix for this failure, the deploy log ends with `Known problem:`, why it happened and how to fix it. Your assistant sees it too. See [What it gives you](what-is-collected.md#what-it-gives-you).
 
+## Codes and hints
+
+Every failure, warning and refusal also carries a short, stable **code**, such as `host_disk_low`, and a list of **hints**: what to do next. Your assistant reads both and can act on them. On the server, `pae project:deploy:log <project>` and `pae project:create` print each sentence followed by the commands that act on it. The sentence can change between releases. The code does not, so quote the code when you ask for help.
+
 Come back here when you want to look up the sentence yourself. If none of the rows below match, the log usually says `A build step failed (exit code N)`. That means the engine did not recognise the cause, not that there is no cause. The command that failed is in the log just above it. This page is the common wording, not every sentence the engine can produce.
 
 ## Wrong version of something
@@ -18,7 +22,7 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 | The message | What it means | What to do |
 |---|---|---|
 | This project needs PHP x, but it was built with PHP y | Your `composer.json` asks for a PHP version the engine did not pick. | Check what version your project really needs and make `composer.json` say so clearly. |
-| This project needs Node … | Your `engines.node` does not match the Node version used. | Same idea - set `engines.node` or add a `.nvmrc`. |
+| This project needs Node … | Your `engines.node` does not match the Node version used. | Same idea: set `engines.node` or add a `.nvmrc`. |
 | This project needs Go x, but it was built with Go y | Your `go.mod` asks for a different Go version. | Align `go.mod` with a version the engine offers. |
 | This project needs the PHP extension … | Your application needs a PHP extension the engine did not install. | Ask your assistant. If the extension is a common one, this is worth reporting as a bug. |
 | This project has to be compiled for Java … | The project asks for a newer Java than the image the engine builds with. | Lower the Java release in the project, or report it if that release is the one you have to use. |
@@ -29,7 +33,7 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 |---|---|---|
 | This project's Composer dependencies cannot all be installed together | Two packages need incompatible versions of a third. | Resolve it in your repository. It would fail on your own machine too. |
 | The project's dependencies conflict with each other | The same thing for npm or yarn. | Fix the versions in `package.json`, then commit the updated lockfile. |
-| A required package was missing when the app started | The install did not finish, but the start was attempted anyway. | Read the install section of the log - the real error is further up. |
+| A required package was missing when the app started | The install did not finish, but the start was attempted anyway. | Read the install section of the log. The real error is further up. |
 | Bun lockfile / frozen lockfile | Your `bun.lock` no longer matches `package.json`. | Run bun locally, commit the updated lockfile. |
 
 ## Out of resources
@@ -46,12 +50,32 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 | A base image this project asks for could not be downloaded | Your `Dockerfile` names an image that does not exist or is private. | Check the image name and tag in your `Dockerfile`. |
 | The image name "*name*" is not valid: Docker image names must be lowercase | The compose file or `Dockerfile` spells an image with capitals, such as `Owner/app:1`. Docker reads `Owner` as the address of a registry and fails to find it. | Use the lowercase name the message gives. |
 
+## The server, not the project
+
+The deploy is refused before it starts, with a message that begins like this:
+
+```text
+The sysbox runtime is not running on the engine host
+```
+
+The runtime the engine starts projects with is stopped, so no project can start or build. A project that lost its connection to it says the same, with "function not implemented" in its log. Restart the runtime as `root` on the VPS, then deploy again:
+
+```bash
+systemctl restart sysbox
+```
+
+In the second case, recreate the project's container instead:
+
+```bash
+pae project:dind:recover --project=<name> --recreate
+```
+
 ## The repository
 
 | The message | What it means | What to do |
 |---|---|---|
 | The repository could not be read | The engine could not access the repository. | Check the URL. If it is private, supply an access token. |
-| The repository was not found | Wrong address, or private with no access. | Paste the URL into a browser in a private window - if you cannot see it, neither can the engine. |
+| The repository was not found | Wrong address, or private with no access. | Paste the URL into a browser in a private window. If you cannot see it, neither can the engine. |
 | The repository's submodules could not be fetched | A submodule is private, no longer exists at the commit the repository records, or sits on a host the git token does not cover. The reason from git follows the sentence. | Give the engine a token that can read the submodule; a private submodule addressed over SSH on another host needs a deploy key. If the application does not need it, name the ones it does under `git: {submodules: [...]}` in `.panelalpha/panelalpha.yaml`: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
 | The repository is refused with `host_refused` | The address leads to the engine's own machine or a private network, which the engine does not fetch from, or the host name does not resolve, so the engine cannot check it. | The server operator can allow a private git server: [Connecting with Git](../05-capabilities/connecting-with-git.md#troubleshooting). |
 
@@ -79,12 +103,14 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 
 | The message | What to do |
 |---|---|
-| A build step failed (exit code N) | The engine did not recognise this one. Read the log around that point - the failing command is right there. Then ask your assistant. |
+| A build step failed (exit code N) | The engine did not recognise this one. Read the log around that point. The failing command is right there. Then ask your assistant. |
 | Failed to start app: … | The rest of the sentence is one of the causes above. |
 
 ## The site is up but the page is wrong
 
-If your deploy **succeeded** and the page is still wrong - a placeholder, a directory listing, someone else's welcome page, a PHP error - that is not a build failure and it will never appear here. The build worked.
+If your deploy **succeeded** and the page is still wrong (a placeholder, a directory listing, someone else's welcome page, a PHP error), that is not a build failure and it will never appear here. The build worked.
+
+The "Project not configured" page is the engine's own placeholder for a repository it could not recognise. It answers 404 on every address, so the project counts as not healthy and the deploy does not report plain success. An app's own error page served with a 200 counts as not serving, too. A project of the general build (Railpack) shows the placeholder after a rebuild that did not ask for Railpack again: [How detection works](../07-supported-projects/how-detection-works.md).
 
 The engine has a separate check for exactly that, and it can usually name what is being served instead: [What the engine checks](../05-capabilities/monitoring-and-logs.md#what-the-engine-checks).
 

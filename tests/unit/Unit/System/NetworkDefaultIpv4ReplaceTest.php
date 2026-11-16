@@ -4,11 +4,10 @@ namespace Tests\Unit\System;
 
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
-use App\System;
 use App\System\Network;
-use Illuminate\Support\Facades\Http;
-use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\NatHost;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -70,25 +69,10 @@ class NetworkDefaultIpv4ReplaceTest extends TestCase
     /** @return array{maps: array<Ipv4NatMap>, default_ipv4_replaced: bool, default_ipv4_previous: ?string, default_ipv4_current: ?string} */
     private function rebuildWithPublicIp(string $publicIp): array
     {
-        Http::fake(['lookup.test/*' => Http::response($publicIp . "\n")]);
+        $host = (new NatHost)
+            ->withInterface('eth0', TestNetwork::private(5))
+            ->answering(TestNetwork::private(5), FakeProcess::ok($publicIp . "\n"));
 
-        return (new Network($this->hostWithLocalIp()))->rebuildIpv4NatMaps('https://lookup.test/ip', true);
-    }
-
-    private function hostWithLocalIp(): System
-    {
-        $process = $this->createStub(Process::class);
-        $process->method('getOutput')->willReturn("2: eth0:\n    inet " . TestNetwork::private(5) . "/24 scope global eth0\n");
-
-        return new class ($process) extends System {
-            public function __construct(private Process $process)
-            {
-            }
-
-            public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
-            {
-                return $this->process;
-            }
-        };
+        return (new Network($host))->rebuildIpv4NatMaps('https://lookup.test/ip', true);
     }
 }

@@ -54,6 +54,9 @@ test.describe('git API', () => {
     await test.step('disconnect is refused', async () => {
       await expectStatus(await api.gitDisconnectRaw(user.username), 422);
     });
+    await test.step('push is refused', async () => {
+      await expectStatus(await api.gitPushRaw(user.username), 422);
+    });
   });
 
   test('an empty DinD project can connect, pull and disconnect', async ({ api, userFactory }) => {

@@ -12,7 +12,7 @@ class ScheduleCommand extends Command
 {
     protected $signature = 'project:backup:schedule
         {project : Project username}
-        {--container= : Backup container id or name}
+        {--container= : Backup container id or name (default: the current schedule store, else the default store)}
         {--cron= : Five-field cron expression in UTC}
         {--keep= : Completed scheduled backups to keep (1-365)}
         {--disable : Turn the schedule off}';
@@ -106,15 +106,12 @@ class ScheduleCommand extends Command
         if ($idOrName === null && $schedule !== null) {
             $idOrName = (string) $schedule->container_id;
         }
-        if ($idOrName === null) {
-            $this->error('The --container option is required for a new schedule.');
 
-            return null;
-        }
-
-        $container = BackupContainer::findByIdOrName($idOrName);
+        $container = BackupContainer::namedOrDefault($idOrName);
         if ($container === null) {
-            $this->error("Backup container '{$idOrName}' not found.");
+            $this->error($idOrName === null
+                ? 'This server has no default backup container; name one with --container.'
+                : "Backup container '{$idOrName}' not found.");
         }
 
         return $container;

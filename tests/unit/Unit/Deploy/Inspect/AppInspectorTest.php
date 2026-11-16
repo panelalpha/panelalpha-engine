@@ -190,6 +190,21 @@ class AppInspectorTest extends TestCase
     }
 
     /**
+     * A manifest with no `strategy` takes its id, which is a finding when the deploy cannot dispatch it.
+     */
+    public function test_a_manifest_strategy_the_deploy_cannot_dispatch_is_not_deployable(): void
+    {
+        $this->writeFile('package.json', json_encode(['scripts' => ['start' => 'node server.js']]));
+        $this->writeFile('.panelalpha/panelalpha.yaml', "id: acme-typo\nlabel: Typo\nruntime: node\nport: 3000\n");
+
+        $app = AppInspector::inspect($this->tmpDir)['application'];
+
+        $this->assertFalse($app['deployable']);
+        $this->assertSame(AppInspector::MANIFEST_INVALID, $app['issue']['code']);
+        $this->assertStringContainsString("strategy 'acme-typo' is not one this engine deploys", $app['issue']['message']);
+    }
+
+    /**
      * The YAML app config is the format the engine reads first, so an inspection
      * that only knew the markdown page would report "no app config" for a project
      * that has one — and then predict a deploy that is not going to happen.

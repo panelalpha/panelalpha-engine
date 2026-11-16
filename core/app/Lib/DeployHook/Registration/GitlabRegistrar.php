@@ -3,20 +3,17 @@
 namespace App\Lib\DeployHook\Registration;
 
 use App\Lib\DeployHook\GitlabProvider;
-use App\Lib\DeployHook\ProviderRegistrationRefused;
 use Illuminate\Http\Client\Response;
 
 /**
- * GitLab project webhooks, on gitlab.com and self-managed instances. `POST
- * /projects/:id/hooks` with `push_events`. The secret is the hook's
- * `signing_token`, so GitLab 19.0 and later sign every delivery; `token` is
- * derived from it ({@see GitlabProvider::tokenFor()}) for older GitLab, which
- * ignores the signing token, and so that no header ever carries the key. A
- * secret that cannot sign ({@see GitlabProvider::canSignWith()}) is sent as
- * the `token` alone: GitLab would sign with it, and the engine could not check that.
+ * GitLab hooks: `signing_token` is the secret; `token` ({@see GitlabProvider::tokenFor()}) is for GitLab before 19.0, which
+ * ignores it, and keeps the key out of headers. A secret that cannot sign goes as `token` alone: its signature is uncheckable.
  */
 final class GitlabRegistrar extends ApiRegistrar
 {
+    use CreatedHookId;
+    use RepositoryUrlParts;
+
     private const API = 'https://gitlab.com/api/v4';
 
     public function name(): string
@@ -31,12 +28,8 @@ final class GitlabRegistrar extends ApiRegistrar
 
     public function address(string $repoUrl): ?WebhookTarget
     {
-        $parts = parse_url(trim($repoUrl));
-        if (! is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https') {
-            return null;
-        }
-        $host = strtolower((string) ($parts['host'] ?? ''));
-        if ($host === '' || isset($parts['user']) || isset($parts['query']) || isset($parts['fragment'])) {
+        $parts = self::plainHttpsParts($repoUrl);
+        if ($parts === null) {
             return null;
         }
         $path = trim((string) preg_replace('/\.git$/', '', (string) ($parts['path'] ?? '')), '/');
@@ -44,6 +37,7 @@ final class GitlabRegistrar extends ApiRegistrar
             return null;
         }
 
+        $host = self::lowerHost($parts);
         if ($host === 'gitlab.com') {
             return new WebhookTarget(self::API, $path);
         }
@@ -52,9 +46,8 @@ final class GitlabRegistrar extends ApiRegistrar
     }
 
     /**
-     * A self-managed GitLab may be served under a path (`https://host/gitlab`), which the
-     * repository URL alone cannot tell from a group. From the root down, the first prefix
-     * where GitLab's API answers is the instance; when none does, the root, as before.
+     * A self-managed GitLab may be served under a path (`https://host/gitlab`) the URL cannot tell from a
+     * group: the first prefix from the root where GitLab's API answers is the instance, else the root.
      *
      * @param  list<string>  $segments
      */
@@ -130,11 +123,6 @@ final class GitlabRegistrar extends ApiRegistrar
 
     protected function hookId(array $body): string
     {
-        $id = $body['id'] ?? null;
-        if (! is_int($id) && ! is_string($id)) {
-            throw ProviderRegistrationRefused::unreachable($this->name(), 'the created webhook had no id');
-        }
-
-        return (string) $id;
+        return $this->createdHookId($body);
     }
 }

@@ -56,6 +56,7 @@ class FileThumbnailHttpTest extends TestCase
         $this->writeBytes($home . '/misnamed.gif', 'png');
         $this->writeBytes($home . '/photo.png', 'png');
         file_put_contents($home . '/huge.png', self::hugePng());
+        file_put_contents($home . '/huge-first-frame.gif', self::hugeFirstFrameGif());
         $this->writeSparse($home . '/oversize.jpg', FileThumbnail::MAX_SOURCE_BYTES + 1);
         file_put_contents($this->tmpRoot . '/secret', 'outside the home');
         symlink($this->tmpRoot . '/secret', $home . '/escapes.jpg');
@@ -91,8 +92,8 @@ class FileThumbnailHttpTest extends TestCase
             }
         });
         $this->withoutMiddleware(Authenticate::class);
-        if (in_array('sudophp', stream_get_wrappers(), true)) {
-            stream_wrapper_unregister('sudophp');
+        if (in_array('rootfile', stream_get_wrappers(), true)) {
+            stream_wrapper_unregister('rootfile');
         }
         FileStreamWrapper::register();
     }
@@ -104,7 +105,7 @@ class FileThumbnailHttpTest extends TestCase
 
             return;
         }
-        FileStreamWrapper::confineTo(null, ['sudo']);
+        FileStreamWrapper::unconfine();
         foreach ($this->savedEnv as $key => $value) {
             if ($value === false) {
                 putenv($key);
@@ -241,6 +242,15 @@ class FileThumbnailHttpTest extends TestCase
         $response->assertJsonPath('problems.0.code', 'image_too_large');
     }
 
+    /** The frame that is checked is the frame that is decoded, whichever frame of an animation is small. */
+    public function test_a_gif_whose_first_frame_is_huge_is_refused_before_it_is_decoded(): void
+    {
+        $response = $this->getJson($this->url(['path' => 'huge-first-frame.gif']));
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('problems.0.code', 'image_too_large');
+    }
+
     public function test_a_source_over_the_size_limit_is_refused(): void
     {
         $response = $this->getJson($this->url(['path' => 'oversize.jpg']));
@@ -356,6 +366,15 @@ class FileThumbnailHttpTest extends TestCase
             . self::pngChunk('IHDR', pack('NNCCCCC', 20000, 20000, 8, 2, 0, 0, 0))
             . self::pngChunk('IDAT', (string) gzcompress(str_repeat("\x00", 100)))
             . self::pngChunk('IEND', '');
+    }
+
+    /** A two-frame GIF: a first frame claiming 20000x20000 with no pixels behind it, then a 1x1 one. */
+    private static function hugeFirstFrameGif(): string
+    {
+        return 'GIF89a' . pack('vvCCC', 20000, 20000, 0x80, 0, 0) . "\xFF\x00\x00\x00\x00\xFF"
+            . "\x2C" . pack('vvvvC', 0, 0, 20000, 20000, 0) . "\x02\x01\x2C\x00"
+            . "\x2C" . pack('vvvvC', 0, 0, 1, 1, 0) . "\x02\x02\x44\x01\x00"
+            . "\x3B";
     }
 
     private static function pngChunk(string $type, string $data): string

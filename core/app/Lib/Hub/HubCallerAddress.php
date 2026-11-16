@@ -11,9 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Keeps the addresses PanelAlpha Connect calls from out of the engine-api jail while connected, or a
- * replaced token's 401s ban them. Learnt from its calls: the Hub's name resolves to a CDN, and Connect
- * calls from more than one address.
+ * Keeps the addresses PanelAlpha Connect calls from out of the engine-api jail while connected, or a replaced
+ * token's 401s ban them. The Hub's name resolves to a CDN, and Connect calls from several addresses.
  */
 final class HubCallerAddress
 {

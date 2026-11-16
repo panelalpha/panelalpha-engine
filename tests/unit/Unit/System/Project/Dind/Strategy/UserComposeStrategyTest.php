@@ -16,6 +16,7 @@ use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
@@ -27,17 +28,17 @@ use Tests\Unit\System\Project\SuccessfulProcess;
  *
  * Driven through the real {@see UserComposeStrategy}, over a stubbed
  * {@see System} that answers a fixed file map and captures every
- * write the same way the staged-temp-file-then-`sudo cp`-then-rename
+ * write the same way the staged-temp-file-then-`files.copy`-then-rename
  * ({@see StagedRename}) write actually happens (mirroring {@see \Tests\Unit\Deploy\Dind\HostCompilePhpPlatformPinTest}).
  */
 class UserComposeStrategyTest extends TestCase
 {
     private const PROJECT_DIR = '/home/acme/project';
 
-    /** @var array<string, string> target path => contents, from every `sudo cp` the write issued */
+    /** @var array<string, string> target path => contents, from every `files.copy` the write issued */
     private array $copiedTo = [];
 
-    /** @var array<string, string> target path => mode, from every `sudo chmod` */
+    /** @var array<string, string> target path => mode, from every `files.changeMode` */
     private array $modes = [];
 
     protected function setUp(): void
@@ -89,12 +90,11 @@ class UserComposeStrategyTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.copy' && is_file(LocalRoot::values($cmd)[0])) {
+                    $this->copiedTo[LocalRoot::values($cmd)[1]] = (string) file_get_contents(LocalRoot::values($cmd)[0]);
                 }
-                if (preg_match('/^sudo chmod (\S+) (\S+)$/', $line, $m) === 1) {
-                    $this->modes[$m[2]] = $m[1];
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.changeMode') {
+                    $this->modes[LocalRoot::values($cmd)[1]] = LocalRoot::values($cmd)[0];
                 }
                 if (($moved = StagedRename::of($cmd)) !== null) {
                     $this->renamed(...$moved);
@@ -213,6 +213,40 @@ class UserComposeStrategyTest extends TestCase
             $hardened['services']['app']['restart'],
             'hardening must apply a restart policy the client compose file did not declare'
         );
+    }
+
+    /**
+     * A repository's compose file names `.env` nowhere, so without this the env_vars reach only interpolation.
+     */
+    public function test_the_service_that_publishes_the_app_port_loads_the_projects_env_file(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n"
+                . "  wordpress:\n    image: wordpress:latest\n    ports:\n      - \"8080:80\"\n"
+                . "  db:\n    image: mysql:8.0\n    expose:\n      - \"3306\"\n",
+        ]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['.env'], $run['services']['wordpress']['env_file']);
+        $this->assertArrayNotHasKey('env_file', $run['services']['db']);
+    }
+
+    /** A service that already loads `.env` keeps its list, and `.env` is not named twice. */
+    public function test_an_app_service_that_already_loads_env_is_left_with_one_entry(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n    ports:\n      - \"8080:80\"\n"
+                . "    env_file:\n      - ./.env\n",
+        ]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['./.env'], $run['services']['app']['env_file']);
     }
 
     /** deemix: `${DEEMIX_CONFIG_PATH}:/config` with nothing setting it, and compose rejected `:/config`. */
@@ -434,9 +468,8 @@ class UserComposeStrategyTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.copy' && is_file(LocalRoot::values($cmd)[0])) {
+                    $this->copiedTo[LocalRoot::values($cmd)[1]] = (string) file_get_contents(LocalRoot::values($cmd)[0]);
                 }
                 $this->renameStaged($cmd);
 

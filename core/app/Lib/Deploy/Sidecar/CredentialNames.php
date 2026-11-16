@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\Sidecar;
 use App\Lib\Deploy\Port\EnvVarDefault;
 
 /**
- * Reading a datastore's variables by the shape of their names.
- *
- * `POSTGRES_USER`, `MYSQL_USER`, `INFLUXDB_USER` and `CLICKHOUSE_USER` are one
- * pattern — a prefix naming the engine, a suffix naming the role — which is
- * what lets an engine nobody catalogued still hand over its username,
- * password and database name.
+ * Reading a datastore's variables by the shape of their names (`<ENGINE>_USER`, `<ENGINE>_PASSWORD`),
+ * so an engine nobody catalogued still hands over its credentials.
  */
 final class CredentialNames
 {
@@ -26,16 +22,14 @@ final class CredentialNames
     ];
 
     /**
-     * Names that mark a service as a *client* of an engine rather than the
-     * engine itself. A server has no need to be told its own address.
+     * Names that mark a service as a *client* of an engine: a server is not told its own address.
      *
      * @var list<string>
      */
     private const CLIENT_MARKERS = ['_HOST', '_HOSTNAME', '_URL', '_URI', '_DSN', '_ADDR', '_ENDPOINT'];
 
     /**
-     * Client settings named outside the prefix: libpq's own PGHOST beside
-     * POSTGRES_USER is an app configuring its client (AdventureLog).
+     * Client settings named outside the prefix: libpq's own PGHOST beside POSTGRES_USER is a client.
      *
      * @var array<string, list<string>>
      */
@@ -45,9 +39,7 @@ final class CredentialNames
     ];
 
     /**
-     * Suffixes naming the *administrative* account rather than the
-     * application's. A service declaring both is describing two accounts, and
-     * mixing them gives an app a username it has with a password it has not.
+     * Suffixes naming the *administrative* account rather than the application's, which must not be mixed.
      *
      * @var list<string>
      */
@@ -86,22 +78,8 @@ final class CredentialNames
     }
 
     /**
-     * Take the username and the password from the *same* account.
-     *
-     * Each role was resolved independently, first match in the environment's
-     * own order, and MySQL is the case where that goes wrong: a service
-     * declaring `MYSQL_ROOT_PASSWORD`, `MYSQL_USER` and `MYSQL_PASSWORD`
-     * yields whichever password Docker happened to list first. Kanboard's
-     * upstream compose lists the root one first, so the engine built
-     * `mysql://kanboard:secret@db/kanboard` -- the application's username
-     * with the administrator's password -- and the site served
-     * `SQLSTATE[HY000] [1045] Access denied for user 'kanboard'`, on a deploy
-     * reported as a success.
-     *
-     * The application's own account wins when the service declares one, which
-     * is both what upstream intended and the lesser privilege. A service
-     * declaring only root credentials -- Mongo's `_INITDB_ROOT_*` -- is
-     * unaffected, and so is one declaring only an application account.
+     * Take the username and password from the *same* account, the application's when declared. The password
+     * decides; a lone username of the other tier is still paired rather than dropped.
      *
      * @param  array{prefix: ?string, username: ?string, password: ?string, database: ?string}  $found
      * @param  array{username: array<string, string>, password: array<string, string>}  $tiered
@@ -109,16 +87,12 @@ final class CredentialNames
      */
     private static function pairedAccount(array $found, array $tiered): array
     {
-        // The password decides, because it is the half that fails loudly.
         $tier = isset($tiered['password']['app']) ? 'app' : 'root';
         if (! isset($tiered['password'][$tier])) {
             return $found;
         }
 
         $found['password'] = $tiered['password'][$tier];
-        // Its own tier's username, or the other one when the service names
-        // only one -- a lone `MYSQL_USER` beside `MYSQL_ROOT_PASSWORD` is
-        // still that user, and dropping it would be worse than pairing it.
         $found['username'] = $tiered['username'][$tier]
             ?? $tiered['username'][$tier === 'app' ? 'root' : 'app']
             ?? $found['username'];
@@ -127,8 +101,7 @@ final class CredentialNames
     }
 
     /**
-     * Prefixes whose variables name at least two roles: one shared name proves
-     * nothing, two is a server declaring how to initialise itself.
+     * Prefixes whose variables name at least two roles: a server declaring how to initialise itself.
      *
      * @param  list<string>  $keys  uppercased environment keys
      * @return list<string>
@@ -148,8 +121,7 @@ final class CredentialNames
     }
 
     /**
-     * Whether the variables sharing a prefix describe a connection *to* an
-     * engine rather than the engine itself.
+     * Whether the variables sharing a prefix describe a connection *to* an engine rather than the engine.
      *
      * @param  list<string>  $keys
      */
@@ -175,10 +147,8 @@ final class CredentialNames
     }
 
     /**
-     * Whether any `*_HOST` names another host by name: the service connects to
-     * a server rather than being one. Zabbix's frontend carries `MYSQL_USER`
-     * and `MYSQL_PASSWORD` beside `DB_SERVER_HOST: mysql`. A wildcard or a
-     * local address (`MYSQL_ROOT_HOST: '%'`) is a server's own setting.
+     * Whether any `*_HOST` names another host by name, so the service is a client; a wildcard
+     * or a local address (`MYSQL_ROOT_HOST: '%'`) is a server's own setting.
      *
      * @param  array<string, string>  $environment  uppercased names
      */

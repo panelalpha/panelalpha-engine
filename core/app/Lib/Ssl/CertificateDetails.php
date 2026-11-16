@@ -3,11 +3,8 @@
 namespace App\Lib\Ssl;
 
 /**
- * Who signed a certificate and what it is made of: the parts of a parsed
- * certificate that {@see CertificateFacts} leaves out because the verdict
- * does not need them, and a person reading the certificate does.
- *
- * No Laravel dependencies — unit-testable.
+ * Who signed a certificate and what it is made of: the parts {@see CertificateFacts} leaves out because the
+ * verdict does not need them and a person reading the certificate does. No Laravel dependencies.
  */
 final class CertificateDetails
 {

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Update a cron job
 
-    PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.
+    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/.panelalpha/cron/cron.log in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too. The hash is derived from the job's entries, so the job this returns carries a new one: address it by `data.hash` from here on, not by the hash the request used.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -51,6 +51,7 @@ class CronJobUpdateTool extends ApiTool
     {
         return [
             'command',
+            'service',
             'minute',
             'hour',
             'day_of_month',
@@ -76,8 +77,9 @@ class CronJobUpdateTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'hash' => $schema->string()->required(),
+            'hash' => $schema->string()->description('The job hash, as the list returned it.')->required(),
             'command' => $schema->string()->required(),
+            'service' => $schema->string()->description('Container projects only, and required there: the Compose service the command runs in.'),
             'minute' => $schema->string()->required(),
             'hour' => $schema->string()->required(),
             'day_of_month' => $schema->string()->required(),

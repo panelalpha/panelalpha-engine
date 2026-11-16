@@ -18,7 +18,7 @@ class RebuildDomains extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return "Rebuilding domains for user '{$user->username}'...";
+        return "Rebuilding domains for project '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void

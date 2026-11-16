@@ -5,16 +5,16 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use RuntimeException;
 
 /**
- * Rejects source URLs the migration worker must not fetch: non-HTTP schemes,
- * and a host with any address {@see SourceIpPolicy} refuses (loopback,
- * link-local, private, reserved, Docker networks, the Engine's own). Every
- * refused address gets the same answer, so a refusal says nothing about what
- * listens there.
+ * Rejects source URLs the migration worker must not fetch: non-HTTP schemes, and hosts with any address
+ * {@see SourceIpPolicy} refuses. Every refusal gets the same answer, so it says nothing about what listens there.
  */
 final class SourceFetchGuard
 {
     public const REFUSED = 'Source WordPress URL must lead to a public address: loopback, link-local, private, '
         ."reserved, Docker network and this Engine's own addresses are refused.";
+
+    /** Redirects followed as a plain GET without the body and the headers; every other one resends the request. */
+    public const REDIRECTS_AS_GET = [301, 302, 303];
 
     /**
      * Check the URL and every address its host resolves to.
@@ -78,11 +78,101 @@ final class SourceFetchGuard
             return $location;
         }
 
+        $base = self::redirectBase($current);
+        $origin = self::origin($base);
+
+        if (str_starts_with($location, '//')) {
+            return $base['scheme'].':'.$location;
+        }
+        if (str_starts_with($location, '/')) {
+            return $origin.$location;
+        }
+
+        return $origin.self::directory($base).$location;
+    }
+
+    /**
+     * No hop leaves https for plain http. A hop that resends the request (a 307 or 308) carries the migrator
+     * token and the wp-admin password, so it stays on the origin or its `www.` twin, or moves them to https.
+     */
+    public static function assertRedirectAllowed(int $status, string $from, string $to): void
+    {
+        $source = self::redirectBase($from);
+        $target = self::redirectBase($to);
+        if (self::scheme($source) === 'https' && self::scheme($target) === 'http') {
+            throw SourceCheckFailed::unreachable('The source WordPress site redirects from https to plain http at '
+                .self::origin($target).'; enter that URL to import over plain http');
+        }
+        if (! in_array($status, self::REDIRECTS_AS_GET, true) && ! self::staysOnSite($source, $target)) {
+            throw SourceCheckFailed::unreachable('The source WordPress site redirects to '
+                .self::origin($target).'; enter that URL as the source URL');
+        }
+    }
+
+    /**
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $from
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $to
+     */
+    private static function staysOnSite(array $from, array $to): bool
+    {
+        if (! SourceIpPin::sameSite($from['host'], $to['host'])) {
+            return false;
+        }
+        if (self::scheme($from) === self::scheme($to)) {
+            return self::port($from) === self::port($to);
+        }
+
+        return self::upgradesToHttps($from, $to);
+    }
+
+    /**
+     * http to https on the same port, or from the default 80 to the default 443.
+     *
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $from
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $to
+     */
+    private static function upgradesToHttps(array $from, array $to): bool
+    {
+        $ports = [self::port($from), self::port($to)];
+
+        return self::scheme($from) === 'http' && self::scheme($to) === 'https'
+            && ($ports[0] === $ports[1] || $ports === [80, 443]);
+    }
+
+    /**
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $base
+     */
+    private static function scheme(array $base): string
+    {
+        return strtolower($base['scheme']);
+    }
+
+    /**
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $base
+     */
+    private static function port(array $base): int
+    {
+        return $base['port'] ?? (self::scheme($base) === 'https' ? 443 : 80);
+    }
+
+    /**
+     * @return array{scheme: string, host: string, port?: int, path?: string}
+     */
+    private static function redirectBase(string $current): array
+    {
         $base = parse_url($current);
         if (! is_array($base) || ! isset($base['scheme'], $base['host']) || ! is_string($base['host'])) {
             throw new RuntimeException('Source WordPress URL is invalid');
         }
 
+        return $base;
+    }
+
+    /**
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $base
+     */
+    private static function origin(array $base): string
+    {
         $host = $base['host'];
         if (str_contains($host, ':')) {
             $host = '['.trim($host, '[]').']';
@@ -92,18 +182,18 @@ final class SourceFetchGuard
             $origin .= ':'.$base['port'];
         }
 
-        if (str_starts_with($location, '//')) {
-            return $base['scheme'].':'.$location;
-        }
-        if (str_starts_with($location, '/')) {
-            return $origin.$location;
-        }
+        return $origin;
+    }
 
+    /**
+     * @param  array{scheme: string, host: string, port?: int, path?: string}  $base
+     */
+    private static function directory(array $base): string
+    {
         $path = isset($base['path']) && is_string($base['path']) ? $base['path'] : '/';
         $slash = strrpos($path, '/');
-        $dir = $slash === false ? '/' : substr($path, 0, $slash + 1);
 
-        return $origin.$dir.$location;
+        return $slash === false ? '/' : substr($path, 0, $slash + 1);
     }
 
     /**
@@ -113,33 +203,55 @@ final class SourceFetchGuard
     {
         $ips = [];
         if (function_exists('dns_get_record')) {
-            $records = @dns_get_record($host, DNS_A + DNS_AAAA);
-            if (is_array($records)) {
-                foreach ($records as $record) {
-                    if (! is_array($record)) {
-                        continue;
-                    }
-                    if (isset($record['ip']) && is_string($record['ip'])) {
-                        $ips[] = $record['ip'];
-                    }
-                    if (isset($record['ipv6']) && is_string($record['ipv6'])) {
-                        $ips[] = $record['ipv6'];
-                    }
-                }
-            }
+            $ips = self::dnsRecordAddresses($host);
         }
         if ($ips === [] && function_exists('gethostbynamel')) {
-            $v4 = @gethostbynamel($host);
-            if (is_array($v4)) {
-                foreach ($v4 as $ip) {
-                    if (is_string($ip)) {
-                        $ips[] = $ip;
-                    }
+            $ips = self::hostByNameAddresses($host);
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function dnsRecordAddresses(string $host): array
+    {
+        $ips = [];
+        $records = @dns_get_record($host, DNS_A + DNS_AAAA);
+        if (is_array($records)) {
+            foreach ($records as $record) {
+                if (! is_array($record)) {
+                    continue;
+                }
+                if (isset($record['ip']) && is_string($record['ip'])) {
+                    $ips[] = $record['ip'];
+                }
+                if (isset($record['ipv6']) && is_string($record['ipv6'])) {
+                    $ips[] = $record['ipv6'];
                 }
             }
         }
 
-        return array_values(array_unique($ips));
+        return $ips;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function hostByNameAddresses(string $host): array
+    {
+        $ips = [];
+        $v4 = @gethostbynamel($host);
+        if (is_array($v4)) {
+            foreach ($v4 as $ip) {
+                if (is_string($ip)) {
+                    $ips[] = $ip;
+                }
+            }
+        }
+
+        return $ips;
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Backup\Container;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
+use App\Lib\Backup\ContainerRemoval;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use Illuminate\Console\Command;
@@ -33,9 +34,17 @@ class DeleteCommand extends Command
             return 1;
         }
 
-        $hasBackups = $container->backups()->exists();
+        $projects = ContainerRemoval::projectsOnSchedule($container);
+        if ($projects !== []) {
+            $this->error(ContainerRemoval::scheduleRefusal($projects));
+
+            return 1;
+        }
+
+        $backups = $container->backups()->count();
+        $hasBackups = $backups > 0;
         if ($hasBackups && ! $this->option('delete-backups')) {
-            $this->error('Cannot delete backup container while backups exist.');
+            $this->error(ContainerRemoval::backupsRefusal($backups, '--delete-backups'));
 
             return 1;
         }
@@ -61,7 +70,7 @@ class DeleteCommand extends Command
             foreach ($backups as $backup) {
                 $user = $backup->user;
                 if ($user === null) {
-                    $this->error("Backup {$backup->id} has no owning user.");
+                    $this->error("Backup {$backup->id} has no owning project.");
 
                     return 1;
                 }
@@ -83,7 +92,7 @@ class DeleteCommand extends Command
             }
         }
 
-        $container->delete();
+        $container->deleteWithEmptyLocation();
         $this->info('Backup container deleted successfully.');
 
         return 0;

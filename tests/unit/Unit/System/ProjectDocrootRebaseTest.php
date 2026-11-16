@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Projects;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class ProjectDocrootRebaseTest extends TestCase
@@ -94,18 +95,19 @@ class ProjectDocrootRebaseTest extends TestCase
         return new class extends System {
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
+                $argv = is_array($cmd) && LocalRoot::isRequest($cmd) ? LocalRoot::plain($cmd) : [];
                 $exit = 0;
 
-                if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'test') {
-                    $exit = match ($argv[2] ?? '') {
-                        '-d' => is_dir($argv[3] ?? '') ? 0 : 1,
-                        '-e' => (file_exists($argv[3] ?? '') || is_link($argv[3] ?? '')) ? 0 : 1,
-                        '-L' => is_link($argv[3] ?? '') ? 0 : 1,
+                if (($argv[0] ?? '') === 'test') {
+                    $exit = match ($argv[1] ?? '') {
+                        '-d' => is_dir($argv[2] ?? '') ? 0 : 1,
+                        '-e' => (file_exists($argv[2] ?? '') || is_link($argv[2] ?? '')) ? 0 : 1,
+                        '-L' => is_link($argv[2] ?? '') ? 0 : 1,
                         default => 1,
                     };
-                } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'mv') {
-                    $exit = @rename($argv[3] ?? '', $argv[4] ?? '') ? 0 : 1;
+                } elseif (($argv[0] ?? '') === 'mv') {
+                    [$from, $to] = array_slice($argv, -2);
+                    $exit = @rename($from, $to) ? 0 : 1;
                 }
 
                 return new class ($exit) extends Process {

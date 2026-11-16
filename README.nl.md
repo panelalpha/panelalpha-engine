@@ -38,7 +38,7 @@ Open source. Self-hosted. Makkelijk voor iedereen, niet alleen voor sysadmins.
 <p>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installatie met één commando"></a>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Ondersteunde systemen"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-287_tools-6f42c1" alt="287 MCP-tools"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-311_tools-6f42c1" alt="311 MCP-tools"></a>
 <a href="#licentie"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Kom op Discord"></a>
 </p>
@@ -69,7 +69,7 @@ Direct na de installatie geeft PanelAlpha Engine jou en je AI alles wat jullie n
 
 ## Hoe het werkt
 
-<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
 
 ## Waarom dit moet bestaan
 
@@ -174,7 +174,7 @@ Geen commando's om te leren, en ook geen toverformules. Dit zijn voorbeelden van
 | `Zet een Cloudflare-tunnel op voor n8n.mydomain.com.` | DNS en tunnel geregeld, en zo serveer je ook vanaf een server achter NAT. |
 | `Hoeveel verkeer kregen we vorige week?` | Verbruik, logs en limieten voor dat project, en voor de hele server. |
 
-Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [287 tools](docs/04-connecting-your-ai/your-assistant.md).
+Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [311 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

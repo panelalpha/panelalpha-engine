@@ -16,10 +16,8 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * A panelalpha.online name that shows an imported site before its own domain
- * points here: named after the domain (`wp.com` → `wp-com`), forwarded with
- * the domain as Host, and never expiring on its own. The DNS check removes it
- * once the domain answers on this engine.
+ * A panelalpha.online name (`wp.com` → `wp-com`) showing an imported site, with the domain as Host, before the domain
+ * points here; it never expires on its own, and the DNS check removes it once the domain answers on this engine.
  */
 final class PreviewTunnel
 {
@@ -93,7 +91,7 @@ final class PreviewTunnel
             try {
                 return ($this->create)($user, $domain, $hostname)->hostname;
             } catch (CloudflareException|PanelAlphaException $e) {
-                if ($attempt >= self::ATTEMPTS || ! DomainAllocator::nameIsTaken($e->getMessage())) {
+                if ($attempt >= self::ATTEMPTS || ! DomainAllocator::nameIsTaken($e)) {
                     throw $e;
                 }
             }

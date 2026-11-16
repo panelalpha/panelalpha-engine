@@ -6,13 +6,9 @@ use App\System as EngineSystem;
 use Symfony\Component\Process\Process;
 
 /**
- * Updating the engine itself: starting `updater.sh`, and reading back what the
- * last run did.
- *
- * The updater runs detached through `at`, so nothing here waits for it. What it
- * leaves behind is a directory of small files -- pid, exit code, the two output
- * streams, the versions -- symlinked to as `latest`, and reading those is the
- * only way to report progress.
+ * Updating the engine: starting `updater.sh` detached through `at`, so nothing here waits for it, and reading back the
+ * small files it leaves under `latest` (pid, exit code, output, versions, result, reason), the only way to report
+ * progress.
  */
 final class EngineUpdate
 {
@@ -30,6 +26,9 @@ final class EngineUpdate
     /** After this a placeholder is a run that never started; a real one replaces it within seconds. */
     public const PENDING_GRACE_SECONDS = 300;
 
+    /** The pid older engines seeded their placeholder with: the host's kthreadd, always alive and never an updater. */
+    private const LEGACY_PLACEHOLDER_PID = '2';
+
     public function __construct(private readonly EngineSystem $system) {}
 
     public function latestDir(): string
@@ -46,6 +45,7 @@ final class EngineUpdate
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,
@@ -67,6 +67,7 @@ final class EngineUpdate
     /**
      * `started_at` is the mtime of `pid` -- the one file a run writes once, at
      * its start; the `latest` symlink's own time moves whenever it is re-pointed.
+     * A run that died without an exit code finished when it last wrote anything.
      *
      * @return array{
      *   started_at: ?int,
@@ -74,6 +75,7 @@ final class EngineUpdate
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,
@@ -88,37 +90,56 @@ final class EngineUpdate
         $pid = $fs->cat("{$dir}/pid");
         $exitCode = self::exitCode($fs->cat("{$dir}/exit_code"));
         $failed = $exitCode === null ? ! $this->isRunning() : $exitCode !== 0;
-        $tailStdout = self::stripAnsi($fs->tail("{$dir}/stdout", self::TAIL_LINES));
-        $tailStderr = self::stripAnsi($fs->tail("{$dir}/stderr", self::TAIL_LINES));
+        $died = $failed && $exitCode === null;
+        $recordedReason = self::field($fs->cat("{$dir}/reason"));
 
         return [
             'started_at' => $fs->mtime("{$dir}/pid"),
-            'finished_at' => $fs->mtime("{$dir}/exit_code"),
+            'finished_at' => $died ? $this->lastWrite($dir) : $fs->mtime("{$dir}/exit_code"),
             'pid' => is_numeric($pid) ? (int) $pid : null,
             'exit_code' => $exitCode,
             'failed' => $failed,
-            'reason' => $failed ? self::failureReason($exitCode, $pid, $tailStdout, $tailStderr) : null,
-            'tail_stdout' => $tailStdout,
-            'tail_stderr' => $tailStderr,
-            'from_version' => $fs->cat("{$dir}/from_version"),
-            'to_version' => $fs->cat("{$dir}/to_version"),
+            'result' => self::field($fs->cat("{$dir}/result")),
+            'reason' => $recordedReason ?? ($failed ? self::failureReason($exitCode, $pid) : null),
+            'tail_stdout' => self::stripAnsi($fs->tail("{$dir}/stdout", self::TAIL_LINES)),
+            'tail_stderr' => self::stripAnsi($fs->tail("{$dir}/stderr", self::TAIL_LINES)),
+            'from_version' => self::field($fs->cat("{$dir}/from_version")),
+            'to_version' => self::field($fs->cat("{$dir}/to_version")),
             'logs_path' => $dir,
         ];
     }
 
-    /**
-     * Why a failed run failed when neither stream says it: a placeholder that
-     * never became a run has nothing, and a dead process leaves only its pid.
-     */
-    private static function failureReason(?int $exitCode, ?string $pid, ?string $stdout, ?string $stderr): ?string
+    /** When a run that left no exit code last wrote anything: its output, else its start. */
+    private function lastWrite(string $dir): ?int
     {
-        if ($exitCode !== null || trim((string) $stdout) !== '' || trim((string) $stderr) !== '') {
-            return null;
+        $fs = $this->system->filesystem();
+
+        return $fs->mtime("{$dir}/stdout")
+            ?? $fs->mtime("{$dir}/pid")
+            ?? $fs->mtime("{$dir}/".self::PENDING_FILE);
+    }
+
+    /**
+     * Why a failed run failed when it recorded no reason itself: a non-zero exit,
+     * a process that died before writing one, or a job that never started.
+     */
+    private static function failureReason(?int $exitCode, ?string $pid): string
+    {
+        if ($exitCode !== null) {
+            return "the update exited with code {$exitCode}";
         }
 
         return is_numeric(trim((string) $pid))
             ? 'the update process ended without writing an exit code'
             : 'the update job never started';
+    }
+
+    /** A one-line file the run wrote; empty or missing is not known. */
+    private static function field(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
     }
 
     /** A run is over once it has an exit code; a code that is not a number is not one. */
@@ -128,9 +149,8 @@ final class EngineUpdate
     }
 
     /**
-     * Leave a `latest` directory behind so {@see isRunning()} has something to
-     * read before the script itself writes one, then start the updater in the
-     * background.
+     * Leave a `latest` directory behind so {@see isRunning()} has something to read before the script itself
+     * writes one, then start the updater in the background.
      */
     public function run(?string $licenseKey = null): void
     {
@@ -142,7 +162,7 @@ final class EngineUpdate
     private function enqueueUpdater(?string $licenseKey): void
     {
         $process = $this->system->runProcess(
-            self::onHost('echo '.escapeshellarg($this->updaterJob($licenseKey)).' | at now')
+            Privileged::host()->enqueueEngineUpdate($this->system->engineDirPath(), $licenseKey)
         );
 
         if ($process->getExitCode() !== 0) {
@@ -155,39 +175,18 @@ final class EngineUpdate
         }
     }
 
-    /**
-     * The updater's output, and its exit code when it fails, go to the placeholder: until the
-     * installer writes its own run, nothing else records why an update never started.
-     */
-    private function updaterJob(?string $licenseKey): string
-    {
-        $updater = 'bash '.escapeshellarg($this->system->engineDirPath().'/updater.sh').' -f --background';
-        if (! empty($licenseKey)) {
-            $updater .= ' '.escapeshellarg($licenseKey);
-        }
-        $tmp = self::LOGS_DIR.'/tmp';
-
-        return "{$updater} > {$tmp}/stdout 2> {$tmp}/stderr || echo \$? > {$tmp}/exit_code";
-    }
-
     /** Point `latest` at an empty `tmp` run holding only the enqueue time, until the updater writes its own. */
     private function seedPendingPlaceholder(): void
     {
-        $logs = self::LOGS_DIR;
-        $this->system->runProcess(self::onHost(
-            "mkdir -p {$logs}/tmp && date +%s > {$logs}/tmp/".self::PENDING_FILE
-            ." && rm -f {$logs}/tmp/pid {$logs}/tmp/exit_code {$logs}/tmp/stdout {$logs}/tmp/stderr"
-            ." && ln -sfn {$logs}/tmp {$logs}/latest"
-        ));
+        $this->system->runProcess(Privileged::host()->seedEngineUpdatePlaceholder());
     }
 
     /** A job `at` refused never runs, so the placeholder records the refusal as a failed run. */
     private function failPlaceholder(Process $process): void
     {
-        $tmp = self::LOGS_DIR.'/tmp';
-        $this->system->runProcess(self::onHost(
-            'printf %s '.escapeshellarg($process->getErrorOutput() ?: $process->getOutput())." > {$tmp}/stderr"
-            .' && echo '.(int) $process->getExitCode()." > {$tmp}/exit_code"
+        $this->system->runProcess(Privileged::host()->recordEngineUpdateRefusal(
+            $process->getErrorOutput() ?: $process->getOutput(),
+            (int) $process->getExitCode(),
         ));
     }
 
@@ -210,11 +209,11 @@ final class EngineUpdate
         }
 
         $pid = trim((string) $fs->cat("{$dir}/pid"));
-        if (! ctype_digit($pid)) {
+        if (! ctype_digit($pid) || (int) $pid < 1 || $pid === self::LEGACY_PLACEHOLDER_PID) {
             return false;
         }
 
-        return $this->system->runProcess(self::onHost(['kill', '-0', $pid]))->getExitCode() === 0;
+        return $this->system->runProcess(Privileged::host()->processExists((int) $pid))->getExitCode() === 0;
     }
 
     /** Seconds since the placeholder was seeded; an unreadable timestamp must not block an update. */
@@ -225,22 +224,6 @@ final class EngineUpdate
         }
 
         return max(0, time() - (int) $started);
-    }
-
-    /**
-     * The updater lives outside this container, so every command enters the
-     * host's namespaces first.
-     *
-     * @param  string|list<string>  $command
-     * @return list<string>
-     */
-    private static function onHost(string|array $command): array
-    {
-        $argv = ['sudo', 'nsenter', '--target', '1', '--all'];
-
-        return is_array($command)
-            ? [...$argv, ...$command]
-            : [...$argv, 'bash', '-c', $command];
     }
 
     /** Terminal colour codes are noise in a JSON field. */

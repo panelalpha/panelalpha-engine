@@ -4,20 +4,15 @@ namespace App\Lib\Host;
 
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * CPU and memory of every project, at two levels: the project's DinD
- * container as a whole (its daemon included), and each container running
- * inside it. Read from the host's cgroup files in one shell run -- no
- * `docker stats`, nothing executed inside an account.
- *
- * The inner containers' cgroups nest under the DinD container's, and their
- * names live in the inner daemon's data root, /home/<project>/docker. The
- * samples are read back here too, for the API's latest values and histories.
+ * CPU and memory of every project's DinD container and of each container inside it, read from the host's
+ * cgroup files in one shell run (nothing executed inside an account), and read back for the API.
  */
 class ProjectStats
 {
@@ -27,17 +22,13 @@ class ProjectStats
     /** A host run is cut off well before the next minute's sample starts. */
     public const HOST_TIMEOUT_SECONDS = 45;
 
-    /** @var callable(string): string */
+    /** @var callable(list<string>): string */
     private $runOnHost;
 
-    /** @param (callable(string): string)|null $runOnHost runs a bash script on the host, returns stdout */
+    /** @param (callable(list<string>): string)|null $runOnHost runs a host argv, returns stdout */
     public function __construct(?callable $runOnHost = null)
     {
-        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System)->execOnHost(
-            ['timeout', '-k', '5', (string) self::HOST_TIMEOUT_SECONDS, 'bash', '-c', $script],
-            [],
-            self::HOST_TIMEOUT_SECONDS + 15
-        );
+        $this->runOnHost = $runOnHost ?? fn (array $argv): string => (new System)->exec($argv, [], self::HOST_TIMEOUT_SECONDS + 15);
     }
 
     /** @return array{projects: int, containers: int} rows written */
@@ -50,7 +41,7 @@ class ProjectStats
         }
 
         try {
-            $read = self::parse(($this->runOnHost)(self::script($usernames)));
+            $read = self::parse(($this->runOnHost)(Privileged::host()->projectStats($usernames, self::HOST_TIMEOUT_SECONDS)));
         } catch (\Throwable $e) {
             Log::warning('Could not read project stats: '.$e->getMessage());
 
@@ -60,48 +51,73 @@ class ProjectStats
         $at = $now->format('Y-m-d H:i:s');
         $previous = $this->previous($now);
 
+        $projects = self::projectRows($read['projects'], $previous['projects'], $at, $now);
+        $containers = self::containerRows($read['containers'], $previous['containers'], $at, $now);
+
+        self::insertChunks('project_metrics', $projects);
+        self::insertChunks('project_container_metrics', $containers);
+
+        return ['projects' => count($projects), 'containers' => count($containers)];
+    }
+
+    /**
+     * @param  array<string, array{memory: ?int, limit: ?int, usec: ?int}>  $read
+     * @param  array<string, array{usec: int, at: Carbon}>  $previous
+     * @return list<array<string, mixed>>
+     */
+    private static function projectRows(array $read, array $previous, string $at, Carbon $now): array
+    {
         $projects = [];
-        foreach ($read['projects'] as $username => $p) {
+        foreach ($read as $username => $p) {
             $projects[] = [
                 'timestamp' => $at,
                 'username' => $username,
-                'cpu_percent' => self::cpuPercent($previous['projects'][$username] ?? null, $p['usec'], $now),
+                'cpu_percent' => self::cpuPercent($previous[$username] ?? null, $p['usec'], $now),
                 'memory_bytes' => $p['memory'],
                 'memory_limit_bytes' => $p['limit'],
                 'cpu_usage_usec' => $p['usec'],
             ];
         }
 
+        return $projects;
+    }
+
+    /**
+     * @param  list<array{username: string, id: string, name: ?string, service: ?string, memory: ?int, limit: ?int, usec: ?int}>  $read
+     * @param  array<string, array{usec: int, at: Carbon}>  $previous
+     * @return list<array<string, mixed>>
+     */
+    private static function containerRows(array $read, array $previous, string $at, Carbon $now): array
+    {
         $containers = [];
-        foreach ($read['containers'] as $c) {
+        foreach ($read as $c) {
             $containers[] = [
                 'timestamp' => $at,
                 'username' => $c['username'],
                 'container_id' => $c['id'],
                 'name' => $c['name'],
                 'service' => $c['service'],
-                'cpu_percent' => self::cpuPercent($previous['containers'][$c['id']] ?? null, $c['usec'], $now),
+                'cpu_percent' => self::cpuPercent($previous[$c['id']] ?? null, $c['usec'], $now),
                 'memory_bytes' => $c['memory'],
                 'memory_limit_bytes' => $c['limit'],
                 'cpu_usage_usec' => $c['usec'],
             ];
         }
 
-        foreach (array_chunk($projects, 200) as $chunk) {
-            DB::table('project_metrics')->insert($chunk);
-        }
-        foreach (array_chunk($containers, 200) as $chunk) {
-            DB::table('project_container_metrics')->insert($chunk);
-        }
+        return $containers;
+    }
 
-        return ['projects' => count($projects), 'containers' => count($containers)];
+    /** @param  list<array<string, mixed>>  $rows */
+    private static function insertChunks(string $table, array $rows): void
+    {
+        foreach (array_chunk($rows, 200) as $chunk) {
+            DB::table($table)->insert($chunk);
+        }
     }
 
     /**
-     * Average every complete hour that is not averaged yet into the hourly
-     * tables. Safe to run as often as wanted: the last averaged hour is
-     * recomputed, and nothing older than the minute rows' retention is
-     * looked at.
+     * Average every complete hour not averaged yet into the hourly tables. Safe to run as often as wanted:
+     * the last averaged hour is recomputed, and nothing older than the minute rows' retention is read.
      *
      * @return int hourly rows written
      */
@@ -117,59 +133,89 @@ class ProjectStats
             ['project_container_metrics', 'project_container_metrics_hourly', ['username', 'container_id']],
         ];
         foreach ($levels as [$raw, $hourly, $keys]) {
-            $last = DB::table($hourly)->max('timestamp');
-            $first = $last !== null ? $last : DB::table($raw)->min('timestamp');
-            if ($first === null) {
-                continue;
-            }
-            $from = Carbon::parse((string) $first, 'UTC')->startOfHour()->max($oldest);
-            if ($from->gte($to)) {
-                continue;
-            }
-
-            $select = implode(', ', $keys).', '.MetricBuckets::sql(3600).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
-                .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes, COUNT(*) AS samples'
-                .($raw === 'project_container_metrics' ? ', MAX(name) AS name, MAX(service) AS service' : '');
-            $rows = DB::table($raw)
-                ->selectRaw($select)
-                ->where('timestamp', '>=', $from->format('Y-m-d H:i:s'))
-                ->where('timestamp', '<', $to->format('Y-m-d H:i:s'))
-                ->groupBy($keys)
-                ->groupByRaw('bucket')
-                ->get();
-
-            $insert = $rows->map(function (object $row) use ($keys, $raw): array {
-                $values = [
-                    'timestamp' => Carbon::createFromTimestampUTC((int) $row->bucket)->format('Y-m-d H:i:s'),
-                    'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
-                    'memory_bytes' => $row->memory_bytes === null ? null : (int) round((float) $row->memory_bytes),
-                    'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
-                    'samples' => (int) $row->samples,
-                ];
-                foreach ($keys as $key) {
-                    $values[$key] = (string) $row->$key;
-                }
-                if ($raw === 'project_container_metrics') {
-                    $values['name'] = $row->name;
-                    $values['service'] = $row->service;
-                }
-
-                return $values;
-            })->all();
-
-            DB::transaction(function () use ($hourly, $from, $to, $insert): void {
-                DB::table($hourly)
-                    ->where('timestamp', '>=', $from->format('Y-m-d H:i:s'))
-                    ->where('timestamp', '<', $to->format('Y-m-d H:i:s'))
-                    ->delete();
-                foreach (array_chunk($insert, 200) as $chunk) {
-                    DB::table($hourly)->insert($chunk);
-                }
-            });
-            $written += count($insert);
+            $written += self::rollupLevel($raw, $hourly, $keys, $oldest, $to);
         }
 
         return $written;
+    }
+
+    /** @param  list<string>  $keys */
+    private static function rollupLevel(string $raw, string $hourly, array $keys, Carbon $oldest, Carbon $to): int
+    {
+        $last = DB::table($hourly)->max('timestamp');
+        $first = $last !== null ? $last : DB::table($raw)->min('timestamp');
+        if ($first === null) {
+            return 0;
+        }
+        $from = Carbon::parse((string) $first, 'UTC')->startOfHour()->max($oldest);
+        if ($from->gte($to)) {
+            return 0;
+        }
+
+        $insert = self::hourlyRows($raw, $keys, $from, $to);
+        self::replaceHourly($hourly, $from, $to, $insert);
+
+        return count($insert);
+    }
+
+    /**
+     * @param  list<string>  $keys
+     * @return list<array<string, mixed>>
+     */
+    private static function hourlyRows(string $raw, array $keys, Carbon $from, Carbon $to): array
+    {
+        $select = implode(', ', $keys).', '.MetricBuckets::sql(3600).' AS bucket, AVG(cpu_percent) AS cpu_percent, '
+            .'AVG(memory_bytes) AS memory_bytes, MAX(memory_limit_bytes) AS memory_limit_bytes, COUNT(*) AS samples'
+            .($raw === 'project_container_metrics' ? ', MAX(name) AS name, MAX(service) AS service' : '');
+        $rows = DB::table($raw)
+            ->selectRaw($select)
+            ->where('timestamp', '>=', $from->format('Y-m-d H:i:s'))
+            ->where('timestamp', '<', $to->format('Y-m-d H:i:s'))
+            ->groupBy($keys)
+            ->groupByRaw('bucket')
+            ->get();
+
+        return $rows->map(function (object $row) use ($keys, $raw): array {
+            return self::hourlyValues($row, $keys, $raw);
+        })->all();
+    }
+
+    /**
+     * @param  list<string>  $keys
+     * @return array<string, mixed>
+     */
+    private static function hourlyValues(object $row, array $keys, string $raw): array
+    {
+        $values = [
+            'timestamp' => Carbon::createFromTimestampUTC((int) $row->bucket)->format('Y-m-d H:i:s'),
+            'cpu_percent' => $row->cpu_percent === null ? null : round((float) $row->cpu_percent, 2),
+            'memory_bytes' => $row->memory_bytes === null ? null : (int) round((float) $row->memory_bytes),
+            'memory_limit_bytes' => $row->memory_limit_bytes === null ? null : (int) $row->memory_limit_bytes,
+            'samples' => (int) $row->samples,
+        ];
+        foreach ($keys as $key) {
+            $values[$key] = (string) $row->$key;
+        }
+        if ($raw === 'project_container_metrics') {
+            $values['name'] = $row->name;
+            $values['service'] = $row->service;
+        }
+
+        return $values;
+    }
+
+    /** @param  list<array<string, mixed>>  $insert */
+    private static function replaceHourly(string $hourly, Carbon $from, Carbon $to, array $insert): void
+    {
+        DB::transaction(function () use ($hourly, $from, $to, $insert): void {
+            DB::table($hourly)
+                ->where('timestamp', '>=', $from->format('Y-m-d H:i:s'))
+                ->where('timestamp', '<', $to->format('Y-m-d H:i:s'))
+                ->delete();
+            foreach (array_chunk($insert, 200) as $chunk) {
+                DB::table($hourly)->insert($chunk);
+            }
+        });
     }
 
     /** How long the per-minute rows are kept. */
@@ -185,9 +231,8 @@ class ProjectStats
     }
 
     /**
-     * The DinD totals from each project's latest sample, in one query; a project
-     * with no recent sample is left out. Every project view reads this, so a
-     * table not migrated yet means no sample rather than a 500 on all of them.
+     * The DinD totals from each project's latest recent sample, in one query; a table not migrated yet
+     * means no sample rather than a 500 on every project view.
      *
      * @param  list<string>  $usernames
      * @return array<string, array{cpu_percent: ?float, memory_bytes: ?int, memory_limit_bytes: ?int, sampled_at: string}>
@@ -331,9 +376,7 @@ class ProjectStats
     }
 
     /**
-     * Busy share of one core between two samples: 100 is one core, as
-     * `docker stats` counts it. Null for a first sample, or when the counter
-     * went backwards because the container restarted.
+     * Busy share of one core between two samples (100 is one core); null for a first sample or a restart.
      *
      * @param  ?array{usec: int, at: Carbon}  $previous
      */
@@ -349,58 +392,6 @@ class ProjectStats
         }
 
         return round($used / ($elapsed * 1_000_000) * 100, 2);
-    }
-
-    /**
-     * One run on the host. For each project container that is running: a `P`
-     * line for its cgroup, and a `C` line for each container nested in it.
-     *
-     * The inner daemon's data root is the tenant's to write, so a container's
-     * config.v2.json is read only when it is a regular file at its own path,
-     * checked on the opened descriptor, and every read is time-limited.
-     *
-     * @param  list<string>  $usernames
-     */
-    public static function script(array $usernames): string
-    {
-        $want = escapeshellarg(' '.implode(' ', $usernames).' ');
-
-        return str_replace('__WANT__', $want, <<<'SH'
-set -u
-want=__WANT__
-mem() {
-    cur=$(cat "$1/memory.current" 2>/dev/null || true)
-    max=$(cat "$1/memory.max" 2>/dev/null || true)
-    inactive=$(awk '$1=="inactive_file"{print $2}' "$1/memory.stat" 2>/dev/null || true)
-    usec=$(awk '$1=="usage_usec"{print $2}' "$1/cpu.stat" 2>/dev/null || true)
-    printf '%s\t%s\t%s\t%s' "${cur:-}" "${max:-}" "${inactive:-}" "${usec:-}"
-}
-config() {
-    cfg="$1/containers/$2/config.v2.json"
-    [ -f "$cfg" ] && [ ! -L "$cfg" ] || return 0
-    timeout -k 1 2 bash -c 'exec 3<"$1" && [ "$(readlink /proc/self/fd/3)" = "$1" ] && [ -f /proc/self/fd/3 ] && head -c 1048576 <&3' _ "$cfg" 2>/dev/null || true
-}
-docker ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null | while read -r id name; do
-    case "$want" in *" $name "*) ;; *) continue ;; esac
-    dir=
-    for c in "/sys/fs/cgroup/system.slice/docker-$id.scope" "/sys/fs/cgroup/docker/$id"; do
-        [ -d "$c" ] && { dir=$c; break; }
-    done
-    [ -n "$dir" ] || continue
-    printf 'P\t%s\t%s\n' "$name" "$(mem "$dir")"
-    root=$(realpath -e "/home/$name/docker" 2>/dev/null) || root=
-    for c in "$dir"/docker/*/; do
-        [ -d "$c" ] || continue
-        cid=$(basename "$c")
-        json=
-        case "$cid" in *[!0-9a-f]*) ;; *) [ -z "$root" ] || json=$(config "$root" "$cid") ;; esac
-        cname=$(printf '%s' "$json" | grep -o '"Name":"[^"]*"' | head -n1 | cut -d'"' -f4)
-        svc=$(printf '%s' "$json" | grep -o '"com.docker.compose.service":"[^"]*"' | head -n1 | cut -d'"' -f4)
-        printf 'C\t%s\t%s\t%s\t%s\t%s\n' "$name" "$cid" "${cname#/}" "$svc" "$(mem "$c")"
-    done
-done
-exit 0
-SH);
     }
 
     /**
@@ -428,12 +419,36 @@ SH);
             }
         }
 
-        return ['projects' => $projects, 'containers' => $containers];
+        return ['projects' => $projects, 'containers' => self::heldToProjectLimit($containers, $projects)];
     }
 
     /**
-     * Memory as `docker stats` reports it: what the cgroup holds less the page
-     * cache it can drop at once. `max` is "no limit".
+     * The project's DinD cgroup is every container's parent, so the lower of the two limits is the one that holds.
+     *
+     * @param  list<array{username: string, id: string, name: ?string, service: ?string, memory: ?int, limit: ?int, usec: ?int}>  $containers
+     * @param  array<string, array{memory: ?int, limit: ?int, usec: ?int}>  $projects
+     * @return list<array{username: string, id: string, name: ?string, service: ?string, memory: ?int, limit: ?int, usec: ?int}>
+     */
+    private static function heldToProjectLimit(array $containers, array $projects): array
+    {
+        return array_map(static function (array $container) use ($projects): array {
+            $container['limit'] = self::lowerLimit($container['limit'], $projects[$container['username']]['limit'] ?? null);
+
+            return $container;
+        }, $containers);
+    }
+
+    private static function lowerLimit(?int $own, ?int $parent): ?int
+    {
+        if ($own === null || $parent === null) {
+            return $own ?? $parent;
+        }
+
+        return min($own, $parent);
+    }
+
+    /**
+     * Memory as `docker stats` reports it: the cgroup's less its droppable page cache; `max` is "no limit".
      *
      * @return array{memory: ?int, limit: ?int, usec: ?int}
      */
@@ -449,10 +464,7 @@ SH);
         ];
     }
 
-    /**
-     * Minute rows are kept two days and hourly averages the month, so a
-     * bucket of an hour or more reads the averages.
-     */
+    /** Minute rows are kept two days and hourly averages the month, so an hour bucket reads the averages. */
     private static function table(string $minutes, int $bucket): string
     {
         return $bucket >= 3600 ? $minutes.'_hourly' : $minutes;
@@ -469,8 +481,7 @@ SH);
     }
 
     /**
-     * The last CPU counter of each project and container, from the sample
-     * before this one.
+     * The last CPU counter of each project and container, from the previous sample.
      *
      * @return array{projects: array<string, array{usec: int, at: Carbon}>, containers: array<string, array{usec: int, at: Carbon}>}
      */

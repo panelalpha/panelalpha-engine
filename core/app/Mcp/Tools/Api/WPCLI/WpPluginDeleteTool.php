@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a WordPress plugin
 
-    Deletes an installed plugin by slug. Optional `path` selects the install.
+    Deletes an installed plugin by slug the way WordPress's own Delete does: the plugin is deactivated and its uninstall runs before its files are deleted, so a page-cache plugin takes its dropin and its `WP_CACHE` with it. The settings the plugin's uninstall removes are gone and whatever it leaves stays. A plugin whose uninstall fails, such as one that breaks the site when loaded, has its files deleted without loading any plugin, and the answer says its uninstall did not run. The engine keeps no copy of the files; this cannot be undone. Ask the operator to confirm first. Optional `path` selects the install.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

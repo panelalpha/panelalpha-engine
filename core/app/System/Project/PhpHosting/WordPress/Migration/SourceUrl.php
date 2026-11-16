@@ -12,9 +12,8 @@ use RuntimeException;
 final class SourceUrl
 {
     /**
-     * Hosting account name: strip leading www., lowercase, then
-     * {@see HostingUsername::normalize()} (dots removed, not hyphens).
-     * Null when the host is too short after normalisation.
+     * Hosting account name: strip leading www., lowercase, then {@see HostingUsername::normalize()} (dots removed,
+     * not hyphens). Null when the host is too short after normalisation.
      */
     public static function projectUsername(string $sourceUrl): ?string
     {
@@ -32,11 +31,8 @@ final class SourceUrl
     }
 
     /**
-     * Relative directory under the document root for the WordPress install.
-     * Empty string means the document root itself. Trailing wp-login.php or
-     * index.php is stripped (same behaviour as the panel ImportController).
-     * The admin URL is what users paste (…/wp-admin); the install lives one
-     * level above it.
+     * Directory under the document root for the install, '' for the root itself. A trailing wp-login.php or index.php
+     * goes, as in the panel ImportController, and so does the wp-admin users paste: the install lives one level above.
      */
     public static function installSubdirectory(string $sourceUrl): string
     {
@@ -45,28 +41,12 @@ final class SourceUrl
             return '';
         }
 
-        $path = rtrim($path, '/');
-        if (str_ends_with($path, 'wp-login.php') || str_ends_with($path, 'index.php')) {
-            $slash = strrpos($path, '/');
-            $path = $slash === false ? '' : substr($path, 0, $slash);
-        }
-
-        if ($path === '/wp-admin' || str_ends_with($path, '/wp-admin')) {
-            $path = substr($path, 0, -strlen('/wp-admin'));
-        }
-
-        $relative = trim($path, '/');
+        $relative = trim(self::installPath($path), '/');
         if ($relative === '') {
             return '';
         }
 
-        foreach (explode('/', $relative) as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
-                throw new RuntimeException(
-                    'Source WordPress URL path must stay under the document root.'
-                );
-            }
-        }
+        self::assertUnderDocumentRoot($relative);
 
         return $relative;
     }
@@ -83,5 +63,31 @@ final class SourceUrl
         }
 
         return $url;
+    }
+
+    private static function installPath(string $path): string
+    {
+        $path = rtrim($path, '/');
+        if (str_ends_with($path, 'wp-login.php') || str_ends_with($path, 'index.php')) {
+            $slash = strrpos($path, '/');
+            $path = $slash === false ? '' : substr($path, 0, $slash);
+        }
+
+        if ($path === '/wp-admin' || str_ends_with($path, '/wp-admin')) {
+            $path = substr($path, 0, -strlen('/wp-admin'));
+        }
+
+        return $path;
+    }
+
+    private static function assertUnderDocumentRoot(string $relative): void
+    {
+        foreach (explode('/', $relative) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                throw new RuntimeException(
+                    'Source WordPress URL path must stay under the document root.'
+                );
+            }
+        }
     }
 }

@@ -5,15 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Named cache flush for a PHP hosting WordPress install.
- *
- * Flushes the object cache (`wp cache flush`), then, best effort, the page
- * caches of WP Super Cache, LiteSpeed Cache, W3 Total Cache, WP Rocket and
- * WP Fastest Cache through their own purge functions. A page-cache failure is
- * logged and reported, not raised; with plugins skipped there is nothing to
- * call, so that step is skipped. Goes through WpCli::runOrFail so a successful
- * flush shares the OpenLiteSpeed webserver-reload side effect of the raw
- * `cache flush` command.
+ * Flushes the object cache, then best effort the page-cache plugins' own purges: a failure is logged, not raised, and
+ * with plugins skipped there is none to call. Uses WpCli::runOrFail to share the raw `cache flush`'s OpenLiteSpeed reload.
  */
 final class Cache
 {

@@ -6,10 +6,8 @@ use App\Lib\Deploy\Sidecar\ServiceRole;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The `tty` / `stdin_open` a repository's own compose gives the service that
- * runs its Dockerfile. An image whose CMD ends in `exec bash` (MintHCM) relies
- * on them: without a terminal bash reads EOF, exits 0 and the container
- * restart-loops. Both settings are harmless, so they are carried over as set.
+ * The `tty` / `stdin_open` a repository's own compose gives the service that runs its Dockerfile:
+ * a CMD ending in `exec bash` (MintHCM) reads EOF without a terminal, exits 0 and restart-loops.
  */
 final class RepositoryAppTerminal
 {

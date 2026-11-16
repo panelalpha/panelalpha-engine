@@ -11,13 +11,17 @@ use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
+use App\Models\User;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -35,7 +39,7 @@ class HostCompileBuildSlotTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->username = 'slot' . bin2hex(random_bytes(3));
+        $this->username = 'slot'.bin2hex(random_bytes(3));
         $username = $this->username;
         $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
     }
@@ -48,20 +52,20 @@ class HostCompileBuildSlotTest extends TestCase
      */
     private function build(string $memory, int $times = 1, ?DindHostBuilder $builder = null): array
     {
-        $system = new class extends System {
+        $system = new class extends System
+        {
             /** @var list<bool> */
             public array $slotFreeDuringBuild = [];
 
-            /** @var list<?string> the `--memory` each build container was started with */
+            /** @var list<?string> the memory limit each build container was started with */
             public array $memoryFlags = [];
 
-            public function __construct()
-            {
-            }
+            public function __construct() {}
 
             public function filesystem(): SystemFilesystem
             {
-                return new class ($this) extends SystemFilesystem {
+                return new class($this) extends SystemFilesystem
+                {
                     public function fileExists(string $path): bool
                     {
                         return str_ends_with($path, '/composer.json');
@@ -96,17 +100,16 @@ class HostCompileBuildSlotTest extends TestCase
             }
 
             /** A stand-in for the build container: probe the slot from outside it. */
-            private function container(array $argv): Process
+            private function container(array $request): Process
             {
                 // Writing the runtime Composer manifest probes directories too.
-                if (!in_array('docker', $argv, true)) {
+                if (LocalRoot::build($request) === []) {
                     $process = new Process(['php', '-r', 'exit(0);']);
                     $process->run();
 
                     return $process;
                 }
-                $at = array_search('--memory', $argv, true);
-                $this->memoryFlags[] = $at === false ? null : $argv[$at + 1];
+                $this->memoryFlags[] = LocalRoot::build($request)['memory'];
 
                 $probe = fopen(storage_path('host-build.lock'), 'c');
                 $free = flock($probe, LOCK_EX | LOCK_NB);
@@ -123,10 +126,10 @@ class HostCompileBuildSlotTest extends TestCase
             }
         };
 
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = $this->username;
         $model->details = ['UID' => 1001, 'GID' => 1001];
-        $home = '/home/' . $this->username;
+        $home = '/home/'.$this->username;
 
         $engine = $this->createStub(ContainerEngine::class);
         $engine->method('hostBuilder')->willReturn($builder ?? new DindHostBuilder($memory, ''));
@@ -135,12 +138,13 @@ class HostCompileBuildSlotTest extends TestCase
         $dind->method('username')->willReturn($this->username);
         $dind->method('userModel')->willReturn($model);
         $dind->method('system')->willReturn($system);
-        $dind->method('userAppDirPath')->willReturn($home . '/project');
-        $dind->method('composeFilePath')->willReturn($home . '/docker-compose.yml');
+        $dind->method('userAppDirPath')->willReturn($home.'/project');
+        $dind->method('composeFilePath')->willReturn($home.'/docker-compose.yml');
         $dind->method('engine')->willReturn($engine);
         $dind->method('engineAccount')->willReturn(new EngineAccount($this->username, $home, '1001:1001'));
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
         $dind->method('projectTree')->willReturnCallback(fn (): ProjectFiles => new ProjectFiles($dind));
+        $dind->method('innerDocker')->willReturn($this->hostWithTheBase());
 
         $compile = new HostCompile($dind);
         for ($i = 0; $i < $times; $i++) {
@@ -216,8 +220,8 @@ class HostCompileBuildSlotTest extends TestCase
         $this->assertSame(['8192m'], $this->memoryFlags);
         $this->assertContains(
             'Host build container memory: 8192 MB, 8192 MB by default, at most half the server\'s 32768 MB and never more'
-                . ' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
-                . ' up to 16384 MB',
+                .' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
+                .' up to 16384 MB',
             $this->logLines($logger)
         );
     }
@@ -233,18 +237,18 @@ class HostCompileBuildSlotTest extends TestCase
         $this->assertSame(['1895m'], $this->memoryFlags);
         $this->assertContains(
             'Host build container memory: 1895 MB, 8192 MB by default, at most half the server\'s 3790 MB and never more'
-                . ' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
-                . ' up to 1895 MB',
+                .' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
+                .' up to 1895 MB',
             $this->logLines($logger)
         );
     }
 
     public function test_deploy_build_memory_wins_on_the_real_engine(): void
     {
-        config(['deploy.build_memory' => '3g']);
-        $builder = (new DindEngine())->hostBuilder();
+        config(['deploy.build_memory' => '512m']);
+        $builder = (new DindEngine)->hostBuilder();
 
-        $this->assertSame(3072, $builder->memoryLimitMb());
+        $this->assertSame(512, $builder->memoryLimitMb());
         $this->assertSame(BuildMemory::SETTING, $builder->memoryOrigin()->source);
     }
 
@@ -252,12 +256,22 @@ class HostCompileBuildSlotTest extends TestCase
     public function test_the_real_engine_reads_the_host_when_nothing_is_set(): void
     {
         config(['deploy.build_memory' => '']);
-        $builder = (new DindEngine())->hostBuilder();
+        $builder = (new DindEngine)->hostBuilder();
 
         $this->assertSame(
             min(DindEngine::MAX_BUILD_MEMORY_MB, DindEngine::buildCeilingMb(HostMemoryProbe::current())),
             $builder->memoryLimitMb()
         );
         $this->assertSame(BuildMemory::HOST, $builder->memoryOrigin()->source);
+    }
+
+    private function hostWithTheBase(): InnerDocker
+    {
+        $bases = $this->createStub(SharedBaseImages::class);
+        $bases->method('ensureOnHost')->willReturn(true);
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('bases')->willReturn($bases);
+
+        return $inner;
     }
 }

@@ -3,24 +3,14 @@
 namespace App\Lib\Deploy\CacheManager;
 
 /**
- * Reading a Railpack build plan.
- *
- * Read, not rewritten: railpack's `packages:mise` step copies the project's
- * version files into the image before `mise install`, so BuildKit keys the
- * runtime-install layer on the customer's own files and no two accounts share
- * it. Nothing here strips those copies any more — there is no shared layer
- * cache left to share the layer with.
+ * Reads a Railpack build plan without rewriting it: its runtime-install layer is keyed on the project's own
+ * version files, and there is no shared layer cache left to share it with.
  */
 class RailpackPlan
 {
     /**
-     * Every image the plan names.
-     *
-     * They appear in two shapes — `steps[].inputs[].image` for a build stage
-     * and `deploy.base.image` for the runtime — and railpack has moved both
-     * between releases, so the whole document is walked for an `image` key
-     * instead of reading two paths. Anything docker would not accept is
-     * dropped: this feeds a pull.
+     * Every image the plan names, found by walking the whole document for `image` keys since railpack moves
+     * them between releases; anything docker would not accept is dropped, as this feeds a pull.
      *
      * @return list<string>
      */

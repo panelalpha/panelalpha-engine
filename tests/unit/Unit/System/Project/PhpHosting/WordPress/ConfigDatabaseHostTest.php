@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 use App\Models\Domain;
 use App\Models\User;
 use App\System\Project;
+use App\System\Project\FileManager;
 use App\System\Project\PhpHosting\WordPress\Config;
 use App\System\Project\PhpHosting\WordPress\WpCli;
 use Mockery;
@@ -96,6 +97,9 @@ class ConfigDatabaseHostTest extends TestCase
 
             return array_shift($this->results) ?? ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
         });
+        $files = Mockery::mock(FileManager::class);
+        $files->shouldReceive('chmod');
+        $project->shouldReceive('fileManager')->andReturn($files);
         $domain = Mockery::mock(Domain::class);
         $domain->shouldReceive('getDocumentRoot')->andReturn('/example.test/public_html');
         $user->shouldReceive('project')->andReturn($project);

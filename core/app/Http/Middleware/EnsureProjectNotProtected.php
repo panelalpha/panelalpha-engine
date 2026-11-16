@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Auth\ApiSurface;
 use App\Auth\ProjectFields;
 use App\Auth\RequestToken;
+use App\Http\Responses\Refusal;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
@@ -51,6 +52,7 @@ class EnsureProjectNotProtected
         'POST /projects/{username}/rebuild',
         'POST /projects/{username}/deploy-archive',
         'POST /projects/{username}/source',
+        'PUT /projects/{username}/source',
         'POST /projects/{username}/git/pull',
         'PUT /projects/{username}/git/change-branch',
         'POST /projects/{username}/git/revert',
@@ -168,11 +170,7 @@ class EnsureProjectNotProtected
 
     private function refuse(string $username): JsonResponse
     {
-        return new JsonResponse([
-            'message' => "Project '{$username}' is protected from API and MCP tokens. Deleting, stopping or "
-                .'redeploying it needs an operator: clear the setting first with '
-                ."`pae project:settings:unset protected --project={$username}`.",
-            'code' => self::CODE,
-        ], 409);
+        return Refusal::json(409, 'project', self::CODE, "Project '{$username}' is protected from API and MCP tokens. Deleting, "
+            .'stopping or redeploying it needs an operator to clear its protected setting first.', $username);
     }
 }

@@ -9,6 +9,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
@@ -37,7 +38,7 @@ class AppConfigSnippetUnderLinkTest extends TestCase
         }
 
         $this->assertSame([], $this->ranWith('mkdir'));
-        $this->assertSame([], $this->ranWith('sudo cp'));
+        $this->assertSame([], $this->ranWith('files.copy'));
     }
 
     public function test_a_link_further_up_is_found_too(): void
@@ -52,7 +53,7 @@ class AppConfigSnippetUnderLinkTest extends TestCase
         $this->install('config/app/settings.yml', []);
 
         $this->assertCount(1, $this->ranWith("'mkdir' '-p' '".self::PROJECT."/config/app'"));
-        $this->assertCount(1, $this->ranWith('sudo cp'));
+        $this->assertCount(1, $this->ranWith('files.copy'));
     }
 
     /** @return list<string> */
@@ -108,7 +109,7 @@ class AppConfigSnippetUnderLinkTest extends TestCase
             {
                 $argv = (array) $cmd;
                 $this->ran[] = implode(' ', $argv);
-                if (array_slice($argv, 0, 3) === ['sudo', 'test', '-L'] && ! in_array($argv[3], $this->links, true)) {
+                if (LocalRoot::action($argv) === 'files.isSymlink' && ! in_array(LocalRoot::values($argv)[0], $this->links, true)) {
                     $process = new Process(['php', '-r', 'exit(1);']);
                     $process->run();
 

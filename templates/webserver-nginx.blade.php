@@ -5,6 +5,8 @@ worker_processes  auto;
 error_log  /opt/panelalpha/shared-hosting/webserver-logs/nginx/error.log notice;
 pid        /var/run/nginx.pid;
 
+load_module modules/ngx_http_js_module.so;
+
 @if (!empty($modsecurity_enabled))
 load_module modules/ngx_http_modsecurity_module.so;
 @endif
@@ -51,6 +53,9 @@ http {
     fastcgi_buffer_size 128k;
     fastcgi_buffers 8 32k;
     fastcgi_busy_buffers_size 128k;
+
+    # Narrows a Set-Cookie's Domain to the host on the vhosts that ask for it.
+    js_import pa_cookie_isolation from /opt/panelalpha/shared-hosting/webserver-config/nginx/njs/cookie-isolation.js;
 
     include /opt/panelalpha/shared-hosting/webserver-config/nginx/cloudflare-realip[.]conf;
     include /etc/nginx/conf.d/*.conf;

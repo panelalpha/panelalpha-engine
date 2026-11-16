@@ -11,6 +11,7 @@ use App\System\Project\PhpHosting\FpmStack;
 use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class ProjectPhpTest extends TestCase
 {
@@ -21,11 +22,13 @@ class ProjectPhpTest extends TestCase
         parent::setUp();
         $this->tmpRoot = sys_get_temp_dir() . '/pa-project-php-' . bin2hex(random_bytes(4));
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => $this->tmpRoot . '/home']));
         $this->setCurrentWebserver('nginx');
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->setCurrentWebserver(null);
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
@@ -68,21 +71,10 @@ class ProjectPhpTest extends TestCase
             $php->getCustomIniSettings('8.3')
         );
         $this->assertCount(1, $system->processJournal);
+        $this->assertSame('account-container.exec', LocalRoot::action($system->processJournal[0]));
         $this->assertSame(
-            [
-                'sudo',
-                'docker',
-                'compose',
-                '-f',
-                $project->composeFilePath(),
-                'exec',
-                '-T',
-                'php',
-                'bash',
-                '-c',
-                FpmStack::restartScript(new RunnerServiceManager($runtime), '8.3'),
-            ],
-            $system->processJournal[0]
+            ['bash', '-c', FpmStack::restartScript(new RunnerServiceManager($runtime), '8.3')],
+            LocalRoot::inAccount($system->processJournal[0])
         );
     }
 

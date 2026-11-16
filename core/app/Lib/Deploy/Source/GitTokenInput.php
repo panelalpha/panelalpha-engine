@@ -3,25 +3,15 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * Shape checks for a Git access token, before it is ever used.
- *
- * A wrong token and a truncated paste both come back from the forge as
- * "Authentication failed", which sends people to check their scopes. Only
- * high-confidence checks live here; token formats are the forge's to change.
- *
- * Nothing here ever puts the value in a message. Unlike a repository URL, a
- * token is a secret, and `errors` reaches logs, MCP and transcripts.
- *
- * A `vault:<key>` is resolved by RequestVault in the controller, after
- * validation -- so whether the real secret works is not knowable from here.
+ * High-confidence shape checks for a Git access token, before it is used; no message ever holds the value.
+ * A `vault:<key>` is resolved after validation, so only its shape is checked here.
  */
 final class GitTokenInput
 {
     public const MAX_LENGTH = 2048;
 
     /**
-     * Total length for prefixes the forge documents, checked as a floor.
-     * Shorter is a truncated paste; longer is a format newer than this list.
+     * Total length for prefixes the forge documents, checked as a floor: shorter is a truncated paste.
      *
      * @var array<string, int>
      */
@@ -62,15 +52,24 @@ final class GitTokenInput
             return ctype_alnum(substr($value, strlen(self::VAULT_PREFIX)))
                 ? null
                 : self::problemOf($field, 'malformed_vault_reference',
-                    'A vault reference is `vault:<key>`, as vault_secret_create returned it.');
+                    'A vault reference is `vault:<key>`, as the vault returned it when the secret was created.');
         }
+
+        return self::pasteProblem($field, $value) ?? self::truncationProblem($field, $value);
+    }
+
+    /**
+     * What came along with the paste; the header check precedes the space check, since a header has a space.
+     *
+     * @return ?array<string, mixed>
+     */
+    private static function pasteProblem(string $field, string $value): ?array
+    {
         if (preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
             return self::problemOf($field, 'malformed',
                 'A Git token must not contain control characters. This usually means a newline '
                 .'came along with the paste.');
         }
-        // Before the space check: a header always contains one, and naming the
-        // header is the more useful of the two things to say.
         if (self::hasAuthPrefix($value)) {
             return self::problemOf($field, 'has_auth_prefix',
                 'Send the token itself, not a whole Authorization header: drop everything '
@@ -82,14 +81,14 @@ final class GitTokenInput
         }
         if (str_contains($value, '://')) {
             return self::problemOf($field, 'looks_like_url',
-                'This looks like a URL, not a token. The repository address goes in `git_repo`.');
+                'This looks like a URL, not a token. Send the repository address separately from the token.');
         }
         if (self::isQuoted($value)) {
             return self::problemOf($field, 'quoted',
                 'The token is wrapped in quotes. Send it without them -- a shell kept them.');
         }
 
-        return self::truncationProblem($field, $value);
+        return null;
     }
 
     /** First few characters, so two failures can be told apart in a log. */

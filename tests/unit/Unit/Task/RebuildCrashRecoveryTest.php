@@ -18,11 +18,8 @@ use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
- * A worker killed during a project's first redeploy. The redeploy resumed the
- * log the create left waiting for files, so that log started long before the
- * task; the killed job's queue row stays reserved for a day. The task read
- * `running` for that day, and every rebuild in it answered 409 with the dead
- * task's id. The minutely `task:reconcile` now retires it.
+ * A worker killed during a project's first redeploy. The killed job's queue row stays reserved for a day, so the task reads
+ * `running` for that day and every rebuild in it answered 409 with the dead task's id. The minutely `task:reconcile` retires it.
  */
 class RebuildCrashRecoveryTest extends TestCase
 {
@@ -105,18 +102,16 @@ class RebuildCrashRecoveryTest extends TestCase
         $this->assertSame(202, $queued->getStatusCode());
 
         $task = $this->workerTakesItAndDies((int) $queued->json('data.id'), function (Task $task) use ($createId): void {
-            // What the job does before the pipeline gets far: resume the create's log, record it.
             $logger = app(ProjectRebuild::class)->openLog($this->user, ProjectRebuild::REBUILD);
-            $this->assertSame($createId, $logger->getDeployId(), 'the first redeploy continues the create log');
+            $this->assertNotSame($createId, $logger->getDeployId(), 'the first redeploy opens its own log');
             $task->details = array_merge($task->details ?? [], ['deploy_id' => $logger->getDeployId()]);
             $task->save();
-            $logger->info('Continuing deploy with project files');
+            $logger->info('Deploy started (source: rebuild)');
             $logger->stage(DeployLogger::STAGE_CLONING);
         });
 
-        // The reviewer's evidence: the queue still holds the job, and the log started an hour before the task.
         $this->assertTrue(TaskReconciler::queueCheck()($task));
-        $this->assertLessThan($task->started_at->getTimestamp() - 60, DeployLogger::readLatestFor($this->user->username)['started_at']);
+        $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($this->user->username)['status']);
 
         $blocked = $this->rebuild();
         $this->assertSame(409, $blocked->getStatusCode());

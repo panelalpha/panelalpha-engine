@@ -6,11 +6,8 @@ use App\Lib\Deploy\Platform\StageScript;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * Installs the staged entrypoint instead of baking a start command in.
- *
- * `CMD ["sh","-c", $start]` runs on every container start, so migrations ran on
- * every restart; the entrypoint branches on the deploy phase. `ENTRYPOINT` and a
- * script ending in `exec` make the server PID 1, so Docker's stop signal reaches it.
+ * Installs the staged entrypoint, which branches on the deploy phase so migrations do not run on
+ * every restart, and `exec`s the server as PID 1 so Docker's stop signal reaches it.
  */
 final class EntrypointInstall
 {

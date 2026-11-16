@@ -6,11 +6,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Is this SvelteKit project built with adapter-static?
- *
- * svelte.config decides when it names one adapter: golty lists adapter-static
- * in devDependencies but configures adapter-auto. Without a readable answer
- * there, the dependencies do, as before.
+ * Is this SvelteKit project built with adapter-static? svelte.config decides when it names one
+ * adapter (a dependency may be unused), otherwise the dependencies do.
  */
 final class SvelteKitStaticAdapterProbe implements PlatformProbe
 {

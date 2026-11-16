@@ -1,0 +1,35 @@
+FROM debian:trixie-slim
+
+RUN apt-get update -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        coreutils \
+        curl \
+        findutils \
+        git \
+        gzip \
+        logrotate \
+        openssl \
+        python3 \
+        rsync \
+        s6 \
+        tar \
+        unzip \
+        util-linux \
+        zip \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl --proto '=https' -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]" \
+        "https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update -y \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/* \
+    && test "$(id -u www-data):$(id -g www-data)" = 33:33
+
+# the broker's code is mounted from the engine tree at /usr/local/lib/panelalpha
+RUN ln -s /usr/local/lib/panelalpha/pa-broker /usr/local/bin/pa-broker
+
+ARG PANELALPHA_SOURCES=
+LABEL panelalpha.sources.sha256=$PANELALPHA_SOURCES

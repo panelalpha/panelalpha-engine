@@ -19,5 +19,8 @@ class TrimStrings extends Middleware
         'env_vars.*',
         // files/put-contents writes this as the file: a lockfile's final newline matters.
         'contents',
+        // An operator image is built from these as written, so the CLI and the API store the same build.
+        'dockerfile',
+        'build_args.*',
     ];
 }

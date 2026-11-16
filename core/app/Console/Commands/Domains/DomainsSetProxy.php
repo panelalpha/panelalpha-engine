@@ -3,13 +3,13 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\System;
+use App\System\Services\Webserver\ProxyRuleServerName;
 use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
@@ -17,14 +17,12 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsSetProxy extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = ['domains:set-proxy', 'projects:domains:set-proxy'];
 
     protected $signature = 'domain:set-proxy
         {--domain= : Domain name or alias}
         {--project= : Project username (optional; used as default host for port-only --proxy-to)}
-        {--username= : Deprecated alias for --project}
         {--proxy-to= : Upstream port, or host:port where host is the project\'s own name}
         {--port=* : Listen port(s); defaults to 80 and 443}
         {--force : Skip confirmation}';
@@ -33,11 +31,9 @@ class DomainsSetProxy extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
         $domainName = strtolower(trim((string) $this->option('domain')));
         $proxyTo = trim((string) $this->option('proxy-to'));
-        $projectOpt = trim((string) $this->option('username'));
+        $projectOpt = trim((string) $this->option('project'));
 
         if ($domainName === '') {
             $this->error('--domain is required.');
@@ -61,6 +57,10 @@ class DomainsSetProxy extends Command
             return 1;
         }
         [$upstreamHost, $upstreamPort] = $upstream;
+
+        if (! $this->servesProxyRules($domain)) {
+            return 1;
+        }
 
         $listenPorts = $this->resolveListenPorts();
         if ($listenPorts === null) {
@@ -101,7 +101,7 @@ class DomainsSetProxy extends Command
         $domain->loadMissing('user');
         $user = $domain->user;
         if (! $user) {
-            $this->error('Domain has no project/user.');
+            $this->error('Domain has no project.');
 
             return null;
         }
@@ -140,6 +140,18 @@ class DomainsSetProxy extends Command
         }
 
         return [$upstreamHost, $upstreamPort];
+    }
+
+    /** Whether the domain's vhost serves a rule named after it, printing why not when it does not. */
+    private function servesProxyRules(Domain $domain): bool
+    {
+        $refusal = ProxyRuleServerName::refusal('user', $domain->user->username, $domain->domain);
+        if ($refusal === null) {
+            return true;
+        }
+        $this->error($refusal);
+
+        return false;
     }
 
     /** @param list<int> $listenPorts */

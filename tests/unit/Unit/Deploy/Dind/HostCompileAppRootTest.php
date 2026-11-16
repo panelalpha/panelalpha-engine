@@ -2,17 +2,19 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
+use App\Lib\Deploy\Dind\DindHostBuilder;
+use App\Lib\Deploy\Engine\ContainerEngine;
+use App\Lib\Deploy\Engine\EngineAccount;
+use App\Models\User;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
-use App\Lib\Deploy\Dind\DindHostBuilder;
-use App\Lib\Deploy\Engine\ContainerEngine;
-use App\Lib\Deploy\Engine\EngineAccount;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * The PHP frontend build reads the application's package.json, not the
@@ -26,18 +28,18 @@ class HostCompileAppRootTest extends TestCase
     /** @param array<string, string> $files absolute account path => contents */
     private function system(array $files): System
     {
-        return new class ($files) extends System {
+        return new class($files) extends System
+        {
             /** @var list<list<string>> */
             public array $commands = [];
 
             /** @param array<string, string> $files */
-            public function __construct(private array $files)
-            {
-            }
+            public function __construct(private array $files) {}
 
             public function filesystem(): SystemFilesystem
             {
-                return new class ($this, $this->files) extends SystemFilesystem {
+                return new class($this, $this->files) extends SystemFilesystem
+                {
                     /** @param array<string, string> $files */
                     public function __construct(System $engine, private array $files)
                     {
@@ -63,10 +65,9 @@ class HostCompileAppRootTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? $cmd : [$cmd];
                 // Only build containers: writing the runtime Composer manifest probes directories too.
-                if (in_array('docker', $argv, true)) {
-                    $this->commands[] = $argv;
+                if (is_array($cmd) && LocalRoot::build($cmd) !== []) {
+                    $this->commands[] = $cmd;
                 }
                 $process = new Process(['php', '-r', 'exit(0);']);
                 $process->run();
@@ -78,12 +79,12 @@ class HostCompileAppRootTest extends TestCase
 
     private function project(System $system): Dind
     {
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = 'acme';
         $model->details = ['UID' => 1001, 'GID' => 1001];
 
         $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('hostBuilder')->willReturn(new DindHostBuilder());
+        $engine->method('hostBuilder')->willReturn(new DindHostBuilder);
 
         $dind = $this->createStub(Dind::class);
         $dind->method('userModel')->willReturn($model);
@@ -98,7 +99,7 @@ class HostCompileAppRootTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $files
+     * @param  array<string, string>  $files
      * @return list<list<string>> the containers it ran
      */
     private function runForPhp(array $files, string $appRoot): array
@@ -116,9 +117,9 @@ class HostCompileAppRootTest extends TestCase
         return $system->commands;
     }
 
-    private static function workdir(array $argv): string
+    private static function workdir(array $request): string
     {
-        return $argv[array_search('-w', $argv, true) + 1];
+        return LocalRoot::build($request)['workdir'];
     }
 
     public function test_the_build_reads_package_json_in_the_app_root_and_runs_there(): void
@@ -131,7 +132,7 @@ class HostCompileAppRootTest extends TestCase
 
         $this->assertCount(1, $commands, 'vendor/ is already resolved, so only the Node build runs');
         $this->assertSame('/app/www', self::workdir($commands[0]));
-        $this->assertStringContainsString('npm run build', (string) end($commands[0]));
+        $this->assertStringContainsString('npm run build', LocalRoot::build($commands[0])['script']);
     }
 
     public function test_an_unresolved_app_root_gets_its_composer_pass_there_too(): void
@@ -142,7 +143,7 @@ class HostCompileAppRootTest extends TestCase
         ], 'www');
 
         $this->assertCount(2, $commands);
-        $this->assertContains('composer:2', $commands[0]);
+        $this->assertSame('composer:2', LocalRoot::build($commands[0])['image']);
         $this->assertSame('/app/www', self::workdir($commands[0]));
         $this->assertSame('/app/www', self::workdir($commands[1]));
     }

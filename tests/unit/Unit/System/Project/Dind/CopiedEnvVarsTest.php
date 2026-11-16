@@ -56,6 +56,7 @@ class CopiedEnvVarsTest extends TestCase
             ],
             'used_custom_env_vars' => true,
             'env_override_keys' => ['FOO', 'APP_URL', 'DB_DATABASE'],
+            'env_service_keys' => ['FOO'],
         ]);
         $live->save();
 
@@ -68,6 +69,7 @@ class CopiedEnvVarsTest extends TestCase
         );
         $this->assertTrue($stg->getDetails()['used_custom_env_vars']);
         $this->assertSame(['FOO', 'APP_URL', 'DB_DATABASE'], $stg->getDetails()['env_override_keys']);
+        $this->assertSame(['FOO'], $stg->getDetails()['env_service_keys']);
         $this->assertStringStartsWith('laravel-encrypted:v1:', json_decode($stg->getAttributes()['details'], true)['env_vars']);
     }
 
@@ -99,7 +101,7 @@ class CopiedEnvVarsTest extends TestCase
     public function test_a_source_without_env_vars_leaves_the_copy_without_any(): void
     {
         [$live, $stg] = $this->pair();
-        $stg->setDetails(['env_vars' => ['OLD' => 'two'], 'env_override_keys' => ['OLD'], 'used_custom_env_vars' => true]);
+        $stg->setDetails(['env_vars' => ['OLD' => 'two'], 'env_override_keys' => ['OLD'], 'env_service_keys' => ['OLD'], 'used_custom_env_vars' => true]);
         $stg->save();
 
         $this->project($stg)->adoptCopiedEnvVars($live);
@@ -107,6 +109,7 @@ class CopiedEnvVarsTest extends TestCase
         $stg = User::findByUsernameOrFail('stg');
         $this->assertSame([], $stg->getEnvVars());
         $this->assertNull($stg->getDetails()['env_override_keys']);
+        $this->assertNull($stg->getDetails()['env_service_keys']);
         $this->assertNull($stg->getDetails()['used_custom_env_vars']);
     }
 

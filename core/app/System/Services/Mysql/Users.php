@@ -42,6 +42,12 @@ class Users
         $conn->statement($query, [$name, $newName]);
     }
 
+    /** Closes every open connection of the user; one with none is no error. */
+    public function killSessions(string $name): void
+    {
+        $this->pdo->exec('KILL CONNECTION USER '.$this->pdo->quote($name)."@'{$this->host}'");
+    }
+
     public function changeUserPassword(string $name, string $password): void
     {
         $conn = new Connection($this->pdo);

@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * Detection logic a `detect` predicate cannot express — walking directories
- * to find a Next.js app inside an unknown workspace layout, for instance.
- *
- * A manifest names a probe under `{"probe": "…"}` and keeps everything else
- * declarative. Probes decide detection only; they never return commands.
+ * Detection logic a `detect` predicate cannot express, such as finding a Next.js app in an unknown
+ * workspace layout; a manifest names it under `{"probe": "…"}`, and it never returns commands.
  */
 interface PlatformProbe
 {

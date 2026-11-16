@@ -124,11 +124,12 @@ class DependencyFailureTest extends TestCase
         2026-10-13T15:36:12.320Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.0.46'  socket: '/var/run/mysqld/mysqld.sock'  port: 3306
         TXT;
 
-    /** `docker inspect --format '{{json .State.Health}}'` of that container. */
-    private const MYSQL_HEALTH = '{"Status":"unhealthy","FailingStreak":30,"Log":['
-        . '{"Start":"2026-10-13T15:39:30Z","End":"2026-10-13T15:39:30Z","ExitCode":0,"Output":""},'
-        . '{"Start":"2026-10-13T15:39:35Z","End":"2026-10-13T15:39:35Z","ExitCode":1,'
-        . '"Output":"ERROR 1045 (28000): Access denied for user \'wordpress\'@\'localhost\' (using password: YES)\n"}]}';
+    /** That container's `State.Health`, as its account's daemon gives it. */
+    private const MYSQL_HEALTH = ['Status' => 'unhealthy', 'FailingStreak' => 30, 'Log' => [
+        ['Start' => '2026-10-13T15:39:30Z', 'End' => '2026-10-13T15:39:30Z', 'ExitCode' => 0, 'Output' => ''],
+        ['Start' => '2026-10-13T15:39:35Z', 'End' => '2026-10-13T15:39:35Z', 'ExitCode' => 1,
+            'Output' => "ERROR 1045 (28000): Access denied for user 'wordpress'@'localhost' (using password: YES)\n"],
+    ]];
 
     public function test_the_newest_failing_probe_is_quoted(): void
     {
@@ -142,15 +143,15 @@ class DependencyFailureTest extends TestCase
     {
         $this->assertSame(
             'Health check exceeded timeout (5s)',
-            DependencyFailure::probe('{"Status":"unhealthy","Log":[{"ExitCode":-1,"Output":"Health check exceeded timeout (5s)"}]}')
+            DependencyFailure::probe(['Status' => 'unhealthy', 'Log' => [['ExitCode' => -1, 'Output' => 'Health check exceeded timeout (5s)']]])
         );
     }
 
     public function test_no_health_log_quotes_nothing(): void
     {
-        $this->assertSame('', DependencyFailure::probe(''));
-        $this->assertSame('', DependencyFailure::probe('null'));
-        $this->assertSame('', DependencyFailure::probe('{"Status":"healthy","Log":[{"ExitCode":0,"Output":"ok"}]}'));
+        $this->assertSame('', DependencyFailure::probe(null));
+        $this->assertSame('', DependencyFailure::probe(['Status' => 'starting', 'Log' => null]));
+        $this->assertSame('', DependencyFailure::probe(['Status' => 'healthy', 'Log' => [['ExitCode' => 0, 'Output' => 'ok']]]));
     }
 
     /** The message names the probe's refusal, not only the healthy-looking startup lines. */

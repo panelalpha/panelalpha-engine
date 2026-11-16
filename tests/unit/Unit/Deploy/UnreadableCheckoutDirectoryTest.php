@@ -2,13 +2,20 @@
 
 namespace Tests\Unit\Deploy;
 
+use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Detect\HtmlSite;
 use App\Lib\Deploy\Detect\PhpSources;
+use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Deploy\Detect\StaticEntry;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Env\EnvExampleCopies;
+use App\Lib\Deploy\Health\Explainers\PlaceholderPageExplainer;
+use App\Lib\Deploy\Health\Explainers\StaticEntryExplainer;
+use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Probes\NextWorkspaceProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\GoEmbeddedFrontends;
 use App\Lib\Deploy\Platform\Runtime\GoRuntime;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 use App\Lib\Deploy\Telemetry\SourceBundle;
@@ -18,12 +25,15 @@ use PHPUnit\Framework\TestCase;
  * The account owns its checkout and may chmod 700 a directory in
  * it (Phorge's conf/local). The engine walks the tree as another user, so every
  * walker must skip what it cannot read rather than fail the deploy on
- * `scandir(...): Failed to open directory: Permission denied`.
+ * `scandir(...): Failed to open directory: Permission denied`. A checkout
+ * that is gone finds nothing too.
  *
  * Warnings throw, as they do under Laravel's error handler in production.
  */
 class UnreadableCheckoutDirectoryTest extends TestCase
 {
+    private const EXECUTE_ONLY = 0111;
+
     private string $dir = '';
 
     /** @var list<string> */
@@ -90,6 +100,15 @@ class UnreadableCheckoutDirectoryTest extends TestCase
         $this->assertSame('./cmd/server', GoRuntime::mainPackage($this->dir));
     }
 
+    public function test_go_embedded_frontends_are_found_past_a_locked_directory(): void
+    {
+        $this->write('main.go', "package main\n\nimport \"embed\"\n\n//go:embed web/dist\nvar ui embed.FS\n");
+        $this->write('web/package.json', '{"scripts":{"build":"vite build"}}');
+        $this->lock('conf/local');
+
+        $this->assertSame(['web'], array_column(GoEmbeddedFrontends::missing($this->dir), 'dir'));
+    }
+
     public function test_html_site_and_env_examples_skip_a_locked_directory(): void
     {
         $this->write('home.html', '<h1>hi</h1>');
@@ -131,6 +150,67 @@ class UnreadableCheckoutDirectoryTest extends TestCase
         }
     }
 
+    public function test_detection_of_a_missing_root_answers_like_an_empty_one(): void
+    {
+        $this->assertSame(
+            DetectProjectStrategy::detect($this->dir)['strategy'],
+            DetectProjectStrategy::detect($this->absentProjectDir())['strategy']
+        );
+    }
+
+    public function test_detection_finds_no_dockerfile_in_a_missing_root(): void
+    {
+        $dir = $this->absentProjectDir();
+
+        $this->assertNull(DockerfileFinder::find($dir, []));
+        $this->assertNull(DockerfileFinder::findNamed($dir));
+    }
+
+    public function test_a_missing_root_has_no_static_entry(): void
+    {
+        $this->assertNull(StaticEntry::find($this->absentProjectDir(), []));
+    }
+
+    public function test_a_missing_root_has_no_superseded_placeholder(): void
+    {
+        $this->assertNull(PlaceholderPage::supersededIndex($this->absentProjectDir()));
+    }
+
+    public function test_an_unlistable_root_has_no_superseded_placeholder(): void
+    {
+        $this->write('index.html', '<title>'.PlaceholderPage::WELCOME_TITLE.'</title>');
+        $this->lock('.', self::EXECUTE_ONLY);
+
+        $this->assertNull(PlaceholderPage::supersededIndex($this->dir));
+    }
+
+    public function test_python_starts_the_placeholder_for_a_missing_root(): void
+    {
+        $command = PythonRuntime::startCommand($this->absentProjectDir());
+
+        $this->assertStringContainsString(PlaceholderPage::NOT_CONFIGURED_TITLE, $command);
+    }
+
+    public function test_static_entry_explainer_answers_a_missing_root(): void
+    {
+        $explanation = (new StaticEntryExplainer())->explain(
+            ProjectContext::at($this->absentProjectDir()),
+            ProbedResponse::none('http://example.test/')
+        );
+
+        $this->assertStringContainsString('no HTML document', $explanation['detail']);
+    }
+
+    public function test_placeholder_page_explainer_answers_a_missing_root(): void
+    {
+        $explanation = (new PlaceholderPageExplainer())->explain(
+            ProjectContext::at($this->absentProjectDir()),
+            ProbedResponse::none('http://example.test/')
+        );
+
+        $this->assertStringContainsString('empty', $explanation['detail']);
+    }
+
     private function write(string $relative, string $contents): void
     {
         $path = $this->dir . '/' . $relative;
@@ -140,29 +220,45 @@ class UnreadableCheckoutDirectoryTest extends TestCase
         file_put_contents($path, $contents);
     }
 
-    /** chmod 000 as the owner; root reads through it, so the case cannot be made. */
-    private function lock(string $relative): void
+    /** A project root that does not exist, with warnings made to throw. */
+    private function absentProjectDir(): string
+    {
+        $this->throwOnWarnings();
+
+        return $this->dir . '/gone';
+    }
+
+    /**
+     * Deny the directory to the running user; as root it reads through the
+     * mode, so the case cannot be made and the test is skipped.
+     */
+    private function lock(string $relative, int $mode = 0): void
     {
         $path = $this->dir . '/' . $relative;
         if (!is_dir($path)) {
             mkdir($path, 0777, true);
         }
-        chmod($path, 0);
+        chmod($path, $mode);
         $this->locked[] = $path;
         if (@scandir($path) !== false) {
-            $this->markTestSkipped('running as a user that can read a mode-000 directory');
+            $this->markTestSkipped('running as a user that can read a directory of any mode');
         }
-        // What Laravel's HandleExceptions does. Here, not in setUp(): PHPUnit
-        // installs its own handler after setUp.
-        if ($this->reporting === null) {
-            $this->reporting = error_reporting(-1);
-            set_error_handler(static function (int $level, string $message, string $file = '', int $line = 0): bool {
-                if ((error_reporting() & $level) === 0) {
-                    return false;
-                }
-                throw new \ErrorException($message, 0, $level, $file, $line);
-            });
+        $this->throwOnWarnings();
+    }
+
+    /** What Laravel's HandleExceptions does. Here, not in setUp(): PHPUnit installs its own handler after setUp. */
+    private function throwOnWarnings(): void
+    {
+        if ($this->reporting !== null) {
+            return;
         }
+        $this->reporting = error_reporting(-1);
+        set_error_handler(static function (int $level, string $message, string $file = '', int $line = 0): bool {
+            if ((error_reporting() & $level) === 0) {
+                return false;
+            }
+            throw new \ErrorException($message, 0, $level, $file, $line);
+        });
     }
 
     private function removeDir(string $dir): void

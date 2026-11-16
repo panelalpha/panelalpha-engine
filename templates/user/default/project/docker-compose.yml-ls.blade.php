@@ -15,12 +15,12 @@ services:
       - /home/{{ $user }}/:/var/www/
       - ./log:/var/log
       - ./crontabs/www-data:/var/spool/cron/crontabs/{{ $user }}
-      - ./msmtp/msmtprc:/etc/msmtprc
+      - ./msmtp/msmtprc:/etc/msmtprc:ro
       - ./services/:/etc/s6/account/:ro
-      - ./entrypoint-init.d/:/entrypoint-init.d/
+      - ./entrypoint-init.d/:/entrypoint-init.d/:ro
 @foreach ($php_versions as $php_version)
-      - ./php/{{ $php_version }}/default.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/90-panelalpha-default.ini
-      - ./php/{{ $php_version }}/custom.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/91-panelalpha-custom.ini
+      - ./php/{{ $php_version }}/default.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/90-panelalpha-default.ini:ro
+      - ./php/{{ $php_version }}/custom.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/91-panelalpha-custom.ini:ro
 @endforeach
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}

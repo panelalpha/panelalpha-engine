@@ -6,16 +6,14 @@ use App\Lib\Deploy\Port\EnvVarDefault;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
 
 /**
- * The services a stack needs running: another service depends on them, or
- * reaches them by name as a host in its environment (`DB_HOST=db`,
- * `REDIS_URL=redis://cache:6379`).
+ * The services a stack needs running: another service depends on them, or reaches them by name as a host
+ * in its environment (`DB_HOST=db`, `REDIS_URL=redis://cache:6379`).
  */
 final class ServiceReferences
 {
     /**
-     * Words of an env key whose value is a host, `host:port` or a list of them
-     * even without a scheme. Under any other key only a URL's host counts, so
-     * `DB_CONNECTION=mysql` does not name a `mysql` service.
+     * Words of an env key whose value is a host even without a scheme; under any other key only a URL's
+     * host counts, so `DB_CONNECTION=mysql` does not name a `mysql` service.
      *
      * @var list<string>
      */
@@ -27,15 +25,7 @@ final class ServiceReferences
      */
     public static function needed(array $services): array
     {
-        $references = [];
-        foreach ($services as $name => $service) {
-            if (is_array($service)) {
-                $references[(string) $name] = array_flip(array_map('strtolower', [
-                    ...ServiceDependencies::namesIn($service),
-                    ...self::hostsIn($service['environment'] ?? null),
-                ]));
-            }
-        }
+        $references = self::referencesOf($services);
 
         $needed = [];
         foreach ($services as $name => $service) {
@@ -55,8 +45,27 @@ final class ServiceReferences
     }
 
     /**
-     * The hosts an environment names: every URL's host, and the bare value of a
-     * host-like key ({@see HOST_KEY_WORDS}). Whole hostnames, lowercased.
+     * @param  array<array-key, mixed>  $services
+     * @return array<string, array<string, int>> each service's lowercase references
+     */
+    private static function referencesOf(array $services): array
+    {
+        $references = [];
+        foreach ($services as $name => $service) {
+            if (is_array($service)) {
+                $references[(string) $name] = array_flip(array_map('strtolower', [
+                    ...ServiceDependencies::namesIn($service),
+                    ...self::hostsIn($service['environment'] ?? null),
+                ]));
+            }
+        }
+
+        return $references;
+    }
+
+    /**
+     * The hosts an environment names: every URL's host, and the bare value of a host-like key
+     * ({@see HOST_KEY_WORDS}). Whole hostnames, lowercased.
      *
      * @return list<string>
      */
@@ -78,8 +87,7 @@ final class ServiceReferences
     }
 
     /**
-     * The names other containers reach a service by: its own, its
-     * `container_name` and its network aliases.
+     * The names other containers reach a service by: its own, its `container_name` and its network aliases.
      *
      * @param  array<string, mixed>  $service
      * @return list<string>
@@ -101,11 +109,11 @@ final class ServiceReferences
         return array_map('strtolower', array_values(array_filter($names, static fn (string $n): bool => $n !== '')));
     }
 
+    /** DB_HOST, and PGHOST written as one word. */
     private static function isHostKey(string $key): bool
     {
         $key = strtoupper($key);
         foreach (self::HOST_KEY_WORDS as $word) {
-            // DB_HOST, and PGHOST written as one word.
             if (str_ends_with($key, $word) || in_array($word, preg_split('/[^A-Z0-9]+/', $key) ?: [], true)) {
                 return true;
             }
@@ -115,8 +123,8 @@ final class ServiceReferences
     }
 
     /**
-     * `db`, `db:5432`, `user:pass@db`, `a:27017,b:27017`: the hosts only. A
-     * token that does not start with a hostname (an IPv6 literal, a path) is skipped.
+     * `db`, `db:5432`, `user:pass@db`, `a:27017,b:27017`: the hosts only. A token that does not start with
+     * a hostname (an IPv6 literal, a path) is skipped.
      *
      * @return list<string>
      */

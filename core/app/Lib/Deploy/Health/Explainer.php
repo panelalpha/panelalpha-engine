@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\Health;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Turns a failed check into a diagnosis by reading the project.
- *
- * A check file says what a wrong answer looks like, in four keys of YAML; an
- * explainer says why this project gave one, which needs the files on disk and
- * is therefore code. Explainers run only after their check has failed, so a
- * healthy application never reads a file.
+ * Turns a failed check into a diagnosis by reading the project's files, which a YAML check file cannot;
+ * it runs only after its check failed, so a healthy app never reads a file.
  */
 interface Explainer
 {

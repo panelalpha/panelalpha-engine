@@ -3,21 +3,8 @@
 namespace App\System\Firewall;
 
 /**
- * One rule, in terms every provider can express. A null protocol, port,
- * source or destination means "any".
- *
- * The id is derived from what the rule matches, not from its position, so it
- * stays valid while other rules are added or removed.
- *
- * Direction `both` is one rule for traffic with an address either way, as a
- * bare address in csf.allow/csf.deny was: from `source` coming in, and to it
- * going out. A provider writes it as the two rules it takes.
- *
- * Scope `host` is the host's own ports; `published` is the ports Docker
- * publishes, matched on the container's port and address (ufw's route rules).
- * Neither reaches the other. Scope `both` is a deny written as one of each,
- * as a ban is: a deny made here without a scope is one, so blocking an
- * address closes the engine's published ports (2011, FTP, SFTP) as well.
+ * One rule, in terms every provider can express; a null protocol, port, source or destination means "any". The id
+ * derives from what the rule matches, not its position, so it stays valid while other rules are added or removed.
  */
 final class FirewallRule
 {
@@ -29,10 +16,16 @@ final class FirewallRule
 
     public const OUT = 'out';
 
+    /**
+     * Direction `both`: from `source` coming in and to it going out, as a bare csf.allow/csf.deny address was, written
+     * as the two rules a provider takes. Scope `both`: a deny written as one host and one published rule, as a ban is.
+     */
     public const BOTH = 'both';
 
+    /** Scope `host`: the host's own ports. Neither scope reaches the other's ports. */
     public const HOST = 'host';
 
+    /** Scope `published`: Docker's published ports, matched on the container's port and address (ufw's route rules). */
     public const PUBLISHED = 'published';
 
     /** Rules the installer opens carry this comment prefix; the API leaves them alone. */
@@ -46,6 +39,9 @@ final class FirewallRule
      * is one line, and a NUL cannot be passed in a command's argument.
      */
     public const COMMENT_REFUSED_CHARACTERS = '/[\'\r\n\x00]/';
+
+    /** iptables' multiport match takes at most this many ports in one rule, a range counting as two. */
+    public const MAX_PORTS = 15;
 
     /**
      * @param  bool  $editable  false for a rule written on the host with options this
@@ -86,9 +82,8 @@ final class FirewallRule
     }
 
     /**
-     * Only a missing scope on an inbound deny becomes `both`; an explicit one is
-     * kept, except `both` on an outbound rule, which becomes `host`: nothing
-     * published is reached going out.
+     * Only a missing scope on an inbound deny becomes `both`: a block closes the published ports (2011, FTP, SFTP) too.
+     * An explicit one is kept, except `both` going out, which becomes `host`: nothing published is reached going out.
      */
     private static function scopeFor(?string $scope, string $action, string $direction): string
     {
@@ -126,9 +121,8 @@ final class FirewallRule
     }
 
     /**
-     * The spelling firewalls store, so a rule is found again under the id it
-     * was added with: 1.2.3.4/32 is 1.2.3.4, 10.1.2.3/8 is 10.0.0.0/8, and
-     * IPv6 is compressed. Anything that is not an address is left as it is.
+     * The spelling firewalls store, so a rule is found again under the id it was added with: 1.2.3.4/32 is 1.2.3.4,
+     * 10.1.2.3/8 is 10.0.0.0/8, IPv6 is compressed, and anything that is not an address is left as it is.
      */
     public static function normalizeAddress(string $address): string
     {
@@ -303,9 +297,8 @@ final class FirewallRule
     }
 
     /**
-     * A port outside 1-65535, or a range written high to low, which ufw refuses.
-     * A leading zero too: ufw stores `08080` as written and iptables-restore then
-     * rejects the whole ruleset on reload, which leaves the host dropping every new connection.
+     * Out of range, high to low, more than multiport takes, or with a leading zero: ufw stores `08080` as written and
+     * iptables-restore then rejects the whole ruleset on reload, dropping every new connection.
      */
     private static function portProblem(string $port): ?string
     {
@@ -316,7 +309,17 @@ final class FirewallRule
             }
         }
 
-        return null;
+        return self::portCountProblem($port);
+    }
+
+    private static function portCountProblem(string $port): ?string
+    {
+        $count = substr_count($port, ',') + 1 + substr_count($port, ':');
+        if ($count <= self::MAX_PORTS) {
+            return null;
+        }
+
+        return sprintf('A rule takes at most %d ports, a range counting as two; this one has %d. Split it into several rules.', self::MAX_PORTS, $count);
     }
 
     /** @param list<string> $parts one port, or the two ends of a range */
@@ -341,10 +344,8 @@ final class FirewallRule
     }
 
     /**
-     * Deleting a rule taken for a ban lifts the ban on its address in fail2ban,
-     * so the prefix stays only on a rule that has it already, and on a deny from
-     * an address only on a ban of the same address. The comment is compared as
-     * normalised (trailing blanks), the ban read from it as stored, as ufw does.
+     * Deleting a rule taken for a ban lifts its fail2ban ban: the prefix stays only on a rule with it, and on an address
+     * deny only on a ban of that address. Comments compare normalised (trailing blanks), bans as stored, as ufw does.
      */
     private function banPrefixProblem(string $comment, ?self $current): ?string
     {
@@ -363,9 +364,8 @@ final class FirewallRule
     }
 
     /**
-     * ufw checks a rule's words before it takes the comment out of them
-     * (ufw/parser.py), so a few comments read as part of the rule, and
-     * /usr/sbin/ufw drops --rootdir= and --datadir= arguments before parsing.
+     * ufw checks a rule's words before it takes the comment out of them (ufw/parser.py), so a few comments read as part
+     * of the rule, and /usr/sbin/ufw drops --rootdir= and --datadir= arguments before parsing.
      */
     private function commentProblem(string $comment): ?string
     {

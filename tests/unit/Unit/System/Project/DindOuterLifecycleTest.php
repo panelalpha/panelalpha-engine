@@ -2,13 +2,18 @@
 
 namespace Tests\Unit\System\Project;
 
-use Tests\Support\FakeProcess;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\AccountContainers;
 use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Illuminate\Support\Facades\Log;
+use Tests\Support\FakeProcess;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class DindOuterLifecycleTest extends TestCase
@@ -23,6 +28,8 @@ class DindOuterLifecycleTest extends TestCase
     /** True: the host's `alice` was not started from the account directory. */
     private bool $foreignOnly = false;
 
+    private bool $accountImageOnHost = true;
+
     private static ?self $current = null;
 
     protected function setUp(): void
@@ -32,6 +39,7 @@ class DindOuterLifecycleTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-dind-outer-' . bin2hex(random_bytes(4));
         $this->homeRoot = $this->tmpRoot . '/home';
         $this->templateRoot = $this->tmpRoot . '/templates/user/dind/project';
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => $this->homeRoot]));
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
         mkdir($this->homeRoot . '/alice', 0777, true);
         mkdir($this->templateRoot, 0777, true);
@@ -40,6 +48,8 @@ class DindOuterLifecycleTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
+        DeployLogger::deleteUserLogs('alice');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -95,13 +105,15 @@ class DindOuterLifecycleTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return "1000\n";
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->executed[] = $cmd;
-                if (is_array($cmd) && ($cmd[0] ?? '') === 'sudo' && ($cmd[1] ?? '') === 'docker') {
+                if (is_array($cmd) && (DindOuterLifecycleTest::asRun($cmd)[0] ?? '') === 'docker') {
                     throw new \Exception('compose up failed');
                 }
 
@@ -147,11 +159,11 @@ class DindOuterLifecycleTest extends TestCase
         $downSeen = false;
         $rmSeen = false;
         foreach ($executed as $cmd) {
-            $flat = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+            $flat = is_array($cmd) ? implode(' ', self::asRun($cmd)) : $cmd;
             if (str_contains($flat, ' down') && str_contains($flat, 'docker compose')) {
                 $downSeen = true;
             }
-            if (str_contains($flat, 'docker rm') && str_contains($flat, 'alice')) {
+            if (str_contains($flat, 'docker.forceRemoveContainer') && str_contains($flat, 'alice')) {
                 $rmSeen = true;
             }
         }
@@ -169,12 +181,12 @@ class DindOuterLifecycleTest extends TestCase
         $project->stop();
 
         $this->assertContains(
-            ['sudo', 'docker', 'compose', '-f', $project->composeFilePath(), 'up', '-d', '--remove-orphans'],
-            $this->executed
+            ['docker', 'compose', '-f', $project->composeFilePath(), 'up', '-d', '--remove-orphans'],
+            $this->ran()
         );
         $this->assertContains(
-            ['sudo', 'docker', 'compose', '-f', $project->composeFilePath(), 'down'],
-            $this->executed
+            ['docker', 'compose', '-f', $project->composeFilePath(), 'down'],
+            $this->ran()
         );
     }
 
@@ -187,10 +199,44 @@ class DindOuterLifecycleTest extends TestCase
         $project->tearDown();
 
         $this->assertContains(
-            ['sudo', 'docker', 'compose', '-f', $project->composeFilePath(), 'down', '-v', '--remove-orphans'],
-            $this->executed
+            ['docker', 'compose', '-f', $project->composeFilePath(), 'down', '-v', '--remove-orphans'],
+            $this->ran()
         );
-        $this->assertContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+        $this->assertContains([LocalRoot::CLIENT, 'docker.forceRemoveContainer', '--', 'alice'], $this->ran());
+    }
+
+    public function test_a_deploy_is_told_when_the_account_image_has_to_be_fetched(): void
+    {
+        $this->accountImageOnHost = false;
+        $deploy = DeployLogger::start('alice');
+        $project = $this->dind($this->recordingSystem(), $this->dindModel());
+
+        $project->buildIfMissing();
+
+        $this->assertContains(
+            ['info', 'The account image '.AccountImage::REF.' is not on this host: pulling it, or building it if the pull fails'],
+            array_map(static fn (array $line): array => [$line['level'], $line['msg']], $deploy->entries()),
+        );
+        $this->assertContains(AccountImage::ensureCommand($project->project()->projectDirPath()), $this->executed);
+    }
+
+    public function test_an_account_image_already_on_the_host_is_not_announced(): void
+    {
+        $deploy = DeployLogger::start('alice');
+        $project = $this->dind($this->recordingSystem(), $this->dindModel());
+
+        $project->buildIfMissing();
+
+        $this->assertStringNotContainsString('account image', implode("\n", array_column($deploy->entries(), 'msg')));
+    }
+
+    public function test_without_a_deploy_the_image_is_not_probed_twice(): void
+    {
+        $project = $this->dind($this->recordingSystem(), $this->dindModel());
+
+        $project->buildIfMissing();
+
+        $this->assertNotContains(AccountImage::presentArgv(), $this->executed);
     }
 
     public function test_materialize_does_not_invoke_deploy_strategy(): void
@@ -223,12 +269,10 @@ class DindOuterLifecycleTest extends TestCase
         $project->tearDown();
 
         $this->assertContains([
-            'sudo', 'docker', 'ps', '-a',
-            '--filter', 'name=^/alice$',
-            '--filter', 'label=com.docker.compose.project.working_dir=' . $system->projectDirPath('alice'),
-            '--format', '{{.Names}}',
-        ], $this->executed);
-        $this->assertNotContains(['sudo', 'docker', 'rm', '-f', 'alice'], $this->executed);
+            LocalRoot::CLIENT, 'docker.containerNamedWithLabel', '--', 'alice',
+            AccountContainers::WORKING_DIR_LABEL, $system->projectDirPath('alice'),
+        ], $this->ran());
+        $this->assertNotContains([LocalRoot::CLIENT, 'docker.forceRemoveContainer', '--', 'alice'], $this->ran());
     }
 
     /**
@@ -239,15 +283,35 @@ class DindOuterLifecycleTest extends TestCase
      */
     public static function hostAnswer(string|array $cmd): FakeProcess
     {
-        $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-        if (str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$')) {
-            $labelled = str_contains($line, 'label=com.docker.compose.project.working_dir=');
+        if ($cmd === AccountImage::presentArgv()) {
+            return (self::$current?->accountImageOnHost ?? true) ? FakeProcess::ok() : FakeProcess::failed();
+        }
+        if (LocalRoot::action((array) $cmd) === 'docker.containerNamedWithLabel') {
             $foreign = self::$current?->foreignOnly ?? false;
 
-            return FakeProcess::ok($labelled && $foreign ? '' : "alice\n");
+            return FakeProcess::ok($foreign ? '' : "alice\n");
         }
 
         return FakeProcess::forCommand($cmd);
+    }
+
+    /**
+     * @param string|list<string> $cmd
+     * @return string|list<string>
+     */
+    public static function asRun(string|array $cmd): string|array
+    {
+        if (!is_array($cmd) || !LocalRoot::isRequest($cmd) || LocalRoot::isNative($cmd)) {
+            return $cmd;
+        }
+
+        return LocalRoot::plain($cmd);
+    }
+
+    /** @return list<string|list<string>> */
+    private function ran(): array
+    {
+        return array_map(self::asRun(...), $this->executed);
     }
 
     private function dind(System $system, ModelsUser $model): Dind
@@ -332,6 +396,7 @@ class DindOuterLifecycleTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 if (is_array($cmd) && ($cmd[0] ?? '') === 'id') {
                     return "1000\n";
                 }

@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project\Dind;
 use App\System;
 use App\System\Project\Dind\StepDiskLimit;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
 
 /**
  * What stops a running deploy step for disk -- the host minimum
@@ -67,6 +68,7 @@ class StepDiskLimitTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->asked[] = $line;
                 $path = is_array($cmd) ? (string) end($cmd) : '';

@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\CacheManager;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
+use App\Lib\Deploy\Dind\AccountImage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -270,6 +271,27 @@ class HostPrewarmPlanTest extends TestCase
             ['panelalpha/php:8.4-cli-bookworm-padeadbeef', 'panelalpha/php:8.2-cli-bookworm-pa20200101'],
             $stale
         );
+    }
+
+    public function test_a_required_image_is_warmed_whatever_the_budget(): void
+    {
+        $plan = HostPrewarmPlan::select(
+            HostPrewarmPlan::required(),
+            [AccountImage::REF => 2 * 1073741824],
+            availableBytes: 11 * 1073741824,
+            reserveBytes: 10 * 1073741824,
+            budgetBytes: 0
+        );
+
+        $this->assertSame([AccountImage::REF], array_column($plan['selected'], 'ref'));
+    }
+
+    public function test_a_required_image_already_present_is_not_warmed_again(): void
+    {
+        $plan = HostPrewarmPlan::select(HostPrewarmPlan::required(), [], 100 * 1073741824, 0, null, [AccountImage::REF]);
+
+        $this->assertSame([], $plan['selected']);
+        $this->assertSame('already present', $plan['skipped'][0]['reason']);
     }
 
     public function test_only_selected_ids_are_warmed(): void

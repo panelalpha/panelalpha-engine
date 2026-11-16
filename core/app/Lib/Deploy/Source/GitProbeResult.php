@@ -3,8 +3,7 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * What {@see GitRemoteProbe::check()} learned. `problem()` callers only need
- * the problem; the vault form also needs "verified" told apart from "not
+ * What {@see GitRemoteProbe::check()} learned; the vault form needs "verified" told apart from "not
  * checked", which a null problem cannot say.
  */
 final class GitProbeResult

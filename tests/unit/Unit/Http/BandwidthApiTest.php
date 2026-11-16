@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
@@ -80,7 +81,7 @@ class BandwidthApiTest extends TestCase
 
         (require database_path('migrations/2026_10_07_000000_create_project_disk_usage_table.php'))->up();
 
-        $this->statistics = new FakeStatistics();
+        $this->statistics = new FakeStatistics;
         $this->statistics->domainSeries = [
             'example.com' => [
                 '2026-09-01' => 1000,
@@ -91,9 +92,8 @@ class BandwidthApiTest extends TestCase
             ],
         ];
         $this->app->instance(Statistics::class, $this->statistics);
-        // /usage measures the home with `du` and the container logs with `find`, both
-        // through sudo; answer them here instead of on this machine.
-        $this->system = new class extends System {
+        $this->system = new class extends System
+        {
             /** @var list<list<string>> */
             public array $ran = [];
 
@@ -102,11 +102,12 @@ class BandwidthApiTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->ran[] = (array) $cmd;
-                if (in_array('du', (array) $cmd, true)) {
+                $argv = LocalRoot::plain((array) $cmd);
+                if (in_array('du', $argv, true)) {
                     return FakeProcess::ok("12\t/home/alice\n");
                 }
 
-                return in_array('find', (array) $cmd, true) ? FakeProcess::ok($this->logSizes) : FakeProcess::forCommand($cmd);
+                return in_array('find', $argv, true) ? FakeProcess::ok($this->logSizes) : FakeProcess::forCommand($cmd);
             }
         };
         $this->app->instance(System::class, $this->system);
@@ -219,11 +220,13 @@ class BandwidthApiTest extends TestCase
         $response->assertJsonPath('logs.usage', 10485760 * 2 + 524288);
         $response->assertJsonPath('logs.maximum', null);
         $response->assertJsonPath('storage.usage', 12);
-        $find = array_values(array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', $cmd, true)));
-        $this->assertSame([[
-            'sudo', 'find', $this->system->projectHomeDirPath('alice') . '/docker/containers',
+        $find = array_values(array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', LocalRoot::plain($cmd), true)));
+        $this->assertCount(1, $find);
+        $this->assertTrue(LocalRoot::isRequest($find[0]));
+        $this->assertSame([
+            'find', $this->system->projectHomeDirPath('alice').'/docker/containers',
             '-mindepth', '2', '-maxdepth', '2', '-type', 'f', '-name', '*-json.log*', '-printf', '%s\n',
-        ]], $find);
+        ], LocalRoot::plain($find[0]));
     }
 
     public function test_usage_logs_are_zero_without_a_containers_directory_or_a_dind_runtime(): void
@@ -237,7 +240,7 @@ class BandwidthApiTest extends TestCase
         $this->system->ran = [];
         $this->system->logSizes = "999\n";
         $this->getJson("/api/projects/{$user->username}/usage")->assertOk()->assertJsonPath('logs.usage', 0);
-        $this->assertSame([], array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', $cmd, true)));
+        $this->assertSame([], array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', LocalRoot::plain($cmd), true)));
     }
 
     public function test_empty_statistics_are_zeros_not_errors(): void
@@ -250,7 +253,7 @@ class BandwidthApiTest extends TestCase
             "/api/projects/{$user->username}/bandwidth?start=2026-09-01&end=2026-09-30&group_by=day"
         );
         $series->assertOk();
-        $series->assertExactJson([]);
+        $this->assertSame('{}', $series->getContent());
 
         $usage = $this->getJson("/api/projects/{$user->username}/usage");
         $usage->assertOk();
@@ -276,7 +279,7 @@ class BandwidthApiTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $details
+     * @param  array<string, mixed>  $details
      */
     private function makeProject(array $details = []): User
     {

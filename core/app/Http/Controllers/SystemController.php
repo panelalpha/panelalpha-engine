@@ -9,6 +9,8 @@ use App\Http\Requests\EximTestEmailSendRequest;
 use App\Lib\Deploy\Telemetry\HostFacts;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\NamingBaseSetting;
+use App\Lib\Host\ApiFeatures;
 use App\Lib\Mail\EximConfigSecrets;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
@@ -16,11 +18,14 @@ use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
+use App\Models\BackupContainer;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
+use App\Rules\AcmeDirectoryUrl;
 use App\System;
 use App\System\AccountContainers;
+use App\System\HostScriptReport;
 use App\System\Network;
 use App\System\Services\Webserver\Litespeed;
 use Illuminate\Http\JsonResponse;
@@ -50,6 +55,7 @@ class SystemController extends Controller
 
         $data = [
             'version' => config('system.version'),
+            'features' => ApiFeatures::ALL,
             'url' => $url !== '' ? $url : null,
             'api_url' => $url !== '' ? $url.'/api' : null,
             'mcp_url' => $url !== '' ? $url.'/mcp' : null,
@@ -60,6 +66,7 @@ class SystemController extends Controller
             'default_ipv4' => Setting::get('default_ipv4'),
             'host' => HostFacts::hostFor($caller, $system),
             'default_ipv6' => Setting::get('default_ipv6'),
+            'default_backup_container' => self::defaultBackupContainer(),
             'ipv4_nat_mode' => Ipv4NatMap::isNatModeEnabled(),
             'ipv4_nat_maps' => Ipv4NatMap::all(),
             'webserver' => $webserver->getDetails(),
@@ -68,6 +75,8 @@ class SystemController extends Controller
             'panelalpha_online' => self::panelalphaOnline(),
             'unreadable_secrets' => self::unreadableSecrets($caller, User::query()->cursor()),
             'orphan_account_containers' => self::orphanAccountContainers($system, $caller),
+            'tenant_network_firewall' => (new HostScriptReport($system, HostScriptReport::TENANT_NETWORK_FIREWALL))->reportFor($caller),
+            'host_firewall' => (new HostScriptReport($system, HostScriptReport::HOST_FIREWALL))->reportFor($caller),
         ];
 
         return new JsonResponse([
@@ -81,6 +90,27 @@ class SystemController extends Controller
         return Setting::get(DomainPlan::SETTING_DEFAULT_TUNNEL);
     }
 
+    /**
+     * The store the host backs up into when a caller names none; null while the
+     * host has none. Credentials are never part of it.
+     *
+     * @return ?array{id: int, name: string, driver: string, location: string}
+     */
+    public static function defaultBackupContainer(): ?array
+    {
+        $container = BackupContainer::defaultContainer();
+        if ($container === null) {
+            return null;
+        }
+
+        return [
+            'id' => $container->id,
+            'name' => $container->name,
+            'driver' => $container->driver,
+            'location' => $container->location,
+        ];
+    }
+
     /** The URL a client should use: APP_URL, which the certificate scripts keep on the name the served certificate was issued for. */
     private static function engineUrl(): string
     {
@@ -91,7 +121,7 @@ class SystemController extends Controller
      * Where a project created without a domain of its own lands (<name>.<sites_base_domain>), and whether
      * sites there can hold a real certificate: a caller cannot know either without it.
      *
-     * @return array{sites_base_domain: mixed, sites_certificates: array{issuer: string, shared_zone: bool, shared_zone_issuance: bool}}
+     * @return array{sites_base_domain: mixed, project_domain_bases: list<array<string, mixed>>, sites_certificates: array{issuer: string, shared_zone: bool, shared_zone_issuance: bool}}
      */
     private static function sitesDomain(): array
     {
@@ -99,6 +129,7 @@ class SystemController extends Controller
 
         return [
             'sites_base_domain' => $base,
+            'project_domain_bases' => DomainAllocator::projectDomainBases(),
             'sites_certificates' => [
                 'issuer' => Issuers::configured()->id(),
                 'shared_zone' => $base === null || SharedZones::covers((string) $base),
@@ -263,7 +294,7 @@ class SystemController extends Controller
         $params = $request->validate([
             'issuer' => 'string|nullable|in:self_signed,acme',
             'sites_base_domain' => 'string|nullable|max:253',
-            'acme_directory_url' => 'string|nullable|max:2048',
+            'acme_directory_url' => ['nullable', 'string', 'max:2048', new AcmeDirectoryUrl],
             'acme_email' => 'email|nullable|max:255',
             'shared_zone_issuance' => 'boolean|nullable',
         ]);
@@ -294,7 +325,7 @@ class SystemController extends Controller
                 'sites_base_domain' => "{$base} is not a hostname sites can be named under.",
             ]);
         }
-        self::setOrForget('default_wildcard_domain', $base);
+        NamingBaseSetting::save('default_wildcard_domain', $base);
     }
 
     /** An emptied value removes the setting, so it reads back as null rather than "". */
@@ -418,14 +449,21 @@ class SystemController extends Controller
 
     #[OA\Put(
         path: '/system/update',
-        summary: 'Trigger a system update',
+        summary: 'Update the engine to its newest release',
+        description: 'Replaces the engine\'s code with the newest release and restarts the engine stack: API and MCP '
+            .'clients disconnect for about a minute, while hosted sites keep running. It runs in the background and '
+            .'answers at once; read how it ended from `latest_update` in GET /system/info. A release older than the '
+            .'running one is refused (`result: refused`); a newer commit of the running version is installed as an '
+            .'update within the release, and when the newest release is the running commit nothing changes '
+            .'(`result: up_to_date`). A run that fails after replacing the engine\'s files puts the previous '
+            .'release back (`result: rolled_back`); database migrations the new release ran stay.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'license_key', type: 'string', nullable: true)],
+            properties: [new OA\Property(property: 'license_key', type: 'string', nullable: true, description: 'Accepted for older callers; ignored')],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Update initiated', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'The update has started; `data` is its run, still pending', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', ref: '#/components/schemas/EngineUpdateRun')],
             )),
             new OA\Response(response: 409, description: 'An update is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -479,8 +517,11 @@ class SystemController extends Controller
             )],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Webserver change initiated', content: new OA\JsonContent(
-                properties: [new OA\Property(property: 'data', type: 'object')],
+            new OA\Response(response: 200, description: 'Webserver change initiated; or, when the requested webserver is already active, nothing is run and `data` is the latest change run', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string', description: 'Only when the requested webserver is already active'),
+                    new OA\Property(property: 'data', type: 'object', nullable: true),
+                ],
             )),
             new OA\Response(response: 422, description: 'Any webserver other than nginx-proxy is temporarily refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
             new OA\Response(response: 409, description: 'A webserver change is already running', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -506,6 +547,13 @@ class SystemController extends Controller
 
         if ($system->isChangeWebserverScriptRunning()) {
             return new JsonResponse(['message' => 'Change webserver script is already running'], 409);
+        }
+
+        if ($serialNumber === null && $system->isWebserverActive($params['new_webserver'])) {
+            return new JsonResponse([
+                'message' => "Webserver '{$params['new_webserver']}' is already active; nothing was changed",
+                'data' => $system->getLatestChangeWebserverInfo(),
+            ]);
         }
 
         if ($serialNumber !== null) {
@@ -599,8 +647,8 @@ class SystemController extends Controller
     #[OA\Put(
         path: '/system/webserver-config',
         summary: 'Update webserver configuration',
-        description: 'LiteSpeed and OpenLiteSpeed only. On the nginx-proxy webserver every engine runs today this answers 422, because only (Open)LiteSpeed implements a panel config.',
-        x: ['mcp-description' => '(Open)LiteSpeed only; answers 422 on nginx-proxy.'],
+        description: 'LiteSpeed only. On the nginx-proxy webserver every engine runs today, and on OpenLiteSpeed, which has no serial number, this answers 422, because only LiteSpeed implements a panel config.',
+        x: ['mcp-description' => 'LiteSpeed only; answers 422 on nginx-proxy and OpenLiteSpeed.'],
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(

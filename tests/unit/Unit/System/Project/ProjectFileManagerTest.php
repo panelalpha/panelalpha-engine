@@ -9,8 +9,10 @@ use App\System\Filesystem;
 use App\System\Project;
 use App\System\Project\FileManager;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\Support\InfoZip;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -236,6 +238,28 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame([], glob($this->homeDir . '/.unzip-stage/*') ?: [], 'the staged copy is removed');
     }
 
+    /** A zip unzip cannot list, and a .gz gzip cannot open, are refused by the archive's own name. */
+    public function test_unzip_names_an_archive_it_cannot_read(): void
+    {
+        $this->requireCommand('unzip');
+        $files = new FileManager(
+            new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')),
+            $this->homeDir . '/.unzip-stage'
+        );
+        file_put_contents($this->homeDir . '/broken.zip', "PK\x03\x04 not a whole zip");
+        file_put_contents($this->homeDir . '/broken.gz', 'not gzip at all');
+
+        foreach (['broken.zip', 'broken.gz'] as $name) {
+            try {
+                $files->unzip($name, 'out-' . $name);
+                $this->fail("{$name} was unpacked");
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                $this->assertMatchesRegularExpression('/Could not (read|unpack) ' . preg_quote($name, '/') . ':/', $e->getMessage());
+                $this->assertStringNotContainsString('unzip-stage', $e->getMessage());
+            }
+        }
+    }
+
     /** Root read what the home check, run as the account, could not see: an archive in ~/docker. */
     public function test_unzip_reads_the_archive_as_the_account(): void
     {
@@ -254,7 +278,7 @@ class ProjectFileManagerTest extends TestCase
         $reads = array_filter($this->commands, fn (array $argv): bool => in_array($this->homeDir . '/bundle.zip', $argv, true));
         $this->assertNotSame([], $reads);
         foreach ($reads as $argv) {
-            $this->assertSame(['sudo', 'setpriv'], array_slice($argv, 0, 2), 'read as root: ' . implode(' ', $argv));
+            $this->assertStringStartsWith('account.', (string) LocalRoot::action($argv), 'read as root: ' . implode(' ', $argv));
         }
     }
 
@@ -400,11 +424,178 @@ class ProjectFileManagerTest extends TestCase
         try {
             $files->unzip('bundle.tar.gz', 'locked');
             $this->fail('an archive was extracted into a folder the account cannot write to');
-        } catch (ValidationException $e) {
-            $this->assertSame(['/locked is not writable.'], $e->errors()['path']);
+        } catch (ProblemException $e) {
+            $this->assertSame([
+                'field' => 'path',
+                'code' => 'not_writable',
+                'message' => "/locked is not a folder the project's account can write to: choose a folder inside the project.",
+            ], $e->problems[0]);
         } finally {
             chmod($this->homeDir . '/locked', 0755);
         }
+    }
+
+    public function test_unzip_refuses_a_missing_destination_below_a_folder_the_account_cannot_write_to(): void
+    {
+        $this->requireCommand('tar');
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root writes to a 0555 directory.');
+        }
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'new');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+        mkdir($this->homeDir . '/locked', 0555);
+
+        try {
+            $files->unzip('bundle.tar.gz', 'locked/new/dir');
+            $this->fail('an archive was extracted below a folder the account cannot write to');
+        } catch (ProblemException $e) {
+            $this->assertSame([
+                'field' => 'path',
+                'code' => 'not_writable',
+                'message' => "/locked is not a folder the project's account can write to: choose a folder inside the project.",
+            ], $e->problems[0]);
+        } finally {
+            chmod($this->homeDir . '/locked', 0755);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/locked/new');
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function fieldsThroughALinkOutOfTheHome(): iterable
+    {
+        yield 'zip_path' => ['zip_path', 'link/site.tar.gz', 'out'];
+        yield 'path' => ['path', 'site.tar.gz', 'link/out'];
+    }
+
+    #[DataProvider('fieldsThroughALinkOutOfTheHome')]
+    public function test_unzip_refuses_a_path_through_a_link_out_of_the_home_as_outside_home_on_its_field(string $field, string $zipPath, string $path): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        file_put_contents($this->homeDir . '/note.txt', 'new');
+        exec('tar -czf ' . escapeshellarg($outside . '/site.tar.gz') . ' -C ' . escapeshellarg($this->homeDir) . ' note.txt');
+        copy($outside . '/site.tar.gz', $this->homeDir . '/site.tar.gz');
+        symlink($outside, $this->homeDir . '/link');
+        $refused = $field === 'zip_path' ? $zipPath : $path;
+
+        try {
+            $files->unzip($zipPath, $path);
+            $this->fail('a path through a link out of the home was used');
+        } catch (ProblemException $e) {
+            $this->assertSame([
+                'field' => $field,
+                'code' => 'outside_home',
+                'message' => "Refusing {$this->homeDir}/{$refused}: it resolves outside the project home",
+            ], $e->problems[0]);
+        }
+        $this->assertSame(['site.tar.gz'], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    /** The destination's check and the move are two steps: a link planted in between is refused by the move. */
+    public function test_unzip_refuses_a_destination_that_became_a_link_out_of_the_home_as_outside_home_on_path(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'new');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.tar.gz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+        $this->plantedBeforeUnpack = [$this->homeDir . '/out' => $outside];
+
+        try {
+            $files->unzip('bundle.tar.gz', 'out');
+            $this->fail('an archive was moved through a link out of the home');
+        } catch (ProblemException $e) {
+            $this->assertSame(['path', 'outside_home'], [$e->problems[0]['field'], $e->problems[0]['code']]);
+            $this->assertStringEndsWith('/out: it resolves outside the project home', $e->problems[0]['message']);
+        }
+        $this->assertSame([], array_values(array_diff(scandir($outside), ['.', '..'])));
+    }
+
+    public function test_unzip_extracts_a_tgz_as_a_tarball(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        file_put_contents($this->homeDir . '/src/note.txt', 'restored');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/bundle.TGZ') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' note.txt');
+
+        $files->unzip('bundle.TGZ', 'out');
+
+        $this->assertSame('restored', file_get_contents($this->homeDir . '/out/note.txt'));
+    }
+
+    public function test_unzip_unpacks_a_gz_to_its_name_without_the_suffix_whatever_its_case(): void
+    {
+        $files = $this->fileManager();
+        file_put_contents($this->homeDir . '/notes.txt.GZ', (string) gzencode('restored'));
+
+        $files->unzip('notes.txt.GZ', 'out');
+
+        $this->assertSame(['notes.txt'], array_values(array_diff(scandir($this->homeDir . '/out'), ['.', '..'])));
+        $this->assertSame('restored', file_get_contents($this->homeDir . '/out/notes.txt'));
+    }
+
+    /** A tarball named .tgz is checked as one: a link member out of it is refused. */
+    public function test_unzip_refuses_a_tgz_a_deploy_would_refuse(): void
+    {
+        $this->requireCommand('tar');
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/src');
+        symlink('/etc', $this->homeDir . '/src/etc');
+        exec('tar -czf ' . escapeshellarg($this->homeDir . '/links.tgz') . ' -C ' . escapeshellarg($this->homeDir . '/src') . ' etc');
+
+        try {
+            $files->unzip('links.tgz', 'out');
+            $this->fail('a .tgz with a link out of it was unpacked');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('symbolic link', $e->errors()['zip_path'][0]);
+        }
+        $this->assertFileDoesNotExist($this->homeDir . '/out/links.tgz');
+        $this->assertFalse(is_link($this->homeDir . '/out/etc'));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function namesUnzipDoesNotRead(): iterable
+    {
+        yield 'rar' => ['site.rar'];
+        yield '7z' => ['site.7z'];
+        yield 'no suffix' => ['site'];
+    }
+
+    #[DataProvider('namesUnzipDoesNotRead')]
+    public function test_unzip_refuses_a_format_it_does_not_read_naming_the_ones_it_does(string $name): void
+    {
+        $files = $this->fileManager();
+        file_put_contents($this->homeDir . '/' . $name, 'Rar!');
+
+        try {
+            $files->unzip($name, 'out');
+            $this->fail("{$name} was handed to an extractor");
+        } catch (ValidationException $e) {
+            $this->assertSame(['Unsupported archive format, expected .zip, .tar.gz, .tgz or .gz'], $e->errors()['zip_path']);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/out');
+    }
+
+    public function test_unzip_answers_an_archive_that_is_not_there_as_not_found_on_zip_path(): void
+    {
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/dir');
+
+        try {
+            $files->unzip('dir/win.zip', 'out');
+            $this->fail('a missing archive was unpacked');
+        } catch (ProblemException $e) {
+            $this->assertSame(['field' => 'zip_path', 'code' => 'not_found', 'message' => 'Archive not found: /dir/win.zip'], $e->problems[0]);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/out');
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/.unzip-stage');
     }
 
     private function assertRaceAnswersDestinationExists(bool $removedAfterTheRename): void
@@ -508,12 +699,85 @@ class ProjectFileManagerTest extends TestCase
         $files->unzip('site.zip', 'out');
 
         $this->assertSame('x', file_get_contents($this->homeDir . '/out/' . $name));
-        $unzips = array_filter($this->commands, fn (array $argv): bool => in_array('unzip', $argv, true));
+        $unzips = array_filter(array_map(LocalRoot::plain(...), $this->commands), fn (array $argv): bool => in_array('unzip', $argv, true));
         $this->assertNotSame([], $unzips);
         foreach ($unzips as $argv) {
             $at = (int) array_search('unzip', $argv, true);
             $this->assertSame(['env', 'LC_ALL=C.UTF-8'], array_slice($argv, $at - 2, 2), implode(' ', $argv));
         }
+    }
+
+    /** As PowerShell's Compress-Archive writes it: unzip exits 1 for the backslashes it reads as folder separators. */
+    public function test_unzip_extracts_a_zip_made_on_windows_into_its_folders_and_answers_unzips_warning(): void
+    {
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        $this->zipMadeOn(\ZipArchive::OPSYS_DOS, 'site.zip', ['index.php' => '<?php', 'inc\\hello.php' => '<?php echo 1;']);
+
+        $warnings = $files->unzip('site.zip', 'out');
+
+        $this->assertSame('<?php echo 1;', file_get_contents($this->homeDir . '/out/inc/hello.php'));
+        $this->assertSame(['warning: site.zip appears to use backslashes as path separators'], $warnings);
+    }
+
+    public function test_unzip_answers_no_warning_for_a_zip_unzip_had_nothing_to_say_about(): void
+    {
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        $this->zipMadeOn(\ZipArchive::OPSYS_UNIX, 'site.zip', ['inc/hello.php' => '<?php echo 1;']);
+
+        $this->assertSame([], $files->unzip('site.zip', 'out'));
+        $this->assertSame('<?php echo 1;', file_get_contents($this->homeDir . '/out/inc/hello.php'));
+    }
+
+    /** unzip would write one file named `inc\hello.php`, which `require 'inc/hello.php'` never finds. */
+    public function test_unzip_refuses_a_zip_whose_backslashes_would_stay_in_its_file_names(): void
+    {
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        $this->zipMadeOn(\ZipArchive::OPSYS_UNIX, 'site.zip', ['index.php' => '<?php', 'inc\\hello.php' => '<?php echo 1;']);
+
+        try {
+            $files->unzip('site.zip', 'out');
+            $this->fail('a zip whose backslashes unzip keeps in its file names was extracted');
+        } catch (ValidationException $e) {
+            $this->assertStringStartsWith('Archive uses backslashes in file names', $e->errors()['zip_path'][0]);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/out');
+    }
+
+    public function test_unzip_still_fails_an_extraction_unzip_could_not_finish(): void
+    {
+        $this->requireCommand('unzip');
+        $files = $this->fileManager();
+        $this->zipMadeOn(\ZipArchive::OPSYS_UNIX, 'site.zip', ['index.php' => '<?php echo 1;']);
+        $archive = (string) file_get_contents($this->homeDir . '/site.zip');
+        file_put_contents($this->homeDir . '/site.zip', str_replace('<?php echo 1;', '<?php echo 2;', $archive));
+
+        try {
+            $files->unzip('site.zip', 'out');
+            $this->fail('a member that failed its CRC check was extracted');
+        } catch (ValidationException $e) {
+            $this->assertStringStartsWith('Could not unpack site.zip: ', $e->errors()['zip_path'][0]);
+            $this->assertStringContainsString('bad CRC', $e->errors()['zip_path'][0]);
+            $this->assertStringNotContainsString('unzip-stage', $e->errors()['zip_path'][0]);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/out');
+    }
+
+    public function test_unzip_names_a_gz_gzip_could_not_unpack_by_its_own_name(): void
+    {
+        $files = $this->fileManager();
+        file_put_contents($this->homeDir . '/notes.gz', 'not gzip data');
+
+        try {
+            $files->unzip('notes.gz', 'out');
+            $this->fail('a .gz gzip could not read was unpacked');
+        } catch (ValidationException $e) {
+            $this->assertStringStartsWith('Could not unpack notes.gz: gzip: ', $e->errors()['zip_path'][0]);
+            $this->assertStringNotContainsString('unzip-stage', $e->errors()['zip_path'][0]);
+        }
+        $this->assertDirectoryDoesNotExist($this->homeDir . '/out');
     }
 
     public function test_move_directory_contents_moves_children_only(): void
@@ -736,6 +1000,19 @@ class ProjectFileManagerTest extends TestCase
         chmod($this->mvShim . '/mv', 0755);
     }
 
+    /** @param array<string, string> $members name => contents, stored as they are */
+    private function zipMadeOn(int $system, string $name, array $members): void
+    {
+        $zip = new \ZipArchive();
+        $zip->open($this->homeDir . '/' . $name, \ZipArchive::CREATE);
+        foreach ($members as $member => $contents) {
+            $zip->addFromString($member, $contents);
+            $zip->setCompressionName($member, \ZipArchive::CM_STORE);
+            $zip->setExternalAttributesName($member, $system, $system === \ZipArchive::OPSYS_UNIX ? 0100644 << 16 : 0x20);
+        }
+        $zip->close();
+    }
+
     private function assertDestinationTaken(callable $unzip, string $archive): ProblemException
     {
         try {
@@ -846,12 +1123,7 @@ class ProjectFileManagerTest extends TestCase
                 }
 
                 $this->commands[] = $cmd;
-                $argv = $cmd;
-                if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'setpriv') {
-                    $argv = array_slice($argv, 7);
-                } elseif (($argv[0] ?? '') === 'sudo') {
-                    $argv = array_slice($argv, 1);
-                }
+                $argv = LocalRoot::plain($cmd);
                 if (($argv[0] ?? '') === 'chown') {
                     // Root's handover of the stage: the test need not run as root.
                     $argv = ['true'];

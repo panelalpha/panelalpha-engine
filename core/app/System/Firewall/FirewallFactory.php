@@ -2,19 +2,18 @@
 
 namespace App\System\Firewall;
 
+use App\Lib\Traits\MemoisesNamedFactories;
 use App\System;
 use App\System\Firewall\Ufw\UfwFirewall;
 
 /**
- * Resolves the {@see Firewall} the engine manages.
- *
- * Adding a provider is a registration plus a setting, no controller or tool
- * changes: `FirewallFactory::register('firewalld', fn () => new Firewalld(...))`
- * and `FIREWALL_PROVIDER=firewalld`. The host side follows the same setting:
- * scripts/firewall.sh runs scripts/firewall/<provider>.sh.
+ * Resolves the {@see Firewall} the engine manages; a provider is a registration plus `FIREWALL_PROVIDER`.
+ * The host side follows the same setting: scripts/firewall.sh runs scripts/firewall/<provider>.sh.
  */
 final class FirewallFactory
 {
+    use MemoisesNamedFactories;
+
     public const UFW = 'ufw';
 
     /** @var array<string, callable(): Firewall> */
@@ -30,9 +29,7 @@ final class FirewallFactory
      */
     public static function register(string $name, callable $factory): void
     {
-        $name = self::normalize($name);
-        self::$factories[$name] = $factory;
-        unset(self::$instances[$name]);
+        self::remember($name, $factory);
     }
 
     /** The provider `FIREWALL_PROVIDER` names, or ufw. */
@@ -43,37 +40,26 @@ final class FirewallFactory
 
     public static function make(?string $name = null): Firewall
     {
-        $name = self::normalize($name ?? self::UFW);
-        if (isset(self::$instances[$name])) {
-            return self::$instances[$name];
-        }
-
-        self::bootDefaults();
-        $factory = self::$factories[$name] ?? null;
-        if ($factory === null) {
-            throw new FirewallException(sprintf(
+        return self::built(
+            self::normalize($name ?? self::UFW),
+            static fn (string $name): FirewallException => new FirewallException(sprintf(
                 'Unknown firewall provider "%s"; available: %s',
                 $name,
                 implode(', ', array_keys(self::$factories))
-            ));
-        }
-
-        return self::$instances[$name] = $factory();
+            ))
+        );
     }
 
     /** @return list<string> */
     public static function names(): array
     {
-        self::bootDefaults();
-
-        return array_keys(self::$factories);
+        return self::registered();
     }
 
     /** Drop every registration and cached instance. Tests only. */
     public static function reset(): void
     {
-        self::$factories = [];
-        self::$instances = [];
+        self::forgetAll();
     }
 
     public static function configuredName(): string
@@ -88,10 +74,5 @@ final class FirewallFactory
         if (! isset(self::$factories[self::UFW])) {
             self::$factories[self::UFW] = static fn (): Firewall => new UfwFirewall(new System);
         }
-    }
-
-    private static function normalize(string $name): string
-    {
-        return strtolower(trim($name));
     }
 }

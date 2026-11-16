@@ -3,19 +3,16 @@
 namespace App\Lib\Deploy\Engine;
 
 use App\Lib\Deploy\Dind\DindEngine;
+use App\Lib\Traits\MemoisesNamedFactories;
 
 /**
- * Resolves the {@see ContainerEngine} the deploy pipeline should use.
- *
- * Adding an engine is a registration plus a config value, no deploy code:
- * `EngineFactory::register('podman', fn () => new PodmanEngine())` and
- * `DEPLOY_ENGINE=podman`. Instances are memoised per name.
- *
- * The one class in Deploy allowed to read Laravel config, and only to answer
- * "which engine is configured". Degrades to the default when unbooted.
+ * Resolves the {@see ContainerEngine} the deploy pipeline uses; an engine is a registration plus `DEPLOY_ENGINE`.
+ * The one class in Deploy allowed to read Laravel config, and it degrades to the default when unbooted.
  */
 final class EngineFactory
 {
+    use MemoisesNamedFactories;
+
     /** Per-account Docker-in-Docker on sysbox — the only engine that ships today. */
     public const DIND = 'dind';
 
@@ -33,9 +30,7 @@ final class EngineFactory
      */
     public static function register(string $name, callable $factory): void
     {
-        $name = self::normalize($name);
-        self::$factories[$name] = $factory;
-        unset(self::$instances[$name]);
+        self::remember($name, $factory);
     }
 
     /**
@@ -51,18 +46,10 @@ final class EngineFactory
      */
     public static function make(?string $name = null): ContainerEngine
     {
-        $name = self::normalize($name ?? self::DIND);
-        if (isset(self::$instances[$name])) {
-            return self::$instances[$name];
-        }
-
-        self::bootDefaults();
-        $factory = self::$factories[$name] ?? null;
-        if ($factory === null) {
-            throw UnknownEngineException::forName($name, self::names());
-        }
-
-        return self::$instances[$name] = $factory();
+        return self::built(
+            self::normalize($name ?? self::DIND),
+            static fn (string $name): UnknownEngineException => UnknownEngineException::forName($name, self::names())
+        );
     }
 
     /**
@@ -70,9 +57,7 @@ final class EngineFactory
      */
     public static function names(): array
     {
-        self::bootDefaults();
-
-        return array_keys(self::$factories);
+        return self::registered();
     }
 
     public static function has(string $name): bool
@@ -88,8 +73,7 @@ final class EngineFactory
      */
     public static function reset(): void
     {
-        self::$factories = [];
-        self::$instances = [];
+        self::forgetAll();
     }
 
     /**
@@ -116,10 +100,5 @@ final class EngineFactory
         if (! isset(self::$factories[self::DIND])) {
             self::$factories[self::DIND] = static fn (): ContainerEngine => new DindEngine;
         }
-    }
-
-    private static function normalize(string $name): string
-    {
-        return strtolower(trim($name));
     }
 }

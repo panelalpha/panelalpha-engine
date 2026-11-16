@@ -11,6 +11,12 @@ class CloudflareException extends \RuntimeException
     private const INVALID_ACCESS_TOKEN = [9109, 'Invalid access token'];
 
     /**
+     * Some endpoints (purge_cache) answer a missing permission with a 401 carrying only this code, as they
+     * answer a dead token. The zone lookup every caller starts with has already told the two apart.
+     */
+    private const AUTHENTICATION_ERROR = 10000;
+
+    /**
      * @param  list<array{code: int, message: string}>  $errors  Cloudflare's own errors, error chains included
      */
     public function __construct(
@@ -31,7 +37,7 @@ class CloudflareException extends \RuntimeException
     /** Cloudflare does not accept the token at all: unknown, expired, revoked or malformed. */
     public function isInvalidToken(): bool
     {
-        if ($this->responseStatus === 401) {
+        if ($this->responseStatus === 401 && ! $this->isBareAuthenticationError()) {
             return true;
         }
 
@@ -46,7 +52,8 @@ class CloudflareException extends \RuntimeException
 
     public function isPermissionDenied(): bool
     {
-        return $this->responseStatus === 403;
+        return $this->responseStatus === 403
+            || ($this->responseStatus === 401 && $this->isBareAuthenticationError());
     }
 
     public function isRateLimited(): bool
@@ -58,6 +65,11 @@ class CloudflareException extends \RuntimeException
     public function isRefusedRequest(): bool
     {
         return $this->responseStatus !== null && $this->responseStatus >= 400 && $this->responseStatus < 500;
+    }
+
+    private function isBareAuthenticationError(): bool
+    {
+        return array_values(array_unique(array_column($this->errors, 'code'))) === [self::AUTHENTICATION_ERROR];
     }
 
     /** @param array{code: int, message: string} $error */

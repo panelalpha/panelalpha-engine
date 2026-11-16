@@ -12,6 +12,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'driver', type: 'string', enum: ['local', 's3', 'ftp', 'ftps', 'sftp'], example: 's3'),
         new OA\Property(property: 'location', type: 'string', example: 'my-bucket/backups'),
         new OA\Property(property: 'has_credentials', type: 'boolean', example: true),
+        new OA\Property(property: 'default', type: 'boolean', example: false, description: 'Whether a caller that names no store backs up into this one'),
         new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
         new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
     ],

@@ -7,14 +7,8 @@ use App\Lib\Deploy\Compose\PrimaryPortBinding;
 use App\Lib\Deploy\Sidecar\ServiceRole;
 
 /**
- * The port an application listens on when its compose file publishes none.
- *
- * Detection then fell back to 8080 while reiverr listens on 9494, and the
- * domain 502'd. Before that guess, the service is asked in turn: a `PORT`-style
- * variable in its environment, the ports its image `EXPOSE`s, and a port the
- * repository's other compose files publish for a service of the same name
- * (reiverr's docker-compose.prod.yml publishes 9494). The port is added as
- * `expose:`, which {@see PrimaryPortBinding} publishes.
+ * The port an app listens on when its compose file publishes none, instead of a guessed 8080: a `PORT`-style
+ * variable, its image's `EXPOSE` or its other compose files, added as `expose:` ({@see PrimaryPortBinding}).
  */
 final class UnpublishedAppPort
 {

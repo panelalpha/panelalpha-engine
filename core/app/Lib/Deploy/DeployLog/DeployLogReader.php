@@ -3,13 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Parsed views over one deploy's JSON-lines log.
- *
- * The panel pages forward from an offset it remembers; telemetry wants the
- * other end and does not know the total; the build breakdown needs the whole
- * thing, because a `#N [x/y] <cmd>` and its `#N DONE <s>` can be thousands of
- * lines apart and a window that split the two would report the step as
- * costing nothing.
+ * Parsed views over one deploy's JSON-lines log. The build breakdown reads it whole, because a step's
+ * `#N [x/y] <cmd>` and its `#N DONE <s>` can be thousands of lines apart.
  */
 final class DeployLogReader
 {
@@ -42,12 +37,8 @@ final class DeployLogReader
     }
 
     /**
-     * Lines from `$offset` on, at most `$limit` of them and, when given, about
-     * `$maxBytes` of log. `next_offset` is where the next page starts, so a
-     * caller that pages until `more` is false reads every line exactly once.
-     *
-     * A single line longer than the whole budget is still returned, cut to
-     * it, so a page never comes back empty while lines remain.
+     * Lines from `$offset`, at most `$limit` and about `$maxBytes`; paging from `next_offset` until `more` is
+     * false reads each line once. A line longer than the budget comes back cut to it, so no page is empty.
      *
      * @return array{lines: list<array{ts: int, stage: ?string, level: string, msg: string}>, next_offset: int, more: bool}
      */

@@ -6,37 +6,17 @@ use App\Lib\Deploy\Dind\TenantNetwork;
 use App\System\ComposeProject;
 
 /**
- * Egress rules inside a DinD account, for the code the tenant runs.
- *
- * A second layer. The boundary is the host's firewall on pash-tenants
- * ({@see TenantNetwork}): the tenant holds
- * the inner Docker socket, and a privileged `--net=host` container of their
- * own edits these rules. Accounts not yet moved off pash-default-network,
- * which they share with core, SFTP, FTP and phpMyAdmin, have only this one.
- * Its apps' traffic is forwarded through the account's namespace (inner
- * DOCKER-USER, FORWARD) and its own processes, tenant crontabs included,
- * leave through OUTPUT; ServiceHardener keeps privileged, cap_add and
- * network_mode: host out of the compose the engine runs.
- *
- * On the account's own network it lets through only the shared MySQL (3306)
- * and the two image registries (5000). On any address of the host itself only
- * mail (25, msmtp's host.docker.internal), the sites (80/443, cloudflared and
- * hairpin requests to the tenant's own domains) and, for a project the engine
- * allowed to use its API, the Engine API port ({@see API_PORT}) -- a second
- * layer that has to agree with the host's own rule for that project. Link-local,
- * which is the cloud metadata address, is refused. Everything else -- the
- * internet, other private networks -- is left as it was.
- *
- * Rendered into the account's entrypoint.d, so entrypoint.sh runs it at boot,
- * and the account service {@see SERVICE} re-runs it: it has to follow the inner
- * daemon's DOCKER-USER chain once that exists and the registry and MySQL
- * addresses when those containers move.
+ * Egress rules in a DinD account, a second layer behind {@see TenantNetwork}: the tenant holds the inner Docker socket,
+ * so its containers can edit them. The only layer on pash-default-network, shared with core, SFTP, FTP and phpMyAdmin.
  */
 final class TenantEgressGuard
 {
     public const FILE = 'egress-guard.sh';
 
-    /** The account service that keeps {@see FILE} applied. */
+    /**
+     * The account service that keeps {@see FILE} applied after entrypoint.sh ran it at boot: it follows the inner
+     * daemon's DOCKER-USER chain once that exists, and the registry and MySQL addresses when those containers move.
+     */
     public const SERVICE = 'egress-guard';
 
     /**
@@ -49,15 +29,17 @@ final class TenantEgressGuard
     /** Names the account resolves through Docker's DNS on pash-default-network. */
     public const DATABASE_NAMES = ['database-users.shared-hosting.palocal', ComposeProject::NAME.'-sites-db-1'];
 
-    public const REGISTRY_NAMES = ['panelalpha-cache-registry', 'panelalpha-registry-proxy'];
+    public const REGISTRY_NAMES = ['panelalpha-cache-registry', 'panelalpha-registry-proxy', 'panelalpha-ghcr-proxy'];
 
-    /** Ports an account may use on the host: mail and the sites. */
+    /**
+     * Ports an account may use on any address of the host: mail, for msmtp's host.docker.internal, and the sites,
+     * for cloudflared and hairpin requests to the tenant's own domains.
+     */
     public const HOST_PORTS = '25 80 443';
 
     /**
-     * The Engine API port a project the engine allowed may use on the host. It is
-     * not in {@see HOST_PORTS}: the host's own firewall admits :2011 per allowed
-     * project, and this one rule has to follow that allowance.
+     * The Engine API port a project the engine allowed may use on the host. Not in {@see HOST_PORTS}: the host's
+     * own firewall admits :2011 per allowed project, and this one rule has to follow that allowance.
      */
     public const API_PORT = 2011;
 
@@ -84,6 +66,9 @@ final class TenantEgressGuard
     }
 
     /**
+     * Only MySQL (3306) and the registries (5000) on the account's network, {@see HOST_PORTS} on the host; link-local,
+     * the cloud metadata address, refused; the internet and other private networks left as they were.
+     *
      * @param  list<string>  $hostIps  every IPv4 address of the host (bridges,
      *                                 public, NAT); the default gateway and host.docker.internal are
      *                                 added in the account itself
@@ -107,6 +92,10 @@ final class TenantEgressGuard
         return strtr(self::TEMPLATE, $vars);
     }
 
+    /**
+     * OUTPUT catches the account's own processes, tenant crontabs included, FORWARD and DOCKER-USER its apps;
+     * ServiceHardener keeps privileged, cap_add and network_mode: host out of the compose the engine runs.
+     */
     private const TEMPLATE = <<<'SH'
 #!/bin/sh
 # What the tenant's code may reach on the account's network and on

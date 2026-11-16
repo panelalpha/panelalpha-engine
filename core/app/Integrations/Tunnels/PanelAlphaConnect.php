@@ -12,6 +12,9 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\Tunnel;
 use App\Models\User;
+use GuzzleHttp\Exception\NetworkTimeoutException;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -148,8 +151,7 @@ class PanelAlphaConnect
             'plugin' => 'PanelAlpha',
         ];
 
-        /** @var Response $response */
-        $response = PanelAlpha::http()->post($url, $payload);
+        $response = $this->send('create', fn (PendingRequest $http) => $http->post($url, $payload), $path.'.'.self::PARENT_DOMAIN);
 
         return $this->parseSuccessBody($response, $path, 'create');
     }
@@ -182,12 +184,11 @@ class PanelAlphaConnect
         }
 
         $url = self::endpoint().'/api/without-dns/sites/'.rawurlencode($pathFqdn);
-        /** @var Response $response */
-        $response = PanelAlpha::http()->put($url, [
+        $response = $this->send('update', fn (PendingRequest $http) => $http->put($url, [
             'target_domain' => $targetDomain,
             'target_ip' => $targetIp,
             'plugin' => 'PanelAlpha',
-        ]);
+        ]));
 
         return $this->parseSuccessBody($response, $path, 'update');
     }
@@ -200,8 +201,7 @@ class PanelAlphaConnect
         $pathFqdn = self::pathFqdnFromHostname($pathFqdn);
         $url = self::endpoint().'/api/without-dns/sites/'.rawurlencode($pathFqdn);
 
-        /** @var Response $response */
-        $response = PanelAlpha::http()->delete($url);
+        $response = $this->send('delete', fn (PendingRequest $http) => $http->delete($url));
         if ($response->status() === 204 || $response->status() === 404) {
             return;
         }
@@ -211,7 +211,8 @@ class PanelAlphaConnect
             ? $body['message']
             : 'delete failed';
         throw new PanelAlphaException(
-            "PanelAlpha Online delete failed: {$message} (HTTP {$response->status()})."
+            "PanelAlpha Online delete failed: {$message} (HTTP {$response->status()}).",
+            $response->status()
         );
     }
 
@@ -402,6 +403,26 @@ class PanelAlphaConnect
     }
 
     /**
+     * A Connect that cannot be reached fails like one that refuses. A create that was sent but never answered
+     * may still have registered its label on Connect, so the label given up on is logged.
+     *
+     * @param  callable(PendingRequest): Response  $request
+     */
+    private function send(string $action, callable $request, ?string $registering = null): Response
+    {
+        try {
+            return $request(PanelAlpha::http());
+        } catch (ConnectionException $e) {
+            $reason = rtrim(trim((string) strtok($e->getMessage(), "\n")), '.');
+            if ($registering !== null && $e->getPrevious() instanceof NetworkTimeoutException) {
+                Log::warning("PanelAlpha Connect timed out while registering {$registering}, so it may hold that label although this engine gave up on it.");
+            }
+
+            throw new PanelAlphaException("PanelAlpha Online {$action} failed: PanelAlpha Connect could not be reached ({$reason}).", previous: $e);
+        }
+    }
+
+    /**
      * @return array{
      *   path: string,
      *   path_fqdn: string,
@@ -416,7 +437,8 @@ class PanelAlphaConnect
         if (! is_array($body)) {
             throw new PanelAlphaException(
                 "PanelAlpha Online {$action} failed: invalid JSON response"
-                .' (HTTP '.$response->status().').'
+                .' (HTTP '.$response->status().').',
+                $response->status()
             );
         }
 
@@ -425,7 +447,8 @@ class PanelAlphaConnect
                 ? $body['message']
                 : (is_string($body['error'] ?? null) ? $body['error'] : "{$action} failed");
             throw new PanelAlphaException(
-                "PanelAlpha Online {$action} failed: {$message} (HTTP {$response->status()})."
+                "PanelAlpha Online {$action} failed: {$message} (HTTP {$response->status()}).",
+                $response->status()
             );
         }
 

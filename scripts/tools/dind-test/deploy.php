@@ -4,8 +4,8 @@
  * Standalone DinD deploy tester — uses the REAL PanelAlpha Engine code.
  *
  * Bootstraps Laravel from core/ so all real classes run unchanged.
- * The only override: TestSystem strips 'sudo'/'chown' from commands
- * and redirects /home/{user} file I/O to a test directory.
+ * TestSystem, the only override, runs root broker requests as you through pa-root-local,
+ * neutralises chown, and redirects /home/{user} file I/O to a test directory.
  *
  * Usage:
  *   php deploy.php <git-url> [--name=NAME] [--branch=BRANCH] [--timeout=SECONDS]
@@ -174,9 +174,15 @@ class TestFilesystem extends RealFilesystem
     }
 }
 
-/** The real System with sudo and chown stripped from commands and /home/{user} redirected to a test directory. */
+/**
+ * The real System, with each root broker request planned by pa-root-local (PA_ROOT_LOCAL=plan) and run as you.
+ */
 class TestSystem extends RealSystem
 {
+    private const CLIENT = '/usr/local/lib/panelalpha/pa-root';
+
+    private const LOCAL_CLIENT = '/dockerfiles/root-broker/local/pa-root-local';
+
     public string $testBaseDir;
     public string $hostCacheDir;
     public string $engineRoot;
@@ -188,6 +194,15 @@ class TestSystem extends RealSystem
         $this->hostCacheDir = $hostCacheDir !== ''
             ? rtrim($hostCacheDir, '/')
             : $this->testBaseDir . '/hostcache';
+        self::setEnvironment('PA_ROOT_LOCAL_ROOTS', json_encode([
+            'homes' => $this->testBaseDir,
+            'engine' => $this->engineRoot,
+            'project-caches' => $this->hostCacheDir,
+        ], JSON_THROW_ON_ERROR));
+        $exchange = $this->testBaseDir . '/.exchange';
+        @mkdir($exchange, 0700, true);
+        self::setEnvironment('PA_EXCHANGE_DIR', $exchange);
+        self::setEnvironment('PA_PUSH_LOCK', $exchange . '/cache-registry.lock');
     }
 
     /** The test dir is the homes root on the host side; the compose volume maps it to /home/{username}/ inside the container. */
@@ -255,11 +270,23 @@ class TestSystem extends RealSystem
         return $this->runProcess($this->rewrite($cmd), $env, $timeout);
     }
 
+    private static function setEnvironment(string $name, string $value): void
+    {
+        putenv("{$name}={$value}");
+        $_ENV[$name] = $value;
+        $_SERVER[$name] = $value;
+    }
+
+    private function localClient(): string
+    {
+        return $this->engineRoot . self::LOCAL_CLIENT;
+    }
+
     /**
      * Redirect the host build caches out of /var/cache/panelalpha/projects.
      *
      * Production creates and owns that path as root in the host namespace
-     * (see HostBuilder::prepareCacheArgv). The tester runs as an
+     * (the broker's host.prepareProjectCache). The tester runs as an
      * unprivileged user, so both the mkdir and the `-v <src>:/var/cache/pa-js`
      * bind sources are pointed at the per-run test dir instead. The
      * container-side path (/var/cache/pa-js) is deliberately left alone.
@@ -273,36 +300,6 @@ class TestSystem extends RealSystem
         );
     }
 
-    /**
-     * Remove a leading `nsenter --target 1 --all` (with its flags) from an argv
-     * array. Returns the argv unchanged when the prefix is absent.
-     *
-     * @param list<string> $cmd
-     * @return list<string>
-     */
-    private static function stripNsenter(array $cmd): array
-    {
-        if (($cmd[0] ?? null) !== 'nsenter') {
-            return $cmd;
-        }
-        $i = 1;
-        $count = count($cmd);
-        while ($i < $count) {
-            $arg = $cmd[$i];
-            if ($arg === '--target' || $arg === '-t') {
-                $i += 2;
-                continue;
-            }
-            if ($arg === '--all' || $arg === '-a' || str_starts_with($arg, '-')) {
-                $i++;
-                continue;
-            }
-            break;
-        }
-
-        return array_values(array_slice($cmd, $i));
-    }
-
     /** Rewrite a command for standalone execution, as the current user on the host itself. */
     private function rewrite(string|array $cmd): string|array
     {
@@ -310,13 +307,11 @@ class TestSystem extends RealSystem
     }
 
     /**
-     * Every sudo and the host-namespace hop go, chown becomes `true` (not root
-     * here), and mkdir -p gets -m 777 so the container user can write there.
+     * Root lines go to pa-root-local, chown becomes `true`, and mkdir -p gets -m 777 for the container user.
      */
     private function rewriteCommandLine(string $cmd): string
     {
-        $cmd = preg_replace('/\bsudo\s+/', '', $cmd);
-        $cmd = preg_replace('/^\s*nsenter\s+--target\s+1\s+--all\s+/', '', $cmd);
+        $cmd = str_replace(self::CLIENT, $this->localClient(), $cmd);
         $cmd = $this->redirectHostCache($cmd);
         if (preg_match('/^\s*chown\b/', $cmd)) {
             return 'true';
@@ -326,22 +321,19 @@ class TestSystem extends RealSystem
     }
 
     /**
-     * The argv form of rewriteCommandLine(). The `nsenter --target 1 --all` hop
-     * reaches the host from production's core container; the tester already runs
-     * there, where it is redundant and needs root. Commands that bake it into
-     * their argv run through plain exec(), so execOnHost() alone never sees them.
+     * The argv form of rewriteCommandLine(). A broker request becomes the command the broker would run for it.
      *
      * @param list<string> $cmd
      * @return list<string>
      */
     private function rewriteArgv(array $cmd): array
     {
-        if (count($cmd) > 0 && $cmd[0] === 'sudo') {
-            $cmd = array_slice($cmd, 1);
+        $cmd = array_map(fn (string $a): string => $this->redirectHostCache($a), array_values($cmd));
+        if (($cmd[0] ?? null) === self::CLIENT) {
+            $cmd = $this->brokerCommand($cmd);
         }
-        $cmd = self::stripNsenter($cmd);
-        $cmd = array_map(fn (string $a): string => $this->redirectHostCache($a), $cmd);
-        $cmd = self::rewriteEmbeddedScript($cmd);
+        $cmd = array_map(fn (string $a): string => $a === self::CLIENT ? $this->localClient() : $a, $cmd);
+        $cmd = $this->rewriteEmbeddedScript($cmd);
         if (count($cmd) > 0 && $cmd[0] === 'chown') {
             return ['true'];
         }
@@ -353,15 +345,29 @@ class TestSystem extends RealSystem
     }
 
     /**
-     * An `sh -c` / `bash -c` script carries its own sudo and nsenter (the PHP base
-     * image build, the image transfer), which would fail off-root and silently
-     * skip the prebuilt base. Its `chown -R` (HostNodeBuild's cache prep) becomes
-     * a world-writable chmod, which the trailing `chmod 750` must not undo.
+     * @param list<string> $request
+     * @return list<string>
+     */
+    private function brokerCommand(array $request): array
+    {
+        $local = [$this->localClient(), ...array_slice($request, 1)];
+        $plan = new Process($local, null, [...getenv(), 'PA_ROOT_LOCAL' => 'plan']);
+        $plan->run();
+        if (!$plan->isSuccessful()) {
+            return $local;
+        }
+        $planned = json_decode($plan->getOutput(), true);
+
+        return is_array($planned) && is_array($planned['argv'] ?? null) ? array_values($planned['argv']) : $local;
+    }
+
+    /**
+     * Root lines in an `sh -c` script go to pa-root-local, and `chown -R` and `chmod 750` become world-writable chmods.
      *
      * @param list<string> $cmd
      * @return list<string>
      */
-    private static function rewriteEmbeddedScript(array $cmd): array
+    private function rewriteEmbeddedScript(array $cmd): array
     {
         if (count($cmd) < 3 || !in_array($cmd[0], ['sh', 'bash'], true)) {
             return $cmd;
@@ -370,16 +376,15 @@ class TestSystem extends RealSystem
         if ($scriptIndex === false || !isset($cmd[$scriptIndex + 1])) {
             return $cmd;
         }
+        $script = str_replace(self::CLIENT, $this->localClient(), $cmd[$scriptIndex + 1]);
         $cmd[$scriptIndex + 1] = preg_replace(
             [
-                '/\bsudo\s+/',
-                '/\bnsenter\s+--target\s+1\s+--all\s+/',
-                '/\bchown\s+-R\s+\S+\s+/',
+                '/\bchown\s+-R\s+(?:--\s+)?\S+\s+/',
                 '/\bchmod\s+750\b/',
                 '/\bmkdir\s+-p\b(?!\s+-m\b)/',
             ],
-            ['', '', 'chmod -R 777 ', 'chmod 777', 'mkdir -p -m 777'],
-            $cmd[$scriptIndex + 1]
+            ['chmod -R 777 ', 'chmod 777', 'mkdir -p -m 777'],
+            $script
         );
 
         return $cmd;

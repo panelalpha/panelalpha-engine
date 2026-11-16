@@ -71,7 +71,7 @@ class BackupCreateTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'container' => $schema->string()->description('Backup container id or name')->required(),
+            'container' => $schema->string()->description('Backup container id or name. Without it the default store is used (`default_backup_container` in GET /system/info); a host with no default answers 422 `no_default_container`.'),
             'files' => $schema->boolean()->description('Include the project files (default true).'),
             'databases' => $schema->boolean()->description('Include the databases; on DinD this also includes the volumes (default true).'),
             'note' => $schema->string()->max(255)->description('Free-form note shown with the backup.'),

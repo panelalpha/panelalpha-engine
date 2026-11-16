@@ -5,10 +5,8 @@ namespace App\System\Services\Webserver;
 use App\Models\ProxyRule;
 
 /**
- * Two enabled HTTP rules on one server name and listen port: the vhost renders
- * one entry per port, so the row order decides which upstream serves the
- * domain and the other rule disappears without a message. Two enabled tcp or
- * udp rules on one address and port end the same way in stream.conf.
+ * Two enabled rules on one server name and port (HTTP), or one address and port (tcp/udp): the config renders one
+ * entry, so row order picks the upstream and the other rule silently disappears.
  */
 final class ProxyRuleDuplicate
 {

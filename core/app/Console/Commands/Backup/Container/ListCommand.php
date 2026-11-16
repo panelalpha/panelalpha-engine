@@ -30,10 +30,11 @@ class ListCommand extends Command
                 'name' => $container->name,
                 'driver' => $container->driver,
                 'location' => $container->location,
+                'default' => $container->is_default ? 'yes' : '',
             ];
         }
 
-        $this->table(['ID', 'Name', 'Driver', 'Location'], $rows);
+        $this->table(['ID', 'Name', 'Driver', 'Location', 'Default'], $rows);
 
         return 0;
     }

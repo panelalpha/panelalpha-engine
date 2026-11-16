@@ -3,16 +3,8 @@
 namespace App\Lib\Deploy\Port;
 
 /**
- * Why a running container does not answer on the port it publishes.
- *
- * "Connection reset by peer" on a published port means Docker accepted the
- * connection and found nothing listening behind it (teslamate
- * 4000, pretix 8080, pleroma 4000, teampass 8080, ofbiz 8443). The container
- * is alive, so the restart-loop check has nothing to say, and the deploy only
- * reported that nothing answered. What the process is listening on, read from
- * its /proc/net/tcp, says which of the usual reasons it is.
- *
- * No Laravel dependencies — unit-testable.
+ * Why a running container does not answer on its published port ("Connection reset by peer": nothing
+ * listens behind it), from what its process listens on in /proc/net/tcp. No Laravel dependencies.
  */
 final class SilentPort
 {

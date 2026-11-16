@@ -375,6 +375,25 @@ class RubyRuntimeTest extends TestCase
         $this->assertSame('3.3', $this->resolve()?->version);
     }
 
+    /** RubyGems reads `~> 3` as `>= 3, < 4`, so bundler refuses a 4.0.1 the version file asks for. */
+    public function test_a_major_twiddle_forbids_the_next_major(): void
+    {
+        $this->write('Gemfile', "source 'x'\nruby '~> 3'\n");
+        $this->write('.ruby-version', "4.0.1\n");
+
+        $this->assertSame('3', $this->resolve()?->version);
+        $this->assertSame('Gemfile ruby directive', $this->resolve()?->source);
+        $this->assertSame('ruby:3-slim-bookworm', RubyRuntime::imageFor($this->context()));
+    }
+
+    public function test_a_major_twiddle_allows_any_release_of_its_major(): void
+    {
+        $this->write('Gemfile', "source 'x'\nruby '~> 3'\n");
+        $this->write('.ruby-version', "3.4.5\n");
+
+        $this->assertSame('3.4.5', $this->resolve()?->version);
+    }
+
     /**
      * A floor that is not the start of its line keeps every digit: the minor
      * line's latest patch could be below it, which would be a Ruby older than

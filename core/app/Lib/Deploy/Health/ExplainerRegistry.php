@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Health;
 
 /**
- * Every {@see Explainer} a check file may name, found by convention.
- *
- * A class named `<Something>Explainer` under `Explainers/` is one: a
- * hand-written array of `new` expressions is one edit away from a check file
- * naming an explainer the engine cannot find.
+ * Every {@see Explainer} a check file may name, found by convention as a `<Something>Explainer` class
+ * under `Explainers/`, so a check file cannot name one the engine fails to find.
  */
 final class ExplainerRegistry
 {

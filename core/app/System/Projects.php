@@ -3,24 +3,36 @@
 namespace App\System;
 
 use App\Exceptions\ProblemException;
+use App\Exceptions\ProjectBusyException;
 use App\Exceptions\RollbackIncompleteException;
+use App\Jobs\CreateStaging;
+use App\Jobs\PushState;
+use App\Jobs\RenameMysqlDatabase;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Project\ClassicAppType;
+use App\Lib\Project\ProjectRebuild;
 use App\Models\Domain as DomainModel;
 use App\Models\MysqlDatabase;
+use App\Models\Task;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
 use App\System\Project\CopyAttempt;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppDatabase;
 use App\System\Project\Dind\AppDatabaseCopy;
+use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Dind\HeldImage;
 use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\ProvisionedAppDatabase;
 use App\System\Project\HomeSwap;
 use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
+use App\System\Project\PhpHosting\WordPress\Install;
+use App\System\Project\PhpHosting\WordPress\InstallLocator;
 use App\System\Project\PhpHosting\WordPress\KeptSite;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
+use App\System\Project\PhpHosting\WordPress\UnclearInstall;
+use App\System\Project\PhpHosting\WordPress\WordPress;
 use App\System\Project\PushAttempt;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
@@ -28,23 +40,22 @@ use App\System\Services\Mysql\DatabaseCopyResult;
 use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 
 class Projects
 {
     private const int PROCESS_TIMEOUT_SECONDS = 86400;
 
-    private const array PUSH_SWAP_SKIP_ENTRIES = ['docker', '.incoming', '.pre-push', '.pre-push-db'];
+    private const array PUSH_SWAP_SKIP_ENTRIES = ['docker', '.incoming', '.pre-push', CopyVolumes::STAGING];
 
     public function __construct(
         protected EngineSystem $system,
     ) {}
 
-    public function clone(string $sourceUsername, string $targetUsername, bool $copyDatabases = true): ?DatabaseCopyResult
+    /** The rows given, never looked up again by name: a project that took a deleted one's name is not this copy's. */
+    public function clone(ModelsUser $source, ModelsUser $target, bool $copyDatabases = true): ?DatabaseCopyResult
     {
-        $source = ModelsUser::findByUsernameOrFail($sourceUsername);
-        $target = ModelsUser::findByUsernameOrFail($targetUsername);
-
         return $this->cloneOrCopy($source, $target, asStaging: false, copyDatabases: $copyDatabases);
     }
 
@@ -102,6 +113,7 @@ class Projects
         $to = ModelsUser::findByUsernameOrFail($targetUsername);
         self::assertCanPush($from, $to);
         self::assertContainerPushCarriesSomething($from, $to, $files, $databases);
+        self::assertTablesSelectSomething($tables);
 
         $targetSnapshot = ModelsUser::copiedDeploySnapshot($to->getDetails());
         if ($files) {
@@ -109,11 +121,29 @@ class Projects
             $to->save();
         }
 
+        $push = $this->newPushAttempt($from, $to, $files, $databases, $tables, $targetSnapshot);
+        $push->keptRollbacks = file_exists($push->rollbackDir) || is_link($push->rollbackDir);
+
+        return $push;
+    }
+
+    /**
+     * @param  list<array{database: string, name: string}>|null  $tables
+     */
+    private function newPushAttempt(
+        ModelsUser $from,
+        ModelsUser $to,
+        bool $files,
+        bool $databases,
+        ?array $tables,
+        array $targetSnapshot,
+    ): PushAttempt {
         $fromProject = $this->system->project($from);
         $toProject = $this->system->project($to);
         $fromHome = rtrim($fromProject->homeDirPath(), '/');
         $toHome = rtrim($toProject->homeDirPath(), '/');
-        $push = new PushAttempt(
+
+        return new PushAttempt(
             $from,
             $to,
             $files,
@@ -124,15 +154,13 @@ class Projects
             $toProject,
             $fromHome,
             $toHome,
+            $this->system->pushRollbacksDirPath().'/'.$to->username,
             self::isDind($to),
             $this->homeSwap($toHome),
         );
-        $push->keptRollbacks = $this->pathExistsAsRoot($push->rollbackDir) || $this->pathIsSymlinkAsRoot($push->rollbackDir);
-
-        return $push;
     }
 
-    /** A failed push's .pre-push aside or rollback dumps refuse the push; a stale .incoming is removed. */
+    /** A failed push's .pre-push aside, volume data or rollback dumps refuse the push; a stale .incoming is removed. */
     private function refuseUnfinishedPush(PushAttempt $push): void
     {
         if ($this->pathIsDirectoryAsRoot($push->prePushDir)) {
@@ -141,16 +169,22 @@ class Projects
             );
         }
 
+        if ($this->pathIsDirectoryAsRoot($push->volumeStagingDir)) {
+            throw new \RuntimeException(
+                'Incomplete previous push ('.CopyVolumes::STAGING.' present); refuse to continue.'
+            );
+        }
+
         if ($push->keptRollbacks) {
             throw new \RuntimeException(
-                'A previous push left the target\'s database rollback dumps in .pre-push-db; '
+                "A previous push left the target's database rollback dumps in the core container at {$push->rollbackDir}; "
                 .'restore or remove them before pushing again.'
             );
         }
 
         if ($this->pathIsDirectoryAsRoot($push->incomingDir)) {
             $this->runPushProcess(
-                ['sudo', 'rm', '-rf', $push->incomingDir],
+                Privileged::files()->removeTree($push->incomingDir),
                 'Failed to remove stale .incoming directory'
             );
         }
@@ -199,7 +233,7 @@ class Projects
     private function stagePushedFiles(PushAttempt $push): void
     {
         $this->runPushProcess(
-            ['sudo', 'mkdir', '-p', $push->incomingDir],
+            Privileged::files()->makeDirectories($push->incomingDir),
             'Failed to create .incoming directory'
         );
         $this->rsyncHomeIntoIncoming($push->fromHome, $push->incomingDir, $push->isDindDest);
@@ -209,8 +243,9 @@ class Projects
         } else {
             $this->rebaseIncomingDocumentRoot($push->from, $push->to, $push->incomingDir);
         }
+        $push->volumesStaged = $push->isDindDest && $push->databases;
         $push->result = $push->result->withWarnings(
-            $this->copyVolumesToIncoming($push->fromProject, $push->toProject, $push->incomingDir, $push->isDindDest && $push->databases)
+            $this->copyVolumesToIncoming($push->fromProject, $push->toProject, $push->incomingDir, $push->volumesStaged)
         );
         $this->refuseIncomingLinks($push->incomingDir);
     }
@@ -224,6 +259,34 @@ class Projects
         $push->toProject->fixPermissions();
         if ($push->keptSite !== null) {
             $this->keepTargetConfig($push->to, $push->keptSite, $push->toHome, $push->prePushDir);
+        }
+        if (! $push->isDindDest) {
+            $this->keepTargetDomainDirectives($push);
+        }
+    }
+
+    /** A domain's PHP settings are the target project's own configuration, not files a push brings or takes away. */
+    private function keepTargetDomainDirectives(PushAttempt $push): void
+    {
+        $uid = $push->to->getUid();
+        $gid = $push->to->getGid();
+        if ($uid === null || $gid === null) {
+            return;
+        }
+
+        foreach ($push->toProject->php()->domainDirectiveRelativePaths() as $relative) {
+            $path = $push->toHome.'/'.ltrim($relative, '/');
+            if (! $this->pathIsDirectoryAsRoot(dirname($path))) {
+                continue;
+            }
+
+            $aside = $push->prePushDir.'/'.ltrim($relative, '/');
+            $this->runPushProcess(
+                $this->pathExistsAsRoot($aside)
+                    ? Privileged::account()->copyReplacingAsAccount($uid, $gid, $aside, $path)
+                    : Privileged::accountFiles($uid, $gid)->removeIfExists($path),
+                "Failed to keep the target's domain PHP settings",
+            );
         }
     }
 
@@ -264,7 +327,7 @@ class Projects
         $this->cleanupIncomingDir($push->incomingDir);
         $this->resumeBoth($push->fromProject, $push->toProject);
         if ($unrestored === [] && ! $push->keptRollbacks) {
-            $this->cleanupPath($push->rollbackDir);
+            $this->removeRollbackDir($push->rollbackDir);
         }
 
         return $this->failPush($push->to, $e, $unrestored, $push->rollbackDir);
@@ -279,8 +342,8 @@ class Projects
 
         return [
             ...($restoreFiles
-                ? $this->restorePushedFiles($push->toProject, $push->homeSwap, $push->incomingDir, $push->prePushDir, $push->volumesSwapStarted)
-                : []),
+                ? $this->restorePushedFiles($push)
+                : $this->restorePushedVolumes($push)),
             ...$this->restorePushTables($e, $push->tableReplacement),
             ...$this->restorePushDatabases($push->rollbacks, $push->createdDatabases, $push->from, $push->to),
             ...$this->removeProvisionedAppDatabase($push->provisioned, $push->to),
@@ -305,36 +368,60 @@ class Projects
     }
 
     /**
-     * Put the target's previous home back from .pre-push, and its volumes from
-     * their _data.pre-push copies, after a push swapped some of them. The target
-     * is stopped first, so nothing writes into the data being put back. The aside
-     * is removed only once the home is back; a failed file rollback keeps it and
-     * names it, so the target can be restored by hand.
+     * Put back the stopped target's volumes and home from their pre-push copies, each whether or not the other could
+     * be. What could not be put back is kept and named, to be restored by hand.
      *
      * @return list<string> every step that could not be undone
      */
-    private function restorePushedFiles(
-        Project $toProject,
-        HomeSwap $homeSwap,
-        string $incomingDir,
-        string $prePushDir,
-        bool $volumesSwapStarted,
-    ): array {
-        $this->pauseAppForCopy($toProject);
+    private function restorePushedFiles(PushAttempt $push): array
+    {
+        $this->pauseAppForCopy($push->toProject);
+
+        return [...$this->restorePushedVolumes($push), ...$this->restorePushedHome($push)];
+    }
+
+    /**
+     * The volumes the push swapped put back and what it only staged dropped; its staging stays when any could not be.
+     *
+     * @return list<string>
+     */
+    private function restorePushedVolumes(PushAttempt $push): array
+    {
+        if (! $push->volumesStaged) {
+            return [];
+        }
         try {
-            if ($volumesSwapStarted) {
-                $toProject->copyVolumesForClone()?->restoreVolumeBackups();
-            }
-            $homeSwap->undo($incomingDir, $prePushDir, 'push');
-            $this->cleanupPath($prePushDir);
-            $toProject->fixPermissions();
+            $push->toProject->copyVolumesForClone()?->restoreVolumeBackups();
         } catch (\Throwable $rollbackError) {
-            Log::error('Push file rollback failed', [
-                'pre_push' => $prePushDir,
+            Log::error('Push volume rollback failed', [
+                'staging' => $push->volumeStagingDir,
                 'exception' => $rollbackError->getMessage(),
             ]);
 
-            return ["restoring the files (the previous home is kept in {$prePushDir})"];
+            return ["restoring the volumes (their data before the push is kept in {$push->volumeStagingDir})"];
+        }
+
+        return [];
+    }
+
+    /**
+     * The aside goes only once the home is back.
+     *
+     * @return list<string>
+     */
+    private function restorePushedHome(PushAttempt $push): array
+    {
+        try {
+            $push->homeSwap->undo($push->incomingDir, $push->prePushDir, 'push');
+            $this->cleanupPath($push->prePushDir);
+            $push->toProject->fixPermissions();
+        } catch (\Throwable $rollbackError) {
+            Log::error('Push file rollback failed', [
+                'pre_push' => $push->prePushDir,
+                'exception' => $rollbackError->getMessage(),
+            ]);
+
+            return ["restoring the files (the previous home is kept in {$push->prePushDir})"];
         }
 
         return [];
@@ -365,9 +452,8 @@ class Projects
     }
 
     /**
-     * The target's own image back under the tag the push built again, before
-     * the target starts: on that tag it would start the pushed code. A holding
-     * tag that cannot be dropped afterwards is only logged.
+     * The target's own image back under the tag the push built again, before the target starts: on that tag it would
+     * start the pushed code. A holding tag that cannot be dropped afterwards is only logged.
      *
      * @return list<string> every step that could not be undone
      */
@@ -401,9 +487,8 @@ class Projects
     }
 
     /**
-     * Start the target again on its restored files and databases, in new containers: one
-     * kept would still mount the pushed files and volumes the rollback removed, or stay
-     * stopped where it crashed on the pushed database.
+     * Start the target again on its restored files and databases, in new containers: one kept would still mount the
+     * pushed files and volumes the rollback removed, or stay stopped where it crashed on the pushed database.
      *
      * @return list<string> every step that could not be undone
      */
@@ -468,7 +553,7 @@ class Projects
     {
         if ($unrestored !== []) {
             $error = $e->getMessage().' The target was not fully restored (failed: '.implode(', ', $unrestored)
-                .')'.($this->pathExistsAsRoot($rollbackDir) ? "; its rollback dumps are kept in {$rollbackDir}." : '.');
+                .')'.(is_dir($rollbackDir) ? "; its rollback dumps are kept in the core container at {$rollbackDir}." : '.');
             $this->markPushFailed($to, $error);
 
             return new \RuntimeException($error, 0, $e);
@@ -483,22 +568,14 @@ class Projects
     }
 
     /**
-     * The target's own databases, each replaced with the source's data under its
-     * rollback dump. A rollback is recorded only once its dump is complete, so a
-     * failed dump is never replayed into a target it did not touch. A source
-     * database the target does not own is created, and the target users the
-     * source users map to get the grants those had on it.
+     * The target's own databases, each replaced with the source's data under its rollback dump; a source database the
+     * target does not own is created.
      *
      * @param  array<string, string>  $rollbacks  destination database => rollback dump
      * @param  list<string>  $created
      */
-    private function pushDatabases(
-        ModelsUser $from,
-        ModelsUser $to,
-        string $rollbackDir,
-        array &$rollbacks,
-        array &$created,
-    ): DatabaseCopyResult {
+    private function pushDatabases(ModelsUser $from, ModelsUser $to, string $rollbackDir, array &$rollbacks, array &$created): DatabaseCopyResult
+    {
         $copier = $this->databaseCopier();
         $definers = DefinerMap::between($from, $to);
         $sourcePrefix = $from->getMysqlPrefix();
@@ -517,18 +594,54 @@ class Projects
             $source = $row->database;
             $dest = DatabaseCopier::mapName($source, $sourcePrefix, $targetPrefix);
             if (in_array($dest, $owned, true)) {
-                $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
-                $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $definers);
+                $this->replacePushedDatabase($copier, $definers, $to, $source, $dest, $rollbackDir, $rollbacks);
             } else {
-                MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
-                $created[] = $dest;
-                $copier->copyDatabase($source, $dest, $definers);
-                array_push($warnings, ...$copier->grantCreatedDatabase($source, $dest, $definers));
+                array_push($warnings, ...$this->createPushedDatabase($copier, $definers, $to, $source, $dest, $created));
             }
             $databases[$source] = $dest;
         }
 
         return new DatabaseCopyResult($databases, warnings: $warnings);
+    }
+
+    /**
+     * The rollback is recorded only once its dump is complete, so a failed dump is never replayed into a target it did
+     * not touch.
+     *
+     * @param  array<string, string>  $rollbacks
+     */
+    private function replacePushedDatabase(
+        DatabaseCopier $copier,
+        DefinerMap $definers,
+        ModelsUser $to,
+        string $source,
+        string $dest,
+        string $rollbackDir,
+        array &$rollbacks,
+    ): void {
+        $rollbacks[$dest] = $copier->dumpRollback($dest, $rollbackDir);
+        $copier->replaceDatabase($source, $dest, $rollbacks[$dest], $to, $definers);
+    }
+
+    /**
+     * The target users the source users map to get the grants those had on the created database.
+     *
+     * @param  list<string>  $created
+     * @return list<string>
+     */
+    private function createPushedDatabase(
+        DatabaseCopier $copier,
+        DefinerMap $definers,
+        ModelsUser $to,
+        string $source,
+        string $dest,
+        array &$created,
+    ): array {
+        MysqlDatabase::create(['user_id' => $to->id, 'database' => $dest]);
+        $created[] = $dest;
+        $copier->copyDatabase($source, $dest, $definers);
+
+        return $copier->grantCreatedDatabase($source, $dest, $definers);
     }
 
     /**
@@ -600,14 +713,13 @@ class Projects
     }
 
     /**
-     * A first copy of the source's home, taken while both apps still run, and the images its run
-     * file names got into the target from it: a Railpack build or a base image transfer takes
-     * minutes. The copy taken once both are stopped then moves only what changed.
+     * A first copy of the source's home and the images its run file names reach the target while both apps run, as a
+     * Railpack build or base image transfer takes minutes; the copy once both are stopped moves only what changed.
      */
     private function provideIncomingImagesWhileRunning(string $fromHome, string $incomingDir, Project $toProject): ?HeldImage
     {
         $this->runPushProcess(
-            ['sudo', 'mkdir', '-p', $incomingDir],
+            Privileged::files()->makeDirectories($incomingDir),
             'Failed to create .incoming directory'
         );
         $this->rsyncHomeIntoIncoming($fromHome, $incomingDir, isDindDest: true, sourceRunning: true);
@@ -624,20 +736,10 @@ class Projects
         bool $isDindDest,
         bool $sourceRunning = false,
     ): void {
-        $cmd = [
-            'sudo', 'rsync', '-a', '--delete',
-            '--exclude=.incoming',
-            '--exclude=.pre-push',
-            '--exclude=.pre-push-db',
-        ];
-        if ($isDindDest) {
-            $cmd[] = '--exclude=docker/';
-        }
-        $cmd[] = rtrim($fromHome, '/').'/';
-        $cmd[] = rtrim($incomingDir, '/').'/';
+        $excluded = ['.incoming', '.pre-push', CopyVolumes::STAGING, ...($isDindDest ? ['docker/'] : [])];
 
         $this->runPushProcess(
-            $cmd,
+            Privileged::files()->mirrorExcluding($fromHome, $incomingDir, $excluded),
             'Failed to rsync source home into .incoming',
             $sourceRunning ? [Project::RSYNC_VANISHED_FILES] : [],
         );
@@ -724,9 +826,8 @@ class Projects
     }
 
     /**
-     * Move one directory inside an account home, as root and without following
-     * a symlink the source account planted: -T, plus a refusal when either end
-     * is a link or the destination already exists.
+     * Move one directory inside an account home, as root and without following a symlink the source account planted:
+     * -T, plus a refusal when either end is a link or the destination already exists.
      */
     public function moveAccountDirectory(string $from, string $to): void
     {
@@ -742,7 +843,7 @@ class Projects
             throw new \RuntimeException("Refusing to move over existing '{$to}'.");
         }
 
-        $this->runPushProcess(['sudo', 'mv', '-T', $from, $to], "Failed to move '{$from}' to '{$to}'");
+        $this->runPushProcess(Privileged::files()->rename($from, $to), "Failed to move '{$from}' to '{$to}'");
     }
 
     public static function isDind(ModelsUser $user): bool
@@ -751,55 +852,90 @@ class Projects
     }
 
     /**
-     * The target keeps its own wp-config.php, with its database and salts, over
-     * the pushed one. Copied as the target account, so a link in either tree
-     * reaches nothing the account could not.
+     * The target keeps its own wp-config.php, with its database and salts, over the pushed one. Copied as the target
+     * account, so a link in either tree reaches nothing the account could not.
      */
     private function keepTargetConfig(ModelsUser $to, KeptSite $kept, string $toHome, string $prePushDir): void
     {
-        if (! str_starts_with($kept->configPath, $toHome.'/')) {
-            throw new \RuntimeException("The target's wp-config.php is outside its home: {$kept->configPath}");
+        $config = $kept->install->configPath;
+        if (! str_starts_with($config, $toHome.'/')) {
+            throw new \RuntimeException("The target's wp-config.php is outside its home: {$config}");
         }
-        $relative = substr($kept->configPath, strlen($toHome) + 1);
+        $relative = substr($config, strlen($toHome) + 1);
 
+        [$uid, $gid] = $to->linuxIds();
         $this->runPushProcess(
-            [
-                'sudo', 'setpriv', '--reuid', (string) $to->getUid(), '--regid', (string) $to->getGid(), '--clear-groups',
-                'cp', '-P', '--remove-destination', $prePushDir.'/'.$relative, $kept->configPath,
-            ],
+            Privileged::account()->copyReplacingAsAccount($uid, $gid, $prePushDir.'/'.$relative, $config),
             "Failed to keep the target's wp-config.php",
         );
     }
 
     private function keptWordPress(ModelsUser $from, ModelsUser $to, bool $isDindDest): ?KeptSite
     {
-        $targetConfig = $isDindDest ? null : $this->wordPressConfig($to);
-        if ($targetConfig === null || $this->wordPressConfig($from) === null) {
+        $targetInstall = $isDindDest ? null : $this->wordPressInstall($to);
+        if ($targetInstall === null) {
+            return null;
+        }
+        $sourceInstall = $this->wordPressInstall($from);
+        if ($sourceInstall === null) {
             return null;
         }
 
-        return $this->siteCopy()->beforePush($from, $to, $targetConfig);
+        return $this->siteCopy()->beforePush($from, $to, $targetInstall, $sourceInstall);
+    }
+
+    /** The project's WordPress: its own, or, for a copy with no record of its own yet, the source's under its home. */
+    private function wordPressInstall(ModelsUser $user): ?Install
+    {
+        $install = $this->ownWordPressInstall($user);
+        if ($install !== null) {
+            return $install;
+        }
+        $source = $user->liveUser;
+
+        return $source === null ? null : $this->copiedWordPressInstall($source, $user);
     }
 
     /**
-     * The wp-config.php of a WordPress at the project's main domain: in its
-     * document root, or the directory above, where WordPress also looks.
+     * The WordPress in the directory it was installed into, else at the main domain's document root, else the only one
+     * below it, which is then recorded as the project's install.
      */
-    private function wordPressConfig(ModelsUser $user): ?string
+    private function ownWordPressInstall(ModelsUser $user): ?Install
     {
         $domain = $user->getMainDomain();
         if ($domain === null) {
             return null;
         }
         $home = rtrim($this->system->project($user)->homeDirPath(), '/');
-        $documentRoot = $home.$domain->getDocumentRoot();
-        foreach ([$documentRoot, dirname($documentRoot)] as $dir) {
-            if (str_starts_with($dir, $home.'/') && $this->pathExistsAsRoot($dir.'/wp-config.php')) {
-                return $dir.'/wp-config.php';
-            }
+        $documentRoot = rtrim($home.$domain->getDocumentRoot(), '/');
+        $recorded = ClassicAppType::installPathOf($user);
+        $install = $this->wordPressInstalls()->find($home, $documentRoot, $recorded);
+        if ($install !== null && $install->dir !== rtrim($recorded ?? $documentRoot, '/')) {
+            $this->classicAppType()->recordInstall($user, $install->dir);
         }
 
-        return null;
+        return $install;
+    }
+
+    /** A copy's WordPress, which has no record of its own yet: the source's install, under the copy's home and domain. */
+    private function copiedWordPressInstall(ModelsUser $source, ModelsUser $copy): ?Install
+    {
+        $install = $this->ownWordPressInstall($source);
+        if ($install === null) {
+            return null;
+        }
+        $sourceHome = rtrim($this->system->project($source)->homeDirPath(), '/');
+        $copyHome = rtrim($this->system->project($copy)->homeDirPath(), '/');
+        if (! str_starts_with($install->dir, $sourceHome.'/')) {
+            return null;
+        }
+        $relative = self::rebasedDocumentRoot(
+            substr($install->dir, strlen($sourceHome)),
+            (string) $source->domain,
+            (string) $copy->domain,
+        );
+
+        return $this->wordPressInstalls()->at($copyHome, $copyHome.$relative);
     }
 
     protected function siteCopy(): SiteCopy
@@ -807,9 +943,19 @@ class Projects
         return new SiteCopy;
     }
 
+    protected function wordPressInstalls(): InstallLocator
+    {
+        return new InstallLocator($this->system);
+    }
+
+    protected function classicAppType(): ClassicAppType
+    {
+        return app(ClassicAppType::class);
+    }
+
     protected function containerSiteCopy(): ContainerSiteCopy
     {
-        return new ContainerSiteCopy;
+        return new ContainerSiteCopy(fn (ModelsUser $user): WordPress => WordPress::for($user, system: $this->system, skipPlugins: true));
     }
 
     /**
@@ -888,7 +1034,7 @@ class Projects
     private function refuseIncomingLinks(string $incomingDir): void
     {
         $process = $this->system->runProcess(
-            ['sudo', 'find', $incomingDir, '-mindepth', '1', '-maxdepth', '1', '-type', 'l'],
+            Privileged::files()->symlinksIn($incomingDir),
             [],
             self::PROCESS_TIMEOUT_SECONDS,
         );
@@ -907,7 +1053,7 @@ class Projects
 
     private function pathIsSymlinkAsRoot(string $path): bool
     {
-        return $this->system->runProcess(['sudo', 'test', '-L', $path])->isSuccessful();
+        return $this->system->runProcess(Privileged::files()->isSymlink($path))->isSuccessful();
     }
 
     private function cleanupPath(string $path): void
@@ -916,41 +1062,26 @@ class Projects
             return;
         }
 
-        $this->runPushProcess(['sudo', 'rm', '-rf', $path], "Failed to remove '{$path}'");
+        $this->runPushProcess(Privileged::files()->removeTree($path), "Failed to remove '{$path}'");
     }
 
-    /**
-     * Create a push's rollback directory so the process that writes the dump
-     * (the queue worker, not root) can reach it — and only that process. The
-     * account's home root is root-owned, so it cannot plant a link in its place;
-     * the symlink refusal is here because a copied source account could try.
-     */
+    /** Core's own: the queue worker writes the dumps and reads them back, with no root step in between. */
     public function prepareRollbackDir(string $directory): void
     {
-        if ($this->pathIsSymlinkAsRoot($directory)) {
+        if (is_link($directory)) {
             throw new \RuntimeException("Refusing to use '{$directory}': it is a symlink.");
         }
-
-        $failure = 'Failed to prepare the push database rollback directory';
-        $this->runPushProcess(['sudo', 'mkdir', '-p', $directory], $failure);
-        $this->runPushProcess(['sudo', 'chown', $this->engineProcessUser(), $directory], $failure);
-        $this->runPushProcess(['sudo', 'chmod', '0700', $directory], $failure);
+        if (! is_dir($directory) && ! mkdir($directory, 0700, true) && ! is_dir($directory)) {
+            throw new \RuntimeException("Failed to prepare the push database rollback directory '{$directory}'");
+        }
+        chmod($directory, 0700);
     }
 
-    /**
-     * The user the non-sudo engine process runs as: the queue worker in
-     * production (www-data), root in the CLI and the test harness.
-     */
-    private function engineProcessUser(): string
+    private function removeRollbackDir(string $directory): void
     {
-        if (function_exists('posix_getpwuid') && function_exists('posix_geteuid')) {
-            $entry = posix_getpwuid(posix_geteuid());
-            if (is_array($entry) && is_string($entry['name'] ?? null) && $entry['name'] !== '') {
-                return $entry['name'];
-            }
+        if (is_dir($directory) && ! is_link($directory) && ! File::deleteDirectory($directory)) {
+            throw new \RuntimeException("Failed to remove '{$directory}'");
         }
-
-        return 'www-data';
     }
 
     private function cloneOrCopy(
@@ -960,15 +1091,7 @@ class Projects
         bool $copyDatabases = true,
         ?callable $log = null,
     ): ?DatabaseCopyResult {
-        $copy = new CopyAttempt(
-            $source,
-            $dest,
-            $this->system->project($source),
-            $this->system->project($dest),
-            self::isDind($dest),
-            $asStaging,
-            $copyDatabases,
-        );
+        $copy = $this->newCopyAttempt($source, $dest, $asStaging, $copyDatabases);
 
         try {
             $this->assertCanCopy($copy);
@@ -990,6 +1113,19 @@ class Projects
         }
     }
 
+    private function newCopyAttempt(ModelsUser $source, ModelsUser $dest, bool $asStaging, bool $copyDatabases): CopyAttempt
+    {
+        return new CopyAttempt(
+            $source,
+            $dest,
+            $this->system->project($source),
+            $this->system->project($dest),
+            self::isDind($dest),
+            $asStaging,
+            $copyDatabases,
+        );
+    }
+
     private function assertCanCopy(CopyAttempt $copy): void
     {
         self::assertSameTemplate($copy->source, $copy->dest);
@@ -999,7 +1135,7 @@ class Projects
         } else {
             self::assertCanCopyIntoStaging($copy->source, $copy->dest);
         }
-        $this->assertCopyGetsDatabases($copy->source, $copy->copyDatabases);
+        $this->assertWordPressCanBeCopied($copy->source, $copy->copyDatabases);
     }
 
     /** The destination account, its Linux user and its running containers, deployed as the source is. */
@@ -1122,9 +1258,29 @@ class Projects
     {
         $copy->destProject->syncGeneratedProxyRules();
         $this->system->project($copy->dest)->domain($domainModel)->create();
-        if (! $copy->isDindDest && $this->wordPressConfig($copy->dest) !== null) {
-            $this->siteCopy()->pointCopyAtItself($copy->dest, $copy->databaseResult);
+        if (! $copy->isDindDest) {
+            $this->pointCopiedWordPressAtItself($copy);
         }
+    }
+
+    /**
+     * A copy of a WordPress whose own wp-config.php cannot be found is refused: it
+     * would keep writing to the source's database. The copy records its own install.
+     */
+    private function pointCopiedWordPressAtItself(CopyAttempt $copy): void
+    {
+        $install = $this->copiedWordPressInstall($copy->source, $copy->dest);
+        if ($install === null) {
+            if ($this->wordPressInstall($copy->source) === null) {
+                return;
+            }
+            throw new \RuntimeException(
+                "The copy of '{$copy->source->username}' holds no wp-config.php of its WordPress, so it would keep using "
+                ."the source's database; the copy is not finished."
+            );
+        }
+        $this->siteCopy()->pointCopyAtItself($copy->dest, $copy->databaseResult, $install);
+        $this->classicAppType()->recordInstall($copy->dest, $install->dir);
     }
 
     private function startCopiedApp(CopyAttempt $copy): void
@@ -1166,14 +1322,22 @@ class Projects
     }
 
     /**
-     * A classic WordPress copy is pointed at the databases copied for it, so
-     * one without them is refused before anything is copied.
+     * A classic WordPress copy is pointed at the databases copied for it, so one without them, or of a source whose
+     * WordPress cannot be told apart, is refused before anything is copied.
      *
      * @return list<array{field: string, code: string, message: string}>
      */
-    public function copyDatabasesProblems(ModelsUser $source, bool $copyDatabases): array
+    public function wordPressCopyProblems(ModelsUser $source, bool $copyDatabases): array
     {
-        if ($copyDatabases || self::isDind($source) || $this->wordPressConfig($source) === null) {
+        if (self::isDind($source)) {
+            return [];
+        }
+        try {
+            $install = $this->wordPressInstall($source);
+        } catch (UnclearInstall $e) {
+            return [['field' => 'project', 'code' => 'wordpress_install_unclear', 'message' => $e->getMessage()]];
+        }
+        if ($copyDatabases || $install === null) {
             return [];
         }
 
@@ -1185,18 +1349,17 @@ class Projects
         ]];
     }
 
-    private function assertCopyGetsDatabases(ModelsUser $source, bool $copyDatabases): void
+    private function assertWordPressCanBeCopied(ModelsUser $source, bool $copyDatabases): void
     {
-        $problems = $this->copyDatabasesProblems($source, $copyDatabases);
+        $problems = $this->wordPressCopyProblems($source, $copyDatabases);
         if ($problems !== []) {
             throw ProblemException::of($problems);
         }
     }
 
     /**
-     * A first copy of the source's home, taken while it still runs, and the images its run file
-     * names got into the copy from it: a Railpack build or a base image transfer takes minutes.
-     * The copy taken once the source is stopped then moves only what changed.
+     * A first copy of the source's home and the images its run file names reach the copy while the source runs, as a
+     * Railpack build or base image transfer takes minutes; the copy once it is stopped moves only what changed.
      */
     private function provideCopyImagesWhileRunning(Project $sourceProject, Project $destProject): void
     {
@@ -1255,8 +1418,83 @@ class Projects
     public static function assertIdle(ModelsUser $user): void
     {
         $async = $user->asyncStatus();
-        if (($async['staging'] ?? null) === 'running' || ($async['push'] ?? null) === 'running') {
-            throw new \RuntimeException("Project '{$user->username}' is busy.", 409);
+        if (($async['staging'] ?? null) === 'running') {
+            throw ProjectBusyException::stagingRunning($user->username);
+        }
+        if (self::isPushing($user)) {
+            throw ProjectBusyException::pushRunning($user->username);
+        }
+        self::assertNotBeingCopied($user);
+
+        app(ProjectRebuild::class)->assertIdle($user);
+    }
+
+    /**
+     * A staging copy or push runs as its destination's task and carries its flag there,
+     * so the project it reads from is found by the source its task names.
+     */
+    private static function assertNotBeingCopied(ModelsUser $user): void
+    {
+        $copy = Task::query()
+            ->whereIn('job_type', [CreateStaging::class, PushState::class])
+            ->where('details->source', $user->username)
+            ->whereNotIn('status', Task::TERMINAL_STATUSES)
+            ->orderByDesc('id')
+            ->first();
+        if ($copy !== null) {
+            throw ProjectBusyException::taskRunning($user->username, $copy);
+        }
+    }
+
+    /**
+     * 409 while a push into this project or the other of its staging pair is
+     * queued or running: the flag is on the target, and the push reads its source.
+     *
+     * @throws ProjectBusyException
+     */
+    public static function assertNoPushInPair(ModelsUser $user): void
+    {
+        foreach ([$user, $user->liveUser, $user->stagingUser] as $side) {
+            if ($side !== null && self::isPushing($side)) {
+                throw ProjectBusyException::pushRunning($user->username);
+            }
+        }
+    }
+
+    /** The push flag a push sets on its target when it is accepted. */
+    private static function isPushing(ModelsUser $user): bool
+    {
+        return ($user->asyncStatus()['push'] ?? null) === 'running';
+    }
+
+    /**
+     * Both projects of a push idle, and neither with a database rename queued or running.
+     *
+     * @throws ProjectBusyException
+     */
+    public static function assertPushIdle(ModelsUser $from, ModelsUser $to): void
+    {
+        self::assertIdle($from);
+        self::assertIdle($to);
+        self::assertNoDatabaseRename($from, $to);
+    }
+
+    /**
+     * 409 while a database rename of one of the projects is queued or running:
+     * a push would copy or replace a database whose tables are being moved.
+     *
+     * @throws ProjectBusyException
+     */
+    private static function assertNoDatabaseRename(ModelsUser ...$users): void
+    {
+        $rename = Task::query()
+            ->whereIn('username', array_map(static fn (ModelsUser $user): string => $user->username, $users))
+            ->where('job_type', RenameMysqlDatabase::class)
+            ->whereNotIn('status', Task::TERMINAL_STATUSES)
+            ->orderBy('id')
+            ->first();
+        if ($rename !== null) {
+            throw ProjectBusyException::taskRunning((string) $rename->username, $rename);
         }
     }
 
@@ -1298,6 +1536,20 @@ class Projects
      */
     public static function createProblems(ModelsUser $source, ?string $destPrefix = null): array
     {
+        $problems = self::stagingSourceProblems($source);
+
+        if ($destPrefix !== null) {
+            $problems = [...$problems, ...self::databaseNameProblems($source, $destPrefix, 'new_username')];
+        }
+
+        return $problems;
+    }
+
+    /**
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    private static function stagingSourceProblems(ModelsUser $source): array
+    {
         $problems = [];
         if ($source->status === 'pending') {
             $problems[] = [
@@ -1319,10 +1571,6 @@ class Projects
                 'code' => 'project_has_staging',
                 'message' => 'Project already has a staging.',
             ];
-        }
-
-        if ($destPrefix !== null) {
-            $problems = [...$problems, ...self::databaseNameProblems($source, $destPrefix, 'new_username')];
         }
 
         return $problems;
@@ -1350,6 +1598,28 @@ class Projects
         }
 
         $sourcePrefix = $source->getMysqlPrefix();
+        $problems = self::mappedDatabaseNameProblems($source, $sourcePrefix, $destPrefix, $field);
+
+        foreach ($source->mysqlUsers as $row) {
+            $name = $row->user;
+            $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
+            if (strlen($mapped) > 32) {
+                $problems[] = [
+                    'field' => $field,
+                    'code' => 'database_user_name_too_long',
+                    'message' => "MySQL user '{$name}' maps to '{$mapped}', longer than 32 characters.",
+                ];
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    private static function mappedDatabaseNameProblems(ModelsUser $source, string $sourcePrefix, string $destPrefix, string $field): array
+    {
         $problems = [];
 
         foreach ($source->mysqlDatabases as $row) {
@@ -1366,18 +1636,6 @@ class Projects
                     'field' => $field,
                     'code' => 'database_name_too_long',
                     'message' => "Database '{$name}' maps to '{$mapped}', longer than 64 characters.",
-                ];
-            }
-        }
-
-        foreach ($source->mysqlUsers as $row) {
-            $name = $row->user;
-            $mapped = DatabaseCopier::mapName($name, $sourcePrefix, $destPrefix);
-            if (strlen($mapped) > 32) {
-                $problems[] = [
-                    'field' => $field,
-                    'code' => 'database_user_name_too_long',
-                    'message' => "MySQL user '{$name}' maps to '{$mapped}', longer than 32 characters.",
                 ];
             }
         }
@@ -1402,9 +1660,20 @@ class Projects
     }
 
     /**
-     * Without its files a container project pushes only the application database
-     * the engine made for it; a source without one would stop and restart both apps
-     * to carry nothing.
+     * An empty selection is not a whole-database push: it would drop every table the target holds alone.
+     *
+     * @param  list<array{database: string, name: string}>|null  $tables
+     */
+    private static function assertTablesSelectSomething(?array $tables): void
+    {
+        if ($tables === []) {
+            throw new \RuntimeException('Selecting tables needs at least one table.', 422);
+        }
+    }
+
+    /**
+     * Without its files a container project pushes only the application database the engine made for it; a source
+     * without one would stop and restart both apps to carry nothing.
      *
      * @return list<array{field: string, code: string, message: string}>
      */
@@ -1451,6 +1720,17 @@ class Projects
                 'message' => "Project '{$to->username}' is pending.",
             ];
         }
+        $problems = [...$problems, ...self::stagingPairProblems($from, $to)];
+
+        return [...$problems, ...self::databaseNameProblems($from, $to->getMysqlPrefix(), 'target')];
+    }
+
+    /**
+     * @return list<array{field: string, code: string, message: string}>
+     */
+    private static function stagingPairProblems(ModelsUser $from, ModelsUser $to): array
+    {
+        $problems = [];
         if ((int) $from->id === (int) $to->id) {
             $problems[] = [
                 'field' => 'target',
@@ -1468,7 +1748,7 @@ class Projects
             ];
         }
 
-        return [...$problems, ...self::databaseNameProblems($from, $to->getMysqlPrefix(), 'target')];
+        return $problems;
     }
 
     /**
@@ -1492,26 +1772,30 @@ class Projects
             }
 
             if (! in_array($database, $owned, true)) {
-                $problems[] = [
-                    'field' => 'tables',
-                    'code' => 'database_not_found',
-                    'message' => "The source project does not own database '{$database}'.",
-                ];
+                $problems[] = self::tableProblem('database_not_found', "The source project does not own database '{$database}'.");
 
                 continue;
             }
 
             $known[$database] ??= $sourceTables->names($database);
             if (! in_array($table, $known[$database], true)) {
-                $problems[] = [
-                    'field' => 'tables',
-                    'code' => 'table_not_found',
-                    'message' => "Table '{$database}.{$table}' does not exist in the source project.",
-                ];
+                $problems[] = self::tableProblem('table_not_found', "Table '{$database}.{$table}' does not exist in the source project.");
             }
         }
 
         return $problems;
+    }
+
+    /**
+     * @return array{field: string, code: string, message: string}
+     */
+    private static function tableProblem(string $code, string $message): array
+    {
+        return [
+            'field' => 'tables',
+            'code' => $code,
+            'message' => $message,
+        ];
     }
 
     private function pauseAppForCopy(Project $project): void
@@ -1603,12 +1887,12 @@ class Projects
 
     private function pathIsDirectoryAsRoot(string $path): bool
     {
-        return $this->system->runProcess(['sudo', 'test', '-d', $path])->isSuccessful();
+        return $this->system->runProcess(Privileged::files()->isDirectory($path))->isSuccessful();
     }
 
     private function pathExistsAsRoot(string $path): bool
     {
-        return $this->system->runProcess(['sudo', 'test', '-e', $path])->isSuccessful();
+        return $this->system->runProcess(Privileged::files()->exists($path))->isSuccessful();
     }
 
     /**
@@ -1616,7 +1900,7 @@ class Projects
      */
     private function listDockerVolumeEntriesAsRoot(string $volumesDir): array
     {
-        $process = $this->system->runProcess(['sudo', 'ls', '-1', $volumesDir]);
+        $process = $this->system->runProcess(Privileged::files()->listNames($volumesDir));
         if (! $process->isSuccessful()) {
             return [];
         }
@@ -1639,7 +1923,7 @@ class Projects
             return 0;
         }
 
-        $process = $this->system->runProcess(['sudo', 'du', '-sb', $path]);
+        $process = $this->system->runProcess(Privileged::files()->diskUsageInBytes($path));
         if (! $process->isSuccessful()) {
             return 0;
         }
@@ -1660,13 +1944,30 @@ class Projects
         string $toHome,
         bool $isDindDest,
     ): void {
+        $required = $this->homeBytesToPush($fromHome, $isDindDest);
+        $required += $this->volumeBytesToPush($fromProject, $fromHome);
+        $availableBytes = $this->availableBytesOn($toHome);
+
+        if ($required > $availableBytes) {
+            throw new \RuntimeException(
+                'Insufficient disk space on target for push (required '
+                .$this->formatBytes($required)
+                .', available '
+                .$this->formatBytes($availableBytes)
+                .').'
+            );
+        }
+    }
+
+    private function homeBytesToPush(string $fromHome, bool $isDindDest)
+    {
         $required = 0;
-        $skipHomeEntries = ['.incoming', '.pre-push', '.pre-push-db'];
+        $skipHomeEntries = ['.incoming', '.pre-push', CopyVolumes::STAGING];
         if ($isDindDest) {
             $skipHomeEntries[] = 'docker';
         }
 
-        $listProcess = $this->system->runProcess(['sudo', 'ls', '-A', $fromHome]);
+        $listProcess = $this->system->runProcess(Privileged::files()->listAllNames($fromHome));
         if ($listProcess->isSuccessful()) {
             foreach (preg_split('/\R/', trim($listProcess->getOutput())) ?: [] as $entry) {
                 $entry = trim($entry);
@@ -1677,6 +1978,12 @@ class Projects
             }
         }
 
+        return $required;
+    }
+
+    private function volumeBytesToPush(Project $fromProject, string $fromHome)
+    {
+        $required = 0;
         $sourceVolumeDataCount = $this->countVolumeDataDirs($fromProject);
         if ($sourceVolumeDataCount > 0) {
             $srcVolumes = $fromHome.'/docker/volumes';
@@ -1690,7 +1997,12 @@ class Projects
             }
         }
 
-        $dfProcess = $this->system->runProcess(['sudo', 'df', '-P', $toHome]);
+        return $required;
+    }
+
+    private function availableBytesOn(string $toHome)
+    {
+        $dfProcess = $this->system->runProcess(Privileged::files()->diskFree($toHome));
         if (! $dfProcess->isSuccessful()) {
             throw new \RuntimeException('Could not determine available disk space on target home.');
         }
@@ -1699,17 +2011,8 @@ class Projects
         $dataLine = $lines[count($lines) - 1] ?? '';
         $parts = preg_split('/\s+/', trim($dataLine));
         $availableKb = isset($parts[3]) ? (int) $parts[3] : 0;
-        $availableBytes = $availableKb * 1024;
 
-        if ($required > $availableBytes) {
-            throw new \RuntimeException(
-                'Insufficient disk space on target for push (required '
-                .$this->formatBytes($required)
-                .', available '
-                .$this->formatBytes($availableBytes)
-                .').'
-            );
-        }
+        return $availableKb * 1024;
     }
 
     private function formatBytes(int $bytes): string
@@ -1734,7 +2037,7 @@ class Projects
         if ($this->pathIsDirectoryAsRoot($incomingDir)
             || $this->pathExistsAsRoot($incomingDir)) {
             $this->runPushProcess(
-                ['sudo', 'rm', '-rf', $incomingDir],
+                Privileged::files()->removeTree($incomingDir),
                 'Failed to remove .incoming directory'
             );
         }
@@ -1751,7 +2054,7 @@ class Projects
         return array_values(array_filter([
             $this->cleanupAfterCommit($prePushDir, fn () => $this->removePrePushDir($prePushDir)),
             $this->cleanupAfterCommit($incomingDir, fn () => $this->cleanupIncomingDir($incomingDir)),
-            $this->cleanupAfterCommit($rollbackDir, fn () => $this->cleanupPath($rollbackDir)),
+            $this->cleanupAfterCommit($rollbackDir, fn () => $this->removeRollbackDir($rollbackDir)),
             $this->cleanupAfterCommit(
                 'the volume data kept aside',
                 fn () => $toProject->copyVolumesForClone()?->discardVolumeBackups(),
@@ -1780,7 +2083,7 @@ class Projects
         if ($this->pathIsDirectoryAsRoot($prePushDir)
             || $this->pathExistsAsRoot($prePushDir)) {
             $this->runPushProcess(
-                ['sudo', 'rm', '-rf', $prePushDir],
+                Privileged::files()->removeTree($prePushDir),
                 'Failed to remove .pre-push directory after successful push'
             );
         }

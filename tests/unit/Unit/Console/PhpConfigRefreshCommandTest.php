@@ -3,6 +3,7 @@
 namespace Tests\Unit\Console;
 
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Artisan;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
@@ -43,9 +44,9 @@ class PhpConfigRefreshCommandTest extends TestCase
 
         $this->assertSame(0, $exit);
         $this->assertStringContainsString("Refreshing the PHP config of 'alice'...", $output);
-        $this->assertStringContainsString('Error-log directives written.', $output);
+        $this->assertStringContainsString('PHP directives written.', $output);
         $this->assertStringContainsString(
-            "log_errors = On\nerror_log = /var/log/php/php_error.log\n",
+            "log_errors = On\nerror_log = /var/log/php/php_error.log\nuser_ini.cache_ttl = 3\n",
             $this->projectFile('alice', '8.3', 'default.ini')
         );
         $this->assertStringContainsString(
@@ -53,7 +54,7 @@ class PhpConfigRefreshCommandTest extends TestCase
             $this->projectFile('alice', '8.3', 'fpm/pool.d/www.conf')
         );
         $this->assertContains(
-            ['sudo', 'chown', '1001:1001', $this->root . '/engine/users/alice/log/php'],
+            Privileged::files()->changeOwner('1001:1001', $this->root . '/engine/users/alice/log/php'),
             $this->system()->commands
         );
     }

@@ -4,12 +4,14 @@ namespace Tests\Unit\Deploy\Compose;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\User;
+use App\Support\JobBudget;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\BindSourceOwners;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -57,6 +59,18 @@ class BindSourceOwnersTest extends TestCase
             implode("\n", $lines)
         );
         $this->assertSame('0664', $this->mode('/keycloak/themes/se2eend/login.css'));
+    }
+
+    /**
+     * A hand-over chowns whatever the bind mount holds, and a command now ends with the timeout its caller gave
+     * it: an inner command's budget, not a minute.
+     */
+    public function test_the_hand_over_gets_a_whole_command_s_budget(): void
+    {
+        $this->apply("services:\n  keycloak:\n    image: keycloak\n    user: \"1000\"\n"
+            . "    volumes:\n      - ./keycloak/themes:/opt/keycloak/themes\n");
+
+        $this->assertSame([JobBudget::COMMAND_SECONDS], $this->handOverTimeouts);
     }
 
     public function test_a_directory_bind_never_reaches_outside_the_checkout(): void
@@ -107,6 +121,9 @@ class BindSourceOwnersTest extends TestCase
     /** @var list<string> images ensureImage() was asked for */
     private array $fetched = [];
 
+    /** @var list<int> the timeout the account's hand-over exec was given */
+    private array $handOverTimeouts = [];
+
     /** @return list<string> the deploy log after apply() */
     private function apply(string $compose): array
     {
@@ -115,15 +132,16 @@ class BindSourceOwnersTest extends TestCase
         $logger = DeployLogger::start($this->username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
 
-        // Runs `test` and the hand-over script locally; the owner becomes our own uid, as tests are not root.
-        $system = new class () extends System {
-            public function __construct()
-            {
-            }
+        $noteHandOver = function (int $timeout): void {
+            $this->handOverTimeouts[] = $timeout;
+        };
+
+        $system = new class ($noteHandOver) extends System {
+            public function __construct(private readonly \Closure $noteHandOver) {}
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(array_values(array_diff((array) $cmd, ['sudo'])));
+                $process = new Process(LocalRoot::argv((array) $cmd));
                 $process->run();
 
                 return $process;
@@ -132,11 +150,17 @@ class BindSourceOwnersTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $cmd = (array) $cmd;
-                $dind = array_search('dind', $cmd, true);
-                if ($dind === false) {
-                    $cmd = array_values(array_diff($cmd, ['sudo']));
+                $inAccount = LocalRoot::inAccount($cmd);
+                if ($inAccount === []) {
+                    $cmd = LocalRoot::argv($cmd);
                 } else {
-                    $cmd = array_slice($cmd, $dind + 1);
+                    $cmd = $inAccount;
+                    if ($cmd[0] === 'docker') {
+                        throw new \RuntimeException('The account has no such image.');
+                    }
+                    if (($cmd[1] ?? null) === '-c') {
+                        ($this->noteHandOver)($timeout);
+                    }
                     $cmd[5] = getmyuid() . ':' . getmygid();
                 }
                 $process = new Process($cmd);
@@ -154,7 +178,6 @@ class BindSourceOwnersTest extends TestCase
         $dind->method('system')->willReturn($system);
         $dind->method('username')->willReturn($this->username);
         $dind->method('userModel')->willReturn($user);
-        $dind->method('composeFilePath')->willReturn($this->root . '/outer.yml');
         $dind->method('userAppComposeFileToRun')->willReturn($composeFile);
         $dind->method('userAppDirPath')->willReturn($this->project);
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));

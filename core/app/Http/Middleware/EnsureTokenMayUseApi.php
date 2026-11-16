@@ -6,6 +6,7 @@ use App\Auth\ApiSurface;
 use App\Auth\ProjectFields;
 use App\Auth\RequestToken;
 use App\Auth\TokenAbilities;
+use App\Http\Responses\Refusal;
 use App\Mcp\Tools\Api\ApiTool;
 use App\Models\Domain;
 use App\Models\PersonalAccessToken;
@@ -29,6 +30,8 @@ use Illuminate\Http\Request;
  */
 class EnsureTokenMayUseApi
 {
+    public const NOT_FOR_API = 'token_not_for_api';
+
     public function handle(Request $request, Closure $next): mixed
     {
         $token = RequestToken::of($request);
@@ -52,14 +55,14 @@ class EnsureTokenMayUseApi
      * A tool call was already measured at `/mcp`, and re-deciding it against a
      * REST allow-list it was never given would refuse every tool on the engine.
      */
-    private function doorRefusal(Request $request, TokenAbilities $abilities, ?string $operation): ?string
+    private function doorRefusal(Request $request, TokenAbilities $abilities, ?string $operation): array|string|null
     {
         if ($request->attributes->get(ApiTool::VIA_ATTRIBUTE) === true) {
             return null;
         }
 
         if (! $abilities->mayUseApi()) {
-            return 'This token was not issued for the API. Mint one with `pae api:token:create`.';
+            return Refusal::body('token', self::NOT_FOR_API, 'This token was not issued for the API; it takes a token minted for it.', null);
         }
 
         if (! $abilities->mayCallRoute($operation)) {
@@ -165,7 +168,7 @@ class EnsureTokenMayUseApi
         $message = 'A project-scoped token must name the project this creates.';
 
         return [
-            'error' => sprintf('%s; %s must name the project it creates.', $this->scoped($scope), $operation),
+            'message' => sprintf('%s; %s must name the project it creates.', $this->scoped($scope), $operation),
             'errors' => [$field => [$message]],
             'problems' => [['field' => $field, 'code' => $field.'_required', 'message' => $message]],
         ];
@@ -250,6 +253,6 @@ class EnsureTokenMayUseApi
      */
     private function refuse(array|string $refusal): JsonResponse
     {
-        return new JsonResponse(is_string($refusal) ? ['error' => $refusal] : $refusal, 403);
+        return new JsonResponse(is_string($refusal) ? ['message' => $refusal] : $refusal, 403);
     }
 }

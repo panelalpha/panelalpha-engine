@@ -6,6 +6,7 @@ test.describe('inspect application schema', () => {
     expect(
       inspectApplicationSchema.parse({
         strategy: 'static',
+        verdict: 'deployable',
         deployable: true,
         candidates: [{ id: 'static' }, { id: 'fallback', label: 'Fallback' }],
       }).candidates?.[0]?.id

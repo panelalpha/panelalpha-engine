@@ -1,0 +1,63 @@
+{
+    "http": [
+        {
+            "id": 0,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 80,
+            "server_name": "alice.test",
+            "server_names": [
+                "alice.test"
+            ],
+            "upstream_host": "localhost",
+            "upstream_port": 80,
+            "upstream_protocol": "http",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "alice",
+            "domain": "alice.test",
+            "is_generated": true,
+            "conflict_key": "http:*:80:*"
+        },
+        {
+            "id": 0,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 80,
+            "server_name": "bob.test",
+            "server_names": [
+                "bob.test"
+            ],
+            "upstream_host": "localhost",
+            "upstream_port": 80,
+            "upstream_protocol": "http",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "bob",
+            "domain": "bob.test",
+            "is_generated": true,
+            "conflict_key": "http:*:80:*"
+        },
+        {
+            "id": 1,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 443,
+            "server_name": "_",
+            "server_names": [],
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 8080,
+            "upstream_protocol": "",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "",
+            "domain": "",
+            "is_generated": false,
+            "conflict_key": "http:*:443:*"
+        }
+    ],
+    "stream": []
+}

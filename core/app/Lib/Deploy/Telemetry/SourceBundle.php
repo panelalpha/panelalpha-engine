@@ -5,22 +5,8 @@ namespace App\Lib\Deploy\Telemetry;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Build the zip of an account's application source.
- *
- * Runs inside {@see Telemetry::captureDeploy()}, which is called from
- * `DeployLogger::finish()` — and that timing is not incidental. A failed
- * account creation is rolled back by `RollBackProject`
- * immediately after the log is finished, so by the time the shipper runs five
- * minutes later the source is gone. If a bundle is going to exist at all it has
- * to be written while the tree is still on disk.
- *
- * What comes out is capped three ways — total bytes, file count, per-file bytes
- * — and if the tree busts a cap after exclusions, no bundle is produced at all.
- * A truncated repository is a misleading bug report; saying "too large" is an
- * honest one.
- *
- * Selection rules live in {@see SourceBundlePolicy} so they can be tested
- * without a filesystem.
+ * The zip of an account's source, written in {@see Telemetry::captureDeploy()} while the tree exists, by the rules of
+ * {@see SourceBundlePolicy}. A tree over a cap gets no bundle at all: a truncated repository is a misleading report.
  */
 class SourceBundle
 {
@@ -75,11 +61,8 @@ class SourceBundle
     }
 
     /**
-     * Why no bundle can be made, before anything is walked or written.
-     *
-     * Order matters for the reason reported: "there was no source" is a truer
-     * answer than "this box has no zip extension", and is_dir() is cheap
-     * enough to ask first.
+     * Why no bundle can be made, before anything is walked or written: "there was no source" is a truer
+     * answer than "this box has no zip extension", so it is asked first.
      */
     private static function unavailableReason(string $projectDir): ?string
     {
@@ -91,10 +74,8 @@ class SourceBundle
     }
 
     /**
-     * {@see plan()} with its failures turned into skip reasons.
-     *
-     * A tree walk that throws is a telemetry problem and never a deploy
-     * problem, so it is logged and reported as a skip rather than raised.
+     * {@see plan()} with its failures turned into skip reasons: a walk that throws is a telemetry problem,
+     * never a deploy problem, so it is logged rather than raised.
      *
      * @return array{files: array<string, string>, uncompressed: int}|array{skipped: string}
      */
@@ -120,10 +101,8 @@ class SourceBundle
     }
 
     /**
-     * Write the archive. Null on success, a skip reason otherwise.
-     *
-     * A half-written zip is removed rather than left for the shipper to find:
-     * it would be uploaded as though it were the source.
+     * Write the archive: null on success, a skip reason otherwise. A half-written zip is removed, or the shipper
+     * would upload it as though it were the source.
      *
      * @param  array<string, string>  $files  relative path => absolute path
      */
@@ -151,9 +130,8 @@ class SourceBundle
     }
 
     /**
-     * Compression usually wins, but a tree of already-compressed assets can
-     * come out larger than the uncompressed budget allowed for. Such a bundle
-     * is deleted, not shipped.
+     * A tree of already-compressed assets can come out larger than the uncompressed budget allowed for:
+     * such a bundle is deleted, not shipped.
      */
     private static function rejectOversized(string $zipPath, int $maxBytes): ?string
     {
@@ -174,16 +152,8 @@ class SourceBundle
     }
 
     /**
-     * Exactly which files would go into a bundle, without writing one.
-     *
-     * Public because "what would you send" has to be answerable without
-     * sending it — and because it is the half of this class that can be tested
-     * on a machine with no ext-zip.
-     *
-     * Excluded directories are pruned during recursion rather than filtered
-     * afterwards: `node_modules` in a real project is hundreds of thousands of
-     * inodes, and stat-ing all of them to throw them away would put seconds of
-     * pointless I/O into a deploy request.
+     * Exactly which files would go into a bundle, without writing one, so "what would you send" is answerable
+     * without sending it. Excluded directories are pruned during the walk, never stat-ed and thrown away.
      *
      * @return array{files: array<string, string>, uncompressed: int}|array{skipped: string}
      */
@@ -220,8 +190,8 @@ class SourceBundle
     }
 
     /**
-     * Every file under $root worth looking at, excluded directories pruned
-     * during recursion rather than after.
+     * Every file under $root worth looking at, excluded directories pruned during recursion, and never a
+     * symlink: it can point anywhere, out of the account's home directory included.
      *
      * @return \Iterator<\SplFileInfo>
      */
@@ -235,8 +205,6 @@ class SourceBundle
         return new \RecursiveIteratorIterator(new \RecursiveCallbackFilterIterator(
             $directories,
             static function (\SplFileInfo $file): bool {
-                // A symlink can point anywhere, including out of the account's
-                // home directory. Never follow one into the bundle.
                 if ($file->isLink()) {
                     return false;
                 }
@@ -247,11 +215,8 @@ class SourceBundle
     }
 
     /**
-     * The path this file would have inside the bundle, or null when it does
-     * not belong in one.
-     *
-     * Readability is checked last: it is the only test here that touches the
-     * filesystem again, and most files are rejected by policy before it.
+     * The path this file would have inside the bundle, or null when it does not belong in one. Readability is
+     * checked last, as the one test that touches the filesystem again.
      */
     private static function includedPath(\SplFileInfo $file, int $rootLength, int $maxFileBytes): ?string
     {

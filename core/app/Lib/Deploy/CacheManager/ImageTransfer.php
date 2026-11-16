@@ -5,11 +5,8 @@ namespace App\Lib\Deploy\CacheManager;
 use App\Lib\Deploy\Engine\ImageStore;
 
 /**
- * What an image transfer is allowed to be, and how many may run at once.
- *
- * Reference validation, the host-capacity readings and the concurrency
- * heuristic are engine-neutral. The commands that actually move an image
- * belong to {@see ImageStore}.
+ * What an image transfer is allowed to be, and how many may run at once; engine-neutral.
+ * The commands that actually move an image belong to {@see ImageStore}.
  */
 class ImageTransfer
 {
@@ -23,14 +20,8 @@ class ImageTransfer
     public const LOAD_UNKNOWN = 1000000.0;
 
     /**
-     * How many images to seed at once on *this* host, right now.
-     *
-     * Seeding decompresses, so it is CPU-bound with an I/O tail — a 2-core VPS
-     * running the panel too has no room for four at once. The limit is derived,
-     * never fixed: CPU headroom is cores minus the whole cores the 1-minute
-     * load average accounts for, memory allows one stream per ~512MB actually
-     * available, and never more streams than images or MAX_CONCURRENCY. An
-     * operator $override wins outright, clamped to the ceiling.
+     * How many images to seed at once on this host, from current CPU and memory headroom.
+     * An operator $override wins outright, clamped to the ceiling.
      */
     public static function concurrencyFor(
         int $cpus,
@@ -56,9 +47,7 @@ class ImageTransfer
     }
 
     /**
-     * Host capacity readings, parsed in PHP so the heuristic stays testable.
-     * All three tolerate junk by returning a value that drives
-     * {@see concurrencyFor()} to sequential.
+     * Host capacity readings; all three answer junk with a value that drives {@see concurrencyFor()} to sequential.
      */
     public static function parseCpuCount(string $procCpuinfo): int
     {
@@ -67,12 +56,11 @@ class ImageTransfer
         return $count > 0 ? $count : 1;
     }
 
+    /** Junk reads as LOAD_UNKNOWN: large enough to force sequential, small enough to stay a safe int. */
     public static function parseLoadAvg(string $procLoadavg): float
     {
         $first = strtok(trim($procLoadavg), " \t\n");
 
-        // Assume the worst: large enough to force sequential, small enough to
-        // stay a safe int.
         return is_string($first) && is_numeric($first) ? (float) $first : self::LOAD_UNKNOWN;
     }
 
@@ -86,10 +74,8 @@ class ImageTransfer
     }
 
     /**
-     * Container ports out of `docker image inspect --format {{json
-     * .Config.ExposedPorts}}`, whose shape is {"5432/tcp":{}}. Anything
-     * unparseable yields nothing: a missing hint is recoverable, a wrong one
-     * is not.
+     * Container ports out of `{{json .Config.ExposedPorts}}` ({"5432/tcp":{}}). Anything unparseable
+     * yields nothing: a missing hint is recoverable, a wrong one is not.
      *
      * @return list<int>
      */
@@ -112,12 +98,8 @@ class ImageTransfer
     }
 
     /**
-     * Download size of an image from `docker manifest inspect --verbose`, in
-     * bytes, or null when the output says nothing we can use.
-     *
-     * Compressed layer sizes — what the pull moves, roughly a third of the
-     * on-disk cost. Only the linux/amd64 entry counts: summing a manifest list
-     * would multiply the answer by the publisher's architectures.
+     * Compressed download size from `docker manifest inspect --verbose`, linux/amd64 only, or null.
+     * A single-platform image inspects to one object, not a list.
      */
     public static function parseManifestSize(string $json): ?int
     {
@@ -125,7 +107,6 @@ class ImageTransfer
         if (! is_array($decoded)) {
             return null;
         }
-        // A single-platform image inspects to one object, not a list.
         if (isset($decoded['Descriptor']) || isset($decoded['layers'])) {
             $decoded = [$decoded];
         }
@@ -134,20 +115,7 @@ class ImageTransfer
             if (! is_array($entry) || ! self::isLinuxAmd64($entry)) {
                 continue;
             }
-            $layers = $entry['OCIManifest']['layers']
-                ?? $entry['SchemaV2Manifest']['layers']
-                ?? $entry['layers']
-                ?? null;
-            if (! is_array($layers)) {
-                continue;
-            }
-            $total = 0;
-            foreach ($layers as $layer) {
-                $size = is_array($layer) ? ($layer['size'] ?? null) : null;
-                if (is_int($size) && $size > 0) {
-                    $total += $size;
-                }
-            }
+            $total = self::layerBytes($entry);
             if ($total > 0) {
                 return $total;
             }
@@ -159,11 +127,34 @@ class ImageTransfer
     /**
      * @param  array<string, mixed>  $entry
      */
+    private static function layerBytes(array $entry): int
+    {
+        $layers = $entry['OCIManifest']['layers']
+            ?? $entry['SchemaV2Manifest']['layers']
+            ?? $entry['layers']
+            ?? null;
+        if (! is_array($layers)) {
+            return 0;
+        }
+        $total = 0;
+        foreach ($layers as $layer) {
+            $size = is_array($layer) ? ($layer['size'] ?? null) : null;
+            if (is_int($size) && $size > 0) {
+                $total += $size;
+            }
+        }
+
+        return $total;
+    }
+
+    /**
+     * No platform block means single-platform: whatever the daemon asked for, which is this host.
+     *
+     * @param  array<string, mixed>  $entry
+     */
     private static function isLinuxAmd64(array $entry): bool
     {
         $platform = $entry['Descriptor']['platform'] ?? null;
-        // An image with no platform block is single-platform: it is whatever
-        // the daemon asked for, which is this host.
         if (! is_array($platform)) {
             return true;
         }
@@ -173,16 +164,14 @@ class ImageTransfer
     }
 
     /**
-     * A reference safe to hand to docker. Accepts a tag, a digest or both, as
-     * recipes pin images (`name:tag@sha256:…`); rejects a leading dash, which
-     * docker would read as a flag.
+     * A reference safe to hand to docker: `[registry[:port]/]repository[:tag][@sha256:…]` with a tag,
+     * a digest or both, and no leading dash, which docker would read as a flag.
      */
     public static function isSafeImageRef(string $image): bool
     {
         if ($image === '' || $image[0] === '-') {
             return false;
         }
-        // [registry[:port]/]repository[:tag][@sha256:…], at least one of the two
         $registry = '(?:[a-z0-9.-]+(?::[0-9]+)?/)?';
         $repository = '[a-z0-9._-]+(?:/[a-z0-9._-]+)*';
         $digest = '@sha256:[a-f0-9]{64}';
@@ -214,9 +203,8 @@ class ImageTransfer
     }
 
     /**
-     * Spell out the implicit :latest, and drop a tag beside a digest, so the
-     * ref matches what docker records. Null for an unexpanded ${VAR}, or a
-     * reference docker would not accept.
+     * Spell out the implicit :latest (never on a digest) and drop a tag beside a digest, as docker
+     * records it. Null for an unexpanded ${VAR}, or a reference docker would not accept.
      */
     public static function normalizeImageRef(mixed $image): ?string
     {
@@ -227,7 +215,6 @@ class ImageTransfer
         if ($image === '' || str_contains($image, '$')) {
             return null;
         }
-        // A digest is already exact; :latest on top of one resolves to nothing.
         if (! str_contains($image, '@') && ! str_contains(basename($image), ':')) {
             $image .= ':latest';
         }

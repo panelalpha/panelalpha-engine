@@ -1,0 +1,197 @@
+[1 log lines] ensurePhpBaseImage
+[
+    "php:8.3-apache-bookworm",
+    [],
+    [],
+    [
+        "imagick"
+    ]
+]
+
+[1 log lines] entrypoint
+[
+    {
+        "platform": "laravel",
+        "start_command": "",
+        "app_root": "/app/"
+    },
+    "{dir}",
+    "1001:1001",
+    {
+        "install": {
+            "wait-for-mysql": "for i in $(seq 1 60); do php -r 'try { $h=getenv(\"DB_HOST\") ?: \"127.0.0.1\"; $p=getenv(\"DB_PORT\") ?: \"3306\"; $u=getenv(\"DB_USERNAME\") ?: \"root\"; $pw=getenv(\"DB_PASSWORD\") ?: \"\"; new PDO(\"mysql:host={$h};port={$p}\", $u, $pw); exit(0);} catch (Throwable $e) { exit(1); }' 2>/dev/null && break; sleep 2; done; "
+        },
+        "upgrade": {
+            "wait-for-mysql": "for i in $(seq 1 60); do php -r 'try { $h=getenv(\"DB_HOST\") ?: \"127.0.0.1\"; $p=getenv(\"DB_PORT\") ?: \"3306\"; $u=getenv(\"DB_USERNAME\") ?: \"root\"; $pw=getenv(\"DB_PASSWORD\") ?: \"\"; new PDO(\"mysql:host={$h};port={$p}\", $u, $pw); exit(0);} catch (Throwable $e) { exit(1); }' 2>/dev/null && break; sleep 2; done; "
+        }
+    },
+    false
+]
+
+[1 log lines] runPhpBuild
+[
+    "panelalpha/php:8.3-x-imagick-test",
+    {
+        "strategy": "laravel",
+        "label": "Laravel",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 8000,
+        "runtime": "php",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader",
+        "build_command": "{ composer run-script --no-interaction post-autoload-dump; } || true",
+        "start_command": "/usr/local/bin/panelalpha-serve",
+        "env": {
+            "APP_ENV": "production",
+            "LOG_CHANNEL": "stderr"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "panelalpha/php:8.3-apache-bookworm-pa20261007",
+        "database": null,
+        "app_root": "/app/",
+        "docroot": "public",
+        "build_args": [],
+        "system_packages": [
+            "libvips-dev"
+        ],
+        "frontend_build": "npm run prod",
+        "credentials": null,
+        "platform": "laravel",
+        "requirements": [
+            {
+                "id": "php",
+                "version": "8.3",
+                "constraint": "^8.2",
+                "source": "composer.json require.php",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "php 8.3 (from composer.json require.php)"
+        ],
+        "build_images": [],
+        "resolved_commands": {
+            "asset-publish": ""
+        }
+    },
+    "app",
+    true,
+    [
+        "imagick"
+    ],
+    []
+]
+
+[1 log lines] runForPhp
+[
+    "{dir}",
+    {
+        ".env": true,
+        "app": true
+    },
+    "app",
+    "npm run prod",
+    "panelalpha/php:8.3-x-imagick-test"
+]
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root docker.readFileFromImage -- 0 panelalpha/php:8.3-x-imagick-test /etc/passwd
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root docker.readFileFromImage -- 0 panelalpha/php:8.3-x-imagick-test /etc/group
+
+
+[1 log lines] write {dir}/panelalpha.passwd chown=1001:1001 mode=644
+root:x:0:0:root:/root:/bin/bash
+app:x:1001:1001:app:/app:/usr/sbin/nologin
+
+
+[1 log lines] write {dir}/panelalpha.group chown=1001:1001 mode=644
+root:x:0:
+app:x:1001:
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root scripts.makeHomeEntry -- {dir}/.cache 0755 1001:1001
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root account.makeDirectories -- 1001 1001 {dir}/.cache/composer
+
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'panelalpha/php:8.3-x-imagick-test'
+    working_dir: /app
+    volumes:
+      - './app:/app'
+      - '{dir}/.cache/composer:/var/cache/pa-composer'
+      - './panelalpha.passwd:/etc/passwd:ro'
+      - './panelalpha.group:/etc/group:ro'
+    ports:
+      - '8000:8000'
+    user: '1001:1001'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '8000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      APP_ENV: production
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: app
+      DB_USERNAME: app
+      DB_PASSWORD: 6f2dc887ffc5b599aa86f744f53465ee
+      PA_DOCROOT: /app/public
+      PA_DEPLOY_PHASE: install
+      DB_SOCKET: ''
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+  db:
+    image: 'mariadb:11'
+    network_mode: 'service:app'
+    depends_on:
+      - app
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: 6f2dc887ffc5b599aa86f744f53465ee
+      MYSQL_ROOT_PASSWORD: 6e0e0bba6a2ad40087913bd803605fa8
+    volumes:
+      - 'dbdata:/var/lib/mysql'
+    labels:
+      panelalpha.generated: framework-db
+volumes:
+  dbdata: null
+
+
+== log
+#0 info: Starting stage: running

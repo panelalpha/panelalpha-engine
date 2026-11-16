@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('phpmyadmin_sso_token_create')]
 #[Description(<<<'MARKDOWN'
     Create a phpMyAdmin SSO token for a project
+
+    Creates a one-time URL that logs straight into phpMyAdmin as the project's database admin. It is single use and expires after 5 minutes; when it stops working, create a new one.
     MARKDOWN)]
 #[IsDestructive]
 class PhpmyadminSsoTokenCreateTool extends ApiTool

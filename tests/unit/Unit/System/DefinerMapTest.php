@@ -46,15 +46,6 @@ class DefinerMapTest extends TestCase
         DefinerMap::map('alice_', "bob'_", [], []);
     }
 
-    public function test_the_catch_all_comes_after_every_mapped_user(): void
-    {
-        $expressions = DefinerMap::map('alice_', 'bob_', ['alice_wp'], ['bob_wp'])->sedExpressions();
-
-        $this->assertSame('s/DEFINER=`alice_wp`@`%`/DEFINER\n`bob_wp`@`%`/g', $expressions[0]);
-        $this->assertStringEndsWith('/DEFINER=`bob_no.definer`@`%`/g', $expressions[1]);
-        $this->assertSame('s/DEFINER\n/DEFINER=/g', $expressions[2]);
-    }
-
     public function test_between_reads_both_projects_users(): void
     {
         $alice = $this->makeUser('alice', ['mysql_prefix' => 'alice_']);

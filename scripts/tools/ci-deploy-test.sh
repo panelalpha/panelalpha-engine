@@ -53,7 +53,8 @@ Options:
                              (app container started but exited non-zero)
   --allow-unrecognized        Don't fail when the engine couldn't detect how to run the
                              project (deploy_strategy=fallback) and served a placeholder
-                             page instead — see docs/07-supported-projects/how-detection-works.md
+                             page instead; its 404 then passes the HTTP check —
+                             see docs/07-supported-projects/how-detection-works.md
   --skip-doctor             Skip the engine reachability pre-flight check
   --keep                    Don't delete the hosting account afterwards (debugging)
   --dump-log-json PATH       On any failure, write a JSON bundle (full deploy log lines +
@@ -369,7 +370,7 @@ deploy_strategy="$(echo "$app_json" | jq -r '(.data // .).details.deploy_strateg
 deploy_label="$(echo "$app_json" | jq -r '(.data // .).details.deploy_label // "unknown"')"
 
 if [[ "$deployment_status" == "partial" ]]; then
-    warnings="$(echo "$app_json" | jq -r '(.data // .).details.deployment_warnings // [] | join("; ")')"
+    warnings="$(echo "$app_json" | jq -r '(.data // .).details.deployment_warnings // [] | map(.message? // .) | join("; ")')"
     if [[ "$ALLOW_PARTIAL" -eq 1 ]]; then
         log_warn "Deploy finished as 'partial' (--allow-partial set): $warnings"
     else
@@ -378,7 +379,9 @@ if [[ "$deployment_status" == "partial" ]]; then
     fi
 fi
 
+unrecognized=0
 if [[ "$deploy_strategy" == "fallback" || "$deploy_label" == "Unknown" ]]; then
+    unrecognized=1
     if [[ "$ALLOW_UNRECOGNIZED" -eq 1 ]]; then
         log_warn "Engine could not recognize the project (strategy=fallback, --allow-unrecognized set); it deployed a placeholder page instead of the app."
     else
@@ -397,7 +400,10 @@ if echo "$health_json" | jq -e 'has("error")' >/dev/null 2>&1; then
     log_error "Could not check '$USERNAME': $(echo "$health_json" | jq -r '.error')"
     exit 1
 fi
-if ! echo "$health_json" | jq -e '.healthy != false' >/dev/null 2>&1; then
+if [[ "$ALLOW_UNRECOGNIZED" -eq 1 && "$unrecognized" -eq 1 ]] \
+    && echo "$health_json" | jq -e '.serving == "placeholder"' >/dev/null 2>&1; then
+    log_warn "'$USERNAME' serves the placeholder page (--allow-unrecognized)."
+elif ! echo "$health_json" | jq -e '.healthy != false' >/dev/null 2>&1; then
     log_error "'$USERNAME' did not answer on every published port."
     echo "$health_json" | jq '.'
     exit 1
@@ -405,6 +411,11 @@ fi
 log_info "Application health OK: $(echo "$health_json" | jq -r '.healthy')"
 
 # --- verify: HTTP check -------------------------------------------------------
+# An unrecognized project, allowed, answers its placeholder with a 404 on purpose.
+allowed_placeholder() {
+    [[ "$ALLOW_UNRECOGNIZED" -eq 1 && "$unrecognized" -eq 1 && "$http_code" == 404 ]] \
+        && grep -q 'PanelAlpha — Project not configured' "$body_file" 2>/dev/null
+}
 if [[ "$SKIP_HTTP_VERIFY" -eq 0 ]]; then
     engine_ip="$("$PAE" settings:get default_ipv4 2>/dev/null | tr -d '\r\n[:space:]')"
     if [[ -z "$engine_ip" ]]; then
@@ -422,25 +433,24 @@ if [[ "$SKIP_HTTP_VERIFY" -eq 0 ]]; then
             http_code="$(curl -k -s -o "$body_file" -w '%{http_code}' \
                 --resolve "${DOMAIN}:443:${engine_ip}" --resolve "${DOMAIN}:80:${engine_ip}" \
                 --max-time 10 "$url" || echo 000)"
-            if [[ "$http_code" -ge "$status_min" && "$http_code" -le "$status_max" ]]; then
+            if [[ "$http_code" -ge "$status_min" && "$http_code" -le "$status_max" ]] || allowed_placeholder; then
                 break
             fi
             sleep "$VERIFY_INTERVAL"
             elapsed=$((elapsed + VERIFY_INTERVAL))
         done
 
-        if [[ "$http_code" -lt "$status_min" || "$http_code" -gt "$status_max" ]]; then
+        if allowed_placeholder; then
+            log_info "HTTP check OK: $url answered the placeholder page with $http_code (--allow-unrecognized)"
+        elif [[ "$http_code" -lt "$status_min" || "$http_code" -gt "$status_max" ]]; then
             log_error "HTTP check failed: $url returned $http_code (expected $VERIFY_STATUS) after ${elapsed}s"
             rm -f "$body_file"
             exit 1
+        else
+            log_info "HTTP check OK: $url returned $http_code"
         fi
-        log_info "HTTP check OK: $url returned $http_code"
 
-        # Redundant safety net: the placeholder pages the engine serves when it
-        # couldn't recognize/build the project (see the deploy_strategy check
-        # above) return a normal 2xx status, so a status check alone can't tell
-        # them apart from a real app. Their title is load-bearing (matched by
-        # DetectProjectStrategy::isEngineWelcomeHtml() on the PHP side too).
+        # The welcome page answers 200; these titles also match PlaceholderPage::isOneOf().
         if [[ "$ALLOW_UNRECOGNIZED" -eq 0 ]] && grep -qE 'PanelAlpha — Project not configured|PanelAlpha — Ready' "$body_file" 2>/dev/null; then
             log_error "$url served PanelAlpha's placeholder page, not the deployed app (project was not recognized)."
             rm -f "$body_file"

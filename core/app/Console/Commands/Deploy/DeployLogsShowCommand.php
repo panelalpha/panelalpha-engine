@@ -2,12 +2,18 @@
 
 namespace App\Console\Commands\Deploy;
 
+use App\Console\Commands\Concerns\PrintsFindings;
 use App\Lib\Deploy\DeployLog\DeployLineFormat;
+use App\Lib\Deploy\DeployLog\DeployLogFollower;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployStatus;
+use App\Lib\Findings\Hints\FindingPresenter;
 use Illuminate\Console\Command;
 
 class DeployLogsShowCommand extends Command
 {
+    use PrintsFindings;
+
     /**
      * How long --follow waits for a deploy log to appear at all. Its own short
      * grace period, not --timeout: that one is for a deploy that is running,
@@ -70,16 +76,19 @@ class DeployLogsShowCommand extends Command
 
         $latestMeta = DeployLogger::readLatestFor($username);
 
-        $this->line("User:    {$username}");
+        $this->line("Project: {$username}");
         $this->line('Deploy:  '.$logger->getDeployId());
         $this->line('Path:    '.$path);
         if ($latestMeta !== null && ($latestMeta['id'] ?? null) === $logger->getDeployId()) {
             $this->line('Status:  '.($latestMeta['status'] ?? '-'));
             $this->line('Stage:   '.($latestMeta['stage'] ?? '-'));
             $this->line('PID:     '.(($latestMeta['pid'] ?? null) !== null ? (string) $latestMeta['pid'] : '-'));
-            if (! empty($latestMeta['error'])) {
-                $this->line('Error:   '.$latestMeta['error']);
+            $error = DeployStatus::errorOf($latestMeta);
+            if ($error !== null && $error !== '') {
+                $this->line('Error:   '.$error);
+                $this->printCliHints(FindingPresenter::presentOne(DeployStatus::failureOf($latestMeta), $username)['hints'] ?? []);
             }
+            $this->printFindings(DeployStatus::warningsOf($latestMeta), $username);
         } elseif ($latestMeta !== null) {
             $this->line('Note:    latest.json points to '.($latestMeta['id'] ?? '?'));
         }
@@ -133,62 +142,46 @@ class DeployLogsShowCommand extends Command
     private function follow(DeployLogger $logger, string $username, int $tail, int $timeout, bool $raw): int
     {
         $verbose = $this->output->isVerbose();
-        $deadline = time() + $timeout;
+        $follower = new DeployLogFollower(fn (array $line, int $startedAt) => $this->write($line, $startedAt, $verbose, $raw));
+        $status = $follower->follow($logger, $tail, fn (): string|false|null => $this->settledStatus($username, $logger->getDeployId()), $timeout);
 
-        $page = $logger->read(0);
-        $lines = $page['lines'];
-        $startedAt = $lines === [] ? time() : (int) ($lines[0]['ts'] ?? time());
-        // The backlog, so a deploy already halfway through does not start
-        // mid-sentence, then everything new from where that ended.
-        foreach (array_slice($lines, -$tail) as $line) {
-            $this->write($line, $startedAt, $verbose, $raw);
+        $this->line('');
+        if ($status === null) {
+            $this->error("Still running after {$timeout}s; giving up on watching it.");
+
+            return 1;
         }
-        $offset = $page['next_offset'];
+        if ($status === false) {
+            $this->warn('This is not the current deploy for the project; nothing more will arrive.');
 
-        while (true) {
-            $status = $this->status($username, $logger->getDeployId());
-
-            $page = $logger->read($offset);
-            foreach ($page['lines'] as $line) {
-                $this->write($line, $startedAt, $verbose, $raw);
-            }
-            $offset = $page['next_offset'];
-
-            // Status read before the lines, so a deploy that finished between
-            // the two is still drained above rather than cut off mid-log.
-            if ($status === null) {
-                // latest.json names a different deploy: this one is over, and
-                // waiting for a status it will never get again is a 30-minute
-                // hang on `--id` for an older deploy.
-                $this->line('');
-                $this->warn('This is not the current deploy for the project; nothing more will arrive.');
-
-                return 0;
-            }
-
-            if (DeployLineFormat::isTerminal($status)) {
-                $this->line('');
-                $failed = in_array(
-                    $status,
-                    [DeployLogger::STATUS_FAILED, DeployLogger::STATUS_CANCELLED],
-                    true
-                );
-                $failed
-                    ? $this->error("Deploy {$status}.")
-                    : $this->info("Deploy {$status}.");
-
-                return $failed ? 1 : 0;
-            }
-
-            if (time() >= $deadline) {
-                $this->line('');
-                $this->error("Still running after {$timeout}s; giving up on watching it.");
-
-                return 1;
-            }
-
-            usleep(500_000);
+            return 0;
         }
+
+        return $this->finished($status);
+    }
+
+    /**
+     * The deploy's terminal status, null while it runs, and false once latest.json names a different deploy: this one is
+     * over, and waiting for a status it will never get again is a 30-minute hang on `--id` for an older deploy.
+     */
+    private function settledStatus(string $username, string $deployId): string|false|null
+    {
+        $status = $this->status($username, $deployId);
+        if ($status === null) {
+            return false;
+        }
+
+        return DeployLineFormat::isTerminal($status) ? $status : null;
+    }
+
+    private function finished(string $status): int
+    {
+        $failed = in_array($status, [DeployLogger::STATUS_FAILED, DeployLogger::STATUS_CANCELLED], true);
+        $failed
+            ? $this->error("Deploy {$status}.")
+            : $this->info("Deploy {$status}.");
+
+        return $failed ? 1 : 0;
     }
 
     /** @param array{ts?: int, stage?: ?string, level?: string, msg?: string} $line */

@@ -49,14 +49,21 @@ class DockerfileNamedProbeTest extends ProbeTestCase
     }
 
     /** Laravel tutorials keep `php.dockerfile` at the root: the app is still Laravel/PHP. */
-    public function test_a_project_another_runtime_recognises_is_left_alone(): void
+    public function test_a_project_a_language_recipe_claims_is_left_to_it(): void
     {
         $this->write('php.dockerfile', 'FROM php:8.3-fpm');
         $this->writeJson('composer.json', ['require' => ['php' => '^8.3']]);
         $this->write('index.php', '<?php echo 1;');
 
-        $this->assertFalse($this->evaluate());
         $this->assertNotSame('dockerfile', DetectProjectStrategy::detect($this->dir)['strategy']);
+    }
+
+    public function test_a_package_no_recipe_claims_is_built_from_its_named_dockerfile(): void
+    {
+        $this->write('app.dockerfile', "FROM node:22-alpine\nEXPOSE 3000\n");
+        $this->writeJson('package.json', ['name' => 'x', 'scripts' => ['lint' => 'eslint .']]);
+
+        $this->assertSame('dockerfile', DetectProjectStrategy::detect($this->dir)['strategy']);
     }
 
     public function test_a_plain_dockerfile_still_wins(): void

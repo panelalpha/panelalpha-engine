@@ -11,8 +11,11 @@ NC='\033[0m' # No Color
 SYSBOX_VERSION="0.7.1"
 # Package filename keeps the "-0" revision suffix used by Nestybox downloads.
 SYSBOX_DEB_URL="https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_amd64.deb"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DAEMON_JSON="${DAEMON_JSON:-/etc/docker/daemon.json}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+USER_HOME_DIR="${USER_HOME_DIR:-/home}"
+RECOVER_SCRIPT="${RECOVER_SCRIPT:-/usr/local/sbin/recover-sysbox-dind.sh}"
+SYSBOX_USER="${SYSBOX_USER:-sysbox}"
 
 # Functions
 log_info() {
@@ -45,7 +48,6 @@ check_dependencies() {
 
 # Ensure Docker daemon has 'time-namespaces' disabled to keep Sysbox working
 ensure_time_namespaces_disabled() {
-    DAEMON_JSON="/etc/docker/daemon.json"
     TMP_JSON="$(mktemp)"
     DOCKER_DAEMON_MODIFIED=0
 
@@ -100,7 +102,7 @@ PANELALPHA_GOGC="${PANELALPHA_GOGC:-50}"
 ensure_go_gc() {
     local unit dir file changed=0
     for unit in docker containerd sysbox-mgr sysbox-fs; do
-        dir="/etc/systemd/system/${unit}.service.d"
+        dir="${SYSTEMD_UNIT_DIR}/${unit}.service.d"
         file="${dir}/panelalpha-gogc.conf"
         if [ "$(cat "$file" 2>/dev/null)" != "$(printf '[Service]\nEnvironment=GOGC=%s' "$PANELALPHA_GOGC")" ]; then
             mkdir -p "$dir"
@@ -126,7 +128,7 @@ ensure_go_gc() {
 PANELALPHA_REGISTRY_MIRROR="${PANELALPHA_REGISTRY_MIRROR-http://127.0.0.1:5001}"
 
 ensure_registry_mirror() {
-    local daemon_json="/etc/docker/daemon.json" tmp
+    local daemon_json="$DAEMON_JSON" tmp
     [ -n "$PANELALPHA_REGISTRY_MIRROR" ] || { log_info "Registry mirror disabled (PANELALPHA_REGISTRY_MIRROR is empty)"; return 0; }
     command -v jq >/dev/null 2>&1 || { log_warn "jq is missing; not setting the registry mirror"; return 0; }
     [ -s "$daemon_json" ] || echo "{}" > "$daemon_json"
@@ -157,24 +159,10 @@ ensure_registry_mirror() {
     fi
 }
 
-install_helper_script() {
-    local name="$1"
-    local dest="$2"
-    local src="${SCRIPT_DIR}/${name}"
-    if [ ! -f "$src" ]; then
-        src="/opt/panelalpha/shared-hosting/scripts/${name}"
-    fi
-    if [ -f "$src" ]; then
-        install -m 0755 "$src" "$dest"
-        log_info "Installed ${dest}"
-        return 0
-    fi
-    log_warn "${name} not found next to installer — skip"
-    return 1
-}
-
-install_recovery_helpers() {
-    install_helper_script "recover-sysbox-dind.sh" /usr/local/sbin/recover-sysbox-dind.sh || true
+# A sysbox container that will not stop is wedged; core runs on runc, so it is up to recover it.
+recover_with_the_engine() {
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan project:dind:recover --project="$1" --wipe-inner </dev/null
 }
 
 sysbox_installed_version() {
@@ -271,7 +259,6 @@ install_sysbox() {
 
     ensure_fuse3
     ensure_fusermount_apparmor
-    install_recovery_helpers
     ensure_go_gc
 
     local current
@@ -287,7 +274,7 @@ install_sysbox() {
                 if [ "$rt" = "sysbox-runc" ]; then
                     docker update --restart=no "$id" >/dev/null 2>&1 || true
                     timeout 60 docker stop "$id" >/dev/null 2>&1 || \
-                        /usr/local/sbin/recover-sysbox-dind.sh --username="$(docker inspect -f '{{.Name}}' "$id" | sed 's#^/##')" --wipe-inner || true
+                        recover_with_the_engine "$(docker inspect -f '{{.Name}}' "$id" | sed 's#^/##')" || true
                 fi
             done
             install_or_upgrade_sysbox_package
@@ -346,25 +333,118 @@ ensure_sysbox_running() {
     fi
 }
 
+# The package leaves behind what it did not create through dpkg: the daemon.json
+# entries that only make sense with the runtime, the drop-ins that tune it, the
+# service user and the recovery script.
+remove_sysbox_daemon_json() {
+    local tmp
+    [ -f "$DAEMON_JSON" ] || return 0
+    if ! command -v jq >/dev/null 2>&1; then
+        log_warn "jq is missing; $DAEMON_JSON may still name the sysbox-runc runtime"
+        return 0
+    fi
+    if ! jq -e '
+        (((.runtimes | type) == "object") and (.runtimes["sysbox-runc"] != null))
+        or (((.features | type) == "object") and (.features["time-namespaces"] == false))
+    ' "$DAEMON_JSON" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    if ! jq '
+        if (((.runtimes | type) == "object") and (.runtimes["sysbox-runc"] != null)) then
+            .runtimes |= del(.["sysbox-runc"])
+            | if ((.runtimes | length) == 0) then del(.runtimes) else . end
+        else . end
+        | if (((.features | type) == "object") and (.features["time-namespaces"] == false)) then
+            .features |= del(.["time-namespaces"])
+            | if ((.features | length) == 0) then del(.features) else . end
+        else . end
+    ' "$DAEMON_JSON" >"$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        log_warn "Could not edit $DAEMON_JSON"
+        return 0
+    fi
+    if cmp -s "$tmp" "$DAEMON_JSON"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    cat "$tmp" >"$DAEMON_JSON"
+    rm -f "$tmp"
+    log_info "Removed the sysbox-runc runtime and the time-namespaces setting from $DAEMON_JSON"
+}
+
+remove_sysbox_configuration() {
+    local unit dir
+
+    for unit in docker containerd sysbox-mgr sysbox-fs; do
+        dir="${SYSTEMD_UNIT_DIR}/${unit}.service.d"
+        rm -f "${dir}/panelalpha-gogc.conf"
+        rmdir "$dir" 2>/dev/null || true
+    done
+
+    if id "$SYSBOX_USER" >/dev/null 2>&1; then
+        userdel "$SYSBOX_USER" >/dev/null 2>&1 || log_warn "Could not delete the $SYSBOX_USER user"
+        rm -rf "${USER_HOME_DIR:?}/${SYSBOX_USER}"
+    fi
+    if getent group "$SYSBOX_USER" >/dev/null 2>&1; then
+        groupdel "$SYSBOX_USER" >/dev/null 2>&1 || true
+    fi
+
+    remove_sysbox_daemon_json
+    systemctl daemon-reload 2>/dev/null || true
+}
+
+# Prints "<id> <compose service>" for every container that runs under sysbox-runc.
+sysbox_containers() {
+    local ids
+    ids="$(docker ps -aq 2>/dev/null)"
+    [ -n "$ids" ] || return 0
+    # shellcheck disable=SC2086
+    docker inspect --format '{{.Id}} {{.HostConfig.Runtime}} {{index .Config.Labels "com.docker.compose.service"}}' $ids 2>/dev/null |
+        awk '$2 == "sysbox-runc" { print $1, $3 }'
+}
+
+# Only the containers that cannot run without the runtime go. An engine account
+# (the dind service of its compose project) takes its anonymous volumes with it;
+# any other keeps them.
+remove_sysbox_containers() {
+    local id service accounts=() others=()
+    while read -r id service; do
+        [ -n "$id" ] || continue
+        if [ "$service" = "dind" ]; then
+            accounts+=("$id")
+        else
+            others+=("$id")
+        fi
+    done < <(sysbox_containers)
+    [ $((${#accounts[@]} + ${#others[@]})) -gt 0 ] || return 0
+
+    log_info "Stopping the sysbox-runc containers..."
+    docker stop "${accounts[@]}" "${others[@]}" >/dev/null 2>&1 || true
+    [ ${#accounts[@]} -eq 0 ] || docker rm -v "${accounts[@]}" >/dev/null 2>&1 || true
+    [ ${#others[@]} -eq 0 ] || docker rm "${others[@]}" >/dev/null 2>&1 || true
+}
+
 # Uninstall Sysbox
 uninstall_sysbox() {
     log_info "Uninstalling Sysbox runtime..."
 
     if ! command -v sysbox-runc >/dev/null 2>&1; then
         log_info "Sysbox is not installed"
+        remove_sysbox_configuration
         return 0
     fi
 
-    log_info "Stopping all Docker containers..."
-    docker stop $(docker ps -aq) 2>/dev/null || true
-    docker rm $(docker ps -aq) 2>/dev/null || true
+    remove_sysbox_containers
 
     log_info "Removing Sysbox package..."
     if ! apt-get purge sysbox-ce -y; then
         log_error "Failed to purge Sysbox package"
     fi
 
-    rm -f /usr/local/sbin/recover-sysbox-dind.sh
+    rm -f "$RECOVER_SCRIPT"
+    remove_sysbox_configuration
 
     log_info "Restarting Docker..."
     if ! (systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null); then
@@ -385,9 +465,6 @@ show_usage() {
     echo ""
     echo "This script installs or uninstalls Sysbox runtime for enhanced Docker-in-Docker security."
     echo "Supported systems: Debian, Ubuntu"
-    echo ""
-    echo "Also installs:"
-    echo "  /usr/local/sbin/recover-sysbox-dind.sh  # recover wedged DinD without host reboot"
     echo ""
     echo "Requirements:"
     echo "  - curl (for install)"

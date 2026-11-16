@@ -3,6 +3,7 @@
 namespace App\System\Project\Deployment;
 
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Finding;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
@@ -10,12 +11,8 @@ use App\System\Project\Dind\AppHealth;
 use RuntimeException;
 
 /**
- * Deploy mechanics for a project on a plain compose template (wordpress,
- * static, ...) rather than DinD. Lifted out of UserController, which ran this
- * sequence inline and is why the pipeline existed twice.
- *
- * The source steps are no-ops here on purpose: a template project has no
- * repository to clone, and provision() forces `dind` on anything that does.
+ * Deploy mechanics for a project on a plain compose template (wordpress, static, ...) rather than DinD. The source
+ * steps are no-ops on purpose: a template project has no repository, and provision() forces `dind` on one that does.
  */
 final class TemplateDeployMechanics implements DeployMechanics
 {
@@ -87,6 +84,9 @@ final class TemplateDeployMechanics implements DeployMechanics
     /** The template path has no generations to note. */
     public function recordRunningVersion(): void {}
 
+    /** The template path runs no account container to repair. */
+    public function repairAccountMapping(): void {}
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
         throw new RuntimeException('Checkout rebuild requires a DinD project.');
@@ -134,9 +134,9 @@ final class TemplateDeployMechanics implements DeployMechanics
         return AppHealth::servingWarnings($this->user()->getDetails());
     }
 
+    /** Reads the account's own domain column, as this path always did, not $domain. */
     public function publicUrlWarnings(DomainModel $domain): array
     {
-        // The account's own domain column, as this path always read it.
         return PublicUrl::warnings($this->user()->domain, $this->user()->getDetails());
     }
 
@@ -152,18 +152,19 @@ final class TemplateDeployMechanics implements DeployMechanics
     public function persistPartialSuccess(array $warnings): void
     {
         $this->user()->setDetails([
-            'deployment_warnings' => $warnings,
+            'deployment_warnings' => Finding::storable($warnings),
             'deployment_status' => 'partial',
             'error' => null,
         ]);
         $this->user()->save();
     }
 
+    /**
+     * markDeploySucceeded() also clears deployment_warnings, so a clean deploy does not inherit a partial one's;
+     * DindDeployMechanics does the same.
+     */
     public function persistSuccess(): void
     {
-        // markDeploySucceeded() also clears deployment_warnings, so a clean
-        // deploy does not inherit the last partial one's. DindDeployMechanics
-        // does the same.
         $this->user()->markDeploySucceeded();
         $this->user()->save();
     }

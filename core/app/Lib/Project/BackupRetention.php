@@ -9,9 +9,8 @@ use App\Models\Task;
 use Illuminate\Support\Collection;
 
 /**
- * Keeps a project's automatic backups bounded by its schedule's `keep_last`.
- * Manual backups are never touched; a failed scheduled backup is pruned once it
- * is older than the newest kept completed one.
+ * Keeps a project's automatic backups bounded by its schedule's `keep_last`. Manual backups are never touched; a failed
+ * scheduled backup is pruned once it is older than the newest kept completed one.
  */
 class BackupRetention
 {
@@ -67,6 +66,7 @@ class BackupRetention
             username: $backup->username,
             details: ['backup_id' => $backup->id, 'action' => 'delete'],
         );
+        $backup->recordTask('delete', $task);
         DeleteBackup::dispatch($backup->id)->attachTask($task);
     }
 }

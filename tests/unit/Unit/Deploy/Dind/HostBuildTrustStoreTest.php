@@ -6,6 +6,7 @@ use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * A host build container has no certificate authorities of its own.
@@ -41,24 +42,22 @@ class HostBuildTrustStoreTest extends TestCase
         return new EngineAccount('koel', '/home/koel', '1001:1002');
     }
 
-    /**
-     * @return list<string>
-     */
-    private function argv(?string $caBundle): array
+    /** @return array<string, mixed> */
+    private function build(?string $caBundle): array
     {
-        return (new DindHostBuilder(null, $caBundle))->nodeBuildArgv(
+        return LocalRoot::build((new DindHostBuilder(null, $caBundle))->nodeBuildArgv(
             $this->account(),
             Images::NODE_IMAGE,
             'pnpm install --frozen-lockfile',
             'pnpm build'
-        );
+        ));
     }
 
     public function test_the_bundle_is_mounted_read_only(): void
     {
         $this->assertContains(
-            self::HOST_BUNDLE . ':' . self::CONTAINER_BUNDLE . ':ro',
-            $this->argv(self::HOST_BUNDLE),
+            self::HOST_BUNDLE.':'.self::CONTAINER_BUNDLE.':ro',
+            $this->build(self::HOST_BUNDLE)['mounts'],
             'the build needs the host bundle, and has no business writing to it'
         );
     }
@@ -72,7 +71,7 @@ class HostBuildTrustStoreTest extends TestCase
      */
     public function test_ssl_cert_file_names_the_mounted_path(): void
     {
-        $this->assertContains('SSL_CERT_FILE=' . self::CONTAINER_BUNDLE, $this->argv(self::HOST_BUNDLE));
+        $this->assertSame(self::CONTAINER_BUNDLE, $this->build(self::HOST_BUNDLE)['environment']['SSL_CERT_FILE'] ?? null);
     }
 
     /**
@@ -81,19 +80,14 @@ class HostBuildTrustStoreTest extends TestCase
      */
     public function test_the_variable_points_at_a_path_that_is_actually_mounted(): void
     {
-        $argv = $this->argv(self::HOST_BUNDLE);
+        $build = $this->build(self::HOST_BUNDLE);
 
-        $declared = null;
+        $declared = $build['environment']['SSL_CERT_FILE'] ?? null;
         $mounted = [];
-        foreach ($argv as $i => $arg) {
-            if ($arg === '-e' && str_starts_with((string) ($argv[$i + 1] ?? ''), 'SSL_CERT_FILE=')) {
-                $declared = substr($argv[$i + 1], strlen('SSL_CERT_FILE='));
-            }
-            if ($arg === '-v' && isset($argv[$i + 1])) {
-                $parts = explode(':', $argv[$i + 1]);
-                if (isset($parts[1])) {
-                    $mounted[] = $parts[1];
-                }
+        foreach ($build['mounts'] as $mount) {
+            $parts = explode(':', $mount);
+            if (isset($parts[1])) {
+                $mounted[] = $parts[1];
             }
         }
 
@@ -109,42 +103,42 @@ class HostBuildTrustStoreTest extends TestCase
      */
     public function test_a_host_without_a_bundle_changes_nothing(): void
     {
-        $argv = $this->argv('');
-        $joined = implode(' ', $argv);
+        $build = $this->build('');
 
-        $this->assertStringNotContainsString('SSL_CERT_FILE', $joined);
-        $this->assertStringNotContainsString(self::CONTAINER_BUNDLE, $joined);
+        $this->assertArrayNotHasKey('SSL_CERT_FILE', $build['environment']);
+        $this->assertNotContains(self::CONTAINER_BUNDLE, $build['mounts']);
         // And the build itself is still built.
-        $this->assertStringContainsString('pnpm build', $joined);
+        $this->assertStringContainsString('pnpm build', $build['script']);
     }
 
     /** A recipe that sets its own still wins: caller env is applied last. */
     public function test_a_recipe_may_override_it(): void
     {
-        $argv = (new DindHostBuilder(null, self::HOST_BUNDLE))->nodeBuildArgv(
+        $build = LocalRoot::build((new DindHostBuilder(null, self::HOST_BUNDLE))->nodeBuildArgv(
             $this->account(),
             Images::NODE_IMAGE,
             'pnpm install',
             'pnpm build',
             ['SSL_CERT_FILE' => '/app/certs/custom.pem']
-        );
+        ));
 
-        $ours = array_search('SSL_CERT_FILE=' . self::CONTAINER_BUNDLE, $argv, true);
-        $theirs = array_search('SSL_CERT_FILE=/app/certs/custom.pem', $argv, true);
-
-        $this->assertIsInt($ours);
-        $this->assertIsInt($theirs);
-        $this->assertGreaterThan($ours, $theirs, 'the caller\'s value must be the later one docker keeps');
+        $this->assertSame('/app/certs/custom.pem', $build['environment']['SSL_CERT_FILE'] ?? null);
+        $this->assertContains(self::HOST_BUNDLE.':'.self::CONTAINER_BUNDLE.':ro', $build['mounts']);
     }
 
     /** The sandboxing this sits inside is not loosened to make room for it. */
     public function test_the_sandbox_is_intact(): void
     {
-        $argv = $this->argv(self::HOST_BUNDLE);
+        $request = (new DindHostBuilder(null, self::HOST_BUNDLE))->nodeBuildArgv(
+            $this->account(),
+            Images::NODE_IMAGE,
+            'pnpm install --frozen-lockfile',
+            'pnpm build'
+        );
+        $build = LocalRoot::build($request);
 
-        $this->assertContains('no-new-privileges', $argv);
-        $this->assertContains('--cap-drop', $argv);
-        $this->assertContains('ALL', $argv);
-        $this->assertContains('1001:1002', $argv);
+        $this->assertSame([], LocalRoot::plain($request));
+        $this->assertSame('1001:1002', $build['user']);
+        $this->assertSame('2g', $build['memory']);
     }
 }

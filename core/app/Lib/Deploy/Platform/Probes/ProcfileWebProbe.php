@@ -7,14 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A Procfile that names a web process.
- *
- * `{"file": "Procfile"}` would be wrong: a Procfile declaring only
- * `worker:` or `release:` gives no way to start a server, and claiming the
- * project would produce a container that builds and then exits. The web line
- * has to be parsed out to know whether it exists.
- *
- * Contributes the command, so a manifest can serve it without repeating it.
+ * A Procfile that names a web process, contributing its command; one with only `worker:` or
+ * `release:` cannot start a server, so the web line has to be parsed out.
  */
 final class ProcfileWebProbe implements PlatformProbe
 {
@@ -45,9 +39,8 @@ final class ProcfileWebProbe implements PlatformProbe
     }
 
     /**
-     * The Procfile's other processes, name => command: a worker, a clock, a
-     * `release` run before the app starts. Lower-cased names, as compose
-     * service names; the first line for a name wins.
+     * The Procfile's other processes (a worker, a clock, a `release`), lower-cased name => command
+     * as compose service names; the first line for a name wins.
      *
      * @return array<string, string>
      */

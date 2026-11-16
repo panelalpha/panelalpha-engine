@@ -5,9 +5,8 @@ namespace App\Lib\Hub;
 use App\Auth\TokenAbilities;
 
 /**
- * What a Hub token may call: a few routes of the regular API, named one by
- * one. The engine is the authority here: the Hub sends grant names, and a name
- * this engine does not know is refused, never guessed.
+ * What a Hub token may call: a few routes of the regular API, named one by one. The Hub sends grant names,
+ * and a name this engine does not know is refused, never guessed.
  */
 final class HubGrants
 {
@@ -81,8 +80,8 @@ final class HubGrants
     }
 
     /**
-     * Exactly `api` plus routes this mapping can grant, and at least one of
-     * them. Anything else -- `*`, `mcp`, another route -- is not a Hub token.
+     * Exactly `api` plus at least one route this mapping can grant. Anything else (`*`, `mcp`, another route)
+     * is not a Hub token.
      *
      * @param  array<int, mixed>  $abilities
      */

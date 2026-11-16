@@ -52,7 +52,7 @@ class DeleteBackupContainer implements ShouldQueue
                 throw new RuntimeException('Cannot delete backup container while backups exist');
             }
 
-            $container->delete();
+            $container->deleteWithEmptyLocation();
         });
     }
 

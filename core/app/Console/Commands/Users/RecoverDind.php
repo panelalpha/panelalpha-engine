@@ -2,26 +2,23 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\User;
+use App\System\Privileged;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
 /**
  * Recover a wedged Sysbox DinD user container without rebooting the host.
  *
- * Runs host-side /usr/local/sbin/recover-sysbox-dind.sh via nsenter (needs
- * host root). See that script for the FUSE-abort + cgroup.kill procedure.
+ * Asks the root broker to run the recovery in the host's namespaces against the host's own Docker daemon.
  */
 class RecoverDind extends Command
 {
-    use ResolvesProject;
-
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:recover-dind', 'users:recover-dind'];
 
     protected $signature = 'project:dind:recover
-        {--project= : DinD username / outer container name} {--username= : Deprecated alias for --project}
+        {--project= : DinD username / outer container name}
         {--all-stuck : Recover every sysbox container that looks stuck}
         {--detect : Only detect stuck DinD containers}
         {--wipe-inner : Wipe ~/docker inner Docker data-root}
@@ -29,20 +26,16 @@ class RecoverDind extends Command
 
     protected $description = 'Recover wedged Sysbox DinD containers without host reboot (FUSE abort).';
 
-    private const HOST_SCRIPT = '/usr/local/sbin/recover-sysbox-dind.sh';
-
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $username = $this->option('username');
+        $username = $this->option('project');
         $allStuck = (bool) $this->option('all-stuck');
         $detect = (bool) $this->option('detect');
         $wipeInner = (bool) $this->option('wipe-inner');
         $recreate = (bool) $this->option('recreate');
 
         if (! $detect && ! $username && ! $allStuck) {
-            $this->error('One of --username=, --all-stuck, or --detect is required.');
+            $this->error('One of --project=, --all-stuck, or --detect is required.');
 
             return 1;
         }
@@ -55,44 +48,14 @@ class RecoverDind extends Command
                 return 1;
             }
             if ($user->getTemplate() !== 'dind') {
-                $this->error("User `{$username}` is not a DinD (sysbox) project.");
+                $this->error("Project `{$username}` is not a DinD (sysbox) project.");
 
                 return 1;
             }
         }
 
-        $args = [];
-        if ($detect) {
-            $args[] = '--detect';
-        } elseif ($allStuck) {
-            $args[] = '--all-stuck';
-        } else {
-            $args[] = '--username='.$username;
-        }
-        if ($wipeInner) {
-            $args[] = '--wipe-inner';
-        }
-        if ($recreate) {
-            $args[] = '--recreate';
-        }
-
-        $quoted = implode(' ', array_map('escapeshellarg', $args));
-        $hostCmd = 'if [ -x '.escapeshellarg(self::HOST_SCRIPT).' ]; then '
-            .escapeshellarg(self::HOST_SCRIPT).' '.$quoted
-            .'; else echo "Missing '.self::HOST_SCRIPT
-            .' — run engine scripts/install-sysbox.sh on the host" >&2; exit 127; fi';
-
-        $this->warn('Running host recovery via nsenter (pid 1)...');
-        $process = new Process([
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-            'bash',
-            '-c',
-            $hostCmd,
-        ]);
+        $this->warn('Running host recovery in the host\'s namespaces...');
+        $process = $this->recoveryProcess($this->recoveryCommand($username, $detect, $allStuck, $wipeInner, $recreate));
         $process->setTimeout(300);
         $process->run(function ($type, $buffer) {
             $this->output->write($buffer);
@@ -104,20 +67,77 @@ class RecoverDind extends Command
             return (int) $process->getExitCode();
         }
 
-        // Best-effort: refresh compose template so mem_limit / restart policy match DB.
-        if ($recreate && $username) {
-            try {
-                $user = User::findByUsername($username);
-                if ($user) {
-                    $this->info("Rebuilding user `{$username}` project config...");
-                    $project = $user->project();
-                    $project->rebuildFromSource();
-                }
-            } catch (\Throwable $e) {
-                $this->warn('Container recovered but rebuild failed: '.$e->getMessage());
-            }
+        if ($detect || ! $username) {
+            return 0;
+        }
+
+        if (! self::recovered($process->getOutput(), $username)) {
+            $this->sayOptionsSkipped($username, $wipeInner, $recreate);
+
+            return 0;
+        }
+
+        if ($recreate) {
+            $this->refreshComposeTemplate($username);
         }
 
         return 0;
+    }
+
+    /** @param  list<string>  $argv */
+    protected function recoveryProcess(array $argv): Process
+    {
+        return new Process($argv);
+    }
+
+    /**
+     * The broker ends a recovery it ran with `done <name>`; an account it found healthy it leaves alone, and a
+     * rebuild then would only redeploy it and drop the files written into ~/project since the last deploy.
+     */
+    private static function recovered(string $output, string $username): bool
+    {
+        return preg_match('/(?:^|\] )done '.preg_quote($username, '/').' \(/m', $output) === 1;
+    }
+
+    private function sayOptionsSkipped(string $username, bool $wipeInner, bool $recreate): void
+    {
+        $skipped = array_keys(array_filter(['--wipe-inner' => $wipeInner, '--recreate' => $recreate]));
+        if ($skipped === []) {
+            return;
+        }
+
+        $this->info(implode(' and ', $skipped)." skipped: `{$username}` is healthy, so nothing was recreated, wiped or rebuilt.");
+    }
+
+    /** Best-effort, after a real recreate: the compose template refreshed so mem_limit and the restart policy match the database. */
+    private function refreshComposeTemplate(string $username): void
+    {
+        try {
+            $user = User::findByUsername($username);
+            if ($user) {
+                $this->info("Rebuilding project `{$username}` config...");
+                $this->rebuild($user);
+            }
+        } catch (\Throwable $e) {
+            $this->warn('Container recovered but rebuild failed: '.$e->getMessage());
+        }
+    }
+
+    protected function rebuild(User $user): void
+    {
+        $user->project()->rebuildFromSource();
+    }
+
+    /** @return list<string> */
+    private function recoveryCommand(?string $username, bool $detect, bool $allStuck, bool $wipeInner, bool $recreate): array
+    {
+        if ($detect) {
+            return Privileged::host()->detectStuckDind();
+        }
+        if ($allStuck) {
+            return Privileged::host()->recoverStuckDind($wipeInner, $recreate);
+        }
+
+        return Privileged::host()->recoverDindAccount((string) $username, $wipeInner, $recreate);
     }
 }

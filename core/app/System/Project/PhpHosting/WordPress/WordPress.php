@@ -2,17 +2,13 @@
 
 namespace App\System\Project\PhpHosting\WordPress;
 
+use App\Lib\Project\ClassicAppType;
 use App\Models\User;
 use App\System;
 
 /**
- * Install-scoped WordPress operations for a PHP hosting project.
- *
- * Optional path selects the install (null = main domain document root);
- * skipPlugins runs every operation with --skip-plugins --skip-themes. Named
- * modules use the shared WpCli; they do not resolve path or own a runner, and
- * a non-zero exit in a named operation becomes Exception unless the module
- * says otherwise. HTTP, artisan and MCP tools are thin adapters over them.
+ * Install-scoped WordPress operations: path picks the install (null = main domain root), skipPlugins adds --skip-plugins
+ * --skip-themes; modules share the WpCli, own no path or runner, and a non-zero exit is an Exception unless they say otherwise.
  */
 final class WordPress
 {
@@ -58,7 +54,9 @@ final class WordPress
 
     public function core(): Core
     {
-        return new Core($this->cli);
+        return new Core($this->cli, function (string $path): void {
+            app(ClassicAppType::class)->recordInstall($this->user, $path);
+        });
     }
 
     public function cache(): Cache

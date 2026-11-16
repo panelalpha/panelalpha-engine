@@ -67,20 +67,20 @@ class ProxyRuleUpstreamProtocolTest extends TestCase
 
     public function test_the_sync_a_deploy_runs_carries_the_scheme(): void
     {
-        ProxyRule::syncGeneratedHttpPair('unifi', 'unifi.example.test', 8443, 'https');
+        ProxyRule::syncGeneratedHttpPairs('unifi', ['unifi.example.test'], 8443, 'https');
 
         $this->assertSame(['https', 'https'], ProxyRule::forUser('unifi')->orderBy('listen_port')->pluck('upstream_protocol')->all());
     }
 
     public function test_an_operators_https_stays_but_a_recipes_is_dropped_with_the_declaration(): void
     {
-        ProxyRule::syncGeneratedHttpPair('ops', 'ops.example.test', 8000);
+        ProxyRule::syncGeneratedHttpPairs('ops', ['ops.example.test'], 8000);
         ProxyRule::forUser('ops')->update(['upstream_protocol' => 'https']);
-        ProxyRule::syncGeneratedHttpPair('ops', 'ops.example.test', 8000);
+        ProxyRule::syncGeneratedHttpPairs('ops', ['ops.example.test'], 8000);
         $this->assertSame(['https', 'https'], ProxyRule::forUser('ops')->pluck('upstream_protocol')->all());
 
-        ProxyRule::syncGeneratedHttpPair('rcp', 'rcp.example.test', 8443, 'https');
-        ProxyRule::syncGeneratedHttpPair('rcp', 'rcp.example.test', 8443);
+        ProxyRule::syncGeneratedHttpPairs('rcp', ['rcp.example.test'], 8443, 'https');
+        ProxyRule::syncGeneratedHttpPairs('rcp', ['rcp.example.test'], 8443);
         $this->assertSame(['http', 'http'], ProxyRule::forUser('rcp')->pluck('upstream_protocol')->all());
     }
 }

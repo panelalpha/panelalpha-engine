@@ -5,15 +5,16 @@ namespace App\Lib\Deploy\Dind;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * Storage heuristics and reclaim scripts for heavy builds inside DinD: the
- * thresholds, the ENOSPC vocabulary and the two scripts, reached through
- * DindAccountStorage.
+ * Storage heuristics and reclaim scripts for heavy DinD builds (thresholds, ENOSPC vocabulary), reached
+ * through DindAccountStorage.
  */
 class DindBuildStorage
 {
-    public const MIN_FREE_BYTES = 4294967296; // 4 GiB
+    /** 4 GiB */
+    public const MIN_FREE_BYTES = 4294967296;
 
-    public const LARGE_BUILD_CACHE_BYTES = 1073741824; // 1 GiB
+    /** 1 GiB */
+    public const LARGE_BUILD_CACHE_BYTES = 1073741824;
 
     public static function isDiskFullError(string $output): bool
     {
@@ -58,15 +59,6 @@ class DindBuildStorage
         return null;
     }
 
-    public static function parseBuildxTotalBytes(string $buildxDuOutput): ?int
-    {
-        if (! preg_match('/^Total:\s+([0-9.]+)\s*([KMGTP]?B)$/mi', $buildxDuOutput, $m)) {
-            return null;
-        }
-
-        return self::sizeToBytes($m[1], $m[2]);
-    }
-
     /**
      * Remove the entire inner Docker data-root (user delete / failed deploy).
      */
@@ -103,28 +95,5 @@ class DindBuildStorage
         }
 
         return false;
-    }
-
-    private static function sizeToBytes(string $value, string $unit): ?int
-    {
-        if (! is_numeric($value)) {
-            return null;
-        }
-
-        $number = (float) $value;
-        $multipliers = [
-            'B' => 1,
-            'KB' => 1024,
-            'MB' => 1024 * 1024,
-            'GB' => 1024 * 1024 * 1024,
-            'TB' => 1024 * 1024 * 1024 * 1024,
-            'PB' => 1024 * 1024 * 1024 * 1024 * 1024,
-        ];
-        $unit = strtoupper($unit);
-        if (! isset($multipliers[$unit])) {
-            return null;
-        }
-
-        return (int) round($number * $multipliers[$unit]);
     }
 }

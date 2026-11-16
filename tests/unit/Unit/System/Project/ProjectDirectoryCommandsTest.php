@@ -6,10 +6,12 @@ use App\Models\User;
 use App\System;
 use App\System\Project;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The home and engine directories are created and removed with argv, so a
- * path the shell would split or interpret reaches sudo as one argument.
+ * path the shell would split or interpret reaches the root broker as one value.
+ * Only classic hosting gets `.wp-cli`: a container project's WP-CLI never reads it.
  */
 class ProjectDirectoryCommandsTest extends TestCase
 {
@@ -39,13 +41,30 @@ class ProjectDirectoryCommandsTest extends TestCase
 
         $home = $this->root . '/homes/' . self::USERNAME;
         $this->assertSame([
-            ['sudo', 'mkdir', '-p', $home],
-            ['sudo', 'chown', 'root:root', $home],
-            ['sudo', 'mkdir', '-p', $home . '/.panelalpha'],
-            ['sudo', 'chmod', '700', $home . '/.panelalpha'],
-            ['sudo', 'mkdir', '-p', $home . '/.wp-cli'],
-            ['sudo', 'mkdir', '-p', $this->root . '/engine/users/' . self::USERNAME],
-            ['sudo', 'chown', '-R', 'www-data:www-data', $this->root . '/engine/users/' . self::USERNAME],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $home],
+            [LocalRoot::CLIENT, 'files.changeOwner', '--', 'root:root', $home],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $home . '/.panelalpha'],
+            [LocalRoot::CLIENT, 'files.changeMode', '--', '700', $home . '/.panelalpha'],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $home . '/.wp-cli'],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $this->root . '/engine/users/' . self::USERNAME],
+            [LocalRoot::CLIENT, 'files.changeOwnerRecursively', '--', 'www-data:www-data', $this->root . '/engine/users/' . self::USERNAME],
+        ], $system->commands);
+    }
+
+    public function test_a_container_project_gets_no_wp_cli_directory(): void
+    {
+        $system = $this->system();
+
+        $this->project($system, ['template' => 'dind'])->createDirectories();
+
+        $home = $this->root . '/homes/' . self::USERNAME;
+        $this->assertSame([
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $home],
+            [LocalRoot::CLIENT, 'files.changeOwner', '--', 'root:root', $home],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $home . '/.panelalpha'],
+            [LocalRoot::CLIENT, 'files.changeMode', '--', '700', $home . '/.panelalpha'],
+            [LocalRoot::CLIENT, 'files.makeDirectories', '--', $this->root . '/engine/users/' . self::USERNAME],
+            [LocalRoot::CLIENT, 'files.changeOwnerRecursively', '--', 'www-data:www-data', $this->root . '/engine/users/' . self::USERNAME],
         ], $system->commands);
     }
 
@@ -56,15 +75,17 @@ class ProjectDirectoryCommandsTest extends TestCase
         $this->project($system)->tearDownLinuxIsolation();
 
         $this->assertSame([
-            ['sudo', 'rm', '-rf', $this->root . '/homes/' . self::USERNAME],
-            ['sudo', 'rm', '-rf', $this->root . '/engine/users/' . self::USERNAME],
+            [LocalRoot::CLIENT, 'files.removeTree', '--', $this->root . '/homes/' . self::USERNAME],
+            [LocalRoot::CLIENT, 'files.removeTree', '--', $this->root . '/engine/users/' . self::USERNAME],
         ], $system->commands);
     }
 
-    private function project(System $system): Project
+    /** @param array<string, string> $details */
+    private function project(System $system, array $details = []): Project
     {
         $user = new User();
         $user->username = self::USERNAME;
+        $user->setDetails($details);
 
         return new Project($system, $user);
     }

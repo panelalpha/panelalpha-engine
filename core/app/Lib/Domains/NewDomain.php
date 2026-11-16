@@ -3,14 +3,14 @@
 namespace App\Lib\Domains;
 
 use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\PublicRouting\HostDomain;
 use App\Models\Domain;
 use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
- * The rules an addon or subdomain has to pass before it is created, shared by
- * `POST /projects/{project}/domains` and `domain:create`. Each caller still
- * decides the order it asks in and how it words a refusal.
+ * The rules an addon or subdomain must pass before it is created, shared by `POST /projects/{project}/domains`
+ * and `domain:create`; each caller decides the order it asks in and how it words a refusal.
  */
 final class NewDomain
 {
@@ -81,6 +81,26 @@ final class NewDomain
             }
             if (Domain::domainOrAliasExists($alias)) {
                 return [self::ALIAS_EXISTS, $alias];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The server's own name among the names, when the project may not hold it.
+     *
+     * @param  array<mixed>  $aliases
+     * @return ?array{field: string, code: string, message: string}
+     */
+    public static function claimProblem(string $username, string $domain, array $aliases): ?array
+    {
+        foreach (['domain' => [$domain], 'aliases' => $aliases] as $field => $names) {
+            foreach ($names as $name) {
+                $refusal = is_string($name) ? HostDomain::claimRefusal($username, $name) : null;
+                if ($refusal !== null) {
+                    return ['field' => $field] + $refusal;
+                }
             }
         }
 

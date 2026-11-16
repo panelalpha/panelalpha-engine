@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Ssl;
 
 use App\Lib\Ssl\CertificateStatus;
+use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\ProjectCertificate;
 use App\Models\Domain;
 use Illuminate\Console\Command;
@@ -21,6 +22,9 @@ use Illuminate\Support\Facades\Log;
  * (DNS not pointing here, a shared wildcard zone) is not something a renewal
  * loop can fix and retrying it daily would spend the failure limit forever.
  * `ssl:project-cert:request` is the deliberate first attempt.
+ *
+ * A name the engine's own certificate covers, the server's own name first, gets that certificate again: the
+ * engine renews it, even in a shared zone the project issuer refuses.
  */
 class ProjectCertRenew extends Command
 {
@@ -54,8 +58,9 @@ class ProjectCertRenew extends Command
         // anything else writes during the HTTP-01 check, recording details.ssl fails.
         foreach ($query->lazyById() as $model) {
             $name = $model->domain;
+            $fromEngine = (new EngineCertificate)->covering($name) !== null;
 
-            if ($issuer->ineligibleReason($name) !== null) {
+            if (! $fromEngine && $issuer->ineligibleReason($name) !== null) {
                 continue;
             }
 
@@ -78,7 +83,7 @@ class ProjectCertRenew extends Command
             }
 
             try {
-                $issuer->issue($connection);
+                $fromEngine ? $connection->generateCertificate() : $issuer->issue($connection);
                 $connection->rebuild();
                 ProjectCertificate::remember($model->user);
                 $this->info("renewed {$name}");

@@ -9,6 +9,8 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Git\Exception as GitException;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -183,11 +185,20 @@ class DindSubmoduleRebuildTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                if (is_array($cmd) && array_slice($cmd, 0, 3) === ['sudo', 'find', '/home/alice/project']) {
+                if (is_array($cmd) && LocalRoot::isRequest($cmd) && array_slice(LocalRoot::plain($cmd), 0, 2) === ['find', '/home/alice/project']) {
                     ($this->wipe)();
                 }
 
                 return '';
+            }
+
+            /** No file the account could hold is there. */
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $missing = new Process(['php', '-r', 'exit(1);']);
+                $missing->run();
+
+                return $missing;
             }
         };
     }

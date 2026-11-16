@@ -5,9 +5,8 @@ namespace App\Lib\Hub;
 use App\Lib\Ssl\EngineCertificate;
 
 /**
- * `sha256/<base64>` of the certificate's DER SubjectPublicKeyInfo: how the Hub
- * knows it is talking to this engine on :2011 when the certificate is
- * self-signed or issued for a bare IP.
+ * `sha256/<base64>` of the certificate's DER SubjectPublicKeyInfo: how the Hub knows it is talking to this
+ * engine on :2011 when the certificate is self-signed or issued for a bare IP.
  */
 final class SpkiPin
 {

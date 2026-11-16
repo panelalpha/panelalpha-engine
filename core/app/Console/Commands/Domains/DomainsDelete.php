@@ -3,7 +3,8 @@
 namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
+use App\Lib\Domains\HttpsPorts;
+use App\Lib\Domains\HttpsPortsChange;
 use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
@@ -13,7 +14,6 @@ use Symfony\Component\Console\Helper\Table;
 class DomainsDelete extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = ['domains:delete', 'projects:domains:delete'];
 
@@ -21,15 +21,12 @@ class DomainsDelete extends Command
         {domain? : Domain name or alias to delete}
         {--domain= : Domain name (alternative to the positional argument)}
         {--project= : Project username that owns the domain}
-        {--username= : Deprecated alias for --project}
         {--force : Skip confirmation}';
 
-    protected $description = 'Delete a domain (nginx vhost, proxy rules, and any attached tunnels)';
+    protected $description = 'Delete a domain (nginx vhost, proxy rules, and any attached tunnels); its files are kept';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
         $positional = strtolower(trim((string) ($this->argument('domain') ?? '')));
         $optionDomain = strtolower(trim((string) ($this->option('domain') ?? '')));
         if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
@@ -38,7 +35,7 @@ class DomainsDelete extends Command
             return 1;
         }
         $domainName = $positional !== '' ? $positional : $optionDomain;
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
 
         if ($domainName === '') {
             $this->error('Domain name is required (positional argument or --domain).');
@@ -61,6 +58,12 @@ class DomainsDelete extends Command
         $domain = Domain::findByNameOrAlias($domainName);
         if (! $domain || (int) $domain->user_id !== (int) $user->id) {
             $this->error("Domain '{$domainName}' not found for project '{$project}'.");
+
+            return 1;
+        }
+
+        if ($refusal = $domain->mainDomainDeleteRefusal()) {
+            $this->error($refusal);
 
             return 1;
         }
@@ -92,7 +95,7 @@ class DomainsDelete extends Command
             ['Tunnels', $tunnelLines === [] ? '-' : implode("\n", $tunnelLines)],
         ]);
         $table->render();
-        $this->comment('This removes the domain, its proxy rules, nginx vhost, and any attached tunnels.');
+        $this->comment('This removes the domain, its proxy rules, nginx vhost, and any attached tunnels. '.self::filesKept($domain));
 
         if (! $this->option('force') && ! $this->confirm('Delete this domain?')) {
             $this->info('Cancelled.');
@@ -101,8 +104,12 @@ class DomainsDelete extends Command
         }
 
         try {
+            $closesPorts = HttpsPorts::hasExtra($domain);
             $domain->projectDomain()->delete();
             $domain->delete();
+            if ($closesPorts) {
+                app(HttpsPortsChange::class)->listenersChanged();
+            }
             $user->project()->syncPhpHandlersScripts();
             $user->project()->syncServices();
         } catch (\Throwable $e) {
@@ -111,9 +118,16 @@ class DomainsDelete extends Command
             return 1;
         }
 
-        $this->info("Domain '{$domainName}' deleted.");
+        $this->info("Domain '{$domainName}' deleted. ".self::filesKept($domain));
         $this->line('');
 
         return 0;
+    }
+
+    private static function filesKept(Domain $domain): string
+    {
+        $directories = array_map(static fn (string $dir): string => '~'.$dir, $domain->directoriesKeptOnDelete());
+
+        return 'Its files are kept in '.implode(' and ', $directories).'.';
     }
 }

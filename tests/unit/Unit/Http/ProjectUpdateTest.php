@@ -9,6 +9,13 @@ use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\Models\User;
+use App\System;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\Dind;
+use App\System\Project\Dind\CpuLimitDeferred;
+use App\System\Project\Runtime;
+use Mockery;
+use Mockery\MockInterface;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -165,6 +172,7 @@ class ProjectUpdateTest extends TestCase
                 'field' => 'domain',
                 'code' => 'domain_taken',
                 'message' => 'bob.test is already on this engine.',
+                'hints' => [],
             ]]);
 
         $alice = User::findByUsernameOrFail('alice');
@@ -189,8 +197,8 @@ class ProjectUpdateTest extends TestCase
             'hostname' => 'api-bob.panelalpha.test',
         ]);
 
-        foreach (['shop.test', 'bob-alias.test', 'www.bob.test', 'api-bob.panelalpha.test'] as $taken) {
-            $this->putJson('/api/projects/alice', ['domain' => $taken])
+        foreach (['shop.test' => 'shop.test', 'bob-alias.test' => 'bob-alias.test', 'www.bob.test' => 'bob.test', 'api-bob.panelalpha.test' => 'api-bob.panelalpha.test'] as $given => $taken) {
+            $this->putJson('/api/projects/alice', ['domain' => $given])
                 ->assertStatus(422)
                 ->assertJsonPath('problems.0.code', 'domain_taken')
                 ->assertJsonPath('problems.0.message', "{$taken} is already on this engine.");
@@ -316,5 +324,66 @@ class ProjectUpdateTest extends TestCase
         $this->makeMainDomain($this->makeUser('bob', ['template' => 'wordpress'], 'bob.test'), 'bob.test');
 
         $this->putJson('/api/projects/nobody', ['domain' => 'bob.test'])->assertNotFound();
+    }
+
+    public function test_a_container_projects_cpu_limit_is_put_on_its_account_at_once(): void
+    {
+        $user = $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512]);
+        /** @var Dind&MockInterface $runtime */
+        $runtime = Mockery::mock(Dind::class);
+        $runtime->shouldReceive('applyCpuLimit')->once();
+        $runtime->shouldNotReceive('applyMemoryLimit');
+        $this->bindRuntime($user, $runtime);
+
+        $this->putJson('/api/projects/dock', ['cpu_limit' => 2])
+            ->assertOk()
+            ->assertJsonMissingPath('warnings');
+
+        $this->assertSame(2.0, User::findByUsernameOrFail('dock')->getCpuLimit());
+    }
+
+    /** Not an error page and not a silent success: the limit is stored, and the answer says when it applies. */
+    public function test_a_cpu_limit_the_running_account_cannot_take_is_stored_with_a_warning(): void
+    {
+        $user = $this->makeUser('dock', ['template' => 'dind', 'memory_limit' => 512, 'cpu_limit' => 1.0]);
+        /** @var Dind&MockInterface $runtime */
+        $runtime = Mockery::mock(Dind::class);
+        $runtime->shouldReceive('applyCpuLimit')->once()
+            ->andThrow(CpuLimitDeferred::refusedByTheRootBroker("pa-root: refused: there is no action 'docker.limitCpu'\n"));
+        $this->bindRuntime($user, $runtime);
+
+        $this->putJson('/api/projects/dock', ['cpu_limit' => null])
+            ->assertOk()
+            ->assertJsonPath('warnings', [
+                'The CPU limit is saved, but the running account keeps its current one until its container is next '
+                    . "recreated: the root broker refused it (there is no action 'docker.limitCpu').",
+            ]);
+
+        $this->assertNull(User::findByUsernameOrFail('dock')->getCpuLimit());
+    }
+
+    private function bindRuntime(User $user, Dind $runtime): void
+    {
+        $project = new class (new System(), $user, $runtime) extends ProjectAggregate {
+            public function __construct(System $system, User $model, private Runtime $fake)
+            {
+                parent::__construct($system, $model);
+            }
+
+            public function runtime(): Runtime
+            {
+                return $this->fake;
+            }
+        };
+        $this->app->instance(System::class, new class ($project) extends System {
+            public function __construct(private ProjectAggregate $project)
+            {
+            }
+
+            public function project(User $model): ProjectAggregate
+            {
+                return $this->project;
+            }
+        });
     }
 }

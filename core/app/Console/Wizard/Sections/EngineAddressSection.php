@@ -6,6 +6,7 @@ use App\Console\Prompts\Screen;
 use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\NamingBaseSetting;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\ServedCertificate;
 use App\Models\Setting;
@@ -334,7 +335,7 @@ class EngineAddressSection implements Section
         }
 
         try {
-            Setting::set('cert_domain', $name);
+            NamingBaseSetting::save('cert_domain', $name);
             Setting::set('cert_email', $email);
         } catch (Throwable $e) {
             error($e->getMessage());

@@ -1,0 +1,73 @@
+run ["test","-e","/opt/engine/users/bob/ssl-certs/bob.test.pem"]
+run ["test","-e","/opt/engine/users/bob/ssl-certs/bob.test.key"]
+put /opt/engine/webserver-config/nginx/vhosts/bob.test.conf -
+server {
+    listen 198.51.100.10:80;
+    listen [2001:db8::7]:80;
+    server_name  bob.test;
+    access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/access.log combined;
+    access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/bytes.log bytes;
+    error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/error.log error;
+
+    root /home/bob/bob.test/web;
+    location ^~ /phpmyadmin {
+        proxy_set_header X-Real-IP $remote_addr;
+        set $pmapass 0;
+        if ($arg_pmassotoken) {
+            set $pmapass 1;
+        }
+        if ($cookie_PMASignonSession) {
+            set $pmapass 1;
+        }
+        if ($pmapass) {
+            rewrite ^([^.]*[^/])$ $1/ permanent;
+            rewrite ^/phpmyadmin(.*) /$1 break; 
+            proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
+        }
+    }
+            location / {
+            error_page 503 /account-suspended.html;
+            location = /account-suspended.html {
+                root  /opt/panelalpha/shared-hosting/webserver-config/document-root;
+            }
+            return 503;
+        }
+    }
+    server {
+        listen 198.51.100.10:443 ssl;
+        listen [2001:db8::7]:443 ssl;
+        http2 on;
+        server_name  bob.test;
+        ssl_certificate /opt/engine/users/bob/ssl-certs/bob.test.pem;
+        ssl_certificate_key /opt/engine/users/bob/ssl-certs/bob.test.key;
+        access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/access.log combined;
+        access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/bytes.log bytes;
+        error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/bob.test/error.log error;
+
+        root /home/bob/bob.test/web;
+        location ^~ /phpmyadmin {
+            proxy_set_header X-Real-IP $remote_addr;
+            set $pmapass 0;
+            if ($arg_pmassotoken) {
+                set $pmapass 1;
+            }
+            if ($cookie_PMASignonSession) {
+                set $pmapass 1;
+            }
+            if ($pmapass) {
+                rewrite ^([^.]*[^/])$ $1/ permanent;
+                rewrite ^/phpmyadmin(.*) /$1 break; 
+                proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
+            }
+        }
+                    location / {
+                error_page 503 /account-suspended.html;
+                location = /account-suspended.html {
+                    root  /opt/panelalpha/shared-hosting/webserver-config/document-root;
+                }
+                return 503;
+            }
+            }
+
+<<< end of /opt/engine/webserver-config/nginx/vhosts/bob.test.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/nginx/bob.test"]

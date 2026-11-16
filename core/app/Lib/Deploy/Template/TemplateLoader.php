@@ -3,14 +3,8 @@
 namespace App\Lib\Deploy\Template;
 
 /**
- * Reads the files under `resources/deploy/`, once per process.
- *
- * Stubs are templates with placeholders; assets are shipped verbatim — the
- * nginx config, the PHP router, the standalone Node server. Both are files
- * on disk for the same reason: an editor highlights them, a reviewer diffs
- * them, and neither has to be un-escaped out of a heredoc first.
- *
- * No Laravel dependencies — unit-testable.
+ * Reads the files under `resources/deploy/` once per process: stubs and verbatim assets, kept as files, not heredocs,
+ * so they are highlighted and diffed as they are (nginx config, PHP router, Node server). No Laravel dependencies.
  */
 final class TemplateLoader
 {

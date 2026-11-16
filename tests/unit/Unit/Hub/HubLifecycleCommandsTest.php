@@ -158,10 +158,14 @@ class HubLifecycleCommandsTest extends HubTestCase
         $this->artisan('hub:tls-announce', ['certificate' => '/nonexistent'])->assertExitCode(0);
     }
 
-    public function test_tls_announce_without_a_connection_does_nothing(): void
+    public function test_tls_announce_without_a_connection_says_so_and_exits_zero(): void
     {
         Http::fake();
-        $this->artisan('hub:tls-announce')->assertExitCode(0);
+
+        $this->artisan('hub:tls-announce')
+            ->expectsOutputToContain('Not connected to PanelAlpha Connect')
+            ->assertExitCode(0);
+
         Http::assertNothingSent();
     }
 }

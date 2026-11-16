@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Checkout;
 
 /**
- * The block of Engine Artifacts the engine owns in a checkout's local exclude
- * file (`.git/info/exclude`), never in the client's `.gitignore` — ADR-0001.
- *
- * Excluded files stay out of `git status`, are never committed, and survive a
- * forced pull's `clean -fd`. Everything outside the markers belongs to the
- * client and is kept byte for byte.
+ * The engine's block of Engine Artifacts in `.git/info/exclude`, never `.gitignore` (ADR-0001), so they stay
+ * uncommitted and survive a forced pull's `clean -fd`; everything outside the markers is the client's, kept as is.
  */
 final class CheckoutExclude
 {
@@ -47,11 +43,8 @@ final class CheckoutExclude
     }
 
     /**
-     * A checkout-relative path as a pattern matching that one path.
-     *
-     * The leading slash anchors it to the checkout root, so a line can never
-     * start with `#` or `!`; glob characters and backslashes are escaped so a
-     * directory named `[api]` is not read as a character class.
+     * A checkout-relative path as a pattern matching only that path: the leading slash keeps a line from
+     * starting with `#` or `!`, and glob characters are escaped so `[api]` is no character class.
      */
     public static function anchoredPath(string $relative): string
     {

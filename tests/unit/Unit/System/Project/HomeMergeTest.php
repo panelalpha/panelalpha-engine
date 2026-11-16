@@ -5,6 +5,7 @@ namespace Tests\Unit\System\Project;
 use App\System;
 use App\System\Project\HomeMerge;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -41,23 +42,23 @@ class HomeMergeTest extends TestCase
         (new HomeMerge($system, '/home/alice', '1002', '1003', 60))
             ->merge('/var/tmp/panelalpha-backup/alice/9/home.tar.gz', '/home/alice/.restore-9');
 
-        $asAccount = 'sudo setpriv --reuid 1002 --regid 1003 --clear-groups';
-        $realDirectory = 'sudo bash -c [ -d "$1" ] && [ ! -L "$1" ] bash ';
+        $asAccount = '[1002:1003]';
+        $realDirectory = $asAccount.' sh -c [ -d "$1" ] && [ ! -L "$1" ] sh ';
         $this->assertSame([
-            'sudo mkdir -- /home/alice/.restore-9',
-            'sudo chown 1002:1003 -- /home/alice/.restore-9',
+            '[root] mkdir -- /home/alice/.restore-9',
+            '[root] chown -- 1002:1003 /home/alice/.restore-9',
             'bash -c exec "${@:2}" < "$1" bash /var/tmp/panelalpha-backup/alice/9/home.tar.gz '
                 . $asAccount . ' tar -xzpf - --no-same-owner -C /home/alice/.restore-9',
-            'sudo ls -A /home/alice/.restore-9',
+            $asAccount.' ls -1A -- /home/alice/.restore-9',
             $realDirectory . '/home/alice/.restore-9/public_html',
             $realDirectory . '/home/alice/public_html',
             $realDirectory . '/home/alice/.restore-9/.bashrc',
             $realDirectory . '/home/alice/.bashrc',
-            'sudo rm -f -- /home/alice/.bashrc',
-            'sudo mv -T -- /home/alice/.restore-9/.bashrc /home/alice/.bashrc',
+            '[root] rm -f -- /home/alice/.bashrc',
+            '[root] mv -T -- /home/alice/.restore-9/.bashrc /home/alice/.bashrc',
             $asAccount . ' bash -c set -o pipefail; tar -C "$1" -cf - -- "${@:3}" | tar -C "$2" -xpf - '
                 . '--no-same-owner --no-overwrite-dir bash /home/alice/.restore-9 /home/alice public_html',
-        ], array_map(static fn (array $argv): string => implode(' ', $argv), $recorded));
+        ], array_map(self::described(...), $recorded));
     }
 
     public function test_archive_files_overwrite_and_every_other_file_stays(): void
@@ -212,11 +213,11 @@ class HomeMergeTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
-                $this->recorded[] = $argv;
-                $isDirectoryCheck = ($argv[1] ?? null) === 'bash' && ($argv[2] ?? null) === '-c' && str_contains($argv[3] ?? '', '-L');
+                $this->recorded[] = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $argv = is_array($cmd) ? LocalRoot::plain($cmd) : [$cmd];
+                $isDirectoryCheck = in_array('sh', $argv, true) && str_contains(implode(' ', $argv), '[ ! -L "$1" ]');
                 $succeeds = !$isDirectoryCheck || in_array(end($argv), $this->directories, true);
-                $output = ($argv[1] ?? null) === 'ls' ? $this->listing : '';
+                $output = in_array('ls', $argv, true) ? $this->listing : '';
 
                 $process = new Process(['sh', '-c', 'printf %s "$1"; exit "$2"', 'sh', $output, $succeeds ? '0' : '1']);
                 $process->run();
@@ -226,7 +227,25 @@ class HomeMergeTest extends TestCase
         };
     }
 
-    /** Runs the merge as this test process: root's sudo and the account's setpriv are both dropped. */
+    /**
+     * `[root]` or `[UID:GID]`, then the command the broker runs.
+     *
+     * @param list<string> $argv
+     */
+    private static function described(array $argv): string
+    {
+        $at = array_search(LocalRoot::CLIENT, $argv, true);
+        if ($at === false) {
+            return implode(' ', $argv);
+        }
+        $request = array_slice($argv, $at);
+        $asAccount = str_starts_with((string) LocalRoot::action($request), 'account.');
+        $who = $asAccount ? implode(':', array_slice(LocalRoot::values($request), 0, 2)) : 'root';
+
+        return implode(' ', [...array_slice($argv, 0, $at), "[{$who}]", ...LocalRoot::plain($request)]);
+    }
+
+    /** Runs the merge as this test process, through pa-root-local. */
     private function executingSystem(): System
     {
         return new class () extends System {
@@ -236,7 +255,7 @@ class HomeMergeTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process($this->withoutPrivilegeChanges(is_array($cmd) ? array_values($cmd) : [$cmd]));
+                $process = new Process($this->throughLocalRoot(is_array($cmd) ? array_values($cmd) : [$cmd]));
                 $process->setTimeout($timeout);
                 $process->run();
 
@@ -247,17 +266,9 @@ class HomeMergeTest extends TestCase
              * @param list<string> $argv
              * @return list<string>
              */
-            private function withoutPrivilegeChanges(array $argv): array
+            private function throughLocalRoot(array $argv): array
             {
-                $setpriv = array_search('setpriv', $argv, true);
-                if ($setpriv !== false && $setpriv > 0 && $argv[$setpriv - 1] === 'sudo') {
-                    array_splice($argv, $setpriv - 1, 7);
-                }
-                if (($argv[0] ?? null) === 'sudo') {
-                    array_shift($argv);
-                }
-
-                return array_values($argv);
+                return array_map(static fn (string $word): string => $word === LocalRoot::CLIENT ? LocalRoot::client() : $word, $argv);
             }
         };
     }

@@ -56,7 +56,7 @@ test.describe('cron jobs', () => {
 
       const job = await cronFactory.createMinuteCron(
         setupUser.username,
-        `echo "${marker} UID=$(id -u) GID=$(id -g)" > ${absolutePath}`
+        `echo "${marker} UID=$(id -u) GID=$(id -g) PCT=100%" > ${absolutePath}`
       );
       expect(job.hash).toBeTruthy();
       // Update can replace the hash; finally must clean whichever hash still exists.
@@ -109,6 +109,9 @@ test.describe('cron jobs', () => {
           const reportedGid = /GID=(\d+)/.exec(content)?.[1];
 
           expect.soft(reportedUid, `the cron output has no UID line: ${content}`).toBeTruthy();
+          expect
+            .soft(content, 'a % in the command reached the shell, not cron')
+            .toContain('PCT=100%');
           expect
             .soft(Number.parseInt(reportedUid ?? '', 10), 'the cron job ran as another user')
             .toBe(uid.uid);

@@ -4,32 +4,42 @@ namespace App\Lib\Host;
 
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Disk use of every project, measured on the host in one shell run and stored,
- * so reading it never waits on `du`. Two parts: the project's files (its home
- * without ~/docker) and its own Docker's data in ~/docker, which is root-owned
- * and holds images, build cache and volumes -- usually most of the total.
+ * Disk use of every project, read on the host one project at a time and stored so reading never waits on `du`:
+ * its files (home without ~/docker), and ~/docker with the root-owned images, build cache and volumes.
  */
 class ProjectDisk
 {
-    /** @var callable(string): string */
+    /** @var callable(list<string>): string */
     private $runOnHost;
 
-    /** @param (callable(string): string)|null $runOnHost runs a bash script on the host, returns stdout */
+    /** @param (callable(list<string>): string)|null $runOnHost runs a host argv, returns stdout */
     public function __construct(?callable $runOnHost = null)
     {
-        $this->runOnHost = $runOnHost ?? fn (string $script): string => (new System)->execOnHost(['bash', '-c', $script]);
+        $this->runOnHost = $runOnHost ?? fn (array $argv): string => (new System)->exec($argv);
     }
 
     /** @return int rows written */
     public function sample(?Carbon $now = null): int
     {
-        $now = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC');
+        $at = ($now ?? Carbon::now('UTC'))->copy()->setTimezone('UTC')->format('Y-m-d H:i:s');
+        $written = 0;
+        foreach (self::homes() as $username => $home) {
+            $written += $this->sampleOne($username, $home, $at);
+        }
+
+        return $written;
+    }
+
+    /** @return array<string, string> username => home directory */
+    private static function homes(): array
+    {
         $system = new System;
         $homes = [];
         foreach (User::query()->pluck('username') as $username) {
@@ -37,41 +47,36 @@ class ProjectDisk
                 $homes[$username] = $system->projectHomeDirPath($username);
             }
         }
-        if ($homes === []) {
-            return 0;
-        }
 
+        return $homes;
+    }
+
+    /** One host run and one row per project, so a slow or failed walk loses only that project. */
+    private function sampleOne(string $username, string $home, string $at): int
+    {
         try {
-            $read = self::parse(($this->runOnHost)(self::script($homes)));
+            $bytes = self::parse(($this->runOnHost)(Privileged::host()->projectDisk([$username => $home])))[$username] ?? null;
         } catch (\Throwable $e) {
-            Log::warning('Could not measure project disk use: '.$e->getMessage());
+            Log::warning("Could not measure the disk use of {$username}: ".$e->getMessage());
 
             return 0;
         }
-
-        $at = $now->format('Y-m-d H:i:s');
-        $rows = [];
-        foreach ($read as $username => $bytes) {
-            if (isset($homes[$username])) {
-                $rows[] = ['timestamp' => $at, 'username' => $username] + $bytes;
-            }
+        if ($bytes === null) {
+            return 0;
         }
-        foreach (array_chunk($rows, 200) as $chunk) {
-            DB::table('project_disk_usage')->insert($chunk);
-        }
+        DB::table('project_disk_usage')->insert(['timestamp' => $at, 'username' => $username] + $bytes);
 
-        return count($rows);
+        return 1;
     }
 
     /**
-     * The latest measurement, or null before the first one.
+     * The latest measurement, or null before the first one or while the table is not migrated: every project view
+     * reads this, and that must not turn them all into 500s.
      *
      * @return ?array{files_bytes: ?int, docker_bytes: ?int, total_bytes: ?int, measured_at: string}
      */
     public static function latest(string $username): ?array
     {
-        // Every project view reads this: a table not migrated yet must not
-        // turn them all into 500s, it only means nothing was measured.
         try {
             $row = DB::table('project_disk_usage')
                 ->where('username', $username)
@@ -98,39 +103,6 @@ class ProjectDisk
     public static function daysKept(): int
     {
         return max(1, (int) env('PROJECT_DISK_USAGE_DAYS', 30));
-    }
-
-    /**
-     * One `D` line per project home that exists: bytes on disk of the files
-     * and of ~/docker (empty when there is none). Idle I/O priority, one
-     * filesystem, so a busy host barely notices.
-     *
-     * @param  array<string, string>  $homes  username => home directory
-     */
-    public static function script(array $homes): string
-    {
-        $pairs = '';
-        foreach ($homes as $username => $home) {
-            $pairs .= escapeshellarg($username).' '.escapeshellarg(rtrim($home, '/')).' ';
-        }
-
-        return str_replace('__PAIRS__', $pairs, <<<'SH'
-set -u
-low=
-command -v nice >/dev/null 2>&1 && low="nice -n 19"
-command -v ionice >/dev/null 2>&1 && low="$low ionice -c3"
-set -- __PAIRS__
-while [ $# -ge 2 ]; do
-    name=$1 home=$2
-    shift 2
-    [ -d "$home" ] || continue
-    files=$($low du -sx -B1 --exclude="$home/docker" "$home" 2>/dev/null | cut -f1)
-    docker=
-    [ -d "$home/docker" ] && docker=$($low du -sx -B1 "$home/docker" 2>/dev/null | cut -f1)
-    printf 'D\t%s\t%s\t%s\n' "$name" "$files" "$docker"
-done
-exit 0
-SH);
     }
 
     /** @return array<string, array{files_bytes: ?int, docker_bytes: ?int}> */

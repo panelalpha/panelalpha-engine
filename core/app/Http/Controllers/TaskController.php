@@ -10,6 +10,7 @@ use App\Http\Resources\TaskLogCollection;
 use App\Http\Resources\TaskLogResource;
 use App\Http\Resources\TaskResource;
 use App\Http\Resources\TaskSummaryCollection;
+use App\Http\Responses\Refusal;
 use App\Lib\Task\LogStreamLimiter;
 use App\Lib\Task\ProcessTreeKiller;
 use App\Lib\Task\TaskCanceller;
@@ -71,7 +72,8 @@ class TaskController extends Controller
             .'it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the '
             .'API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is '
             .'shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, '
-            .'push, backup, restore or attach_source.',
+            .'push, backup, restore or attach_source. A deleted project\'s tasks stay listed under its name, the record '
+            .'of what was done to it, until the engine\'s operator prunes them.',
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
@@ -173,6 +175,11 @@ class TaskController extends Controller
         summary: 'Poll a task status and new log lines after a cursor',
         description: 'Returns the task and a page of at most `limit` log rows after `after_id`. While `more` '
             .'is true there are rows after this page: ask again with `after_id` set to `next_after_id`.',
+        x: ['mcp-description' => 'Returns the task and a page of at most `limit` log rows after `after_id`. While '
+            .'`more` is true there are rows after this page: ask again with `after_id` set to `next_after_id`. '
+            .'A deploy or rebuild usually takes a few minutes, a clone or staging copy about as long as its files '
+            .'take to copy, and either can run past ten minutes on a large app: keep polling every 20-30 seconds '
+            .'until `status` is `completed` or `failed` (or `cancelled`) and do not answer the user before that.'],
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [
@@ -311,7 +318,7 @@ class TaskController extends Controller
 
         $slot = LogStreamLimiter::acquire();
         if ($slot === null) {
-            return $this->tooManyStreams();
+            return $this->tooManyStreams($task);
         }
 
         $afterId = max(0, (int) $request->query('after_id', 0));
@@ -321,9 +328,9 @@ class TaskController extends Controller
     }
 
     /** A stream holds a worker for the task's whole life, so streams are capped and log followers cannot take every worker. */
-    private function tooManyStreams(): JsonResponse
+    private function tooManyStreams(Task $task): JsonResponse
     {
-        return new JsonResponse(['message' => LogStreamLimiter::MESSAGE], 503, ['Retry-After' => 5]);
+        return Refusal::json(503, 'task', LogStreamLimiter::CODE, LogStreamLimiter::MESSAGE, $task->username, ['task_id' => $task->id], ['Retry-After' => '5']);
     }
 
     /**

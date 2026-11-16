@@ -6,9 +6,8 @@ use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The second copy of the routed service a redeploy starts beside the running
- * one: the same compose files plus an override, its own compose
- * project, ports left to Docker, the running project's networks and volumes.
+ * The second copy of the routed service a redeploy starts beside the running one: the same compose files plus an
+ * override, its own compose project, ports left to Docker, the running project's networks and volumes.
  */
 final class NextGeneration
 {
@@ -57,6 +56,27 @@ final class NextGeneration
             return 'its compose file could not be read';
         }
 
+        $name = self::routedService($services, $routedPort);
+        if ($name === null) {
+            return "no service publishes port {$routedPort}, the one the site is routed to";
+        }
+
+        $service = $services[$name];
+        $refusal = self::sideBySideRefusal($name, $service);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+        if ($repositoryCompose && count($services) > 1) {
+            return 'the repository\'s compose file runs '.count($services)
+                .' services, and only a single-service stack is started twice';
+        }
+
+        return new self($project, $name, self::published($service), $config);
+    }
+
+    /** @param  array<mixed>  $services */
+    private static function routedService(array $services, int $routedPort): ?string
+    {
         $name = null;
         foreach ($services as $candidate => $service) {
             if (is_array($service) && array_key_exists($routedPort, self::published($service))) {
@@ -64,11 +84,13 @@ final class NextGeneration
                 break;
             }
         }
-        if ($name === null) {
-            return "no service publishes port {$routedPort}, the one the site is routed to";
-        }
 
-        $service = $services[$name];
+        return $name;
+    }
+
+    /** @param  array<string, mixed>  $service */
+    private static function sideBySideRefusal(string $name, array $service): ?string
+    {
         if (! empty($service['network_mode'])) {
             return "{$name} shares another network namespace (network_mode: {$service['network_mode']})";
         }
@@ -80,12 +102,8 @@ final class NextGeneration
                 return "{$name} publishes a port range or a UDP port";
             }
         }
-        if ($repositoryCompose && count($services) > 1) {
-            return 'the repository\'s compose file runs '.count($services)
-                .' services, and only a single-service stack is started twice';
-        }
 
-        return new self($project, $name, self::published($service), $config);
+        return null;
     }
 
     /**
@@ -114,22 +132,7 @@ final class NextGeneration
     public function override(): string
     {
         $service = $this->config['services'][$this->service];
-        $targets = array_values(array_unique(array_values($this->ports)));
-        $override = [
-            'ports' => new TaggedValue('override', array_map(
-                static fn (int $target): array => ['target' => $target, 'protocol' => 'tcp'],
-                $targets
-            )),
-            'labels' => [self::LABEL => 'next'],
-        ];
-        if (isset($service['build'])) {
-            $override['build'] = new TaggedValue('reset', null);
-            $override['image'] = is_string($service['image'] ?? null) && $service['image'] !== ''
-                ? $service['image']
-                : $this->project.'-'.$this->service;
-        }
-
-        $compose = ['services' => [$this->service => $override]];
+        $compose = ['services' => [$this->service => $this->serviceOverride($service)]];
         $networks = is_array($service['networks'] ?? null) && $service['networks'] !== []
             ? array_keys($service['networks'])
             : ['default'];
@@ -150,6 +153,30 @@ final class NextGeneration
         }
 
         return Yaml::dump($compose, 6, 2);
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @return array<string, mixed>
+     */
+    private function serviceOverride(array $service): array
+    {
+        $targets = array_values(array_unique(array_values($this->ports)));
+        $override = [
+            'ports' => new TaggedValue('override', array_map(
+                static fn (int $target): array => ['target' => $target, 'protocol' => 'tcp'],
+                $targets
+            )),
+            'labels' => [self::LABEL => 'next'],
+        ];
+        if (isset($service['build'])) {
+            $override['build'] = new TaggedValue('reset', null);
+            $override['image'] = is_string($service['image'] ?? null) && $service['image'] !== ''
+                ? $service['image']
+                : $this->project.'-'.$this->service;
+        }
+
+        return $override;
     }
 
     /** The name compose gave a network or volume of the running project. */

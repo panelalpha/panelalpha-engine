@@ -44,6 +44,24 @@ final class WpAdminHtml
     }
 
     /**
+     * The text of wp-admin's first error notice, where a refused plugin upload says why; '' when it shows none.
+     */
+    public static function errorNotice(string $response): string
+    {
+        $doc = new \DOMDocument;
+        @$doc->loadHTML($response);
+
+        foreach ((new \DOMXPath($doc))->query('//div[contains(@class, "error")]//p') ?: [] as $paragraph) {
+            $text = trim((string) $paragraph->textContent);
+            if ($text !== '') {
+                return $text;
+            }
+        }
+
+        return '';
+    }
+
+    /**
      * @return array{active?: array<string, string>, inactive?: array<string, string>}
      */
     public static function plugins(string $response): array

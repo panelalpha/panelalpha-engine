@@ -74,7 +74,7 @@ class EngineFactoryTest extends TestCase
         $this->assertSame('podman', $engine->name());
         $this->assertSame(
             ['podman', 'image', 'inspect', 'nginx:alpine'],
-            $engine->images()->imageIdArgv('nginx:alpine')
+            $engine->images()->hostImageInspectArgv('nginx:alpine')
         );
     }
 
@@ -106,14 +106,24 @@ final class FakeEngine implements ContainerEngine
                 return 'buildah bud';
             }
 
+            public function hostBuildArgv(string $tag, string $dockerfile, bool $pull = true): array
+            {
+                return ['buildah', 'bud'];
+            }
+
+            public function hostBuildInBackgroundArgv(string $tag, string $dockerfile): array
+            {
+                return ['buildah', 'bud'];
+            }
+
             public function hostPublishCommand(string $image): string
             {
                 return 'skopeo copy';
             }
 
-            public function loadFromHostCommand(EngineAccount $account, string $image): string
+            public function loadFromHostArgv(EngineAccount $account, string $image): array
             {
-                return 'skopeo copy';
+                return ['skopeo', 'copy'];
             }
 
             public function seedCommand(EngineAccount $account, string $image, bool $ours, bool $private = false, ?string $dockerConfig = null): string
@@ -126,39 +136,14 @@ final class FakeEngine implements ContainerEngine
                 return 'skopeo copy';
             }
 
+            public function operatorSeedCommand(EngineAccount $account, string $image): string
+            {
+                return 'skopeo copy';
+            }
+
             public function parallelImportCommand(EngineAccount $account, array $images, int $concurrency): string
             {
                 return 'true';
-            }
-
-            public function listImagesArgv(): array
-            {
-                return ['podman', 'images'];
-            }
-
-            public function hostAccountMountsArgv(EngineAccount $account): array
-            {
-                return ['podman', 'inspect', $account->username];
-            }
-
-            public function hostAccountProcessesArgv(EngineAccount $account): array
-            {
-                return ['podman', 'top', $account->username];
-            }
-
-            public function hostSignalDockerdArgv(int $pid): array
-            {
-                return ['kill', '-HUP', (string) $pid];
-            }
-
-            public function imageIdArgv(string $image): array
-            {
-                return ['podman', 'image', 'inspect', $image];
-            }
-
-            public function imageExposedPortsArgv(string $image): array
-            {
-                return ['podman', 'image', 'inspect', $image];
             }
 
             public function hostImageInspectArgv(string $image): array
@@ -176,9 +161,9 @@ final class FakeEngine implements ContainerEngine
                 return ['true'];
             }
 
-            public function hostRebuildCommand(string $image, string $dockerfile): string
+            public function hostRebuildArgv(string $image, string $dockerfile): array
             {
-                return 'true';
+                return ['true'];
             }
 
             public function refreshCommand(EngineAccount $account, string $image): string
@@ -264,39 +249,9 @@ final class FakeEngine implements ContainerEngine
                 return null;
             }
 
-            public function buildCacheProbeArgv(): array
-            {
-                return ['podman', 'system', 'df'];
-            }
-
-            public function parseBuildCacheBytes(string $output): ?int
-            {
-                return null;
-            }
-
-            public function containersProbeArgv(): array
-            {
-                return ['podman', 'ps', '-aq'];
-            }
-
-            public function reclaimArgvs(): array
-            {
-                return [['podman', 'system', 'prune', '-af']];
-            }
-
             public function fullWipeScript(): string
             {
                 return 'true';
-            }
-
-            public function pruneAllArgv(): array
-            {
-                return ['podman', 'system', 'prune'];
-            }
-
-            public function pruneBuildCacheArgv(): array
-            {
-                return [['podman', 'system', 'prune']];
             }
 
             public function stopEngineArgv(): array
@@ -304,9 +259,9 @@ final class FakeEngine implements ContainerEngine
                 return ['true'];
             }
 
-            public function hostCleanupArgv(EngineAccount $account, array $sidecarRefs = []): array
+            public function hostCleanupArgvs(EngineAccount $account, array $sidecarRefs = []): array
             {
-                return ['true'];
+                return [['true']];
             }
         };
     }

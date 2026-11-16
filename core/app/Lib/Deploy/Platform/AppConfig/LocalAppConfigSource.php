@@ -43,20 +43,31 @@ final class LocalAppConfigSource implements AppConfigSource
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
-            $path = $dir.'/'.$entry;
-            if (is_dir($path)) {
-                foreach ($this->listFiles($path) as $nested) {
-                    $found[] = $entry.'/'.$nested;
-                }
-
-                continue;
-            }
-            if (is_file($path)) {
-                $found[] = $entry;
+            foreach ($this->filesOfEntry($dir, $entry) as $file) {
+                $found[] = $file;
             }
         }
         sort($found);
 
         return $found;
+    }
+
+    /** @return list<string> */
+    private function filesOfEntry(string $dir, string $entry): array
+    {
+        $path = $dir.'/'.$entry;
+        if (is_dir($path)) {
+            $files = [];
+            foreach ($this->listFiles($path) as $nested) {
+                $files[] = $entry.'/'.$nested;
+            }
+
+            return $files;
+        }
+        if (is_file($path)) {
+            return [$entry];
+        }
+
+        return [];
     }
 }

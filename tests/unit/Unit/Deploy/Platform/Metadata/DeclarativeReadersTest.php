@@ -78,6 +78,27 @@ class DeclarativeReadersTest extends MetadataTestCase
         $this->assertSame(['python' => '^3.11'], $package->platform);
     }
 
+    public function test_a_poetry_inline_table_reports_its_version_or_any(): void
+    {
+        $this->write('pyproject.toml', <<<'TOML'
+        [tool.poetry]
+        name = "shop-api"
+
+        [tool.poetry.dependencies]
+        python = "^3.11"
+        litestar = { version = "2.0", extras = ["standard"] }
+        aiohttp = { git = "https://github.com/aio-libs/aiohttp.git" }
+        TOML);
+
+        $package = (new PythonMetadata())->read($this->context());
+
+        $this->assertNotNull($package);
+        $this->assertSame(
+            ['litestar' => '2.0', 'aiohttp' => '*'],
+            array_column(array_map(static fn ($f) => $f->toArray(), $package->frameworks), 'constraint', 'id')
+        );
+    }
+
     public function test_a_pyproject_with_only_tooling_names_no_application(): void
     {
         $this->write('pyproject.toml', "[tool.ruff]\nline-length = 120\n");

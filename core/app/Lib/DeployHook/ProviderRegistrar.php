@@ -8,13 +8,12 @@ use App\Lib\DeployHook\Registration\GithubRegistrar;
 use App\Lib\DeployHook\Registration\GitlabRegistrar;
 use App\Lib\DeployHook\Registration\WebhookRegistrar;
 use App\Lib\DeployHook\Registration\WebhookTarget;
+use App\Models\DeployHook;
+use Illuminate\Support\Facades\Log;
 
 /**
- * Registers a Deploy Hook as a webhook at the git provider its checkout came
- * from, and keeps the provider's id for it so a rotation can update it and a
- * deletion can remove it. Which provider serves a repository is read from the
- * URL's host; a client that names a provider may point this at a self-managed
- * instance, which no host list would recognise.
+ * Registers a Deploy Hook as a webhook at its checkout's git provider, keeping the provider's id for rotation and deletion.
+ * The provider is read from the URL's host, unless a client names one for a self-managed instance no host list would know.
  */
 final class ProviderRegistrar
 {
@@ -57,9 +56,8 @@ final class ProviderRegistrar
     }
 
     /**
-     * Replace the URL and secret of a webhook registered earlier. False when
-     * the provider cannot be addressed anymore -- the checkout was
-     * disconnected, or its remote moved -- and the webhook is left as it is.
+     * Replace the URL and secret of a webhook registered earlier. False, the webhook left as it is, when the provider cannot
+     * be addressed: the checkout was disconnected, or its remote moved.
      *
      * @throws ProviderRegistrationRefused
      */
@@ -89,6 +87,23 @@ final class ProviderRegistrar
         $registrar->delete($target, (string) $remote->token, $hookId);
 
         return true;
+    }
+
+    /**
+     * {@see forget()} for a hook the engine is forgetting anyway: a provider that will not
+     * answer must not keep alive a URL the engine has already stopped serving.
+     */
+    public function forgetQuietly(CheckoutRemote $remote, DeployHook $hook): void
+    {
+        try {
+            $this->forget($remote, (string) $hook->provider_hook_id, $hook->provider);
+        } catch (ProviderRegistrationRefused $e) {
+            Log::warning('Could not delete the provider webhook of a forgotten deploy hook', [
+                'deploy_hook_id' => $hook->id,
+                'provider' => $hook->provider,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

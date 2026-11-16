@@ -5,15 +5,13 @@ namespace App\Lib\Deploy\CacheManager;
 use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 
 /**
- * The Rust build image plus the apt packages a project's build scripts need
- * ({@see RustBuildTools}): protoc, cmake,
- * libclang, mold. Built on the host once per package set and used only by the
- * host compile; the app still runs in the slim runtime image.
- *
- * The tag fingerprints the Dockerfile, so two package sets never share an image.
+ * The Rust build image plus the apt packages build scripts need ({@see RustBuildTools}), built once per
+ * package set on the host for the host compile only; the tag fingerprints the Dockerfile.
  */
 final class RustBuildToolsImage
 {
+    use FingerprintedTag;
+
     public const REPOSITORY = 'panelalpha/build-rust';
 
     /** @param list<string> $packages */
@@ -23,9 +21,8 @@ final class RustBuildToolsImage
         if ($dockerfile === null) {
             return null;
         }
-        $slug = trim((string) preg_replace('/[^a-z0-9._-]+/', '-', strtolower(trim($image))), '-.');
 
-        return self::REPOSITORY.':'.substr($slug, 0, 80).'-pa'.substr(sha1($dockerfile), 0, 8);
+        return self::fingerprintedTag($image, $dockerfile);
     }
 
     /**

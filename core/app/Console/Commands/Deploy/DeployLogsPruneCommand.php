@@ -2,20 +2,17 @@
 
 namespace App\Console\Commands\Deploy;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Deploy\DeployLog\DeployLogArchive;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use Illuminate\Console\Command;
 
 class DeployLogsPruneCommand extends Command
 {
-    use ResolvesProject;
-
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['deploy-logs:prune'];
 
     protected $signature = 'deploy:log:prune
-                            {--project= : Limit prune to a single engine username} {--user= : Deprecated alias for --project}
+                            {--project= : Limit prune to a single engine username}
                             {--keep= : How many newest .log files to keep per user (default DEPLOY_LOG_KEEP)}
                             {--dry-run : List files that would be deleted without deleting}';
 
@@ -23,8 +20,6 @@ class DeployLogsPruneCommand extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption('user');
-
         $keep = $this->option('keep') === null ? DeployLogArchive::keep() : (int) $this->option('keep');
         if ($keep < 1) {
             $this->error('--keep must be >= 1');
@@ -33,7 +28,7 @@ class DeployLogsPruneCommand extends Command
         }
 
         $dryRun = (bool) $this->option('dry-run');
-        $user = $this->option('user');
+        $user = $this->option('project');
 
         try {
             if ($user !== null && $user !== '') {

@@ -68,10 +68,6 @@ class DeployStrategy
         $this->dind = $dind;
     }
 
-    // -------------------------------------------------------------------------
-    // Shared services
-    // -------------------------------------------------------------------------
-
     public function sidecars(): RuntimeSidecars
     {
         return $this->runtimeSidecars ??= new RuntimeSidecars($this->dind);
@@ -122,7 +118,22 @@ class DeployStrategy
         );
         $decision = ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
 
-        return $this->withDatabaseHostPinned($decision);
+        return $this->withDatabaseHostPinned(ComposeEnvironment::withMailRelay($decision, $this->mailRelay()));
+    }
+
+    /**
+     * The server's mail relay, empty when there is no engine host to ask (a unit test) or no
+     * address it can name.
+     *
+     * @return array<string, string>
+     */
+    protected function mailRelay(): array
+    {
+        try {
+            return $this->dind->system()->exim()->relayEnvironment();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**
@@ -208,10 +219,6 @@ class DeployStrategy
         return $keys === [] ? $decision : ['path_prefix_keys' => $keys] + $decision;
     }
 
-    // -------------------------------------------------------------------------
-    // The writers
-    // -------------------------------------------------------------------------
-
     private function appConfigBootstrap(): AppConfigBootstrap
     {
         return $this->bootstrap ??= new AppConfigBootstrap($this->dind);
@@ -263,10 +270,6 @@ class DeployStrategy
         return $this->railpack ??= new RailpackStrategy($this->dind);
     }
 
-    // -------------------------------------------------------------------------
-    // The pipeline
-    // -------------------------------------------------------------------------
-
     /**
      * Everything the project's app config does to the checkout, before anything
      * is detected. See {@see AppConfigBootstrap}.
@@ -278,9 +281,8 @@ class DeployStrategy
     }
 
     /**
-     * Write the build definition for the detected strategy. A compose (or PAEMD, an app config's own
-     * compose stack) runs prepare at its own point; every other strategy runs it first, as it may write
-     * the very files the generator reads.
+     * Write the build definition for the detected strategy. A compose (or PAEMD, an app config's own compose stack)
+     * runs prepare at its own point; every other runs it first, as it may write the very files the generator reads.
      *
      * @param array{
      *   strategy: string,
@@ -309,33 +311,7 @@ class DeployStrategy
 
         $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision, $appConfig), $appConfig);
 
-        if ($strategy === Strategies::DOCKERFILE) {
-            $this->dockerfile()->apply($decision, $projectDir, $chown);
-
-            return;
-        }
-
-        if ($strategy === Strategies::RAILS || $strategy === Strategies::RUBY) {
-            $this->ruby()->apply($decision, $projectDir, $chown, $appConfig);
-
-            return;
-        }
-
-        if ($strategy === Strategies::LARAVEL || $strategy === Strategies::PHP) {
-            $this->php()->apply($projectDir, $chown, $strategy === Strategies::LARAVEL, $appConfig, $decision);
-
-            return;
-        }
-
-        if (Strategies::isGenerated($strategy)) {
-            $this->framework()->apply($decision, $projectDir, $chown, $appConfig);
-
-            return;
-        }
-
-        if ($strategy === Strategies::RAILPACK) {
-            $this->railpack()->applyRailpackOrFallback($projectDir, $chown, $sourceLabel);
-
+        if ($this->appliedBuildStrategy($strategy, $decision, $appConfig, $projectDir, $chown, $sourceLabel)) {
             return;
         }
 
@@ -346,6 +322,54 @@ class DeployStrategy
         }
 
         $this->railpack()->applyFallback($projectDir, $chown, $sourceLabel);
+    }
+
+    /**
+     * Whether a writer of the strategy's own took it; a static site and the fallback are left to apply().
+     *
+     * @param  array<string, mixed>  $decision
+     */
+    private function appliedBuildStrategy(string $strategy, array $decision, ?AppConfig $appConfig, string $projectDir, ?string $chown, string $sourceLabel): bool
+    {
+        if ($strategy === Strategies::DOCKERFILE) {
+            $this->dockerfile()->apply($decision, $projectDir, $chown);
+
+            return true;
+        }
+
+        if ($strategy === Strategies::RAILS || $strategy === Strategies::RUBY) {
+            $this->ruby()->apply($decision, $projectDir, $chown, $appConfig);
+
+            return true;
+        }
+
+        if ($strategy === Strategies::LARAVEL || $strategy === Strategies::PHP) {
+            $this->php()->apply($projectDir, $chown, $strategy === Strategies::LARAVEL, $appConfig, $decision);
+
+            return true;
+        }
+
+        return $this->appliedGeneratedOrRailpack($strategy, $decision, $appConfig, $projectDir, $chown, $sourceLabel);
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     */
+    private function appliedGeneratedOrRailpack(string $strategy, array $decision, ?AppConfig $appConfig, string $projectDir, ?string $chown, string $sourceLabel): bool
+    {
+        if (Strategies::isGenerated($strategy)) {
+            $this->framework()->apply($decision, $projectDir, $chown, $appConfig);
+
+            return true;
+        }
+
+        if ($strategy === Strategies::RAILPACK) {
+            $this->railpack()->applyRailpackOrFallback($projectDir, $chown, $sourceLabel);
+
+            return true;
+        }
+
+        return false;
     }
 
     /**

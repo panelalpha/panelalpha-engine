@@ -3,9 +3,8 @@
 namespace App\Lib\Hub;
 
 /**
- * The Hub is `config('hub.url')`. Everything that carries a Hub credential
- * goes over https with verification on; plain http is accepted only for a Hub
- * on this machine in a local environment.
+ * The Hub is `config('hub.url')`, reached over verified https; plain http is accepted only for a Hub on this
+ * machine in a local environment.
  */
 final class HubUrl
 {

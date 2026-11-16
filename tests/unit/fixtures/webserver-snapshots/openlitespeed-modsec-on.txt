@@ -1,0 +1,24 @@
+put /opt/engine/webserver-config/openlitespeed/httpd_config.conf -
+serverName engine
+user nobody
+
+listener Default {
+  address *:80
+  secure 0
+  map old old.test
+}
+
+virtualhost old {
+  vhRoot /old
+}
+
+module cgi {
+}
+
+module mod_security {
+  modsecurity on
+  modsecurity_rules_file /opt/modsecurity/main.conf
+}
+
+<<< end of /opt/engine/webserver-config/openlitespeed/httpd_config.conf
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","fullrestart"]

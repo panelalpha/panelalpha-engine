@@ -3,16 +3,14 @@
 namespace App\System\Project\Dind\Services;
 
 /**
- * The long-running processes a DinD account's init keeps up: dockerd, cron,
- * cloudflared, the egress guard. Callers name a service; which init runs it is
- * this class's business, not theirs.
+ * The long-running processes a DinD account's init keeps up (dockerd, cron, cloudflared, the egress guard);
+ * callers name a service, and which init runs it is this class's business.
  */
 interface ServiceManager
 {
     /**
-     * Write whether $service runs, and the environment it runs with, into the
-     * account's project dir. Takes effect when the account next starts, or
-     * now through {@see apply()}.
+     * Write whether $service runs, and its environment, into the account's project dir: in effect when the
+     * account next starts, or at once through {@see apply()}.
      *
      * @param  array<string, string>  $env
      */

@@ -7,11 +7,14 @@ use App\Exceptions\ProblemException;
 use App\Exceptions\TaskCancelledException;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployRequest;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
+use App\Lib\Project\ArchiveDrop;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Task\TaskLogSink;
+use App\Lib\Upload\ArchiveSource;
 use App\Models\User;
 use App\Rules\RuleExpectation;
 use App\Support\JobBudget;
@@ -45,6 +48,12 @@ class RebuildProject implements ShouldQueue
     /** The project's row; null on a job queued before it was recorded. */
     public ?int $userId = null;
 
+    /** The archive at zipPath was put into the project for this deploy alone (by the CLI), and goes once it has ended. */
+    public bool $ownsArchive = false;
+
+    /** An archive deploy's upload or URL ({@see ArchiveSource::toArray()}); null for a path or no archive. */
+    public ?array $archive = null;
+
     /**
      * @param  array<string, list<array<string, mixed>>>|null  $stages
      * @param  array<string, string>|null  $git  a git action's input: `path` and `strategy`, `branch` or `ref`
@@ -57,26 +66,44 @@ class RebuildProject implements ShouldQueue
         public ?string $recipe = null,
         public ?array $git = null,
         ?int $userId = null,
+        bool $ownsArchive = false,
+        ?array $archive = null,
     ) {
         $this->userId = $userId;
+        $this->ownsArchive = $ownsArchive;
+        $this->archive = $archive;
         $this->onQueue('default');
     }
 
+    /** The archive this deploy owns goes however it ended, cancelled before it began included. */
     public function handle(ProjectRebuild $rebuild): void
     {
-        $this->runTask(function () use ($rebuild): void {
-            $user = $this->project();
-            if ($user === null) {
-                $this->logTask("Not deploying: project '{$this->username}' was deleted.");
-                throw new TaskCancelledException;
-            }
+        try {
+            $this->runTask(function () use ($rebuild): void {
+                $user = $this->project();
+                if ($user === null) {
+                    $this->logTask("Not deploying: project '{$this->username}' was deleted.");
+                    throw new TaskCancelledException;
+                }
 
-            $this->bindDeployContext();
-            $result = $this->rebuild($rebuild, $user);
+                $this->bindDeployContext();
+                $result = $this->rebuild($rebuild, $user);
 
-            $user->refresh();
-            $this->recordOutcome($user, $result);
-        });
+                $user->refresh();
+                $this->recordOutcome($user, $result);
+            });
+        } finally {
+            $this->removeOwnArchive();
+        }
+    }
+
+    /** An API caller's zip_path is theirs, and stays where they put it. */
+    private function removeOwnArchive(): void
+    {
+        $user = $this->ownsArchive && $this->zipPath !== null ? $this->project() : null;
+        if ($user !== null) {
+            app(ArchiveDrop::class)->discard($user, (string) $this->zipPath);
+        }
     }
 
     /**
@@ -103,9 +130,9 @@ class RebuildProject implements ShouldQueue
         try {
             $this->throwIfCancelled();
             $logger = $rebuild->openLog($user, $this->action);
-            $this->recordDeployId($logger);
+            DeployRequest::recordTask($logger, $this->task());
 
-            return $rebuild->run($user, $this->action, $logger, $this->zipPath, $this->git ?? []);
+            return $rebuild->run($user, $this->action, $logger, $this->zipPath, $this->git ?? [], ArchiveSource::fromArray($this->archive));
         } catch (DeployAlreadyRunningException $e) {
             throw $this->failure(ProblemException::one('deploy', 'deploy_already_running', $e->getMessage()));
         } catch (ValidationException $e) {
@@ -127,27 +154,14 @@ class RebuildProject implements ShouldQueue
             : User::query()->whereKey($this->userId)->first();
     }
 
+    /** Also what runs for a job that never reached the end of handle(), a timed-out one. */
     public function failed(?Throwable $e): void
     {
         $task = $this->task();
         if ($task !== null && ! $task->isTerminal()) {
             $this->markFailed($e ?? new RuntimeException('Rebuild job failed'));
         }
-    }
-
-    /**
-     * The deploy this task runs. The log it resumes may have been started by
-     * the create, long before this task: the reconciler and a cancel match the
-     * task to its log by this id, not by when the log started.
-     */
-    private function recordDeployId(?DeployLogger $logger): void
-    {
-        $task = $this->task();
-        if ($task === null || $logger === null) {
-            return;
-        }
-        $task->details = array_merge($task->details ?? [], ['deploy_id' => $logger->getDeployId()]);
-        $task->save();
+        $this->removeOwnArchive();
     }
 
     /**

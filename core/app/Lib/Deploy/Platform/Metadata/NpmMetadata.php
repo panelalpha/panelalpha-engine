@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * JavaScript identity, from package.json and package-lock.json. Versions resolve from
- * the lockfile only: pnpm and Yarn keep their own formats, so those projects report the
- * declared constraint in `source`, and `name` as declared (often `my-app`).
+ * JavaScript identity, from package.json and package-lock.json; pnpm and Yarn lockfiles are not read, so those
+ * projects report the declared constraint.
  */
 final class NpmMetadata implements PackageMetadata
 {
@@ -18,11 +17,7 @@ final class NpmMetadata implements PackageMetadata
     public const LOCK = 'package-lock.json';
 
     /**
-     * JS frameworks worth naming, most specific first.
-     *
-     * Order is the design: every Next.js project depends on React, every Nuxt
-     * on Vue, so the meta-framework has to sit above the view library it is
-     * built on or every application here reports as "React".
+     * JS frameworks worth naming, most specific first: a meta-framework sits above the view library it is built on.
      *
      * @var array<string, string>
      */
@@ -74,7 +69,7 @@ final class NpmMetadata implements PackageMetadata
             nameSource: $name !== null ? self::FILE.' name' : AppPackage::NAME_FROM_DIRECTORY,
             description: self::text($package['description'] ?? null),
             version: self::text($package['version'] ?? null),
-            license: implode(', ', self::stringList($package['license'] ?? null)) ?: null,
+            license: implode(', ', self::stringList($package['license'] ?? null, 'type')) ?: null,
             homepage: self::text($package['homepage'] ?? null),
             repository: self::repository($package['repository'] ?? null),
             authors: self::authors($package),
@@ -83,25 +78,31 @@ final class NpmMetadata implements PackageMetadata
             scripts: self::keys($package['scripts'] ?? null),
             entrypoints: self::entrypoints($package),
             workspaces: self::workspaces($package['workspaces'] ?? null),
-            frameworks: self::matchFrameworks(
-                self::FRAMEWORKS,
-                self::constraints($dependencies, $devDependencies),
-                $locked,
-                self::FILE,
-                self::LOCK
-            ),
-            dependencyCounts: [
-                'dependencies' => count($dependencies),
-                'devDependencies' => count($devDependencies),
-            ],
+            frameworks: self::frameworks($dependencies, $devDependencies, $locked),
+            dependencyCounts: ['dependencies' => count($dependencies), 'devDependencies' => count($devDependencies)],
             platform: self::engines($package)
         );
     }
 
     /**
-     * `engines`, npm's spelling of a platform requirement. Every key is kept,
-     * not just `node`: a project that pins `pnpm` fails for a reason its `node`
-     * constraint cannot explain.
+     * @param  array<string, mixed>  $dependencies
+     * @param  array<string, mixed>  $devDependencies
+     * @param  array<string, string>  $locked
+     * @return list<Framework>
+     */
+    private static function frameworks(array $dependencies, array $devDependencies, array $locked): array
+    {
+        return self::matchFrameworks(
+            self::FRAMEWORKS,
+            self::constraints($dependencies, $devDependencies),
+            $locked,
+            self::FILE,
+            self::LOCK
+        );
+    }
+
+    /**
+     * `engines`, npm's platform requirement, every key kept: a pinned `pnpm` fails for a reason `node` cannot explain.
      *
      * @param  array<string, mixed>  $package
      * @return array<string, string>
@@ -122,10 +123,7 @@ final class NpmMetadata implements PackageMetadata
     }
 
     /**
-     * Installed versions from package-lock.json, keyed by package.
-     *
-     * Two layouts: lockfileVersion 1 keys a `dependencies` tree by bare name, 2
-     * and 3 key a flat `packages` map by install path. Both are read.
+     * Installed versions from package-lock.json: v2 and v3's flat `packages` map, then v1's `dependencies` tree.
      *
      * @return array<string, string>
      */
@@ -133,25 +131,42 @@ final class NpmMetadata implements PackageMetadata
     {
         $lock = self::map($context->json(self::LOCK));
 
+        return self::treeVersions($lock, self::installPathVersions($lock));
+    }
+
+    /**
+     * Top-level `node_modules/<name>` entries only: the root project is keyed by '', and a nested second copy
+     * (`node_modules/vitest/node_modules/vite`) is not what the project builds against.
+     *
+     * @param  array<mixed>  $lock
+     * @return array<string, string>
+     */
+    private static function installPathVersions(array $lock): array
+    {
         $versions = [];
         foreach (self::map($lock['packages'] ?? null) as $path => $entry) {
             $path = self::text($path);
             $version = is_array($entry) ? self::text($entry['version'] ?? null) : null;
-            // The root project is keyed by the empty string, and its version
-            // is the application's own — not a dependency's.
             if ($path === null || $version === null || ! str_starts_with($path, 'node_modules/')) {
                 continue;
             }
             $name = substr($path, strlen('node_modules/'));
-            // `node_modules/vitest/node_modules/vite` is a nested second copy, not the
-            // version this project builds against: taking it reported Vite 5 for an
-            // application whose package.json asks for Vite 6.
             if ($name === '' || str_contains($name, 'node_modules/')) {
                 continue;
             }
             $versions[$name] = $version;
         }
 
+        return $versions;
+    }
+
+    /**
+     * @param  array<mixed>  $lock
+     * @param  array<string, string>  $versions
+     * @return array<string, string>
+     */
+    private static function treeVersions(array $lock, array $versions): array
+    {
         foreach (self::map($lock['dependencies'] ?? null) as $name => $entry) {
             $name = self::text($name);
             $version = is_array($entry) ? self::text($entry['version'] ?? null) : null;

@@ -5,9 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use App\Exceptions\ProblemException;
 
 /**
- * The test's answer to "which domain would the import get": the target the
- * start would resolve, from the site's real home rather than the URL typed.
- * A refusal answers with the start's own problem code as `error_type`.
+ * The test's answer to "which domain would the import get": the target the start would resolve from the site's real
+ * home rather than the URL typed. A refusal answers with the start's own problem code as `error_type`.
  */
 final class ImportDomainCheck implements SourceProbeCheck
 {

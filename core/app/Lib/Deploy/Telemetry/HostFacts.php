@@ -7,33 +7,12 @@ use App\Lib\Host\DataDisk;
 use App\Models\Setting;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Probe the machine for the handful of facts telemetry needs.
- *
- * Two different jobs, deliberately in one place because they read the same
- * sources:
- *
- *  - **Derivation material** ({@see forFingerprint()}) — never sent anywhere.
- *    Hashed by {@see InstallFingerprint} into the install id.
- *  - **Envelope facts** ({@see envelope()}) — sent once per batch, describing
- *    the platform rather than the customer: engine version, OS, kernel, Docker
- *    version, which webserver variant, how many accounts.
- *
- * Everything here has to work from *both* the `core` container and the `cron`
- * container. `cron` gets `volumes_from: core` but not `privileged`/`pid: host`,
- * so `System::execOnHost()` (which is nsenter into pid 1) is unavailable there.
- * That rules out reading the host's /etc/machine-id directly. What is available
- * to both is the mounted Docker socket, and `docker info` happens to carry the
- * daemon's own stable id plus the host's OS, kernel and hardware — one call
- * that answers nearly everything.
- *
- * /proc/cpuinfo and /proc/meminfo are not namespaced, so they report the host's
- * real CPU and RAM even from inside an unprivileged container.
- *
- * Every probe is best-effort. A fact that cannot be read is null, never an
- * exception: telemetry must not be able to break a deploy or a cron run.
+ * The machine facts telemetry needs: {@see InstallFingerprint} material (never sent) and envelope facts. Read through
+ * `docker info` and /proc, which work from the `core` and `cron` containers alike; an unreadable fact is null.
  */
 class HostFacts
 {
@@ -88,8 +67,7 @@ class HostFacts
     }
 
     /**
-     * host() for the caller of GET /system/info: the capacity and identity of the
-     * machine itself, not of the engine. A token scoped to projects is a tenant's,
+     * host() for the caller of GET /system/info, or null for a project-scoped token: that is a tenant's,
      * and the machine's name, kernel and uptime are the operator's.
      *
      * @return ?array<string, mixed>
@@ -100,8 +78,8 @@ class HostFacts
     }
 
     /**
-     * The machine as its own admin sees it, for GET /system/info. Unlike
-     * envelope() it names the host: this answers the API, not telemetry.
+     * The machine as its own admin sees it, for GET /system/info. Unlike envelope() it names the host, by the
+     * daemon's hostname, as core's own is the container's.
      *
      * @return array<string, mixed>
      */
@@ -112,7 +90,6 @@ class HostFacts
         $memKb = self::memTotalKb();
 
         return [
-            // core's own hostname is the container's; the daemon reports the host's.
             'hostname' => self::str($info['Name'] ?? null),
             'os' => self::str($info['OperatingSystem'] ?? null),
             'kernel' => self::str($info['KernelVersion'] ?? null),
@@ -145,7 +122,7 @@ class HostFacts
 
         self::$dockerInfo = [];
         try {
-            $raw = $system->exec(['sudo', 'docker', 'info', '--format', '{{json .}}'], [], 30);
+            $raw = $system->exec(Privileged::docker()->info(), [], 30);
             $decoded = json_decode(trim($raw), true);
             if (is_array($decoded)) {
                 self::$dockerInfo = $decoded;
@@ -182,10 +159,8 @@ class HostFacts
     }
 
     /**
-     * The container's own machine-id. Not the host's — reading that needs
-     * nsenter, which `cron` cannot do. It is stable for as long as the image
-     * is, which makes it a weak anchor, so it only ever contributes alongside
-     * the Docker daemon id.
+     * The container's own machine-id, since `cron` cannot enter the host's namespaces. A weak anchor,
+     * stable only as long as the image, so it only contributes alongside the Docker daemon id.
      */
     private static function machineId(): ?string
     {

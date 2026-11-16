@@ -7,17 +7,8 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * The `.env` files a checkout is missing and cannot start without.
- *
- * Three sources, in this order of confidence:
- *
- *  1. A `.env.example` ({@see EnvTemplates}) beside a directory that has no `.env` — including a
- *     few levels down, because a monorepo's api and web each ship their own.
- *  2. A path the compose file names in `env_file:`. Compose V2 refuses to
- *     start when one is missing, so a destination with no source still gets
- *     an entry with an empty `example`, meaning "create it empty".
- *  3. `.env.local`, for the frameworks that read it (Next.js, and anything
- *     started with `bun --env-file=.env.local`).
+ * The `.env` files a checkout is missing and cannot start without: from a `.env.example`
+ * ({@see EnvTemplates}) a few levels deep, from compose's `env_file:` (empty if need be), and `.env.local`.
  */
 final class EnvExampleCopies
 {
@@ -70,9 +61,7 @@ final class EnvExampleCopies
     }
 
     /**
-     * Where every copy {@see for()} makes lands, including the ones already
-     * made -- the files a deploy leaves behind as Engine Artifacts when the
-     * repository does not track them.
+     * Where every copy {@see for()} makes lands, including the ones already made (Engine Artifacts).
      *
      * @return list<string> project-relative paths of files that exist
      */
@@ -97,6 +86,8 @@ final class EnvExampleCopies
     }
 
     /**
+     * First writer wins: a sibling example beats the root one, and both beat creating the file empty.
+     *
      * @return array<string, array{example: string, dest: string, relative: string}>
      */
     private static function collect(string $projectDir, bool $includeMade): array
@@ -108,8 +99,6 @@ final class EnvExampleCopies
 
         $copies = [];
         self::collectExamples($projectDir, '', 0, $copies, $includeMade);
-        // First writer wins: a sibling example is a better source than the
-        // root one, and both beat creating the file empty.
         $copies += self::composeDeclared($projectDir, $includeMade);
         $copies += self::localCopy($projectDir, $includeMade);
 
@@ -132,14 +121,11 @@ final class EnvExampleCopies
         return $source === null ? [] : [$dest => self::copy($source, $dest, self::LOCAL)];
     }
 
+    /** Asked with is_file(), not attempted: `@` does not silence the error handler. */
     public static function mentionsEnvLocal(string $projectDir): bool
     {
         $projectDir = rtrim($projectDir, '/');
         foreach (self::LOCAL_MARKERS as $name) {
-            // Asked, not attempted. `@` suppresses the warning but not the
-            // error handler, so a project with no next.config wrote three
-            // ERROR lines into the log on every deploy -- noise that reads
-            // like a failure in a file nobody was expected to have.
             $path = $projectDir.'/'.$name;
             if (! is_file($path)) {
                 continue;
@@ -243,12 +229,10 @@ final class EnvExampleCopies
         return is_string($raw) && $raw !== '' ? $raw : null;
     }
 
-    /** '' means "create the file empty" — Compose only needs it to exist. */
+    /** '' means "create the file empty"; the file's own template (`.env.docker.example`) comes first. */
     private static function sourceFor(string $projectDir, string $dest): string
     {
         $candidates = [
-            // The file's own template first: openstatus ships `.env.docker.example`
-            // for its `env_file: .env.docker`, and the root `.env` lacks its keys.
             ...array_map(static fn (string $suffix): string => $dest.$suffix, self::OWN_TEMPLATE_SUFFIXES),
             dirname($dest).'/'.self::EXAMPLE,
             $projectDir.'/'.self::EXAMPLE,

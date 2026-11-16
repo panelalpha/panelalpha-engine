@@ -1,0 +1,1 @@
+exec ["/usr/local/lib/panelalpha/pa-root","compose.nginxReload","--","/opt/engine/docker-compose.yml"]

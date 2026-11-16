@@ -109,10 +109,8 @@ final class RubyServer
     }
 
     /**
-     * Whether the server gem will be in the image: built with
-     * BUNDLE_WITHOUT="development:test", so Redmine's `group :test` puma was
-     * picked here and the container exited 127 on `bundler: command not found:
-     * puma`.
+     * Whether the server gem will be in the image, which is built with
+     * BUNDLE_WITHOUT="development:test", so a `group :test` puma does not count.
      */
     private function requires(string $gem): bool
     {

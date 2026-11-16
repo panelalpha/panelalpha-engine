@@ -212,7 +212,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/System/Services/Mysql/**',
       'core/app/Console/Commands/System/TestDatabaseConnection.php',
     ],
-    specs: ['mysql/*'],
+    specs: ['mysql/*', 'flows/mysql-tenant'],
   },
   {
     id: 'backup',
@@ -279,7 +279,20 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Http/Controllers/User/WpCliController.php',
       'core/app/Console/Commands/Domains/WpCli.php',
     ],
-    specs: ['wp-cli/*', 'permalinks/*'],
+    specs: ['wp-cli/*', 'permalinks/*', 'wordpress/wp-command'],
+  },
+  {
+    id: 'wordpress',
+    reason: 'typed WordPress operations and WordPress migrations',
+    paths: [
+      'core/app/Http/Controllers/User/Wp/**',
+      'core/app/Http/Requests/Wp/**',
+      'core/app/Http/Controllers/WordpressMigrationController.php',
+      'core/app/System/Project/PhpHosting/WordPress/**',
+      'core/app/Rules/WpCliArgument.php',
+      'templates/virtualHost-apache*',
+    ],
+    specs: ['wordpress/*'],
   },
   {
     id: 'files',
@@ -316,6 +329,7 @@ export const PR_RULES: readonly PrRule[] = [
     paths: [
       'core/app/Http/Controllers/User/ContainerController.php',
       'core/app/Http/Controllers/User/DeployLogController.php',
+      'core/app/Http/Controllers/User/ProjectMetricsController.php',
       'core/app/Lib/Deploy/DeployLog/**',
       'core/app/Console/Commands/Deploy/DeployLogs*.php',
     ],
@@ -332,7 +346,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/System/Project/SitePasswordProtection.php',
       'core/app/Console/Commands/Users/ProjectSettings/**',
     ],
-    specs: ['project-settings/*', 'system/internal-routes'],
+    specs: ['project-settings/*', 'site-password/*', 'system/internal-routes'],
   },
   {
     id: 'tunnels',
@@ -381,6 +395,8 @@ export const PR_RULES: readonly PrRule[] = [
       'integration/cross-user-isolation',
       'integration/delete-idempotency',
       'integration/uid-ownership*',
+      'flows/redeploy',
+      'flows/suspend',
     ],
     checks: true,
   },
@@ -406,6 +422,7 @@ export const PR_RULES: readonly PrRule[] = [
       'app/*',
       'inspect/*',
       'env-vars/image-only-compose',
+      'flows/*',
     ],
     checks: true,
   },
@@ -416,7 +433,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Http/Controllers/User/EnvVarsController.php',
       'core/app/Lib/Deploy/EnvVarOverrides.php',
     ],
-    specs: ['env-vars/*'],
+    specs: ['env-vars/*', 'flows/env-vars-reach-app'],
   },
   {
     id: 'inspect',
@@ -536,7 +553,7 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Console/Commands/System/VersionCommand.php',
       'core/app/Console/Commands/System/GuardHostDisk.php',
     ],
-    specs: ['system/system-info', 'system/metrics', 'health/*'],
+    specs: ['system/system-info', 'system/metrics', 'system/documentation', 'health/*'],
   },
   {
     id: 'api-access',
@@ -548,6 +565,31 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Console/Commands/System/ApiAccess*.php',
     ],
     specs: ['system/api-access'],
+  },
+  {
+    id: 'system-images',
+    reason: 'operator base images in the cache registry',
+    paths: [
+      'core/app/Http/Controllers/SystemImageController.php',
+      'core/app/Jobs/ApplyOperatorImage.php',
+      'core/app/Lib/Deploy/CacheManager/Operator*.php',
+      'core/app/Lib/Deploy/CacheManager/PublicImageLookup.php',
+      'core/app/Lib/Deploy/CacheManager/SystemImageListing.php',
+      'core/app/Console/Commands/System/Image*Command.php',
+      'core/app/Console/Commands/Concerns/ReadsOperatorImageBuild.php',
+    ],
+    specs: ['system/images'],
+  },
+  {
+    id: 'system-build-caches',
+    reason: 'BuildKit caches of public repositories in the cache registry',
+    paths: [
+      'core/app/Http/Controllers/SystemBuildCacheController.php',
+      'core/app/Jobs/BuildRepositoryCache.php',
+      'core/app/Lib/Deploy/CacheManager/BuildCache*.php',
+      'core/app/Console/Commands/System/BuildCache*.php',
+    ],
+    specs: ['system/build-caches'],
   },
   {
     id: 'mcp',
@@ -572,6 +614,28 @@ export const PR_RULES: readonly PrRule[] = [
       'core/app/Console/Commands/Vault/**',
     ],
     specs: ['vault/*'],
+  },
+  {
+    id: 'cdn',
+    reason: 'Cloudflare CDN zones and cache purges of a project',
+    paths: ['core/app/Http/Controllers/User/CdnController.php', 'core/app/Lib/Cdn/**'],
+    specs: ['cdn/*'],
+  },
+  {
+    id: 'overlay',
+    reason: 'HTML overlays the proxy writes into project pages',
+    paths: [
+      'core/app/Http/Controllers/SystemOverlayController.php',
+      'core/app/Http/Controllers/User/ProjectOverlayController.php',
+      'core/app/Lib/Overlay/**',
+    ],
+    specs: ['overlay/*'],
+  },
+  {
+    id: 'tokens',
+    reason: 'a token rotating or revoking itself',
+    paths: ['core/app/Http/Controllers/TokenController.php'],
+    specs: ['tokens/*'],
   },
   {
     id: 'tasks',

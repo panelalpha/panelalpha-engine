@@ -2,8 +2,10 @@
 
 namespace Tests\Unit\System;
 
+use App\Console\Commands\System\RebuildEximConfig;
 use App\System;
 use Illuminate\Support\Facades\Artisan;
+use Symfony\Component\Console\Tester\CommandTester;
 use Tests\TestCase;
 
 /** system:exim:rebuild has to exit non-zero when the rebuild fails (engine#796). */
@@ -36,6 +38,13 @@ class RebuildEximConfigCommandTest extends TestCase
                             throw $this->failure;
                         }
                     }
+
+                    public function refreshSenderMap(): void
+                    {
+                        if ($this->failure !== null) {
+                            throw $this->failure;
+                        }
+                    }
                 };
             }
         });
@@ -58,6 +67,20 @@ class RebuildEximConfigCommandTest extends TestCase
         $this->assertStringContainsString('apply failed', Artisan::output());
     }
 
+    public function test_a_failed_rebuild_says_why_on_stderr_not_stdout(): void
+    {
+        $this->stub(new \RuntimeException('apply failed'));
+        $command = new RebuildEximConfig;
+        $command->setLaravel($this->app);
+        $tester = new CommandTester($command);
+
+        $exit = $tester->execute([], ['capture_stderr_separately' => true]);
+
+        $this->assertSame(1, $exit);
+        $this->assertSame("apply failed\n", $tester->getErrorOutput());
+        $this->assertSame('', $tester->getDisplay());
+    }
+
     public function test_the_networks_variant_exits_non_zero_on_failure(): void
     {
         $this->stub(new \RuntimeException('networks failed'));
@@ -65,6 +88,15 @@ class RebuildEximConfigCommandTest extends TestCase
 
         $this->assertSame(1, $exit);
         $this->assertStringContainsString('networks failed', Artisan::output());
+    }
+
+    public function test_the_senders_variant_exits_non_zero_on_failure(): void
+    {
+        $this->stub(new \RuntimeException('senders failed'));
+        $exit = Artisan::call('system:exim:rebuild', ['--senders' => true]);
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('senders failed', Artisan::output());
     }
 
     public function test_an_error_that_is_not_an_exception_still_exits_non_zero(): void

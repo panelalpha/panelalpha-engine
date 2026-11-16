@@ -5,19 +5,8 @@ namespace App\Lib\DeployHook;
 use Illuminate\Http\Request;
 
 /**
- * What Bitbucket Cloud and Bitbucket Data Center have in common: an
- * `X-Event-Key` header names the event, and when the webhook has a secret,
- * `X-Hub-Signature` carries `sha256=` and the hex HMAC of the raw request body
- * under it (Atlassian: "method=signature", currently sha256).
- *
- * The two products also share that header name and event-key format, so
- * neither is told apart by them alone. Cloud sends its own UUID headers
- * (`X-Hook-UUID`, `X-Request-UUID`); Data Center sends `X-Request-Id`. Each
- * subclass decides what it is from those, and nothing here reads a body.
- *
- * Only the `sha256` method is accepted. The scheme leaves room for others
- * ("this might change in the future"), and honouring a weaker one because the
- * sender chose it would let a delivery pick its own check.
+ * Bitbucket Cloud and Data Center: `X-Event-Key` names the event, `X-Hub-Signature` is `sha256=` and the body's
+ * HMAC, only sha256 so a sender cannot pick its check; subclasses tell the two apart by headers, never the body.
  */
 abstract class BitbucketProvider implements HookProvider
 {
@@ -63,12 +52,8 @@ abstract class BitbucketProvider implements HookProvider
     }
 
     /**
-     * The push event for a payload's list of changes.
-     *
-     * A change the provider cannot read is left out rather than failing the
-     * delivery: one push can move several refs, and a malformed entry beside
-     * the tracked branch's must not stop that one from deploying. Only a list
-     * with nothing readable in it is an invalid payload.
+     * The push event for a payload's changes; an unreadable change is left out so it cannot stop another ref
+     * deploying, and only a list with nothing readable in it is an invalid payload.
      *
      * @param  callable(mixed): ?RefChange  $toChange  null for a change it cannot read
      *

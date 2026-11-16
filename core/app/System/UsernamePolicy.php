@@ -3,18 +3,18 @@
 namespace App\System;
 
 /**
- * What a project may be called, independent of what this host already holds.
- *
- * The rule is a Linux username's: a project gets an OS user and a home
- * directory named after it, so a name the system would refuse is a name the
- * engine has to refuse first.
+ * What a project may be called on any host: a Linux username's rule, since a project gets an OS user and a home
+ * named after it, so a name the system would refuse the engine refuses first.
  */
 final class UsernamePolicy
 {
     /** At most 32 characters, starting with a letter -- `useradd`'s own rule. */
     private const PATTERN = '/^[a-z][a-z0-9_-]{0,31}$/';
 
-    /** Names the base system or the engine's networks already own. Taking one would collide with it. */
+    /**
+     * Names the base system or the engine's networks own, which an account would collide with: system users, then names
+     * the proxy's resolver may answer (compose services, kept in sync by UsernamePolicyTest; templates' own; hosts-file loopback).
+     */
     private const RESERVED = [
         'root',
         'daemon',
@@ -35,9 +35,6 @@ final class UsernamePolicy
         'nobody',
         'systemd-network',
         'systemd-resolve',
-        // Names the proxy's resolver may already answer, so an account named so would
-        // share it: the engine's compose services (kept in sync by UsernamePolicyTest),
-        // the account templates' own (`dind`, `php`), and the hosts file's loopback names.
         'core',
         'ftp',
         'sftp',

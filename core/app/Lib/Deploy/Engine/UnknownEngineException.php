@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Engine;
 
 /**
- * A container engine was asked for by a name nothing is registered under —
- * almost always a typo in `DEPLOY_ENGINE`, or an engine whose registration
- * has not run.
+ * A container engine asked for by a name nothing is registered under: almost always a typo in
+ * `DEPLOY_ENGINE`, or an engine whose registration has not run.
  */
 class UnknownEngineException extends \InvalidArgumentException
 {

@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Detect;
 
 use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Port\InternalPorts;
 use Generator;
 
@@ -14,16 +15,14 @@ use Generator;
 final class DockerfileFinder
 {
     /**
-     * Production Dockerfiles that live next to the app, not at the repository
-     * root. Sail and devcontainer paths are absent.
+     * Production Dockerfiles that live next to the app, not at the repository root (Flipt's release build is
+     * `build/Dockerfile`, beside a root Dockerfile.dev). Sail and devcontainer paths are absent.
      *
      * @var list<string>
      */
     public const NESTED_CANDIDATES = [
         'docker/Dockerfile',
         'scripts/docker/Dockerfile',
-        // Flipt keeps its release build here while a Dockerfile.dev sits at
-        // the root, which is the shape DEMOTED_VARIANTS exists to lose to.
         'build/Dockerfile',
     ];
 
@@ -42,6 +41,9 @@ final class DockerfileFinder
 
     /** A whole `COPY` or `ADD` line, after continuations have been joined. */
     private const COPY_LINE_PATTERN = '/^[ \t]*(?:COPY|ADD)[ \t]+(.+)$/mi';
+
+    /** A `FROM` line: the base it starts from, and the stage name it gives, if any. */
+    public const FROM_LINE_PATTERN = '/^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$/i';
 
     /**
      * @param  array<string, true>  $files  lowercase basename => true
@@ -76,10 +78,8 @@ final class DockerfileFinder
     }
 
     /**
-     * The first exposed port an application could be served on: every port on
-     * every `EXPOSE` line in written order, minus the ones that cannot be a
-     * web front door. Falls back to the first port found when all are
-     * excluded, so a Dockerfile exposing only 22 still reports something.
+     * The first `EXPOSE`d port, in written order, that could be a web front door (a `/udp` one cannot serve HTTP), else the
+     * first port found, so a Dockerfile exposing only 22 still reports something.
      */
     public static function exposedPortIn(string $contents): ?int
     {
@@ -88,7 +88,6 @@ final class DockerfileFinder
             return null;
         }
 
-        // A `/udp` port cannot serve HTTP: rapidbay's `EXPOSE 6881/udp`.
         foreach ($declared as [$port, $protocol]) {
             if ($protocol !== 'udp' && InternalPorts::isWebCandidate($port)) {
                 return $port;
@@ -116,6 +115,8 @@ final class DockerfileFinder
     }
 
     /**
+     * `EXPOSE ${PORT}` after `ENV PORT=8080` states a port as plainly as a literal; a name the file never defines is skipped.
+     *
      * @return list<array{0: int, 1: string}> port and lowercased protocol ('' when unstated)
      */
     private static function exposedDeclarations(string $contents): array
@@ -128,8 +129,6 @@ final class DockerfileFinder
 
         $ports = [];
         foreach ($lines[1] as $line) {
-            // `EXPOSE ${PORT}` after `ENV PORT=8080` states a port as plainly
-            // as a literal. A name the file never defines is skipped.
             $line = self::substitute($line, $declared);
             if (preg_match_all(self::PORT_TOKEN_PATTERN, $line, $tokens, PREG_SET_ORDER) === 0) {
                 continue;
@@ -146,7 +145,7 @@ final class DockerfileFinder
     }
 
     /**
-     * Every `ENV`/`ARG` value the file assigns, later assignments winning.
+     * Every `ENV`/`ARG` value the file assigns, later assignments winning, the old `ENV NAME value` form included.
      * Continuations are joined first: a multi-line `ENV` is one instruction.
      *
      * @return array<string, string>
@@ -162,7 +161,6 @@ final class DockerfileFinder
         foreach ($lines[1] as $line) {
             $pattern = '/([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|\'[^\']*\'|\S+)/';
             if (preg_match_all($pattern, $line, $pairs, PREG_SET_ORDER) === 0) {
-                // The old `ENV NAME value` form: one value, no second pair.
                 if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)[ \t]+(\S.*)$/', $line, $single) === 1) {
                     $values[$single[1]] = trim($single[2], "\"'");
                 }
@@ -196,10 +194,8 @@ final class DockerfileFinder
     private const VOLUME_LINE_PATTERN = '/^[ \t]*VOLUME[ \t]+(.+)$/mi';
 
     /**
-     * The container paths a Dockerfile declares as volumes. When the compose
-     * file names none, Docker creates an anonymous volume for each: not in
-     * ~/project, not backed up, orphaned on recreate. Vaultwarden refuses to
-     * start on an anonymous data folder and exits 1.
+     * The container paths a Dockerfile declares as volumes, a build-arg path left out rather than guessed at. Unnamed by
+     * compose, each is an anonymous volume: not backed up, orphaned on recreate, and Vaultwarden will not start on one.
      *
      * @return list<string> absolute container paths, in the order declared
      */
@@ -216,7 +212,6 @@ final class DockerfileFinder
             $tokens = is_array($decoded) ? $decoded : preg_split('/\s+/', $line);
             foreach ($tokens ?: [] as $token) {
                 $path = trim((string) $token, " \t\"'");
-                // A build-arg path is not something to guess at.
                 if (str_starts_with($path, '/') && ! str_contains($path, '$')) {
                     $paths[$path] = true;
                 }
@@ -227,87 +222,103 @@ final class DockerfileFinder
     }
 
     /**
-     * Suffixes naming a Dockerfile written for something other than running
-     * the application in production. Ranked below NESTED_CANDIDATES, because
-     * `docker/Dockerfile` is a likelier production build than `Dockerfile.dev`.
+     * Suffixes naming a Dockerfile not meant to run the application in production (a coverage build is an instrumented
+     * binary), ranked below NESTED_CANDIDATES: `docker/Dockerfile` is a likelier production build than `Dockerfile.dev`.
      *
      * @var list<string>
      */
     private const DEMOTED_VARIANTS = [
         'dev', 'develop', 'development', 'local', 'test', 'tests', 'ci',
         'builder', 'build', 'client', 'dispatcher', 'heroku', 'example', 'sample',
-        // Authelia's root Dockerfile is the release image and is rejected for
-        // other reasons, so detection fell through to Dockerfile.coverage --
-        // `go build -tags dev -cover`, an instrumented binary that also swaps
-        // the portal's CSP for the development one. A coverage build is never
-        // what a site should run.
         'coverage',
     ];
 
     /**
-     * Suffixes that say "this is the one to ship". Ranked above every other
-     * variant so they beat whatever the directory listing happens to return
-     * first.
+     * Suffixes that say "this is the one to ship", ranked above every other variant so they beat whatever the directory
+     * listing happens to return first.
      *
      * @var list<string>
      */
     private const PREFERRED_VARIANTS = ['prod', 'production', 'release', 'stable'];
 
     /**
-     * Paths that might be a Dockerfile, best first: root `Dockerfile` (or
-     * `Containerfile`), then PREFERRED_VARIANTS, then variants that say
-     * nothing either way, then NESTED_CANDIDATES, then DEMOTED_VARIANTS.
-     *
-     * The ranking is the whole point. Variants used to be yielded in directory
-     * order, so whichever the filesystem listed first won: `Dockerfile.client`
-     * beat `Dockerfile.server.production`, `Dockerfile.heroku` beat
-     * `docker/Dockerfile`, `Dockerfile.dev` beat `build/Dockerfile` and
-     * `Dockerfile.latest` beat `Dockerfile.stable`. Each built something the
-     * project never meant to run as its server, and the deploy then reported a
-     * successful build of the wrong image.
-     *
-     * A multi-part suffix is judged on every part (`server.production` is
-     * preferred, `server.dev` demoted); a part appearing in both lists is
-     * demoted, since `Dockerfile.prod.test` is still a test file.
+     * Paths that might be a Dockerfile, best first: root `Dockerfile` (or `Containerfile`), PREFERRED_VARIANTS, unmarked
+     * variants, NESTED_CANDIDATES, DEMOTED_VARIANTS.
      *
      * @return Generator<string>
      */
     private function candidates(): Generator
     {
-        $plain = [];
-        $preferred = [];
-        $neutral = [];
-        $demoted = [];
+        $names = $this->namesOnDisk();
+        [$preferred, $neutral, $demoted] = self::rankedVariants(array_keys($names));
 
-        // The listing is lowercased, so names are taken from disk as well:
-        // `Dockerfile.prod` has to be opened under the case it was written in.
+        yield from $this->plainNames($names);
+        yield from $preferred;
+        yield from $neutral;
+        yield from self::NESTED_CANDIDATES;
+        yield from $demoted;
+    }
+
+    /**
+     * The listing's variant names and every Dockerfile-shaped name on disk: the listing is lowercased, and `Dockerfile.prod`
+     * has to be opened under the case it was written in.
+     *
+     * @return array<string, true>
+     */
+    private function namesOnDisk(): array
+    {
         $names = [];
         foreach (array_keys($this->files) as $name) {
             if (str_starts_with((string) $name, 'dockerfile.')) {
                 $names[(string) $name] = true;
             }
         }
-        foreach (scandir($this->projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($this->projectDir) as $entry) {
             if (preg_match(self::NAME_PATTERN, $entry) === 1) {
                 $names[$entry] = true;
             }
         }
 
-        // From disk as well: a caller with no listing to hand passes [] --
-        // PortsReport does -- and the loop below skips the plain name on the
-        // assumption that this line took it.
+        return $names;
+    }
+
+    /**
+     * `Dockerfile` from the listing or from disk (a caller with no listing, PortsReport, passes []), then `Containerfile`.
+     *
+     * @param  array<string, true>  $names
+     * @return list<string>
+     */
+    private function plainNames(array $names): array
+    {
+        $plain = [];
         if (isset($this->files[strtolower(self::ROOT_NAME)]) || isset($names[self::ROOT_NAME])) {
             $plain[] = self::ROOT_NAME;
         }
-
         foreach (array_keys($names) as $name) {
             $suffix = (string) strstr((string) $name, '.');
-            if ($suffix === '') {
-                // `Dockerfile` is already in $plain; this is `Containerfile`.
-                if (strcasecmp((string) $name, self::ROOT_NAME) !== 0) {
-                    $plain[] = (string) $name;
-                }
+            if ($suffix === '' && strcasecmp((string) $name, self::ROOT_NAME) !== 0) {
+                $plain[] = (string) $name;
+            }
+        }
 
+        return $plain;
+    }
+
+    /**
+     * Suffixed names as preferred, unmarked and demoted. Every part of a multi-part suffix counts (`server.production` is
+     * preferred, `server.dev` demoted), and a part in both lists demotes: `Dockerfile.prod.test` is still a test file.
+     *
+     * @param  list<string>  $names
+     * @return array{0: list<string>, 1: list<string>, 2: list<string>}
+     */
+    private static function rankedVariants(array $names): array
+    {
+        $preferred = [];
+        $neutral = [];
+        $demoted = [];
+        foreach ($names as $name) {
+            $suffix = (string) strstr((string) $name, '.');
+            if ($suffix === '') {
                 continue;
             }
 
@@ -321,24 +332,19 @@ final class DockerfileFinder
             }
         }
 
-        yield from $plain;
-        yield from $preferred;
-        yield from $neutral;
-        yield from self::NESTED_CANDIDATES;
-        yield from $demoted;
+        return [$preferred, $neutral, $demoted];
     }
 
     /**
-     * The one `<name>.dockerfile` at the root (otobo's `otobo.web.dockerfile`
-     * form), less the variants DEMOTED_VARIANTS names; of several, the one a
-     * PREFERRED_VARIANTS word marks, else none, since picking would be a guess.
+     * The one `<name>.dockerfile` at the root (otobo's `otobo.web.dockerfile`), less DEMOTED_VARIANTS; of several, the one
+     * a PREFERRED_VARIANTS word marks, else none, since picking would be a guess.
      */
     public static function findNamed(string $projectDir): ?string
     {
         $finder = new self($projectDir, []);
         $usable = [];
         $preferred = [];
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($projectDir) as $entry) {
             if (preg_match('/^(.+)\.(?:dockerfile|containerfile)$/i', $entry, $m) !== 1
                 || preg_match(self::NAME_PATTERN, $entry) === 1
                 || ! $finder->isUsable($entry)
@@ -363,12 +369,8 @@ final class DockerfileFinder
     }
 
     /**
-     * A `COPY`/`ADD` source the build context does not contain: GoReleaser
-     * copies a CI binary that is gitignored, and building fails late as
-     * `failed to compute cache key`. A variable the file assigns a default
-     * (`ARG JAR_FILE=build/libs/*.jar`) is read as that default, since nothing
-     * passes another; any other counts by its literal prefix (`build/` in
-     * `build/app-${VERSION}`) only. `--from` is another stage.
+     * A `COPY`/`ADD` source the build context lacks (a gitignored CI binary fails late as `failed to compute cache key`). An
+     * assigned default is read as that default, since nothing passes another; any other variable counts by its literal prefix.
      */
     public static function missingContextSource(string $contents, string $contextDir): ?string
     {
@@ -389,13 +391,13 @@ final class DockerfileFinder
     }
 
     /**
-     * The sources of every `COPY`/`ADD` that reads from the build context.
+     * The sources of every `COPY`/`ADD` that reads from the build context, continuations joined: not a `--from` stage,
+     * not the destination (the last argument), not a `<<EOF` heredoc's inline content.
      *
      * @return Generator<list<string>>
      */
     private static function copyInstructions(string $contents): Generator
     {
-        // Continuations first: one instruction may span lines.
         $contents = self::withoutHeredocBodies($contents);
         $joined = preg_replace('/\\\\[ \t]*\r?\n/', ' ', $contents) ?? $contents;
 
@@ -405,7 +407,6 @@ final class DockerfileFinder
 
         foreach ($lines[1] as $line) {
             $argv = self::instructionArgv(trim($line));
-            // `--from` means the source is another stage.
             $flags = array_filter($argv, static fn (string $a): bool => str_starts_with($a, '--'));
             foreach ($flags as $flag) {
                 if (str_starts_with(strtolower($flag), '--from=')) {
@@ -414,13 +415,11 @@ final class DockerfileFinder
             }
 
             $paths = array_values(array_filter($argv, static fn (string $a): bool => ! str_starts_with($a, '--')));
-            // The last argument is the destination; one argument names nothing.
             array_pop($paths);
             if ($paths === []) {
                 continue;
             }
 
-            // `COPY <<EOF /dst` writes inline content, not from the context.
             yield array_values(array_filter(
                 $paths,
                 static fn (string $p): bool => ! self::isRemote($p) && ! str_starts_with($p, '<<')
@@ -482,23 +481,17 @@ final class DockerfileFinder
     }
 
     /**
-     * The part of a source path that is certain, or null when none of it is:
-     * `build/app-${TARGETOS}` as far as `build/`, `${DIR}/app` not at all.
-     * Drop only whole `.` segments -- `ltrim($source, './')` takes a character
-     * class, and rejects a valid Dockerfile over `.env.template`.
+     * The certain part of a source path, cleaned as Docker cleans it (only whole `.` segments go: `ltrim` would eat `.env`),
+     * or null: `build/app-${TARGETOS}` as far as `build/`; `${DIR}/app`, or a `..` segment escaping the context, not at all.
      */
     private static function literalPrefix(string $source): ?string
     {
-        // Docker cleans the path: `./`, a leading `/`, `//`, `/./` and a
-        // trailing `/` are all dropped, even after a file (`requirements.txt/`).
         $segments = array_filter(explode('/', $source), static fn (string $s): bool => $s !== '' && $s !== '.');
         $source = implode('/', $segments);
         if ($source === '') {
             return null;
         }
 
-        // A `..` *segment* escapes the context and cannot be verified; as a
-        // substring it is not evidence of that (`a..b/c` is a legitimate name).
         if (preg_match('#(?:^|/)\.\.(?:/|$)#', $source) === 1) {
             return null;
         }

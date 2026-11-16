@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Setting;
+use App\System\Services\Modsec;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 
@@ -13,6 +14,7 @@ class ModsecRulesetCollection extends ResourceCollection
         $labels = [
             'owasp-crs' => 'OWASP Core Rule Set',
             'panelalpha-wordpress' => 'PanelAlpha WordPress hardening',
+            Modsec::CUSTOM_RULESET => 'Custom rules',
         ];
         $config = Setting::getModsecConfig();
 

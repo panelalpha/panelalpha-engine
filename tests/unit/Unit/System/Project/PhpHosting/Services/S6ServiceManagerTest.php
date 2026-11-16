@@ -4,6 +4,7 @@ namespace Tests\Unit\System\Project\PhpHosting\Services;
 
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmApacheStack;
@@ -16,6 +17,7 @@ use App\System\Services\Webserver;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class S6ServiceManagerTest extends TestCase
 {
@@ -139,10 +141,10 @@ class S6ServiceManagerTest extends TestCase
         $project->reloadCron();
         $project->syncServices();
 
-        $prefix = ['docker', 'compose', '-f', $project->composeFilePath(), 'exec', '-T', 'php'];
-        $this->assertSame([...$prefix, 'bash', '-c', FpmStack::restartScript(new S6ServiceManager($project), '8.4')], $system->journal[0]);
-        $this->assertSame([...$prefix, 's6-svc', '-r', '/run/service/cron'], $system->journal[1]);
-        $this->assertSame([...$prefix, 'sh', '-c', S6ServiceManager::syncScript()], $system->journal[2]);
+        $container = Privileged::accountContainer($project->username());
+        $this->assertSame($container->exec(['bash', '-c', FpmStack::restartScript(new S6ServiceManager($project), '8.4')]), $system->journal[0]);
+        $this->assertSame($container->exec(['s6-svc', '-r', '/run/service/cron']), $system->journal[1]);
+        $this->assertSame($container->exec(['sh', '-c', S6ServiceManager::syncScript()]), $system->journal[2]);
         $this->assertStringNotContainsString('entrypoint-runner', implode("\n", array_merge(...$system->journal)));
     }
 
@@ -155,8 +157,10 @@ class S6ServiceManagerTest extends TestCase
 
         (new LiteSpeedStack($system, $project->userModel()))->restartPhpHandler($project, '8.4');
 
-        $prefix = ['docker', 'compose', '-f', $project->composeFilePath(), 'exec', '-T', 'php'];
-        $this->assertSame([[...$prefix, 'sh', '-c', S6ServiceManager::restartScriptFor('lsphp84')]], $system->journal);
+        $this->assertSame(
+            [Privileged::accountContainer($project->username())->exec(['sh', '-c', S6ServiceManager::restartScriptFor('lsphp84')])],
+            $system->journal
+        );
         // s6 starts nothing it does not supervise, so the main process pattern goes unused.
         $this->assertSame(
             S6ServiceManager::restartScriptFor('php-fpm8.4'),
@@ -308,7 +312,7 @@ class S6ServiceManagerTest extends TestCase
         return $runtime;
     }
 
-    /** Runs file commands for real, without sudo; records and skips docker. */
+    /** Runs file commands for real, without the broker; records and skips compose. */
     private function system(): System
     {
         return new class ($this->root) extends System {
@@ -336,16 +340,15 @@ class S6ServiceManagerTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : ['sh', '-c', $cmd];
-                if ($argv[0] === 'sudo') {
-                    array_shift($argv);
-                }
-                if ($argv[0] === 'docker') {
+                $argv = is_array($cmd) ? array_values($cmd) : ['sh', '-c', LocalRoot::line($cmd)];
+                if (preg_match('/\A(compose|account-container)\./', (string) LocalRoot::action($argv)) === 1) {
                     $this->journal[] = $argv;
                     $argv = ['true'];
                 }
-                $process = new Process($argv);
-                $process->run();
+                $process = new Process(LocalRoot::argv($argv));
+                $process->run(null, [
+                    'PA_ROOT_LOCAL_ROOTS' => json_encode(['engine' => $this->engineRoot, 'homes' => $this->engineRoot . '/home'], JSON_THROW_ON_ERROR),
+                ]);
 
                 return $process;
             }

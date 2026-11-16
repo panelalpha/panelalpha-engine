@@ -76,14 +76,14 @@ class DeployCancelQueuedTest extends TestCase
         $this->assertSame(DeployLogger::STATUS_RUNNING, DeployLogger::readLatestFor($this->username)['status']);
     }
 
-    /** The deploy that resumed the waiting log holds its lock before it writes a line of its own. */
-    public function test_a_deploy_that_resumed_the_waiting_log_is_still_cancelled(): void
+    /** The deploy that took the waiting project over holds its lock before it writes a line of its own. */
+    public function test_a_deploy_that_took_a_waiting_project_over_is_still_cancelled(): void
     {
         $this->waitForFiles();
-        $resumed = DeployLogger::resumeRunningOrStart($this->username);
+        $deploy = DeployLogger::resumeRunningOrStart($this->username);
 
         $this->assertTrue(DeployLogger::requestCancel($this->username)['cancelled']);
-        $this->assertTrue($resumed->isCancelled());
+        $this->assertTrue($deploy->isCancelled());
     }
 
     public function test_a_queued_task_that_is_not_a_deploy_is_left_alone(): void

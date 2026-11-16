@@ -3,11 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * Named search-replace for a PHP hosting WordPress install.
- *
- * Maps to `wp search-replace {search} {replacement} ...extra`. Extra args are
- * table names and the flags below only: WP-CLI honours its global options,
- * --exec among them, from any position, so anything else is refused.
+ * `wp search-replace {search} {replacement} ...extra`, where extra is table names and the flags below only:
+ * WP-CLI honours its global options, --exec among them, from any position, so anything else is refused.
  */
 final class SearchReplace
 {

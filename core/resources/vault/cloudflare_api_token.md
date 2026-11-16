@@ -1,9 +1,10 @@
 ### Where to get a Cloudflare API token
 
 Create one at **[My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)**
-→ *Create Token* → **Create Custom Token**, with these two permissions:
+→ *Create Token* → **Create Custom Token**, with these three permissions:
 
 - **Account** → Cloudflare Tunnel → **Edit**
+- **Zone** → Zone → **Read**
 - **Zone** → DNS → **Edit**
 
 To purge the cache or change the security level from the engine, add two more:

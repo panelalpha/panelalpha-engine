@@ -3,18 +3,12 @@
 namespace App\Lib\Deploy\Port;
 
 /**
- * What a container is actually listening on, read from its /proc/net/tcp via
- * the container's PID: the application image may ship neither `ss` nor a
- * shell.
+ * What a container is actually listening on, read from its /proc/net/tcp via the container's PID:
+ * the application image may ship neither `ss` nor a shell.
  */
 final class ListeningSockets
 {
-    /**
-     * Start of the Linux ephemeral range
-     * (/proc/sys/net/ipv4/ip_local_port_range). A runtime picking a free port
-     * for itself listens here (Rails opens one while booting), and such a
-     * mapping is wrong the moment the process restarts.
-     */
+    /** Start of the Linux ephemeral range, where a self-picked port is wrong the moment the process restarts. */
     public const EPHEMERAL_PORT_MIN = 32768;
 
     /** `sl local_address rem_address st …` — state 0A is LISTEN. */
@@ -27,9 +21,7 @@ final class ListeningSockets
     private const V4_MAPPED_PREFIX = '0000000000000000FFFF0000';
 
     /**
-     * Ports a recipe would plausibly serve on, best first. Used only to break
-     * ties when a container listens on several — never to override something
-     * that is already answering.
+     * Ports a recipe would plausibly serve on, best first; only a tie-break, never an override.
      *
      * @var list<int>
      */
@@ -60,8 +52,8 @@ final class ListeningSockets
     }
 
     /**
-     * Bound to loopback only: nothing outside the container can reach it, so
-     * remapping a published port would not help.
+     * Bound to loopback only, all of 127.0.0.0/8 (Docker's DNS is 127.0.0.11) or ::ffff:127.x as a JVM binds it.
+     * IPv4 is little-endian in /proc, so the first octet is last.
      */
     public static function isLoopback(string $hexAddr): bool
     {
@@ -70,27 +62,18 @@ final class ListeningSockets
             if ($hex === self::LOOPBACK_V6) {
                 return true;
             }
-            // A JVM binds 127.0.0.1 as ::ffff:127.0.0.1 in tcp6.
             if (! str_starts_with($hex, self::V4_MAPPED_PREFIX)) {
                 return false;
             }
             $hex = substr($hex, 24);
         }
 
-        // All of 127.0.0.0/8, not just .1: Docker's embedded DNS listens on
-        // 127.0.0.11. IPv4 is little-endian in /proc, so the first octet is last.
         return strlen($hex) === 8 && str_ends_with($hex, '7F');
     }
 
     /**
-     * The port a generated deploy should actually forward to. Null when
-     * $expected is already served, otherwise the port the application really
-     * bound: a recipe's guess, or an app that ignores $PORT (PocketBase),
-     * would otherwise be a green deploy behind a 502.
-     *
-     * A port the image itself declares ($declared, its Dockerfile's EXPOSE)
-     * outranks the generic preference: rapidbay listens on 80 (a stock nginx
-     * page) and on its declared 5000.
+     * The port a generated deploy should forward to, null when $expected is already served.
+     * A port the image declares (EXPOSE) outranks the generic preference.
      *
      * @param  list<array{addr: string, port: int}>  $sockets
      * @param  list<int>  $declared
@@ -101,9 +84,8 @@ final class ListeningSockets
     }
 
     /**
-     * Every port {@see chooseAppPort()} could answer, best first, so a caller
-     * that finds the first one does not speak HTTP can try the next: php-fpm
-     * on 9000 ranks above a real server on 8081.
+     * Every port {@see chooseAppPort()} could answer, best first, so a caller can try the next.
+     * A port that cannot serve HTTP (sshd on 22) is never one; empty means "not yet".
      *
      * @param  list<array{addr: string, port: int}>  $sockets
      * @param  list<int>  $declared
@@ -116,9 +98,6 @@ final class ListeningSockets
             return [];
         }
 
-        // A port that cannot serve HTTP is not an answer to "where is the
-        // site": Gitea's sshd binds 22 before the app binds 3000, and the API
-        // read 3000 while traffic went to sshd. Empty means "not yet".
         $reachable = array_values(array_filter($reachable, InternalPorts::isWebCandidate(...)));
         if ($reachable === []) {
             return [];
@@ -137,10 +116,7 @@ final class ListeningSockets
     }
 
     /**
-     * Whether the container already answers on the port we publish.
-     * chooseAppPort() returns null both for "all good" and for "nothing worth
-     * pointing at yet"; the caller must tell those apart before it stops
-     * waiting.
+     * Whether the container already answers on the port we publish, which chooseAppPort()'s null cannot tell.
      *
      * @param  list<array{addr: string, port: int}>  $sockets
      */

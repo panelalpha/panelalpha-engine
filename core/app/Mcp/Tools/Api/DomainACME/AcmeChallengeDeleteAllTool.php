@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('acme_challenge_delete_all')]
 #[Description(<<<'MARKDOWN'
     Delete all HTTP-01 ACME challenges for a domain
+
+    The validation records go and an issuance in progress fails and has to be started again; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

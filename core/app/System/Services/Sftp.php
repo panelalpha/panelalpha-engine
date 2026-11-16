@@ -2,8 +2,10 @@
 
 namespace App\System\Services;
 
+use App\Models\SftpAccount;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -27,17 +29,7 @@ class Sftp
 
     public function syncLogins(): void
     {
-        $this->system->runProcess([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'exec',
-            'sftp',
-            'bash',
-            '/etc/sftp/sync-logins.sh',
-        ]);
+        $this->system->runProcess(Privileged::engineServices($this->system->composeFilePath())->sftpSyncLogins());
     }
 
     public function applyLogins(string $config): void
@@ -59,18 +51,7 @@ class Sftp
             return 0;
         }
 
-        $output = $this->system->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'exec',
-            'sftp',
-            'sh',
-            '-c',
-            $this->killSessionsScript($logins),
-        ]);
+        $output = $this->system->exec(Privileged::engineServices($this->system->composeFilePath())->sftpKillSessions($logins));
 
         return (int) trim($output);
     }
@@ -103,43 +84,6 @@ class Sftp
         return array_values(array_unique($valid));
     }
 
-    /**
-     * One sshd monitor process watches each session, so the monitors count the sessions; TERM ends them, KILL only
-     * what outlives the two-second grace. Never by uid: every account of a project shares one.
-     *
-     * @param  list<string>  $logins
-     */
-    private function killSessionsScript(array $logins): string
-    {
-        $patterns = [];
-        $monitors = [];
-        foreach ($logins as $login) {
-            $patterns[] = escapeshellarg('^sshd: '.$login.'(@|\s|$)');
-            $monitors[] = escapeshellarg('^sshd: '.$login.' \\[priv\\]');
-        }
-
-        $all = implode(' ', $patterns);
-        $watched = implode(' ', $monitors);
-
-        return implode("\n", [
-            'killed=0',
-            "for pattern in {$watched}; do",
-            '  n=$(pgrep -cf "$pattern" 2>/dev/null || true)',
-            '  killed=$((killed + ${n:-0}))',
-            'done',
-            "for pattern in {$all}; do",
-            '  pids=$(pgrep -f "$pattern" 2>/dev/null || true)',
-            '  [ -n "$pids" ] && kill -TERM $pids 2>/dev/null || true',
-            'done',
-            'sleep 2',
-            "for pattern in {$all}; do",
-            '  pids=$(pgrep -f "$pattern" 2>/dev/null || true)',
-            '  [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true',
-            'done',
-            'echo "$killed"',
-        ]);
-    }
-
     public function rebuildSftpAccounts(): void
     {
         $config = '';
@@ -150,15 +94,12 @@ class Sftp
         foreach ($users as $user) {
             /** @var ModelsUser $user */
             try {
-                $osUser = $user->project()->syncLinuxUser();
-                $home = $user->project()->homeDirPath();
+                $project = $user->project($this->system);
+                $osUser = $project->syncLinuxUser();
+                $home = $project->homeDirPath();
                 $accs = $user->getSftpAccounts();
                 foreach ($accs as $acc) {
-                    $auth = $acc->getAuthMethods();
-                    $username = $acc->username;
-                    $password = in_array('password', $auth, true) ? $acc->password : '';
-                    $pubKey = in_array('public_key', $auth, true) ? $acc->public_key : '';
-                    $config .= "{$username}:{$password}:{$osUser['UID']}:{$osUser['GID']}:{$home}:{$pubKey}\n";
+                    $config .= self::loginLine($acc, $osUser, $home);
                 }
             } catch (\Exception $e) {
                 Log::warning('Could not rebuild SFTP accounts for user '.$user->username, [
@@ -168,5 +109,18 @@ class Sftp
         }
 
         $this->applyLogins($config);
+    }
+
+    /**
+     * @param  array{UID: int, GID: int}  $osUser
+     */
+    private static function loginLine(SftpAccount $acc, array $osUser, string $home): string
+    {
+        $auth = $acc->getAuthMethods();
+        $username = $acc->username;
+        $password = in_array('password', $auth, true) ? $acc->password : '';
+        $pubKey = in_array('public_key', $auth, true) ? $acc->public_key : '';
+
+        return "{$username}:{$password}:{$osUser['UID']}:{$osUser['GID']}:{$home}:{$pubKey}\n";
     }
 }

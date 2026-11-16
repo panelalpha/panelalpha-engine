@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Filesystem;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
 
 /**
  * engine#792: a /home on a whole, unpartitioned disk (for example /dev/vdb
@@ -27,8 +28,23 @@ class FilesystemBlockDeviceTest extends TestCase
     public function test_a_partition_uses_its_parent_disk(): void
     {
         $fs = new Filesystem($this->system([
-            'df -P /home | tail -1' => "/dev/sda1 100 10 500 1% /home\n",
-            'lsblk -no PKNAME /dev/sda1' => "sda\n",
+            'df -P -- /home' => "Filesystem 1024-blocks Used Available Capacity Mounted on
+/dev/sda1 100 10 500 1% /home\n",
+            'lsblk --nodeps -no PKNAME /dev/sda1' => "sda\n",
+        ]));
+
+        $this->assertSame('/dev/sda', $fs->getHomeFilesystemParentBlockDevice());
+    }
+
+    public function test_a_whole_disk_with_partitions_uses_itself_once(): void
+    {
+        $fs = new Filesystem($this->system([
+            'df -P -- /home' => "Filesystem 1024-blocks Used Available Capacity Mounted on
+/dev/sda 100 10 500 1% /home\n",
+            'lsblk -no PKNAME /dev/sda' => "\nsda\nsda\n",
+            'lsblk -no TYPE /dev/sda' => "disk\npart\npart\n",
+            'lsblk --nodeps -no PKNAME /dev/sda' => "\n",
+            'lsblk --nodeps -no TYPE /dev/sda' => "disk\n",
         ]));
 
         $this->assertSame('/dev/sda', $fs->getHomeFilesystemParentBlockDevice());
@@ -37,9 +53,10 @@ class FilesystemBlockDeviceTest extends TestCase
     public function test_a_whole_unpartitioned_disk_uses_itself(): void
     {
         $fs = new Filesystem($this->system([
-            'df -P /home | tail -1' => "/dev/vdb 100 10 500 1% /home\n",
-            'lsblk -no PKNAME /dev/vdb' => '',
-            'lsblk -no TYPE /dev/vdb' => "disk\n",
+            'df -P -- /home' => "Filesystem 1024-blocks Used Available Capacity Mounted on
+/dev/vdb 100 10 500 1% /home\n",
+            'lsblk --nodeps -no PKNAME /dev/vdb' => '',
+            'lsblk --nodeps -no TYPE /dev/vdb' => "disk\n",
         ]));
 
         $this->assertSame('/dev/vdb', $fs->getHomeFilesystemParentBlockDevice());
@@ -48,7 +65,8 @@ class FilesystemBlockDeviceTest extends TestCase
     public function test_a_filesystem_that_is_not_a_block_device_is_refused(): void
     {
         $fs = new Filesystem($this->system([
-            'df -P /home | tail -1' => "rpool/home 100 10 500 1% /home\n",
+            'df -P -- /home' => "Filesystem 1024-blocks Used Available Capacity Mounted on
+rpool/home 100 10 500 1% /home\n",
         ]));
 
         $this->expectException(\RuntimeException::class);
@@ -66,8 +84,15 @@ class FilesystemBlockDeviceTest extends TestCase
             {
             }
 
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                return $this->answers[implode(' ', (array) HostCommand::argv($cmd))] ?? '';
+            }
+
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return $this->answers[implode(' ', (array) $cmd)] ?? '';
             }
         };

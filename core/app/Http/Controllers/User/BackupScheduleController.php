@@ -48,9 +48,9 @@ class BackupScheduleController extends Controller
         tags: ['Backups'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['container', 'cron'],
+            required: ['cron'],
             properties: [
-                new OA\Property(property: 'container', description: 'Backup container id or name', type: 'string'),
+                new OA\Property(property: 'container', description: 'Backup container id or name. Without it an existing schedule keeps its store, and a new one uses the default store (`default_backup_container` in GET /system/info); a new one on a host with no default answers 422 `no_default_container`.', type: 'string'),
                 new OA\Property(property: 'cron', description: 'Five-field cron expression in UTC, at most hourly.', type: 'string', example: '0 3 * * *'),
                 new OA\Property(property: 'keep_last', description: 'Completed scheduled backups to keep (1-365).', type: 'integer', minimum: 1, maximum: 365, example: 7),
                 new OA\Property(property: 'files', type: 'boolean', example: true),
@@ -67,11 +67,11 @@ class BackupScheduleController extends Controller
     public function update(string $username, BackupScheduleUpdateRequest $request): JsonResponse
     {
         $user = $this->projectOr404($username);
-        $container = $this->resolveContainer((string) $request->validated('container'));
-        $cron = $this->acceptableCron($request->cron());
-
         /** @var BackupSchedule $schedule */
         $schedule = BackupSchedule::query()->firstOrNew(['user_id' => $user->id]);
+        $container = $this->existingContainer($request->backupContainer($schedule->container));
+        $cron = $this->acceptableCron($request->cron());
+
         $schedule->fill([
             'container_id' => $container->id,
             'cron' => $cron,
@@ -90,7 +90,9 @@ class BackupScheduleController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/backup-schedule',
         summary: 'Delete the automatic backup schedule of a project',
-        description: 'Idempotent: answers 204 whether or not the project had a schedule.',
+        description: 'Idempotent: answers 204 whether or not the project had a schedule. '
+            .'The schedule goes and no automatic backup is taken until a new one is set; the backups it already '
+            .'took stay. This cannot be undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Backups'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -112,9 +114,8 @@ class BackupScheduleController extends Controller
         return BackupSchedule::query()->where('user_id', $userId)->first();
     }
 
-    private function resolveContainer(string $idOrName): BackupContainer
+    private function existingContainer(?BackupContainer $container): BackupContainer
     {
-        $container = BackupContainer::findByIdOrName($idOrName);
         if ($container === null) {
             throw ProblemException::one('container', 'container_not_found', 'Backup container not found');
         }

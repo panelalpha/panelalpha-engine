@@ -20,6 +20,38 @@ use OpenApi\Attributes as OA;
             type: 'boolean',
             example: false,
         ),
+        new OA\Property(
+            property: 'public_routing',
+            description: 'What the project\'s panelalpha.yaml asks for beyond its domain (`domain: host`, `public_ports:`), what the '
+                .'operator allows it (`pae system:public-routing:allow`), and what its last deploy applied. Null when its last deploy '
+                .'asked for nothing.',
+            properties: [
+                new OA\Property(property: 'allowed', type: 'array', items: new OA\Items(type: 'string', enum: ['ports', 'host_domain'])),
+                new OA\Property(property: 'asked', properties: [
+                    new OA\Property(property: 'domain', type: 'string', enum: ['generated', 'host']),
+                    new OA\Property(property: 'ports', type: 'array', items: new OA\Items(properties: [
+                        new OA\Property(property: 'listen', type: 'integer', example: 8081),
+                        new OA\Property(property: 'to', type: 'integer', example: 3000),
+                        new OA\Property(property: 'transport', type: 'string', enum: ['tcp', 'udp']),
+                    ], type: 'object')),
+                ], type: 'object'),
+                new OA\Property(property: 'domain', properties: [
+                    new OA\Property(property: 'state', type: 'string', enum: ['host', 'generated', 'refused', 'not_allowed']),
+                    new OA\Property(property: 'name', type: 'string', nullable: true),
+                    new OA\Property(property: 'reason', type: 'string'),
+                ], type: 'object', nullable: true),
+                new OA\Property(property: 'ports', type: 'array', items: new OA\Items(properties: [
+                    new OA\Property(property: 'listen', type: 'integer', example: 8081),
+                    new OA\Property(property: 'to', type: 'integer', example: 3000),
+                    new OA\Property(property: 'transport', type: 'string', enum: ['tcp', 'udp']),
+                    new OA\Property(property: 'state', type: 'string', enum: ['open', 'refused', 'not_allowed']),
+                    new OA\Property(property: 'reason', type: 'string'),
+                    new OA\Property(property: 'rule_id', type: 'integer', description: 'The proxy rule, while open'),
+                ], type: 'object')),
+            ],
+            type: 'object',
+            nullable: true,
+        ),
         new OA\Property(property: 'config', type: 'object', nullable: true),
         new OA\Property(property: 'details', type: 'object', nullable: true),
         new OA\Property(
@@ -57,7 +89,8 @@ use OpenApi\Attributes as OA;
             description: 'Transfer this calendar month, measured hourly in the background; null before the first '
                 .'measurement. month is the month it counts, used_bytes the same figure GET '
                 .'/projects/{username}/bandwidth?group_by=month gives for it. limit_bytes is the project '
-                .'bandwidth_limit in bytes, -1 when unlimited and null when no limit is set.',
+                .'bandwidth_limit in bytes, -1 when unlimited and null when no limit is set. The limit is only '
+                .'reported: a project past it keeps serving.',
             properties: [
                 new OA\Property(property: 'month', type: 'string', example: '2026-10'),
                 new OA\Property(property: 'used_bytes', type: 'integer', example: 734003200),
@@ -80,12 +113,29 @@ use OpenApi\Attributes as OA;
             property: 'app',
             description: 'The deployed application, normalized. Read from the database, the deploy lock and the running containers; nothing inside the account.',
             properties: [
-                new OA\Property(property: 'type', type: 'string', nullable: true, example: 'wordpress', enum: ['wordpress', 'laravel', 'php', 'node', 'python', 'ruby', 'go', 'rust', 'java', 'dotnet', 'docker', 'static', 'other'], description: 'null before the first deploy'),
+                new OA\Property(property: 'type', type: 'string', nullable: true, example: 'wordpress', enum: ['wordpress', 'laravel', 'php', 'node', 'python', 'ruby', 'go', 'rust', 'java', 'dotnet', 'docker', 'static', 'other'], description: 'A container project: what its last deploy built, null before the first deploy. A PHP hosting project: wordpress when WordPress core is in its main domain\'s document root or in the directory the engine installed it into, even if the site is broken or not set up, otherwise php; refreshed every minute and after a WordPress core download or install, null until first read.'),
+                new OA\Property(property: 'path', type: 'string', nullable: true, example: '/home/alice/example.test/public_html/blog', description: 'A PHP hosting project reported as wordpress: the absolute directory the engine installed WordPress into, when that is not the main domain\'s document root; null for a WordPress in the document root, for any other type and for a project in its own containers. The WP-CLI operations use it when no path is given.'),
                 new OA\Property(property: 'framework', type: 'string', nullable: true, example: 'nextjs', description: 'The deploy strategy that built it'),
                 new OA\Property(property: 'label', type: 'string', nullable: true, example: 'WordPress', description: 'Human name of what was detected'),
                 new OA\Property(property: 'status', type: 'string', example: 'live', enum: ['live', 'building', 'failed', 'down', 'suspended', 'none'], description: 'building: a deploy is queued or running. failed: the last deploy failed. down: deployed, but the account container is not running. none: never deployed'),
                 new OA\Property(property: 'public_url', type: 'string', nullable: true, example: 'https://blog-x7k2.panelalpha.online', description: 'A tunnel hostname when the project has one, otherwise its domain'),
                 new OA\Property(property: 'admin_sso', type: 'boolean', example: true, description: 'Whether POST /projects/{username}/app/users/{userId}/sso can log a user in'),
+            ],
+            type: 'object',
+        ),
+        new OA\Property(
+            property: 'source',
+            description: 'Where the project\'s code comes from, in the words of the `source` POST /projects takes: what a rebuild deploys. '
+                .'Never a token or key.',
+            properties: [
+                new OA\Property(property: 'type', type: 'string', enum: ['none', 'git', 'archive', 'project', 'wordpress'], example: 'git'),
+                new OA\Property(property: 'url', type: 'string', nullable: true, example: 'git@github.com:acme/shop.git', description: 'git: the repository, credentials removed. archive: the URL it was downloaded from'),
+                new OA\Property(property: 'branch', type: 'string', nullable: true, example: 'main', description: 'git only'),
+                new OA\Property(property: 'auth', type: 'string', nullable: true, enum: ['none', 'token', 'deploy_key'], description: 'git only: how a clone authenticates'),
+                new OA\Property(property: 'rebuild', type: 'string', nullable: true, enum: ['clone', 'checkout'], description: 'git only. clone: a rebuild clones the repository again. checkout: it builds ~/project as it is (connected with git_connect); git pull brings new commits'),
+                new OA\Property(property: 'upload_id', type: 'string', nullable: true, description: 'archive: the upload it was deployed from'),
+                new OA\Property(property: 'path', type: 'string', nullable: true, description: 'archive: the file in the home it was deployed from'),
+                new OA\Property(property: 'from', type: 'string', nullable: true, example: 'shop', description: 'project: the project it was copied from'),
             ],
             type: 'object',
         ),

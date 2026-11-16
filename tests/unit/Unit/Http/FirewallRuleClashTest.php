@@ -13,6 +13,7 @@ use App\System\ProcessRunner;
 use Laravel\Mcp\Request;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\HostCommand;
 use Tests\Support\InMemoryDatabase;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
@@ -51,6 +52,7 @@ class FirewallRuleClashTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
                 $cmd = (array) $cmd;
                 if ($cmd[0] === 'ufw') {
                     $this->ufw[] = $cmd;
@@ -68,6 +70,8 @@ class FirewallRuleClashTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 

@@ -9,15 +9,8 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 /**
- * HTTP requests the engine makes to an imported site by its name, always
- * answered by this engine whatever the name's DNS says.
- *
- * The name is pinned (CURLOPT_RESOLVE) to the IPv4 the project's vhost listens
- * on, the address the webserver binds: the site webserver runs on the host
- * network and binds the host's own addresses, so a public address behind
- * NAT is translated back to its local one, and loopback inside the core
- * container is core itself, never the webserver. A name with no project
- * falls back to the engine's default IPv4.
+ * Requests to an imported site by name, answered here whatever its DNS says: pinned (CURLOPT_RESOLVE) to the IPv4 its vhost
+ * binds: a public address behind NAT does not work as a pin, and core's loopback is core. No project: the default IPv4.
  */
 final class DestinationProbe
 {

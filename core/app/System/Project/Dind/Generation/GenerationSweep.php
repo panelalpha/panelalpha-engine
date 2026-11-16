@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
 use App\Models\User;
+use App\System;
 use App\System\Project\Dind as DindProject;
 use Illuminate\Support\Facades\Log;
 
@@ -35,47 +36,98 @@ final class GenerationSweep
      */
     public static function run(): array
     {
+        $recorded = GenerationState::usernames();
         $settled = [];
-        foreach (GenerationState::usernames() as $username) {
-            $user = User::query()->where('username', $username)->first();
-            $runtime = $user?->project()->runtime();
-            if (! $runtime instanceof DindProject) {
-                @unlink(GenerationState::path($username));
-
-                continue;
-            }
-            $done = self::settleInterrupted($runtime);
-            if ($done !== null && $done !== []) {
-                $settled[] = $username.': '.implode(', ', $done);
-            }
+        foreach ($recorded as $username) {
+            $settled[] = self::settleAccount($username);
+        }
+        foreach (array_diff(CheckoutAside::accountsWithAside(app(System::class)), $recorded) as $username) {
+            $settled[] = self::putBackStranded($username);
         }
 
-        return $settled;
+        return array_values(array_filter($settled));
+    }
+
+    private static function settleAccount(string $username): ?string
+    {
+        $runtime = self::runtimeOf($username);
+        if ($runtime === null) {
+            @unlink(GenerationState::path($username));
+
+            return null;
+        }
+        $done = self::settleInterrupted($runtime);
+
+        return $done === null || $done === [] ? null : $username.': '.implode(', ', $done);
     }
 
     /**
-     * Null when a deploy holds the account's lock. $succeeded is the verdict
-     * of the deploy that just ended, null when it is not known.
+     * An aside directory on an account with nothing recorded: put back when ~/project is gone or empty,
+     * else left for the next deploy's move to report rather than reported every minute.
+     */
+    private static function putBackStranded(string $username): ?string
+    {
+        $runtime = self::runtimeOf($username);
+        $lock = $runtime === null ? null : self::acquireLock($runtime);
+        if ($lock === null) {
+            return null;
+        }
+        try {
+            $outcome = (new CheckoutAside($runtime))->reconcileStranded();
+        } finally {
+            $lock->release();
+        }
+        if ($outcome !== 'restored') {
+            return null;
+        }
+        self::logSettled($runtime, ['checkout restored']);
+
+        return "{$username}: checkout restored";
+    }
+
+    private static function runtimeOf(string $username): ?DindProject
+    {
+        $runtime = User::query()->where('username', $username)->first()?->project()->runtime();
+
+        return $runtime instanceof DindProject ? $runtime : null;
+    }
+
+    /**
+     * Null when another process holds the account's lock; a deploy whose log this process has not finished yet
+     * holds it here and settles under it. $succeeded is the verdict of the deploy that just ended, null when not known.
      *
      * @return ?list<string>
      */
     public static function settleIfIdle(DindProject $project, ?bool $succeeded = null): ?array
     {
+        if (DeployLock::heldByThisProcess($project->username())) {
+            return self::settleLocked($project, $succeeded);
+        }
         $lock = self::acquireLock($project);
         if ($lock === null) {
             return null;
         }
 
         try {
-            if (self::checkoutOwnedElsewhere($project)) {
-                self::forgetStoppedAfterSuccess($project, $succeeded);
-
-                return null;
-            }
-            $done = self::settleHeld($project, $succeeded);
+            return self::settleLocked($project, $succeeded);
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * The caller holds the deploy lock.
+     *
+     * @return ?list<string>
+     */
+    private static function settleLocked(DindProject $project, ?bool $succeeded): ?array
+    {
+        if (self::checkoutOwnedElsewhere($project)) {
+            self::forgetStoppedAfterSuccess($project, $succeeded);
+
+            return null;
+        }
+        $done = self::settleHeld($project, $succeeded);
         self::logSettled($project, $done);
 
         return $done;
@@ -90,9 +142,8 @@ final class GenerationSweep
     }
 
     /**
-     * A redeploy whose process is gone: its log is closed first, failed as interrupted unless it wrote its
-     * verdict before it died. Then the version that serves is chosen from what it recorded ({@see decide()}),
-     * and its log says which one and why.
+     * A redeploy whose process is gone: its log is closed first, failed as interrupted unless it wrote its verdict
+     * before it died; then what serves is chosen from what it recorded ({@see decide()}), and the log says why.
      *
      * @return ?list<string>
      */
@@ -162,11 +213,8 @@ final class GenerationSweep
     }
 
     /**
-     * Which version serves after a redeploy died. One whose containers still
-     * run is the previous one, as the deploy had not replaced it. Once they
-     * are gone, a new version that passed its health check and still answers
-     * stays; otherwise the previous one is started again while what it needs
-     * is kept, and only when it is not does the new one stay.
+     * After a redeploy died: the previous one while its containers run, as the deploy had not replaced it; else a new
+     * one past its health check that answers; else the previous one again while what it needs is kept; else the new one.
      */
     public static function decide(bool $previousRunning, bool $gated, bool $restorable, ?bool $newAnswers): string
     {
@@ -181,9 +229,8 @@ final class GenerationSweep
     }
 
     /**
-     * The caller holds the deploy lock. $forward settles traffic on the new version's port instead, $to on
-     * that port. A copy that serves the site while that port does not answer stays, with the port noted
-     * for the next call: the site never moves to nothing. False when it stays or could not be settled.
+     * Under the caller's deploy lock; $forward settles on the new version's port, $to on that port. A serving copy
+     * stays, port noted, while that port is silent: the site never moves to nothing. False if kept or not settled.
      */
     public static function settleNext(DindProject $project, bool $forward = false, ?int $to = null, ?int $wait = null): bool
     {
@@ -350,10 +397,7 @@ final class GenerationSweep
         $served = (int) ($details['app_port'] ?? 0);
         $previous = self::name('previous', $details['git_commit'] ?? null, self::previousImage($project));
         if ($running) {
-            return [
-                self::settleHeld($project, null),
-                "The redeploy stopped before it finished: the {$previous} still serves on port {$served}, as the new one had not replaced it yet",
-            ];
+            return self::previousStillServes($project, $previous, $served);
         }
 
         $gated = ($entry['gated'] ?? false) === true;
@@ -370,6 +414,15 @@ final class GenerationSweep
         }
 
         return self::keepNew($project, $gated, $silent, $port);
+    }
+
+    /** @return array{0: list<string>, 1: string} */
+    private static function previousStillServes(DindProject $project, string $previous, int $served): array
+    {
+        return [
+            self::settleHeld($project, null),
+            "The redeploy stopped before it finished: the {$previous} still serves on port {$served}, as the new one had not replaced it yet",
+        ];
     }
 
     /** @return array{0: list<string>, 1: string} */
@@ -441,14 +494,15 @@ final class GenerationSweep
     /** The image of the container that publishes $port. */
     private static function imageOn(DindProject $project, int $port): ?string
     {
-        $script = 'id=$(docker ps -q --filter "publish=$1" | head -n1); [ -z "$id" ] || docker inspect --format "{{.Image}}" "$id"';
         try {
-            $image = trim($project->shell()->execQuiet(['bash', '-c', $script, 'image', (string) $port], [], 30));
+            $daemon = $project->accountDaemon();
+            $id = $daemon->containerIds(false, ['publish' => [(string) $port]], 30)[0] ?? null;
+            $image = $id === null ? null : $daemon->container($id, 30)['Image'] ?? null;
         } catch (\Throwable) {
             return null;
         }
 
-        return $image === '' ? null : $image;
+        return is_string($image) && $image !== '' ? $image : null;
     }
 
     /** Moved aside before a pull that has not taken the lock yet. */

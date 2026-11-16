@@ -1,0 +1,3 @@
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","condrestart"]
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","fullrestart"]
+exec ["/usr/local/lib/panelalpha/pa-root","scripts.removeStartingWith","--","/opt/engine/webserver-config/openlitespeed/vhosts/alice.test.conf"]

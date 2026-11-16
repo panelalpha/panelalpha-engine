@@ -27,12 +27,12 @@ class ValidationFieldKeysTest extends TestCase
         $this->withoutMiddleware([Authenticate::class, PmaSso::class]);
     }
 
-    public function test_an_sftp_username_outside_the_project_prefix_is_refused_under_username(): void
+    public function test_an_sftp_username_with_nothing_after_the_prefix_is_refused_under_username(): void
     {
         $this->makeUser('alice');
 
-        $this->assertField('username', 'Username must start with alice_', $this->createSftp([
-            'username' => 'other_backup',
+        $this->assertField('username', 'Username needs a name after alice_', $this->createSftp([
+            'username' => 'alice_',
             'auth_method' => 'password',
             'password' => 'secret-pass',
         ]));

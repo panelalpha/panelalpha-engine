@@ -6,6 +6,7 @@ use App\Integrations\Tunnels\TunnelManager;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Domains\HttpsPorts;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
@@ -44,10 +45,11 @@ class Networking
         if ($name === '') {
             return null;
         }
-        $details = is_array($domain->details) ? $domain->details : [];
-        $scheme = ! empty($details['ssl_disabled']) ? 'http' : 'https';
+        if (! $domain->sslEnabled()) {
+            return 'http://'.$name;
+        }
 
-        return $scheme.'://'.$name;
+        return 'https://'.$name.HttpsPorts::suffix($domain);
     }
 
     /**
@@ -109,26 +111,44 @@ class Networking
         return true;
     }
 
-    /** The domain's generated rules on $primaryPort, then the vhost rebuilt and the webserver reloaded. */
+    /** Every domain's generated rules on $primaryPort, then the vhosts rebuilt and the webserver reloaded. */
     public function applyRoutes(User $user, int $primaryPort, ?int $fromPort = null): void
     {
         if ($fromPort !== null && $fromPort !== $primaryPort) {
             $this->moveHandMadeRules($user, $fromPort, $primaryPort);
         }
 
-        $domain = $user->getMainDomain();
-        $fqdn = $domain !== null ? trim((string) $domain->domain) : '';
-        if ($fqdn === '') {
+        $domains = self::routedDomains($user);
+        if ($domains === []) {
             Log::warning("Skipping proxy rule create for {$user->username}: no main domain yet");
 
             return;
         }
 
-        $this->syncGeneratedHttpRules($user, $fqdn, $primaryPort);
-        if ($domain !== null && $domain->hasTunnels()) {
-            $this->syncTunnelIngress($user, $domain);
+        $this->syncGeneratedHttpRules($user, array_map(static fn (Domain $domain): string => trim((string) $domain->domain), $domains), $primaryPort);
+        foreach ($domains as $domain) {
+            if ($domain->hasTunnels()) {
+                $this->syncTunnelIngress($user, $domain);
+            }
         }
-        $this->rebuildVhost($user, $domain);
+        $this->rebuildVhosts($user, $domains);
+    }
+
+    /**
+     * The main domain first, then the project's other domains: each is routed to the app.
+     *
+     * @return list<Domain>
+     */
+    private static function routedDomains(User $user): array
+    {
+        $main = $user->getMainDomain();
+        if ($main === null || trim((string) $main->domain) === '') {
+            return [];
+        }
+        /** @var list<Domain> $others */
+        $others = $user->domains()->getQuery()->whereKeyNot($main->getKey())->orderBy('id')->get()->all();
+
+        return array_values(array_filter([$main, ...$others], static fn (Domain $domain): bool => trim((string) $domain->domain) !== ''));
     }
 
     /**
@@ -144,13 +164,17 @@ class Networking
         }
     }
 
-    /** The domain's :80/:443 rules updated in place: a delete-and-recreate would drop an operator's edits. */
-    private function syncGeneratedHttpRules(User $user, string $fqdn, int $primaryPort): void
+    /**
+     * The domains' :80/:443 rules updated in place: a delete-and-recreate would drop an operator's edits.
+     *
+     * @param  list<string>  $fqdns
+     */
+    private function syncGeneratedHttpRules(User $user, array $fqdns, int $primaryPort): void
     {
         try {
-            ProxyRule::syncGeneratedHttpPair($user->username, $fqdn, $primaryPort, $user->getAppPortScheme());
+            ProxyRule::syncGeneratedHttpPairs($user->username, $fqdns, $primaryPort, $user->getAppPortScheme());
         } catch (\Exception $e) {
-            Log::warning("Failed to create proxy rules for {$user->username} {$fqdn}", [
+            Log::warning("Failed to create proxy rules for {$user->username} ".implode(', ', $fqdns), [
                 'error' => $e->getMessage(),
             ]);
         }
@@ -173,11 +197,17 @@ class Networking
         }
     }
 
-    /** A failure goes to the deploy log too, so a later "no vhost is loaded" traces back here. */
-    private function rebuildVhost(User $user, ?Domain $domain): void
+    /**
+     * A failure goes to the deploy log too, so a later "no vhost is loaded" traces back here.
+     *
+     * @param  list<Domain>  $domains
+     */
+    private function rebuildVhosts(User $user, array $domains): void
     {
         try {
-            $this->project->system()->webserver()->rebuildDomainConfig($domain);
+            foreach ($domains as $domain) {
+                $this->project->system()->webserver()->rebuildDomainConfig($domain);
+            }
             $this->project->system()->webserver()->reloadRouting();
         } catch (\Exception $e) {
             Log::warning("Failed to rebuild domain vhost after proxy rules for {$user->username}", [
@@ -190,9 +220,8 @@ class Networking
     }
 
     /**
-     * A compose recipe's own `port:` wins over the scan: the scan never routes
-     * an image-named datastore, and an app that is one (Qdrant, MinIO) says so
-     * in its recipe. The shipped compose manifest declares no port.
+     * A compose recipe's own `port:` wins over the scan, which never routes an image-named datastore: an app that
+     * is one (Qdrant, MinIO) says so in its recipe. The shipped compose manifest declares no port.
      */
     public static function recipeComposePort(User $user): ?int
     {

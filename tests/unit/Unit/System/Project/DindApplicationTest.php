@@ -5,13 +5,14 @@ namespace Tests\Unit\System\Project;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
-use App\System\Project as ProjectAggregate;
 use App\System\Project\AbstractApplication;
+use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AbstractApplication as DindApp;
 use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class DindApplicationTest extends TestCase
 {
@@ -25,10 +26,12 @@ class DindApplicationTest extends TestCase
         $this->homeRoot = $this->tmpRoot . '/home';
         mkdir($this->tmpRoot . '/users/alice', 0777, true);
         mkdir($this->homeRoot . '/alice/project', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => $this->homeRoot]));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -80,11 +83,9 @@ class DindApplicationTest extends TestCase
         $this->assertSame($app->shell(), $app->shell());
     }
 
-    public function test_shell_wrap_targets_outer_compose_dind_service(): void
+    public function test_shell_wrap_targets_the_accounts_own_container(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'static']);
-        $outerCompose = $this->tmpRoot . '/users/alice/docker-compose.yml';
-        file_put_contents($outerCompose, "services:\n  dind:\n    image: test\n");
         file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services: {}\n");
 
         $project = $this->dind($model);
@@ -92,20 +93,11 @@ class DindApplicationTest extends TestCase
 
         $this->assertSame(
             [
-                'sudo',
-                'docker',
-                'compose',
-                '-f',
-                $outerCompose,
-                'exec',
-                '-e',
-                'DOCKER_CONFIG=' . $this->homeRoot . '/alice/.panelalpha-docker',
-                '-T',
-                'dind',
-                'echo',
-                'hi',
+                'pa-root', 'account-container.exec', '--', 'alice', '', '',
+                '1', 'DOCKER_CONFIG', $this->homeRoot . '/alice/.panelalpha-docker',
+                'echo', 'hi',
             ],
-            $wrap
+            LocalRoot::plain($wrap)
         );
     }
 

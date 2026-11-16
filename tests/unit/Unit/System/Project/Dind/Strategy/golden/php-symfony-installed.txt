@@ -1,0 +1,158 @@
+[1 log lines] ensurePhpBaseImage
+[
+    "php:8.3-apache-bookworm",
+    [],
+    [],
+    []
+]
+
+[1 log lines] entrypoint
+[
+    {
+        "platform": "php",
+        "start_command": "",
+        "app_root": ""
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] runPhpBuild
+[
+    "panelalpha/php:8.3-test",
+    {
+        "strategy": "php",
+        "label": "PHP",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 8000,
+        "runtime": "php",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader",
+        "build_command": "{ composer run-script --no-interaction post-autoload-dump; } || true",
+        "start_command": "/usr/local/bin/panelalpha-serve",
+        "env": {
+            "LOG_CHANNEL": "stderr"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "panelalpha/php:8.3-apache-bookworm-pa20261007",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": false,
+        "credentials": null,
+        "platform": "",
+        "requirements": [
+            {
+                "id": "php",
+                "version": "8.3",
+                "constraint": "^8.3",
+                "source": "composer.json require.php",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "php 8.3 (from composer.json require.php)"
+        ],
+        "build_images": [],
+        "resolved_commands": []
+    },
+    "",
+    true,
+    [],
+    []
+]
+
+[1 log lines] runForPhp
+[
+    "{dir}",
+    {
+        "composer.json": true,
+        "public": true,
+        "vendor": true
+    },
+    "",
+    false,
+    "panelalpha/php:8.3-test"
+]
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root docker.readFileFromImage -- 0 panelalpha/php:8.3-test /etc/passwd
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root docker.readFileFromImage -- 0 panelalpha/php:8.3-test /etc/group
+
+
+[1 log lines] write {dir}/panelalpha.passwd chown=1001:1001 mode=644
+root:x:0:0:root:/root:/bin/bash
+app:x:1001:1001:app:/app:/usr/sbin/nologin
+
+
+[1 log lines] write {dir}/panelalpha.group chown=1001:1001 mode=644
+root:x:0:
+app:x:1001:
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root scripts.makeHomeEntry -- /home/{user}/.cache 0755 1001:1001
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root account.makeDirectories -- 1001 1001 /home/{user}/.cache/composer
+
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'panelalpha/php:8.3-test'
+    working_dir: /app
+    volumes:
+      - './:/app'
+      - '/home/{user}/.cache/composer:/var/cache/pa-composer'
+      - './panelalpha.passwd:/etc/passwd:ro'
+      - './panelalpha.group:/etc/group:ro'
+    ports:
+      - '8000:8000'
+    user: '1001:1001'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '8000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      LOG_CHANNEL: stderr
+      APP_ENV: prod
+      PA_DOCROOT: /app/public
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

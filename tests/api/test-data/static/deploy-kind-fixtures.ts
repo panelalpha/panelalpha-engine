@@ -798,6 +798,17 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
     },
   },
   {
+    id: 'roundcube',
+    strategy: 'php',
+    files: {
+      'composer.json': composer(),
+      'program/include/iniset.php': PHP,
+      'program/lib/Roundcube/rcube.php': PHP,
+      'public_html/static.php': PHP,
+      'bin/initdb.sh': PHP,
+    },
+  },
+  {
     id: 'suitecrm',
     strategy: 'php',
     files: {

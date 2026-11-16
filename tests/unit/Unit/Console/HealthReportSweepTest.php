@@ -3,11 +3,18 @@
 namespace Tests\Unit\Console;
 
 use App\Console\Commands\Deploy\HealthReportCommand;
+use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\User;
+use App\System;
+use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\ShellOperations;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Mockery;
+use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
 use Tests\TestCase;
 
 /**
@@ -34,6 +41,7 @@ class HealthReportSweepTest extends TestCase
 
     protected function tearDown(): void
     {
+        Mockery::close();
         Schema::dropIfExists('users');
         parent::tearDown();
     }
@@ -56,6 +64,101 @@ class HealthReportSweepTest extends TestCase
         ]));
         // A worker with nothing to probe is not silence.
         $this->assertFalse(HealthReportCommand::notServing([AppHealth::DETAIL_CHECKED => false, AppHealth::DETAIL_HEALTHY => null]));
+    }
+
+    /**
+     * The probe of an account whose container is down asks nothing and finds no failed check, yet the account serves
+     * nothing: it is listed, served as stopped, with the probe's reason as the cause.
+     */
+    public function test_an_account_whose_container_is_down_is_listed_with_that_cause(): void
+    {
+        $user = User::create(['username' => 'downapp', 'domain' => 'downapp.example.test', 'details' => ['template' => 'dind', 'app_port' => 8000]]);
+
+        $report = $this->healthOf($user)->observe(1, 1, 0);
+        $details = $user->fresh()->getDetails();
+
+        $this->assertTrue(HealthReportCommand::notServing($details));
+        $this->assertSame(
+            [
+                'project' => 'downapp',
+                'serving' => 'stopped',
+                'checks' => 'the project\'s container is not running, so nothing was probed (service "dind" is not running)',
+            ],
+            HealthReportCommand::row('downapp', $report, $details),
+        );
+    }
+
+    /** A probe that failed for any other reason is no verdict, and is not listed. */
+    public function test_a_probe_that_could_not_run_is_not_listed(): void
+    {
+        $details = [
+            AppHealth::DETAIL_CHECKED => true,
+            AppHealth::DETAIL_HEALTHY => false,
+            AppHealth::DETAIL_SERVING => null,
+            AppHealth::DETAIL_PORTS => [],
+            AppHealth::DETAIL_CHECKS => [],
+        ];
+
+        $this->assertNull(HealthReportCommand::row('oddapp', ['healthy' => false, 'ports' => [], 'error' => 'could not run the probe: boom'], $details));
+    }
+
+    /** Stopped on request, its container being down is what was asked for: the sweep leaves it out. */
+    public function test_an_account_stopped_on_request_is_not_listed_though_its_container_is_down(): void
+    {
+        $user = User::create(['username' => 'parked', 'domain' => 'parked.example.test', 'details' => [
+            'template' => 'dind',
+            AppHealth::DETAIL_CHECKED => true,
+            AppHealth::DETAIL_HEALTHY => false,
+            AppHealth::DETAIL_SERVING => 'stopped',
+            AppHealth::DETAIL_PORTS => [],
+            AppHealth::DETAIL_CHECKS => [],
+        ]]);
+        $user->markAppStoppedByRequest(true);
+
+        Artisan::call('project:health:report', ['project' => 'parked', '--local' => true, '--json' => true]);
+
+        $sweep = json_decode(Artisan::output(), true);
+        $this->assertSame(['swept' => 0, 'degraded' => 0, 'reported' => 0, 'projects' => []], $sweep);
+    }
+
+    /** The real probe on an account whose every docker command answers that its container is not running. */
+    private function healthOf(User $user): AppHealth
+    {
+        $host = new class () extends System {
+            public function __construct()
+            {
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return FakeProcess::failed("service \"dind\" is not running\n");
+            }
+
+            public function runProcessWithCallbacks(
+                string|array $cmd,
+                array $env = [],
+                int $timeout = 600,
+                ?callable $onStart = null,
+                ?callable $onOutput = null,
+                ?StepWatchdog $watchdog = null
+            ): Process {
+                return FakeProcess::failed("service \"dind\" is not running\n");
+            }
+        };
+        $dind = Mockery::mock(Dind::class);
+        $dind->shouldReceive('username')->andReturn($user->username);
+        $dind->shouldReceive('composeFilePath')->andReturn('/opt/panelalpha/shared-hosting/users/' . $user->username . '/docker-compose.yml');
+        $dind->shouldReceive('homeDirPath')->andReturn('/home/' . $user->username);
+        $dind->shouldReceive('userModel')->andReturn($user);
+        $dind->shouldReceive('system')->andReturn($host);
+        $dind->shouldReceive('shell')->andReturnUsing(fn (): ShellOperations => new ShellOperations($dind));
+
+        return new class ($dind) extends AppHealth {
+            public function ports(): array
+            {
+                return [8000];
+            }
+        };
     }
 
     public function test_a_project_stopped_on_request_is_skipped(): void

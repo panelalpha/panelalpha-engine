@@ -64,7 +64,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
     {
         $this->project('wpcom', 'wp.com');
         $migration = $this->started();
-        $installer = new RecordingInstaller();
+        $installer = new RecordingInstaller;
         $step = new InstallWordpressStep($installer);
 
         $step->run($migration);
@@ -75,7 +75,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
         $this->assertSame(1, $this->callsTo($installer->calls, 'install'));
         $this->assertCount(1, $installer->databases);
         $this->assertSame([$first->created_database => $first->created_database_user], $installer->databases);
-        $this->assertStringStartsWith($this->user('wpcom')->getMysqlPrefix() . 'wp', (string) $first->created_database);
+        $this->assertStringStartsWith($this->user('wpcom')->getMysqlPrefix().'wp', (string) $first->created_database);
         $this->assertSame(2, $this->callsTo($installer->calls, 'writeConfig'));
     }
 
@@ -101,7 +101,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
         $migration = $this->atFiles();
         $migration->markStepFailed(WordpressMigration::STEP_MIGRATE_FILES);
 
-        (new SourcePluginOnFailure(new SourceConnection(fn () => new RoutedSourceHttpClient())))
+        (new SourcePluginOnFailure(new SourceConnection(fn () => new RoutedSourceHttpClient)))
             ->afterFailure($migration, WordpressMigration::STEP_MIGRATE_FILES);
 
         $migration->refresh();
@@ -113,7 +113,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
 
     public function test_a_manual_plugin_or_an_early_failure_leaves_the_source_alone(): void
     {
-        $http = new RoutedSourceHttpClient();
+        $http = new RoutedSourceHttpClient;
         $cleanup = new SourcePluginOnFailure(new SourceConnection(fn () => $http));
         $early = $this->started();
         $manual = WordpressMigration::start(
@@ -127,6 +127,24 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
         $cleanup->afterFailure($manual, WordpressMigration::STEP_MIGRATE_FILES);
 
         $this->assertSame([], $http->calls);
+    }
+
+    public function test_a_failed_install_of_the_source_plugin_leaves_a_copy_it_did_not_install(): void
+    {
+        $http = (new RoutedSourceHttpClient)
+            ->on('POST', 'https://wp.com/wp-login.php', new SourceHttpResponse('ok', 200))
+            ->on('GET', 'https://wp.com/wp-admin', RoutedSourceHttpClient::admin());
+        $migration = $this->started();
+        $migration->markStepFailed(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN);
+        $migration->storeResolvedSource('https://wp.com', 'https://wp.com/wp-login.php', SourceSite::REST_WP_JSON);
+
+        (new SourcePluginOnFailure(new SourceConnection(fn () => $http)))
+            ->afterFailure($migration, WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN);
+
+        $this->assertSame([], $http->calls);
+        $this->assertNull($migration->fresh()->plugin_migration_id);
+        $messages = implode(' ', array_column($migration->fresh()->step_log, 'message'));
+        $this->assertStringNotContainsString('Removed the migrator plugin', $messages);
     }
 
     private function started(): WordpressMigration
@@ -151,7 +169,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
 
     private function loggedInSource(): RoutedSourceHttpClient
     {
-        return (new RoutedSourceHttpClient())
+        return (new RoutedSourceHttpClient)
             ->on('POST', 'https://wp.com/wp-login.php', new SourceHttpResponse('ok', 200))
             ->on('GET', 'https://wp.com/wp-admin', RoutedSourceHttpClient::admin());
     }
@@ -165,7 +183,8 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
 
     private function failingCreator(): MigrationProjectCreator
     {
-        return new class implements MigrationProjectCreator {
+        return new class implements MigrationProjectCreator
+        {
             public int $calls = 0;
 
             public function create(string $username, ?string $domain = null): string
@@ -178,7 +197,7 @@ class WordpressMigrationRerunTest extends ImportTargetTestCase
     }
 
     /**
-     * @param list<array<int, mixed>> $calls
+     * @param  list<array<int, mixed>>  $calls
      */
     private function callsTo(array $calls, string $name): int
     {

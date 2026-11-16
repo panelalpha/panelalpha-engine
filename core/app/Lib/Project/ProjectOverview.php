@@ -6,17 +6,18 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\Strategies;
+use App\Lib\Domains\HttpsPorts;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
+use App\System\Projects;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * One project in a few normalized words: what it is, whether it is up, where
- * it answers and whether an admin can be logged in. Built for a list, so it
- * reads only the database (once for the whole list, {@see ProjectListFacts}),
- * the deploy lock and one `docker ps` per request -- never anything inside an account.
+ * One project in a few words: what it is, whether it is up, where it answers, whether an admin can be logged in. Cheap
+ * for a list: {@see ProjectListFacts} once for all of it, the deploy lock, one `docker ps` per request, never an account.
  */
 final class ProjectOverview
 {
@@ -41,16 +42,18 @@ final class ProjectOverview
 
     /**
      * @param  ?ProjectListFacts  $facts  loaded for the whole list the project is in; loaded for it alone when null
-     * @return array{type: ?string, framework: ?string, label: ?string, status: string, public_url: ?string, admin_sso: bool}
+     * @return array{type: ?string, path: ?string, framework: ?string, label: ?string, status: string, public_url: ?string, admin_sso: bool}
      */
     public static function for(User $user, ?ProjectListFacts $facts = null): array
     {
         $facts ??= ProjectListFacts::load([$user]);
         $details = $user->getDetails();
         $strategy = is_string($details['deploy_strategy'] ?? null) ? $details['deploy_strategy'] : null;
+        $type = self::type($details, $user->getGitRepo()) ?? self::classicType($user);
 
         return [
-            'type' => self::type($details, $user->getGitRepo()),
+            'type' => $type,
+            'path' => self::installPath($user, $type),
             'framework' => $strategy,
             'label' => is_string($details['deploy_label'] ?? null) ? $details['deploy_label'] : null,
             'status' => self::status($user, $details, $facts),
@@ -60,8 +63,8 @@ final class ProjectOverview
     }
 
     /**
-     * wordpress, laravel, php, node, python, ruby, go, rust, java, dotnet,
-     * docker, static or other; null before the first deploy.
+     * A container project's type: wordpress, laravel, php, node, python, ruby,
+     * go, rust, java, dotnet, docker, static or other; null before the first deploy.
      *
      * @param  array<string, mixed>  $details
      */
@@ -88,6 +91,24 @@ final class ProjectOverview
             $strategy === Strategies::STATIC => 'static',
             default => 'other',
         };
+    }
+
+    /** What a PHP hosting project's files were last read as; a container project not deployed yet has no type. */
+    private static function classicType(User $user): ?string
+    {
+        return Projects::isDind($user) ? null : ClassicAppType::of($user);
+    }
+
+    /**
+     * Where WordPress is when it is not the main domain's document root; the documented rule needs no path.
+     *
+     * @param  ?string  $type  what the project was already reported as
+     */
+    private static function installPath(User $user, ?string $type): ?string
+    {
+        return $type === ClassicAppType::WORDPRESS && ! Projects::isDind($user)
+            ? ClassicAppType::installPathOf($user)
+            : null;
     }
 
     /**
@@ -137,8 +158,11 @@ final class ProjectOverview
             return null;
         }
         $domain = $facts->mainDomainOf($user);
+        if ($domain !== null && ! $domain->sslEnabled()) {
+            return 'http://'.$user->domain;
+        }
 
-        return ($domain !== null && ! $domain->sslEnabled() ? 'http://' : 'https://').$user->domain;
+        return 'https://'.$user->domain.($domain !== null ? HttpsPorts::suffix($domain) : '');
     }
 
     /**
@@ -207,7 +231,7 @@ final class ProjectOverview
 
         $names = null;
         try {
-            $out = (new System)->exec(['sudo', 'docker', 'ps', '--format', '{{.Names}}'], [], 15);
+            $out = (new System)->exec(Privileged::docker()->runningContainerNames(), [], 15);
             $names = array_fill_keys(array_filter(array_map('trim', explode("\n", $out))), true);
         } catch (Throwable $e) {
             Log::warning('Could not list running containers: '.$e->getMessage());

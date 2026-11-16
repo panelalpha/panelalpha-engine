@@ -350,6 +350,91 @@ class DeployTimingsTest extends TestCase
         $this->assertSame('#8', $summary['build']['slowest'][0]['step']);
     }
 
+    /**
+     * The steps of a `FROM nginx:1.27-alpine` + one RUN + one COPY Dockerfile handed over on stdin, as BuildKit numbered them on
+     * a real rebuild: the context read, the FROM resolution, the export and the provenance never answer CACHED.
+     *
+     * @param  array{6: string, 7: string}  $layerResults  `CACHED` or `DONE <s>` for the RUN (#6) and the COPY (#7)
+     * @return list<array{ts: int, msg: string}>
+     */
+    private function nginxRebuildLog(array $layerResults): array
+    {
+        return array_map(static fn (string $m): array => ['ts' => 1, 'msg' => $m], [
+            '#1 reading from stdin 488B done',
+            '#1 DONE 0.0s',
+            '#2 [internal] load metadata for docker.io/library/nginx:1.27-alpine',
+            '#2 DONE 0.0s',
+            '#3 [internal] load .dockerignore',
+            '#3 DONE 0.0s',
+            '#4 [internal] load build context',
+            '#4 DONE 0.0s',
+            '#5 [1/3] FROM docker.io/library/nginx:1.27-alpine',
+            '#5 DONE 0.0s',
+            '#6 [2/3] RUN echo "built $(date)" > /tmp/built && sleep 2',
+            '#6 '.$layerResults[6],
+            '#7 [3/3] COPY index.html /usr/share/nginx/html/index.html',
+            '#7 '.$layerResults[7],
+            '#8 exporting to image',
+            '#8 exporting layers done',
+            '#8 naming to docker.io/library/project-app:latest done',
+            '#8 DONE 0.1s',
+            '#9 resolving provenance for metadata file',
+            '#9 DONE 0.0s',
+        ]);
+    }
+
+    public function test_a_fully_cached_rebuild_reads_a_full_hit_ratio(): void
+    {
+        $build = DeployTimings::summarize(
+            ['started_at' => 1, 'finished_at' => 2],
+            $this->nginxRebuildLog([6 => 'CACHED', 7 => 'CACHED'])
+        )['build'];
+
+        $this->assertSame(1.0, $build['cache_hit_ratio']);
+        $this->assertSame(2, $build['cacheable_steps']);
+        $this->assertSame(2, $build['cached_steps']);
+        $this->assertSame(6, $build['step_count'], 'every step is still listed and timed');
+        $this->assertSame(0.1, $build['total_seconds'], 'the export stays in the build time');
+    }
+
+    public function test_a_cold_build_reads_a_zero_hit_ratio(): void
+    {
+        $build = DeployTimings::summarize(
+            ['started_at' => 1, 'finished_at' => 2],
+            $this->nginxRebuildLog([6 => 'DONE 2.3s', 7 => 'DONE 0.0s'])
+        )['build'];
+
+        $this->assertSame(0.0, $build['cache_hit_ratio']);
+        $this->assertSame(2, $build['cacheable_steps']);
+        $this->assertSame(0, $build['cached_steps']);
+    }
+
+    public function test_only_dockerfile_instructions_after_from_are_cacheable(): void
+    {
+        $steps = DeployTimings::buildSteps(array_column($this->nginxRebuildLog([6 => 'CACHED', 7 => 'CACHED']), 'msg'));
+
+        $cacheable = array_column($steps, 'cacheable', 'step');
+        ksort($cacheable, SORT_NATURAL);
+
+        $this->assertSame(
+            ['#1' => false, '#5' => false, '#6' => true, '#7' => true, '#8' => false, '#9' => false],
+            $cacheable
+        );
+    }
+
+    public function test_a_build_with_nothing_to_cache_reports_no_ratio(): void
+    {
+        $build = DeployTimings::summarize(['started_at' => 1, 'finished_at' => 2], [
+            ['ts' => 1, 'msg' => '#5 [1/1] FROM docker.io/library/nginx:1.27-alpine'],
+            ['ts' => 1, 'msg' => '#5 DONE 0.0s'],
+            ['ts' => 1, 'msg' => '#6 exporting to image'],
+            ['ts' => 1, 'msg' => '#6 DONE 0.1s'],
+        ])['build'];
+
+        $this->assertSame(2, $build['step_count']);
+        $this->assertNull($build['cache_hit_ratio']);
+    }
+
     public function test_a_deploy_with_no_build_reports_no_ratio(): void
     {
         // A compose or static deploy builds nothing. Reporting a 0.0 hit ratio

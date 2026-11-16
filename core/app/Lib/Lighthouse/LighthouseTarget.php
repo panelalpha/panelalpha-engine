@@ -8,18 +8,14 @@ use Closure;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Where the Lighthouse container may be pointed.
- *
- * Headless Chrome runs on the engine's own network, so any URL it is given is
- * a request from inside it. Only this engine's domains are accepted, and
- * Chrome refuses loopback, private and link-local hosts for whatever the page
- * then redirects to or embeds.
+ * Where the Lighthouse container may be pointed: Chrome runs on the engine's own network, so only this engine's domains
+ * are accepted, and Chrome refuses loopback, private and link-local hosts for whatever the page redirects to or embeds.
  */
 final class LighthouseTarget
 {
     /**
-     * Host patterns Chrome must not resolve. They apply to IP literals too,
-     * and the first matching rule wins, so a pinned domain goes before them.
+     * Host patterns Chrome must not resolve, IP literals included, ending with the engine's own services as Docker's DNS
+     * names them on the shared network. The first matching rule wins, so a pinned domain goes before them.
      */
     public const BLOCKED_HOSTS = [
         'localhost',
@@ -34,14 +30,12 @@ final class LighthouseTarget
         '172.20.*', '172.21.*', '172.22.*', '172.23.*',
         '172.24.*', '172.25.*', '172.26.*', '172.27.*',
         '172.28.*', '172.29.*', '172.30.*', '172.31.*',
-        // The engine's own services, by the names Docker's DNS answers to
-        // on the network the lighthouse container shares with them.
         '*.palocal',
         ComposeProject::NAME.'-*',
         'panelalpha-*',
         'core', 'core-db', 'mail', 'metrics', 'sites-dns', 'sites-db',
         'sites-phpmyadmin', 'sites-http', 'ftp', 'sftp', 'cache-registry',
-        'cache-registry-writer', 'registry-proxy', 'lighthouse',
+        'cache-registry-writer', 'registry-proxy', 'ghcr-proxy', 'lighthouse', 'root-broker',
     ];
 
     /** @param Closure(string): bool $isOwnDomain */
@@ -53,13 +47,11 @@ final class LighthouseTarget
     }
 
     /**
-     * The URL's host, lowercased, if it is http(s) on one of this engine's
-     * domains; a validation error otherwise.
+     * The URL's host, lowercased, if it is http(s) on one of this engine's domains; a validation error otherwise.
+     * Backslashes and userinfo are refused: there PHP's parser and Chrome's disagree about which part is the host.
      */
     public function hostOf(string $url): string
     {
-        // A backslash or userinfo is where PHP's parser and Chrome's disagree
-        // about which part is the host.
         if (preg_match('/[\\\\\s\x00-\x1f]/', $url) === 1) {
             throw self::refuse('The url must not contain backslashes, whitespace or control characters.');
         }
@@ -118,9 +110,8 @@ final class LighthouseTarget
     }
 
     /**
-     * The address the run ended on when that is not one of this engine's
-     * domains -- a redirect the resolver rules did not catch. A hop they did
-     * block ends on chrome-error://, which carries nothing, and passes.
+     * The address the run ended on when it is not one of this engine's domains: a redirect the resolver rules missed.
+     * A hop they did block ends on chrome-error://, which carries nothing, and passes.
      *
      * @param  array<string, mixed>  $report
      */

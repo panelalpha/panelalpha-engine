@@ -77,6 +77,22 @@ export class ContainersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
+  async getContainerMetricsRaw(
+    username: string,
+    range?: string
+  ): Promise<{ status: number; body: any }> {
+    const query = range === undefined ? '' : `?range=${encodeURIComponent(range)}`;
+    return this.rawCall(await this.api.get(`projects/${username}/containers/metrics${query}`));
+  }
+
+  async getProjectMetricsHistoryRaw(
+    username: string,
+    range?: string
+  ): Promise<{ status: number; body: any }> {
+    const query = range === undefined ? '' : `?range=${encodeURIComponent(range)}`;
+    return this.rawCall(await this.api.get(`projects/${username}/metrics/history${query}`));
+  }
+
   async getContainerLogs(
     username: string,
     service: string,
@@ -125,8 +141,18 @@ export class ContainersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
-  async listDeploysRaw(username: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.get(`projects/${username}/deploys`);
+  async listDeploysRaw(
+    username: string,
+    paging: { page?: number; per_page?: number } = {}
+  ): Promise<{ status: number; body: any }> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(paging)) {
+      query.set(key, String(value));
+    }
+    const encoded = query.toString();
+    const response = await this.api.get(
+      `projects/${username}/deploys${encoded === '' ? '' : `?${encoded}`}`
+    );
     return this.rawCall(response);
   }
 

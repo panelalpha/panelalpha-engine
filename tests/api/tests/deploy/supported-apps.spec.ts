@@ -13,6 +13,8 @@ import { waitForCondition } from '@/helpers/retry';
 import { skipUnless, skipUnlessResolvableSite } from '@/helpers/test-helpers';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { fetchSite } from '@/helpers/webserver-helpers';
+import { testNetwork } from '@/helpers/test-network';
+import { describeFrontPage, readFrontPage, servedCertificate } from '@/helpers/front-page';
 import { APPLICATION_DEPLOY_USER } from '@/test-data/factories';
 import { selectedSupportedApps, type SupportedApp } from '@/test-data/static/supported-apps';
 import type { EngineApi } from '@/clients/engine-api';
@@ -20,16 +22,24 @@ import type { EngineApi } from '@/clients/engine-api';
 /**
  * One real deploy per Supported-board app:
  *   1. POST /source/inspect  (clone + strategy; retried on a git 504)
- *   2. POST /projects        (account + deploy of that branch)
+ *   2. POST /projects        (account + deploy of that branch; an entry's `branch` is asked for)
  *   3. deploy log until a terminal status, then timings with build_timings=1
  *   4. GET /app/health       (`serving: ok` — a placeholder is not support)
  *   5. GET https://<domain>/ (200/301/302, or an auth wall once serving is ok)
+ *   6. the page a browser lands on holds the app's own `page` marker, and no `<base>` on localhost
+ *   7. the certificate the domain serves names it and is in date
  *
  * The account is deleted afterwards (`preserveOnFailure: false`).
  * Run with `bun run test:supported-apps`. `SUPPORTED_APPS=koel,ntfy` limits the slice.
  * Checks that are not repeated per application live in supported-apps-checks.spec.ts.
  */
 const apps = selectedSupportedApps(process.env.SUPPORTED_APPS);
+
+/** A `<base>` on the loopback makes every relative link and asset load from the visitor's own machine. */
+const LOCAL_BASE = new RegExp(
+  `<base\\s+href="https?://(localhost|${testNetwork.LOOPBACK.replaceAll('.', '\\.')})[:/"]`,
+  'i'
+);
 
 test.describe('supported applications', () => {
   test.describe.configure({ timeout: Timeouts.supportedApp });
@@ -52,6 +62,9 @@ test.describe('supported applications', () => {
       const platform = inspectPlatform(inspected.body);
       expect(branch, `${app.title} inspect did not resolve a branch`).toBeTruthy();
       expect(strategy, `${app.title} inspect did not name a strategy`).toBeTruthy();
+      if (app.branch !== undefined) {
+        expect(branch, `${app.title} inspect resolved another branch`).toBe(app.branch);
+      }
       testInfo.annotations.push(
         { type: 'issue', description: `#${app.iid} ${app.issueUrl}` },
         { type: 'repo', description: app.repo },
@@ -123,6 +136,23 @@ test.describe('supported applications', () => {
       // serving is ok here, so an application's own auth wall is a valid answer.
       expectOneOf(code, [200, 301, 302, 303, 307, 308, 401, 403]);
 
+      const front = await phases.run('content', () =>
+        readFrontPage(anonymousRequest, `https://${user.domain}/`)
+      );
+      testInfo.annotations.push({ type: 'page', description: describeFrontPage(front) });
+      if (app.page !== undefined) {
+        expect(front.body, `${app.title} front page is not the application`).toMatch(app.page);
+      }
+      expect(front.body, `${app.title} sends the browser to localhost`).not.toMatch(LOCAL_BASE);
+
+      const certificate = await phases.run('tls', () => servedCertificate(user.domain));
+      testInfo.annotations.push({
+        type: 'tls',
+        description: `${certificate.names}, issuer ${certificate.issuer}, until ${certificate.validTo}, ${certificate.trusted ? 'trusted' : 'not trusted by the runner'}`,
+      });
+      expect(certificate.hostProblem, 'the served certificate names the domain').toBeNull();
+      expect(Date.parse(certificate.validTo)).toBeGreaterThan(Date.now());
+
       // The fixture would delete this account anyway; doing it here times it.
       await phases.run('cleanup', () => userFactory.deleteUser(user.username));
       testInfo.annotations.push({ type: 'phases', description: phases.summary() });
@@ -137,7 +167,14 @@ async function inspectUntilAnswered(
   let latest: { status: number; body: unknown } = { status: 0, body: {} };
   await waitForCondition(
     async () => {
-      latest = await api.inspectSourceRaw({ source: app.repo, type: 'git' }, { timeout: 180_000 });
+      latest = await api.inspectSourceRaw(
+        {
+          source: app.repo,
+          type: 'git',
+          ...(app.branch === undefined ? {} : { branch: app.branch }),
+        },
+        { timeout: 180_000 }
+      );
       if (latest.status === 200) {
         return true;
       }

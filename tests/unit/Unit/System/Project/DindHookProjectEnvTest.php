@@ -4,10 +4,11 @@ namespace Tests\Unit\System\Project;
 
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use Symfony\Component\Process\Process;
-use Tests\Support\StagedRename;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -38,7 +39,7 @@ class DindHookProjectEnvTest extends TestCase
         $envFile = array_key_first($this->written);
         $this->assertStringStartsWith('/home/alice/.panelalpha-hook-env-', $envFile);
         $this->assertSame("FOO_TOKEN='it'\\''s \$2y\$10\$abc'\n", $this->written[$envFile], 'PATH is left to the shell');
-        $this->assertContains(['sudo', 'chmod', '600', $this->stagedAs($envFile)], $this->commands);
+        $this->assertContains(Privileged::files()->changeMode('600', $this->stagedAs($envFile)), $this->commands);
 
         $run = $this->commandContaining('su');
         $this->assertStringContainsString("'hook-env' '{$envFile}' 'bash' '-c' 'exec bash \"\$0\" 1>&2' '/home/alice/.panelalpha-precheck.sh'", end($run));
@@ -89,11 +90,24 @@ class DindHookProjectEnvTest extends TestCase
     private function stagedAs(string $path): string
     {
         foreach ($this->commands as $cmd) {
-            if ((StagedRename::of($cmd)[1] ?? null) === $path) {
-                return StagedRename::of($cmd)[0];
+            if ((self::renamed($cmd)[1] ?? null) === $path) {
+                return self::renamed($cmd)[0];
             }
         }
         $this->fail("nothing was renamed onto {$path}");
+    }
+
+    /**
+     * @param  list<string>  $cmd
+     * @return array{0: string, 1: string}|null staged path and target
+     */
+    public static function renamed(array $cmd): ?array
+    {
+        return match (LocalRoot::action($cmd)) {
+            'files.rename' => [LocalRoot::values($cmd)[0], LocalRoot::values($cmd)[1]],
+            'account.renameInHome' => [LocalRoot::values($cmd)[1], LocalRoot::values($cmd)[2]],
+            default => null,
+        };
     }
 
     /** @param array<string, string> $envVars */
@@ -118,8 +132,9 @@ class DindHookProjectEnvTest extends TestCase
             {
                 $cmd = (array) $cmd;
                 $this->commands[] = $cmd;
-                if (($cmd[0] ?? '') === 'sudo' && ($cmd[1] ?? '') === 'cp') {
-                    $this->written[$cmd[3]] = (string) file_get_contents($cmd[2]);
+                if (LocalRoot::action($cmd) === 'files.copy') {
+                    [$source, $target] = LocalRoot::values($cmd);
+                    $this->written[$target] = (string) file_get_contents($source);
                 }
                 $this->renameStaged($cmd);
 
@@ -128,9 +143,17 @@ class DindHookProjectEnvTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                if (StagedRename::of($cmd) !== null) {
-                    $this->commands[] = (array) $cmd;
-                    $this->renameStaged((array) $cmd);
+                $cmd = (array) $cmd;
+                if (DindHookProjectEnvTest::renamed($cmd) !== null) {
+                    $this->commands[] = $cmd;
+                    $this->renameStaged($cmd);
+                }
+
+                if (LocalRoot::action($cmd) === 'files.deviceNumbers') {
+                    $process = new Process(['php', '-r', 'echo $argv[1];', str_repeat("1\n", count(LocalRoot::values($cmd)))]);
+                    $process->run();
+
+                    return $process;
                 }
 
                 return SuccessfulProcess::for($cmd);
@@ -138,7 +161,7 @@ class DindHookProjectEnvTest extends TestCase
 
             private function renameStaged(array $cmd): void
             {
-                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                [$staged, $target] = DindHookProjectEnvTest::renamed($cmd) ?? [null, null];
                 if ($staged !== null && isset($this->written[$staged])) {
                     $this->written[$target] = $this->written[$staged];
                     unset($this->written[$staged]);

@@ -41,18 +41,6 @@ TXT;
         $this->assertSame(4200000 * 1024, DindBuildStorage::parseDfAvailableBytes($df));
     }
 
-    public function test_parses_total_buildx_cache_bytes(): void
-    {
-        $output = <<<TXT
-ID   RECLAIMABLE   SIZE
-abc  false         1.2GB
-Reclaimable: 0B
-Total:      6.036GB
-TXT;
-
-        $this->assertSame(6481105650, DindBuildStorage::parseBuildxTotalBytes($output));
-    }
-
     public function test_reclaims_when_space_is_low_and_no_inner_containers(): void
     {
         $this->assertTrue(DindBuildStorage::shouldReclaimBeforeBuild(

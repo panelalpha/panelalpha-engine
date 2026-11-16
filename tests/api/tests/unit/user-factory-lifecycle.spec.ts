@@ -44,7 +44,7 @@ function fakeApi(runId: string, options: FakeOptions = {}) {
       );
     },
     getUser: () => Promise.resolve({ data: { domain: 'x.test' } }),
-    listUserDomains: () => Promise.resolve({ data: [] }),
+    listUserDomainsRaw: () => Promise.resolve<Raw>({ status: 200, body: { data: [] } }),
     deleteUserSafe: (username: string) => {
       calls.push(`DELETE ${username}`);
       return options.deleteFails

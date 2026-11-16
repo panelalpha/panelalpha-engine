@@ -12,9 +12,8 @@ use App\System\Project\PhpHosting\WordPress\WordPress;
 use Illuminate\Support\Str;
 
 /**
- * WP-CLI as the account for core and config, the users' MySQL server for the
- * database. The destination admin password is throwaway: the migrator
- * overwrites the site's content and users.
+ * WP-CLI as the account for core and config, the users' MySQL server for the database.
+ * The destination admin password is throwaway: the migrator overwrites the site's content and users.
  */
 final class WpCliWordpressInstaller implements WordpressInstaller
 {
@@ -49,9 +48,7 @@ final class WpCliWordpressInstaller implements WordpressInstaller
 
     public function writeConfig(User $user, string $path, string $database, string $databaseUser, string $password): void
     {
-        WordPress::for($user, $path)->cli()->runOrFail([
-            'config',
-            'create',
+        WordPress::for($user, $path)->cli()->createConfigFile([
             '--dbname='.$database,
             '--dbuser='.$databaseUser,
             '--dbpass='.$password,

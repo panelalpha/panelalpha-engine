@@ -1,0 +1,547 @@
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/data/lscache"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:www-data","/opt/engine/data/lscache"]
+put /opt/engine/webserver-config/litespeed/httpd_config.xml -
+<?xml version="1.0" encoding="UTF-8"?>
+<httpServerConfig>
+  <serverName>engine</serverName>
+  <security>
+    <censorshipControl>
+      <enableCensorship>0</enableCensorship>
+    </censorshipControl>
+    <accessDenyDir>/</accessDenyDir>
+  </security>
+  <listenerList>
+    <listener><name>old</name></listener>
+  </listenerList>
+  <virtualHostList>
+    <virtualHost><name>old</name></virtualHost>
+  </virtualHostList>
+<cache>
+  <cacheEngine>7</cacheEngine>
+  <storage>
+    <cacheStorePath>/opt/engine/data/lscache</cacheStorePath>
+    <pubStoreExpireMinutes>720</pubStoreExpireMinutes>
+    <purgeNoHitTimeout>360</purgeNoHitTimeout>
+  </storage>
+  <cachePolicy>
+    <expireInSeconds>86400</expireInSeconds>
+  </cachePolicy>
+</cache></httpServerConfig>
+
+<<< end of /opt/engine/webserver-config/litespeed/httpd_config.xml
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/home/alice/alice.test/.lscache"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:alice","/home/alice/alice.test/.lscache"]
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.pem"]
+put /opt/engine/webserver-config/litespeed/vhosts/alice.test.xml 994:994
+<?xml version="1.0" encoding="UTF-8"?>
+<virtualHostConfig>
+  <docRoot>/home/alice/alice.test/public_html</docRoot>
+  <enableGzip>1</enableGzip>
+  <logging>
+    <log>
+      <useServer>0</useServer>
+      <fileName>/opt/panelalpha/shared-hosting/webserver-logs/litespeed/alice.test/error.log</fileName>
+      <logLevel>ERROR</logLevel>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </log>
+    <accessLog>
+      <useServer>0</useServer>
+      <fileName>/opt/panelalpha/shared-hosting/webserver-logs/litespeed/alice.test/access.log</fileName>
+      <logHeaders>3</logHeaders>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </accessLog>
+  </logging>
+  <index>
+    <useServer>0</useServer>
+    <indexFiles>index.php, index.html</indexFiles>
+    <autoIndex>0</autoIndex>
+    <autoIndexURI>/_autoindex/default.php</autoIndexURI>
+  </index>
+  <customErrorPages>
+    <errorPage>
+      <errCode>403</errCode>
+      <url>/alice-error-pages/403.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>404</errCode>
+      <url>/alice-error-pages/404.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>500</errCode>
+      <url>/alice-error-pages/500.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>502</errCode>
+      <url>/alice-error-pages/502.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>503</errCode>
+      <url>/alice-error-pages/503.html</url>
+    </errorPage>
+  </customErrorPages>
+  <scriptHandlerList>
+    <scriptHandler>
+      <suffix>php</suffix>
+      <type>lsapi</type>
+      <handler>alice-lsphp</handler>
+    </scriptHandler>
+  </scriptHandlerList>
+  <htAccess>
+    <allowOverride>31</allowOverride>
+    <accessFileName>.htaccess</accessFileName>
+  </htAccess>
+  <expires>
+    <enableExpires>1</enableExpires>
+  </expires>
+  <security>
+    <hotlinkCtrl>
+      <enableHotlinkCtrl>0</enableHotlinkCtrl>
+      <suffixes>gif, jpeg, jpg</suffixes>
+      <allowDirectAccess>1</allowDirectAccess>
+      <onlySelf>1</onlySelf>
+    </hotlinkCtrl>
+    <accessControl>
+      <allow>*</allow>
+    </accessControl>
+  </security>
+  <cache>
+    <cacheEngine>7</cacheEngine>
+    <storage>
+      <cacheStorePath>/home/alice/alice.test/.lscache</cacheStorePath>
+      <litemage>0</litemage>
+    </storage>
+    <cachePolicy>
+      <checkPublicCache>1</checkPublicCache>
+      <checkPrivateCache>1</checkPrivateCache>
+      <respectCacheable>0</respectCacheable>
+      <enableCache>0</enableCache>
+    </cachePolicy>
+  </cache>
+  <extProcessorList>
+    <extProcessor>
+      <type>lsapi</type>
+      <name>alice-lsphp</name>
+      <address>alice:9082</address>
+      <maxConns>4</maxConns>
+      <env>PHP_LSAPI_MAX_REQUESTS=5000</env>
+      <env>PHP_LSAPI_CHILDREN=4</env>
+      <initTimeout>1</initTimeout>
+      <retryTimeout>3</retryTimeout>
+      <pcKeepAliveTimeout>1</pcKeepAliveTimeout>
+      <respBuffer>0</respBuffer>
+      <autoStart>0</autoStart>
+      <backlog>1</backlog>
+      <instances>1</instances>
+    </extProcessor>
+    <extProcessor>
+      <type>proxy</type>
+      <name>alice-phpmyadmin</name>
+      <address>http://phpmyadmin-users.shared-hosting.palocal:80</address>
+      <maxConns>10</maxConns>
+      <initTimeout>5</initTimeout>
+      <retryTimeout>5</retryTimeout>
+      <respBuffer>0</respBuffer>
+    </extProcessor>
+  </extProcessorList>
+    <contextList>
+    <context>
+      <uri>/alice-error-pages/</uri>
+      <location>/opt/panelalpha/shared-hosting/webserver-config/error-pages/</location>
+      <allowBrowse>1</allowBrowse>
+    </context>
+  </contextList>
+  <rewrite>
+    <enable>1</enable>
+    <logLevel>0</logLevel>
+    <rules>
+RewriteCond %{QUERY_STRING} pmassotoken=
+RewriteRule .* - [E=pmapass:1]
+RewriteCond %{HTTP_COOKIE} PMASignonSession
+RewriteRule .* - [E=pmapass:1]
+RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+RewriteRule ^ /phpmyadmin/ [R=301,L]
+RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+RewriteCond %{ENV:pmapass} =1
+RewriteRule ^/phpmyadmin/(.*)$ http://alice-phpmyadmin/$1 [P,L]
+    </rules>
+  </rewrite>
+  <frontPage>
+    <enable>0</enable>
+    <disableAdmin>0</disableAdmin>
+  </frontPage>
+  <awstats>
+    <updateMode>0</updateMode>
+    <workingDir>$VH_ROOT/awstats</workingDir>
+    <awstatsURI>/awstats/</awstatsURI>
+    <siteDomain>localhost</siteDomain>
+    <siteAliases>127.0.0.1 localhost</siteAliases>
+    <updateInterval>86400</updateInterval>
+    <updateOffset>0</updateOffset>
+    <securedConn>0</securedConn>
+  </awstats>
+</virtualHostConfig>
+<<< end of /opt/engine/webserver-config/litespeed/vhosts/alice.test.xml
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/litespeed/alice.test"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:www-data","/opt/engine/webserver-logs/litespeed/alice.test"]
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/home/bob/bob.test/.lscache"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:bob","/home/bob/bob.test/.lscache"]
+run ["test","-e","/opt/engine/users/bob/ssl-certs/bob.test.pem"]
+run ["test","-e","/opt/engine/users/bob/ssl-certs/bob.test.key"]
+put /opt/engine/webserver-config/litespeed/vhosts/bob.test.xml 994:994
+<?xml version="1.0" encoding="UTF-8"?>
+<virtualHostConfig>
+  <docRoot>/opt/panelalpha/shared-hosting/webserver-config/document-root</docRoot>
+  <customErrorPages>
+    <errorPage>
+      <errCode>503</errCode>
+      <url>/account-suspended.html</url>
+    </errorPage>
+  </customErrorPages>
+  <rewrite>
+    <enable>1</enable>
+    <logLevel>0</logLevel>
+    <rules>
+RewriteCond %{REQUEST_URI} !^/account-suspended\.html$
+RewriteRule ^ - [R=503,L]
+    </rules>
+  </rewrite>
+  <docRoot>/home/bob/bob.test/web</docRoot>
+  <enableGzip>1</enableGzip>
+  <logging>
+    <log>
+      <useServer>0</useServer>
+      <fileName>/opt/panelalpha/shared-hosting/webserver-logs/litespeed/bob.test/error.log</fileName>
+      <logLevel>ERROR</logLevel>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </log>
+    <accessLog>
+      <useServer>0</useServer>
+      <fileName>/opt/panelalpha/shared-hosting/webserver-logs/litespeed/bob.test/access.log</fileName>
+      <logHeaders>3</logHeaders>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </accessLog>
+  </logging>
+  <index>
+    <useServer>0</useServer>
+    <indexFiles>index.php, index.html</indexFiles>
+    <autoIndex>0</autoIndex>
+    <autoIndexURI>/_autoindex/default.php</autoIndexURI>
+  </index>
+  <customErrorPages>
+    <errorPage>
+      <errCode>403</errCode>
+      <url>/bob-error-pages/403.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>404</errCode>
+      <url>/bob-error-pages/404.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>500</errCode>
+      <url>/bob-error-pages/500.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>502</errCode>
+      <url>/bob-error-pages/502.html</url>
+    </errorPage>
+    <errorPage>
+      <errCode>503</errCode>
+      <url>/bob-error-pages/503.html</url>
+    </errorPage>
+  </customErrorPages>
+  <scriptHandlerList>
+    <scriptHandler>
+      <suffix>php</suffix>
+      <type>lsapi</type>
+      <handler>bob-lsphp</handler>
+    </scriptHandler>
+  </scriptHandlerList>
+  <htAccess>
+    <allowOverride>31</allowOverride>
+    <accessFileName>.htaccess</accessFileName>
+  </htAccess>
+  <expires>
+    <enableExpires>1</enableExpires>
+  </expires>
+  <security>
+    <hotlinkCtrl>
+      <enableHotlinkCtrl>0</enableHotlinkCtrl>
+      <suffixes>gif, jpeg, jpg</suffixes>
+      <allowDirectAccess>1</allowDirectAccess>
+      <onlySelf>1</onlySelf>
+    </hotlinkCtrl>
+    <accessControl>
+      <allow>*</allow>
+    </accessControl>
+  </security>
+  <cache>
+    <cacheEngine>7</cacheEngine>
+    <storage>
+      <cacheStorePath>/home/bob/bob.test/.lscache</cacheStorePath>
+      <litemage>0</litemage>
+    </storage>
+    <cachePolicy>
+      <checkPublicCache>1</checkPublicCache>
+      <checkPrivateCache>1</checkPrivateCache>
+      <respectCacheable>0</respectCacheable>
+      <enableCache>0</enableCache>
+    </cachePolicy>
+  </cache>
+  <extProcessorList>
+    <extProcessor>
+      <type>lsapi</type>
+      <name>bob-lsphp</name>
+      <address>bob:9074</address>
+      <maxConns>35</maxConns>
+      <env>PHP_LSAPI_MAX_REQUESTS=5000</env>
+      <env>PHP_LSAPI_CHILDREN=35</env>
+      <initTimeout>1</initTimeout>
+      <retryTimeout>3</retryTimeout>
+      <pcKeepAliveTimeout>1</pcKeepAliveTimeout>
+      <respBuffer>0</respBuffer>
+      <autoStart>0</autoStart>
+      <backlog>1</backlog>
+      <instances>1</instances>
+    </extProcessor>
+    <extProcessor>
+      <type>proxy</type>
+      <name>bob-phpmyadmin</name>
+      <address>http://phpmyadmin-users.shared-hosting.palocal:80</address>
+      <maxConns>10</maxConns>
+      <initTimeout>5</initTimeout>
+      <retryTimeout>5</retryTimeout>
+      <respBuffer>0</respBuffer>
+    </extProcessor>
+  </extProcessorList>
+    <contextList>
+    <context>
+      <uri>/bob-error-pages/</uri>
+      <location>/opt/panelalpha/shared-hosting/webserver-config/error-pages/</location>
+      <allowBrowse>1</allowBrowse>
+    </context>
+  </contextList>
+  <rewrite>
+    <enable>1</enable>
+    <logLevel>0</logLevel>
+    <rules>
+RewriteCond %{QUERY_STRING} pmassotoken=
+RewriteRule .* - [E=pmapass:1]
+RewriteCond %{HTTP_COOKIE} PMASignonSession
+RewriteRule .* - [E=pmapass:1]
+RewriteCond %{REQUEST_URI} ^/phpmyadmin$
+RewriteRule ^ /phpmyadmin/ [R=301,L]
+RewriteCond %{REQUEST_URI} ^/phpmyadmin/
+RewriteCond %{ENV:pmapass} =1
+RewriteRule ^/phpmyadmin/(.*)$ http://bob-phpmyadmin/$1 [P,L]
+    </rules>
+  </rewrite>
+  <vhssl>
+    <keyFile>/opt/panelalpha/shared-hosting/users/bob/ssl-certs/bob.test.key</keyFile>
+    <certFile>/opt/panelalpha/shared-hosting/users/bob/ssl-certs/bob.test.pem</certFile>
+  </vhssl>
+  <frontPage>
+    <enable>0</enable>
+    <disableAdmin>0</disableAdmin>
+  </frontPage>
+  <awstats>
+    <updateMode>0</updateMode>
+    <workingDir>$VH_ROOT/awstats</workingDir>
+    <awstatsURI>/awstats/</awstatsURI>
+    <siteDomain>localhost</siteDomain>
+    <siteAliases>127.0.0.1 localhost</siteAliases>
+    <updateInterval>86400</updateInterval>
+    <updateOffset>0</updateOffset>
+    <securedConn>0</securedConn>
+  </awstats>
+</virtualHostConfig>
+<<< end of /opt/engine/webserver-config/litespeed/vhosts/bob.test.xml
+run ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/litespeed/bob.test"]
+run ["/usr/local/lib/panelalpha/pa-root","files.changeOwnerRecursively","--","nobody:www-data","/opt/engine/webserver-logs/litespeed/bob.test"]
+put /opt/engine/webserver-config/litespeed/vhosts/fallback.xml 994:994
+<?xml version="1.0" encoding="UTF-8"?>
+<virtualHostConfig>
+  <docRoot>/opt/engine/webserver-config/document-root</docRoot>
+  <customErrorPages>
+    <errorPage>
+      <errCode>404</errCode>
+      <url>/404.html</url>
+    </errorPage>
+  </customErrorPages>
+  <logging>
+    <log>
+      <useServer>0</useServer>
+      <fileName>/opt/engine/webserver-logs/litespeed/fallback/error.log</fileName>
+      <logLevel>ERROR</logLevel>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </log>
+    <accessLog>
+      <useServer>0</useServer>
+      <fileName>/opt/engine/webserver-logs/litespeed/fallback/access.log</fileName>
+      <logHeaders>3</logHeaders>
+      <rollingSize>100M</rollingSize>
+      <keepDays>7</keepDays>
+      <compressArchive>1</compressArchive>
+    </accessLog>
+  </logging>
+  <rewrite>
+    <enable>1</enable>
+    <rules>
+RewriteCond %{REQUEST_URI} !^/404\.html$
+RewriteRule .* /404.html [L]
+    </rules>
+  </rewrite>
+</virtualHostConfig>
+<<< end of /opt/engine/webserver-config/litespeed/vhosts/fallback.xml
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/litespeed/fallback"]
+put /opt/engine/webserver-config/litespeed/httpd_config.xml -
+<?xml version="1.0" encoding="UTF-8"?>
+<httpServerConfig>
+  <serverName>engine</serverName>
+  <security>
+    <censorshipControl>
+      <enableCensorship>0</enableCensorship>
+    </censorshipControl>
+    <accessDenyDir>/</accessDenyDir>
+  </security>
+  <listenerList>
+<listener>
+  <name>198.51.100.10</name>
+  <address>198.51.100.10:80</address>
+  <secure>0</secure>
+  <vhostMapList>
+    <vhostMap>
+      <vhost>alice.test</vhost>
+      <domain>alice.test, www.alice.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>bob.test</vhost>
+      <domain>bob.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>fallback</vhost>
+      <domain>*</domain>
+    </vhostMap>
+  </vhostMapList>
+</listener>
+
+<listener>
+  <name>198.51.100.10-SSL</name>
+  <address>198.51.100.10:443</address>
+  <reusePort>1</reusePort>
+  <secure>1</secure>
+  <keyFile>/usr/local/lsws/admin/conf/webadmin.key</keyFile>
+  <certFile>/usr/local/lsws/admin/conf/webadmin.crt</certFile>
+  <vhostMapList>
+    <vhostMap>
+      <vhost>alice.test</vhost>
+      <domain>alice.test, www.alice.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>bob.test</vhost>
+      <domain>bob.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>fallback</vhost>
+      <domain>*</domain>
+    </vhostMap>
+  </vhostMapList>
+</listener>
+
+<listener>
+  <name>2001:db8::7</name>
+  <address>[2001:db8::7]:80</address>
+  <secure>0</secure>
+  <vhostMapList>
+    <vhostMap>
+      <vhost>alice.test</vhost>
+      <domain>alice.test, www.alice.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>bob.test</vhost>
+      <domain>bob.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>fallback</vhost>
+      <domain>*</domain>
+    </vhostMap>
+  </vhostMapList>
+</listener>
+
+<listener>
+  <name>2001:db8::7-SSL</name>
+  <address>[2001:db8::7]:443</address>
+  <reusePort>1</reusePort>
+  <secure>1</secure>
+  <keyFile>/usr/local/lsws/admin/conf/webadmin.key</keyFile>
+  <certFile>/usr/local/lsws/admin/conf/webadmin.crt</certFile>
+  <vhostMapList>
+    <vhostMap>
+      <vhost>alice.test</vhost>
+      <domain>alice.test, www.alice.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>bob.test</vhost>
+      <domain>bob.test</domain>
+    </vhostMap>
+    <vhostMap>
+      <vhost>fallback</vhost>
+      <domain>*</domain>
+    </vhostMap>
+  </vhostMapList>
+</listener>
+</listenerList>
+  <virtualHostList>
+<virtualHost>
+  <name>alice.test</name>
+  <vhRoot>/home/alice/alice.test/public_html</vhRoot>
+  <configFile>$SERVER_ROOT/conf/vhosts/alice.test.xml</configFile>
+  <allowSymbolLink>1</allowSymbolLink>
+  <enableScript>1</enableScript>
+  <restrained>1</restrained>
+  <setUIDMode>2</setUIDMode>
+  <chrootMode>0</chrootMode>
+</virtualHost>
+
+<virtualHost>
+  <name>bob.test</name>
+  <vhRoot>/home/bob/bob.test/web</vhRoot>
+  <configFile>$SERVER_ROOT/conf/vhosts/bob.test.xml</configFile>
+  <allowSymbolLink>1</allowSymbolLink>
+  <enableScript>1</enableScript>
+  <restrained>1</restrained>
+  <setUIDMode>2</setUIDMode>
+  <chrootMode>0</chrootMode>
+</virtualHost>
+
+<virtualHost>
+    <name>fallback</name>
+    <vhRoot>/opt/engine/webserver-config/document-root</vhRoot>
+    <configFile>$SERVER_ROOT/conf/vhosts/fallback.xml</configFile>
+    <allowSymbolLink>1</allowSymbolLink>
+    <enableScript>0</enableScript>
+    <restrained>1</restrained>
+</virtualHost></virtualHostList>
+<cache>
+  <cacheEngine>7</cacheEngine>
+  <storage>
+    <cacheStorePath>/opt/engine/data/lscache</cacheStorePath>
+    <pubStoreExpireMinutes>720</pubStoreExpireMinutes>
+    <purgeNoHitTimeout>360</purgeNoHitTimeout>
+  </storage>
+  <cachePolicy>
+    <expireInSeconds>86400</expireInSeconds>
+  </cachePolicy>
+</cache></httpServerConfig>
+
+<<< end of /opt/engine/webserver-config/litespeed/httpd_config.xml
+run ["/usr/local/lib/panelalpha/pa-root","compose.litespeedControl","--","/opt/engine/docker-compose.yml","restart"]

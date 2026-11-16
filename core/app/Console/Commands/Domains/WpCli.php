@@ -12,7 +12,7 @@ class WpCli extends Command
 {
     protected $signature = 'domain:wp-cli {domain} {arg*}';
 
-    protected $description = 'Deprecated: prefer wordpress:command {username}. Runs WP-CLI as the domain\'s project user, using that domain\'s document root as --path if not provided.';
+    protected $description = 'Deprecated: prefer wordpress:command {username}. Runs WP-CLI as the domain\'s project, using that domain\'s document root as --path if not provided.';
 
     public function handle(): int
     {
@@ -27,7 +27,7 @@ class WpCli extends Command
 
         $user = $domain->user;
         if (! $user) {
-            $this->error("User #{$domain->user_id} of domain `{$domainName}` not found in database.");
+            $this->error("Project #{$domain->user_id} of domain `{$domainName}` not found in database.");
 
             return 1;
         }

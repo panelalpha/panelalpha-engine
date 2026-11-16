@@ -3,14 +3,12 @@
 namespace App\System\Project;
 
 use App\System as EngineSystem;
+use App\System\Privileged;
 use RuntimeException;
 
 /**
- * The move-aside / move-in / rollback protocol shared by a push into a home and
- * a classic restore: the live home's entries go aside, the incoming directory's
- * entries take their place, and a failed restore puts the aside back.
- *
- * Every step runs as root through the Engine's process runner.
+ * The move-aside / move-in / rollback protocol of a push into a home and of a classic restore: the live home's entries
+ * go aside, the incoming ones take their place, and a failed restore puts the aside back. Every step runs as root.
  */
 final class HomeSwap
 {
@@ -35,25 +33,16 @@ final class HomeSwap
     {
         $this->started = true;
         $this->run(
-            ['sudo', 'mkdir', '-p', $asideDir],
+            Privileged::files()->makeDirectories($asideDir),
             'Failed to create '.basename($asideDir).' directory',
         );
 
-        foreach ($this->list($this->home, "Failed to list target home before {$label}.") as $entry) {
-            if (in_array($entry, $skipEntries, true)) {
-                continue;
-            }
-            $this->run(
-                ['sudo', 'mv', $this->home.'/'.$entry, $asideDir.'/'],
-                "Failed to move '{$entry}' aside before {$label}",
-            );
-            $this->movedAside[] = $entry;
-        }
+        $this->moveHomeAside($asideDir, $skipEntries, $label);
 
         $incomingName = basename($incomingDir);
         foreach ($this->list($incomingDir, "Failed to list {$incomingName} directory before {$label}.") as $entry) {
             $this->run(
-                ['sudo', 'mv', $incomingDir.'/'.$entry, $this->home.'/'],
+                Privileged::files()->move($incomingDir.'/'.$entry, $this->home.'/'),
                 "Failed to move incoming '{$entry}' into target home",
             );
             $this->movedIn[] = $entry;
@@ -61,10 +50,38 @@ final class HomeSwap
 
         if ($this->isDirectory($incomingDir)) {
             $this->run(
-                ['sudo', 'rmdir', $incomingDir],
+                Privileged::files()->removeEmptyDirectory($incomingDir),
                 "Failed to remove empty {$incomingName} directory after swap",
             );
         }
+    }
+
+    /**
+     * @param  list<string>  $skipEntries
+     */
+    private function moveHomeAside(string $asideDir, array $skipEntries, string $label): void
+    {
+        foreach ($this->list($this->home, "Failed to list target home before {$label}.") as $entry) {
+            if (in_array($entry, $skipEntries, true)) {
+                continue;
+            }
+            $this->run(
+                Privileged::files()->move($this->home.'/'.$entry, $asideDir.'/'),
+                "Failed to move '{$entry}' aside before {$label}",
+            );
+            $this->movedAside[] = $entry;
+        }
+    }
+
+    /** The same swap, what it moved kept, its later steps run on $timeout. */
+    public function withTimeout(int $timeout): self
+    {
+        $copy = new self($this->system, $this->home, $timeout);
+        $copy->started = $this->started;
+        $copy->movedAside = $this->movedAside;
+        $copy->movedIn = $this->movedIn;
+
+        return $copy;
     }
 
     public function hasStarted(): bool
@@ -73,19 +90,18 @@ final class HomeSwap
     }
 
     /**
-     * Undo what this instance's swap() moved, however far it got: the entries
-     * it moved in go to $incomingDir, the entries it moved aside come back.
-     * Nothing else in the home is touched.
+     * Undo what this instance's swap() moved, however far it got: the entries it moved in go to $incomingDir, those it
+     * moved aside come back, and nothing else in the home is touched.
      */
     public function undo(string $incomingDir, string $asideDir, string $label): void
     {
         if ($this->movedIn !== []) {
-            $this->run(['sudo', 'mkdir', '-p', $incomingDir], "Failed to recreate the incoming directory for {$label} undo");
+            $this->run(Privileged::files()->makeDirectories($incomingDir), "Failed to recreate the incoming directory for {$label} undo");
         }
 
         foreach ($this->movedIn as $index => $entry) {
             $this->run(
-                ['sudo', 'mv', $this->home.'/'.$entry, $incomingDir.'/'],
+                Privileged::files()->move($this->home.'/'.$entry, $incomingDir.'/'),
                 "Failed to move incoming '{$entry}' out during {$label} undo",
             );
             unset($this->movedIn[$index]);
@@ -93,35 +109,10 @@ final class HomeSwap
 
         foreach ($this->movedAside as $index => $entry) {
             $this->run(
-                ['sudo', 'mv', $asideDir.'/'.$entry, $this->home.'/'],
+                Privileged::files()->move($asideDir.'/'.$entry, $this->home.'/'),
                 "Failed to move '{$entry}' back during {$label} undo",
             );
             unset($this->movedAside[$index]);
-        }
-    }
-
-    /**
-     * Clear whatever the incoming move left in the home and put the aside back.
-     *
-     * @param  list<string>  $skipEntries  home entries never touched
-     */
-    public function rollback(string $incomingDir, string $asideDir, array $skipEntries, string $label): void
-    {
-        foreach ($this->list($this->home, "Failed to list target home before {$label} rollback.") as $entry) {
-            if (in_array($entry, $skipEntries, true)) {
-                continue;
-            }
-            $this->run(
-                ['sudo', 'mv', $this->home.'/'.$entry, $incomingDir.'/'],
-                "Failed to move live '{$entry}' aside during {$label} rollback",
-            );
-        }
-
-        foreach ($this->list($asideDir, "Failed to list the aside during {$label} rollback.") as $entry) {
-            $this->run(
-                ['sudo', 'mv', $asideDir.'/'.$entry, $this->home.'/'],
-                "Failed to move the aside '{$entry}' back during {$label} rollback",
-            );
         }
     }
 
@@ -144,7 +135,7 @@ final class HomeSwap
      */
     private function list(string $dir, string $context): array
     {
-        $process = $this->system->runProcess(['sudo', 'ls', '-A', $dir], [], $this->timeout);
+        $process = $this->system->runProcess(Privileged::files()->listAllNames($dir), [], $this->timeout);
         if (! $process->isSuccessful()) {
             throw new RuntimeException($context);
         }
@@ -163,7 +154,7 @@ final class HomeSwap
     private function isDirectory(string $dir): bool
     {
         return $this->system
-            ->runProcess(['sudo', 'test', '-d', $dir], [], $this->timeout)
+            ->runProcess(Privileged::files()->isDirectory($dir), [], $this->timeout)
             ->isSuccessful();
     }
 }

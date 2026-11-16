@@ -5,9 +5,12 @@ namespace Tests\Unit\DeployHook;
 use App\Lib\DeployHook\DeployHooks;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
+use App\Models\User;
 use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\Exception as GitException;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\Support\TestNetwork;
 
 /**
@@ -193,6 +196,29 @@ class DeployHooksTest extends DeployHookTestCase
         $this->assertSame([$site->id], DeployHook::pluck('id')->all(), 'only the disconnected checkout loses its hook');
     }
 
+    public function test_disconnect_and_forget_deletes_the_provider_webhook_with_the_remote_it_had(): void
+    {
+        Http::fake(['api.github.com/*' => Http::response(null, 204)]);
+        $user = $this->registeredSiteGitHook();
+
+        (new DeployHooks())->disconnectAndForget($user, $this->disconnectingGit($user));
+
+        Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'DELETE'
+            && $request->url() === 'https://api.github.com/repos/octocat/Hello-World/hooks/7'
+            && $request->hasHeader('Authorization'));
+        $this->assertSame(0, DeployHook::count());
+    }
+
+    public function test_disconnect_and_forget_forgets_the_hook_when_the_provider_refuses_the_delete(): void
+    {
+        Http::fake(['api.github.com/*' => Http::response(['message' => 'Forbidden'], 403)]);
+        $user = $this->registeredSiteGitHook();
+
+        (new DeployHooks())->disconnectAndForget($user, $this->disconnectingGit($user));
+
+        $this->assertSame(0, DeployHook::count());
+    }
+
     public function test_disconnect_and_forget_does_not_forget_the_hook_when_disconnect_fails(): void
     {
         $user = $this->user();
@@ -282,5 +308,30 @@ class DeployHooksTest extends DeployHookTestCase
         $this->assertSame(0, DeployHook::where('user_id', $user->id)->count());
         $this->assertSame(0, HookDelivery::where('deploy_hook_id', $hook->id)->count());
         $this->assertSame([$other->id], DeployHook::pluck('id')->all(), 'another project\'s hook is untouched');
+    }
+
+    private function registeredSiteGitHook(): User
+    {
+        $user = $this->siteGitUser();
+        $user->putSiteGit('public_html', [
+            'repo_url' => 'https://github.com/octocat/Hello-World.git',
+            'branch' => 'main',
+            'token' => 'a-provider-token',
+        ]);
+        $this->hook($user, pathKey: 'public_html')->rememberRegistration('github', '7');
+
+        return $user;
+    }
+
+    private function disconnectingGit(User $user): ProjectGit
+    {
+        $git = $this->git(deployManaged: false, pathKey: 'public_html', connected: true);
+        $git->method('disconnect')->willReturnCallback(function () use ($user): array {
+            $user->forgetSiteGit('public_html');
+
+            return ['connected' => false];
+        });
+
+        return $git;
     }
 }

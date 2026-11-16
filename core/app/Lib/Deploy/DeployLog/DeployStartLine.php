@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * The `Deploy started (source: …)` lines a deploy log opens with, and what
- * they say about where the deploy came from. A create or a rebuild writes its
- * start line before it clones, so the line its clone ends on names the commit.
+ * The `Deploy started (source: …)` and `Deploy requested (…)` lines a deploy log opens with: where it came from and who
+ * asked. A start line is written before the clone, so the line the clone ends on names the commit.
  */
 final class DeployStartLine
 {
@@ -13,6 +12,8 @@ final class DeployStartLine
     public const HEAD = 200;
 
     private const OPENING = 'Deploy started (';
+
+    private const REQUEST_OPENING = 'Deploy requested (';
 
     private const CLONED = 'Repository cloned';
 
@@ -44,6 +45,35 @@ final class DeployStartLine
         return self::OPENING.implode(', ', ['source: '.$source, ...self::pairs($fields)]).')';
     }
 
+    /** Who asked for a deploy and the task that runs it; null when none of it is known. */
+    public static function requestText(?int $taskId, ?string $trigger, ?string $action): ?string
+    {
+        $pairs = self::pairs(['trigger' => $trigger, 'action' => $action, 'task' => $taskId === null ? null : (string) $taskId]);
+
+        return $pairs === [] ? null : self::REQUEST_OPENING.implode(', ', $pairs).')';
+    }
+
+    /**
+     * The last request line among $lines: a deploy continued by a later task names it after the first.
+     *
+     * @param  list<array{msg: string}>  $lines
+     * @return array{trigger: ?string, action: ?string, task_id: ?int}
+     */
+    public static function request(array $lines): array
+    {
+        $fields = [];
+        foreach ($lines as $line) {
+            $fields = self::fields($line['msg'], self::REQUEST_OPENING) ?? $fields;
+        }
+        $task = self::value($fields, 'task');
+
+        return [
+            'trigger' => self::value($fields, 'trigger'),
+            'action' => self::value($fields, 'action'),
+            'task_id' => $task !== null && ctype_digit($task) ? (int) $task : null,
+        ];
+    }
+
     /** The line a clone ends on, naming the branch and the commit it checked out when git could tell. */
     public static function cloned(?string $branch, ?string $commit): string
     {
@@ -69,10 +99,8 @@ final class DeployStartLine
     }
 
     /**
-     * An archive deploy logs `archive` and then `rebuild`, and a template
-     * account that later receives files logs `template` first, so the first
-     * source that is not a follow-on wins. The commit and the branch are the
-     * ones a start line names, or the ones the clone checked out.
+     * The first source that is not a follow-on wins (an archive logs `archive` then `rebuild`, a template account `template`
+     * first); the commit and branch are a start line's, or the ones the clone checked out.
      *
      * @param  list<array{msg: string}>  $lines
      * @return array{source: ?string, commit: ?string, branch: ?string, kind: ?string}

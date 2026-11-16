@@ -52,8 +52,7 @@ test.describe('IP subnets', () => {
         expect(listed?.mask).toBe(subnet.mask);
 
         if (shared) {
-          // The listing reports the flag as 1 while the create response uses true.
-          expect(Boolean(listed?.is_shared), 'the subnet is not marked shared').toBe(true);
+          expect(listed?.is_shared, 'the subnet is not marked shared').toBe(true);
         }
       } finally {
         expect(await removeSubnet(api, subnetId)).toBe(200);

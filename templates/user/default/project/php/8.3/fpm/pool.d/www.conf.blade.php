@@ -15,3 +15,4 @@ pm.max_spare_servers = 3
 
 catch_workers_output = yes
 decorate_workers_output = no
+php_admin_value[user_ini.cache_ttl] = 3

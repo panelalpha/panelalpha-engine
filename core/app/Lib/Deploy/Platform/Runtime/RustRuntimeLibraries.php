@@ -3,23 +3,12 @@
 namespace App\Lib\Deploy\Platform\Runtime;
 
 /**
- * Shared libraries a Rust binary links that its runtime image does not have.
- *
- * Rust compiles in the full `rust:1-bookworm` and runs in `rust:1-slim-bookworm`.
- * A binary linking something only the full image carries -- diesel's libpq is
- * the common one -- compiles and then dies at start with
- * `libpq.so.5: cannot open shared object file`. Those libraries, and only
- * those, are copied from the build image into {@see DIR}, where the start
- * command points `LD_LIBRARY_PATH`. Both images are bookworm, so the copies
- * are the same package versions apt would install.
- *
- * Three scripts, each run in the project as the account: {@see checkScript()}
- * in the runtime image, and only when it finds a gap {@see bundleScript()} in
- * the build image and {@see verifyScript()} in the runtime image again.
+ * Shared libraries a Rust binary links (diesel's libpq) that the slim runtime image lacks, copied from
+ * the build image by the three scripts below; both are bookworm, so they are the versions apt would install.
  */
 final class RustRuntimeLibraries
 {
-    /** Relative to the project, beside cargo's own output. */
+    /** Relative to the project, beside cargo's own output; the start command points LD_LIBRARY_PATH here. */
     public const DIR = 'target/.panelalpha-libs';
 
     /** Written by the check only when something is missing: the signal to bundle. */
@@ -37,9 +26,8 @@ final class RustRuntimeLibraries
     private const NOT_FOUND = "awk '\$2 == \"=>\" && \$3 == \"not\" {print \$1}' | sort -u";
 
     /**
-     * Runtime image. Clears the last deploy's bundle, and writes
-     * {@see MISSING_FILE} only when a binary names a library it cannot resolve.
-     * A runtime image with no ldd is left alone, as before.
+     * Runtime image: clears the last deploy's bundle, and writes {@see MISSING_FILE} only when a
+     * binary names a library it cannot resolve; an image with no ldd is left alone.
      */
     public static function checkScript(): string
     {
@@ -54,10 +42,8 @@ final class RustRuntimeLibraries
     }
 
     /**
-     * Build image, where the binary was linked. ldd's answer here is the whole
-     * closure, so a library the missing one needs in turn (libpq's Kerberos
-     * and LDAP) is found in the same pass; whatever the runtime image already
-     * resolves stays out, glibc included.
+     * Build image, where ldd gives the whole closure (libpq's Kerberos and LDAP) in one pass;
+     * whatever the runtime image already resolves stays out, glibc included.
      */
     public static function bundleScript(): string
     {
@@ -71,9 +57,8 @@ final class RustRuntimeLibraries
     }
 
     /**
-     * Runtime image again, with the bundle on the path the start command will
-     * set. Anything still unresolved fails the deploy here, naming it, rather
-     * than as a container that restart-loops behind a 502.
+     * Runtime image again, with the bundle on the start command's path; anything still unresolved
+     * fails the deploy here, naming it, rather than restart-looping behind a 502.
      */
     public static function verifyScript(): string
     {

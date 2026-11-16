@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Contract for named maintenance-mode operations: enabled body, set resource
  * body, failure as Exception, and the WP-CLI argv including resolved --path.
- * Status treats a non-zero is-active exit as enabled=false, not as a failure.
+ * Status treats a silent non-zero is-active exit as enabled=false, and one with an error as a failure.
  * Set reads the state back, since WP-CLI reports success either way.
  */
 class MaintenanceTest extends TestCase
@@ -43,6 +43,25 @@ class MaintenanceTest extends TestCase
             $sequence[0]
         );
         $this->assertSame(['enabled' => true], $body);
+    }
+
+    public function test_get_fails_where_there_is_no_wordpress(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "Error: This does not seem to be a WordPress installation.\n"],
+            ],
+        );
+
+        try {
+            $maintenance->get();
+            $this->fail('A read where there is no WordPress answered a state.');
+        } catch (WordPressException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('does not seem to be a WordPress installation', $e->getMessage());
+        }
     }
 
     public function test_get_returns_enabled_false_when_is_active_exits_nonzero(): void

@@ -1,7 +1,12 @@
 import { faker } from '@faker-js/faker';
 import { test } from '@playwright/test';
 import { type EngineApi } from '@/clients/engine-api';
-import { type TaskSnapshot, type UserCredentials } from '@/types';
+import {
+  type ApiListResponse,
+  type Domain,
+  type TaskSnapshot,
+  type UserCredentials,
+} from '@/types';
 import { getSettings } from '@/config/settings';
 import { configuredGitRepo, waitForDeploy } from '@/helpers/deploy-helpers';
 import { isProjectCreateOk, taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
@@ -67,6 +72,11 @@ const manualCleanupUsers = new Set<string>();
 /** Usernames of `autoCleanup: false` users still on the Engine as far as this worker knows. */
 export function manualCleanupPending(): string[] {
   return [...manualCleanupUsers];
+}
+
+/** Hands an `autoCleanup: false` user over to later runs, so the worker sweep keeps it. */
+export function keepManualUser(username: string): void {
+  manualCleanupUsers.delete(username);
 }
 
 const DIAGNOSTICS_BUDGET_MS = 15_000;
@@ -451,25 +461,32 @@ export class UserFactory {
 
   private async cleanupUserDomains(username: string): Promise<void> {
     try {
-      const response = await this.api.listUserDomains(username);
-      const domains = response.data;
-
-      if (!Array.isArray(domains)) {
-        return;
-      }
-
-      for (const domain of domains) {
-        if (domain.type === 'addon' || domain.type === 'alias') {
-          try {
-            await this.api.deleteDomain(username, domain.domain);
-          } catch (error) {
-            console.warn(`Failed to delete domain ${domain.domain}:`, error);
-          }
+      for (const domain of await this.removableDomains(username)) {
+        try {
+          await this.api.deleteDomain(username, domain.domain);
+        } catch (error) {
+          console.warn(`Failed to delete domain ${domain.domain}:`, error);
         }
       }
     } catch (error) {
       console.warn(`Failed to cleanup domains for ${username}:`, error);
     }
+  }
+
+  /** The project's addon and alias domains; none when the project is already gone. */
+  private async removableDomains(username: string): Promise<Domain[]> {
+    const { status, body } = await this.api.listUserDomainsRaw(username);
+    if (status === 404) {
+      return [];
+    }
+    if (status !== 200) {
+      throw new Error(`GET projects/${username}/domains answered ${status}: ${describeBody(body)}`);
+    }
+    const domains = (body as Partial<ApiListResponse<Domain>> | null)?.data;
+    if (!Array.isArray(domains)) {
+      return [];
+    }
+    return domains.filter((domain) => domain.type === 'addon' || domain.type === 'alias');
   }
 }
 

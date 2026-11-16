@@ -2,11 +2,16 @@
 
 namespace App\Console\Commands\Backup\Container;
 
+use App\Http\Requests\Concerns\NormalizesBackupContainerCredentials;
 use App\Models\BackupContainer;
+use Illuminate\Validation\ValidationException;
 
 class UpdateCommand extends BackupContainerCommand
 {
-    protected $signature = 'backup:container:update {container : Container ID or name}'.self::OPTIONS;
+    use NormalizesBackupContainerCredentials;
+
+    protected $signature = 'backup:container:update {container : Container ID or name}'.self::OPTIONS.'
+        {--default : Make this container the default one}';
 
     protected $description = 'Update a backup container';
 
@@ -31,7 +36,9 @@ class UpdateCommand extends BackupContainerCommand
             return 1;
         }
 
-        $refusal = $this->refusal($container, $updates);
+        $makeDefault = (bool) $this->option('default');
+
+        $refusal = $this->refusal($container, $updates, $makeDefault);
         if ($refusal !== null) {
             $this->error($refusal);
 
@@ -42,7 +49,7 @@ class UpdateCommand extends BackupContainerCommand
             return 1;
         }
 
-        $this->showChanges($container, $updates);
+        $this->showChanges($container, $updates, $makeDefault);
 
         if (! $this->option('force') && ! $this->confirm('Apply these changes?')) {
             $this->info('Cancelled.');
@@ -51,6 +58,9 @@ class UpdateCommand extends BackupContainerCommand
         }
 
         $container->update($updates);
+        if ($makeDefault) {
+            $container->makeDefault();
+        }
         $this->info('Backup container updated successfully.');
 
         return 0;
@@ -91,6 +101,16 @@ class UpdateCommand extends BackupContainerCommand
         }
 
         $effectiveDriver = $updates['driver'] ?? $container->driver;
+        if ($effectiveDriver === 'local') {
+            try {
+                $this->assertLocalLocationIsSafe($updates['location'] ?? $container->location);
+            } catch (ValidationException $e) {
+                $this->error(collect($e->errors())->flatten()->first() ?? $e->getMessage());
+
+                return null;
+            }
+        }
+
         if ($this->credentialFlagsProvided($effectiveDriver)) {
             try {
                 $merged = array_merge($container->credentials ?? [], $this->buildCredentials($effectiveDriver) ?? []);
@@ -112,9 +132,9 @@ class UpdateCommand extends BackupContainerCommand
      *
      * @param  array<string, mixed>  $updates
      */
-    private function refusal(BackupContainer $container, array $updates): ?string
+    private function refusal(BackupContainer $container, array $updates, bool $makeDefault): ?string
     {
-        if ($updates === []) {
+        if ($updates === [] && ! $makeDefault) {
             return 'No updates provided.';
         }
 
@@ -137,13 +157,14 @@ class UpdateCommand extends BackupContainerCommand
     }
 
     /** @param array<string, mixed> $updates */
-    private function showChanges(BackupContainer $container, array $updates): void
+    private function showChanges(BackupContainer $container, array $updates, bool $makeDefault): void
     {
         $this->info('Current values:');
         $this->line("  Name: {$container->name}");
         $this->line("  Driver: {$container->driver}");
         $this->line("  Location: {$container->location}");
         $this->line('  Has credentials: '.($container->credentials !== null ? 'yes' : 'no'));
+        $this->line('  Default: '.($container->is_default ? 'yes' : 'no'));
 
         $this->info('New values:');
         foreach ($updates as $key => $value) {
@@ -153,6 +174,9 @@ class UpdateCommand extends BackupContainerCommand
                 continue;
             }
             $this->line('  '.ucfirst($key).": {$value}");
+        }
+        if ($makeDefault) {
+            $this->line('  Default: yes');
         }
     }
 

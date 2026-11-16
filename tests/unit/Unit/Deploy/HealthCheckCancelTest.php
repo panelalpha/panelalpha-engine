@@ -77,6 +77,7 @@ class HealthCheckCancelTest extends TestCase
     private function health(System $system): AppHealth
     {
         $dind = $this->createStub(Dind::class);
+        $dind->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $dind->method('system')->willReturn($system);
         $dind->method('username')->willReturn($this->username);
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
@@ -87,7 +88,7 @@ class HealthCheckCancelTest extends TestCase
                 return [8080];
             }
 
-            protected function containerSnapshot(): ?string
+            protected function containerSnapshot(): ?array
             {
                 return null;
             }

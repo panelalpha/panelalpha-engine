@@ -94,7 +94,8 @@ class GitRemoteProbeRefsTest extends TestCase
         $e = $this->refusal($probe, 'https://example.test/o/r.git', null);
 
         $this->assertSame(GitRefsUnavailableException::AUTHENTICATION_FAILED, $e->outcome);
-        $this->assertStringContainsString('git_token', $e->getMessage());
+        $this->assertStringContainsString('Send a token that can read it', $e->getMessage());
+        $this->assertStringNotContainsString('git_token', $e->getMessage());
     }
 
     public function test_a_missing_repository_is_not_found(): void

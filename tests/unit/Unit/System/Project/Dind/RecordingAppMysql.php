@@ -4,13 +4,14 @@ namespace Tests\Unit\System\Project\Dind;
 
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Users;
 use PDO;
 
 /**
  * The account MySQL server as a list of what was asked of it: databases and
- * users held in memory, every dump, restore and copy script recorded.
+ * users held in memory, every dump, restore, copy and drop recorded.
  */
 class RecordingAppMysql extends Mysql
 {
@@ -25,8 +26,6 @@ class RecordingAppMysql extends Mysql
 
     /** @var list<string> */
     public array $log = [];
-
-    public ?string $failScriptContaining = null;
 
     public bool $failRestore = false;
 
@@ -49,13 +48,14 @@ class RecordingAppMysql extends Mysql
         $this->log[] = "restore {$name} from " . basename($sqlGzPath);
     }
 
-    public function runSitesDbScript(string $script, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
     {
-        if ($this->failScriptContaining !== null && str_contains($script, $this->failScriptContaining)) {
-            throw new \RuntimeException("{$failurePrefix}: copy exploded");
-        }
-        preg_match("/-uroot '([^']+)' \\|.*-uroot '([^']+)'$/", $script, $m);
-        $this->log[] = 'copy ' . ($m[1] ?? '?') . ' to ' . ($m[2] ?? '?');
+        $this->log[] = 'copy ' . $from . ' to ' . $to;
+    }
+
+    public function dropTableInSitesDb(string $database, string $table): void
+    {
+        $this->log[] = "drop table {$database}.{$table}";
     }
 
     public function databases(): Databases

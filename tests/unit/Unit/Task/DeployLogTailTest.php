@@ -117,6 +117,16 @@ class DeployLogTailTest extends SqliteTaskTestCase
         $this->assertFalse(DeployLogTail::preserve($task, null));
     }
 
+    public function test_a_deploy_log_with_no_lines_copies_nothing(): void
+    {
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default');
+        $logger = $this->failedDeploy(1);
+        DeployLogger::deleteUserLogs(end($this->usernames));
+
+        $this->assertFalse(DeployLogTail::preserve($task, $logger));
+        $this->assertSame(0, TaskLog::query()->count());
+    }
+
     public function test_retarget_points_at_the_task_log_instead_of_the_deleted_deploy_log(): void
     {
         $this->assertSame(

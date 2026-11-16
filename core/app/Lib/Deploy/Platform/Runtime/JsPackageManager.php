@@ -5,16 +5,14 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use App\Lib\Deploy\AccountHomeRead;
 
 /**
- * npm/yarn/pnpm/bun mechanics shared by every JS recipe: which manager a repo
- * uses, the install/build/start command for each, and the install-time quirks
- * (frozen lockfiles, corepack pinning, git-hook scripts unrunnable in a build).
+ * npm/yarn/pnpm/bun mechanics shared by every JS recipe: which manager a repo uses, its commands,
+ * and the install-time quirks (frozen lockfiles, corepack pinning, git-hook scripts).
  */
 class JsPackageManager
 {
     /**
-     * Lockfile first, in this order: `bun.lock`/`bun.lockb`, `pnpm-lock.yaml`,
-     * `yarn.lock`, `package-lock.json`/`npm-shrinkwrap.json`. Then the
-     * `packageManager` field of package.json; then npm.
+     * The lockfile's manager (bun, pnpm, yarn, npm, in that order), then package.json's `packageManager`,
+     * then npm.
      *
      * @param  array<string, true>  $files
      * @param  array<string, mixed>  $package
@@ -81,8 +79,7 @@ class JsPackageManager
 
     /**
      * The lockfile this manager reads, or null when the project ships none.
-     * `bun.lock` outranks `bun.lockb`; `package-lock.json` outranks
-     * `npm-shrinkwrap.json`.
+     * `bun.lock` outranks `bun.lockb`; `package-lock.json` outranks `npm-shrinkwrap.json`.
      *
      * @param  array<string, true>  $files
      */
@@ -115,17 +112,14 @@ class JsPackageManager
     }
 
     /**
-     * Install corepack where the image lacks it: Node 25+ no longer bundles
-     * it (Misskey pins `.node-version` 26.4.0 and died on `corepack: not
-     * found`), while npm ships in every Node image. Its own `sh -c`, so the
-     * `||` cannot swallow a failure earlier in an `&&` chain.
+     * Installs corepack on Node 25+, which does not bundle it.
+     * Its own `sh -c`, so the `||` cannot swallow a failure earlier in an `&&` chain.
      */
     public const ENSURE_COREPACK = "sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'";
 
     /**
-     * The install line per manager: `bun install`; pnpm via corepack with
-     * `--frozen-lockfile` when a lockfile exists; `corepack enable && yarn
-     * install`; `npm ci` with a lockfile, `npm install` without.
+     * `bun install`, never frozen: older Bun lockfiles disagree with oven/bun:1. pnpm and yarn through corepack,
+     * frozen with a lockfile; `npm ci` with a lockfile, `npm install` without.
      *
      * @param  array<string, true>  $files
      * @param  array<string, mixed>  $package
@@ -138,8 +132,6 @@ class JsPackageManager
     ): string {
         $lock = self::lockfileName($pm, $files);
         if ($pm === 'bun') {
-            // Never --frozen-lockfile: lockfiles committed under an older Bun
-            // disagree with the oven/bun:1 image.
             return self::withCiInstallEnv('bun install');
         }
         if ($pm === 'pnpm') {
@@ -164,9 +156,7 @@ class JsPackageManager
     }
 
     /**
-     * husky / lefthook `prepare` hooks fail in Docker (no .git, no git binary).
-     * CI=1 also skips some interactive postinstall prompts.
-     *
+     * Quiets husky / lefthook hooks, which fail without .git; CI=1 skips interactive postinstall prompts.
      * Idempotent: a command already carrying HUSKY=0 is returned unchanged.
      */
     public static function withCiInstallEnv(string $command): string
@@ -180,12 +170,8 @@ class JsPackageManager
     }
 
     /**
-     * Root `prepare`/`postinstall` that cannot run before install here: a
-     * git-hook tool (lefthook, husky, …) never can, since an image build has no
-     * .git and no git binary.
-     *
-     * A script running a file *from the repository* is only unrunnable when the
-     * source is not there yet, which `$sourcePresent` says.
+     * A root lifecycle script that cannot run before install: a git-hook tool never can (no .git in a build),
+     * and one running a repository file cannot while the source is absent (`$sourcePresent`).
      */
     public static function isGitHookInstallerScript(string $script, bool $sourcePresent = false): bool
     {
@@ -204,18 +190,8 @@ class JsPackageManager
     }
 
     /**
-     * A lifecycle script that runs a file from the repository, e.g.
-     * `./backend/scripts/check-supported-node.cjs`. The dependencies layer
-     * copies only package.json and the lockfile, so the file arrives one layer
-     * later, on `COPY . .`, and the install fails.
-     *
-     * Paths under `node_modules/` are excluded — they exist by then, and
-     * stripping them would break a package that builds itself on install. So is
-     * an inline `node -e '…'`: the token after the runner must look like a
-     * script file.
-     *
-     * Only true where the source is genuinely absent, which is the manifests-first
-     * layer alone; `$sourcePresent` says so.
+     * A lifecycle script running a repository file, which the manifests-first layer has not copied yet.
+     * Paths under `node_modules/` and inline `node -e '…'` do not count.
      */
     public static function referencesLocalScript(string $script): bool
     {
@@ -266,24 +242,12 @@ class JsPackageManager
     private const STRIP_TIMEOUT_SECONDS = 30;
 
     /**
-     * On a host build this runs against a bind mount of the checkout, so the
-     * file is written only when a script actually goes: a strip that matches
-     * nothing leaves the tracked package.json byte-identical.
+     * Writes package.json only when a script goes, leaving a bind-mounted checkout untouched otherwise.
+     * Bounded and allowed to fail: a hanging RUN pins a core, while a failed `husky install` is visible.
      */
     public static function dockerfileStripGitHookScriptsCommand(string $pm, bool $sourcePresent = false): string
     {
-        // The repository-file rule applies only where the file is absent — the
-        // manifests-first layer. The matcher loops every match, unlike a single
-        // `match()`: `node node_modules/foo/build.js && node scripts/y.js` has
-        // one path under node_modules and one in the repository, and inspecting
-        // only the first said "keep".
-        $localRule = $sourcePresent
-            ? ''
-            : 'const local=/(?:^|[\\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx)\\s+(?:\\.\\/)?((?:[\\w.-]+\\/)*[\\w.-]+\\.(?:cjs|mjs|js|ts|sh))\\b/gi;'
-                .'const localHit=s=>{local.lastIndex=0;let m;'
-                .'while((m=local.exec(s))!==null){'
-                .'if(m[1].toLowerCase().indexOf("node_modules/")!==0)return true;}'
-                .'return false;};';
+        $localRule = self::localScriptRule($sourcePresent);
         $localTest = $sourcePresent ? '' : '||localHit(s)';
 
         $js = 'const fs=require("fs");'
@@ -301,17 +265,28 @@ class JsPackageManager
 
         $runner = $pm === 'bun' ? 'bun' : 'node';
 
-        // Bounded and allowed to fail: without the strip `npm install` runs
-        // `husky install` in a tree with no .git and fails, which is visible,
-        // while an unbounded RUN that hangs pins a core.
         return 'timeout '.self::STRIP_TIMEOUT_SECONDS.' '
             .$runner.' -e '."'".$js."'"
             .' || true';
     }
 
     /**
-     * npm/bun/pnpm workspace root: install needs every package.json, not only
-     * the root manifest.
+     * The repository-file matcher, only where the file is absent. It loops every match: inspecting only the
+     * first kept `node node_modules/foo/build.js && node scripts/y.js`.
+     */
+    private static function localScriptRule(bool $sourcePresent): string
+    {
+        return $sourcePresent
+            ? ''
+            : 'const local=/(?:^|[\\s;&|(])(?:node|bash|sh|zsh|dash|bun|deno|ts-node|tsx)\\s+(?:\\.\\/)?((?:[\\w.-]+\\/)*[\\w.-]+\\.(?:cjs|mjs|js|ts|sh))\\b/gi;'
+                .'const localHit=s=>{local.lastIndex=0;let m;'
+                .'while((m=local.exec(s))!==null){'
+                .'if(m[1].toLowerCase().indexOf("node_modules/")!==0)return true;}'
+                .'return false;};';
+    }
+
+    /**
+     * npm/bun/pnpm workspace root: install needs every package.json, not only the root manifest.
      *
      * @param  array<string, mixed>  $package
      * @param  array<string, true>  $files
@@ -330,13 +305,8 @@ class JsPackageManager
     }
 
     /**
-     * Pin pnpm via corepack. Bare `corepack enable && pnpm` downloads latest,
-     * and pnpm 11+ needs Node 22.13 (`node:sqlite`), so it crashes on the
-     * Node 18/20 images `engines.node` often selects.
-     *
-     * Never create pnpm-workspace.yaml: a settings-only file turns a
-     * single-package repo into a broken workspace. `--dangerously-allow-all-builds`
-     * (10.9+) is added only for a project declaring no build policy.
+     * pnpm pinned via corepack, since latest needs Node 22.13; `--dangerously-allow-all-builds` (10.9+) only
+     * without a build policy. Never writes pnpm-workspace.yaml: that breaks a single-package repo.
      *
      * @param  array<string, mixed>  $package
      */
@@ -358,10 +328,7 @@ class JsPackageManager
     }
 
     /**
-     * Every spelling of "this project has already decided which dependencies
-     * may run build scripts": pnpm 10's `onlyBuiltDependencies` /
-     * `neverBuiltDependencies`, pnpm 11's `allowBuilds` /
-     * `ignoredBuiltDependencies`.
+     * Every spelling of "this project decided which dependencies may run build scripts", pnpm 10's and 11's.
      *
      * @var list<string>
      */
@@ -373,16 +340,8 @@ class JsPackageManager
     ];
 
     /**
-     * Has the project already decided which dependencies may run build scripts?
-     *
-     * The repo's own policy wins: `--dangerously-allow-all-builds` sets
-     * neverBuiltDependencies, and pnpm 10 aborts with
-     * ERR_PNPM_CONFIG_CONFLICT_BUILT_DEPENDENCIES when that meets the repo's
-     * own onlyBuiltDependencies. HedgeDoc declares `allowBuilds: {
-     * better-sqlite3: false }` — the flag overrode it, node-gyp ran, and the
-     * build died on `Could not find any Python installation to use`.
-     *
-     * Read from `package.json` `pnpm` and from pnpm-workspace.yaml.
+     * Whether package.json `pnpm` or pnpm-workspace.yaml sets a build policy, which the flag must not override:
+     * pnpm 10 aborts on the conflict, and HedgeDoc's `better-sqlite3: false` was overridden.
      *
      * @param  array<string, mixed>  $package
      */
@@ -414,15 +373,8 @@ class JsPackageManager
     }
 
     /**
-     * `--frozen-lockfile` for Yarn 1, `--immutable` for Yarn 2+. Each rejects
-     * the other's spelling as a hard error (`YN0050`), so the major must be
-     * known.
-     *
-     * `yarnMajor()` decides from three signals, in order of authority:
-     * `packageManager` in package.json (corepack refuses to run any other
-     * version), then `.yarnrc.yml`, which only Yarn 2+ reads, then the
-     * lockfile's header — `__metadata:` is Berry, `# yarn lockfile v1` is
-     * Classic. With no Berry signal at all it answers Classic.
+     * `--frozen-lockfile` for Yarn 1, `--immutable` for Yarn 2+: each rejects the other's (`YN0050`).
+     * With no Berry signal (`packageManager`, `.yarnrc.yml`, the lockfile header) it is Classic.
      *
      * @param  array<string, true>  $files
      * @param  array<string, mixed>  $package
@@ -435,13 +387,8 @@ class JsPackageManager
     }
 
     /**
-     * `--ignore-engines` for a Classic Yarn install, nothing for Berry.
-     *
-     * Yarn 1 refuses to install when *any* package in the resolved tree
-     * declares an `engines.node` the running Node does not satisfy, which npm
-     * ignores by default. A transitive `@mybucks.online/core` wanting `>=24`
-     * failed a static build at Node 20 with `Found incompatible module`.
-     * Yarn 2+ does not enforce `engines`, and the flag is unknown to it.
+     * `--ignore-engines` for Classic Yarn, which refuses any package's unmet `engines.node`; nothing for Berry.
+     * A null major, no Berry signal, is Classic as in yarnLockfileFlag().
      *
      * @param  array<string, true>  $files
      * @param  array<string, mixed>  $package
@@ -450,7 +397,6 @@ class JsPackageManager
     {
         $major = self::yarnMajor($files, $package, $projectDir);
 
-        // null means no Berry signal, which yarnLockfileFlag() treats as Classic.
         return $major === null || $major < 2 ? '--ignore-engines' : '';
     }
 
@@ -491,15 +437,8 @@ class JsPackageManager
     }
 
     /**
-     * Whether the install's lifecycle scripts or $build call `php` or
-     * `composer`, following `npm run x` / `yarn x` into the scripts they name.
-     * selfoss's postinstall runs `composer install`, which a Node-only build
-     * image cannot.
-     *
-     * With $read (a file relative to the package.json's directory) it also
-     * reads the gulpfile or Gruntfile a visited script runs -- OSPOS's
-     * `gulp default` runs `composer licenses` from a gulp task -- and the
-     * install hooks of workspace members named by a literal path.
+     * Whether the install's lifecycle scripts or $build call `php` or `composer` (selfoss's postinstall), through
+     * the scripts they run and, with $read, the gulpfile or Gruntfile they use and literal workspace members.
      *
      * @param  array<string, mixed>  $package
      * @param  (callable(string): ?string)|null  $read
@@ -511,8 +450,26 @@ class JsPackageManager
         foreach (['preinstall', 'install', 'postinstall', 'prepare'] as $hook) {
             $pending[] = is_string($scripts[$hook] ?? null) ? $scripts[$hook] : '';
         }
-        $seen = [];
         $visited = '';
+        if (self::scriptBodiesCallPhp($scripts, $pending, $visited)) {
+            return true;
+        }
+        if ($read === null) {
+            return false;
+        }
+
+        return self::taskRunnerCallsPhp($visited, $read) || self::workspaceMemberCallsPhp($package, $read);
+    }
+
+    /**
+     * Walks the bodies and every `npm run x` / `yarn x` they name, with its pre and post scripts.
+     *
+     * @param  array<string, mixed>  $scripts
+     * @param  list<string>  $pending
+     */
+    private static function scriptBodiesCallPhp(array $scripts, array $pending, string &$visited): bool
+    {
+        $seen = [];
         while ($pending !== []) {
             $body = (string) array_shift($pending);
             $visited .= $body."\n";
@@ -529,23 +486,38 @@ class JsPackageManager
                 }
             }
         }
-        if ($read === null) {
-            return false;
-        }
 
+        return false;
+    }
+
+    /**
+     * A shell command in a string of a visited runner's config: OSPOS's gulp task runs `composer licenses`.
+     *
+     * @param  callable(string): ?string  $read
+     */
+    private static function taskRunnerCallsPhp(string $visited, callable $read): bool
+    {
         foreach (self::TASK_RUNNER_FILES as $runner => $files) {
             if (preg_match('/\b'.$runner.'\b/i', $visited) !== 1) {
                 continue;
             }
             foreach ($files as $file) {
                 $contents = $read($file);
-                // A shell command in a string: run('composer licenses ...'), exec("php ...").
                 if ($contents !== null && preg_match('/[\'"`]\s*(?:php|composer)\s/', $contents) === 1) {
                     return true;
                 }
             }
         }
 
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $package
+     * @param  callable(string): ?string  $read
+     */
+    private static function workspaceMemberCallsPhp(array $package, callable $read): bool
+    {
         foreach (self::workspaces($package) as $workspace) {
             if (str_contains($workspace, '*')) {
                 continue;
@@ -566,9 +538,8 @@ class JsPackageManager
     ];
 
     /**
-     * Yarn 2+ on Plug'n'Play, its default linker: the install writes no
-     * node_modules and its link step deletes any it finds. From file contents,
-     * so a caller reading through the account's filesystem can ask.
+     * Yarn 2+ on Plug'n'Play, whose install writes no node_modules and deletes any it finds.
+     * From file contents, so a caller reading through the account's filesystem can ask.
      *
      * @param  array<string, mixed>  $package
      */
@@ -600,6 +571,7 @@ class JsPackageManager
         return 'pnpm@10';
     }
 
+    /** pnpm@10 with no minor resolves to the latest 10.x, which includes 10.9+. */
     private static function pnpmSupportsDangerouslyAllowAllBuilds(string $spec): bool
     {
         if (preg_match('/^pnpm@(\d+)(?:\.(\d+))?/', $spec, $matches) !== 1) {
@@ -612,7 +584,6 @@ class JsPackageManager
         if ($major < 10) {
             return false;
         }
-        // pnpm@10 (no minor) resolves to latest 10.x, which includes 10.9+.
         if (! isset($matches[2]) || $matches[2] === '') {
             return true;
         }
@@ -621,9 +592,8 @@ class JsPackageManager
     }
 
     /**
-     * Pick build/start for a workspace: `<kind>:<slug>` if it exists, then the
-     * root script (injecting `--filter` into a bare `turbo build`), else the
-     * framework default from `$partial['default_<kind>']`.
+     * Build/start for a workspace: `<kind>:<slug>`, then the root script (a bare `turbo build` gets `--filter`),
+     * else the framework default, run in the workspace, where its binary is installed (Teable's root has none).
      *
      * @param  array<string, mixed>  $scripts
      * @param  array<string, mixed>  $partial
@@ -655,9 +625,6 @@ class JsPackageManager
             return '';
         }
 
-        // The framework's own default names its binary (`npx next build`),
-        // which a workspace installs under the app, not the root: Teable's
-        // root has no `next`, so the build died on `sh: 1: next: not found`.
         $relative = trim((string) ($partial['workspace_relative'] ?? ''), '/');
 
         return $relative === ''
@@ -723,13 +690,8 @@ class JsPackageManager
     }
 
     /**
-     * The workspace paths a root package.json declares, in both shapes npm
-     * accepts: a list, or an object with a `packages` key.
-     *
-     * A path is kept only when it stays inside the repository — these become
-     * the directory a shell command runs in, and a customer's package.json is
-     * not the place to take `../../..` from. A glob is returned as written.
-     * A string in this field names no directory.
+     * The workspace paths a root package.json declares, as a list or under `packages`, globs as written.
+     * Only paths inside the repository (absolute checked before trimming): a shell command runs in them.
      *
      * @param  array<string, mixed>  $package
      * @return list<string>
@@ -749,8 +711,6 @@ class JsPackageManager
             if (! is_string($workspace)) {
                 continue;
             }
-            // Absolute first, on the untrimmed string: trimming the leading
-            // slash off `/etc` would make it look like a relative path.
             if (str_starts_with(trim($workspace), '/')) {
                 continue;
             }
@@ -767,22 +727,12 @@ class JsPackageManager
     }
 
     /**
-     * Where a project's frontend build actually runs. The root `build` script
-     * wins; failing that, the first declared workspace with one, in declaration
-     * order.
-     *
-     * Firefly III's root declares `resources/assets/v1` and
-     * `resources/assets/v2` and only v2 carries a `build`, so `npm run build`
-     * there stops on `Missing script: "build"` and every Blade `@vite` answers
-     * 500 with ViteManifestNotFoundException.
+     * Where the frontend build runs: the root `build` script, else the first declared workspace with one
+     * (Firefly III's v2), else null; `workspace` is '' for the root.
      *
      * @param  array<string, mixed>  $package  the root package.json, decoded
-     * @param  callable(string): ?array<string, mixed>  $packageAt  a workspace
-     *                                                              path => the package.json under it, decoded, or null when there is
-     *                                                              none to read
-     * @return array{workspace: string, script: string}|null null when neither
-     *                                                       the root nor a declared workspace builds anything; `workspace`
-     *                                                       is '' for the root
+     * @param  callable(string): ?array<string, mixed>  $packageAt  workspace path => its package.json, or null
+     * @return array{workspace: string, script: string}|null
      */
     public static function buildTarget(array $package, callable $packageAt): ?array
     {
@@ -805,10 +755,7 @@ class JsPackageManager
     }
 
     /**
-     * Run a command in a workspace directory.
-     *
-     * `cd`, not a `--workspace`/`--filter` flag — every manager spells the
-     * filter differently, and the build tools read the directory they start in.
+     * A command run in a workspace by `cd`, since every manager spells the filter differently.
      * Escaped, because the path comes out of a customer repository.
      */
     public static function inWorkspace(string $command, string $workspace): string

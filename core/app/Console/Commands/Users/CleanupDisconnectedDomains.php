@@ -35,7 +35,7 @@ class CleanupDisconnectedDomains extends Command
     private function cleanupDomains($users): int
     {
         foreach ($users as $user) {
-            $this->info("User `{$user->username}`:");
+            $this->info("Project `{$user->username}`:");
 
             $userProject = $user->project();
             $webDomains = $userProject->listDomains();

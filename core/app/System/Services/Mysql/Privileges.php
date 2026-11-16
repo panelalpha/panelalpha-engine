@@ -9,6 +9,8 @@ use PDO;
 
 class Privileges
 {
+    private const DATABASE_GRANT_TARGET = '/^`((?:[^`]|``)+)`\.\*$/';
+
     public function __construct(
         protected PDO $pdo,
         protected string $host,
@@ -56,6 +58,15 @@ class Privileges
             }
             throw $e;
         }
+
+        return $this->grantedDatabases($query, $user);
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function grantedDatabases(\PDOStatement $query, string $user): array
+    {
         $privileges = [];
         while ($res = $query->fetch()) {
             if (
@@ -70,11 +81,22 @@ class Privileges
                 continue;
             }
             $on = Str::betweenFirst($res[0], ' ON ', " TO `{$user}`@`{$this->host}`");
-            [$db] = explode('.', $on, 2);
-            $db = trim($db, '`');
-            $privileges[$db] = $privs;
+            $db = self::databaseOf($on);
+            if ($db !== null) {
+                $privileges[$db] = $privs;
+            }
         }
 
         return $privileges;
+    }
+
+    /** The database a grant is on, or null when the grant is on a table, a routine or every database. */
+    private static function databaseOf(string $on): ?string
+    {
+        if (preg_match(self::DATABASE_GRANT_TARGET, $on, $match) !== 1) {
+            return null;
+        }
+
+        return str_replace('``', '`', $match[1]);
     }
 }

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a WordPress wp-config constant
 
-    Removes a constant (or, with `type`, a variable) from wp-config.php via `wp config delete`. Optional `path` selects the install.
+    Removes a constant (or, with `type`, a variable) from wp-config.php via `wp config delete`. Optional `path` selects the install. The entry is removed from wp-config.php and its value is not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

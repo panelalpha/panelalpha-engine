@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\Sidecar\ServiceRole;
 
 /**
- * Services that provably run once and exit: a restart policy restarts a finished
- * job forever. Chatwoot's `base` is the anchor its `rails` and `sidekiq` inherit
- * from — it defines nothing of its own, runs the image default command and exits.
+ * Services that provably run once and exit, which a restart policy would restart forever
+ * (Chatwoot's `base` anchor, a migration job, a file-permission fixer).
  */
 final class OneShotServices
 {
@@ -17,6 +16,8 @@ final class OneShotServices
     private const FINITE_COMMANDS = ['chown', 'chmod', 'chgrp', 'mkdir', 'cp', 'touch', 'ln', 'rm', 'install', 'echo', 'true'];
 
     /**
+     * Something waits for it to finish and nothing waits for it to run, or nothing waits on it at all.
+     *
      * @param  array<string, mixed>  $compose
      * @return list<string>
      */
@@ -32,7 +33,6 @@ final class OneShotServices
         foreach ($services as $name => $service) {
             $name = (string) $name;
             $waitedOn = $conditions[$name] ?? [];
-            // Something waits for it to finish, and nothing waits for it to run.
             $completes = $waitedOn !== [] && array_unique($waitedOn) === [self::COMPLETED];
             if ($completes
                 || ($waitedOn === [] && (self::isBaseService($name, $service, $services)
@@ -46,9 +46,8 @@ final class OneShotServices
     }
 
     /**
-     * A base other services run and which runs nothing itself: it builds the image
-     * its siblings run, or is the YAML anchor they inherit from. Neither declares
-     * a command, entrypoint or port, so both run the image default and exit.
+     * A base other services run and which runs nothing itself (it builds their image, or is their YAML
+     * anchor), so it runs the image default and exits.
      *
      * @param  array<string, mixed>  $service
      * @param  array<array-key, array<string, mixed>>  $services
@@ -64,9 +63,17 @@ final class OneShotServices
             }
         }
 
-        // A sibling must run this image without building it and declare a command,
-        // entrypoint or port; an image-only pair would make each the other's base.
-        $image = self::normalisedImage($service['image']);
+        return self::isRunBySibling($name, self::normalisedImage($service['image']), $services);
+    }
+
+    /**
+     * A sibling must run this image without building it and declare a command, entrypoint or port;
+     * an image-only pair would make each the other's base.
+     *
+     * @param  array<array-key, array<string, mixed>>  $services
+     */
+    private static function isRunBySibling(string $name, string $image, array $services): bool
+    {
         $usedElsewhere = false;
         foreach ($services as $other => $otherService) {
             if ((string) $other === $name || ! is_string($otherService['image'] ?? null)) {
@@ -87,10 +94,8 @@ final class OneShotServices
     }
 
     /**
-     * A job, not the application — dpaste's `migration` runs
-     * `./manage.py migrate --noinput` and exits. Nothing waits on it, so the
-     * dependency rule cannot see it, and the hardener would otherwise restart it
-     * forever. Narrow: a known job name, no published port and no healthcheck.
+     * A job nothing waits on, not the application (`./manage.py migrate` and exit): a known job name,
+     * no published port and no healthcheck.
      *
      * @param  array<string, mixed>  $service
      */
@@ -100,8 +105,7 @@ final class OneShotServices
     }
 
     /**
-     * Baserow's `volume-permissions-fixer` runs `chown 9999:9999 -R /baserow/media`
-     * and exits 0. Only a command made of file-setup steps, with no port or healthcheck.
+     * A command made only of file-setup steps (`chown 9999:9999 -R /media`), with no port or healthcheck.
      *
      * @param  array<string, mixed>  $service
      */
@@ -146,9 +150,8 @@ final class OneShotServices
     }
 
     /**
-     * Every condition another service waits on each service with. A list-form
-     * `depends_on`, `links`, `volumes_from` and `network_mode: service:` all
-     * mean the service is expected to be running.
+     * Every condition another service waits on each service with; list-form `depends_on`, `links`,
+     * `volumes_from` and `network_mode: service:` all mean it is expected to be running.
      *
      * @param  array<array-key, array<string, mixed>>  $services
      * @return array<string, list<string>>

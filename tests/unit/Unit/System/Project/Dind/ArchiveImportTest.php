@@ -2,22 +2,32 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\MissingLinuxUserException;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\Source\Files;
-use App\System\Project\FileManager;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\BrokerScripts;
+use Tests\Support\LocalRoot;
 
 /**
  * The archive is extracted under ~/.panelalpha, which is the account's alone
  * (0700): core's PHP cannot list it, so the single top-level directory has to
- * be found by a command run as root, or `myapp/` lands in ~/project as is.
+ * be found by a command run as the account, or `myapp/` lands in ~/project as is.
  */
 class ArchiveImportTest extends TestCase
 {
+    private const AS_ACCOUNT = ['account', '1000', '1000'];
+
+    private const AS_ROOT = ['root'];
+
+    public const EXTRACTIONS = ['account.extractZip', 'account.extractTar'];
+
     private string $root;
 
     protected function setUp(): void
@@ -26,11 +36,13 @@ class ArchiveImportTest extends TestCase
         $this->root = sys_get_temp_dir() . '/pa-archive-import-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/home/alice/project', 0777, true);
         mkdir($this->root . '/stage', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['homes' => $this->root . '/home']));
         file_put_contents($this->root . '/home/alice/fw.tar.gz', gzencode('not inspected here'));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         exec('rm -rf ' . escapeshellarg($this->root));
         parent::tearDown();
     }
@@ -41,14 +53,34 @@ class ArchiveImportTest extends TestCase
         $this->files($system)->importProjectArchive('/fw.tar.gz');
 
         $find = $this->extractFind($system);
-        $extract = $find[2];
+        $extract = $find[4];
         $this->assertStringStartsWith($this->root . '/home/alice/.panelalpha/archive-extract-', $extract);
         // Nothing was extracted for real: only the root listing knows what is there.
         $this->assertDirectoryDoesNotExist($extract);
 
         $this->assertSame(
-            [['sudo', 'rsync', '-a', '--delete', '--checksum', '--no-times', $extract . '/myapp/', $this->root . '/home/alice/project/']],
-            $this->commandsStartingWith($system, ['sudo', 'rsync'])
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--', $extract . '/myapp/', $this->root . '/home/alice/project/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
+        );
+    }
+
+    public function test_the_extract_directory_is_made_by_the_account(): void
+    {
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/fw.tar.gz');
+
+        $extract = $this->extractFind($system)[4];
+        $home = $this->root.'/home/alice';
+        $this->assertContains(Privileged::scripts()->makeHomeEntry($home.'/.panelalpha', '0700', '1000:1000'), $system->commands);
+        $this->assertContains([...self::AS_ACCOUNT, 'mkdir', '-p', '--', $extract], $this->describedCommands($system));
+        $this->assertContains(Privileged::scripts()->makeHomeEntry($home.'/project', '0755', '1000:1000'), $system->commands);
+        $this->assertSame([], array_filter(
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'mkdir']),
+            static fn (array $cmd): bool => str_starts_with((string) end($cmd), $home)
+        ));
+        $this->assertSame(
+            [[...self::AS_ROOT, 'chown', '-R', '--', '1000:1000', $home.'/project']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'chown'])
         );
     }
 
@@ -62,11 +94,35 @@ class ArchiveImportTest extends TestCase
         $this->files($system)->importProjectArchive('/.panelalpha/archives/fw.tar.gz');
 
         $this->assertSame(
-            [['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'sh', '-c', FileManager::RESOLVED_FILE_SCRIPT, 'sh', $archive]],
-            $this->commandsStartingWith($system, ['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'sh'])
+            [[...self::AS_ACCOUNT, 'sh', '-c', BrokerScripts::resolvedFile(), 'sh', $archive]],
+            $this->commandsStartingWith($system, [...self::AS_ACCOUNT, 'sh'])
         );
-        $this->assertSame($archive, $this->commandsStartingWith($system, ['sudo', 'cp', '--no-dereference'])[0][3]);
-        $this->assertCount(1, $this->commandsStartingWith($system, ['sudo', 'rsync']));
+        $copy = $this->stagingCopy($system);
+        $this->assertSame($archive, end($copy));
+        $this->assertSame(
+            [...self::AS_ACCOUNT, 'sh', '-c'],
+            array_slice($copy, 4, 5),
+            'the archive is read as the account and written by the engine'
+        );
+        $this->assertCount(1, $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync']));
+    }
+
+    public function test_the_staged_copy_is_made_by_the_engine_and_left_read_only(): void
+    {
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/fw.tar.gz');
+
+        $staged = $this->stagingCopy($system)[3];
+        clearstatcache();
+        $this->assertSame('0444', substr(sprintf('%o', fileperms($staged)), -4));
+        $this->assertSame('0755', substr(sprintf('%o', fileperms(dirname($staged))), -4));
+        $this->assertSame(gzencode('not inspected here'), file_get_contents($staged));
+        $rootOnStage = array_filter(
+            $this->commandsStartingWith($system, self::AS_ROOT),
+            fn (array $cmd): bool => in_array($cmd[1], ['mkdir', 'chmod', 'cp', 'chown'], true)
+                && str_contains(implode(' ', $cmd), $this->root.'/stage')
+        );
+        $this->assertSame([], array_values($rootOnStage));
     }
 
     public function test_a_flat_archive_is_copied_as_it_is(): void
@@ -74,10 +130,10 @@ class ArchiveImportTest extends TestCase
         $system = $this->system("f index.php\0d assets\0");
         $this->files($system)->importProjectArchive('/fw.tar.gz');
 
-        $extract = $this->extractFind($system)[2];
+        $extract = $this->extractFind($system)[4];
         $this->assertSame(
-            [['sudo', 'rsync', '-a', '--delete', '--checksum', '--no-times', $extract . '/', $this->root . '/home/alice/project/']],
-            $this->commandsStartingWith($system, ['sudo', 'rsync'])
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--', $extract . '/', $this->root . '/home/alice/project/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
         );
     }
 
@@ -93,28 +149,28 @@ class ArchiveImportTest extends TestCase
         $staleExtract = $this->root . '/home/alice/.panelalpha/archive-extract-deadbeef02';
         $system = $this->system("f index.php\0");
         $system->answers = [
-            'sudo find ' . $this->root . '/stage ' => $staleStage . "\n",
-            'sudo find ' . $this->root . '/home/alice/.panelalpha ' => $staleExtract . "\n",
+            'root find ' . $this->root . '/stage ' => $staleStage . "\n",
+            'root find ' . $this->root . '/home/alice/.panelalpha ' => $staleExtract . "\n",
         ];
 
         $this->files($system)->importProjectArchive('/fw.tar.gz');
 
-        $sweeps = $this->commandsStartingWith($system, ['sudo', 'find']);
-        $this->assertCount(3, $sweeps);
+        $sweeps = $this->commandsStartingWith($system, [...self::AS_ROOT, 'find']);
+        $this->assertCount(2, $sweeps);
         $this->assertSame(
-            ['sudo', 'find', $this->root . '/stage', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', '*', '-mmin', '+1440', '-print'],
+            [...self::AS_ROOT, 'find', $this->root . '/stage', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', '*', '-mmin', '+1440', '-print'],
             $sweeps[0]
         );
         $this->assertSame(
-            ['sudo', 'find', $this->root . '/home/alice/.panelalpha', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', 'archive-extract-*', '-mmin', '+1440', '-print'],
+            [...self::AS_ROOT, 'find', $this->root . '/home/alice/.panelalpha', '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', 'archive-extract-*', '-mmin', '+1440', '-print'],
             $sweeps[1]
         );
         $removals = array_values(array_filter(
-            $this->commandsStartingWith($system, ['sudo', 'rm', '-rf']),
-            static fn ($cmd): bool => count($cmd) === 4
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rm', '-rf']),
+            static fn ($cmd): bool => count($cmd) === 5
         ));
         $this->assertSame(
-            [['sudo', 'rm', '-rf', $staleStage], ['sudo', 'rm', '-rf', $staleExtract]],
+            [[...self::AS_ROOT, 'rm', '-rf', '--', $staleStage], [...self::AS_ROOT, 'rm', '-rf', '--', $staleExtract]],
             $removals
         );
     }
@@ -126,10 +182,10 @@ class ArchiveImportTest extends TestCase
         $this->files($system)->importProjectArchive('/site.zip');
 
         $this->assertSame(
-            [['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p', $this->stagedZip($system), 'app/CLAUDE.md']],
-            $this->commandsStartingWith($system, ['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p'])
+            [['env', 'LC_ALL=C.UTF-8', 'unzip', '-p', $this->stagedZip($system), 'app/CLAUDE.md']],
+            $this->commandsStartingWith($system, ['env', 'LC_ALL=C.UTF-8', 'unzip', '-p'])
         );
-        $this->assertCount(1, $this->commandsStartingWith($system, ['sudo', 'rsync']));
+        $this->assertCount(1, $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync']));
     }
 
     public function test_a_zip_link_out_of_the_archive_is_refused_before_extraction(): void
@@ -142,7 +198,227 @@ class ArchiveImportTest extends TestCase
             $this->assertStringContainsString('symbolic link', $e->getMessage());
         }
 
-        $this->assertSame([], $this->commandsStartingWith($system, ['sudo', 'setpriv', '--reuid', '1000', '--regid', '1000', '--clear-groups', 'unzip']));
+        $this->assertSame([], $this->extractions($system));
+    }
+
+    public function test_a_zip_that_unpacked_with_a_warning_is_written_into_the_project(): void
+    {
+        $system = $this->zipSystem('AGENTS.md');
+        $system->extraction = [0, "warning:  /proc/self/fd/7 appears to use backslashes as path separators\n"];
+
+        $this->files($system)->importProjectArchive('/site.zip');
+
+        $this->assertCount(1, $this->extractions($system));
+        $this->assertCount(1, $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync']));
+    }
+
+    /** @return iterable<string, array{string, string, string}> */
+    public static function failedExtractions(): iterable
+    {
+        yield 'zip' => [
+            '/site.zip',
+            "  End-of-central-directory signature not found.\n"
+                ."unzip:  cannot find zipfile directory in one of /proc/self/fd/7 or\n        /proc/self/fd/7.zip, and cannot find /proc/self/fd/7.ZIP, period.\n",
+            'Could not unpack site.zip: End-of-central-directory signature not found. '
+                .'unzip: cannot find zipfile directory in one of site.zip or site.zip.zip, and cannot find site.zip.ZIP, period.',
+        ];
+        yield 'tarball' => [
+            '/fw.tar.gz',
+            "\ngzip: stdin: not in gzip format\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n",
+            'Could not unpack fw.tar.gz: gzip: stdin: not in gzip format tar: Child returned status 1 tar: Error is not recoverable: exiting now',
+        ];
+    }
+
+    #[DataProvider('failedExtractions')]
+    public function test_a_failed_extraction_names_the_archive_and_writes_nothing_into_the_project(string $archive, string $said, string $message): void
+    {
+        $system = str_ends_with($archive, '.zip') ? $this->zipSystem('AGENTS.md') : $this->system("f index.php\0");
+        $system->extraction = [str_ends_with($archive, '.zip') ? 9 : 2, $said];
+
+        try {
+            $this->files($system)->importProjectArchive($archive);
+            $this->fail('the failed extraction went on');
+        } catch (\RuntimeException $e) {
+            $this->assertSame($message, $e->getMessage());
+        }
+
+        $this->assertSame([], $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync']));
+    }
+
+    /** The broker's own failure exits 1 too, so only the extraction script decides that unzip's 1 went fine. */
+    public function test_an_extraction_the_broker_could_not_run_fails(): void
+    {
+        $system = $this->zipSystem('AGENTS.md');
+        $system->extraction = [1, "pa-root: Permission denied\n"];
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Could not unpack site.zip: pa-root: Permission denied');
+
+        $this->files($system)->importProjectArchive('/site.zip');
+    }
+
+    /**
+     * A caller stages the next version in a folder of its own, beside the one being deployed: the deploy replaces the
+     * project tree, so the mirror leaves that folder alone and only the archive it read goes.
+     */
+    public function test_a_deploy_keeps_the_other_archives_in_the_folder_it_staged_in(): void
+    {
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $project = $this->root.'/home/alice/project';
+        $extract = $this->extractFind($system)[4];
+        $this->assertSame(
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--filter=P /.panelalpha-upload/***', '--', $extract.'/', $project.'/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
+        );
+        $removals = $this->removals($system);
+        $this->assertContains([...self::AS_ROOT, 'rm', '-rf', '--', $project.'/.panelalpha-upload/site-v1.tar.gz'], $removals);
+        $this->assertNotContains([...self::AS_ROOT, 'rm', '-rf', '--', $project.'/.panelalpha-upload'], $removals);
+    }
+
+    /** The archive it read is gone when the import returns, so no cleanup step is left to run once the deploy has ended. */
+    public function test_the_archive_it_read_is_removed_by_the_import(): void
+    {
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $this->assertContains(
+            [...self::AS_ROOT, 'rm', '-rf', '--', $this->root.'/home/alice/project/.panelalpha-upload/site-v1.tar.gz'],
+            $this->removals($system)
+        );
+    }
+
+    /** The engine's own drop goes with the folder it made, and it goes with the import too. */
+    public function test_the_engines_own_drop_folder_is_removed_by_the_import(): void
+    {
+        $drop = $this->root.'/home/alice/project/.deploy-archive-abc123abc123';
+        mkdir($drop, 0777, true);
+        file_put_contents($drop.'/site.tar.gz', gzencode('dropped by the engine'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/.deploy-archive-abc123abc123/site.tar.gz');
+
+        $this->assertContains([...self::AS_ROOT, 'rm', '-rf', '--', $drop], $this->removals($system));
+    }
+
+    /** An archive at the top of ~/project is the replaced tree's to delete, as before: nothing is kept for it. */
+    public function test_an_archive_at_the_top_of_the_project_is_not_excluded_from_the_mirror(): void
+    {
+        file_put_contents($this->root.'/home/alice/project/app.tar.gz', gzencode('deployed now'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/app.tar.gz');
+
+        $this->assertSame(
+            [[...self::AS_ROOT, 'rsync', '-a', '--delete', '--checksum', '--no-times', '--', $this->extractFind($system)[4].'/', $this->root.'/home/alice/project/']],
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])
+        );
+        $this->assertSame([], $this->removals($system), 'the mirror took it with the tree');
+    }
+
+    /** The archive staged beside the one deployed outlives a real mirror; the one it read does not. */
+    public function test_a_real_mirror_keeps_the_archive_staged_beside_the_one_deployed(): void
+    {
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            $this->markTestSkipped('rsync is not installed');
+        }
+        $this->stagedArchives();
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/project/.panelalpha-upload/site-v1.tar.gz');
+
+        $rsync = $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0];
+        $extract = rtrim($rsync[count($rsync) - 2], '/');
+        $project = rtrim($rsync[count($rsync) - 1], '/');
+        mkdir($extract, 0777, true);
+        file_put_contents($extract.'/index.php', 'v2');
+        file_put_contents($project.'/stale.php', 'old');
+
+        exec(implode(' ', array_map('escapeshellarg', array_slice($rsync, 1))), $out, $code);
+        $this->assertSame(0, $code);
+        $removal = $this->removals($system)[0];
+        exec(implode(' ', array_map('escapeshellarg', array_slice($removal, 1))), $out, $code);
+
+        $this->assertSame(0, $code);
+        $this->assertSame('v2', file_get_contents($project.'/index.php'));
+        $this->assertFileDoesNotExist($project.'/stale.php');
+        $this->assertFileExists($project.'/.panelalpha-upload/site-v2.tar.gz', 'an archive staged for the next deploy is not this deploy\'s');
+        $this->assertFileDoesNotExist($project.'/.panelalpha-upload/site-v1.tar.gz', 'the archive this deploy read goes');
+    }
+
+    /** The folder an archive was staged in is a folder of the archive's too: what the archive holds there is written. */
+    public function test_a_real_mirror_writes_the_archives_files_into_the_folder_it_was_staged_in(): void
+    {
+        if (trim((string) shell_exec('command -v rsync')) === '') {
+            $this->markTestSkipped('rsync is not installed');
+        }
+        $public = $this->root.'/home/alice/project/public';
+        mkdir($public, 0777, true);
+        file_put_contents($public.'/site.tar.gz', gzencode('deployed now'));
+        file_put_contents($public.'/index.php', 'v1');
+        $system = $this->system("f index.php\0");
+        $this->files($system)->importProjectArchive('/project/public/site.tar.gz');
+
+        $rsync = $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0];
+        $this->assertContains('--filter=P /public/***', $rsync);
+        $extract = rtrim($rsync[count($rsync) - 2], '/');
+        mkdir($extract.'/public', 0777, true);
+        file_put_contents($extract.'/public/index.php', 'v2');
+        file_put_contents($extract.'/public/app.js', 'new');
+
+        exec(implode(' ', array_map('escapeshellarg', array_slice($rsync, 1))), $out, $code);
+        $this->assertSame(0, $code);
+        $removal = $this->removals($system)[0];
+        exec(implode(' ', array_map('escapeshellarg', array_slice($removal, 1))), $out, $code);
+
+        $this->assertSame(0, $code);
+        $this->assertSame('v2', file_get_contents($public.'/index.php'));
+        $this->assertSame('new', file_get_contents($public.'/app.js'));
+        $this->assertFileDoesNotExist($public.'/site.tar.gz', 'the archive this deploy read goes');
+    }
+
+    /** A staged folder's name is matched literally, wildcards and all. */
+    public function test_the_staged_folders_name_is_escaped_in_the_protect_rule(): void
+    {
+        $dir = $this->root.'/home/alice/project/up[1]*?';
+        mkdir($dir, 0777, true);
+        file_put_contents($dir.'/site.tar.gz', gzencode('deployed now'));
+        $system = $this->system("f index.php\0");
+
+        $this->files($system)->importProjectArchive('/project/up[1]*?/site.tar.gz');
+
+        $this->assertContains('--filter=P /up\\[1\\]\\*\\?/***', $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0]);
+    }
+
+    /** A caller's archive and the one it staged for later, in the folder the panel uploads into. */
+    private function stagedArchives(): void
+    {
+        $dir = $this->root.'/home/alice/project/.panelalpha-upload';
+        mkdir($dir, 0777, true);
+        file_put_contents($dir.'/site-v1.tar.gz', gzencode('deployed now'));
+        file_put_contents($dir.'/site-v2.tar.gz', gzencode('staged for later'));
+    }
+
+    /** @return list<list<string>> the removals of one path each */
+    private function removals(System $system): array
+    {
+        return array_values(array_filter(
+            $this->commandsStartingWith($system, [...self::AS_ROOT, 'rm', '-rf']),
+            static fn (array $cmd): bool => count($cmd) === 5
+        ));
+    }
+
+    /** @return list<list<string>> */
+    private function extractions(System $system): array
+    {
+        return array_values(array_filter(
+            $system->commands,
+            static fn ($cmd): bool => is_array($cmd) && in_array(LocalRoot::action($cmd), self::EXTRACTIONS, true)
+        ));
     }
 
     private function zipSystem(string $target): System
@@ -156,10 +432,10 @@ class ArchiveImportTest extends TestCase
 
         $system = $this->system("d app\0");
         $system->answers = [
-            'sudo env LC_ALL=C.UTF-8 unzip -Z1 ' => "app/AGENTS.md\napp/CLAUDE.md\n",
-            'sudo env LC_ALL=C.UTF-8 unzip -Z ' => "-rw-r--r--  3.0 unx    5 tx stor 26-Oct-03 10:00 app/AGENTS.md\n"
+            'env LC_ALL=C.UTF-8 unzip -Z1 ' => "app/AGENTS.md\napp/CLAUDE.md\n",
+            'env LC_ALL=C.UTF-8 unzip -Z ' => "-rw-r--r--  3.0 unx    5 tx stor 26-Oct-03 10:00 app/AGENTS.md\n"
                 . "lrwxrwxrwx  3.0 unx    9 bx stor 26-Oct-03 10:00 app/CLAUDE.md\n",
-            'sudo env LC_ALL=C.UTF-8 unzip -p ' => $target,
+            'env LC_ALL=C.UTF-8 unzip -p ' => $target,
         ];
 
         return $system;
@@ -167,16 +443,19 @@ class ArchiveImportTest extends TestCase
 
     private function stagedZip(System $system): string
     {
-        return $this->commandsStartingWith($system, ['sudo', 'cp', '--no-dereference'])[0][4];
+        return $this->stagingCopy($system)[3];
     }
 
-    /** The root listing of the current import's extract -- not one of the sweep finds. */
+    /** @return list<string> */
+    private function stagingCopy(System $system): array
+    {
+        return $this->commandsStartingWith($system, ['sh', '-c'])[0];
+    }
+
+    /** The account's listing of the current import's extract -- not one of the sweep finds. */
     private function extractFind(System $system): array
     {
-        return array_values(array_filter(
-            $this->commandsStartingWith($system, ['sudo', 'find']),
-            static fn ($cmd): bool => !in_array('-mmin', $cmd, true)
-        ))[0];
+        return $this->commandsStartingWith($system, [...self::AS_ACCOUNT, 'find'])[0];
     }
 
     /** Reproducible builds stamp every file alike: a same-length edit must still land. */
@@ -187,7 +466,7 @@ class ArchiveImportTest extends TestCase
         }
         $system = $this->system("f VERSION\0");
         $this->files($system)->importProjectArchive('/fw.tar.gz');
-        $rsync = $this->commandsStartingWith($system, ['sudo', 'rsync'])[0];
+        $rsync = $this->commandsStartingWith($system, [...self::AS_ROOT, 'rsync'])[0];
 
         $extract = rtrim($rsync[count($rsync) - 2], '/');
         $project = rtrim($rsync[count($rsync) - 1], '/');
@@ -211,11 +490,28 @@ class ArchiveImportTest extends TestCase
         $this->assertSame(1_790_000_000, filemtime($project . '/KEEP'));
     }
 
-    private function files(System $system): Files
+    /** The archive is looked up as the account first, so a missing gid is refused there. */
+    public function test_an_account_without_a_recorded_gid_is_refused_before_anything_is_staged(): void
+    {
+        $system = $this->system("f index.php\0");
+
+        try {
+            $this->files($system, ['UID' => 1000])->importProjectArchive('/fw.tar.gz');
+            $this->fail('an account without a gid cannot extract');
+        } catch (MissingLinuxUserException $e) {
+            $this->assertSame("Project 'alice' has no Linux user recorded; rebuild it to create one.", $e->getMessage());
+        }
+
+        $this->assertSame([], $this->commandsStartingWith($system, ['sh', '-c']));
+        $this->assertSame([], $this->commandsStartingWith($system, [...self::AS_ROOT, 'rm', '-rf']));
+    }
+
+    /** @param array<string, int> $ids */
+    private function files(System $system, array $ids = ['UID' => 1000, 'GID' => 1000]): Files
     {
         $model = new ModelsUser();
         $model->username = 'alice';
-        $model->setDetails(['template' => 'dind', 'UID' => 1000, 'GID' => 1000, 'deploy_strategy' => 'static']);
+        $model->setDetails(['template' => 'dind', ...$ids, 'deploy_strategy' => 'static']);
         $runtime = (new ProjectAggregate($system, $model))->runtime();
         $this->assertInstanceOf(Dind::class, $runtime);
 
@@ -238,6 +534,9 @@ class ArchiveImportTest extends TestCase
             /** @var list<string> files the account sees and this process cannot */
             public array $accountOnly = [];
 
+            /** @var array{int, string} how the extraction ends: its exit code and what it wrote on stderr */
+            public array $extraction = [0, ''];
+
             public function __construct(private string $root, private string $listing)
             {
             }
@@ -255,30 +554,36 @@ class ArchiveImportTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->commands[] = $cmd;
-                if (is_array($cmd) && array_slice($cmd, 0, 3) === ['sudo', 'cp', '--no-dereference']) {
-                    @mkdir(dirname($cmd[4]), 0777, true);
-                    is_file($cmd[3]) ? copy($cmd[3], $cmd[4]) : file_put_contents($cmd[4], gzencode('read as root'));
+                if (is_array($cmd) && array_slice($cmd, 0, 2) === ['sh', '-c']) {
+                    $from = (string) end($cmd);
+                    is_file($from) ? copy($from, $cmd[3]) : file_put_contents($cmd[3], gzencode('read as the account'));
                 }
                 foreach ($this->answers as $prefix => $output) {
-                    if (is_array($cmd) && str_starts_with(implode(' ', $cmd), $prefix)) {
+                    if (is_array($cmd) && str_starts_with(implode(' ', ArchiveImportTest::described($cmd)), $prefix)) {
                         return $output;
                     }
                 }
-                if (is_array($cmd) && array_slice($cmd, 0, 2) === ['sudo', 'find']) {
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.staleDirectoriesStartingWith') {
                     // A sweep find lists stale entries; by default there are none.
-                    return in_array('-mmin', $cmd, true) ? '' : $this->listing;
+                    return '';
+                }
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'account.listEntryTypes') {
+                    return $this->listing;
                 }
 
                 return '';
             }
 
-            /** An account command, run as ourselves with the sudo setpriv prefix dropped. */
+            /** An account command, run as ourselves by pa-root-local; the extraction only ends as $extraction says. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = $cmd;
-                $argv = array_slice((array) $cmd, 7);
+                $argv = LocalRoot::argv((array) $cmd);
                 if (in_array(end($argv), $this->accountOnly, true)) {
                     $argv = ['printf', '%s\n', end($argv)];
+                }
+                if (in_array(LocalRoot::action((array) $cmd), ArchiveImportTest::EXTRACTIONS, true)) {
+                    $argv = ['sh', '-c', 'printf %s "$1" >&2; exit "$0"', (string) $this->extraction[0], $this->extraction[1]];
                 }
                 $process = new Process($argv);
                 $process->run();
@@ -292,8 +597,34 @@ class ArchiveImportTest extends TestCase
     private function commandsStartingWith(System $system, array $prefix): array
     {
         return array_values(array_filter(
-            $system->commands,
+            $this->describedCommands($system),
             static fn ($cmd): bool => is_array($cmd) && array_slice($cmd, 0, count($prefix)) === $prefix
         ));
+    }
+
+    /** @return list<list<string>|string> */
+    private function describedCommands(System $system): array
+    {
+        return array_map(static fn ($cmd) => is_array($cmd) ? self::described($cmd) : $cmd, $system->commands);
+    }
+
+    /**
+     * A file request as the account's ids or `root`, then the command the broker runs.
+     *
+     * @param  list<string>  $cmd
+     * @return list<string>
+     */
+    public static function described(array $cmd): array
+    {
+        $at = array_search(LocalRoot::CLIENT, $cmd, true);
+        if ($at === false || str_starts_with((string) LocalRoot::action(array_slice($cmd, $at)), 'scripts.')) {
+            return $cmd;
+        }
+        $request = array_slice($cmd, $at);
+        $who = str_starts_with((string) LocalRoot::action($request), 'account.')
+            ? ['account', ...array_slice(LocalRoot::values($request), 0, 2)]
+            : self::AS_ROOT;
+
+        return [...array_slice($cmd, 0, $at), ...$who, ...LocalRoot::plain($request)];
     }
 }

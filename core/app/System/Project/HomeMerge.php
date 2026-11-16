@@ -3,26 +3,17 @@
 namespace App\System\Project;
 
 use App\System as EngineSystem;
+use App\System\Privileged;
+use App\System\Privileged\AccountFiles;
 use RuntimeException;
 
 /**
- * A classic restore that keeps the files already in the home: archive entries
- * overwrite theirs, every other file stays.
- *
- * The home's contents are the account's and stay writable while its PHP and
- * cron run, so a directory swapped for a symlink mid-restore would carry a root
- * write anywhere on the host. The account therefore unpacks the archive and
- * merges it into its own directories itself. Root acts only on the home's top
- * level, which is root-owned: it creates the scratch directory and moves in the
- * entries the account cannot place there, by rename, never through a link.
+ * A classic restore that keeps the home's other files, merged by the account itself, as a directory it swaps for a
+ * symlink would carry a root write anywhere; root only renames entries into the root-owned top level, never via a link.
  */
 final class HomeMerge
 {
-    private const string REAL_DIRECTORY = '[ -d "$1" ] && [ ! -L "$1" ]';
-
     private const string EXTRACT_FROM_STDIN = 'exec "${@:2}" < "$1"';
-
-    private const string COPY_THROUGH_TAR = 'set -o pipefail; tar -C "$1" -cf - -- "${@:3}" | tar -C "$2" -xpf - --no-same-owner --no-overwrite-dir';
 
     public function __construct(
         private readonly EngineSystem $system,
@@ -57,9 +48,9 @@ final class HomeMerge
 
     private function createIncoming(string $incomingDir): void
     {
-        $this->run(['sudo', 'mkdir', '--', $incomingDir], 'Failed to create '.basename($incomingDir).' directory');
+        $this->run(Privileged::files()->makeDirectory($incomingDir), 'Failed to create '.basename($incomingDir).' directory');
         $this->run(
-            ['sudo', 'chown', "{$this->uid}:{$this->gid}", '--', $incomingDir],
+            Privileged::files()->changeOwner("{$this->uid}:{$this->gid}", $incomingDir),
             'Failed to hand '.basename($incomingDir).' to the account',
         );
     }
@@ -69,7 +60,7 @@ final class HomeMerge
     {
         $this->run([
             'bash', '-c', self::EXTRACT_FROM_STDIN, 'bash', $archivePath,
-            ...$this->asAccount(), 'tar', '-xzpf', '-', '--no-same-owner', '-C', $incomingDir,
+            ...Privileged::account()->extractTarFromStdin((int) $this->uid, (int) $this->gid, $incomingDir),
         ], 'Failed to extract the backup as the account');
     }
 
@@ -81,10 +72,10 @@ final class HomeMerge
     {
         $target = $this->home.'/'.$entry;
         if (! $this->isDirectory($target)) {
-            $this->run(['sudo', 'rm', '-f', '--', $target], "Failed to remove '{$entry}' before restoring it");
+            $this->run(Privileged::files()->removeIfExists($target), "Failed to remove '{$entry}' before restoring it");
         }
         $this->run(
-            ['sudo', 'mv', '-T', '--', $incomingDir.'/'.$entry, $target],
+            Privileged::files()->rename($incomingDir.'/'.$entry, $target),
             "Failed to move restored '{$entry}' into the home",
         );
     }
@@ -96,16 +87,16 @@ final class HomeMerge
      */
     private function mergeAsAccount(string $incomingDir, array $entries): void
     {
-        $this->run([
-            ...$this->asAccount(),
-            'bash', '-c', self::COPY_THROUGH_TAR, 'bash', $incomingDir, $this->home, ...$entries,
-        ], 'Failed to merge the restored files into the home');
+        $this->run(
+            Privileged::account()->mergeTree((int) $this->uid, (int) $this->gid, $incomingDir, $this->home, $entries),
+            'Failed to merge the restored files into the home',
+        );
     }
 
-    /** @return list<string> */
-    private function asAccount(): array
+    /** As the account, which owns the restore dir and can read the 0755 home. */
+    private function accountFiles(): AccountFiles
     {
-        return ['sudo', 'setpriv', '--reuid', $this->uid, '--regid', $this->gid, '--clear-groups'];
+        return Privileged::accountFiles((int) $this->uid, (int) $this->gid);
     }
 
     private function bothDirectories(string $incoming, string $target): bool
@@ -117,7 +108,7 @@ final class HomeMerge
     private function isDirectory(string $path): bool
     {
         return $this->system
-            ->runProcess(['sudo', 'bash', '-c', self::REAL_DIRECTORY, 'bash', $path], [], $this->timeout)
+            ->runProcess($this->accountFiles()->isRealDirectory($path), [], $this->timeout)
             ->isSuccessful();
     }
 
@@ -140,7 +131,7 @@ final class HomeMerge
      */
     private function list(string $dir): array
     {
-        $process = $this->system->runProcess(['sudo', 'ls', '-A', $dir], [], $this->timeout);
+        $process = $this->system->runProcess($this->accountFiles()->listAllNames($dir), [], $this->timeout);
         if (! $process->isSuccessful()) {
             throw new RuntimeException('Failed to list '.basename($dir).' directory before merge.');
         }

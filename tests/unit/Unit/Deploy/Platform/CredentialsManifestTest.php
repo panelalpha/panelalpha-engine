@@ -129,6 +129,14 @@ class CredentialsManifestTest extends TestCase
         AppConfig::fromYaml("credentials:\n  fields: []\n");
     }
 
+    /** `value: |` keeps its final newline, which delivery would then drop from the env file without a word. */
+    public function test_a_block_scalar_value_is_refused_by_file(): void
+    {
+        $this->expectException(ManifestException::class);
+        $this->expectExceptionMessageMatches('/^panelalpha\.yaml: credentials\.fields\.ADMIN_EMAIL\.value must be/');
+        AppConfig::fromYaml("credentials:\n  fields:\n    ADMIN_EMAIL:\n      kind: email\n      value: |\n        admin@example.com\n");
+    }
+
     public function test_a_source_recipe_extending_a_shipped_one_carries_it_to_the_manifest(): void
     {
         $config = AppConfig::fromYaml(

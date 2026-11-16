@@ -2,14 +2,15 @@
 
 namespace App\System\Project\Dind\Generation;
 
+use App\Lib\Project\PublicRouting\PublicPortRules;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\System as EngineSystem;
 
 /**
- * Moves the account's proxy rules between ports in its container, then one
- * graceful reload: requests in flight finish on the old upstream.
+ * Moves the account's proxy rules between ports in its container, then one graceful reload:
+ * requests in flight finish on the old upstream.
  */
 final class RouteSwitch
 {
@@ -52,8 +53,8 @@ final class RouteSwitch
     }
 
     /**
-     * A domain a Cloudflare tunnel serves: its ingress names the account's
-     * port itself. A PanelAlpha Online name only points DNS at this host.
+     * A domain a Cloudflare tunnel serves: its ingress names the account's port itself.
+     * A PanelAlpha Online name only points DNS at this host.
      *
      * @param  list<ProxyRule>  $rules
      */
@@ -73,7 +74,8 @@ final class RouteSwitch
     }
 
     /**
-     * The ids of the rules moved from each key of $map to its value.
+     * The ids of the rules moved from each key of $map to its value. Rules named by $onlyIds come back by id,
+     * even ones their owner switched off meanwhile: those stay off, on their own port.
      *
      * @param  array<int, int>  $map
      * @param  ?list<int>  $onlyIds
@@ -84,7 +86,6 @@ final class RouteSwitch
         if ($onlyIds === null) {
             $rules = $this->rulesTo(array_keys($map));
         } else {
-            // Back by id, whatever its owner switched off meanwhile: it stays off, on its own port.
             $rules = $onlyIds === [] ? [] : ProxyRule::query()
                 ->whereIn('id', $onlyIds)
                 ->where('upstream_host', $this->username)
@@ -102,8 +103,8 @@ final class RouteSwitch
     }
 
     /**
-     * The operator's own rules to the app's port, enabled or not, follow it
-     * to the port the new version answers on. The ids moved.
+     * The operator's own rules to the app's port, enabled or not, follow it to the port the new version
+     * answers on. The ids moved.
      *
      * @return list<int>
      */
@@ -112,14 +113,8 @@ final class RouteSwitch
         if ($from === $to) {
             return [];
         }
-        $rules = ProxyRule::query()
-            ->where('is_generated', false)
-            ->where('upstream_host', $this->username)
-            ->where('upstream_port', $from)
-            ->get()
-            ->all();
 
-        return $this->move([$from => $to], array_map(static fn (ProxyRule $rule): int => (int) $rule->id, $rules));
+        return $this->move([$from => $to], array_map(static fn (ProxyRule $rule): int => (int) $rule->id, $this->handMadeTo($from)));
     }
 
     /**
@@ -129,19 +124,31 @@ final class RouteSwitch
      */
     public function handRulesTo(int $port): array
     {
-        return array_map(static fn (ProxyRule $rule): array => ['id' => (int) $rule->id, 'port' => (int) $rule->upstream_port], ProxyRule::query()
-            ->where('is_generated', false)
-            ->where('upstream_host', $this->username)
-            ->where('upstream_port', $port)
-            ->orderBy('id')
-            ->get()
-            ->all());
+        return array_map(static fn (ProxyRule $rule): array => ['id' => (int) $rule->id, 'port' => (int) $rule->upstream_port], $this->handMadeTo($port));
     }
 
     /**
-     * Each recorded rule back on its port, while it still points at this app
-     * on one of $from: a rule its owner pointed elsewhere, or deleted, stays
-     * as they left it. The ids moved.
+     * Rules `public_ports:` made name their own port, so they never follow the app's.
+     *
+     * @return list<ProxyRule>
+     */
+    private function handMadeTo(int $port): array
+    {
+        return array_values(array_filter(
+            ProxyRule::query()
+                ->where('is_generated', false)
+                ->where('upstream_host', $this->username)
+                ->where('upstream_port', $port)
+                ->orderBy('id')
+                ->get()
+                ->all(),
+            static fn (ProxyRule $rule): bool => ! PublicPortRules::isDeclared($rule)
+        ));
+    }
+
+    /**
+     * Each recorded rule back on its port while it still points at this app on one of $from; one its owner
+     * pointed elsewhere, or deleted, stays as they left it. The ids moved.
      *
      * @param  list<array{id: int, port: int}>  $recorded
      * @param  list<int>  $from  the ports a redeploy put them on
@@ -165,11 +172,8 @@ final class RouteSwitch
     }
 
     /**
-     * A rule named after a domain lives in its vhost; any other is written by
-     * the full rebuild, which also keeps the firewall open for its port.
-     *
-     * A vhost-only change cannot move a listener, so it never restarts the webserver;
-     * the full rebuild can, so it keeps the reload with its restart fallback.
+     * Rules named after a domain live in its vhost, which a reload alone applies; any other needs the full
+     * rebuild, which keeps its port open and may move a listener, so it keeps the restart fallback.
      *
      * @param  list<ProxyRule>  $rules
      */

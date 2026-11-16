@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime\Php;
 use App\Lib\Deploy\Compose\ComposeValues;
 
 /**
- * The environment the generated PHP service runs with: production, logs to
- * stderr where Docker can read them, and pointed at whichever database the
- * account was given -- or at none, which is a thing an app is allowed to be.
+ * The environment the generated PHP service runs with: production, logs to stderr, and pointed at
+ * whichever database the account was given, or at none.
  */
 final class PhpEnvironment
 {
@@ -47,17 +46,8 @@ final class PhpEnvironment
     }
 
     /**
-     * Symfony's production environment is spelled `prod`, and only `prod`.
-     *
-     * `production` is Laravel's word, and shipping it to a Symfony app is
-     * fatal rather than untidy: symfony/runtime reads APP_ENV and then looks
-     * for the config of that name, so wallabag died on
-     *
-     *     The file "/app/app/config/config_production.yml" does not exist.
-     *
-     * before it rendered a single byte. The deploy skill already warns an
-     * operator to correct this by hand with env_vars; the engine knows which
-     * framework it detected, so it should not need telling.
+     * Symfony's production environment is spelled `prod`: given Laravel's `production`, symfony/runtime looks for
+     * that config and wallabag died on `config_production.yml does not exist`.
      */
     private static function appEnv(bool $symfony): string
     {
@@ -77,6 +67,8 @@ final class PhpEnvironment
     }
 
     /**
+     * The SQLite fallback is Laravel's alone: only its image creates the file and only it reads the variable.
+     *
      * @return array<string, string>
      */
     private static function database(DatabaseSettings $db, bool $artisan, ?string $databaseConfig): array
@@ -85,10 +77,6 @@ final class PhpEnvironment
             return self::mysql($db);
         }
 
-        // Only Laravel gets the SQLite fallback, because only Laravel's image
-        // creates the file it points at and only Laravel reads the variable.
-        // A plain PHP app used to be told its database was a path that did
-        // not exist, which is worse than being told nothing.
         return $artisan ? self::sqlite($databaseConfig) : [];
     }
 
@@ -116,10 +104,8 @@ final class PhpEnvironment
     }
 
     /**
-     * Heimdall wraps the variable in database_path(), so an absolute path doubles.
-     * Such a config gets a bare filename; anything else keeps the absolute path.
-     * The wrap may sit anywhere in the `database` entry: Heimdall now puts a
-     * `:memory:` ternary in front of it.
+     * A bare filename where the config wraps the variable in database_path() anywhere in its `database` entry
+     * (Heimdall), which would double an absolute path; otherwise the absolute path.
      */
     private static function sqlitePath(?string $databaseConfig): string
     {

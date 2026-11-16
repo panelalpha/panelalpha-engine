@@ -3,17 +3,13 @@
 namespace App\System\Project\PhpHosting;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
+use App\System\Privileged;
 use App\System\Project\Dind\TenantNetworkMove as DindTenantNetworkMove;
 use App\System\Project\PhpHosting;
 
 /**
- * Moves a running PHP-hosting account from pash-default-network to
- * pash-tenants without restarting it, as
- * {@see DindTenantNetworkMove} does for DinD accounts.
- *
- * Nothing in the account pins an address: the database is reached by
- * sites-db's hostname, which Docker's DNS answers on either network, and mail
- * by host.docker.internal. So it joins, is bound, and leaves the old network.
+ * Moves a running PHP-hosting account to pash-tenants without a restart, as {@see DindTenantNetworkMove} does for DinD:
+ * nothing pins an address (sites-db by hostname, mail by host.docker.internal), so it joins, is bound, and leaves.
  */
 final class TenantNetworkMove
 {
@@ -21,7 +17,12 @@ final class TenantNetworkMove
         private PhpHosting $project,
     ) {}
 
-    /** @return DindTenantNetworkMove::MOVED|DindTenantNetworkMove::ALREADY|DindTenantNetworkMove::NOT_RUNNING */
+    /**
+     * The firewall goes on again once the new port exists, which carries nothing until it is bound; the proxy,
+     * which caches the account's address for 30s, is reloaded to re-resolve it.
+     *
+     * @return DindTenantNetworkMove::MOVED|DindTenantNetworkMove::ALREADY|DindTenantNetworkMove::NOT_RUNNING
+     */
     public function run(): string
     {
         if (! $this->project->isRunning()) {
@@ -34,8 +35,7 @@ final class TenantNetworkMove
 
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
         if (! array_key_exists(TenantNetwork::NAME, $networks)) {
-            $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
-            // The new port carries nothing until it is bound.
+            $system->exec(Privileged::docker()->connectNetwork(TenantNetwork::NAME, $account), [], 60);
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
         }
 
@@ -44,9 +44,8 @@ final class TenantNetworkMove
         if (! array_key_exists(TenantNetwork::LEGACY_NAME, $networks)) {
             return DindTenantNetworkMove::ALREADY;
         }
-        $system->exec(['sudo', 'docker', 'network', 'disconnect', TenantNetwork::LEGACY_NAME, $account], [], 60);
+        $system->exec(Privileged::docker()->disconnectNetwork(TenantNetwork::LEGACY_NAME, $account), [], 60);
 
-        // The proxy caches the account's address for 30s; a reload re-resolves it.
         try {
             $system->reloadWebserver();
         } catch (\Throwable) {

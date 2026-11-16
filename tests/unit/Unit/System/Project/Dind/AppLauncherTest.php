@@ -2,7 +2,13 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
+use App\System\Project\Dind\AppLauncher;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class AppLauncherTest extends TestCase
 {
@@ -56,6 +62,50 @@ class AppLauncherTest extends TestCase
             ['env', 'DOCKER_CONFIG=/home/a/.panelalpha-registry-x', 'PWD=/home/a/project', 'docker', 'compose', 'up', '-d'],
             \App\System\Project\Dind\AppLauncher::withDockerConfig($command, '/home/a/.panelalpha-registry-x')
         );
+    }
+
+    /** All of it comes from the account's dockerd, a service's output laid out as compose logs. */
+    public function test_a_failed_dependency_is_named_with_what_it_printed_and_its_health_check_said(): void
+    {
+        $requests = [];
+        $system = $this->createStub(System::class);
+        $system->method('exec')->willReturnCallback(function (string|array $cmd) use (&$requests): string {
+            $line = implode(' ', (array) $cmd);
+            $requests[] = $line;
+
+            return match (LocalRoot::action((array) $cmd)) {
+                'account-docker.logTail' => LocalRoot::values((array) $cmd)[1] === 'project-db-1' ? "mysqld: ready for connections.\n" : "2026-11-10T08:00:00.000000001Z Error: no database\n",
+                'account-docker.containers' => '[{"State":{"Health":{"Status":"unhealthy","FailingStreak":3,"Log":['
+                    . '{"Start":"","End":"","ExitCode":1,"Output":"ERROR 1045 (28000): Access denied"}]}}}]',
+                'account-docker.listContainers' => '[{"Id":"' . str_repeat('e', 64) . '","Names":["/project-migrate-1"]}]',
+                default => '',
+            };
+        });
+        $project = $this->createStub(Dind::class);
+        $project->method('username')->willReturn('acme');
+        $project->method('system')->willReturn($system);
+        $project->method('composeFilePath')->willReturn('/home/acme/docker-compose.yml');
+        $project->method('userAppComposeProjectName')->willReturn('project');
+        $project->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($project));
+        $project->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($project));
+
+        $cause = (new \ReflectionMethod(AppLauncher::class, 'failedDependencyCause'))->invoke(
+            new AppLauncher($project),
+            "dependency failed to start: container project-db-1 is unhealthy\nservice \"migrate\" didn't complete successfully: exit 1"
+        );
+
+        $this->assertSame(
+            "error: service project-db-1 did not start (unhealthy) [health check: ERROR 1045 (28000): Access denied]: mysqld: ready for connections.\n"
+            . 'error: service migrate did not start (exited with code 1): Error: no database',
+            $cause
+        );
+        $this->assertContains(LocalRoot::CLIENT . ' account-docker.logTail -- acme project-db-1 60 ', $requests);
+        $this->assertContains(LocalRoot::CLIENT . ' account-docker.containers -- acme project-db-1', $requests);
+        $this->assertContains(
+            LocalRoot::CLIENT . ' account-docker.listContainers -- acme all 4 label com.docker.compose.project=project label com.docker.compose.config-hash label com.docker.compose.oneoff=False label com.docker.compose.service=migrate',
+            $requests
+        );
+        $this->assertContains(LocalRoot::CLIENT . ' account-docker.logTail -- acme ' . str_repeat('e', 64) . ' 60 timestamps', $requests);
     }
 
     private function methodBody(string $source, string $method): string

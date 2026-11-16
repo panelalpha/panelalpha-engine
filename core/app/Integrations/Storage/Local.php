@@ -3,13 +3,15 @@
 namespace App\Integrations\Storage;
 
 use App\Models\BackupContainer;
+use App\System\Privileged;
 use FilesystemIterator;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
-use SplFileInfo;
 use Symfony\Component\Process\Process;
+use UnexpectedValueException;
 
 final class Local extends AbstractStorage
 {
@@ -34,6 +36,11 @@ final class Local extends AbstractStorage
     public static function fromContainer(BackupContainer $container): self
     {
         return new self($container->location);
+    }
+
+    public static function releaseLocation(BackupContainer $container): void
+    {
+        self::fromContainer($container)->removeEmptyRoot();
     }
 
     public function put(string $key, $stream): void
@@ -83,6 +90,10 @@ final class Local extends AbstractStorage
         }
     }
 
+    /**
+     * Removed as root: a backup written by the CLI is root-owned, and the web user
+     * running the delete job could not remove it.
+     */
     public function deletePrefix(string $prefix): void
     {
         $dir = $this->resolvePrefixDir($prefix);
@@ -90,18 +101,34 @@ final class Local extends AbstractStorage
             return;
         }
 
-        $root = $this->rootRealPath();
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
-
-        foreach ($iterator as $entry) {
-            $this->removeBelowRoot($entry, $root);
+        try {
+            $this->asRoot(Privileged::backupStore()->removeTree($dir));
+        } catch (RuntimeException $e) {
+            throw new RuntimeException("Could not remove backup objects under {$prefix}: ".$e->getMessage(), 0, $e);
         }
 
-        if (is_dir($dir) && $dir !== $root) {
-            @rmdir($dir);
+        if (file_exists($dir)) {
+            throw new RuntimeException("Could not remove backup objects under {$prefix}");
+        }
+
+        $this->removeEmptyParents($dir);
+    }
+
+    /**
+     * Best effort, as root: the store's parent directory is usually root-owned. A root
+     * holding anything but empty directories, or a failure, keeps it as it is.
+     */
+    public function removeEmptyRoot(): void
+    {
+        $root = $this->rootRealPath();
+        if ($root === null || $this->holdsAnythingButDirectories($root)) {
+            return;
+        }
+
+        try {
+            $this->asRoot(Privileged::backupStore()->removeEmptyDirectories($root));
+        } catch (RuntimeException|InvalidArgumentException $e) {
+            Log::warning("Could not remove the empty backup storage root {$root}: ".$e->getMessage());
         }
     }
 
@@ -145,14 +172,55 @@ final class Local extends AbstractStorage
         @unlink($probe);
     }
 
-    private function removeBelowRoot(SplFileInfo $entry, ?string $root): void
+    /**
+     * As root, the directories a deleted prefix left empty on its way up, the storage root excluded.
+     * Best effort: the objects are already gone, so a failure here only leaves empty directories.
+     */
+    private function removeEmptyParents(string $dir): void
     {
-        $path = $entry->getPathname();
-        if ($path === $root || ! str_starts_with($path, $root.'/')) {
+        $parents = $this->parentsBelowRoot($dir);
+        if ($parents === []) {
             return;
         }
 
-        $entry->isDir() ? @rmdir($path) : @unlink($path);
+        try {
+            $this->asRoot(Privileged::backupStore()->removeEmptyParents(...$parents));
+        } catch (RuntimeException $e) {
+            Log::warning("Could not remove the empty backup directories above {$dir}: ".$e->getMessage());
+        }
+    }
+
+    /** @return list<string> deepest first */
+    private function parentsBelowRoot(string $dir): array
+    {
+        $root = $this->rootRealPath();
+        $parents = [];
+        for ($parent = dirname($dir); $root !== null && $parent !== $root && self::isInside($parent, $root); $parent = dirname($parent)) {
+            $parents[] = $parent;
+        }
+
+        return $parents;
+    }
+
+    /** A location that cannot be listed holds something this driver must not remove. */
+    private function holdsAnythingButDirectories(string $root): bool
+    {
+        try {
+            $entries = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+
+            foreach ($entries as $entry) {
+                if ($entry->isLink() || ! $entry->isDir()) {
+                    return true;
+                }
+            }
+        } catch (UnexpectedValueException) {
+            return true;
+        }
+
+        return false;
     }
 
     private function rootRealPath(): ?string
@@ -166,7 +234,7 @@ final class Local extends AbstractStorage
     {
         $prefix = $this->normalizeRelativePath($prefix);
         if ($prefix === '') {
-            return $this->root;
+            throw new InvalidArgumentException('Prefix must name a directory below the storage root.');
         }
 
         $root = $this->rootRealPath();
@@ -260,7 +328,7 @@ final class Local extends AbstractStorage
         }
 
         $this->assertSafeToChown($root);
-        $this->sudo(['mkdir', '-p', $dir]);
+        $this->asRoot(Privileged::backupStore()->makeDirectories($dir));
         $this->handToWebUserUpTo($dir, $root);
     }
 
@@ -272,8 +340,8 @@ final class Local extends AbstractStorage
         $cursor = $dir;
         while (true) {
             $this->assertSafeToChown($cursor);
-            $this->sudo(['chown', 'www-data:www-data', $cursor]);
-            $this->sudo(['chmod', '0775', $cursor]);
+            $this->asRoot(Privileged::backupStore()->giveToWebUser($cursor));
+            $this->asRoot(Privileged::backupStore()->openToWebUser($cursor));
             if ($cursor === $root) {
                 return;
             }
@@ -299,11 +367,11 @@ final class Local extends AbstractStorage
     }
 
     /**
-     * @param  list<string>  $args
+     * @param  list<string>  $command
      */
-    private function sudo(array $args): void
+    private function asRoot(array $command): void
     {
-        $process = new Process(['sudo', ...$args]);
+        $process = new Process($command);
         $process->setTimeout(60);
         $process->run();
         if ($process->isSuccessful()) {
@@ -311,6 +379,6 @@ final class Local extends AbstractStorage
         }
 
         $message = trim($process->getErrorOutput() ?: $process->getOutput());
-        throw new RuntimeException($message !== '' ? $message : 'sudo failed');
+        throw new RuntimeException($message !== '' ? $message : 'the root command failed');
     }
 }

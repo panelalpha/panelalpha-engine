@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System;
 
+use App\Models\MysqlDatabase;
 use App\Models\User;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\DatabaseCopier;
@@ -13,6 +14,7 @@ use App\System\Services\Mysql\TableReplacement;
 use App\System\Services\Mysql\Tables;
 use PDO;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\SitesDbRequest;
 use Tests\TestCase;
 
 class DatabaseCopierTableTest extends TestCase
@@ -25,20 +27,17 @@ class DatabaseCopierTableTest extends TestCase
         $this->bootInMemoryDatabase();
     }
 
-    public function test_copy_table_streams_the_named_table_through_the_definer_rewrite(): void
+    public function test_copy_table_asks_sites_db_for_that_table_with_the_definers_mapped(): void
     {
         $record = $this->recorder();
 
         $this->copier($record)->copyTable('alice_wp', 'bob_wp', 'wp_posts', DefinerMap::map('alice_', 'bob_', [], []));
 
         $this->assertCount(1, $record->scripts);
-        $this->assertStringContainsString(
-            "mariadb-dump --single-transaction -uroot 'alice_wp' 'wp_posts'",
-            $record->scripts[0]
+        $this->assertStringEndsWith(
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_no.definer 0",
+            $record->scripts[0],
         );
-        $this->assertStringNotContainsString('--routines', $record->scripts[0]);
-        $this->assertStringContainsString('DEFINER=`bob_no.definer`@`%`', $record->scripts[0]);
-        $this->assertStringContainsString("'bob_wp'", $record->scripts[0]);
     }
 
     public function test_a_table_name_outside_the_grammar_is_refused(): void
@@ -60,7 +59,10 @@ class DatabaseCopierTableTest extends TestCase
 
         $this->copier($record)->dropTable('bob_wp', 'wp_$posts');
 
-        $this->assertStringContainsString('DROP TABLE IF EXISTS `wp_$posts`', $record->scripts[0]);
+        $this->assertStringEndsWith(
+            "compose.sitesDbDropTable -- /opt/panelalpha/shared-hosting bob_wp 'wp_\$posts'",
+            $record->scripts[0],
+        );
     }
 
     public function test_replace_tables_dumps_the_target_table_before_it_is_touched(): void
@@ -98,8 +100,10 @@ class DatabaseCopierTableTest extends TestCase
             '/tmp/g23-rollback',
         );
 
-        $this->assertStringContainsString('s/DEFINER=`alice_wp`@`%`/DEFINER\n`bob_wp`@`%`/g', $record->scripts[0]);
-        $this->assertStringContainsString('/DEFINER=`bob_no.definer`@`%`/g', $record->scripts[0]);
+        $this->assertStringEndsWith(
+            "compose.sitesDbCopy -- /opt/panelalpha/shared-hosting alice_wp bob_wp wp_posts bob_no.definer 1 alice_wp bob_wp",
+            $record->scripts[0],
+        );
     }
 
     public function test_a_failure_on_the_second_table_restores_the_first(): void
@@ -175,7 +179,8 @@ class DatabaseCopierTableTest extends TestCase
         $this->copier($record)->restoreTables($replacement);
 
         $this->assertCount(1, $record->scripts);
-        $this->assertStringContainsString('DROP TABLE IF EXISTS `wp_posts`', $record->scripts[0]);
+        $this->assertStringEndsWith('compose.sitesDbDropTable -- /opt/panelalpha/shared-hosting bob_wp wp_posts',
+            $record->scripts[0]);
         $this->assertSame(['bob_wp'], $record->deleted);
     }
 
@@ -205,6 +210,77 @@ class DatabaseCopierTableTest extends TestCase
         $this->assertSame([['bob_wp', 'bob_wp', 'SELECT, INSERT, TRIGGER']], $record->grants);
         $this->assertSame(['bob_wp'], $record->deleted);
         $this->assertSame([['bob_wp', 'bob_wp']], $record->revoked);
+    }
+
+    public function test_a_table_named_twice_is_dumped_and_replaced_once(): void
+    {
+        $record = $this->recorder();
+        $replacement = $this->copier($record, ['bob_wp' => ['wp_posts']])->replaceTables(
+            $this->userWithDatabase('alice', 'alice_wp'),
+            $this->userWithDatabase('bob', 'bob_wp'),
+            [
+                ['database' => 'alice_wp', 'name' => 'wp_posts'],
+                ['database' => 'alice_wp', 'name' => 'wp_posts'],
+            ],
+            '/tmp/g23-rollback',
+        );
+
+        $this->assertSame([['bob_wp', 'wp_posts', '/tmp/g23-rollback/bob_wp.wp_posts.sql.gz']], $record->dumps);
+        $this->assertCount(1, $record->scripts);
+        $this->assertCount(1, $replacement->rollbacks);
+    }
+
+    public function test_a_failed_copy_into_a_created_database_leaves_no_row_for_it(): void
+    {
+        $record = $this->recorder();
+        $target = $this->userWithDatabase('bob', 'bob_other');
+
+        try {
+            $this->copier($record, failTable: 'wp_posts')->replaceTables(
+                $this->userWithDatabase('alice', 'alice_wp'),
+                $target,
+                [['database' => 'alice_wp', 'name' => 'wp_posts']],
+                '/tmp/g23-rollback',
+            );
+            $this->fail('the table copy should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('copy exploded', $e->getMessage());
+        }
+
+        $this->assertSame(['bob_other'], $target->mysqlDatabases()->pluck('database')->all());
+    }
+
+    public function test_a_database_that_could_not_be_created_leaves_no_row_and_is_not_dropped(): void
+    {
+        $record = $this->recorder(existing: ['bob_wp']);
+        $record->failCreate = true;
+        $target = $this->userWithDatabase('bob', 'bob_other');
+
+        try {
+            $this->copier($record)->replaceTables(
+                $this->userWithDatabase('alice', 'alice_wp'),
+                $target,
+                [['database' => 'alice_wp', 'name' => 'wp_posts']],
+                '/tmp/g23-rollback',
+            );
+            $this->fail('creating the database should have failed');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('create exploded', $e->getMessage());
+        }
+
+        $this->assertSame(['bob_other'], $target->mysqlDatabases()->pluck('database')->all());
+        $this->assertSame([], $record->deleted);
+    }
+
+    public function test_restore_tables_deletes_the_row_of_a_created_database(): void
+    {
+        $target = $this->userWithDatabase('bob', 'bob_wp');
+        $replacement = new TableReplacement(new DatabaseCopyResult(), DefinerMap::map('alice_', 'bob_', [], []), [], ['bob_wp'], []);
+
+        $this->copier($this->recorder(existing: ['bob_wp']))->restoreTables($replacement);
+
+        $this->assertFalse(MysqlDatabase::query()->where('database', 'bob_wp')->exists());
+        $this->assertSame([], $target->mysqlDatabases()->pluck('database')->all());
     }
 
     public function test_table_rollback_path_names_the_database_and_table(): void
@@ -300,9 +376,19 @@ class DatabaseCopierTableTest extends TestCase
                 $this->record->restores[] = [$name, $sqlGzPath];
             }
 
-            public function runSitesDbScript(string $script, string $failurePrefix): void
+            public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
             {
-                if ($this->failTable !== null && str_contains($script, "'".$this->failTable."'")) {
+                $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+            }
+
+            public function dropTableInSitesDb(string $database, string $table): void
+            {
+                $this->recordScript(SitesDbRequest::drop($database, $table), 'table drop failed');
+            }
+
+            private function recordScript(string $script, string $failurePrefix): void
+            {
+                if ($this->failTable !== null && str_contains($script, ' '.$this->failTable)) {
                     throw new \RuntimeException('copy exploded');
                 }
 
@@ -350,6 +436,9 @@ class DatabaseCopierTableTest extends TestCase
 
                     public function createDatabase(string $name): void
                     {
+                        if ($this->record->failCreate ?? false) {
+                            throw new \RuntimeException('create exploded');
+                        }
                         $this->record->created[] = $name;
                     }
 

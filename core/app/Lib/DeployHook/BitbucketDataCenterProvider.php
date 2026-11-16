@@ -5,23 +5,8 @@ namespace App\Lib\DeployHook;
 use Illuminate\Http\Request;
 
 /**
- * Bitbucket Data Center (self-hosted). `repo:refs_changed` is the push event,
- * and its body is `changes[]`, one entry per ref the push moved:
- *
- *  - `ref.id` is the full ref (`refs/heads/main`), `ref.type` is `BRANCH` or
- *    `TAG`;
- *  - `type` is `ADD`, `UPDATE` or `DELETE`, and `toHash` is the all-zero hash
- *    for a `DELETE`.
- *
- * The "Test connection" button in the webhook settings sends
- * `diagnostics:ping`, which is answered like GitHub's ping.
- *
- * `X-Request-Id` is "a unique UUID for each webhook request" and is the
- * delivery id. It is not a fingerprint of the push: a hook that fires again
- * for the same push is a different request.
- *
- * Recognised by an event key with no Cloud UUID header. Atlassian says
- * `X-Request-Id` "may" be present, so it is not required.
+ * Bitbucket Data Center, recognised by an event key with no Cloud UUID header: `repo:refs_changed` and its
+ * `changes[]`, `diagnostics:ping` as a ping, and the optional `X-Request-Id`, unique per request, as delivery id.
  */
 final class BitbucketDataCenterProvider extends BitbucketProvider
 {

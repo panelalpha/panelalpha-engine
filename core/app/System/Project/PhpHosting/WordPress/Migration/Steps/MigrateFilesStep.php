@@ -7,7 +7,6 @@ use App\System\Project\PhpHosting\WordPress\Migration\BatchBudget;
 use App\System\Project\PhpHosting\WordPress\Migration\BatchedStep;
 use App\System\Project\PhpHosting\WordPress\Migration\MigrationTransfer;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceConnection;
-use App\System\Project\PhpHosting\WordPress\Migration\TransferProgress;
 use RuntimeException;
 
 /**
@@ -16,6 +15,8 @@ use RuntimeException;
  */
 final class MigrateFilesStep implements BatchedStep
 {
+    use RunsTransferBatches;
+
     public function __construct(
         private SourceConnection $source = new SourceConnection,
         private int $batchesPerRun = BatchBudget::BATCHES,
@@ -35,16 +36,11 @@ final class MigrateFilesStep implements BatchedStep
 
         $finished = (new MigrationTransfer(
             $this->source->transfer($migration),
-            onProgress: fn (TransferProgress $progress) => $migration->storeTransferProgress($this->name(), $progress),
+            onProgress: $this->progressRecorder($migration),
         ))->migrateFiles($pluginMigrationId, $this->budget($migration));
 
         if ($finished) {
             $migration->markStepCompleted($this->name());
         }
-    }
-
-    private function budget(WordpressMigration $migration): BatchBudget
-    {
-        return new BatchBudget($this->batchesPerRun, BatchBudget::SECONDS, $migration->cancelRequested(...));
     }
 }

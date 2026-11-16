@@ -4,18 +4,22 @@ namespace App\Lib\Domains;
 
 use App\Exceptions\ProblemException;
 use App\Integrations\Tunnels\PanelAlphaConnect;
+use App\Lib\Project\PublicRouting\HostDomain;
+use App\Lib\Ssl\KeptCertificate;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Tunnel;
 use App\Models\User;
+use App\System;
+use App\System\Project\Domain as ProjectDomain;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Moving a project's main domain to a new name, as `PUT /projects/{project}`
- * with `domain` does it: a new domain row carrying the old one's settings
- * and aliases, the proxy rules retargeted, then the old one removed.
+ * Moving a project's main domain to a new name, as `PUT /projects/{project}` with `domain` does it: a new domain row
+ * carrying the old one's settings and aliases, the proxy rules retargeted, then the old one removed.
  */
 final class MainDomainRename
 {
@@ -23,58 +27,118 @@ final class MainDomainRename
         .'and served through its proxy, so a main domain is not renamed to one. Add the name as a tunnel instead.';
 
     /**
-     * Point the project's main domain at $newFqdn. The same name in any case
-     * is left alone, so its vhost is not torn down and rebuilt for nothing.
-     * The caller saves the user.
+     * Point the project's main domain at $newFqdn; the caller saves the user. A name given as `www.example.org` is the
+     * name under it, as adding a domain makes it, and the same name in any case is left alone, so its vhost is not torn
+     * down and rebuilt for nothing.
      *
      * @throws ProblemException domain_taken, when another project took the name since it was validated
      */
     public static function apply(User $user, string $newFqdn): void
     {
         $oldFqdn = self::currentName($user, $user->getMainDomain());
-        $newFqdn = trim($newFqdn);
+        $requested = trim($newFqdn);
 
+        if (self::isSameName($oldFqdn, $requested)) {
+            return;
+        }
+
+        [$newFqdn] = self::nameFor($requested);
         if (self::isSameName($oldFqdn, $newFqdn)) {
             return;
         }
 
         $domain = $user->getMainDomain() ?? self::placeholder($user);
-        $newDomain = self::replacement($domain, $newFqdn);
+        $newDomain = self::replacement($domain, $requested);
 
         $previous = $user->getOriginal('domain');
         $routing = self::routingOf($user, $oldFqdn);
         self::claimName($user, $newFqdn);
 
         try {
-            self::moveDomain($user, $domain, $newDomain, $oldFqdn, $newFqdn);
+            self::moveDomain($user, $domain, $newDomain, $routing, $oldFqdn, $newFqdn);
         } catch (\Throwable $e) {
-            self::restoreRouting($user, $routing, $oldFqdn, $newFqdn);
             self::writeNameBack($user, $previous, $newFqdn);
 
-            throw $e;
+            throw self::renameFailed($newFqdn, $e);
         }
         $user->domain = $newFqdn;
 
         $user->setDetails(['domain' => self::allocationFor($newFqdn)]);
+        if ($oldFqdn !== '') {
+            KeptCertificate::keep($user, $oldFqdn);
+        }
     }
 
     /**
      * Retargets the proxy rules before the new vhost is rendered: DinD routing is driven only by
      * ProxyRule rows (no app_port fallback), and Domain::delete() would drop rules keyed by the old name.
      */
-    private static function moveDomain(User $user, Domain $domain, Domain $newDomain, string $oldFqdn, string $newFqdn): void
+    private static function retargetRouting(User $user, string $oldFqdn, string $newFqdn): void
     {
-        $oldNameTunnels = self::oldNameTunnels($domain, $oldFqdn);
         $retargeted = $oldFqdn === '' ? 0 : ProxyRule::retargetServerName($user->username, $oldFqdn, $newFqdn);
         if ($retargeted === 0) {
             self::generateDindRouting($user, $newFqdn);
         }
+    }
 
-        $newDomain->projectDomain()->create();
-        self::deleteVhostIgnoringFailure($domain);
-        $domain->delete();
-        $newDomain->save();
+    /**
+     * A vhost is rendered from the rules named after it, so a failure puts the routing back
+     * before the old vhost is rendered again.
+     *
+     * @param  list<array<string, mixed>>  $routing
+     */
+    private static function moveDomain(User $user, Domain $domain, Domain $newDomain, array $routing, string $oldFqdn, string $newFqdn): void
+    {
+        $oldNameTunnels = self::oldNameTunnels($domain, $oldFqdn);
+        $newVhost = self::projectVhost($newDomain);
+        try {
+            self::retargetRouting($user, $oldFqdn, $newFqdn);
+            $newVhost->create();
+        } catch (\Throwable $e) {
+            self::restoreRouting($user, $routing, $oldFqdn, $newFqdn);
+            throw $e;
+        }
+
+        $oldVhost = self::projectVhost($domain);
+        try {
+            self::deleteVhostIgnoringFailure($oldVhost);
+            self::replaceDomainRow($domain, $newDomain);
+        } catch (\Throwable $e) {
+            self::restoreRouting($user, $routing, $oldFqdn, $newFqdn);
+            self::restoreVhosts($oldVhost, $newVhost);
+            throw $e;
+        }
         self::releaseTunnels($oldNameTunnels);
+    }
+
+    private static function projectVhost(Domain $domain): ProjectDomain
+    {
+        return $domain->getUser()->project(app(System::class))->domain($domain);
+    }
+
+    /** One transaction, so a failed insert cannot leave the old row already deleted. */
+    private static function replaceDomainRow(Domain $domain, Domain $newDomain): void
+    {
+        DB::transaction(static function () use ($domain, $newDomain): void {
+            $domain->delete();
+            $newDomain->save();
+        });
+    }
+
+    /** The old vhost is gone and the new one is up; put them back the other way round. */
+    private static function restoreVhosts(ProjectDomain $oldVhost, ProjectDomain $newVhost): void
+    {
+        try {
+            $oldVhost->rebuild();
+        } catch (\Throwable $e) {
+            Log::error("Rebuilding the vhost of {$oldVhost->model()->domain} after a failed rename failed: ".$e->getMessage());
+        }
+
+        try {
+            $newVhost->delete();
+        } catch (\Throwable $e) {
+            Log::error("Removing the vhost of {$newVhost->model()->domain} after a failed rename failed: ".$e->getMessage());
+        }
     }
 
     private static function generateDindRouting(User $user, string $newFqdn): void
@@ -85,12 +149,32 @@ final class MainDomainRename
         }
     }
 
-    private static function deleteVhostIgnoringFailure(Domain $domain): void
+    /** The renamed-away name keeps its certificate for a re-add moments later ({@see KeptCertificate}). */
+    private static function deleteVhostIgnoringFailure(ProjectDomain $vhost): void
     {
         try {
-            $domain->projectDomain()->delete();
-        } catch (\Exception) {
+            $vhost->delete(keepCertificate: true);
+        } catch (\Throwable $e) {
+            Log::warning("Could not delete the old vhost of {$vhost->model()->domain} during a rename: ".$e->getMessage());
         }
+    }
+
+    /**
+     * The reason a failed rename answers with, so the caller is not left with a bare 500.
+     * The cause is reported first: a validation answer never reaches the log.
+     */
+    private static function renameFailed(string $newFqdn, \Throwable $cause): ProblemException
+    {
+        if ($cause instanceof ProblemException) {
+            return $cause;
+        }
+        report($cause);
+
+        return ProblemException::one(
+            'domain',
+            'domain_rename_failed',
+            "Renaming the main domain to {$newFqdn} failed: {$cause->getMessage()}"
+        );
     }
 
     /**
@@ -189,10 +273,19 @@ final class MainDomainRename
     {
         $domain = $user->getMainDomain();
         $oldFqdn = self::currentName($user, $domain);
-        if (self::isSameName($oldFqdn, trim($newFqdn))) {
+        $requested = trim($newFqdn);
+        if (self::isSameName($oldFqdn, $requested)) {
             return null;
         }
-        if (($taken = self::takenName($user, $newFqdn)) !== null) {
+        [$newFqdn] = self::nameFor($requested);
+        if (self::isSameName($oldFqdn, $newFqdn)) {
+            return null;
+        }
+        $claim = HostDomain::claimRefusal((string) $user->username, $newFqdn);
+        if ($claim !== null) {
+            return $claim;
+        }
+        if (($taken = self::takenName($user, $requested)) !== null) {
             return ['code' => 'domain_taken', 'message' => "{$taken} is already on this engine."];
         }
         if (DomainPlan::inOnlineZone($newFqdn)) {
@@ -273,18 +366,19 @@ final class MainDomainRename
     }
 
     /**
-     * The first name a rename to $newFqdn would take that is already on this
-     * engine -- the name, then the `www.` alias that moves with it -- or null
-     * when both are free. What the main domain row itself holds (its name,
-     * aliases and tunnels) goes with it and does not count; the project's
-     * other domains do, as two rows for one name share one vhost file.
+     * The first name a rename to $newFqdn would take that is already on this engine (the name, then its `www.` alias), or
+     * null. The main row's own names and tunnels move with it; other domains count, as two rows for one name share a vhost.
      */
     public static function takenName(User $user, string $newFqdn): ?string
     {
         $domain = $user->getMainDomain();
         $oldFqdn = self::currentName($user, $domain);
-        $newFqdn = trim($newFqdn);
+        $requested = trim($newFqdn);
 
+        if (self::isSameName($oldFqdn, $requested)) {
+            return null;
+        }
+        [$newFqdn] = self::nameFor($requested);
         if (self::isSameName($oldFqdn, $newFqdn)) {
             return null;
         }
@@ -293,15 +387,29 @@ final class MainDomainRename
         }
 
         $www = 'www.'.$newFqdn;
-        if (
-            $domain !== null
-            && in_array('www.'.$domain->domain, $domain->getAliases())
-            && self::heldElsewhere($user, $domain, $www)
-        ) {
+        if (self::bringsWwwAlias($domain, $requested, $newFqdn) && self::heldElsewhere($user, $domain, $www)) {
             return $www;
         }
 
         return null;
+    }
+
+    /**
+     * The main name a rename to $fqdn gives the project, with the `www.` alias it brings: `www.example.org` is
+     * `example.org`, `www.example.org` kept as an alias, the shape adding a domain creates.
+     *
+     * @return array{0: string, 1: array<mixed>}
+     */
+    private static function nameFor(string $fqdn): array
+    {
+        return NewDomain::withoutWww(trim($fqdn), []);
+    }
+
+    /** Whether the renamed row takes `www.<new name>`: the old main's own `www.` alias moves there, or the name was given with it. */
+    private static function bringsWwwAlias(?Domain $domain, string $requested, string $newFqdn): bool
+    {
+        return $requested !== $newFqdn
+            || ($domain !== null && in_array('www.'.$domain->domain, $domain->getAliases()));
     }
 
     private static function currentName(User $user, ?Domain $mainDomain): string
@@ -337,42 +445,51 @@ final class MainDomainRename
 
     /**
      * The main domain under its new name: the old one's settings, with its
-     * `www.` alias following the name and every other alias kept.
+     * `www.` alias following the name and every other alias kept. A `www.` name is the
+     * name under it, with the `www.` one kept as an alias.
      */
     public static function replacement(Domain $domain, string $newFqdn): Domain
     {
+        [$newFqdn, $ownAliases] = self::nameFor($newFqdn);
         $newDomain = $domain->replicate();
         $newDomain->domain = $newFqdn;
         $newDomain->removeAliases();
         foreach ($domain->getAliases() as $alias) {
             self::carryAlias($domain, $newDomain, $alias, 'www.'.$newFqdn);
         }
+        foreach ($ownAliases as $alias) {
+            self::carryName($domain, $newDomain, (string) $alias);
+        }
         $newDomain->setDetails(['aliases' => array_values(array_unique($newDomain->getAliases()))]);
 
         return $newDomain;
     }
 
-    /**
-     * Moves one alias onto the renamed row, the old `www.` alias becoming $newWww. It is set
-     * directly, not with addAlias(): the old row still holds it, so the availability check would find it taken.
-     */
+    /** Moves one alias onto the renamed row, the old `www.` alias becoming $newWww. */
     private static function carryAlias(Domain $domain, Domain $newDomain, mixed $alias, string $newWww): void
     {
-        if ($alias == 'www.'.$domain->domain) {
-            if (! self::servedBy($domain, $newWww)) {
-                $newDomain->addAlias($newWww);
+        self::carryName($domain, $newDomain, $alias == 'www.'.$domain->domain ? $newWww : (string) $alias);
+    }
 
-                return;
-            }
-            $alias = $newWww;
+    /**
+     * An alias the renamed row takes. It is set directly, not with addAlias(), when the row being
+     * replaced still holds it: the availability check would find it taken.
+     */
+    private static function carryName(Domain $domain, Domain $newDomain, string $alias): void
+    {
+        if (! self::servedBy($domain, $alias)) {
+            $newDomain->addAlias($alias);
+
+            return;
         }
         $newDomain->setDetails(['aliases' => [...$newDomain->getAliases(), $alias]]);
     }
 
-    /** The row already serves $name, as an alias or a tunnel: it goes with the row. */
+    /** The row already serves $name, as its own name, an alias or a tunnel: it goes with the row. */
     private static function servedBy(Domain $domain, string $name): bool
     {
-        return in_array($name, $domain->getAliases())
+        return strcasecmp((string) $domain->domain, $name) === 0
+            || in_array($name, $domain->getAliases())
             || ($domain->exists && $domain->tunnels()->getQuery()->where('hostname', strtolower($name))->exists());
     }
 

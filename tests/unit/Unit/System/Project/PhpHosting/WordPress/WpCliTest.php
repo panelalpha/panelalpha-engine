@@ -37,6 +37,24 @@ class WpCliTest extends TestCase
         $this->assertSame('', $result['stderr']);
     }
 
+    public function test_a_failure_message_drops_terminal_controls_and_keeps_its_lines(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            result: ['exit_code' => 2, 'stdout' => '', 'stderr' => "\u{7}mysqldump: Got error: 1044\n\tAccess denied\u{1b}[0m"],
+        );
+
+        try {
+            $cli->runOrFail(['db', 'export', 'x.sql']);
+            $this->fail('A failed run did not throw.');
+        } catch (WordPressException $e) {
+            $this->assertSame("mysqldump: Got error: 1044\n\tAccess denied[0m", $e->getMessage());
+        }
+    }
+
     public function test_skip_plugins_adds_both_skip_flags_before_the_path(): void
     {
         $captured = [];
@@ -79,6 +97,37 @@ class WpCliTest extends TestCase
             ['core', 'version', '--path=/home/alice/other.test/public_html'],
             $captured
         );
+    }
+
+    public function test_a_recorded_install_directory_is_used_when_no_path_is_bound(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            installed: '/home/alice/example.test/public_html/blog',
+        );
+
+        $cli->run(['plugin', 'list']);
+
+        $this->assertSame(['plugin', 'list', '--path=/home/alice/example.test/public_html/blog'], $captured);
+    }
+
+    public function test_a_bound_path_beats_the_recorded_install_directory(): void
+    {
+        $captured = [];
+        $cli = $this->cliWithFakeRunner(
+            $captured,
+            mainDocRoot: '/example.test/public_html',
+            home: '/home/alice',
+            path: 'other.test/public_html',
+            installed: '/home/alice/example.test/public_html/blog',
+        );
+
+        $cli->run(['plugin', 'list']);
+
+        $this->assertSame(['plugin', 'list', '--path=/home/alice/other.test/public_html'], $captured);
     }
 
     public function test_a_relative_path_is_read_inside_the_home(): void
@@ -223,9 +272,11 @@ class WpCliTest extends TestCase
         array $result = ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => ''],
         ?string $path = null,
         bool $skipPlugins = false,
+        ?string $installed = null,
     ): WpCli {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
+        $user->setAttribute('app_path', $installed);
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn($home);
         $project->shouldReceive('resolvePath')

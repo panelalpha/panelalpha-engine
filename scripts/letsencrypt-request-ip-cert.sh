@@ -20,6 +20,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# No cron run retries a first issuance the way it retries a renewal.
+LE_CERTBOT_TIMEOUT="${LE_CERTBOT_TIMEOUT:-600}"
 # shellcheck source=./letsencrypt-lib.sh
 source "${SCRIPT_DIR}/letsencrypt-lib.sh"
 
@@ -66,12 +68,14 @@ args+=($(le_account_args "$EMAIL"))
 [ "$STAGING" = 1 ] && args+=(--staging)
 [ "$FORCE_RENEWAL" = 1 ] && args+=(--force-renewal)
 
-le_info "Requesting a Let's Encrypt certificate for ${IP_ADDRESS}"
-le_release_port_80
-le_certbot "${args[@]}"
-status=$?
-le_restore_stack
-[ "$status" = 0 ] || le_error "certbot did not issue a certificate for ${IP_ADDRESS}"
+if [ "$FORCE_RENEWAL" = 0 ] && le_lineage_current "$LE_IP_CERT_NAME" "$IP_ADDRESS"; then
+    le_info "The certificate for ${IP_ADDRESS} is not yet due for renewal; the webserver keeps running"
+else
+    le_info "Requesting a Let's Encrypt certificate for ${IP_ADDRESS}"
+    le_certbot_standalone "${args[@]}"
+    status=$?
+    [ "$status" = 0 ] || le_error "certbot did not issue a certificate for ${IP_ADDRESS}"
+fi
 
 le_install_lineage "$LE_IP_CERT_NAME" server-ip || exit 1
 if [ "$INSTALL" = 1 ]; then

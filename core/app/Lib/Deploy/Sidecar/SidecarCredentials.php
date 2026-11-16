@@ -7,9 +7,8 @@ use App\Lib\Deploy\Compose\ComposeInterpolation;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 
 /**
- * Connection settings for a compose sidecar (database, cache, search engine),
- * derived from the sidecar's own service definition and generated upper-cased
- * under its prefix: `<PREFIX>_HOST`, `_PORT`, `_URL`, `<PREFIX>_*`, `DB_*`.
+ * Connection settings for a compose sidecar (database, cache, search engine), derived from its own service
+ * definition and generated upper-cased under its prefix: `<PREFIX>_HOST`, `_PORT`, `_URL`, `<PREFIX>_*`, `DB_*`.
  */
 class SidecarCredentials
 {
@@ -90,9 +89,8 @@ class SidecarCredentials
     }
 
     /**
-     * Connection settings the application needs to reach one sidecar. An
-     * engine with no dialect entry still gets its host, port and credentials
-     * under its own prefix, plus every variable it declares under that prefix.
+     * Connection settings the application needs to reach one sidecar. An engine with no dialect entry still
+     * gets its host, port and credentials, plus every variable it declares, under its own prefix.
      *
      * @param  array<string, mixed>  $service
      * @param  list<int>  $observedPorts
@@ -100,85 +98,7 @@ class SidecarCredentials
      */
     public static function envForSidecar(string $name, array $service, array $observedPorts = []): array
     {
-        $engine = self::sidecarEngine($name, $service, $observedPorts);
-        $declared = self::environmentMap($service['environment'] ?? null);
-        $ports = SidecarEngine::allPorts($service, $observedPorts);
-        $dialect = SidecarEngine::dialect((string) $engine, $ports[0] ?? 0);
-
-        $credentials = SidecarEngine::credentials($declared);
-        $prefix = self::envPrefix(
-            $credentials['prefix'] ?? self::dominantPrefix($declared),
-            $engine,
-            $name
-        );
-        if ($prefix === null) {
-            return [];
-        }
-
-        [$username, $password, $database] = self::resolvedCredentials($credentials, $service['command'] ?? null);
-
-        $env = self::hostAndPort($prefix, $name, $dialect) + self::declaredVariablesUnderPrefix($declared, $prefix);
-        $url = self::uninterpolatedUrl($dialect, $name, $username, $password, $database);
-        if ($url !== null) {
-            $env[$prefix.'_URL'] = $url;
-        }
-
-        return $env + self::frameworkEnvironment($dialect, $name, $username, $password, $database, $url);
-    }
-
-    /**
-     * Username, password and database as Compose settles them; a blank
-     * password falls back to redis's `--requirepass`.
-     *
-     * @param  array{prefix: ?string, username: ?string, password: ?string, database: ?string}  $credentials
-     * @return array{0: string, 1: string, 2: string}
-     */
-    private static function resolvedCredentials(array $credentials, mixed $command): array
-    {
-        $username = self::resolvedComposeValue((string) ($credentials['username'] ?? ''), '');
-        $password = self::resolvedComposeValue((string) ($credentials['password'] ?? ''), '');
-        if ($password === '') {
-            $password = self::requirePassOf($command);
-        }
-        $database = self::resolvedComposeValue((string) ($credentials['database'] ?? ''), '');
-
-        return [$username, $password, $database];
-    }
-
-    /**
-     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
-     * @return array<string, string>
-     */
-    private static function hostAndPort(string $prefix, string $host, array $dialect): array
-    {
-        $env = [$prefix.'_HOST' => $host];
-        if ($dialect['port'] > 0) {
-            $env[$prefix.'_PORT'] = (string) $dialect['port'];
-        }
-
-        return $env;
-    }
-
-    /**
-     * The connection URL, or null while the password still carries a
-     * reference: nothing interpolates a *_URL, so the app would get it literally.
-     *
-     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
-     */
-    private static function uninterpolatedUrl(
-        array $dialect,
-        string $host,
-        string $username,
-        string $password,
-        string $database
-    ): ?string {
-        return self::unresolved($password) ? null : self::connectionUrl($dialect, $host, $username, $password, $database);
-    }
-
-    /** Whether a value still carries a Compose reference the sidecar would leave literal. */
-    private static function unresolved(string $value): bool
-    {
-        return str_contains($value, '$');
+        return (new SidecarConnectionEnv(self::resolvedComposeValue(...)))->envFor($name, $service, $observedPorts);
     }
 
     /**
@@ -231,9 +151,8 @@ class SidecarCredentials
     }
 
     /**
-     * Secret-looking keys that {@see envFromWorkstationAppService()} would copy
-     * verbatim: a literal already sitting in the repository's compose file, the
-     * same for every deploy of it, not a per-account `${VAR:?}` reference.
+     * Secret-looking keys {@see envFromWorkstationAppService()} would copy verbatim: a literal in the repository's
+     * compose file, the same for every deploy of it, not a per-account `${VAR:?}` reference.
      *
      * @param  array<string, mixed>  $service
      * @return list<string>
@@ -273,32 +192,9 @@ class SidecarCredentials
         return $changed ? $map : $environment;
     }
 
-    /** Redis's `--requirepass <literal>`, so its URL carries the password; '' otherwise. */
-    private static function requirePassOf(mixed $command): string
-    {
-        if (preg_match('/--requirepass[ =]+("?)([^\s"]+)\1/', self::commandText($command), $m) !== 1) {
-            return '';
-        }
-        $password = self::resolvedComposeValue($m[2], '');
-
-        return self::unresolved($password) ? '' : $password;
-    }
-
-    /** A `command:` in either form as one line; '' for anything else. */
-    private static function commandText(mixed $command): string
-    {
-        if (is_array($command)) {
-            return implode(' ', array_filter($command, 'is_string'));
-        }
-
-        return is_string($command) ? $command : '';
-    }
-
     /**
-     * A kept sidecar's bare `${SECRET}` in `environment:` or `command:` that
-     * nothing will set, replaced with a generated value. Compose would pass an
-     * empty string: redis then refuses `--requirepass` with no argument and
-     * meilisearch refuses an empty master key in production.
+     * A kept sidecar's bare `${SECRET}` in `environment:` or `command:` that nothing sets, given a generated value:
+     * Compose would pass '', and redis refuses an empty `--requirepass`, meilisearch an empty production master key.
      *
      * @param  array<string, mixed>  $service
      * @param  array<string, list<?string>|string>  $env  what compose may interpolate the file with
@@ -476,155 +372,8 @@ class SidecarCredentials
     }
 
     /**
-     * The prefix most of a service's variables share: meilisearch names its
-     * settings `MEILI_*`. Two variables must agree, so a lone TZ or PUID
-     * cannot claim the prefix.
-     *
-     * @param  array<string, string>  $declared
-     */
-    private static function dominantPrefix(array $declared): ?string
-    {
-        $counts = [];
-        foreach (array_keys($declared) as $key) {
-            $key = strtoupper(trim((string) $key));
-            $head = explode('_', $key, 2);
-            if (count($head) < 2 || $head[0] === '') {
-                continue;
-            }
-            $counts[$head[0]] = ($counts[$head[0]] ?? 0) + 1;
-        }
-        if ($counts === []) {
-            return null;
-        }
-
-        arsort($counts);
-        $prefix = (string) array_key_first($counts);
-
-        return $counts[$prefix] >= 2 ? $prefix : null;
-    }
-
-    /**
-     * The service's own variables that belong to its prefix, resolved.
-     *
-     * @param  array<string, string>  $declared
-     * @return array<string, string>
-     */
-    private static function declaredVariablesUnderPrefix(array $declared, string $prefix): array
-    {
-        $out = [];
-        foreach ($declared as $key => $value) {
-            $key = strtoupper(trim((string) $key));
-            if (! str_starts_with($key, $prefix.'_')) {
-                continue;
-            }
-            $resolved = self::resolvedComposeValue((string) $value, '');
-            if ($resolved !== '') {
-                $out[$key] = $resolved;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * The prefix the application will look under: the service's own variables
-     * wherever they exist, then the engine's name, then the service's.
-     */
-    private static function envPrefix(?string $declaredPrefix, ?string $engine, string $serviceName): ?string
-    {
-        foreach ([$declaredPrefix, $engine, $serviceName] as $candidate) {
-            $prefix = trim(strtoupper((string) preg_replace('/[^A-Za-z0-9]+/', '_', (string) $candidate)), '_');
-            if ($prefix !== '' && preg_match('/^[A-Z]/', $prefix) === 1) {
-                return $prefix;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string}  $dialect
-     */
-    private static function connectionUrl(
-        array $dialect,
-        string $host,
-        string $username,
-        string $password,
-        string $database
-    ): ?string {
-        if ($dialect['scheme'] === null || $dialect['port'] <= 0) {
-            return null;
-        }
-
-        $credentials = '';
-        if ($username !== '' || $password !== '') {
-            $credentials = rawurlencode($username).':'.rawurlencode($password).'@';
-        }
-
-        if ($database === '') {
-            $database = (string) ($dialect['default_database'] ?? '');
-        }
-
-        return $dialect['scheme'].'://'.$credentials.$host.':'.$dialect['port']
-            .($database !== '' ? '/'.$database : '');
-    }
-
-    /**
-     * The spellings frameworks expect, on top of the derived ones: Laravel
-     * reads DB_CONNECTION and DB_HOST for any database, and CACHE_DRIVER for
-     * its cache. They can never come out of the compose file, so they come
-     * from the engine's entry in resources/sidecars/dialects.php.
-     *
-     * @param  array{engine: string, port: int, scheme: ?string, driver: ?string, default_database: ?string, env: array<string, string>}  $dialect
-     * @return array<string, string>
-     */
-    private static function frameworkEnvironment(
-        array $dialect,
-        string $host,
-        string $username,
-        string $password,
-        string $database,
-        ?string $url
-    ): array {
-        $env = self::dialectEnvironment($dialect, $host);
-        if ($dialect['driver'] === null) {
-            return $env;
-        }
-
-        return $env + array_filter([
-            'DB_CONNECTION' => $dialect['driver'],
-            'DB_HOST' => $host,
-            'DB_PORT' => (string) $dialect['port'],
-            'DB_DATABASE' => $database,
-            'DB_USERNAME' => $username,
-            'DB_PASSWORD' => $password,
-            'DATABASE_URL' => (string) $url,
-        ], static fn (string $v): bool => $v !== '');
-    }
-
-    /**
-     * The dialect's own `env` entries with `{host}` and `{port}` filled in.
-     *
-     * @param  array{port: int, env: array<string, string>}  $dialect
-     * @return array<string, string>
-     */
-    private static function dialectEnvironment(array $dialect, string $host): array
-    {
-        $env = [];
-        foreach ($dialect['env'] as $key => $value) {
-            $env[(string) $key] = strtr((string) $value, [
-                '{host}' => $host,
-                '{port}' => (string) $dialect['port'],
-            ]);
-        }
-
-        return $env;
-    }
-
-    /**
-     * A service's own variable as Compose settles it with the variable unset,
-     * so DATABASE_URL matches what the sidecar gets. Only a value that is one
-     * whole reference is resolved; one that settles to nothing falls back.
+     * A service's own variable as Compose settles it with the variable unset, so DATABASE_URL matches the sidecar.
+     * Only a value that is one whole reference is resolved; one that settles to nothing falls back.
      */
     private static function resolvedComposeValue(string $value, string $fallback): string
     {
@@ -661,9 +410,8 @@ class SidecarCredentials
     }
 
     /**
-     * Compose's list form, decided by shape: a map whose one value contains
-     * an `=` read as a list, and a list whose first entry has no `=` read as
-     * a map. The wrong branch returns nothing for keys it should have found.
+     * Compose's list form, decided by shape and not by `=`: guessing from a value or a first entry
+     * reads a map as a list or a list as a map, and the wrong branch finds none of its keys.
      *
      * @param  array<mixed>  $environment
      */

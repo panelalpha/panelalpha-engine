@@ -86,6 +86,13 @@ test.describe('ModSecurity rulesets', () => {
     expect(await stateOf(), `${name} did not report as disabled`).toBe(false);
   });
 
+  test('the custom ruleset is listed and can be enabled before it holds rules', async ({ api }) => {
+    const { data } = await api.listModSecurityRulesets();
+    expect(data.map((entry) => entry.name)).toContain('custom');
+
+    await expectStatus(await api.enableModSecurityRulesetRaw('custom'), 200);
+  });
+
   test('an individual config file can be toggled off and back on', async ({ api }) => {
     const name = snapshot.rulesets[0].name;
     const ruleset = (await api.listModSecurityRulesets()).data.find((entry) => entry.name === name);

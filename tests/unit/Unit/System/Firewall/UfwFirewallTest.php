@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\Fail2banHost;
 use Tests\Support\FakeProcess;
+use Tests\Support\HostCommand;
 use Tests\Support\TestNetwork;
 
 class UfwFirewallTest extends TestCase
@@ -91,6 +92,7 @@ class UfwFirewallTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::asked($cmd);
                 $cmd = (array) $cmd;
                 $this->ran[] = $cmd;
                 $this->held[] = UfwFirewallTest::lockHeld($this->lock);
@@ -109,7 +111,7 @@ class UfwFirewallTest extends TestCase
                     $cmd === ['cat', '/etc/ufw/user6.rules'] => FakeProcess::failed('No such file'),
                     $cmd === ['ufw', 'version'] => FakeProcess::ok("ufw 0.36.2\nCopyright 2008-2023 Canonical Ltd.\n"),
                     $cmd === ['ufw', 'status', 'verbose'] => FakeProcess::ok("Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), deny (routed)\n"),
-                    $cmd[0] === 'sh' && ($cmd[3] ?? null) === UfwFirewall::SNAPSHOT => FakeProcess::ok($this->enabled),
+                    $cmd[0] === 'sh' && ($cmd[4] ?? null) === UfwFirewall::SNAPSHOT => FakeProcess::ok($this->enabled),
                     default => FakeProcess::of($this->ufwCode, $this->ufwOut),
                 };
             }
@@ -121,6 +123,8 @@ class UfwFirewallTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
@@ -174,6 +178,7 @@ class UfwFirewallTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::asked($cmd);
                 $cmd = (array) $cmd;
                 $this->ran[] = $cmd;
                 $this->held[] = $held = UfwFirewallTest::lockHeld($this->lock);
@@ -260,6 +265,8 @@ class UfwFirewallTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
@@ -810,6 +817,7 @@ class UfwFirewallTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::asked($cmd);
                 $this->ran[] = (array) $cmd;
                 $this->held[] = UfwFirewallTest::lockHeld($this->lock);
                 foreach ($this->answers as $prefix => $answer) {
@@ -833,6 +841,8 @@ class UfwFirewallTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
@@ -1132,9 +1142,9 @@ class UfwFirewallTest extends TestCase
 
         /** @var object{ran: list<list<string>>} $host */
         $write = array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'sh'))[0];
-        $this->assertSame('/etc/fail2ban/panelalpha-ignoreip', $write[3]);
-        $this->assertSame(TestNetwork::public2(7) . " # office\n2001:db8::/32\n" . TestNetwork::public(7) . " # monitoring\n", $write[4]);
-        $this->assertContains(['bash', '/opt/panelalpha/shared-hosting/scripts/firewall.sh', '--fail2ban'], $host->ran);
+        $this->assertSame('/etc/fail2ban/panelalpha-ignoreip', $write[4]);
+        $this->assertSame(TestNetwork::public2(7) . " # office\n2001:db8::/32\n" . TestNetwork::public(7) . " # monitoring\n", $write[5]);
+        $this->assertContains(['pa-root', 'firewall.applyTrustedLists'], $host->ran);
         $this->assertContains(['fail2ban-client', 'unban', TestNetwork::public(7)], $host->ran);
     }
 
@@ -1183,7 +1193,7 @@ class UfwFirewallTest extends TestCase
 
         $this->assertSame('office', $removed->comment);
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame("2001:db8::/32\n", array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'sh'))[0][4]);
+        $this->assertSame("2001:db8::/32\n", array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'sh'))[0][5]);
 
         $this->expectException(FirewallNotFound::class);
         $firewall->untrust('000000000000');
@@ -1205,6 +1215,7 @@ class UfwFirewallTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::asked($cmd);
                 $this->trustedHeld[] = UfwFirewallTest::lockHeld($this->trustedLock);
                 $this->ufwHeld[] = UfwFirewallTest::lockHeld($this->ufwLock);
                 $cmd = (array) $cmd;
@@ -1222,6 +1233,8 @@ class UfwFirewallTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
@@ -1250,7 +1263,7 @@ class UfwFirewallTest extends TestCase
 
         ($this->firewall($this->failing([
             'cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(''),
-            'bash /opt/panelalpha/shared-hosting/scripts/firewall.sh' => FakeProcess::failed('firewall: fail2ban did not start'),
+            'pa-root firewall.applyTrustedLists' => FakeProcess::failed('firewall: fail2ban did not start'),
         ])))->trust(new TrustedAddress(TestNetwork::public(7)));
     }
 
@@ -1382,7 +1395,10 @@ class UfwFirewallTest extends TestCase
     public function test_a_lock_core_cannot_open_is_made_on_the_host_first(): void
     {
         $host = $this->host();
-        $missing = sys_get_temp_dir() . '/ufw-lock-' . bin2hex(random_bytes(4)) . '/ufw.lock';
+        $missing = UfwFirewall::LOCK;
+        if (file_exists($missing)) {
+            $this->markTestSkipped('the engine\'s own lock exists here');
+        }
 
         try {
             (new UfwFirewall($host, $missing))->enable();
@@ -1392,7 +1408,7 @@ class UfwFirewallTest extends TestCase
         }
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame([['sh', '-c', 'mkdir -p "$(dirname "$0")" && touch "$0" && chmod 0644 "$0"', $missing]], $host->ran);
+        $this->assertSame([['sh', '-c', 'mkdir -p "$(dirname "$1")" && touch "$1" && chmod 0644 "$1"', 'sh', $missing]], $host->ran);
     }
 
     /** @return list<string> the host commands, as one line each, without the clash check and read-back */
@@ -1402,7 +1418,7 @@ class UfwFirewallTest extends TestCase
         $steps = [];
         foreach ($host->ran as $cmd) {
             if ($cmd[0] === 'sh') {
-                $steps[] = str_starts_with($cmd[2], 'rm -rf') ? 'snapshot' : 'restore';
+                $steps[] = str_contains($cmd[2], 'rm -rf') ? 'snapshot' : 'restore';
             } elseif ($cmd[0] === 'ufw') {
                 $steps[] = implode(' ', $cmd);
             }
@@ -1517,7 +1533,7 @@ class UfwFirewallTest extends TestCase
 
     public function test_rule_files_that_cannot_be_copied_aside_are_not_changed(): void
     {
-        $host = $this->failing(['sh -c rm -rf' => FakeProcess::failed('No space left on device')]);
+        $host = $this->failing(['sh -c snapshot=$1; shift; rm -rf' => FakeProcess::failed('No space left on device')]);
 
         try {
             $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080']));

@@ -14,13 +14,6 @@ final class CancelledGeneration
 {
     private const TIMEOUT_SECONDS = 120;
 
-    /** `docker inspect` per container: id, when it was created, its image id. */
-    private const CONTAINER_FORMAT = '{{.Id}} {{.Created}} {{.Image}}';
-
-    /** Removes the containers named before `--`, then each image after it that no container uses. */
-    private const REMOVE_SCRIPT = 'ids=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do ids+=("$1"); shift; done; shift; '
-        .'docker rm -f "${ids[@]}" >/dev/null || exit 1; for image in "$@"; do docker rmi "$image" >/dev/null 2>&1; done; true';
-
     public function __construct(private readonly DindProject $project) {}
 
     /**
@@ -34,28 +27,29 @@ final class CancelledGeneration
         if ($since === null || $this->runFileNotWrittenYet() || ! $this->replacedNothingRunning()) {
             return [];
         }
-        $containers = self::createdSince((string) $this->inspectProject(), $since);
+        $containers = self::createdSince($this->inspectProject() ?? [], $since);
         if ($containers === []) {
             return [];
         }
-        $images = self::createdSince((string) $this->inspectImages(array_values(array_unique(array_column($containers, 'image')))), $since);
+        $images = self::createdSince($this->inspectImages(array_values(array_unique(array_column($containers, 'image')))) ?? [], $since);
 
         return $this->removeAll(array_column($containers, 'id'), array_column($images, 'id'));
     }
 
     /**
-     * Lines of `<id> <created> [<image>]` created at or after $since.
+     * The containers or images inspected that were created at or after $since, each with its image id if it has one.
      *
+     * @param  list<array<string, mixed>|null>  $inspected
      * @return list<array{id: string, image: string}>
      */
-    public static function createdSince(string $inspect, int $since): array
+    public static function createdSince(array $inspected, int $since): array
     {
         $created = [];
-        foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
-            $fields = preg_split('/\s+/', trim($line)) ?: [];
-            $at = count($fields) >= 2 ? self::timestamp($fields[1]) : null;
+        foreach ($inspected as $item) {
+            $id = (string) ($item['Id'] ?? '');
+            $at = $id === '' ? null : self::timestamp((string) ($item['Created'] ?? ''));
             if ($at !== null && $at >= $since) {
-                $created[] = ['id' => $fields[0], 'image' => $fields[2] ?? ''];
+                $created[] = ['id' => $id, 'image' => (string) ($item['Image'] ?? '')];
             }
         }
 
@@ -118,53 +112,92 @@ final class CancelledGeneration
         return $state->get(GenerationState::STOPPED) !== null;
     }
 
-    private function inspectProject(): ?string
+    /** @return list<array<string, mixed>>|null */
+    private function inspectProject(): ?array
     {
-        $ps = implode(' ', array_map('escapeshellarg', $this->project->userAppComposeCommand(['ps', '--all', '--quiet'])));
-        $script = 'ids=$('.$ps.') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            .escapeshellarg(self::CONTAINER_FORMAT).' $ids';
+        return $this->quietly(function (): array {
+            $ids = $this->project->accountDaemon()->stackContainerIds(true, true, timeout: self::TIMEOUT_SECONDS);
 
-        return $this->quietly(fn (): string => $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS));
+            return $ids === [] ? [] : self::allFound('container', $ids, $this->project->accountDaemon()->containers($ids, self::TIMEOUT_SECONDS));
+        });
     }
 
-    /** @param list<string> $images */
-    private function inspectImages(array $images): ?string
+    /**
+     * @param  list<string>  $images
+     * @return list<array<string, mixed>>|null
+     */
+    private function inspectImages(array $images): ?array
     {
         $images = array_values(array_filter($images, static fn (string $image): bool => $image !== ''));
         if ($images === []) {
             return null;
         }
 
-        return $this->quietly(fn (): string => $this->project->shell()->execQuiet(
-            ['docker', 'image', 'inspect', '--format', '{{.Id}} {{.Created}}', ...$images],
-            [],
-            self::TIMEOUT_SECONDS
-        ));
+        return $this->quietly(fn (): array => self::allFound('image', $images, $this->project->accountDaemon()->images($images, self::TIMEOUT_SECONDS)));
     }
 
     /**
+     * $inspected, or a throw naming the first one asked that the daemon does not have.
+     *
+     * @param  list<string>  $asked
+     * @param  list<array<string, mixed>|null>  $inspected
+     * @return list<array<string, mixed>>
+     */
+    private static function allFound(string $kind, array $asked, array $inspected): array
+    {
+        foreach ($inspected as $at => $item) {
+            if ($item === null) {
+                throw new \RuntimeException("No such {$kind}: {$asked[$at]}");
+            }
+        }
+
+        return $inspected;
+    }
+
+    /**
+     * The containers, then each image no container uses; nothing counts as removed when a container stays.
+     *
      * @param  list<string>  $containers
      * @param  list<string>  $images
      * @return list<string>
      */
     private function removeAll(array $containers, array $images): array
     {
-        $removed = $this->quietly(fn (): string => $this->project->shell()->execQuiet(
-            ['bash', '-c', self::REMOVE_SCRIPT, 'remove', ...$containers, '--', ...$images],
-            [],
-            self::TIMEOUT_SECONDS
-        ));
+        $removed = $this->quietly(function () use ($containers): bool {
+            $this->project->accountDaemon()->removeContainers($containers, true, false, self::TIMEOUT_SECONDS);
+
+            return true;
+        });
         if ($removed === null) {
             return [];
         }
+        $this->removeUnused($images);
         Log::info("Removed what the cancelled redeploy of {$this->project->username()} created: "
             .count($containers).' container(s), and their new images where nothing else uses them');
 
         return $containers;
     }
 
-    /** @param \Closure(): string $exec */
-    private function quietly(\Closure $exec): ?string
+    /**
+     * Every image is tried; one a container still uses stays.
+     *
+     * @param  list<string>  $images
+     */
+    private function removeUnused(array $images): void
+    {
+        try {
+            $this->project->accountDaemon()->removeImages($images, false, self::TIMEOUT_SECONDS);
+        } catch (\Throwable) {
+        }
+    }
+
+    /**
+     * @template T
+     *
+     * @param  \Closure(): T  $exec
+     * @return T|null
+     */
+    private function quietly(\Closure $exec): mixed
     {
         try {
             return $exec();

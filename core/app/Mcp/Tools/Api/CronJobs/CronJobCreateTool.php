@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a cron job
 
-    PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.
+    On a container project the job runs as the account user in a running container of `service`, which is required there and refused on PHP hosting. Either kind of project writes each run to ~/.panelalpha/cron/cron.log in the account, with the output of the command and its exit status; a container run skipped because the service is not running is written there too.
     MARKDOWN)]
 #[IsDestructive]
 class CronJobCreateTool extends ApiTool
@@ -48,6 +48,7 @@ class CronJobCreateTool extends ApiTool
     {
         return [
             'command',
+            'service',
             'minute',
             'hour',
             'day_of_month',
@@ -74,6 +75,7 @@ class CronJobCreateTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'command' => $schema->string()->description('Example: /usr/bin/php /home/johndoe/script.php.')->required(),
+            'service' => $schema->string()->description('Container projects only, and required there: the Compose service the command runs in. Example: app.'),
             'minute' => $schema->string()->description('Example: 0.')->required(),
             'hour' => $schema->string()->description('Example: *.')->required(),
             'day_of_month' => $schema->string()->description('Example: *.')->required(),

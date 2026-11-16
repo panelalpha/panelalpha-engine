@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * A short-syntax volume entry, once interpolated, read as Compose's own parser
- * reads it: every `:` separates fields, inside braces and brackets too, except
- * the one after a lone drive letter. An entry of one field, or of two characters
- * at most, is an anonymous volume and has no source.
+ * An interpolated short-syntax volume read as Compose reads it: every `:` splits, in braces too,
+ * except after a lone drive letter; one field, or two characters at most, is an anonymous volume.
  */
 final class ShortVolume
 {

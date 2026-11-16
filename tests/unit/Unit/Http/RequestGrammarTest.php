@@ -126,7 +126,7 @@ class RequestGrammarTest extends TestCase
         $errors = $this->errors(new SftpAccountStoreRequest(), [
             'username' => 'acme_sftp',
             'auth_method' => 'public_key',
-            'public_key' => 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxzZWNyZXQ user@laptop',
+            'public_key' => 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIN5KCiuy5+pUCc2xXv4dhmQWvU/VtCA/OmjHI8mwa5l user@laptop',
         ]);
 
         $this->assertArrayNotHasKey('public_key', $errors);

@@ -6,14 +6,8 @@ use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Secrets a generated deploy needs that nobody supplied.
- *
- * Derived rather than random, and that is the whole design: a Rails
- * secret_key_base regenerated on each rebuild logs every session out, and a
- * compose password regenerated on each redeploy locks the app out of its own
- * database. Deriving from the engine app key keeps them stable across
- * rebuilds while remaining unguessable from the username alone, and keying by
- * purpose keeps one leaking from exposing the rest.
+ * Secrets a generated deploy needs that nobody supplied, derived from the engine app key rather than random: stable,
+ * so a rebuild neither logs sessions out nor locks the app out of its database, and not guessable from the username.
  */
 class AccountSecrets
 {
@@ -41,9 +35,8 @@ class AccountSecrets
     }
 
     /**
-     * Stable per-account secret. Derived from the engine app key so it is not
-     * guessable from the username alone, and deterministic so a rebuild does
-     * not log every session out.
+     * Stable per-account secret: derived from the engine app key so it is not guessable from the username alone,
+     * and deterministic so a rebuild does not log every session out.
      */
     public function generatedSecretKeyBase(): string
     {
@@ -73,9 +66,8 @@ class AccountSecrets
     }
 
     /**
-     * Of these generated names, the ones this deploy's log has not named yet,
-     * now counted as named. The run file and .env fill a compose file's
-     * `${VAR:?}` with the same value, and one value deserves one log line.
+     * Of these generated names, the ones this deploy's log has not named yet, which then count as named: the run
+     * file and .env fill a compose file's `${VAR:?}` with the same value, and one value deserves one log line.
      *
      * @param  list<string>  $names
      * @return list<string>

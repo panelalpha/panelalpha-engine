@@ -2,15 +2,15 @@
 
 namespace App\Lib\DeployHook\Registration;
 
-use App\Lib\DeployHook\ProviderRegistrationRefused;
-
 /**
- * GitHub repository webhooks, on github.com and GitHub Enterprise Server.
- * `POST /repos/{owner}/{repo}/hooks` with a `web` hook and a `push` event; the
- * signature goes in `config.secret` as the HMAC key.
+ * GitHub and GitHub Enterprise Server repository webhooks: `POST /repos/{owner}/{repo}/hooks`, a `web`
+ * hook for `push`, with the HMAC key in `config.secret`.
  */
 final class GithubRegistrar extends ApiRegistrar
 {
+    use CreatedHookId;
+    use RepositoryUrlParts;
+
     private const API = 'https://api.github.com';
 
     public function name(): string
@@ -25,21 +25,19 @@ final class GithubRegistrar extends ApiRegistrar
 
     public function address(string $repoUrl): ?WebhookTarget
     {
-        $parts = parse_url(trim($repoUrl));
-        if (! is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https') {
+        $parts = self::plainHttpsParts($repoUrl);
+        if ($parts === null) {
             return null;
         }
-        $host = strtolower((string) ($parts['host'] ?? ''));
-        if ($host === '' || isset($parts['user']) || isset($parts['query']) || isset($parts['fragment'])) {
+        $repository = self::ownerAndName($parts);
+        if ($repository === null) {
             return null;
         }
-        if (preg_match('#^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$#', (string) ($parts['path'] ?? ''), $m) !== 1) {
-            return null;
-        }
+        $host = self::lowerHost($parts);
 
         return new WebhookTarget(
             apiBase: $host === 'github.com' ? self::API : $this->origin($host, $parts).'/api/v3',
-            repository: $m[1].'/'.$m[2],
+            repository: $repository,
         );
     }
 
@@ -78,11 +76,6 @@ final class GithubRegistrar extends ApiRegistrar
 
     protected function hookId(array $body): string
     {
-        $id = $body['id'] ?? null;
-        if (! is_int($id) && ! is_string($id)) {
-            throw ProviderRegistrationRefused::unreachable($this->name(), 'the created webhook had no id');
-        }
-
-        return (string) $id;
+        return $this->createdHookId($body);
     }
 }

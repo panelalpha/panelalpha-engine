@@ -34,7 +34,7 @@ Four things, and none of them is a reply in your inbox.
 
 **A product that improves from what happens on every install.** Repeating detection misses and recipe failures become something PanelAlpha can see. When that becomes a product fix, it arrives as an engine update, not as a reply to your report.
 
-**A check that a site is still serving itself after the deploy already succeeded.** A deploy log is a photograph of one moment. It says nothing about the site a month later, after a database filled up, a certificate lapsed, or someone deleted the index page over FTP. Every six hours the engine opens each deployed application and lists the ones that are not serving themselves any more. It also checks that the public name for the project serves this application, not a different one. That sweep does not run when telemetry is fully off. You can still ask about any site whenever you want: [Monitoring and logs](../05-capabilities/monitoring-and-logs.md). To keep the sweep without sending anything off your VPS: [Keep the checks, send nothing](how-to-turn-it-off.md#keep-the-checks-send-nothing).
+**A check that a site is still serving itself after the deploy already succeeded.** A deploy log is a photograph of one moment. It says nothing about the site a month later, after a database filled up, a certificate lapsed or someone deleted the index page over FTP. Every six hours the engine opens each deployed application and lists the ones that are not serving themselves any more. It also checks that the public name for the project serves this application, not a different one. That sweep does not run when telemetry is fully off. You can still ask about any site whenever you want: [Monitoring and logs](../05-capabilities/monitoring-and-logs.md). To keep the sweep without sending anything off your VPS: [Keep the checks, send nothing](how-to-turn-it-off.md#keep-the-checks-send-nothing).
 
 **The fix for a failure PanelAlpha already knows.** A failed deploy's report is sent the moment the deploy fails. If PanelAlpha already has a fix for that failure, it comes back in the answer. The deploy log then ends with `Known problem:` and what to do, and carries the same fix as `problem`, so you or your assistant can apply it straight away. A failed deploy waits up to 5 seconds for that answer. If nothing answers in time, the report is queued as usual and the deploy has no fix attached. With telemetry off nothing is sent, so no fix comes back.
 
@@ -46,13 +46,17 @@ Your VPS is identified by a fingerprint rather than by name: the engine combines
 
 The installer also gives the engine a random ID, `APP_UID` in `.env-core`. It is sent in the `X-Engine-App-UID` header with every report and every request to PanelAlpha Connect, so both can tell one installation from another. It is not derived from anything on the machine. A value that is already set is never replaced, so you can choose it before installing.
 
-A report contains what kind of application it was, how long things took, and the project's limits. It also includes the **public website names** the project answers on, such as `shop.example.com`. Those names leave your VPS in readable form. They are the addresses a visitor types, and they are how a report says which site it is about. A failed or partial deploy also includes which stage failed and the end of the deploy log, with sensitive values removed. A successful deploy is reported without that log.
+A report contains what kind of application it was, how long things took, and the project's limits. It also includes the **public website names** the project answers on, such as `shop.example.com` or `blog-4f2a.panelalpha.online`. Those names leave your VPS in readable form, exactly as a visitor types them. They are how a report says which site it is about. A name the engine gave the project contains the project's name, and some contain the server's address too, such as `blog.203-0-113-7.panelalpha.direct`.
+
+Everywhere else in the report, such as a deploy log line, an error message or a certificate's issuer, three parts of a name are replaced: the project's name by `<account>`, an IP address the name spells by `<ip>`, and the server's own name, the one the engine's certificate is issued for, by `<server>`. For a project named `blog`, a log line quoting `blog.203-0-113-7.panelalpha.direct` says `<account>.<ip>.panelalpha.direct`.
+
+A failed or partial deploy also includes which stage failed and the end of the deploy log, with sensitive values removed. A successful deploy is reported without that log.
 
 **None of this is sent:**
 
-- Project names, replaced with `<account>`
-- Tokens, passwords, secrets, and email addresses found in logs
-- Your VPS's own IP address or hostname in readable form
+- Project names outside the website names above, replaced with `<account>`
+- Tokens, passwords, secrets and email addresses found in logs
+- Your VPS's own IP address or hostname in readable form, outside the website names above
 - Private repository names, which are hashed
 - Filenames from your projects
 - Your source code
@@ -60,6 +64,18 @@ A report contains what kind of application it was, how long things took, and the
 Two addresses can identify a person, and only if you give them. One is a contact on a bug report you file yourself. The other is a notification email you set so monitoring can write to you when this engine or a site it checks looks down. Neither is filled in unless you type it.
 
 There is a setting that allows a copy of your source to be attached to a failed deploy. It is **off**, and the only reason to turn it on is if PanelAlpha support asks you to during an investigation. Set it back afterwards.
+
+## The installer's own report
+
+When the installer finishes an install or an update, it sends one short report to `monitoring.panelalpha.com`, whether the run worked or not. The installer sends it, not the running engine, so `pae telemetry:disable` does not stop it. It holds:
+
+- whether it was an install or an update, when it started and ended, and the exit code
+- the engine version it was installing and, when something failed, a short message saying what
+- the email you gave with `--email`, if any
+- with `--repo`: the branch or tag, the repository address with any user name or token in it replaced by `***`, and `deploy_result`, which is `deployed`, `updated`, `failed` or `not_run`
+- `software`, which is `engine`, or `single-server` when `--full-privileges` deployed the PanelAlpha panel
+
+**The repository address is not hashed here.** It is sent as you typed it, so the name of a private repository leaves your VPS in this one report. No source code is sent, and neither are the values of `--git-token`, `--password` or `--env-var`.
 
 ## An email for alerts
 
@@ -118,7 +134,7 @@ Or from the server:
 pae telemetry:bug-report <project>
 ```
 
-What this does: asks you for a title and a description, then gathers the evidence itself: what it identified your application as, what your site is actually returning, and the end of the last deploy log.
+What this does: asks you for a title and a description, then gathers the evidence itself: what it identified your application as, what your site is actually returning and the end of the last deploy log.
 
 What you should see: `Bug report queued.` It is not sent immediately. It goes out with the next delivery, within five minutes.
 
@@ -147,4 +163,4 @@ Every deploy is recorded in a log file inside the engine, **whether or not sendi
 
 ## From the server
 
-Status, enable, disable, the notification email, the queue, and filing a bug as `pae` commands: [CLI commands](../06-commands/pae-cli.md#telemetry-and-the-engine-itself).
+Status, enable, disable, the notification email, the queue and filing a bug as `pae` commands: [CLI commands](../06-commands/pae-cli.md#telemetry-and-the-engine-itself).

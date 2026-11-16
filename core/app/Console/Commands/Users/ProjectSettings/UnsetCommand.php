@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Users\ProjectSettings;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User;
 use App\System\Project\Settings;
@@ -12,7 +11,6 @@ use Illuminate\Console\Command;
 class UnsetCommand extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = [
         'projects:settings:unset',
@@ -23,16 +21,13 @@ class UnsetCommand extends Command
     protected $signature = 'project:settings:unset
         {key : Setting key (e.g. cloudflare-api-token)}
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--force : Tear down tunnels when unsetting cloudflare-api-token; also skip confirmation}';
 
     protected $description = 'Unset an allowlisted project setting';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $key = Settings::normalizeKey((string) $this->argument('key'));
         $force = (bool) $this->option('force');
 

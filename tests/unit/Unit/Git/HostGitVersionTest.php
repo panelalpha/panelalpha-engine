@@ -4,6 +4,7 @@ namespace Tests\Unit\Git;
 
 use App\Lib\Git\HostGitVersion;
 use App\Lib\Net\EgressRefusedException;
+use App\System\Privileged;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use PHPUnit\Framework\TestCase;
@@ -32,7 +33,7 @@ class HostGitVersionTest extends TestCase
     public function test_the_version_is_read_from_git_itself(): void
     {
         $this->assertSame('2.34.1', $this->hostGit("git version 2.34.1\n")->version());
-        $this->assertSame([['git', '--version']], $this->runs);
+        $this->assertSame([Privileged::probes()->gitVersion()], $this->runs);
     }
 
     public function test_a_distribution_suffix_is_not_part_of_the_version(): void

@@ -3,8 +3,7 @@
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
 /**
- * A package manager's download cache is not needed at runtime but lands in the
- * image layer; a BuildKit `RUN --mount` cache keeps it out of the layer and
+ * A BuildKit `RUN --mount` cache keeps a package manager's download cache out of the image layer and
  * persists it in the account's own daemon between builds.
  */
 final class PackageManagerCache
@@ -17,7 +16,6 @@ final class PackageManagerCache
      */
     private const DIRECTORIES = [
         'npm' => '/root/.npm',
-        // Measured: 1.6 GB for a Next.js starter's yarn install.
         'yarn' => '/usr/local/share/.cache/yarn',
         'pnpm' => '/root/.local/share/pnpm/store',
         'bun' => '/root/.bun/install/cache',
@@ -25,10 +23,8 @@ final class PackageManagerCache
     ];
 
     /**
-     * `--mount=type=cache,target=<dir>,sharing=locked ` for one package
-     * manager, or '' for one this class does not know, so a caller can
-     * concatenate unconditionally. `sharing=locked` is required: npm and yarn
-     * are not safe against a concurrent process mutating their cache dir.
+     * The `--mount=type=cache,…,sharing=locked ` part of the RUN line (and its cache key), or '' for an unknown
+     * manager; `sharing=locked` because npm and yarn are not safe against concurrent writes to their cache.
      */
     public static function mountFor(string $packageManager): string
     {
@@ -37,7 +33,6 @@ final class PackageManagerCache
             return '';
         }
 
-        // Part of the RUN line: adding or removing it changes that layer's cache key.
         return sprintf('--mount=type=cache,target=%s,sharing=locked ', $directory);
     }
 

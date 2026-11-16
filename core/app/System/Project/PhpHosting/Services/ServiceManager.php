@@ -5,9 +5,8 @@ namespace App\System\Project\PhpHosting\Services;
 use App\System\Project\PhpHosting;
 
 /**
- * What keeps a PHP hosting account's processes up: the PHP handlers, Apache,
- * redis and cron. Callers name a service; which init runs it is this class's
- * business, not theirs. Chosen in {@see PhpHosting::services()}.
+ * What keeps a PHP hosting account's processes up: the PHP handlers, Apache, redis and cron.
+ * Callers name a service; which init runs it is this class's business. Chosen in {@see PhpHosting::services()}.
  */
 interface ServiceManager
 {
@@ -24,9 +23,8 @@ interface ServiceManager
     public function bootScripts(array $services): array;
 
     /**
-     * Write $services into the project dir and drop the ones the engine wrote
-     * before that are no longer wanted. A running account picks them up
-     * through {@see sync()}.
+     * Write $services into the project dir and drop any other service written there.
+     * A running account picks them up through {@see sync()}.
      *
      * @param  list<Service>  $services
      */
@@ -46,12 +44,8 @@ interface ServiceManager
     public function restartArgv(string $service): array;
 
     /**
-     * Inside the account, as shell: restart $service, or start it if it is
-     * down, and exit {@see EXIT_NOT_MANAGED} before touching anything when
-     * there is no such service. A copy of its main process ($mainProcess, a
-     * `pgrep -f` pattern) that the init did not start is stopped first and
-     * named on stdout, the only thing the script prints there. Ends without a
-     * newline, so the caller can append what to check afterwards.
+     * Shell restarting or starting $service, or exiting {@see EXIT_NOT_MANAGED} untouched without one; a copy of $mainProcess
+     * (`pgrep -f`) the init did not start is stopped first and named on stdout, its only output there. Ends without a newline.
      */
     public function restartScript(string $service, string $mainProcess): string;
 }

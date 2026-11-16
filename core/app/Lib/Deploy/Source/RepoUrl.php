@@ -3,44 +3,25 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * A repository URL broken into the things the engine keys anything by:
- * host, owner and repo. The owner is a namespace and may itself hold slashes
- * — a GitLab subgroup makes `gitlab.com/rtraceio/web/flink` owner
- * `rtraceio/web`, repo `flink` — so only the last path segment is the repo.
- *
- * Two trees are addressed this way — the paemd pages under
- * `/opt/panelalpha/shared-hosting/paemd-pages` and the source recipes under
- * `resources/sources/` — and a project reaches them by the URL it was cloned
- * from, in whichever spelling the operator typed. `git@github.com:o/r.git`,
- * `https://GitHub.com/O/R/` and `https://github.com/o/r` are one repository,
- * so they have to resolve to one path.
- *
- * Lives here rather than beside either consumer because "what repository is
- * this URL" is not a question about app configs or about recipes.
- *
- * No Laravel dependencies — unit-testable.
+ * A repository URL as host, owner and repo, whatever its spelling; the owner is a namespace that
+ * may hold slashes, so only the last path segment is the repo.
  */
 final class RepoUrl
 {
     /**
-     * Host, owner and repo, or null when the URL names no repository.
-     *
-     * Case is left as typed; {@see segments()} is what lowercases, because a
-     * caller comparing two URLs and a caller building a path want different
-     * things from the same parse.
+     * Host, owner and repo, or null when the URL names no repository; case as typed ({@see segments()} lowercases).
+     * Trailing slashes and `.git` are stripped, and SCP-style `git@host:owner/repo` is read too.
      *
      * @return ?array{host: string, owner: string, repo: string}
      */
     public static function parse(string $gitUrl): ?array
     {
-        // Normalise: strip trailing slashes and optional .git suffix
         $gitUrl = rtrim(trim($gitUrl), '/');
         if (str_ends_with($gitUrl, '.git')) {
             $gitUrl = substr($gitUrl, 0, -4);
         }
         $gitUrl = rtrim($gitUrl, '/');
 
-        // SCP-style git URLs: git@host:owner/.../repo
         if (preg_match('/^[^@\s\/]+@([^:\s]+):([^\s]+)$/', $gitUrl, $m)) {
             return self::build($m[1], $m[2]);
         }
@@ -54,8 +35,7 @@ final class RepoUrl
     }
 
     /**
-     * Split a host and path into host/owner/repo, the repo being the last
-     * segment and the owner every namespace segment before it.
+     * Split a host and path into host/owner/repo; GitLab's `/-/` route marker and what follows are dropped.
      *
      * @return ?array{host: string, owner: string, repo: string}
      */
@@ -66,8 +46,6 @@ final class RepoUrl
             static fn (string $s): bool => $s !== ''
         ));
 
-        // GitLab decorates project URLs with a `/-/` route marker
-        // (`group/sub/repo/-/tree/main`); the repository is everything before it.
         $marker = array_search('-', $segments, true);
         if ($marker !== false) {
             $segments = array_slice($segments, 0, $marker);
@@ -83,13 +61,8 @@ final class RepoUrl
     }
 
     /**
-     * The URL as path segments — lowercased, and rejected if any of them
-     * could climb out of the tree they are about to be joined to.
-     *
-     * A repository URL is operator input that becomes a filesystem path, so
-     * this is the only place that conversion happens: `..` and separators in
-     * an owner or repo name are how a crafted remote would read a YAML file
-     * from somewhere else on the host.
+     * The URL as lowercased path segments, each validated on its own: null if any could climb out of the
+     * tree it is joined to. The only place operator input becomes a filesystem path.
      *
      * @return ?list<string> host, then each namespace segment, then repo
      */
@@ -100,8 +73,6 @@ final class RepoUrl
             return null;
         }
 
-        // The owner may be a multi-level namespace, so validate every segment
-        // on its own — a subgroup separator is legitimate, `..` never is.
         $parts = array_merge(
             [$parsed['host']],
             explode('/', $parsed['owner']),

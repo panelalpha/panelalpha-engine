@@ -1,0 +1,157 @@
+{
+    "http": [
+        {
+            "id": 0,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 443,
+            "server_name": "alice.test",
+            "server_names": [
+                "alice.test",
+                "www.alice.test"
+            ],
+            "upstream_host": "localhost",
+            "upstream_port": 3000,
+            "upstream_protocol": "http",
+            "ssl_enabled": true,
+            "ssl_cert_pem_file": "/opt/panelalpha/shared-hosting/users/alice/ssl-certs/alice.test.pem",
+            "ssl_cert_key_file": "/opt/panelalpha/shared-hosting/users/alice/ssl-certs/alice.test.key",
+            "user": "alice",
+            "domain": "alice.test",
+            "is_generated": true,
+            "conflict_key": "http:*:443:*"
+        },
+        {
+            "id": 0,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 80,
+            "server_name": "bob.test",
+            "server_names": [
+                "bob.test"
+            ],
+            "upstream_host": "localhost",
+            "upstream_port": 80,
+            "upstream_protocol": "http",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "bob",
+            "domain": "bob.test",
+            "is_generated": true,
+            "conflict_key": "http:*:80:*"
+        },
+        {
+            "id": 0,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 80,
+            "server_name": "carol.test",
+            "server_names": [
+                "carol.test"
+            ],
+            "upstream_host": "localhost",
+            "upstream_port": 4000,
+            "upstream_protocol": "http",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "carol",
+            "domain": "carol.test",
+            "is_generated": true,
+            "conflict_key": "http:*:80:*"
+        },
+        {
+            "id": 1,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 80,
+            "server_name": "www.alice.test",
+            "server_names": [],
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 8080,
+            "upstream_protocol": "https",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "",
+            "domain": "",
+            "is_generated": false,
+            "conflict_key": "http:*:80:*"
+        },
+        {
+            "id": 2,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 443,
+            "server_name": "carol.test",
+            "server_names": [],
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 8080,
+            "upstream_protocol": "",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "",
+            "domain": "",
+            "is_generated": false,
+            "conflict_key": "http:*:443:*"
+        },
+        {
+            "id": 3,
+            "transport": "http",
+            "listen_ip": "10.0.0.3",
+            "listen_port": 80,
+            "server_name": "_",
+            "server_names": [],
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 8080,
+            "upstream_protocol": "",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "",
+            "domain": "",
+            "is_generated": false,
+            "conflict_key": "http:10.0.0.3:80:*"
+        },
+        {
+            "id": 6,
+            "transport": "http",
+            "listen_ip": "*",
+            "listen_port": 8080,
+            "server_name": "carol.test",
+            "server_names": [],
+            "upstream_host": "carol",
+            "upstream_port": 8080,
+            "upstream_protocol": "",
+            "ssl_enabled": false,
+            "ssl_cert_pem_file": null,
+            "ssl_cert_key_file": null,
+            "user": "carol",
+            "domain": "carol.test",
+            "is_generated": false,
+            "conflict_key": "http:*:8080:*"
+        }
+    ],
+    "stream": [
+        {
+            "id": 4,
+            "transport": "tcp",
+            "listen_ip": "*",
+            "listen_port": 5432,
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 5432,
+            "is_generated": false
+        },
+        {
+            "id": 5,
+            "transport": "udp",
+            "listen_ip": "10.0.0.4",
+            "listen_port": 53,
+            "upstream_host": "10.0.0.9",
+            "upstream_port": 53,
+            "is_generated": false
+        }
+    ]
+}

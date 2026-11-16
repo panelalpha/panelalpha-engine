@@ -19,14 +19,13 @@ class CheckoutRedeploy
         $this->rebuild($project);
     }
 
+    /** rebuildFromCheckout() records its own verdict, and a partial one is never turned into a success here. */
     protected function rebuild(DindProject $project): void
     {
         $project->deployment()->rebuildFromCheckout();
         $project->system()->webserver()->rebuildDomains();
 
         $user = $project->userModel();
-        // rebuildFromCheckout() already recorded its own verdict; a partial one must not be
-        // turned into a success here.
         if (in_array($user->getDeploymentStatus(), ['success', 'partial'], true)) {
             return;
         }

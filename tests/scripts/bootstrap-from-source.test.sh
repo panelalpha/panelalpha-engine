@@ -156,5 +156,49 @@ FAKE_GIT=''
 expect_git_warning "no git says nothing and does not end the bootstrap" "survived/"
 unset -f git warn
 
+# The upload keeps core/bootstrap/cache, so what an earlier tree cached must be cleared.
+eval "$(sed -n '/^clear_cached_bootstrap_files() {/,/^}/p' "$SCRIPT_DIR/bootstrap-from-source.sh")"
+step() { echo "step: $1"; }
+DOCKER_CALLS="$WORK_DIR/docker-calls"
+docker() { printf '%s\n' "$*" >>"$DOCKER_CALLS"; }
+expect_clear() { # expect_clear <label> <expected call>
+    local got
+    : >"$DOCKER_CALLS"
+    clear_cached_bootstrap_files >/dev/null
+    got=$(tail -n 1 "$DOCKER_CALLS" 2>/dev/null)
+    if [ "$got" = "$2" ]; then
+        echo "PASS: $1"
+    else
+        echo "FAIL: $1 -- expected '$2', got '$got'"
+        failures=$((failures + 1))
+    fi
+}
+expect_clear "a source deploy clears the cached bootstrap files" 'compose exec -T core php artisan optimize:clear --except=cache'
+
+# Core answers first, and the clear lands before anything acts on the new tree.
+expect_order() { # expect_order <label> <file> <regex 1> <regex 2> <regex 3>
+    local last=0 n pattern
+    for pattern in "$3" "$4" "$5"; do
+        n=$(grep -nE "$pattern" "$2" | head -1 | cut -d: -f1)
+        if [ -z "$n" ] || [ "$n" -le "$last" ]; then
+            echo "FAIL: $1 -- '$pattern' is missing or out of order"
+            failures=$((failures + 1))
+            return
+        fi
+        last=$n
+    done
+    echo "PASS: $1"
+}
+expect_order "the bootstrap clears them once core is up, before the migrations" \
+    "$SCRIPT_DIR/bootstrap-from-source.sh" '^wait_for_database$' '^clear_cached_bootstrap_files$' '^update_core_state$'
+expect_order "installer.sh clears them before the migrations that follow 'up'" \
+    "$SCRIPT_DIR/installer.sh" 'artisan optimize:clear' 'artisan migrate --force' 'artisan project:network:move --all'
+
+# Stored NAT maps go after the migrations and before an --enable-nat rebuild.
+expect_order "installer.sh prunes the NAT maps after the migrations, before a NAT rebuild" \
+    "$SCRIPT_DIR/installer.sh" 'artisan migrate --force' 'artisan system:nat:prune \|\| true$' 'artisan system:nat:build'
+expect_order "the bootstrap prunes the NAT maps after the migrations" \
+    "$SCRIPT_DIR/bootstrap-from-source.sh" 'core_artisan migrate --force' 'core_artisan system:exim:rebuild' 'core_artisan system:nat:prune'
+
 [ "$failures" -eq 0 ] && echo "All passed." || echo "${failures} failed."
 exit "$failures"

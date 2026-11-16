@@ -47,6 +47,12 @@ final class LiteSpeedStack implements PhpStack
         $this->system->runProcess($project->execArgv($project->services()->restartArgv("lsphp{$phpVersion}")));
     }
 
+    /** lsphp replaces its children only when its service restarts. */
+    public function reloadPhpHandler(PhpHosting $project, string $phpVersion): void
+    {
+        $this->restartPhpHandler($project, $phpVersion);
+    }
+
     /**
      * @return list<Service>
      */

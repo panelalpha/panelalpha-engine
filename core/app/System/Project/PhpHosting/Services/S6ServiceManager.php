@@ -2,14 +2,13 @@
 
 namespace App\System\Project\PhpHosting\Services;
 
+use App\System\Privileged;
 use App\System\Project\PhpHosting;
 use InvalidArgumentException;
 
 /**
- * s6, as the PHP hosting template sets it up: `services/<name>/run` in the
- * project dir, mounted at {@see SOURCE_DIR} and copied to {@see SCAN_DIR} when
- * the account boots. The template ships redis and cron; the engine writes the
- * PHP handlers (and Apache) next to them, every one in the foreground.
+ * s6 as the template sets it up: `services/<name>/run` mounted at {@see SOURCE_DIR}, copied to {@see SCAN_DIR} at boot.
+ * The template ships redis and cron; the engine writes the PHP handlers (and Apache), every one in the foreground.
  */
 final class S6ServiceManager implements ServiceManager
 {
@@ -91,7 +90,7 @@ final class S6ServiceManager implements ServiceManager
         foreach (glob($dir.'/*', GLOB_ONLYDIR) ?: [] as $path) {
             $name = basename($path);
             if (! in_array($name, $wanted, true) && ! is_dir("{$templateDir}/{$name}")) {
-                $system->exec(['sudo', 'rm', '-rf', $path]);
+                $system->exec(Privileged::files()->removeTree($path));
             }
         }
     }

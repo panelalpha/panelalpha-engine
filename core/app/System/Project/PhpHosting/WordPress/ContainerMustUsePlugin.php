@@ -3,10 +3,8 @@
 namespace App\System\Project\PhpHosting\WordPress;
 
 /**
- * The engine must-use plugin for WordPress in a project's own container.
- *
- * The install is not on the host filesystem, so WordPress writes the file
- * itself through WP-CLI, into WPMU_PLUGIN_DIR and as the user WP-CLI runs as.
+ * The engine must-use plugin for WordPress in a project's own container. The install is not on the host filesystem,
+ * so WordPress writes the file itself through WP-CLI, into WPMU_PLUGIN_DIR and as the user WP-CLI runs as.
  */
 final class ContainerMustUsePlugin implements EnsuresMustUsePlugin
 {

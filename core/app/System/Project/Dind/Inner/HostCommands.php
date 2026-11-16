@@ -5,21 +5,11 @@ namespace App\System\Project\Dind\Inner;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\System\Project\Dind\InnerDocker;
+use Symfony\Component\Process\Process;
 
 /**
- * Running host-side work on behalf of an account's deploy, and saying so in
- * its log.
- *
- * Two ways to run something, and the choice is about who is waiting. A
- * cancellable command is one this deploy needs finished, so it streams into
- * the deploy log and honours a cancel; a background one is work the *next*
- * deploy will benefit from, detached so nobody waits and failure costs
- * nothing but a retry later.
- *
- * Every path through here checks for ENOSPC. Image seeding used to log "host
- * import failed" and carry on, so a full disk reached the customer as a
- * generic error several steps later; stopping at the first one turns it into
- * the sentence {@see DeployFailureExplainer} produces.
+ * Host-side work for an account's deploy: cancellable when this deploy waits for it, detached when only the
+ * next one benefits; every path stops at the first ENOSPC with {@see DeployFailureExplainer}'s sentence.
  */
 class HostCommands
 {
@@ -31,33 +21,32 @@ class HostCommands
     }
 
     /**
-     * Detach a host command so the deploy that asked for it does not wait.
-     * Best-effort by design: if it fails, the only cost is that the next
-     * deploy tries again.
+     * Best effort, since a failure costs only a retry by the next deploy; one that did not start is a warning.
+     *
+     * @param  list<string>  $argv
      */
-    public function inBackground(string $script): void
+    public function inBackground(array $argv): void
     {
         try {
-            $this->inner->dind()->system()->runProcess(
-                ['sudo', 'sh', '-c', 'nohup sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &'],
-                [],
-                5
-            );
+            $process = $this->inner->dind()->system()->runProcess($argv, [], 5);
+            $failure = $process->isSuccessful() ? null : self::failureOf($process);
         } catch (\Exception $e) {
-            // The stock-image path already covers this deploy.
+            $failure = $e->getMessage();
+        }
+        if ($failure !== null) {
+            $this->logWarn("Background host work did not start; the next deploy tries again: {$failure}");
         }
     }
 
     /**
      * Host-side docker/build steps that must honour deploy cancellation via PID.
      *
-     * @param  list<string>|string  $cmd
+     * @param  list<string>  $argv
      */
-    public function cancellable(array|string $cmd, int $timeout): void
+    public function cancellable(array $argv, int $timeout): void
     {
         $shell = $this->inner->dind()->shell();
         $logger = $shell->logger();
-        $argv = is_array($cmd) ? $cmd : ['sudo', 'sh', '-c', $cmd];
 
         if ($logger === null) {
             $this->inner->dind()->system()->exec($argv, [], $timeout);
@@ -75,9 +64,8 @@ class HostCommands
     }
 
     /**
-     * Image seeding used to log "host import failed" and carry on, so a full
-     * disk reached the customer as a generic error several steps later. Stop
-     * at the first ENOSPC with the sentence DeployFailureExplainer produces.
+     * Stop at the first ENOSPC with the sentence DeployFailureExplainer produces, rather than carry on and
+     * reach the customer as a generic error several steps later.
      */
     public function failDeployIfDiskFull(string $output): void
     {
@@ -118,5 +106,12 @@ class HostCommands
             $this->failDeployIfDiskFull($e->getMessage());
             throw $e;
         }
+    }
+
+    private static function failureOf(Process $process): string
+    {
+        $output = trim($process->getErrorOutput() ?: $process->getOutput());
+
+        return $output !== '' ? $output : 'exit code '.$process->getExitCode();
     }
 }

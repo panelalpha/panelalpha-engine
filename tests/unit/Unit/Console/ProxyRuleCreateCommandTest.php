@@ -93,7 +93,7 @@ class ProxyRuleCreateCommandTest extends TestCase
         $args = '--transport=tcp --listen-port=5432 --upstream-host=db --upstream-port=5432';
 
         $this->create("--scope=user {$args}")
-            ->expectsQuestion('Username (for user-owned rule)', '')
+            ->expectsQuestion('Project username (for user-owned rule)', '')
             ->expectsOutputToContain('A user-owned rule needs an existing project (--project).')
             ->assertExitCode(1);
         $this->create("--scope=user --project=nobody {$args}")

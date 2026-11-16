@@ -18,29 +18,21 @@ class ProjectUsage
     public function __construct(private Statistics $statistics) {}
 
     /**
+     * Storage is the background measurement, `du` only before the first one; only a DinD account keeps its
+     * containers' logs inside its own home.
+     *
      * @return array<string, array{usage: mixed, maximum: mixed}>
      */
     public function summary(User $user, ?System $system = null): array
     {
         $project = $user->project($system);
-        // The background measurement; `du` here only before the first one.
         $disk = ProjectDisk::latest((string) $user->username);
         $diskUsage = $disk !== null && $disk['files_bytes'] !== null
             ? (int) ceil($disk['files_bytes'] / 1048576)
             : $project->fileManager()->diskUsage();
-        // Only a DinD account keeps its containers' logs inside its own home.
         $logBytes = $project->runtime() instanceof Dind ? $project->fileManager()->containerLogBytes() : 0;
 
-        $query = 'SELECT ';
-        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'addon') AS addon_domains, ";
-        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'sub') AS subdomains, ";
-        $query .= '(SELECT COUNT(*) FROM ftp_accounts WHERE user_id = ?) AS ftp_accounts, ';
-        $query .= '(SELECT COUNT(*) FROM sftp_accounts WHERE user_id = ?) AS sftp_accounts, ';
-        $query .= '(SELECT COUNT(*) FROM mysql_databases WHERE user_id = ?) AS mysql_databases';
-
-        $result = DB::select($query, array_fill(0, 5, $user->id));
-        /** @var object $counters */
-        $counters = $result[0];
+        $counters = self::counters($user);
 
         return [
             'storage' => [
@@ -55,6 +47,30 @@ class ProjectUsage
                 'usage' => $disk['docker_bytes'] ?? null,
                 'maximum' => null,
             ],
+            ...$this->transferAndCounts($user, $counters),
+        ];
+    }
+
+    private static function counters(User $user): object
+    {
+        $query = 'SELECT ';
+        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'addon') AS addon_domains, ";
+        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'sub') AS subdomains, ";
+        $query .= '(SELECT COUNT(*) FROM ftp_accounts WHERE user_id = ?) AS ftp_accounts, ';
+        $query .= '(SELECT COUNT(*) FROM sftp_accounts WHERE user_id = ?) AS sftp_accounts, ';
+        $query .= '(SELECT COUNT(*) FROM mysql_databases WHERE user_id = ?) AS mysql_databases';
+
+        $result = DB::select($query, array_fill(0, 5, $user->id));
+        /** @var object $counters */
+        $counters = $result[0];
+
+        return $counters;
+    }
+
+    /** @return array<string, array{usage: mixed, maximum: mixed}> */
+    private function transferAndCounts(User $user, object $counters): array
+    {
+        return [
             'bandwidth' => [
                 'usage' => $this->statistics->projectCalendarMonthBytes($this->domainNames($user)),
                 'maximum' => ResourceLimit::scaled($user->getBandwidthLimit(), 1024 * 1024),
@@ -83,11 +99,15 @@ class ProjectUsage
     }
 
     /**
-     * @return array<string, int>
+     * Transfer per bucket. An empty series is an object, so it answers `{}` as the document says.
+     *
+     * @return array<string, int>|\stdClass
      */
-    public function projectBandwidth(User $user, string $start, string $end, string $groupBy): array
+    public function projectBandwidth(User $user, string $start, string $end, string $groupBy): array|\stdClass
     {
-        return $this->statistics->projectBandwidth($this->domainNames($user), $start, $end, $groupBy);
+        $series = $this->statistics->projectBandwidth($this->domainNames($user), $start, $end, $groupBy);
+
+        return $series === [] ? new \stdClass : $series;
     }
 
     public function ownedDomain(User $user, string $domain): ?Domain

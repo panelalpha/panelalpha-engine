@@ -6,14 +6,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\Ruby\Gemfile;
 
 /**
- * Ruby, versioned by `.ruby-version`, then by `ARG RUBY_VERSION=` or a
- * `FROM ruby:<version>` in the repo's own Dockerfile (Rails 7.1+ generates
- * one). Then, when the stated version violates the Gemfile's `ruby`
- * constraint, by the constraint's floor.
- *
- * Whatever the project declares is honoured, including a version outside
- * `MINORS` — that list is what the host warms, not a whitelist: a Gemfile.lock
- * resolved under one minor will not install under another.
+ * Ruby, versioned by `.ruby-version`, then the repo's Dockerfile, then the Gemfile constraint's floor when violated.
+ * A declared version outside `MINORS` is honoured: that list is what the host warms, not a whitelist.
  */
 final class RubyRuntime implements Runtime
 {
@@ -35,9 +29,7 @@ final class RubyRuntime implements Runtime
     private const DOCKERFILES = ['Dockerfile', 'Dockerfile.prod'];
 
     /**
-     * Both spellings a Dockerfile uses. `ARG RUBY_VERSION=` first: such a
-     * Dockerfile usually then writes `FROM ruby:$RUBY_VERSION`, where the FROM
-     * line names no version.
+     * Both spellings a Dockerfile uses, `ARG RUBY_VERSION=` first: its FROM line then usually names no version.
      *
      * @var list<string>
      */
@@ -65,9 +57,8 @@ final class RubyRuntime implements Runtime
     }
 
     /**
-     * The one entry point for "which Ruby does this project get". Unlike
-     * `resolve()` it answers for any directory: its callers are already inside
-     * a Ruby deploy and need an image, not a verdict on the project.
+     * The one entry point for "which Ruby does this project get", for any directory: its callers are already
+     * inside a Ruby deploy and need an image, not a verdict.
      */
     public static function imageFor(ProjectContext $context): string
     {
@@ -90,11 +81,12 @@ final class RubyRuntime implements Runtime
         return 'ruby';
     }
 
+    /**
+     * Only a project with a Gemfile is Ruby's. A stated version the Gemfile rejects, which bundler refuses,
+     * moves to its floor; the log carries both the declaration and the constraints.
+     */
     public function resolve(ProjectContext $context): ?Requirement
     {
-        // The Gemfile gate belongs here, not in imageFor(): this method answers
-        // "is this project mine", and a .ruby-version with no Gemfile is not a
-        // Ruby application the engine can deploy.
         if (! $context->hasFile('gemfile')) {
             return null;
         }
@@ -102,10 +94,6 @@ final class RubyRuntime implements Runtime
         [$version, $source, $raw] = self::statedVersion($context);
         $constraints = Gemfile::of($context)->rubyConstraints();
 
-        // The Gemfile constrains, it does not dictate. bundler refuses to
-        // install under a Ruby the Gemfile rejects (`Your Ruby version is
-        // 3.3.0, but your Gemfile specified 3.2.2`), so a violation is a failed
-        // deploy — but a range already satisfied must not move to its floor.
         if ($constraints !== [] && ! self::satisfies($version, $constraints)) {
             $required = self::lowestAllowed($constraints);
             if ($required !== null) {
@@ -113,8 +101,6 @@ final class RubyRuntime implements Runtime
             }
         }
 
-        // Both the verbatim declaration and the Gemfile constraints go in the
-        // deploy log: reporting either alone makes the other look absent.
         return new Requirement(
             'ruby',
             $version,
@@ -124,10 +110,8 @@ final class RubyRuntime implements Runtime
     }
 
     /**
-     * What the project states, where it said so, and the declaration verbatim
-     * — before the Gemfile gets a say on whether it is allowed. The verbatim
-     * form is what the requirement reports, so a log showing only our `3.3.0`
-     * can still be checked against the file's `ruby-3.3.0`.
+     * What the project states, where, and verbatim, before the Gemfile has a say; the verbatim form lets a log
+     * showing our `3.3.0` be checked against the file's `ruby-3.3.0`.
      *
      * @return array{0: string, 1: ?string, 2: string}
      */
@@ -162,39 +146,40 @@ final class RubyRuntime implements Runtime
         return true;
     }
 
+    /**
+     * `~> 3` and `~> 3.2` allow 3.x and `~> 3.2.1` 3.2.x, as RubyGems defines them; an exact pin matches
+     * by prefix, as bundler means it. Unrecognised syntax never vetoes a version.
+     */
     private static function satisfiesOne(string $version, string $constraint): bool
     {
         $constraint = trim($constraint);
 
-        // `~> 3.2` allows 3.x; `~> 3.2.1` allows 3.2.x — the last named
-        // component may move.
         if (preg_match('/^~>\s*(\d+(?:\.\d+){0,2})$/', $constraint, $m) === 1) {
             $parts = explode('.', $m[1]);
-            array_pop($parts);
+            if (count($parts) > 1) {
+                array_pop($parts);
+            }
             $prefix = implode('.', $parts);
 
             return version_compare($version, $m[1], '>=')
-                && ($prefix === '' || str_starts_with($version.'.', $prefix.'.'));
+                && str_starts_with($version.'.', $prefix.'.');
         }
 
         if (preg_match('/^(>=|<=|>|<|!=|=)?\s*(\d+(?:\.\d+){0,2})$/', $constraint, $m) === 1) {
             $operator = $m[1] !== '' ? $m[1] : '=';
             if ($operator === '=') {
-                // An exact pin matches by prefix: `3.2` is satisfied by 3.2.2,
-                // which is what the pin means to bundler.
                 return $version === $m[2] || str_starts_with($version.'.', $m[2].'.');
             }
 
             return version_compare($version, $m[2], $operator);
         }
 
-        // Unrecognised syntax must not veto a version.
         return true;
     }
 
     /**
-     * The lowest version the constraints allow, for when the stated one does
-     * not satisfy them. Null when nothing here names a floor.
+     * The lowest version the constraints allow, or null; a `>=`/`~>` `X.Y.0` floor collapses to `X.Y`,
+     * since Docker Hub prunes a line's oldest patch first.
      *
      * @param  list<string>  $constraints
      */
@@ -206,11 +191,6 @@ final class RubyRuntime implements Runtime
                 continue;
             }
 
-            // Docker Hub prunes the oldest patch of a line first
-            // (ruby:3.4.0-slim-bookworm is gone), so a `>= X.Y.0` floor
-            // collapses to the minor line, which is the same floor and is what
-            // the host warms. Only a `.0` floor: `~> 3.3.9` would go *below*
-            // what the project asked for.
             if (($m[1] === '>=' || $m[1] === '~>') && self::isMinorFloor($m[2])) {
                 return substr($m[2], 0, (int) strrpos($m[2], '.'));
             }
@@ -233,10 +213,8 @@ final class RubyRuntime implements Runtime
     }
 
     /**
-     * The version this project gets, Gemfile constraint included. Shares
-     * `statedVersion()` with `resolve()`, so the recipe and the deploy cannot
-     * resolve different versions. Differs from resolve() only for a project
-     * that is not Ruby at all — this answers anyway.
+     * The version this project gets, Gemfile constraint included, sharing `statedVersion()` with `resolve()`
+     * so recipe and deploy agree; unlike resolve() it answers for a project that is not Ruby.
      */
     private static function versionFor(ProjectContext $context): string
     {
@@ -250,10 +228,9 @@ final class RubyRuntime implements Runtime
         return $version;
     }
 
+    /** "ruby-3.3.0", "3.3.0 # pinned": rbenv and rvm write the prefix, and ruby:ruby-3.3.0 is no tag. */
     private static function normalize(string $raw): string
     {
-        // "ruby-3.3.0", "3.3.0 # pinned": rbenv and rvm write the prefixed
-        // form, and ruby:ruby-3.3.0 is not a tag any registry has.
         $version = trim(explode("\n", $raw)[0]);
         $version = preg_replace('/^ruby-/i', '', $version) ?? $version;
 

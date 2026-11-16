@@ -2,19 +2,22 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
-use App\System;
-use App\System\Filesystem as SystemFilesystem;
-use App\System\Project\Dind;
-use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\ProjectFiles;
-use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
+use App\System;
+use App\System\Filesystem as SystemFilesystem;
+use App\System\Project\Dind;
+use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
+use App\System\Project\Dind\ProjectFiles;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\StagedRename;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
@@ -35,8 +38,8 @@ class HostCompileSharedManifestTest extends TestCase
     /**
      * A stubbed System that answers the given files, records every
      * `runProcess()` argv, and captures what a real `writeFileReplacingPath()`
-     * write (staged to a temp file, `sudo cp`'d out, then renamed onto
-     * the target, {@see StagedRename}) actually sent.
+     * write (staged to a temp file, copied out by the broker's `files.copy`,
+     * then renamed onto the target, {@see StagedRename}) actually sent.
      *
      * @param array<string, string> $files absolute account path => contents
      * @param array<string, string> $copiedTo target path => contents, filled in by reference
@@ -79,9 +82,11 @@ class HostCompileSharedManifestTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.copy') {
+                    [$source, $target] = LocalRoot::values($cmd);
+                    if (is_file($source)) {
+                        $this->copiedTo[$target] = (string) file_get_contents($source);
+                    }
                 }
                 $this->renameStaged($cmd);
 
@@ -126,6 +131,7 @@ class HostCompileSharedManifestTest extends TestCase
         $dind->method('engineAccount')->willReturn(new EngineAccount('acme', '/home/acme', '1001:1001'));
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
         $dind->method('projectTree')->willReturnCallback(fn (): ProjectFiles => new ProjectFiles($dind));
+        $dind->method('innerDocker')->willReturn($this->hostWithTheBase());
 
         return $dind;
     }
@@ -209,5 +215,15 @@ class HostCompileSharedManifestTest extends TestCase
         $this->assertSame(PhpHostBuild::allowPlugins(), $written['config']['allow-plugins']);
         unset($written['config']);
         $this->assertSame(json_decode($composerJson, true), $written, 'the manifest must carry composer.json, plus the allow-plugins');
+    }
+
+    private function hostWithTheBase(): InnerDocker
+    {
+        $bases = $this->createStub(SharedBaseImages::class);
+        $bases->method('ensureOnHost')->willReturn(true);
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('bases')->willReturn($bases);
+
+        return $inner;
     }
 }

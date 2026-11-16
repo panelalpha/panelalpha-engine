@@ -67,6 +67,9 @@ const NOT_APPLICABLE_TO_PROJECT = [
   // git_deploy_hook_show on a project that never had a hook set up: an honest
   // 404, and creating one is a write this smoke must not make.
   /has no deploy hook/i,
+  // git_deploy_key_show on a project that never had a key: the same honest 404,
+  // and making one is a write this smoke must not make.
+  /has no deploy key/i,
 ];
 
 function isNotApplicable(detail: string): boolean {

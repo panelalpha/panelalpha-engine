@@ -2,10 +2,14 @@
 
 namespace Tests\Unit\WordpressMigration;
 
+use App\System;
+use App\System\Privileged;
 use App\System\Project\PhpHosting\WordPress\Migration\AccountFileCopy;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\InstallDestinationPluginStep;
 use Exception;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * The migrator zip is staged under ~/.panelalpha for WP-CLI, which must not
@@ -21,16 +25,16 @@ class InstallDestinationPluginStagingTest extends TestCase
 
     private string $account;
 
-    private LocallyRunSystem $system;
+    private BrokerRunSystem $system;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->root = sys_get_temp_dir().'/wp-migrator-staging-'.bin2hex(random_bytes(6));
-        $this->home = $this->root.'/home/alice';
+        $this->home = $this->root.'/home/'.posix_getuid();
         mkdir($this->home, 0755, true);
         $this->account = posix_getuid().':'.posix_getgid();
-        $this->system = new LocallyRunSystem;
+        $this->system = new BrokerRunSystem($this->root.'/home');
     }
 
     protected function tearDown(): void
@@ -48,14 +52,15 @@ class InstallDestinationPluginStagingTest extends TestCase
         $this->assertSame('0700', $this->mode($this->home.'/.panelalpha'));
         $this->assertSame('0755', $this->mode($this->home.'/.panelalpha/wordpress-migrator'));
         $this->assertSame('0644', $this->mode($staged));
-        foreach ($this->system->callsAs('root') as $argv) {
-            $this->assertSame($this->home.'/.panelalpha', $argv[5]);
-        }
+        $this->assertSame(
+            [Privileged::scripts()->makeHomeEntry($this->home.'/.panelalpha', '0700', $this->account)],
+            $this->system->requestsOutsideTheAccount(),
+        );
     }
 
     public function test_staging_refuses_a_staging_dir_linked_into_another_account(): void
     {
-        $victim = $this->root.'/home/bob/public_html';
+        $victim = $this->root.'/home/'.(posix_getuid() + 1).'/public_html';
         mkdir($victim, 0750, true);
         chmod($victim, 0750);
         mkdir($this->home.'/.panelalpha', 0700);
@@ -90,5 +95,39 @@ class InstallDestinationPluginStagingTest extends TestCase
         clearstatcache();
 
         return sprintf('%04o', fileperms($path) & 07777);
+    }
+}
+
+/** Runs every command as the test user, broker requests through pa-root-local, and keeps the requests. */
+final class BrokerRunSystem extends System
+{
+    /** @var list<list<string>> */
+    public array $requests = [];
+
+    public function __construct(private string $homes) {}
+
+    public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+    {
+        $argv = array_values((array) $cmd);
+        $client = array_search(LocalRoot::CLIENT, $argv, true);
+        if ($client !== false) {
+            $this->requests[] = array_slice($argv, $client);
+            $argv[$client] = LocalRoot::client();
+        }
+        $process = new Process($argv, null, ['PA_ROOT_LOCAL_ROOTS' => json_encode(['homes' => $this->homes])]);
+        $process->run();
+
+        return $process;
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function requestsOutsideTheAccount(): array
+    {
+        return array_values(array_filter(
+            $this->requests,
+            static fn (array $argv): bool => ! str_starts_with((string) LocalRoot::action($argv), 'account.'),
+        ));
     }
 }

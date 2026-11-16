@@ -8,6 +8,7 @@ use App\System;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -100,10 +101,10 @@ class FileMkdirHttpTest extends TestCase
                 return $this->root . '/home';
             }
 
-            /** Runs as this process, setpriv dropped. */
+            /** Runs as this process, through pa-root-local. */
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $process = new Process(array_slice((array) $cmd, 7));
+                $process = new Process(LocalRoot::argv((array) $cmd));
                 $process->run();
 
                 return $process;

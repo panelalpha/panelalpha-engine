@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('project_get')]
 #[Description(<<<'MARKDOWN'
     Get a project
+
+    The project's record: status, domain, template, limits and settings. For resource use - disk, bandwidth and the space its container logs take - call project_usage.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

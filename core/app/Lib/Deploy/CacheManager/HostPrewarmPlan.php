@@ -2,28 +2,12 @@
 
 namespace App\Lib\Deploy\CacheManager;
 
+use App\Lib\Deploy\Dind\AccountImage;
 use Illuminate\Container\Container;
 
 /**
- * What to warm into the host image cache before any customer deploys, and how
- * much disk it may cost.
- *
- * The engine already self-warms: an account that needs an image the host does
- * not have pulls it to the host on first use and seeds itself from there, so
- * prewarming a plain `docker pull` only saves that one host pull. What it
- * cannot self-warm cheaply is the shared PHP base, which compiles the baked
- * extension set from the PHP source tree — minutes per minor, paid by whoever
- * deploys that minor first.
- *
- * The candidates and their order come from `config/core/images.yaml`
- * ({@see ImageCatalog}); which of them this host warms, and the disk limits,
- * from `.env` via `pae configure prewarm`. This class is the arithmetic on
- * top: what fits, what is already there, and what to give back when the host
- * is under pressure.
- *
- * Nothing here estimates a size. The caller measures each absent image and
- * passes the sizes in; an image it could not measure is still warmed, and the
- * free-space check between items is what protects the reserve.
+ * What to warm into the host image cache, and the disk it may cost. Accounts self-warm plain pulls, so the win is the
+ * shared PHP base (minutes of compile per minor); candidates from images.yaml ({@see ImageCatalog}), selection and limits from `.env`.
  */
 class HostPrewarmPlan
 {
@@ -31,11 +15,13 @@ class HostPrewarmPlan
 
     public const KIND_PULL = 'pull';
 
+    public const KIND_ACCOUNT = 'account';
+
     /** Never spend the last of the disk: accounts live on the same filesystem. */
-    public const FALLBACK_RESERVE_BYTES = 10737418240; // 10 GiB
+    public const FALLBACK_RESERVE_BYTES = 10737418240;
 
     /** Used only when the config declares no budget at all. */
-    public const FALLBACK_BUDGET_BYTES = 6442450944;  // 6 GiB
+    public const FALLBACK_BUDGET_BYTES = 6442450944;
 
     /**
      * The entries this host warms, highest priority first: only those selected
@@ -53,6 +39,17 @@ class HostPrewarmPlan
             self::available($runtimes),
             static fn (array $i): bool => isset($wanted[$i['id']])
         ));
+    }
+
+    /**
+     * What every host warms ahead of {@see catalog()}, whatever was selected:
+     * the image each account container runs.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function required(): array
+    {
+        return [AccountImage::prewarmItem()];
     }
 
     /**
@@ -127,14 +124,8 @@ class HostPrewarmPlan
     }
 
     /**
-     * Take items in the configured order while they fit.
-     *
-     * An item whose size $sizes does not carry is taken without being charged
-     * for — a build has no manifest to measure until it exists, and refusing
-     * to warm the one image worth minutes because its size is unknown would
-     * defeat the plan. The caller re-reads free space before each item and
-     * stops there instead, so an unmeasured item can overshoot the budget by
-     * its own size and no further.
+     * Take items in order while they fit. An absent required item and an unmeasured one are taken uncharged; the caller
+     * re-reads free space before each item, so it overshoots by one item's size at most.
      *
      * @param  list<array<string, mixed>>  $items
      * @param  array<string, int>  $sizes  ref => measured bytes, where known
@@ -154,6 +145,19 @@ class HostPrewarmPlan
         $headroom = max(0, $availableBytes - $reserve);
         $spendable = $budgetBytes === null ? $headroom : min($headroom, max(0, $budgetBytes));
 
+        [$selected, $skipped] = self::takeWhileFits($items, $sizes, $have, $spendable);
+
+        return ['selected' => $selected, 'skipped' => $skipped, 'spendable' => $spendable];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @param  array<string, int>  $sizes
+     * @param  array<string, int>  $have
+     * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+     */
+    private static function takeWhileFits(array $items, array $sizes, array $have, int $spendable): array
+    {
         $selected = [];
         $skipped = [];
         $spent = 0;
@@ -167,13 +171,12 @@ class HostPrewarmPlan
             }
             $bytes = $sizes[$ref] ?? null;
             $item['bytes'] = $bytes;
-            if ($bytes !== null && $spent + $bytes > $spendable) {
-                $item['reason'] = 'over budget';
-                $skipped[] = $item;
+            if (self::isRequired($item)) {
+                $selected[] = $item;
 
                 continue;
             }
-            if ($bytes === null && $spendable <= $spent) {
+            if (self::overBudget($bytes, $spent, $spendable)) {
                 $item['reason'] = 'over budget';
                 $skipped[] = $item;
 
@@ -183,25 +186,23 @@ class HostPrewarmPlan
             $selected[] = $item;
         }
 
-        return ['selected' => $selected, 'skipped' => $skipped, 'spendable' => $spendable];
+        return [$selected, $skipped];
+    }
+
+    private static function overBudget(mixed $bytes, $spent, int $spendable): bool
+    {
+        return ($bytes !== null && $spent + $bytes > $spendable) || ($bytes === null && $spendable <= $spent);
+    }
+
+    /** @param  array<string, mixed>  $item */
+    public static function isRequired(array $item): bool
+    {
+        return ($item['required'] ?? false) === true;
     }
 
     /**
-     * Images we built that a current recipe would no longer produce.
-     *
-     * A tag carries the recipe it was built from, so a changed recipe builds a
-     * new image instead of serving a stale one — which also means the
-     * superseded image lingers until something removes it.
-     *
-     * The repository table comes from the catalogue, so an image the config
-     * says the engine builds is an image this can reclaim. Comparison is on
-     * the fingerprint *segment*, not the end of the string: a current base
-     * with a variant suffix does not end in its own fingerprint, and calling
-     * that stale deletes every variant on every run.
-     *
-     * A runtime whose current fingerprint cannot be computed is left alone:
-     * "cannot judge" has to mean keep, since this deletes images that cost
-     * minutes to rebuild.
+     * Images we built, of a repository the catalogue names, that a changed recipe superseded. Compared on the fingerprint
+     * segment, since a variant suffix does not end in it; a runtime whose fingerprint cannot be computed is kept (minutes to rebuild).
      *
      * @param  list<string>  $presentRefs
      * @return list<string>
@@ -227,14 +228,8 @@ class HostPrewarmPlan
     }
 
     /**
-     * Current images worth giving up to get back under the reserve — not "is
-     * this obsolete" but "these are all still valid, which do we least mind
-     * rebuilding".
-     *
-     * Ranked by the same order the warm plan spends in, and dropped from the
-     * bottom until the reserve is met, so a host under mild pressure gives up
-     * one rarely-warmed image rather than its PHP set. Everything named can be
-     * rebuilt; the trade is disk now against a slower deploy later.
+     * Still-valid images to give up until the reserve is met, the least-warmed first, so mild pressure costs one rarely
+     * warmed image rather than the PHP set.
      *
      * @param  array<string, int>  $sizes  ref => bytes on disk, from `docker images`
      * @param  list<array<string, mixed>>  $catalog  what the warm plan asks for
@@ -251,36 +246,7 @@ class HostPrewarmPlan
             return [];
         }
 
-        $priority = [];
-        foreach ($catalog as $item) {
-            $ref = (string) ($item['ref'] ?? '');
-            if ($ref !== '') {
-                $priority[$ref] = (int) ($item['prewarm'] ?? 0);
-            }
-        }
-
-        $candidates = [];
-        foreach ($sizes as $ref => $bytes) {
-            if (! is_string($ref) || ! BuiltImage::isOurs($ref)) {
-                continue;
-            }
-            $candidates[] = [
-                'ref' => $ref,
-                'bytes' => max(0, (int) $bytes),
-                // Unranked means the config never asked for it: a variant
-                // built on demand for one account, and the first to give up.
-                'priority' => $priority[$ref] ?? 0,
-            ];
-        }
-
-        usort($candidates, static function (array $a, array $b): int {
-            if ($a['priority'] !== $b['priority']) {
-                return $a['priority'] <=> $b['priority'];
-            }
-
-            // Same priority: the bigger one buys more of the shortfall.
-            return $b['bytes'] <=> $a['bytes'];
-        });
+        $candidates = self::rankedForReclaim($sizes, self::priorities($catalog));
 
         $freed = 0;
         $drop = [];
@@ -293,6 +259,56 @@ class HostPrewarmPlan
         }
 
         return $drop;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $catalog
+     * @return array<string, int>
+     */
+    private static function priorities(array $catalog): array
+    {
+        $priority = [];
+        foreach ($catalog as $item) {
+            $ref = (string) ($item['ref'] ?? '');
+            if ($ref !== '') {
+                $priority[$ref] = (int) ($item['prewarm'] ?? 0);
+            }
+        }
+
+        return $priority;
+    }
+
+    /**
+     * Our images, least valuable first: unranked (a variant built on demand for one account) before ranked, and at equal
+     * priority the bigger first, which buys more of the shortfall.
+     *
+     * @param  array<string, int>  $sizes
+     * @param  array<string, int>  $priority
+     * @return list<array{ref: string, bytes: int, priority: int}>
+     */
+    private static function rankedForReclaim(array $sizes, array $priority): array
+    {
+        $candidates = [];
+        foreach ($sizes as $ref => $bytes) {
+            if (! is_string($ref) || ! BuiltImage::isOurs($ref)) {
+                continue;
+            }
+            $candidates[] = [
+                'ref' => $ref,
+                'bytes' => max(0, (int) $bytes),
+                'priority' => $priority[$ref] ?? 0,
+            ];
+        }
+
+        usort($candidates, static function (array $a, array $b): int {
+            if ($a['priority'] !== $b['priority']) {
+                return $a['priority'] <=> $b['priority'];
+            }
+
+            return $b['bytes'] <=> $a['bytes'];
+        });
+
+        return $candidates;
     }
 
     /**

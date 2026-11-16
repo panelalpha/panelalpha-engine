@@ -2,12 +2,12 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\EngineAccount;
-use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
+use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\ProjectCache;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * Host build containers run on the host daemon with a customer's repository
@@ -19,66 +19,63 @@ class DindHostBuilderTest extends TestCase
 {
     private function builder(): DindHostBuilder
     {
-        return new DindHostBuilder();
+        return new DindHostBuilder;
     }
 
     private function account(string $username, string $identity = '1001:1002'): EngineAccount
     {
-        return new EngineAccount($username, '/home/' . $username, $identity);
+        return new EngineAccount($username, '/home/'.$username, $identity);
     }
 
     public function test_docker_run_binds_project_and_isolated_js_cache_as_user(): void
     {
-        $argv = $this->builder()->nodeBuildArgv(
+        $request = $this->builder()->nodeBuildArgv(
             $this->account('landingpagebolt'),
             Images::NODE_IMAGE,
             'npm ci --no-audit --no-fund',
             'PATH=/app/node_modules/.bin:$PATH astro build',
             ['NITRO_PRESET' => 'node-server']
         );
+        $build = LocalRoot::build($request);
 
-        $this->assertSame('sudo', $argv[0]);
-        $this->assertSame('docker', $argv[1]);
-        $this->assertNotContains('--network', $argv);
-        $this->assertContains('--user', $argv);
-        $this->assertContains('1001:1002', $argv);
-        $this->assertContains('no-new-privileges', $argv);
-        $this->assertContains('--cap-drop', $argv);
-        $this->assertContains('ALL', $argv);
-        $this->assertContains('--pids-limit', $argv);
-        $this->assertContains('/home/landingpagebolt/project:/app', $argv);
-        $this->assertContains(ProjectCache::dirFor('landingpagebolt') . ':/var/cache/pa-js', $argv);
-        $this->assertContains(ProjectCache::dirFor('landingpagebolt') . '/node_modules:/app/node_modules', $argv);
-        $this->assertContains(Images::NODE_IMAGE, $argv);
-        $this->assertContains('NITRO_PRESET=node-server', $argv);
-        $this->assertStringContainsString('node_modules cache hit', implode(' ', $argv));
-        $this->assertStringContainsString('npm ci --no-audit --no-fund', implode(' ', $argv));
-        $this->assertStringContainsString('astro build', implode(' ', $argv));
+        $this->assertSame('docker.nodeBuild', LocalRoot::action($request));
+        $this->assertSame([], LocalRoot::plain($request));
+        $this->assertSame('', $build['network']);
+        $this->assertSame('1001:1002', $build['user']);
+        $this->assertContains('/home/landingpagebolt/project:/app', $build['mounts']);
+        $this->assertContains(ProjectCache::dirFor('landingpagebolt').':/var/cache/pa-js', $build['mounts']);
+        $this->assertContains(ProjectCache::dirFor('landingpagebolt').'/node_modules:/app/node_modules', $build['mounts']);
+        $this->assertSame(Images::NODE_IMAGE, $build['image']);
+        $this->assertSame('node-server', $build['environment']['NITRO_PRESET'] ?? null);
+        $this->assertSame('0', $build['environment']['COREPACK_ENABLE_AUTO_PIN'] ?? null, 'corepack wrote packageManager into the checkout');
+        $this->assertStringContainsString('node_modules cache hit', $build['script']);
+        $this->assertStringContainsString('npm ci --no-audit --no-fund', $build['script']);
+        $this->assertStringContainsString('astro build', $build['script']);
     }
 
     public function test_standalone_node_compile_writes_node_modules_into_the_project(): void
     {
-        $argv = $this->builder()->nodeBuildArgv(
+        $build = LocalRoot::build($this->builder()->nodeBuildArgv(
             $this->account('saasstarterts', '1003:1003'),
             Images::NODE_IMAGE,
             'npm ci',
             'npx vite build',
             [],
             false
-        );
+        ));
 
-        $this->assertContains('/home/saasstarterts/project:/app', $argv);
-        $this->assertContains(ProjectCache::dirFor('saasstarterts') . ':/var/cache/pa-js', $argv);
+        $this->assertContains('/home/saasstarterts/project:/app', $build['mounts']);
+        $this->assertContains(ProjectCache::dirFor('saasstarterts').':/var/cache/pa-js', $build['mounts']);
         $this->assertNotContains(
-            ProjectCache::dirFor('saasstarterts') . '/node_modules:/app/node_modules',
-            $argv
+            ProjectCache::dirFor('saasstarterts').'/node_modules:/app/node_modules',
+            $build['mounts']
         );
     }
 
     /** Group Office: the application is www/, the mount is still the whole checkout. */
     public function test_an_app_root_is_the_working_directory_not_the_mount(): void
     {
-        $argv = $this->builder()->nodeBuildArgv(
+        $build = LocalRoot::build($this->builder()->nodeBuildArgv(
             $this->account('groupoffice'),
             Images::NODE_IMAGE,
             'npm ci',
@@ -87,12 +84,12 @@ class DindHostBuilderTest extends TestCase
             true,
             true,
             'www'
-        );
-        $script = (string) end($argv);
+        ));
+        $script = $build['script'];
 
-        $this->assertContains('/home/groupoffice/project:/app', $argv);
-        $this->assertSame('/app/www', $argv[array_search('-w', $argv, true) + 1]);
-        $this->assertContains(ProjectCache::dirFor('groupoffice') . '/node_modules:/app/www/node_modules', $argv);
+        $this->assertContains('/home/groupoffice/project:/app', $build['mounts']);
+        $this->assertSame('/app/www', $build['workdir']);
+        $this->assertContains(ProjectCache::dirFor('groupoffice').'/node_modules:/app/www/node_modules', $build['mounts']);
         $this->assertStringContainsString('if [ -f /app/www/package.json ]', $script);
         $this->assertStringContainsString('cmp -s /app/www/package-lock.json /app/www/node_modules/.pa-lock', $script);
         $this->assertStringNotContainsString(' /app/package.json', $script);
@@ -100,10 +97,10 @@ class DindHostBuilderTest extends TestCase
 
     public function test_the_composer_pass_runs_in_the_app_root(): void
     {
-        $argv = $this->builder()->composerInstallArgv($this->account('groupoffice'), '8.3', null, 'www');
+        $build = LocalRoot::build($this->builder()->composerInstallArgv($this->account('groupoffice'), '8.3', null, 'www'));
 
-        $this->assertContains('/home/groupoffice/project:/app', $argv);
-        $this->assertSame('/app/www', $argv[array_search('-w', $argv, true) + 1]);
+        $this->assertContains('/home/groupoffice/project:/app', $build['mounts']);
+        $this->assertSame('/app/www', $build['workdir']);
     }
 
     public function test_refuses_a_project_dir_outside_home_project(): void
@@ -141,41 +138,33 @@ class DindHostBuilderTest extends TestCase
 
     public function test_prepare_cache_is_scoped_and_owned_by_build_user(): void
     {
-        $command = $this->builder()->prepareCacheArgv($this->account('landingpagebolt'));
+        $request = $this->builder()->prepareCacheArgv($this->account('landingpagebolt'));
+        $command = LocalRoot::plain($request);
         $script = $command[array_key_last($command)];
 
-        $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'sh', '-c'],
-            array_slice($command, 0, 7)
-        );
+        $this->assertTrue(LocalRoot::isRequest($request));
+        $this->assertSame('--host', $request[1]);
+        $this->assertSame(['sh', '-c'], array_slice($command, 0, 2));
         $this->assertStringContainsString('/var/cache/panelalpha/projects/landingpagebolt/node_modules', $script);
         $this->assertStringContainsString('/var/cache/panelalpha/projects/landingpagebolt/npm', $script);
-        $this->assertStringContainsString('chown -R', $script);
-        $this->assertStringContainsString('1001:1002', $script);
+        $this->assertStringNotContainsString('chown -R', $script);
+        $this->assertStringContainsString("chown -h -- '1001:1002' \"\$cache\"", $script);
     }
 
     public function test_composer_uses_the_composer_image_not_bare_php_cli(): void
     {
-        $argv = $this->builder()->composerInstallArgv($this->account('acme-shop'));
+        $build = LocalRoot::build($this->builder()->composerInstallArgv($this->account('acme-shop')));
 
-        $this->assertContains(Images::COMPOSER_IMAGE, $argv);
-        $this->assertNotContains('php:8.5-apache-bookworm', $argv);
-        $this->assertContains('--entrypoint', $argv);
-        $this->assertContains('sh', $argv);
-        $script = $argv[array_key_last($argv)];
+        $this->assertSame(Images::COMPOSER_IMAGE, $build['image']);
+        $script = $build['script'];
         $this->assertStringContainsString('composer install', $script);
         $this->assertStringContainsString('--ignore-platform-reqs', $script);
         // Both run arbitrary PHP from the repo, and this build is on the host.
         $this->assertStringContainsString('--no-scripts', $script);
         $this->assertStringContainsString('--no-plugins', $script);
-        $this->assertContains('/home/acme-shop/project:/app', $argv);
-        $this->assertNotContains('--network', $argv);
-        $this->assertContains('--user', $argv);
-        $this->assertContains('1001:1002', $argv);
-        $this->assertContains('no-new-privileges', $argv);
-        $this->assertContains('--cap-drop', $argv);
-        $this->assertContains('ALL', $argv);
-        $this->assertContains('--pids-limit', $argv);
+        $this->assertContains('/home/acme-shop/project:/app', $build['mounts']);
+        $this->assertSame('', $build['network']);
+        $this->assertSame('1001:1002', $build['user']);
     }
 
     public function test_composer_rejects_paths_outside_home_project(): void

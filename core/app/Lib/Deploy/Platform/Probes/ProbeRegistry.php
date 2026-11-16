@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Probes;
 use App\Lib\Deploy\Platform\PlatformProbe;
 
 /**
- * Every PlatformProbe a manifest may reference by name. A `<Something>Probe`
- * class in this directory is a probe; the directory is resolved relative to
- * this file.
+ * Every PlatformProbe a manifest may reference by name: each `<Something>Probe` class in this
+ * file's directory.
  */
 final class ProbeRegistry
 {

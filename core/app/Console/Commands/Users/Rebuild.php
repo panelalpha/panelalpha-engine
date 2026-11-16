@@ -28,7 +28,7 @@ class Rebuild extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return "Rebuilding user '{$user->username}'...";
+        return "Rebuilding project '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void
@@ -52,7 +52,7 @@ class Rebuild extends ProjectFleetCommand
 
     protected function finished(User $user): string
     {
-        return '  Finished rebuilding user.';
+        return '  Finished rebuilding project.';
     }
 
     protected function afterAll(): void

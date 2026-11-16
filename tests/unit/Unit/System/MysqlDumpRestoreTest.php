@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System;
 
+use App\Support\JobBudget;
 use App\System;
 use App\System\Services\Mysql;
 use Symfony\Component\Process\Process;
@@ -9,6 +10,8 @@ use Tests\TestCase;
 
 class MysqlDumpRestoreTest extends TestCase
 {
+    private const CLIENT = '/usr/local/lib/panelalpha/pa-root';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -27,15 +30,15 @@ class MysqlDumpRestoreTest extends TestCase
         $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
 
         $this->assertCount(2, $recorded);
-        $this->assertSame(['bash', '-c'], array_slice($recorded[0]['cmd'], 0, 2));
-        $script = $recorded[0]['cmd'][2];
-        $this->assertStringStartsWith('set -o pipefail; ', $script);
-        $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
-        $this->assertStringContainsString('mariadb-dump --single-transaction -uroot', $script);
-        $this->assertStringContainsString('alice_app', $script);
-        $this->assertStringEndsWith("| gzip -c > '/tmp/alice_app.sql.gz'", $script);
-        // The password stays inside sites-db: it is read there from the container's own environment.
-        $this->assertStringContainsString('MYSQL_PWD="$MYSQL_ROOT_PASSWORD"', $script);
+        $this->assertSame(
+            ['bash', '-c', "set -o pipefail; ".self::CLIENT." compose.sitesDbDump -- /opt/panelalpha/shared-hosting alice_app '' | gzip -c > '/tmp/alice_app.sql.gz'"],
+            $recorded[0]['cmd'],
+        );
+        $this->assertSame(
+            self::CLIENT." compose.sitesDbDump -- /opt/panelalpha/shared-hosting alice_app ''",
+            self::request($recorded[0]['cmd'][2]),
+            'the password stays inside sites-db, read there from the container\'s own environment',
+        );
         $this->assertSame([], $recorded[0]['env']);
     }
 
@@ -70,6 +73,33 @@ class MysqlDumpRestoreTest extends TestCase
         $this->assertSame(['bash', '-c', "set -o pipefail; rm -f '/tmp/alice_app.sql.gz'"], $recorded[1]['cmd']);
     }
 
+    public function test_a_given_timeout_caps_the_dump_and_its_completion_check(): void
+    {
+        $recorded = [];
+        $mysql = (new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "-- Dump completed on 2026-10-09 12:00:00\n")))
+            ->withTimeout(120);
+
+        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+
+        $this->assertNotEmpty($recorded);
+        foreach ($recorded as $call) {
+            $this->assertSame(120, $call['timeout'], 'the dump must stop at the given timeout');
+        }
+    }
+
+    public function test_without_a_timeout_the_dump_uses_the_single_command_window(): void
+    {
+        $recorded = [];
+        $mysql = new Mysql($this->recordingSystem($recorded, successful: true, lastLine: "-- Dump completed on 2026-10-09 12:00:00\n"));
+
+        $mysql->dumpToGzip('alice_app', '/tmp/alice_app.sql.gz');
+
+        $this->assertNotEmpty($recorded);
+        foreach ($recorded as $call) {
+            $this->assertSame(JobBudget::COMMAND_SECONDS, $call['timeout']);
+        }
+    }
+
     public function test_the_restore_feeds_the_dump_to_mariadb_in_sites_db(): void
     {
         $recorded = [];
@@ -78,11 +108,14 @@ class MysqlDumpRestoreTest extends TestCase
         $mysql->restoreFromGzip('alice_app', '/tmp/alice_app.sql.gz');
 
         $this->assertCount(1, $recorded);
-        $script = $recorded[0]['cmd'][2];
-        $this->assertStringStartsWith("set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ", $script);
-        $this->assertStringContainsString("'exec' '-T' 'sites-db'", $script);
-        $this->assertStringContainsString('mariadb -uroot', $script);
-        $this->assertStringContainsString('alice_app', $script);
+        $this->assertSame(
+            ['bash', '-c', "set -o pipefail; gunzip -c '/tmp/alice_app.sql.gz' | ".self::CLIENT.' compose.sitesDbRestore -- /opt/panelalpha/shared-hosting alice_app'],
+            $recorded[0]['cmd'],
+        );
+        $this->assertSame(
+            self::CLIENT.' compose.sitesDbRestore -- /opt/panelalpha/shared-hosting alice_app',
+            self::request($recorded[0]['cmd'][2]),
+        );
     }
 
     public function test_a_hyphenated_database_name_reaches_mariadb_as_a_plain_argument(): void
@@ -93,16 +126,15 @@ class MysqlDumpRestoreTest extends TestCase
         $mysql->dumpToGzip('alice_my-db', '/tmp/alice_my-db.sql.gz');
         $mysql->restoreFromGzip('alice_my-db', '/tmp/alice_my-db.sql.gz');
 
-        $dump = $recorded[0]['cmd'][2];
-        $restore = $recorded[2]['cmd'][2];
-
-        $this->assertStringContainsString('mariadb-dump --single-transaction -uroot', $dump);
-        $this->assertStringContainsString('alice_my-db', $dump);
-        $this->assertStringEndsWith("| gzip -c > '/tmp/alice_my-db.sql.gz'", $dump);
-        $this->assertStringContainsString('mariadb -uroot', $restore);
-        $this->assertStringContainsString('alice_my-db', $restore);
-        $this->assertStringNotContainsString('`', $dump);
-        $this->assertStringNotContainsString('`', $restore);
+        $this->assertSame(
+            self::CLIENT." compose.sitesDbDump -- /opt/panelalpha/shared-hosting alice_my-db ''",
+            self::request($recorded[0]['cmd'][2]),
+        );
+        $this->assertSame(
+            self::CLIENT.' compose.sitesDbRestore -- /opt/panelalpha/shared-hosting alice_my-db',
+            self::request($recorded[2]['cmd'][2]),
+        );
+        $this->assertStringEndsWith("| gzip -c > '/tmp/alice_my-db.sql.gz'", $recorded[0]['cmd'][2]);
     }
 
     public function test_invalid_database_name_is_rejected(): void
@@ -128,12 +160,12 @@ class MysqlDumpRestoreTest extends TestCase
     }
 
     /**
-     * @param list<array{cmd: list<string>, env: array<string, string>}> $recorded
+     * @param list<array{cmd: list<string>, env: array<string, string>, timeout: int}> $recorded
      */
     private function recordingSystem(array &$recorded, bool $successful, string $lastLine = ''): System
     {
         return new class ($recorded, $successful, $lastLine) extends System {
-            /** @param list<array{cmd: list<string>, env: array<string, string>}> $recorded */
+            /** @param list<array{cmd: list<string>, env: array<string, string>, timeout: int}> $recorded */
             public function __construct(
                 private array &$recorded,
                 private bool $successful,
@@ -144,7 +176,7 @@ class MysqlDumpRestoreTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $argv = is_array($cmd) ? $cmd : [$cmd];
-                $this->recorded[] = ['cmd' => $argv, 'env' => $env];
+                $this->recorded[] = ['cmd' => $argv, 'env' => $env, 'timeout' => $timeout];
                 $successful = $this->successful;
                 $output = str_contains($argv[2] ?? '', 'tail -n 1') ? $this->lastLine : '';
 
@@ -171,5 +203,17 @@ class MysqlDumpRestoreTest extends TestCase
                 };
             }
         };
+    }
+
+    /** The broker request in a shell line, after `set -o pipefail;` or a pipe, up to the next pipe. */
+    private static function request(string $script): string
+    {
+        foreach (explode(' | ', substr($script, strlen('set -o pipefail; '))) as $part) {
+            if (str_starts_with($part, self::CLIENT)) {
+                return $part;
+            }
+        }
+
+        throw new \RuntimeException("no broker request in {$script}");
     }
 }

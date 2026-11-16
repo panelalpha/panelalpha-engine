@@ -5,17 +5,18 @@ namespace App\System\Project\PhpHosting\WordPress;
 use App\System\Project\Dind\AppDatabase;
 
 /**
- * Named wp-config operations for a PHP hosting WordPress install.
- *
- * List/read/set/delete map to `wp config list|get|set|delete`. The type picks
- * constants (the default), variables such as $table_prefix, or all; for set,
- * all updates whichever exists and adds a constant otherwise. These commands
- * read wp-config.php without loading WordPress. Create writes a new
- * wp-config.php from database credentials.
+ * `wp config list|get|set|delete`, which read wp-config.php without loading WordPress, and `config create`.
+ * The type picks constants (the default), variables such as $table_prefix, or all.
  */
 final class Config
 {
     public const TYPES = ['constant', 'variable', 'all'];
+
+    /**
+     * The longest value WP-CLI writes and reads back: its wp-config reader stops at the PCRE limits, and its writer at
+     * the pattern size, before this length is reached.
+     */
+    public const MAX_VALUE_LENGTH = 16384;
 
     public function __construct(
         private WpCli $cli,
@@ -44,30 +45,29 @@ final class Config
     }
 
     /**
-     * @param  bool  $json  decode the value from `--format=json` (arrays, e.g. WP_REDIS_CONFIG)
+     * The value as wp-config.php defines it, read as JSON: a string, a boolean, a number, an array or null.
+     *
      * @return array{constant: string, value: mixed}
      */
-    public function get(string $name, string $type = 'constant', bool $json = false): array
+    public function get(string $name, string $type = 'constant'): array
     {
         $this->assertType($type);
-        $args = ['config', 'get', WpCli::positional($name), '--type='.$type];
-        if ($json) {
-            $args[] = '--format=json';
-        }
-        $result = $this->cli->runOrFail($args);
 
         return [
             'constant' => $name,
-            'value' => $json ? json_decode(trim($result['stdout']), true) : trim($result['stdout']),
+            'value' => $this->readValue(['config', 'get', WpCli::positional($name), '--type='.$type]),
         ];
     }
 
     /**
+     * With type all, WP-CLI updates whichever of the constant and the variable exists, and adds a constant otherwise.
+     *
      * @return array{constant: string, value: string, message: string}
      */
     public function set(string $name, string $value, bool $raw = false, string $type = 'constant'): array
     {
         $this->assertType($type);
+        self::assertValueLength($value);
         [$written, $raw] = self::writableValue($value, $raw);
         $args = ['config', 'set', WpCli::positional($name), $written, '--type='.$type];
         if ($raw) {
@@ -83,10 +83,8 @@ final class Config
     }
 
     /**
-     * Writes a new wp-config.php (WP-CLI `config create`), e.g. after a core
-     * download. Without force an existing file is a failure; without
-     * skip_check WP-CLI first connects to the database. Without dbhost,
-     * {@see defaultDatabaseHost()} picks the host.
+     * An existing file fails without force, WP-CLI checks the database without skip_check, and
+     * {@see defaultDatabaseHost()} picks a missing dbhost; {@see WpCli::createConfigFile()} keeps the file private.
      *
      * @param array{
      *     dbname: string,
@@ -105,19 +103,20 @@ final class Config
     public function create(array $fields): array
     {
         $fields['dbhost'] ??= $this->defaultDatabaseHost();
-        $args = ['config', 'create'];
+        $options = [];
         foreach (['dbname', 'dbuser', 'dbpass', 'dbhost', 'dbprefix', 'dbcharset', 'dbcollate', 'locale'] as $key) {
             if (isset($fields[$key])) {
-                $args[] = "--{$key}=".$fields[$key];
+                self::assertValueLength((string) $fields[$key]);
+                $options[] = "--{$key}=".$fields[$key];
             }
         }
         if (! empty($fields['force'])) {
-            $args[] = '--force';
+            $options[] = '--force';
         }
         if (! empty($fields['skip_check'])) {
-            $args[] = '--skip-check';
+            $options[] = '--skip-check';
         }
-        $result = $this->cli->runOrFail($args);
+        $result = $this->cli->createConfigFile($options);
 
         return [
             'message' => trim($result['stdout']),
@@ -125,10 +124,8 @@ final class Config
     }
 
     /**
-     * On PHP hosting the projects' MySQL server, which the engine's own
-     * installer writes too: localhost there is the account's PHP container.
-     * In the project's own containers the host wp-config.php already names,
-     * its compose database service; null, WP-CLI's localhost, without one.
+     * PHP hosting: the projects' MySQL server, as the engine's installer writes (localhost is the PHP container there).
+     * Own containers: the host wp-config.php already names, its compose database service; without one null, WP-CLI's localhost.
      */
     private function defaultDatabaseHost(): ?string
     {
@@ -173,10 +170,35 @@ final class Config
         return [$raw ? '('.$value.')' : var_export($value, true), true];
     }
 
+    /**
+     * A value JSON cannot carry, such as a string that is not UTF-8, reads as the plain output prints it.
+     *
+     * @param  list<string>  $args
+     */
+    private function readValue(array $args): mixed
+    {
+        $value = json_decode(trim($this->cli->runOrFail([...$args, '--format=json'])['stdout']), true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $value;
+        }
+
+        return trim($this->cli->runOrFail($args)['stdout']);
+    }
+
     private function assertType(string $type): void
     {
         if (! in_array($type, self::TYPES, true)) {
             throw new Exception("Invalid wp-config type: {$type}.");
+        }
+    }
+
+    /** A longer value is one the list cannot read back, so it is refused before anything is written. */
+    private static function assertValueLength(string $value): void
+    {
+        if (strlen($value) > self::MAX_VALUE_LENGTH) {
+            throw new Exception(
+                'A wp-config.php value can be at most '.self::MAX_VALUE_LENGTH.' bytes; this one is '.strlen($value).'.'
+            );
         }
     }
 }

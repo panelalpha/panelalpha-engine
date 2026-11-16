@@ -20,6 +20,9 @@ use OpenApi\Attributes as OA;
         is deprecated but permanent -- it is not scheduled for removal, so existing
         integrations do not need to change. New clients should use `/projects`.
 
+        A body sent as JSON that does not parse is refused with 400 and `code:
+        invalid_json` before the call does anything.
+
         Note that `mysql/users` and `app/users` are *not* the renamed resource:
         they are MySQL accounts and accounts inside the deployed application
         respectively, and keep their names.
@@ -81,7 +84,8 @@ use OpenApi\Attributes as OA;
                 .'thing that is wrong, each with the `field` it belongs to, a stable `code` to '
                 .'branch on, and the same `message` that appears in `errors`. A failed deploy adds '
                 .'`stage` and `deploy_log_offset`. Codes for a build failure are the deploy '
-                ."explainer's rule slugs, the same identifiers deploy telemetry reports.",
+                ."explainer's rule slugs, the same identifiers deploy telemetry reports. `hints` lists what "
+                .'acts on the problem, one entry per surface (`rest`, `mcp`, `cli`); empty when nothing does.',
             items: new OA\Items(
                 properties: [
                     new OA\Property(property: 'field', type: 'string', example: 'domain'),
@@ -89,6 +93,7 @@ use OpenApi\Attributes as OA;
                     new OA\Property(property: 'message', type: 'string', example: 'shop.acme.com is already on this engine.'),
                     new OA\Property(property: 'stage', type: 'string', nullable: true, example: 'cloning'),
                     new OA\Property(property: 'deploy_log_offset', type: 'integer', nullable: true, example: 0),
+                    new OA\Property(property: 'hints', type: 'array', items: new OA\Items(ref: '#/components/schemas/Hint')),
                 ],
                 type: 'object',
             ),
@@ -116,14 +121,15 @@ use OpenApi\Attributes as OA;
         ),
         new OA\Property(
             property: 'problems',
-            description: 'Present for a refusal about the state of a project, such as a source it cannot take.',
+            description: 'What refused, with its `code` and the `hints` that act on it: follow or cancel the task, '
+                .'read the deploy log, or the operator clearing `protected`.',
             type: 'array',
             nullable: true,
             items: new OA\Items(type: 'object'),
         ),
         new OA\Property(
             property: 'code',
-            description: 'Present when the project is protected: `project_protected`.',
+            description: '`project_protected`, `deploy_busy`, `deploy_busy_task`, `project_busy` or `project_busy_task`.',
             type: 'string',
             nullable: true,
             example: 'project_protected',
@@ -144,4 +150,7 @@ class ApiDefinitions
     /** The 403 a project-scoped token gets for changing what the operator owns on its own project. */
     public const OPERATOR_ONLY_RESPONSE = 'The token is limited to some projects, and this changes what the '
         .'operator owns on a project: only an unscoped token may';
+
+    /** The 409 a staging copy or push answers with while any work holding the deploy lock runs. */
+    public const BUSY_RESPONSE = 'Project busy (a deploy, backup, restore, staging or push is running)';
 }

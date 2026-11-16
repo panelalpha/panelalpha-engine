@@ -2,21 +2,23 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
-use App\System;
-use App\System\Filesystem as SystemFilesystem;
-use App\System\Project\Dind;
-use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\ProjectFiles;
-use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
+use App\Models\User;
+use App\System;
+use App\System\Filesystem as SystemFilesystem;
+use App\System\Project\Dind;
+use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
+use App\System\Project\Dind\ProjectFiles;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
-use Tests\Support\StagedRename;
-use Tests\Unit\System\Project\SuccessfulProcess;
+use Tests\Support\LocalRoot;
 
 /**
  * The host PHP build resolves for the engine's chosen PHP minor, not for the
@@ -30,16 +32,15 @@ use Tests\Unit\System\Project\SuccessfulProcess;
  * the resolve against 8.1 with "overridden via config.platform, actual:
  * 8.4.25". htmly ships the same shape pinned at 7.2.
  *
- * The real `runPhpBuild()` is driven here end to end: the manifests are read
- * through the account's own file API and the argv comes back from the real
- * builder, so the guard that keeps a build inside ~/project is exercised too.
+ * The real `runPhpBuild()` runs end to end, so the guard that keeps a build
+ * inside ~/project is exercised too.
  */
 class HostCompilePhpPlatformPinTest extends TestCase
 {
     /** @var array<string, string> absolute account path => contents */
     private array $files = [];
 
-    /** @var array<string, string> target path => contents, from every `sudo cp` the build issued */
+    /** @var array<string, string> target path => contents, from every `files.copy` the build issued */
     private array $copiedTo = [];
 
     protected function setUp(): void
@@ -51,22 +52,23 @@ class HostCompilePhpPlatformPinTest extends TestCase
 
     /**
      * Run the real host PHP build against a project whose files are the map
-     * given, and answer the argv of the container it started.
+     * given, and answer the container request it made.
      *
-     * @param array<string, string> $files path under the project => contents
-     * @param array<string, mixed> $decision the matched manifest's, as
-     *        DetectProjectStrategy would hand it over
+     * @param  array<string, string>  $files  path under the project => contents
+     * @param  array<string, mixed>  $decision  the matched manifest's, as
+     *                                          DetectProjectStrategy would hand it over
      */
     private function build(array $files, array $decision, string $appRoot = '', bool $hasComposer = true): ?array
     {
         foreach ($files as $path => $contents) {
-            $this->files['/home/acme/project/' . ltrim($path, '/')] = $contents;
+            $this->files['/home/acme/project/'.ltrim($path, '/')] = $contents;
         }
 
         $filesystem = $this->files;
         $copiedTo = &$this->copiedTo;
 
-        $system = new class ($filesystem, $copiedTo) extends System {
+        $system = new class($filesystem, $copiedTo) extends System
+        {
             /** @var array<string, string> */
             private array $files;
 
@@ -85,7 +87,8 @@ class HostCompilePhpPlatformPinTest extends TestCase
                 $files = $this->files;
                 $engine = $this;
 
-                return new class ($engine, $files) extends SystemFilesystem {
+                return new class($engine, $files) extends SystemFilesystem
+                {
                     /** @param array<string, string> $files */
                     public function __construct(System $engine, private array $files)
                     {
@@ -107,18 +110,19 @@ class HostCompilePhpPlatformPinTest extends TestCase
             /**
              * Real writes go through `Filesystem::writeFileReplacingPath()`,
              * which stages the content in a real temp file, copies it out with
-             * `sudo cp <tmp> <staged>` and renames that onto the target
+             * `files.copy <tmp> <staged>` and renames that onto the target
              * ({@see StagedRename}). Reading the temp file here, before it is
              * unlinked, is how the test observes what was actually written
              * without a filesystem the account owns.
              */
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
-                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                $argv = (array) $cmd;
+                [$source, $target] = LocalRoot::action($argv) === 'files.copy' ? LocalRoot::values($argv) : [null, null];
+                if ($source !== null && is_file($source)) {
+                    $this->copiedTo[$target] = (string) file_get_contents($source);
                 }
-                $this->renameStaged($cmd);
+                $this->renameStaged($argv);
 
                 return '';
             }
@@ -127,14 +131,34 @@ class HostCompilePhpPlatformPinTest extends TestCase
             {
                 $this->commands[] = is_array($cmd) ? $cmd : [$cmd];
 
-                $this->renameStaged($cmd);
+                $this->renameStaged((array) $cmd);
 
-                return SuccessfulProcess::for($cmd);
+                return $this->answer((array) $cmd);
             }
 
-            private function renameStaged(string|array $cmd): void
+            /**
+             * One shared device per path, so a home write finds its stage on the same filesystem.
+             *
+             * @param  list<string>  $argv
+             */
+            private function answer(array $argv): Process
             {
-                [$staged, $target] = StagedRename::of($cmd) ?? [null, null];
+                $output = LocalRoot::action($argv) === 'files.deviceNumbers' ? str_repeat("1\n", count(LocalRoot::values($argv))) : '';
+                $process = new Process(['php', '-r', 'echo $argv[1];', $output]);
+                $process->run();
+
+                return $process;
+            }
+
+            /** @param  list<string>  $argv */
+            private function renameStaged(array $argv): void
+            {
+                $values = LocalRoot::values($argv);
+                [$staged, $target] = match (LocalRoot::action($argv)) {
+                    'files.rename' => $values,
+                    'account.renameInHome' => array_slice($values, 1),
+                    default => [null, null],
+                };
                 if ($staged !== null && isset($this->copiedTo[$staged])) {
                     $this->copiedTo[$target] = $this->copiedTo[$staged];
                     unset($this->copiedTo[$staged]);
@@ -142,12 +166,12 @@ class HostCompilePhpPlatformPinTest extends TestCase
             }
         };
 
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = 'acme';
         $model->details = ['UID' => 1001, 'GID' => 1001];
 
         $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('hostBuilder')->willReturn(new DindHostBuilder());
+        $engine->method('hostBuilder')->willReturn(new DindHostBuilder);
 
         $dind = $this->createStub(Dind::class);
         $dind->method('userModel')->willReturn($model);
@@ -160,6 +184,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
         // The real reader, over the stubbed System's file map, so the minor is
         // resolved from the same composer.json the deploy would read.
         $dind->method('projectTree')->willReturnCallback(fn (): ProjectFiles => new ProjectFiles($dind));
+        $dind->method('innerDocker')->willReturn($this->hostWithTheBase());
 
         (new HostCompile($dind))->runPhpBuild(
             'panelalpha/php:8.4-apache-bookworm-pa20260910',
@@ -174,14 +199,24 @@ class HostCompilePhpPlatformPinTest extends TestCase
             return null;
         }
 
-        return end($system->commands) ?: null;
+        $build = end($system->commands);
+
+        return $build === false ? null : $build;
     }
 
-    private function script(?array $argv): string
+    private function script(?array $request): string
     {
-        $this->assertNotNull($argv, 'the host PHP build ran nothing');
+        $this->assertNotNull($request, 'the host PHP build ran nothing');
 
-        return (string) end($argv);
+        return LocalRoot::build($request)['script'];
+    }
+
+    /** @return array<string, string> */
+    private function environment(?array $request): array
+    {
+        $this->assertNotNull($request, 'the host PHP build ran nothing');
+
+        return LocalRoot::build($request)['environment'];
     }
 
     /** @return array<string, mixed> */
@@ -227,7 +262,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
         $minor = PhpRuntime::requirementFor($composerJson)->version;
         $script = $this->script($this->build(['composer.json' => $composerJson], $this->phpDecision()));
 
-        $this->assertStringContainsString('composer config --no-plugins platform.php ' . $minor . '.99', $script);
+        $this->assertStringContainsString('composer config --no-plugins platform.php '.$minor.'.99', $script);
         $this->assertStringNotContainsString('7.2', $script);
     }
 
@@ -302,16 +337,15 @@ class HostCompilePhpPlatformPinTest extends TestCase
         ], $this->phpDecision());
 
         $this->assertNotNull($argv);
-        $line = implode(' ', $argv);
-        $this->assertStringContainsString(
-            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
-            $line,
+        $this->assertSame(
+            PhpHostBuild::RUNTIME_MANIFEST_FILE,
+            $this->environment($argv)[PhpHostBuild::MANIFEST_ENV] ?? null,
             'a pin has to land somewhere other than composer.json'
         );
-        $this->assertStringContainsString('composer install --no-dev', (string) end($argv));
+        $this->assertStringContainsString('composer install --no-dev', $this->script($argv));
 
-        $manifestPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_MANIFEST_FILE;
-        $lockPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_LOCK_FILE;
+        $manifestPath = '/home/acme/project/'.PhpHostBuild::RUNTIME_MANIFEST_FILE;
+        $lockPath = '/home/acme/project/'.PhpHostBuild::RUNTIME_LOCK_FILE;
         $this->assertArrayHasKey($manifestPath, $this->copiedTo, 'the runtime manifest was never written');
         $written = json_decode($this->copiedTo[$manifestPath], true);
         $this->assertSame(PhpHostBuild::allowPlugins(), $written['config']['allow-plugins']);
@@ -348,7 +382,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
     public function test_the_lock_copy_is_refreshed_on_every_build(): void
     {
         $composerJson = (string) json_encode(['require' => ['php' => '^8.4']]);
-        $lockPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_LOCK_FILE;
+        $lockPath = '/home/acme/project/'.PhpHostBuild::RUNTIME_LOCK_FILE;
 
         $this->build([
             'composer.json' => $composerJson,
@@ -380,9 +414,9 @@ class HostCompilePhpPlatformPinTest extends TestCase
         ], $this->phpDecision());
 
         $this->assertNotNull($argv);
-        $this->assertStringContainsString(
-            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
-            implode(' ', $argv)
+        $this->assertSame(
+            PhpHostBuild::RUNTIME_MANIFEST_FILE,
+            $this->environment($argv)[PhpHostBuild::MANIFEST_ENV] ?? null
         );
         $this->assertStringNotContainsString(' cp ', $this->script($argv), 'a require-dev-less lock is never composer.lock');
     }
@@ -574,9 +608,9 @@ class HostCompilePhpPlatformPinTest extends TestCase
         $argv = $this->build(['composer.json' => $composerJson], $this->phpDecision());
 
         $this->assertNotNull($argv);
-        $this->assertStringContainsString(
-            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
-            implode(' ', $argv)
+        $this->assertSame(
+            PhpHostBuild::RUNTIME_MANIFEST_FILE,
+            $this->environment($argv)[PhpHostBuild::MANIFEST_ENV] ?? null
         );
         $script = $this->script($argv);
         $install = '';
@@ -589,13 +623,23 @@ class HostCompilePhpPlatformPinTest extends TestCase
         $this->assertStringContainsString('--no-scripts', $install);
         $this->assertStringContainsString('composer config --no-plugins platform.php', $script);
         // No require-dev to drop, so the lock goes back to composer.lock as before.
-        $this->assertStringContainsString('|| cp ' . PhpHostBuild::RUNTIME_LOCK_FILE . ' composer.lock', $script);
+        $this->assertStringContainsString('|| cp '.PhpHostBuild::RUNTIME_LOCK_FILE.' composer.lock', $script);
 
-        $manifestPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_MANIFEST_FILE;
+        $manifestPath = '/home/acme/project/'.PhpHostBuild::RUNTIME_MANIFEST_FILE;
         $this->assertArrayHasKey($manifestPath, $this->copiedTo);
         $allow = json_decode($this->copiedTo[$manifestPath], true)['config']['allow-plugins'];
         $this->assertSame(PhpHostBuild::allowPlugins(), $allow);
         $this->assertFalse($allow['symfony/flex'] ?? false);
         $this->assertSame($composerJson, $this->files['/home/acme/project/composer.json']);
+    }
+
+    private function hostWithTheBase(): InnerDocker
+    {
+        $bases = $this->createStub(SharedBaseImages::class);
+        $bases->method('ensureOnHost')->willReturn(true);
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('bases')->willReturn($bases);
+
+        return $inner;
     }
 }

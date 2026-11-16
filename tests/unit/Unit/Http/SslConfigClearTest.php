@@ -3,6 +3,8 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Lib\Ssl\AcmeIssuer;
+use App\Lib\Ssl\Issuers;
 use App\Models\Setting;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
@@ -33,5 +35,25 @@ class SslConfigClearTest extends TestCase
         foreach (['default_wildcard_domain', 'acme_directory_url', 'acme_email'] as $name) {
             $this->assertNull(Setting::get($name), $name);
         }
+    }
+
+    public function test_a_directory_url_that_is_not_a_url_is_refused_and_not_stored(): void
+    {
+        $this->putJson('/api/system/ssl-config', ['acme_directory_url' => 'not-a-url'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['acme_directory_url']);
+
+        $this->assertNull(Setting::get('acme_directory_url'));
+    }
+
+    public function test_a_url_and_a_shorthand_are_stored_as_given(): void
+    {
+        $this->putJson('/api/system/ssl-config', ['acme_directory_url' => AcmeIssuer::LETS_ENCRYPT_STAGING])
+            ->assertOk();
+        $this->assertSame(AcmeIssuer::LETS_ENCRYPT_STAGING, Setting::get('acme_directory_url'));
+
+        $this->putJson('/api/system/ssl-config', ['acme_directory_url' => 'staging'])->assertOk();
+        $this->assertSame('staging', Setting::get('acme_directory_url'));
+        $this->assertSame(AcmeIssuer::LETS_ENCRYPT_STAGING, Issuers::directoryUrl());
     }
 }

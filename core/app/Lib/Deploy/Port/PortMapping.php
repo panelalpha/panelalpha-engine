@@ -3,16 +3,8 @@
 namespace App\Lib\Deploy\Port;
 
 /**
- * One entry of a Compose `ports:` or `expose:` list, as the host port it
- * publishes and the container port behind it.
- *
- * Compose accepts every one of these:
- *
- *     8080                       "8080:8080"        "8080:80/tcp"
- *     "127.0.0.1:8080:8080"      "0.0.0.0:8080:80"  "${APP_PORT:-8090}:8000"
- *
- * A binding to loopback publishes nothing anyone outside can reach, so it is
- * not a mapping at all.
+ * One entry of a Compose `ports:` or `expose:` list (`8080`, `"127.0.0.1:8080:80/tcp"`, `"${APP_PORT:-8090}:8000"`)
+ * as its host and container port; a loopback binding publishes nothing, so it is no mapping.
  */
 final class PortMapping
 {
@@ -98,9 +90,8 @@ final class PortMapping
     }
 
     /**
-     * `${WEB_SERVER_PORT:?missing}:3000` has no default, but Compose does not
-     * start without it, so it is set; the container port is the best guess,
-     * as the hardener defaults a bare `${PORT}:3000` (BorgWarehouse).
+     * `${WEB_SERVER_PORT:?missing}:3000` has no default, but Compose will not start without it, so it is set;
+     * the container port is the best guess, as the hardener defaults a bare `${PORT}:3000` (BorgWarehouse).
      */
     private static function withRequiredHostPortDefaulted(string $mapping): string
     {

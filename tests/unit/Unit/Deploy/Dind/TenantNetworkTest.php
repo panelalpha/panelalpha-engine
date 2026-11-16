@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -73,7 +74,7 @@ class TenantNetworkTest extends TestCase
     public function test_the_firewall_creates_the_network_from_the_host_namespace(): void
     {
         $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'sh', TenantNetwork::FIREWALL_SCRIPT, '--create'],
+            [LocalRoot::CLIENT, '--host', 'host.applyTenantNetworkFirewall', '--'],
             TenantNetwork::firewallArgv()
         );
     }
@@ -147,11 +148,16 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('table bridge pa_tenants', $script);
         $this->assertStringContainsString('iifname . ether saddr . arp saddr ether . arp saddr ip @arp_ok accept', $script);
         $this->assertStringContainsString('iifname . ether saddr . ip saddr @ip_ok accept', $script);
+        $this->assertStringContainsString('--ports-on-stdin', $script);
+        $this->assertStringNotContainsString('nsenter', $script);
 
-        $watcher = $this->repo('config/core/services/tenant-network/run');
-        $this->assertStringContainsString('--filter event=connect --filter event=disconnect', $watcher);
-        $this->assertStringContainsString('timeout 60', $watcher);
-        $this->assertTrue(is_executable(dirname(__DIR__, 5) . '/config/core/services/tenant-network/run'));
+        $watcher = $this->repo('config/root-broker/services/tenant-network/run');
+        $ports = $this->repo('dockerfiles/root-broker/rootbroker/tenantports.py');
+        $this->assertStringContainsString('tenantports --serve', $watcher);
+        $this->assertStringContainsString("'event': ['connect', 'disconnect']", $ports);
+        $this->assertStringContainsString('RTM_GETNSID', $ports);
+        $this->assertStringContainsString('MINUTE = 60', $ports);
+        $this->assertTrue(is_executable(dirname(__DIR__, 5) . '/config/root-broker/services/tenant-network/run'));
 
         $this->assertStringContainsString('ensure_packages nftables', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('MISSING+=(nftables)', $this->repo('scripts/bootstrap-from-source.sh'));
@@ -165,15 +171,17 @@ class TenantNetworkTest extends TestCase
         $this->assertStringNotContainsString('csfpost', $this->repo('scripts/tenant-network-firewall.sh'));
     }
 
-    public function test_installers_and_core_start_apply_it(): void
+    /** Closed from boot, not only once the root broker starts. */
+    public function test_installers_and_the_root_broker_s_start_apply_it(): void
     {
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/bootstrap-from-source.sh'));
-        $this->assertStringContainsString('tenant-network-firewall.sh', $this->repo('dockerfiles/entrypoint-core.sh'));
-        // Closed from boot, not only from when core starts.
+        $this->assertStringContainsString('tenantports --serve', $this->repo('config/root-broker/services/tenant-network/run'));
+        $this->assertStringContainsString('tenant-network-firewall.sh', $this->repo('dockerfiles/root-broker/rootbroker/tenantports.py'));
         $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/bootstrap-from-source.sh'));
         $this->assertStringContainsString('panelalpha-tenant-guard.service', $this->repo('scripts/uninstall.sh'));
+        $this->assertStringContainsString('panelalpha-tenant-bind.service', $this->repo('scripts/uninstall.sh'));
     }
 
     public function test_an_update_moves_existing_accounts_without_failing_on_one(): void

@@ -3,10 +3,8 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Where a deploy spent its time: per stage, and per build layer.
- *
- * A step reported `CACHED` cost nothing; a step that compiled again after an
- * identical deploy is the bug a total hides.
+ * Where a deploy spent its time, per stage and per build layer. A `CACHED` step cost nothing; one that compiled again after
+ * an identical deploy is the bug a total hides.
  */
 final class DeployTimings
 {
@@ -27,9 +25,8 @@ final class DeployTimings
     private const LEVEL_DIM = 'dim';
 
     /**
-     * The three recorded stages are too coarse to act on: `running` is one blob
-     * covering detection, base images, the build and the app boot. These markers
-     * split it using lines the pipeline already writes.
+     * Lines the pipeline already writes that split the recorded stages, too coarse to act on: `running` alone covers detection,
+     * base images, the build and the app boot.
      *
      * @var array<string, string> phase => regex over the message
      */
@@ -47,10 +44,8 @@ final class DeployTimings
     ];
 
     /**
-     * Stage durations from the boundaries {@see DeployLogger::stage()} writes.
-     *
-     * A stage still running has no `finished_at` and is reported with a null
-     * duration rather than timed against `now`.
+     * Stage durations from the boundaries {@see DeployLogger::stage()} writes. A stage still running has no `finished_at` and a
+     * null duration.
      *
      * @param  array<string, mixed>  $latest  decoded latest.json
      * @return list<array{name: string, started_at: ?int, finished_at: ?int, seconds: ?int}>
@@ -83,12 +78,8 @@ final class DeployTimings
     }
 
     /**
-     * What `docker compose up` spent its time on, object by object.
-     *
-     * Compose announces `<Kind> <name> <Verb>` around everything it does, and
-     * pairing the verbs turns that into durations: a 118s compose-up was 116s
-     * `Image project-app Building`, against about a second each for the network
-     * and the container.
+     * What `docker compose up` spent its time on, object by object: Compose announces `<Kind> <name> <Verb>` around everything it
+     * does, and pairing the verbs turns that into durations.
      *
      * @param  list<array{ts: int, msg: string}>  $entries
      * @return list<array{object: string, action: string, seconds: int}>
@@ -110,26 +101,7 @@ final class DeployTimings
             [, $kind, $name, $verb] = $m;
             $object = "{$kind} {$name}";
 
-            if (isset(self::COMPOSE_ACTIONS[$verb])) {
-                $started[$object.'|'.$verb] = $ts;
-
-                continue;
-            }
-
-            foreach (self::COMPOSE_ACTIONS as $begin => $end) {
-                if ($verb !== $end) {
-                    continue;
-                }
-                $key = $object.'|'.$begin;
-                if (isset($started[$key])) {
-                    $out[] = [
-                        'object' => $object,
-                        'action' => strtolower($begin),
-                        'seconds' => max(0, $ts - $started[$key]),
-                    ];
-                    unset($started[$key]);
-                }
-            }
+            self::pairComposeVerb($object, $verb, $ts, $started, $out);
         }
 
         usort($out, static fn (array $a, array $b): int => $b['seconds'] <=> $a['seconds']);
@@ -138,12 +110,38 @@ final class DeployTimings
     }
 
     /**
-     * Every measurable step, in order, with how long it took.
+     * Note when $object started an action, or record the action a finish verb closes.
      *
-     * A milestone is any line the pipeline announced (`info`, `ok`, `warn`,
-     * `error`); `dim` lines are raw output and number in the thousands. Each is
-     * charged the time until the next one. {@see phases()} groups this into six
-     * buckets; {@see buildSteps()} covers the inside of the build.
+     * @param  array<string, int>  $started  `<object>|<start verb>` => timestamp, updated in place
+     * @param  list<array{object: string, action: string, seconds: int}>  $out  appended to in place
+     */
+    private static function pairComposeVerb(string $object, string $verb, int $ts, array &$started, array &$out): void
+    {
+        if (isset(self::COMPOSE_ACTIONS[$verb])) {
+            $started[$object.'|'.$verb] = $ts;
+
+            return;
+        }
+
+        foreach (self::COMPOSE_ACTIONS as $begin => $end) {
+            if ($verb !== $end) {
+                continue;
+            }
+            $key = $object.'|'.$begin;
+            if (isset($started[$key])) {
+                $out[] = [
+                    'object' => $object,
+                    'action' => strtolower($begin),
+                    'seconds' => max(0, $ts - $started[$key]),
+                ];
+                unset($started[$key]);
+            }
+        }
+    }
+
+    /**
+     * Every milestone (`info`, `ok`, `warn` or `error`; `dim` is raw output, in the thousands), charged the time until the next;
+     * the last closes nothing and is charged nothing. {@see phases()} groups it, {@see buildSteps()} covers the build.
      *
      * @param  list<array{ts: int, level?: string, msg: string}>  $entries
      * @return list<array{at: int, seconds: ?int, level: string, step: string}>
@@ -170,7 +168,6 @@ final class DeployTimings
             $next = $milestones[$i + 1]['ts'] ?? null;
             $out[] = [
                 'at' => $milestone['ts'] - $start,
-                // The last milestone closes nothing, so it is charged nothing.
                 'seconds' => $next === null ? null : max(0, $next - $milestone['ts']),
                 'level' => $milestone['level'],
                 'step' => $milestone['step'],
@@ -181,18 +178,48 @@ final class DeployTimings
     }
 
     /**
-     * Where the time went, phase by phase.
-     *
-     * `build` is the sum of BuildKit's layer times rather than wall-clock,
-     * because the compose-up window contains both the build and the boot and
-     * they are fixed by different people. `start_to_answer` is that window with
-     * the build subtracted: container start, entrypoint, migrations, reachability.
+     * Where the time went, phase by phase. `build` sums BuildKit's layer times, as the compose-up window holds the build and the
+     * boot, fixed by different people; `start_to_answer` is that window minus the build, which would otherwise count twice.
      *
      * @param  list<array{ts: int, msg: string}>  $entries
-     * @param  list<array{step: string, command: string, seconds: float, cached: bool}>  $steps
+     * @param  list<array{step: string, command: string, seconds: float, cached: bool, cacheable: bool}>  $steps
      * @return list<array{name: string, seconds: float}>
      */
     public static function phases(array $entries, array $steps = []): array
+    {
+        [$first, $last] = self::markerTimes($entries);
+
+        $span = static fn (?int $from, ?int $to): ?float => $from === null || $to === null ? null : (float) max(0, $to - $from);
+
+        $buildSeconds = 0.0;
+        foreach ($steps as $step) {
+            $buildSeconds += (float) $step['seconds'];
+        }
+
+        $startToAnswer = $span($first['app_start'] ?? null, $last['answered'] ?? null);
+        if ($startToAnswer !== null) {
+            $startToAnswer = max(0.0, $startToAnswer - $buildSeconds);
+        }
+
+        $phases = [
+            'preparing' => $span($first['start'] ?? null, $first['preparing_end'] ?? null),
+            'cloning' => $span($first['cloning_start'] ?? null, $first['cloning_end'] ?? null),
+            'detect' => $span($first['running_start'] ?? null, $first['detected'] ?? null),
+            'image_transfer' => $span($first['base_image'] ?? null, $last['base_image'] ?? null),
+            'build' => $steps === [] ? null : round($buildSeconds, 1),
+            'start_to_answer' => $startToAnswer,
+        ];
+
+        return self::measuredPhases($phases);
+    }
+
+    /**
+     * When each marker was first and last seen.
+     *
+     * @param  list<array{ts: int, msg: string}>  $entries
+     * @return array{0: array<string, int>, 1: array<string, int>}
+     */
+    private static function markerTimes(array $entries): array
     {
         $first = [];
         $last = [];
@@ -210,29 +237,17 @@ final class DeployTimings
             }
         }
 
-        $span = static fn (?int $from, ?int $to): ?float => $from === null || $to === null ? null : (float) max(0, $to - $from);
+        return [$first, $last];
+    }
 
-        $buildSeconds = 0.0;
-        foreach ($steps as $step) {
-            $buildSeconds += (float) $step['seconds'];
-        }
-
-        $startToAnswer = $span($first['app_start'] ?? null, $last['answered'] ?? null);
-        if ($startToAnswer !== null) {
-            // The build happens inside this window; charging it twice would make
-            // the phases sum to more than the deploy took.
-            $startToAnswer = max(0.0, $startToAnswer - $buildSeconds);
-        }
-
-        $phases = [
-            'preparing' => $span($first['start'] ?? null, $first['preparing_end'] ?? null),
-            'cloning' => $span($first['cloning_start'] ?? null, $first['cloning_end'] ?? null),
-            'detect' => $span($first['running_start'] ?? null, $first['detected'] ?? null),
-            'image_transfer' => $span($first['base_image'] ?? null, $last['base_image'] ?? null),
-            'build' => $steps === [] ? null : round($buildSeconds, 1),
-            'start_to_answer' => $startToAnswer,
-        ];
-
+    /**
+     * The phases a log shows, rounded: one that did not happen is left out, not zeroed, which would read as instant.
+     *
+     * @param  array<string, float|int|null>  $phases
+     * @return list<array{name: string, seconds: float}>
+     */
+    private static function measuredPhases(array $phases): array
+    {
         $out = [];
         foreach ($phases as $name => $seconds) {
             if ($seconds !== null) {
@@ -244,20 +259,18 @@ final class DeployTimings
     }
 
     /**
-     * Build layers, slowest first, from BuildKit's progress output.
-     *
-     * Correlates `#N [stage x/y] <command>` with the `#N DONE <s>` and
-     * `#N CACHED` that follow it. BuildKit's own `[internal]` steps are dropped:
-     * they are not layers anyone can make faster.
+     * Build layers, slowest first, each with its largest `#N DONE` (children report too) or `#N CACHED`; `[internal]` steps are
+     * dropped. Only a positioned Dockerfile instruction other than `FROM` is `cacheable`, as BuildKit never caches the rest.
      *
      * @param  list<string>  $lines  log message lines, in order
-     * @return list<array{step: string, command: string, seconds: float, cached: bool}>
+     * @return list<array{step: string, command: string, seconds: float, cached: bool, cacheable: bool}>
      */
     public static function buildSteps(array $lines): array
     {
         $commands = [];
         $seconds = [];
         $cached = [];
+        $cacheable = [];
 
         foreach ($lines as $line) {
             $line = trim((string) $line);
@@ -265,32 +278,18 @@ final class DeployTimings
                 if (str_starts_with($m[2], 'internal')) {
                     continue;
                 }
-                // A bracketed descriptor is the command itself and always wins.
                 $commands[$m[1]] = trim($m[3]);
+                $cacheable[$m[1]] = self::isCacheableLayer($m[2], $commands[$m[1]]);
             } elseif (preg_match('/#(\d+)\s+([a-z][^\n]*)$/', $line, $m) === 1) {
-                // BuildKit's unbracketed steps -- `exporting to image` above
-                // all: real work (19.2s on a 1.36GB Matomo build). Only the
-                // first line per step; the rest are its own progress.
                 $commands[$m[1]] ??= trim($m[2]);
             } elseif (preg_match('/#(\d+)\s+DONE\s+([\d.]+)s/', $line, $m) === 1) {
-                // A step can report DONE more than once as its children finish;
-                // the largest is the one that describes the step.
                 $seconds[$m[1]] = max($seconds[$m[1]] ?? 0.0, (float) $m[2]);
             } elseif (preg_match('/#(\d+)\s+CACHED/', $line, $m) === 1) {
                 $cached[$m[1]] = true;
             }
         }
 
-        $steps = [];
-        foreach ($commands as $n => $command) {
-            $steps[] = [
-                'step' => '#'.$n,
-                'command' => $command,
-                // A CACHED step scores zero: it cost no build time.
-                'seconds' => round($cached[$n] ?? false ? 0.0 : ($seconds[$n] ?? 0.0), 2),
-                'cached' => isset($cached[$n]),
-            ];
-        }
+        $steps = self::stepRows($commands, $seconds, $cached, $cacheable);
 
         usort($steps, static fn (array $a, array $b): int => $b['seconds'] <=> $a['seconds']);
 
@@ -298,11 +297,43 @@ final class DeployTimings
     }
 
     /**
-     * The whole picture, in the shape the API returns.
+     * Whether a bracketed step is a Dockerfile instruction BuildKit can answer from its layer cache: one with an `x/y` position
+     * (`[2/3]`, `[app 4/13]`), and not the `FROM` that only resolves the base image.
+     */
+    private static function isCacheableLayer(string $descriptor, string $command): bool
+    {
+        return preg_match('#(^|\s)\d+/\d+$#', trim($descriptor)) === 1
+            && preg_match('/^FROM\s/i', $command) !== 1;
+    }
+
+    /**
+     * One row per step, in the order the steps appeared; a CACHED step scores zero, as it cost no build time.
      *
-     * `cache_hit_ratio` is the number to alert on: 0.0 on a first deploy, high
-     * on a repeat of the same commit. A repeat that reports 0.0 means the cache
-     * was destroyed between runs.
+     * @param  array<int|string, string>  $commands
+     * @param  array<int|string, float>  $seconds
+     * @param  array<int|string, true>  $cached
+     * @param  array<int|string, bool>  $cacheable
+     * @return list<array{step: string, command: string, seconds: float, cached: bool, cacheable: bool}>
+     */
+    private static function stepRows(array $commands, array $seconds, array $cached, array $cacheable): array
+    {
+        $steps = [];
+        foreach ($commands as $n => $command) {
+            $steps[] = [
+                'step' => '#'.$n,
+                'command' => $command,
+                'seconds' => round($cached[$n] ?? false ? 0.0 : ($seconds[$n] ?? 0.0), 2),
+                'cached' => isset($cached[$n]),
+                'cacheable' => $cacheable[$n] ?? false,
+            ];
+        }
+
+        return $steps;
+    }
+
+    /**
+     * The whole picture, in the API's shape. `cache_hit_ratio` is the cached share of the cacheable layers, so a repeat of the
+     * same commit at 0.0 lost its cache.
      *
      * @param  array<string, mixed>  $latest  decoded latest.json
      * @param  list<array{ts: int, msg: string}>  $entries  log entries, in order
@@ -313,14 +344,7 @@ final class DeployTimings
         $stages = self::stages($latest);
         $steps = self::buildSteps(array_column($entries, 'msg'));
 
-        $cachedCount = 0;
-        $buildSeconds = 0.0;
-        foreach ($steps as $step) {
-            $buildSeconds += $step['seconds'];
-            if ($step['cached']) {
-                $cachedCount++;
-            }
-        }
+        [$cachedCount, $cacheableCount, $buildSeconds] = self::buildTotals($steps);
 
         $started = isset($latest['started_at']) ? (int) $latest['started_at'] : null;
         $finished = isset($latest['finished_at']) && $latest['finished_at'] !== null
@@ -336,13 +360,34 @@ final class DeployTimings
             'build' => [
                 'total_seconds' => round($buildSeconds, 2),
                 'step_count' => count($steps),
+                'cacheable_steps' => $cacheableCount,
                 'cached_steps' => $cachedCount,
-                'cache_hit_ratio' => $steps === [] ? null : round($cachedCount / count($steps), 3),
-                // Every layer, not a top ten: a layer that regressed from 0.1s
-                // to 30s never appears in a top ten from the run before.
+                'cache_hit_ratio' => $cacheableCount === 0 ? null : round($cachedCount / $cacheableCount, 3),
                 'steps' => $steps,
                 'slowest' => array_slice($steps, 0, 10),
             ],
         ];
+    }
+
+    /**
+     * How many cacheable layers were cached, how many there were, and the seconds every step took.
+     *
+     * @param  list<array{step: string, command: string, seconds: float, cached: bool, cacheable: bool}>  $steps
+     * @return array{0: int, 1: int, 2: float}
+     */
+    private static function buildTotals(array $steps): array
+    {
+        $cachedCount = 0;
+        $cacheableCount = 0;
+        $buildSeconds = 0.0;
+        foreach ($steps as $step) {
+            $buildSeconds += $step['seconds'];
+            if ($step['cacheable']) {
+                $cacheableCount++;
+                $cachedCount += $step['cached'] ? 1 : 0;
+            }
+        }
+
+        return [$cachedCount, $cacheableCount, $buildSeconds];
     }
 }

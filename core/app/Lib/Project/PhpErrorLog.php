@@ -8,23 +8,20 @@ use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppPortServices;
 use App\System\Project\PhpHosting;
 
 /**
- * A project's PHP errors. Classic hosting writes them to a file in the
- * project's own log directory, outside the account's home; a dind app writes
- * them to its service's container output.
+ * A project's PHP errors: classic hosting writes them to a file in the project's own log directory, outside the account's
+ * home; a dind app writes them to its service's container output.
  */
 final class PhpErrorLog
 {
     public const FILE_NAME = 'php_error.log';
 
     private const TAIL_TIMEOUT = 60;
-
-    /** Run as the account: `$1` the file, `$2` the line count. */
-    private const TAIL_SCRIPT = 'p=$1; [ -f "$p" ] && [ ! -L "$p" ] && [ "$(stat -c %h -- "$p" 2>/dev/null)" = 1 ] && exec tail -n "$2" -- "$p"; exit 3';
 
     private function __construct(
         private readonly User $user,
@@ -72,9 +69,8 @@ final class PhpErrorLog
     }
 
     /**
-     * The service publishing the recorded app port, as the health sweep names
-     * the application; the generated `app`, or the first service, when no port
-     * is recorded.
+     * The service publishing the recorded app port, as the health sweep names the application; the generated `app`, or
+     * the first service, when no port is recorded.
      */
     private function appService(Dind $project): ?string
     {
@@ -115,6 +111,15 @@ final class PhpErrorLog
             return self::nothing();
         }
 
+        return $this->tailed($output, $lines, $since, $stat);
+    }
+
+    /**
+     * @param  array<int|string, int>  $stat
+     * @return array{lines: list<string>, file: string, size: int, mtime: int, truncated: bool}
+     */
+    private function tailed(string $output, int $lines, ?string $since, array $stat): array
+    {
         $found = $this->split($output);
         $truncated = count($found) > $lines;
         if ($truncated) {
@@ -131,15 +136,14 @@ final class PhpErrorLog
     }
 
     /**
-     * Reads as the account, so a link it planted is not followed with root's
-     * privileges. The guard is repeated on the account's side because the file
-     * can be swapped between the lstat above and this open.
+     * Reads as the account, so a link it planted is not followed with root's privileges. The guard is repeated on the
+     * account's side because the file can be swapped between the lstat above and this open.
      */
     private function tailAsAccount(string $path, int $lines): ?string
     {
         try {
-            $account = $this->user->project($this->system)->fileManager();
-            $command = $account->asAccount(['sh', '-c', self::TAIL_SCRIPT, 'sh', $path, (string) $lines]);
+            [$uid, $gid] = $this->user->project($this->system)->fileManager()->accountIds();
+            $command = Privileged::account()->lastLinesOfLog($uid, $gid, $path, $lines);
             $process = $this->system->runProcess($command, [], self::TAIL_TIMEOUT);
         } catch (\Throwable) {
             return null;

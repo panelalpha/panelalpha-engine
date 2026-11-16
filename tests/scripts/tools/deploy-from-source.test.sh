@@ -21,6 +21,7 @@ cat >"$WORK_DIR/bin/rsync" <<EOF
 #!/bin/bash
 args=()
 for a in "\$@"; do args+=("\${a/fakehost:/}"); done
+printf '%s\n' "\$@" >"$WORK_DIR/rsync-argv"
 exec "$REAL_RSYNC" "\${args[@]}"
 EOF
 chmod +x "$WORK_DIR/bin/ssh" "$WORK_DIR/bin/rsync"
@@ -32,6 +33,8 @@ echo 'EXAMPLE=new' >"$WORK_DIR/src/tests/api/env/.env.example"
 echo 'API_TOKEN=host-only' >"$WORK_DIR/remote/tests/api/env/.env"
 echo 'APP_KEY=before-last-configure' >"$WORK_DIR/remote/core/.env.pae-backup"
 echo 'stale0000' >"$WORK_DIR/remote/version"
+mkdir -p "$WORK_DIR/remote/config"
+echo 'panelv1' >"$WORK_DIR/remote/config/tenant-api-access"
 mkdir -p "$WORK_DIR/remote/tests/coverage/123/dumps"
 echo 'coverage-dump' >"$WORK_DIR/remote/tests/coverage/123/dumps/request.rawcov"
 
@@ -58,6 +61,8 @@ expect "pae configure's core/.env.pae-backup survives the upload" \
     'APP_KEY=before-last-configure' "$(cat "$WORK_DIR/remote/core/.env.pae-backup" 2>/dev/null)"
 expect "runtime coverage survives the upload" \
     'coverage-dump' "$(cat "$WORK_DIR/remote/tests/coverage/123/dumps/request.rawcov" 2>/dev/null)"
+expect "the projects allowed to reach the Engine API survive the upload" \
+    'panelv1' "$(cat "$WORK_DIR/remote/config/tenant-api-access" 2>/dev/null)"
 
 rm -f "$WORK_DIR/argv"
 PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
@@ -77,6 +82,21 @@ echo 'local edit' >"$WORK_DIR/src/untracked.txt"
 PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
     --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
 expect "a tree with changes removes version" "no file" "$(cat "$WORK_DIR/remote/version" 2>/dev/null || echo 'no file')"
+
+# Uploaded as a clone by root leaves it, whatever the workstation's umask; an
+# entry already there with other modes is corrected too.
+mkdir -p "$WORK_DIR/src/shared"
+echo 'shared' >"$WORK_DIR/src/shared/file.sh"
+chmod 0775 "$WORK_DIR/src" "$WORK_DIR/src/shared" "$WORK_DIR/src/shared/file.sh"
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
+    --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
+chmod 0666 "$WORK_DIR/remote/shared/file.sh"
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
+    --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
+expect "the engine dir is writable by its owner only" "755" "$(stat -c %a "$WORK_DIR/remote")"
+expect "a directory is writable by its owner only" "755" "$(stat -c %a "$WORK_DIR/remote/shared")"
+expect "a file keeps its execute bit and loses group write" "755" "$(stat -c %a "$WORK_DIR/remote/shared/file.sh")"
+expect "the upload is owned by root on the host" "1" "$(grep -cx -- '--chown=root:root' "$WORK_DIR/rsync-argv")"
 
 [ "$failures" -eq 0 ] && echo "All passed." || echo "${failures} failed."
 exit "$failures"

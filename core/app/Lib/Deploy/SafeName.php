@@ -5,22 +5,8 @@ namespace App\Lib\Deploy;
 use InvalidArgumentException;
 
 /**
- * Names that are about to become part of a filesystem path or a command's
- * argv.
- *
- * Account usernames reach the engine from the database and end up in a log
- * directory, a cache directory, a volume name and half a dozen sudo commands.
- * Each of those sites used to carry its own copy of the same regex, and the
- * copies shared two holes:
- *
- *   - PHP's `$` matches immediately before a final newline, so "acme\n"
- *     passed every one of them;
- *   - `.` and `..` are made only of accepted characters, and both resolve
- *     somewhere other than the account's own directory.
- *
- * The rule lives here once so a fix reaches every caller.
- *
- * No Laravel dependencies — unit-testable with a string.
+ * Names about to become part of a filesystem path or argv, under one rule that also refuses a trailing
+ * newline (which `$` lets through) and names of only dots. No Laravel dependencies.
  */
 final class SafeName
 {

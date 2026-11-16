@@ -114,6 +114,11 @@ export class UsersApi extends EngineApiBase {
     );
   }
 
+  /** DELETE /projects/{username}/password without a status expectation. */
+  async deleteSitePasswordRaw(username: string): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.delete(`projects/${username}/password`));
+  }
+
   /**
    * Updates a user (raw - no status expectation)
    */
@@ -418,11 +423,10 @@ async function deleteProject(api: ApiTransport, username: string): Promise<APIRe
         recordRetryNote(operation, `test timeout extended by ${extended} ms`);
       }
     }
-    const body = (await response.json().catch(() => ({}))) as { message?: unknown };
-    const { message } = body;
-    const task =
-      typeof message === 'string' ? /\/tasks\/(\d+)\/cancel/.exec(message)?.[1] : undefined;
-    const named = typeof message === 'string' ? /\btask (\d+)\b/.exec(message)?.[1] : undefined;
+    const body = (await response.json().catch(() => ({}))) as BusyRefusal;
+    const task = cancellableTask(body);
+    const named =
+      typeof body.message === 'string' ? /\btask (\d+)\b/.exec(body.message)?.[1] : undefined;
     reasons.push(named ? `HTTP 409 task ${named}` : httpReason(409, body));
     if (task !== undefined && !cancelled.has(task)) {
       cancelled.add(task);
@@ -432,6 +436,17 @@ async function deleteProject(api: ApiTransport, username: string): Promise<APIRe
       await delay(2_000);
     }
   }
+}
+
+interface BusyRefusal {
+  message?: unknown;
+  problems?: { code?: unknown; task_id?: unknown }[];
+}
+
+/** The task a busy project's 409 offers to cancel: its problem is `project_busy_task` and names it. */
+function cancellableTask(body: BusyRefusal): string | undefined {
+  const problem = body.problems?.find((entry) => entry.code === 'project_busy_task');
+  return typeof problem?.task_id === 'number' ? String(problem.task_id) : undefined;
 }
 
 /**

@@ -31,6 +31,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# No cron run retries a first issuance the way it retries a renewal.
+LE_CERTBOT_TIMEOUT="${LE_CERTBOT_TIMEOUT:-600}"
 # shellcheck source=./letsencrypt-lib.sh
 source "${SCRIPT_DIR}/letsencrypt-lib.sh"
 
@@ -134,6 +136,10 @@ check_dns() {
 }
 
 request() {
+    if [ "$FORCE_RENEWAL" = 0 ] && [ "$DRY_RUN" = 0 ] && le_lineage_current "$LE_CERT_NAME" "$DOMAIN"; then
+        le_info "The certificate for ${DOMAIN} is not yet due for renewal; the webserver keeps running"
+        return 0
+    fi
     local -a args
     args=(certonly --standalone --non-interactive --agree-tos
         --cert-name "$LE_CERT_NAME" -d "$DOMAIN")
@@ -144,11 +150,7 @@ request() {
     [ "$DRY_RUN" = 1 ] && args+=(--dry-run)
 
     le_info "Requesting a Let's Encrypt certificate for ${DOMAIN}"
-    le_release_port_80
-    le_certbot "${args[@]}"
-    local status=$?
-    le_restore_stack
-    return $status
+    le_certbot_standalone "${args[@]}"
 }
 
 main() {

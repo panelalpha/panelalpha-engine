@@ -38,7 +38,7 @@ Open source. Self-hosted. Łatwy dla każdego, nie tylko dla sysadminów.
 <p>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Instalacja jedną komendą"></a>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Wspierane systemy"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-287_tools-6f42c1" alt="287 narzędzi MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-311_tools-6f42c1" alt="311 narzędzi MCP"></a>
 <a href="#licencja"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Dołącz do Discorda"></a>
 </p>
@@ -69,7 +69,7 @@ Od razu po instalacji PanelAlpha Engine daje Tobie i Twojemu AI wszystko, czego 
 
 ## Jak to działa
 
-<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
 
 ## Po co to musi istnieć
 
@@ -174,7 +174,7 @@ Nie ma komend do nauczenia się i nie ma magicznych formułek. To przykłady poz
 | `Zrób tunel Cloudflare dla n8n.mydomain.com.` | DNS i tunel, czyli też sposób, żeby serwować stronę z serwera za NAT-em. |
 | `Ile ruchu mieliśmy w zeszłym tygodniu?` | Użycie, logi i limity tego projektu, i serwera jako całości. |
 
-Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [287 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
+Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [311 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

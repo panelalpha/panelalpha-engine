@@ -7,11 +7,8 @@ use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * The same JS build, with the toolchain thrown away: only the build output
- * reaches the nginx that serves it.
- *
- * This is why a manifest distinguishes build commands from runtime ones —
- * the Node that produced `dist/` is not in the image that ships.
+ * The same JS build, with the toolchain thrown away: only the build output reaches the nginx that serves it,
+ * which is why a manifest tells build commands from runtime ones.
  */
 final class StaticSiteDockerfile implements DockerfileWriter
 {
@@ -28,15 +25,13 @@ final class StaticSiteDockerfile implements DockerfileWriter
         $this->image = NodeBaseImage::for($recipe);
     }
 
+    /** The heap declaration belongs to the builder stage alone: the nginx stage copies files and inherits nothing. */
     public function render(): string
     {
         return Template::named('dockerfile/static-nginx')->render([
             'image' => $this->image,
             'git_install' => GitInstall::command($this->image),
             'install_layer' => $this->installLayer(),
-            // The builder stage is the only place this toolchain runs, so the
-            // heap declaration belongs there and nowhere else -- the nginx
-            // stage that ships copies files and inherits nothing.
             'env' => EnvironmentLines::buildArgs($this->recipe->nodeHeapBuildArg()),
             'build_command' => NodeRuntime::withLegacyOpenssl(
                 $this->recipe->buildCommandOr(self::DEFAULT_BUILD),

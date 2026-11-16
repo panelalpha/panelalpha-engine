@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Git repository status
 
-    Call this first. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or `site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` means a connect is still fetching the repository: wait and poll; do not call connect again.
+    Call this first. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or `site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` means a connect is still fetching the repository: wait and poll; do not call connect again. A stopped project container answers 503 "Git could not run: the project's container is not running (...)". On a managed_by deploy checkout git_pull, git_revert and git_change_branch start it themselves, so do not tell the user to start the project first.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

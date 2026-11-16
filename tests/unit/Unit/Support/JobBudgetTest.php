@@ -18,6 +18,7 @@ class JobBudgetTest extends TestCase
     public function test_the_caps_are_ordered_so_a_command_fails_before_its_job(): void
     {
         $this->assertLessThan(JobBudget::SECONDS, JobBudget::COMMAND_SECONDS, 'a command must fail before its job');
+        $this->assertSame(JobBudget::CLEANUP_SECONDS, JobBudget::SECONDS - JobBudget::COMMAND_SECONDS, 'the rest of the job is the cleanup reserve');
         $this->assertLessThan(JobBudget::WORKER_SECONDS, JobBudget::SECONDS, 'a job must fail before its worker');
         $this->assertLessThan(JobBudget::RETRY_AFTER_SECONDS, JobBudget::WORKER_SECONDS, 'the worker must finish before the retry');
     }
@@ -38,8 +39,10 @@ class JobBudgetTest extends TestCase
     {
         $mysql = (new \ReflectionClass(\App\System\Services\Mysql::class))->getConstant('DB_COMMAND_TIMEOUT');
         $volume = (new \ReflectionClass(\App\System\Project\Dind\VolumeArchive::class))->getConstant('COMPOSE_TIMEOUT');
+        $compose = (new \ReflectionClass(\App\System\Project\Dind\ContainerOperations::class))->getConstant('COMPOSE_TIMEOUT');
 
         $this->assertSame(JobBudget::COMMAND_SECONDS, $mysql);
         $this->assertSame(JobBudget::COMMAND_SECONDS, $volume);
+        $this->assertSame(JobBudget::CLEANUP_SECONDS, $compose, 'the backup compose start runs on the cleanup reserve');
     }
 }

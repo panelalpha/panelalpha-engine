@@ -1,0 +1,1325 @@
+[
+  {
+    "name": "dind-sysbox",
+    "template": "templates/user/dind/project/docker-compose.yml.blade.php",
+    "vars": {
+      "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+      "isolation": "runtime: sysbox-runc",
+      "user": "alice",
+      "proc_mounts": [
+        "meminfo",
+        "cpuinfo",
+        "stat",
+        "loadavg",
+        "diskstats"
+      ],
+      "cpu_limit": "2",
+      "memory_limit": "2048",
+      "device_read_bps": 1048576,
+      "device_write_bps": 2097152,
+      "block_device": "/dev/sda"
+    },
+    "compose": "services:\n  dind:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    runtime: sysbox-runc\n    container_name: alice\n    # /run is ephemeral, the way it is on any Linux boot. Without this it is\n    # part of the container's persistent overlay, so pidfiles outlive the\n    # process that wrote them: a host reboot SIGKILLs the account before\n    # dockerd can remove /run/docker.pid, and on the next start the init\n    # script reads that pid, finds the number reused by something unrelated,\n    # and refuses to start the daemon. The account comes up with no Docker\n    # and every app in it stays down, silently. Sized because tmpfs pages\n    # count against the account's own memory limit; real usage is ~276K.\n    #\n    # s6's scan directory gets its own tmpfs: Docker mounts tmpfs noexec, and\n    # s6 has to exec each service's run script from there. /run stays noexec.\n    tmpfs:\n      - /run:mode=755,size=64m\n      - /run/service:mode=755,size=4m,exec\n    volumes:\n      - /home/alice/:/home/alice/\n      - ./entrypoint.sh:/entrypoint.sh:ro\n      - ./entrypoint.d/:/entrypoint.d/:ro\n      - ./daemon.json:/etc/docker/daemon.json:ro\n      - ./services/:/etc/s6/account/:ro\n      # lxcfs: the account's own memory, CPUs and load in /proc. Long syntax,\n      # so compose never creates a missing source as a directory.\n      - {type: bind, source: /var/lib/lxcfs/proc/meminfo, target: /proc/meminfo, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/cpuinfo, target: /proc/cpuinfo, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/stat, target: /proc/stat, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/loadavg, target: /proc/loadavg, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/diskstats, target: /proc/diskstats, read_only: true}\n      # The same files for the containers the account's own dockerd starts.\n      - {type: bind, source: /var/lib/lxcfs/proc, target: /var/lib/lxcfs/proc, read_only: true}\n    tty: true\n    cpus: 2\n    mem_limit: 2048M\n    memswap_limit: 2048M\n    blkio_config:\n      device_read_bps:\n        - path: /dev/sda\n          rate: '1048576'\n      device_write_bps:\n        - path: /dev/sda\n          rate: '2097152'\n# Accounts only, never core: no traffic between members, and the host holds\n# them to sites-db and the registries (tenant-network-firewall.sh).\nnetworks:\n  default:\n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "dind": {
+          "restart": "always",
+          "container_name": "alice",
+          "blkio_config": {
+            "device_read_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "1048576"
+              }
+            ],
+            "device_write_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "2097152"
+              }
+            ]
+          },
+          "cpus": 2,
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+          "mem_limit": "2147483648",
+          "memswap_limit": "2147483648",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "runtime": "sysbox-runc",
+          "tmpfs": [
+            "/run:mode=755,size=64m",
+            "/run/service:mode=755,size=4m,exec"
+          ],
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.sh",
+              "target": "/entrypoint.sh",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.d",
+              "target": "/entrypoint.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/daemon.json",
+              "target": "/etc/docker/daemon.json",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/meminfo",
+              "target": "/proc/meminfo",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/cpuinfo",
+              "target": "/proc/cpuinfo",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/stat",
+              "target": "/proc/stat",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/loadavg",
+              "target": "/proc/loadavg",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/diskstats",
+              "target": "/proc/diskstats",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc",
+              "target": "/var/lib/lxcfs/proc",
+              "read_only": true
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "dind-sysbox-without-lxcfs-or-limits",
+    "template": "templates/user/dind/project/docker-compose.yml.blade.php",
+    "vars": {
+      "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+      "isolation": "runtime: sysbox-runc",
+      "user": "alice",
+      "proc_mounts": [],
+      "cpu_limit": "",
+      "memory_limit": "",
+      "device_read_bps": null,
+      "device_write_bps": null,
+      "block_device": ""
+    },
+    "compose": "services:\n  dind:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    runtime: sysbox-runc\n    container_name: alice\n    # /run is ephemeral, the way it is on any Linux boot. Without this it is\n    # part of the container's persistent overlay, so pidfiles outlive the\n    # process that wrote them: a host reboot SIGKILLs the account before\n    # dockerd can remove /run/docker.pid, and on the next start the init\n    # script reads that pid, finds the number reused by something unrelated,\n    # and refuses to start the daemon. The account comes up with no Docker\n    # and every app in it stays down, silently. Sized because tmpfs pages\n    # count against the account's own memory limit; real usage is ~276K.\n    #\n    # s6's scan directory gets its own tmpfs: Docker mounts tmpfs noexec, and\n    # s6 has to exec each service's run script from there. /run stays noexec.\n    tmpfs:\n      - /run:mode=755,size=64m\n      - /run/service:mode=755,size=4m,exec\n    volumes:\n      - /home/alice/:/home/alice/\n      - ./entrypoint.sh:/entrypoint.sh:ro\n      - ./entrypoint.d/:/entrypoint.d/:ro\n      - ./daemon.json:/etc/docker/daemon.json:ro\n      - ./services/:/etc/s6/account/:ro\n      # lxcfs: the account's own memory, CPUs and load in /proc. Long syntax,\n      # so compose never creates a missing source as a directory.\n    tty: true\n    \n    \n    \n# Accounts only, never core: no traffic between members, and the host holds\n# them to sites-db and the registries (tenant-network-firewall.sh).\nnetworks:\n  default:\n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "dind": {
+          "restart": "always",
+          "container_name": "alice",
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "runtime": "sysbox-runc",
+          "tmpfs": [
+            "/run:mode=755,size=64m",
+            "/run/service:mode=755,size=4m,exec"
+          ],
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.sh",
+              "target": "/entrypoint.sh",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.d",
+              "target": "/entrypoint.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/daemon.json",
+              "target": "/etc/docker/daemon.json",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "dind-privileged",
+    "template": "templates/user/dind/project/docker-compose.yml.blade.php",
+    "vars": {
+      "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+      "isolation": "privileged: true",
+      "user": "alice",
+      "proc_mounts": [
+        "meminfo",
+        "cpuinfo",
+        "stat",
+        "loadavg",
+        "diskstats",
+        "uptime",
+        "swaps"
+      ],
+      "cpu_limit": "2",
+      "memory_limit": "2048",
+      "device_read_bps": null,
+      "device_write_bps": 3145728,
+      "block_device": "/dev/nvme0n1"
+    },
+    "compose": "services:\n  dind:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    privileged: true\n    container_name: alice\n    # /run is ephemeral, the way it is on any Linux boot. Without this it is\n    # part of the container's persistent overlay, so pidfiles outlive the\n    # process that wrote them: a host reboot SIGKILLs the account before\n    # dockerd can remove /run/docker.pid, and on the next start the init\n    # script reads that pid, finds the number reused by something unrelated,\n    # and refuses to start the daemon. The account comes up with no Docker\n    # and every app in it stays down, silently. Sized because tmpfs pages\n    # count against the account's own memory limit; real usage is ~276K.\n    #\n    # s6's scan directory gets its own tmpfs: Docker mounts tmpfs noexec, and\n    # s6 has to exec each service's run script from there. /run stays noexec.\n    tmpfs:\n      - /run:mode=755,size=64m\n      - /run/service:mode=755,size=4m,exec\n    volumes:\n      - /home/alice/:/home/alice/\n      - ./entrypoint.sh:/entrypoint.sh:ro\n      - ./entrypoint.d/:/entrypoint.d/:ro\n      - ./daemon.json:/etc/docker/daemon.json:ro\n      - ./services/:/etc/s6/account/:ro\n      # lxcfs: the account's own memory, CPUs and load in /proc. Long syntax,\n      # so compose never creates a missing source as a directory.\n      - {type: bind, source: /var/lib/lxcfs/proc/meminfo, target: /proc/meminfo, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/cpuinfo, target: /proc/cpuinfo, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/stat, target: /proc/stat, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/loadavg, target: /proc/loadavg, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/diskstats, target: /proc/diskstats, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/uptime, target: /proc/uptime, read_only: true}\n      - {type: bind, source: /var/lib/lxcfs/proc/swaps, target: /proc/swaps, read_only: true}\n      # The same files for the containers the account's own dockerd starts.\n      - {type: bind, source: /var/lib/lxcfs/proc, target: /var/lib/lxcfs/proc, read_only: true}\n    tty: true\n    cpus: 2\n    mem_limit: 2048M\n    memswap_limit: 2048M\n    blkio_config:\n      device_write_bps:\n        - path: /dev/nvme0n1\n          rate: '3145728'\n# Accounts only, never core: no traffic between members, and the host holds\n# them to sites-db and the registries (tenant-network-firewall.sh).\nnetworks:\n  default:\n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "dind": {
+          "restart": "always",
+          "container_name": "alice",
+          "blkio_config": {
+            "device_write_bps": [
+              {
+                "Path": "/dev/nvme0n1",
+                "Rate": "3145728"
+              }
+            ]
+          },
+          "cpus": 2,
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-dind:v2.2.0-20261028",
+          "mem_limit": "2147483648",
+          "memswap_limit": "2147483648",
+          "networks": {
+            "default": null
+          },
+          "privileged": true,
+          "pull_policy": "missing",
+          "tmpfs": [
+            "/run:mode=755,size=64m",
+            "/run/service:mode=755,size=4m,exec"
+          ],
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.sh",
+              "target": "/entrypoint.sh",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint.d",
+              "target": "/entrypoint.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/daemon.json",
+              "target": "/etc/docker/daemon.json",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/meminfo",
+              "target": "/proc/meminfo",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/cpuinfo",
+              "target": "/proc/cpuinfo",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/stat",
+              "target": "/proc/stat",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/loadavg",
+              "target": "/proc/loadavg",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/diskstats",
+              "target": "/proc/diskstats",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/uptime",
+              "target": "/proc/uptime",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc/swaps",
+              "target": "/proc/swaps",
+              "read_only": true
+            },
+            {
+              "type": "bind",
+              "source": "/var/lib/lxcfs/proc",
+              "target": "/var/lib/lxcfs/proc",
+              "read_only": true
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "php-apache",
+    "template": "templates/user/default/project/docker-compose.yml.blade.php",
+    "vars": {
+      "user": "alice",
+      "php_versions": [
+        "8.3",
+        "8.4"
+      ],
+      "cpu_limit": "2",
+      "memory_limit": "2048",
+      "device_read_bps": 1048576,
+      "device_write_bps": null,
+      "block_device": "/dev/sda"
+    },
+    "compose": "services:\n  php:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    container_name: alice\n    volumes:\n      - /home/alice/:/home/alice/\n      - /home/alice/:/var/www/\n      - ./apache-sites:/etc/apache2/sites-enabled:ro\n      - ./apache-conf/remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro\n      - ./ssl-certs:/etc/apache2/ssl-certs:ro\n      - ./log:/var/log\n      - ./crontabs/www-data:/var/spool/cron/crontabs/alice\n      - ./msmtp/msmtprc:/etc/msmtprc:ro\n      - ./services/:/etc/s6/account/:ro\n      - ./entrypoint-init.d/:/entrypoint-init.d/:ro\n      - ./php/ext/:/etc/php/ext/:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/fpm/pool.d/:/etc/php/8.3/fpm/pool.d/:ro\n      - ./php/8.4/default.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.4/custom.ini:/etc/php/8.4/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.4/ioncube.ini:/etc/php/8.4/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.4/default.ini:/etc/php/8.4/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.4/custom.ini:/etc/php/8.4/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.4/ioncube.ini:/etc/php/8.4/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.4/fpm/pool.d/:/etc/php/8.4/fpm/pool.d/:ro\n    tty: true\n    cpus: 2\n    mem_limit: 2048M\n    memswap_limit: 2048M\n    blkio_config:\n      device_read_bps:\n        - path: /dev/sda\n          rate: '1048576'\nnetworks: \n  default: \n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "php": {
+          "restart": "always",
+          "container_name": "alice",
+          "blkio_config": {
+            "device_read_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "1048576"
+              }
+            ]
+          },
+          "cpus": 2,
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028",
+          "mem_limit": "2147483648",
+          "memswap_limit": "2147483648",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/var/www",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-sites",
+              "target": "/etc/apache2/sites-enabled",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-conf/remoteip.conf",
+              "target": "/etc/apache2/conf-enabled/remoteip.conf",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/ssl-certs",
+              "target": "/etc/apache2/ssl-certs",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/log",
+              "target": "/var/log",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/crontabs/www-data",
+              "target": "/var/spool/cron/crontabs/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/msmtp/msmtprc",
+              "target": "/etc/msmtprc",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint-init.d",
+              "target": "/entrypoint-init.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/ext",
+              "target": "/etc/php/ext",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/fpm/pool.d",
+              "target": "/etc/php/8.3/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/default.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/custom.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/ioncube.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/default.ini",
+              "target": "/etc/php/8.4/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/custom.ini",
+              "target": "/etc/php/8.4/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/ioncube.ini",
+              "target": "/etc/php/8.4/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/fpm/pool.d",
+              "target": "/etc/php/8.4/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "php-apache-without-limits",
+    "template": "templates/user/default/project/docker-compose.yml.blade.php",
+    "vars": {
+      "user": "alice",
+      "php_versions": [
+        "8.4"
+      ],
+      "cpu_limit": "",
+      "memory_limit": "",
+      "device_read_bps": null,
+      "device_write_bps": null,
+      "block_device": ""
+    },
+    "compose": "services:\n  php:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    container_name: alice\n    volumes:\n      - /home/alice/:/home/alice/\n      - /home/alice/:/var/www/\n      - ./apache-sites:/etc/apache2/sites-enabled:ro\n      - ./apache-conf/remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro\n      - ./ssl-certs:/etc/apache2/ssl-certs:ro\n      - ./log:/var/log\n      - ./crontabs/www-data:/var/spool/cron/crontabs/alice\n      - ./msmtp/msmtprc:/etc/msmtprc:ro\n      - ./services/:/etc/s6/account/:ro\n      - ./entrypoint-init.d/:/entrypoint-init.d/:ro\n      - ./php/ext/:/etc/php/ext/:ro\n      - ./php/8.4/default.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.4/custom.ini:/etc/php/8.4/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.4/ioncube.ini:/etc/php/8.4/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.4/default.ini:/etc/php/8.4/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.4/custom.ini:/etc/php/8.4/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.4/ioncube.ini:/etc/php/8.4/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.4/fpm/pool.d/:/etc/php/8.4/fpm/pool.d/:ro\n    tty: true\n    \n    \n    \nnetworks: \n  default: \n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "php": {
+          "restart": "always",
+          "container_name": "alice",
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/var/www",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-sites",
+              "target": "/etc/apache2/sites-enabled",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-conf/remoteip.conf",
+              "target": "/etc/apache2/conf-enabled/remoteip.conf",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/ssl-certs",
+              "target": "/etc/apache2/ssl-certs",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/log",
+              "target": "/var/log",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/crontabs/www-data",
+              "target": "/var/spool/cron/crontabs/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/msmtp/msmtprc",
+              "target": "/etc/msmtprc",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint-init.d",
+              "target": "/entrypoint-init.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/ext",
+              "target": "/etc/php/ext",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/default.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/custom.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/ioncube.ini",
+              "target": "/etc/php/8.4/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/default.ini",
+              "target": "/etc/php/8.4/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/custom.ini",
+              "target": "/etc/php/8.4/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/ioncube.ini",
+              "target": "/etc/php/8.4/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/fpm/pool.d",
+              "target": "/etc/php/8.4/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "php-fpm-apache",
+    "template": "templates/user/default/project/docker-compose.yml-fpm-apache.blade.php",
+    "vars": {
+      "user": "alice",
+      "php_versions": [
+        "8.2",
+        "8.3"
+      ],
+      "cpu_limit": "2",
+      "memory_limit": "2048",
+      "device_read_bps": 1048576,
+      "device_write_bps": 2097152,
+      "block_device": "/dev/sda"
+    },
+    "compose": "services:\n  php:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    container_name: alice\n    volumes:\n      - /home/alice/:/home/alice/\n      - /home/alice/:/var/www/\n      - ./apache-sites:/etc/apache2/sites-enabled:ro\n      - ./apache-conf/remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro\n      - ./ssl-certs:/etc/apache2/ssl-certs:ro\n      - ./log:/var/log\n      - ./crontabs/www-data:/var/spool/cron/crontabs/alice\n      - ./msmtp/msmtprc:/etc/msmtprc:ro\n      - ./services/:/etc/s6/account/:ro\n      - ./entrypoint-init.d/:/entrypoint-init.d/:ro\n      - ./php/ext/:/etc/php/ext/:ro\n      - ./php/8.2/default.ini:/etc/php/8.2/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.2/custom.ini:/etc/php/8.2/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.2/ioncube.ini:/etc/php/8.2/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.2/default.ini:/etc/php/8.2/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.2/custom.ini:/etc/php/8.2/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.2/ioncube.ini:/etc/php/8.2/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.2/fpm/pool.d/:/etc/php/8.2/fpm/pool.d/:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/fpm/pool.d/:/etc/php/8.3/fpm/pool.d/:ro\n    tty: true\n    cpus: 2\n    mem_limit: 2048M\n    memswap_limit: 2048M\n    blkio_config:\n      device_read_bps:\n        - path: /dev/sda\n          rate: '1048576'\n      device_write_bps:\n        - path: /dev/sda\n          rate: '2097152'\nnetworks: \n  default: \n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "php": {
+          "restart": "always",
+          "container_name": "alice",
+          "blkio_config": {
+            "device_read_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "1048576"
+              }
+            ],
+            "device_write_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "2097152"
+              }
+            ]
+          },
+          "cpus": 2,
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-php-fpm-apache:v2.2.0-20261028",
+          "mem_limit": "2147483648",
+          "memswap_limit": "2147483648",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/var/www",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-sites",
+              "target": "/etc/apache2/sites-enabled",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/apache-conf/remoteip.conf",
+              "target": "/etc/apache2/conf-enabled/remoteip.conf",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/ssl-certs",
+              "target": "/etc/apache2/ssl-certs",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/log",
+              "target": "/var/log",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/crontabs/www-data",
+              "target": "/var/spool/cron/crontabs/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/msmtp/msmtprc",
+              "target": "/etc/msmtprc",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint-init.d",
+              "target": "/entrypoint-init.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/ext",
+              "target": "/etc/php/ext",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/default.ini",
+              "target": "/etc/php/8.2/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/custom.ini",
+              "target": "/etc/php/8.2/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/ioncube.ini",
+              "target": "/etc/php/8.2/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/default.ini",
+              "target": "/etc/php/8.2/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/custom.ini",
+              "target": "/etc/php/8.2/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/ioncube.ini",
+              "target": "/etc/php/8.2/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.2/fpm/pool.d",
+              "target": "/etc/php/8.2/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/fpm/pool.d",
+              "target": "/etc/php/8.3/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "php-fpm",
+    "template": "templates/user/default/project/docker-compose.yml-fpm.blade.php",
+    "vars": {
+      "user": "alice",
+      "php_versions": [
+        "8.3"
+      ],
+      "cpu_limit": "",
+      "memory_limit": "",
+      "device_read_bps": null,
+      "device_write_bps": null,
+      "block_device": ""
+    },
+    "compose": "services:\n  php:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-php-fpm:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    container_name: alice\n    volumes:\n      - /home/alice/:/home/alice/\n      - /home/alice/:/var/www/\n      - ./log:/var/log\n      - ./crontabs/www-data:/var/spool/cron/crontabs/alice\n      - ./msmtp/msmtprc:/etc/msmtprc:ro\n      - ./services/:/etc/s6/account/:ro\n      - ./entrypoint-init.d/:/entrypoint-init.d/:ro\n      - ./php/ext/:/etc/php/ext/:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/fpm/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/default.ini:/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini:ro\n      - ./php/8.3/custom.ini:/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini:ro\n      - ./php/8.3/ioncube.ini:/etc/php/8.3/cli/conf.d/00-ioncube.ini:ro\n      - ./php/8.3/fpm/pool.d/:/etc/php/8.3/fpm/pool.d/:ro\n    tty: true\n    \n    \n    \nnetworks: \n  default: \n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "php": {
+          "restart": "always",
+          "container_name": "alice",
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-php-fpm:v2.2.0-20261028",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/var/www",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/log",
+              "target": "/var/log",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/crontabs/www-data",
+              "target": "/var/spool/cron/crontabs/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/msmtp/msmtprc",
+              "target": "/etc/msmtprc",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint-init.d",
+              "target": "/entrypoint-init.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/ext",
+              "target": "/etc/php/ext",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/fpm/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/default.ini",
+              "target": "/etc/php/8.3/cli/conf.d/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/custom.ini",
+              "target": "/etc/php/8.3/cli/conf.d/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/ioncube.ini",
+              "target": "/etc/php/8.3/cli/conf.d/00-ioncube.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.3/fpm/pool.d",
+              "target": "/etc/php/8.3/fpm/pool.d",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  },
+  {
+    "name": "php-litespeed",
+    "template": "templates/user/default/project/docker-compose.yml-ls.blade.php",
+    "vars": {
+      "user": "alice",
+      "php_versions": [
+        "8.1",
+        "8.4"
+      ],
+      "cpu_limit": "2",
+      "memory_limit": "2048",
+      "device_read_bps": null,
+      "device_write_bps": 2097152,
+      "block_device": "/dev/sda"
+    },
+    "compose": "services:\n  php:\n    build:\n      context: .\n      dockerfile: ./Dockerfile\n    image: ghcr.io/panelalpha/engine-user-php-ls:v2.2.0-20261028\n    pull_policy: missing\n    restart: always\n    hostname: alice\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n    container_name: alice\n    volumes:\n      - /home/alice/:/home/alice/\n      - /home/alice/:/var/www/\n      - ./log:/var/log\n      - ./crontabs/www-data:/var/spool/cron/crontabs/alice\n      - ./msmtp/msmtprc:/etc/msmtprc:ro\n      - ./services/:/etc/s6/account/:ro\n      - ./entrypoint-init.d/:/entrypoint-init.d/:ro\n      - ./php/8.1/default.ini:/usr/local/lsws/lsphp81/etc/php/8.1/mods-available/90-panelalpha-default.ini:ro\n      - ./php/8.1/custom.ini:/usr/local/lsws/lsphp81/etc/php/8.1/mods-available/91-panelalpha-custom.ini:ro\n      - ./php/8.4/default.ini:/usr/local/lsws/lsphp84/etc/php/8.4/mods-available/90-panelalpha-default.ini:ro\n      - ./php/8.4/custom.ini:/usr/local/lsws/lsphp84/etc/php/8.4/mods-available/91-panelalpha-custom.ini:ro\n    tty: true\n    cpus: 2\n    mem_limit: 2048M\n    memswap_limit: 2048M\n    blkio_config:\n      device_write_bps:\n        - path: /dev/sda\n          rate: '2097152'\nnetworks: \n  default: \n    name: pash-tenants\n    external: true\n",
+    "rendered": {
+      "name": "alice",
+      "networks": {
+        "default": {
+          "name": "pash-tenants",
+          "ipam": {},
+          "external": true
+        }
+      },
+      "services": {
+        "php": {
+          "restart": "always",
+          "container_name": "alice",
+          "blkio_config": {
+            "device_write_bps": [
+              {
+                "Path": "/dev/sda",
+                "Rate": "2097152"
+              }
+            ]
+          },
+          "cpus": 2,
+          "command": null,
+          "entrypoint": null,
+          "extra_hosts": [
+            "host.docker.internal=host-gateway"
+          ],
+          "hostname": "alice",
+          "image": "ghcr.io/panelalpha/engine-user-php-ls:v2.2.0-20261028",
+          "mem_limit": "2147483648",
+          "memswap_limit": "2147483648",
+          "networks": {
+            "default": null
+          },
+          "pull_policy": "missing",
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/home/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/home/alice/",
+              "target": "/var/www",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/log",
+              "target": "/var/log",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/crontabs/www-data",
+              "target": "/var/spool/cron/crontabs/alice",
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/msmtp/msmtprc",
+              "target": "/etc/msmtprc",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/services",
+              "target": "/etc/s6/account",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/entrypoint-init.d",
+              "target": "/entrypoint-init.d",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.1/default.ini",
+              "target": "/usr/local/lsws/lsphp81/etc/php/8.1/mods-available/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.1/custom.ini",
+              "target": "/usr/local/lsws/lsphp81/etc/php/8.1/mods-available/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/default.ini",
+              "target": "/usr/local/lsws/lsphp84/etc/php/8.4/mods-available/90-panelalpha-default.ini",
+              "read_only": true,
+              "bind": {}
+            },
+            {
+              "type": "bind",
+              "source": "/opt/panelalpha/shared-hosting/users/alice/php/8.4/custom.ini",
+              "target": "/usr/local/lsws/lsphp84/etc/php/8.4/mods-available/91-panelalpha-custom.ini",
+              "read_only": true,
+              "bind": {}
+            }
+          ],
+          "build": {
+            "context": "/opt/panelalpha/shared-hosting/users/alice",
+            "dockerfile": "./Dockerfile"
+          },
+          "tty": true
+        }
+      }
+    }
+  }
+]

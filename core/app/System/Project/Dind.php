@@ -2,6 +2,7 @@
 
 namespace App\System\Project;
 
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\EngineFactory;
@@ -10,11 +11,15 @@ use App\Lib\Project\ApiAccess;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
 use App\System\Project;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Deployment\DeployableDindProject;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Dind\AbstractApplication as DindApplication;
+use App\System\Project\Dind\AccountCpu;
+use App\System\Project\Dind\AccountCron;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AccountMemory;
 use App\System\Project\Dind\AccountTeardown;
 use App\System\Project\Dind\AccountTemplate;
@@ -25,6 +30,7 @@ use App\System\Project\Dind\AppManager;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\ComposeWriter;
 use App\System\Project\Dind\ContainerOperations;
+use App\System\Project\Dind\CpuLimitDeferred;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\HostDiskGuard;
@@ -46,7 +52,6 @@ use App\System\Project\Dind\Source\GitRepository;
 use App\System\Project\Dind\SystemAppConfigSource;
 use App\System\Project\Dind\TenantEgressGuard;
 use App\System\Project\Dind\WordPressCli;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * DinD Runtime (outer account container; Application as inner containers).
@@ -77,6 +82,8 @@ class Dind implements DeployableDindProject, Runtime
     private ?HostCompile $hostCompile = null;
 
     private ?InnerDocker $innerDocker = null;
+
+    private ?AccountDaemon $accountDaemon = null;
 
     private ?Networking $networking = null;
 
@@ -193,7 +200,6 @@ class Dind implements DeployableDindProject, Runtime
             $model->username,
             $this->homeDirPath(),
             implode(':', $model->linuxIds()),
-            $this->composeFilePath(),
         );
     }
 
@@ -206,6 +212,16 @@ class Dind implements DeployableDindProject, Runtime
     public function applyMemoryLimit(): void
     {
         (new AccountMemory($this))->apply();
+    }
+
+    /**
+     * Put the project's CPU limit on its account container, live.
+     *
+     * @throws CpuLimitDeferred when the running account takes it only once it is recreated
+     */
+    public function applyCpuLimit(): void
+    {
+        (new AccountCpu($this))->apply();
     }
 
     /**
@@ -234,6 +250,12 @@ class Dind implements DeployableDindProject, Runtime
     public function innerDocker(): InnerDocker
     {
         return $this->innerDocker ??= new InnerDocker($this);
+    }
+
+    /** The account's own dockerd through the Engine API. */
+    public function accountDaemon(): AccountDaemon
+    {
+        return $this->accountDaemon ??= new AccountDaemon($this);
     }
 
     public function appHealth(): AppHealth
@@ -330,9 +352,8 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Every deploy path passes through prepareFromSources(), and a git deploy
-     * through preCheckFromSources() before its clone. A full host is not the
-     * app's failure, so it is recorded as a refusal, not a broken deploy.
+     * Every deploy path passes through prepareFromSources(), and a git deploy through preCheckFromSources() before its
+     * clone. A full host is not the app's failure, so it is recorded as a refusal, not a broken deploy.
      */
     private function assertHostHasRoomToDeploy(): void
     {
@@ -345,7 +366,7 @@ class Dind implements DeployableDindProject, Runtime
         }
 
         $this->shell()->logger()?->markPreCheckRejected();
-        throw new \RuntimeException($refusal);
+        throw $refusal;
     }
 
     public function importProjectArchive(string $zipPath): void
@@ -433,6 +454,12 @@ class Dind implements DeployableDindProject, Runtime
     public function userAppComposeCommand(array $rest): array
     {
         return $this->paths()->composeCommand($rest);
+    }
+
+    /** The compose project name the app's stack runs under. */
+    public function userAppComposeProjectName(): string
+    {
+        return $this->paths()->composeProjectName();
     }
 
     /**
@@ -606,22 +633,12 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Whether the inner daemon serves a request (`docker info`): its socket file exists before it can.
+     * Whether the inner daemon serves a request: its socket file exists before it can.
      * Never throws, even when the socket is absent.
      */
-    private function innerDockerIsUp(): bool
+    public function innerDockerIsUp(): bool
     {
-        try {
-            $process = $this->shell()->runProcess(
-                ['docker', 'info', '--format', '{{.ServerVersion}}'],
-                [],
-                self::DAEMON_PROBE_TIMEOUT_SECONDS
-            );
-        } catch (\Throwable) {
-            return false;
-        }
-
-        return $process->isSuccessful();
+        return $this->accountDaemon()->answers(self::DAEMON_PROBE_TIMEOUT_SECONDS);
     }
 
     /** False without an outer compose file: nothing to ask about until recreateOuterCompose() writes it back. */
@@ -631,54 +648,40 @@ class Dind implements DeployableDindProject, Runtime
             return false;
         }
 
-        $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
-        $result = trim($this->system()->exec($command));
+        $result = trim($this->system()->exec(Privileged::compose($this->composeFilePath())->runningServices()));
 
         return $result !== '';
     }
 
     public function build(): void
     {
-        $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} build");
+        $this->system()->exec(Privileged::compose($this->composeFilePath())->build());
     }
 
     public function buildIfMissing(): void
     {
-        $image = $this->outerImage();
-        if (! $image) {
-            $this->build();
-
-            return;
-        }
-
-        $imageEscaped = escapeshellarg($image);
-        $pathEscaped = escapeshellarg($this->composeFilePath());
-        $this->system()->exec(
-            "sudo docker image inspect {$imageEscaped} >/dev/null 2>&1"
-                ." || sudo docker compose -f {$pathEscaped} pull"
-                ." || sudo docker compose -f {$pathEscaped} build"
-        );
+        $this->announceAccountImageFetch();
+        $this->system()->exec(AccountImage::ensureCommand($this->project->projectDirPath()));
     }
 
-    /** The image the outer compose file names for the dind service, if it can be read. */
-    private function outerImage(): ?string
+    /** Only a deploy is told, and only when the host lacks the image: the pull or build is then the slow part. */
+    private function announceAccountImageFetch(): void
     {
-        try {
-            $parsed = Yaml::parseFile($this->composeFilePath());
-        } catch (\Exception) {
-            return null;
+        $logger = $this->shell()->logger();
+        if ($logger === null || $this->system()->runProcess(AccountImage::presentArgv())->isSuccessful()) {
+            return;
         }
-
-        $image = is_array($parsed) && is_array($parsed['services'] ?? null) && is_array($parsed['services']['dind'] ?? null)
-            ? $parsed['services']['dind']['image'] ?? null
-            : null;
-
-        return is_string($image) ? $image : null;
+        $logger->info('The account image '.AccountImage::REF.' is not on this host: pulling it, or building it if the pull fails');
     }
 
     public function createDomainConfig(DomainModel $domain): void {}
 
     public function reloadWebserver(): void {}
+
+    public function reloadCron(): void
+    {
+        (new AccountCron($this))->deliver($this->project->cron()->contents());
+    }
 
     public function rebuildDomain(DomainModel $domain): void {}
 
@@ -690,28 +693,26 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * Each script is replaced by renaming a temp file over it, so a tenant with entrypoint.d
-     * mounted read-write cannot plant a symlink in a gap; the egress guard's service keeps it applied
-     * after boot.
+     * Each script is replaced by renaming a temp file over it, so a tenant with entrypoint.d mounted read-write cannot
+     * plant a symlink in a gap; the egress guard's service keeps it applied after boot.
      */
     public function setupEntrypointInitScripts(): void
     {
         $scriptFiles = $this->accountTemplate()->entrypointInitScripts(ApiAccess::allows($this->userModel()));
         $dir = $this->projectDirPath().'/entrypoint.d';
         $fs = $this->system()->filesystem();
-        $this->system()->runProcess("sudo mkdir -p {$dir}");
+        $this->system()->runProcess(Privileged::files()->makeDirectories($dir));
         foreach ($scriptFiles as $name => $script) {
             $fs->writeFileReplacingPath("{$dir}/{$name}", $script);
         }
         $this->unlinkUnusedInitScripts($dir, $scriptFiles);
+        (new AccountCron($this))->writeScripts();
         $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
     }
 
     /**
-     * The account's egress guard alone, rewritten when its Engine API allowance
-     * changes; its own service re-applies it within a few seconds. Nothing is
-     * written for an account whose directory is not there yet: the create renders
-     * the same file, from the same allowance.
+     * The account's egress guard alone, rewritten when its Engine API allowance changes; its own service re-applies it
+     * within seconds. Nothing is written before the account's directory exists: the create renders the same file then.
      */
     public function rewriteEgressGuard(): void
     {
@@ -738,7 +739,7 @@ class Dind implements DeployableDindProject, Runtime
     {
         foreach (['useradd.sh', TenantEgressGuard::FILE] as $name) {
             if (! isset($scriptFiles[$name])) {
-                $this->system()->runProcess("sudo rm -f {$dir}/{$name}");
+                $this->system()->runProcess(Privileged::files()->removeIfExists("{$dir}/{$name}"));
             }
         }
     }

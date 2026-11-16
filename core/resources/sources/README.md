@@ -61,7 +61,7 @@ Commands the engine may issue:
 | `install` | `<url> <title> <admin_user> <admin_email> <admin_password>` | `{ "id": "<adminUserId>" }` |
 | `users:list` | — | JSON array of `{ "id", "username", "email", "role" }` objects (`email` may be `""` if the app has no email field) |
 | `users:add` | `<login> <email> <password> <role>` | `{ "id": "<newUserId>" }` |
-| `users:delete` | `<userId>` | `{ "success": true }` |
+| `users:delete` | `<userId> [<reassignUserId>]` (the user that receives the deleted user's content, when the app has any) | `{ "success": true }` |
 | `users:reset-password` | `<userId> <newPassword>` | `{ "success": true }` |
 | `users:sso` | `<userId>` | one of the SSO patterns below |
 

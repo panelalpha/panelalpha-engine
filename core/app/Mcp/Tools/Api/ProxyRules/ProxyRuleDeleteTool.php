@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete a proxy rule
 
-    Delete a proxy rule.
+    The rule goes and the traffic it matched is served as the rest of the domain is; the rule is not kept. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

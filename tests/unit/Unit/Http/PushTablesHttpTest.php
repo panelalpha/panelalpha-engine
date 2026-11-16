@@ -88,6 +88,21 @@ class PushTablesHttpTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_an_empty_selection_is_refused(): void
+    {
+        [$from, $to] = $this->classicPair();
+
+        $response = $this->postJson("/api/projects/{$from->username}/push", [
+            'target' => $to->username,
+            'files' => false,
+            'tables' => [],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('tables');
+        Queue::assertNothingPushed();
+    }
+
     public function test_a_valid_selection_reaches_the_push_job(): void
     {
         [$from, $to] = $this->classicPair();

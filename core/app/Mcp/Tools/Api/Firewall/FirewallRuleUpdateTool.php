@@ -75,8 +75,8 @@ class FirewallRuleUpdateTool extends ApiTool
             'port' => $schema->string()->nullable(),
             'source' => $schema->string()->nullable(),
             'destination' => $schema->string()->nullable(),
-            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.')->nullable(),
-            'confirm' => $schema->boolean()->description('A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose ports cover the engine API port is always refused.'),
+            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, one that is only delete or that has in or out followed by more words (delete everything is kept). A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.')->nullable(),
+            'confirm' => $schema->boolean()->description('A deny that covers the caller\'s own address on the engine\'s SSH port, or on its API port without naming a port, is refused unless this is true. A deny whose port, range or list includes the engine API port is always refused; a deny with no port blocks its address from every port, the API port included, and is added with a warning for each port the engine opened that it covers.'),
         ];
     }
 }

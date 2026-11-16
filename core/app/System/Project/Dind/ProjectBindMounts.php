@@ -5,17 +5,12 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Which running containers bind-mount something under ~/project. Those keep
- * reading the old, unlinked tree once a rebuild replaces it, so only they
- * force the app down before the wipe.
+ * Which running containers bind-mount something under ~/project: they keep reading the old, unlinked tree once a
+ * rebuild replaces it, so only they force the app down before the wipe.
  */
 final class ProjectBindMounts
 {
     private const TIMEOUT_SECONDS = 30;
-
-    /** One line per container: its service, then each bind source, tab-separated. */
-    private const INSPECT_FORMAT = '{{index .Config.Labels "com.docker.compose.service"}}'
-        .'{{range .Mounts}}{{if eq .Type "bind"}}{{"\t"}}{{.Source}}{{end}}{{end}}';
 
     public function __construct(private DindProject $project) {}
 
@@ -38,58 +33,53 @@ final class ProjectBindMounts
      */
     public function read(): ?array
     {
-        $ps = implode(' ', array_map(
-            'escapeshellarg',
-            $this->project->userAppComposeCommand(['ps', '--quiet'])
-        ));
-        $script = 'ids=$('.$ps.') || exit 1; [ -n "$ids" ] || exit 0; docker inspect --format '
-            .escapeshellarg('{{.Id}}{{"\t"}}'.self::INSPECT_FORMAT).' $ids';
-
         try {
-            $raw = $this->project->shell()->execAsUserQuiet(['bash', '-c', $script], [], self::TIMEOUT_SECONDS);
+            $daemon = $this->project->accountDaemon();
+            $inspected = $daemon->containers($daemon->stackContainerIds(timeout: self::TIMEOUT_SECONDS), self::TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
 
-        return self::parse($raw, $this->project->userAppDirPath());
+        return in_array(null, $inspected, true) ? null : self::parse($inspected, $this->project->userAppDirPath());
     }
 
     /**
-     * {@see read()} from `docker inspect` lines: id, service, bind sources.
+     * {@see read()} from each container's inspect.
      *
+     * @param  list<array<string, mixed>>  $inspected
      * @return array{mounts: list<string>, containers: list<string>, running: list<string>}
      */
-    public static function parse(string $inspect, string $projectDir): array
+    public static function parse(array $inspected, string $projectDir): array
     {
-        $withoutIds = [];
         $containers = [];
         $running = [];
-        foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
-            [$id, $rest] = array_pad(explode("\t", $line, 2), 2, '');
-            $withoutIds[] = $rest;
-            if (trim($id) === '') {
+        foreach ($inspected as $container) {
+            $id = trim((string) ($container['Id'] ?? ''));
+            if ($id === '') {
                 continue;
             }
-            $running[] = trim($id);
-            if (self::under($rest, $projectDir) !== []) {
-                $containers[] = trim($id);
+            $running[] = $id;
+            if (self::under([$container], $projectDir) !== []) {
+                $containers[] = $id;
             }
         }
 
-        return ['mounts' => self::under(implode("\n", $withoutIds), $projectDir), 'containers' => $containers, 'running' => $running];
+        return ['mounts' => self::under($inspected, $projectDir), 'containers' => $containers, 'running' => $running];
     }
 
     /**
+     * "<service> mounts ./<path>" per bind under $projectDir, from the containers' inspects.
+     *
+     * @param  list<array<string, mixed>>  $inspected
      * @return list<string>
      */
-    public static function under(string $inspect, string $projectDir): array
+    public static function under(array $inspected, string $projectDir): array
     {
         $root = rtrim($projectDir, '/');
         $found = [];
-        foreach (preg_split('/\R/', trim($inspect)) ?: [] as $line) {
-            $fields = explode("\t", $line);
-            $service = trim((string) array_shift($fields));
-            foreach ($fields as $source) {
+        foreach ($inspected as $container) {
+            $service = trim((string) ($container['Config']['Labels']['com.docker.compose.service'] ?? ''));
+            foreach (self::bindSources($container) as $source) {
                 $source = rtrim(trim($source), '/');
                 if ($source !== $root && ! str_starts_with($source, $root.'/')) {
                     continue;
@@ -100,5 +90,21 @@ final class ProjectBindMounts
         }
 
         return array_values(array_unique($found));
+    }
+
+    /**
+     * @param  array<string, mixed>  $container
+     * @return list<string>
+     */
+    private static function bindSources(array $container): array
+    {
+        $sources = [];
+        foreach (is_array($container['Mounts'] ?? null) ? $container['Mounts'] : [] as $mount) {
+            if (is_array($mount) && ($mount['Type'] ?? null) === 'bind') {
+                $sources[] = (string) ($mount['Source'] ?? '');
+            }
+        }
+
+        return $sources;
     }
 }

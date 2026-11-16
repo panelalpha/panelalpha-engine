@@ -6,55 +6,34 @@ use App\System\Project\Dind as DindProject;
 use App\System\Project\PhpHosting\WordPress\DatabaseClientMissing;
 use App\System\Project\PhpHosting\WordPress\MustUsePlugin;
 use App\System\Project\PhpHosting\WordPress\WordPressNotFound;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Support\Str;
 
 /**
- * WP-CLI for WordPress running in a project's own containers: the engine's
- * recipe, the official image from a client compose file, Bedrock, Bitnami.
- *
- * One script runs in the account: it finds the running container that has
- * both PHP and a WordPress tree, streams the account's wp-cli.phar into it
- * when missing or stale, and execs WP-CLI there as the owner of wp-content,
- * so plugin installs land with the web server's ownership and the container's
- * own environment (database credentials) applies. A command that writes into
- * the install directory itself runs as that directory's owner instead.
- *
- * WP-CLI's database commands shell out to mysql and mysqldump, which the
- * official wordpress image lacks: they run in the first container that has a
- * client as well, such as a wordpress:cli service beside the app.
+ * WP-CLI in a project's own WordPress container, as wp-content's owner so installs get the web server's ownership and
+ * the container's environment; database commands need a MySQL client the official image lacks, so go to one that has it.
  */
 class WordPressCli
 {
-    public const PHAR = '/opt/wp-cli.phar';
-
     public const CONTAINER_PHAR = '/tmp/panelalpha-wp-cli.phar';
 
-    /** Prefix of the script's own failures on stderr, as opposed to WP-CLI's. */
-    public const MARKER = 'PANELALPHA_WPCLI:';
+    /** The engine's phar, below the dind project template; the root broker copies it in by {@see ENGINE_FILE}. */
+    public const ENGINE_PHAR = 'wp-cli/wp-cli.phar';
 
-    /** The script's exit code when no container has PHP and WordPress at the requested path. */
-    public const NOT_FOUND_EXIT = 71;
-
-    /** The script's exit code when a database command finds WordPress only where there is no MySQL client. */
-    public const NO_DATABASE_CLIENT_EXIT = 72;
+    public const ENGINE_FILE = 'wp-cli';
 
     /** The `wp db` subcommands that run the mysql, mysqldump or mysqlcheck client rather than PHP. */
     public const DATABASE_CLIENT_COMMANDS = ['create', 'drop', 'reset', 'clean', 'check', 'optimize', 'repair', 'cli', 'query', 'export', 'import'];
 
     /**
-     * The commands that write into the install directory itself: maintenance
-     * mode creates and removes .maintenance there. On a bind-mounted checkout
-     * that directory is the account's, which wp-content's owner cannot write.
+     * Commands that write into the install directory itself (maintenance mode's .maintenance), which on a
+     * bind-mounted checkout is the account's and not writable by wp-content's owner.
      */
     public const INSTALL_DIRECTORY_COMMANDS = ['maintenance-mode'];
 
     /**
-     * Runs in the target container with its default user and working
-     * directory. A relative path is taken from that directory; with none,
-     * the usual install directories are tried, then a search below them.
-     * Prints the install path, the owner to run as, the size of the phar
-     * already there, 1 when the MySQL client is there (else 0) and the owner
-     * of the install directory; exits 3 without PHP, 4 without WordPress.
+     * Runs in the container as its default user: prints the install path, the owner to run as, the size of the
+     * phar there, 1 when the MySQL client is there (else 0) and the install's owner; exits 3 without PHP, 4 without WordPress.
      */
     public const PROBE = <<<'SH'
         want=$1; phar=$2
@@ -85,64 +64,21 @@ class WordPressCli
         printf '%s\n%s\n%s\n%s\n%s\n' "$found" "${owner:-0:0}" "$(stat -c %s "$phar" 2>/dev/null || echo 0)" "$client" "${tree:-${owner:-0:0}}"
         SH;
 
-    /**
-     * Runs in the account as its user: $1 the requested path and $2 the
-     * service (either may be empty), $3 the PHP memory limit, $4 code WP-CLI
-     * runs first, $5 1 when the command needs the MySQL client, $6 1 when it
-     * runs as the owner of the install directory, the rest WP-CLI's arguments.
-     * A database command runs as that owner too, so a dump it writes or reads
-     * there is the account's file. The last step execs WP-CLI, so stdout,
-     * stderr and the exit code are WP-CLI's own.
-     */
-    public const SCRIPT = <<<'SH'
-        set -u
-        want=$1; service=$2; memory=$3; mend=$4; needs_client=$5; as_install_owner=$6; shift 6
-        phar=__PHAR__; dest=__DEST__; probe=__PROBE__
-        fail() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit 70; }
-        missing() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit __NOT_FOUND__; }
-        no_client() { printf '%s %s\n' '__MARKER__' "$1" >&2; exit __NO_CLIENT__; }
-        without_client=
-        [ -r "$phar" ] || fail 'WP-CLI is missing from this account. Rebuild the project to restore it.'
-        size=$(stat -c %s "$phar")
-        rows=$(docker ps --format '{{.ID}}|{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Names}}' 2>/dev/null)
-        [ -n "$rows" ] || fail 'The application is not running. Deploy or start the project, then try again.'
-        if [ -n "$service" ]; then
-          rows=$(printf '%s\n' "$rows" | awk -F'|' -v s="$service" '$2 == s || $4 == s')
-          [ -n "$rows" ] || fail "No running container of this project belongs to service $service."
-        fi
-        ids=$(printf '%s\n' "$rows" | awk -F'|' '{ p = 2; if ($2 $3 ~ /cli/) p = 3; else if ($2 ~ /wordpress|^wp/ || $3 ~ /wordpress/) p = 0; else if ($2 ~ /^(app|php|web|fpm)/) p = 1; print p, $1 }' | sort -s -n -k1,1 | cut -d' ' -f2)
-        for id in $ids; do
-          out=$(docker exec "$id" sh -c "$probe" sh "$want" "$dest" 2>/dev/null) || continue
-          { read -r path; read -r owner; read -r have; read -r client; read -r tree; } <<< "$out"
-          if [ "$needs_client" = 1 ]; then
-            [ "$client" = 1 ] || { without_client=1; continue; }
-          fi
-          if [ "$as_install_owner" = 1 ]; then owner=$tree; fi
-          if [ "$have" != "$size" ]; then
-            docker exec -i "$id" sh -c 'cat > "$1.$$" && chmod 0644 "$1.$$" && mv -f "$1.$$" "$1"' sh "$dest" < "$phar" \
-              || fail "Could not copy WP-CLI into the container: its /tmp is not writable."
-          fi
-          root=()
-          [ "${owner%%:*}" = 0 ] && root=(--allow-root)
-          exec docker exec -u "$owner" -e HOME=/tmp -e WP_CLI_CACHE_DIR=/tmp/.wp-cli-cache -w "$path" "$id" \
-            php -d "memory_limit=$memory" "$dest" "--path=$path" "--exec=$mend" ${root[@]+"${root[@]}"} "$@"
-        done
-        where=${service:+ in service $service}
-        [ -z "$without_client" ] || no_client "WP-CLI's database commands need the MySQL client (mysql, mysqldump and mysqlcheck), and no running container$where that has WordPress has one. Run them in a service whose image has the client, such as wordpress:cli with the same volumes."
-        if [ -n "$want" ]; then
-          missing "No WordPress with PHP was found at $want$where."
-        fi
-        [ -z "$service" ] || missing "No WordPress with PHP was found$where. Pass path with the WordPress directory as the container sees it."
-        missing 'No WordPress install was found in this project'"'"'s containers. Pass path with the WordPress directory as the container sees it.'
-        SH;
-
     public const MEMORY_LIMIT = '512M';
+
+    private const SERVICE_LABEL = 'com.docker.compose.service';
+
+    private const ENVIRONMENT = ['HOME' => '/tmp', 'WP_CLI_CACHE_DIR' => '/tmp/.wp-cli-cache'];
+
+    private const TIMEOUT_SECONDS = 600;
 
     public function __construct(
         private DindProject $dind,
     ) {}
 
     /**
+     * A database command runs as the install's owner too, so a dump it writes or reads there is the account's file.
+     *
      * @param  list<string>  $args  WP-CLI arguments; a --path= among them is
      *                              the install's path inside its container,
      *                              absolute or relative to its working directory
@@ -152,32 +88,37 @@ class WordPressCli
      */
     public function run(array $args, ?string $service = null): array
     {
-        $process = $this->dind->shell()->runProcessAsUser($this->command($args, $service));
-        $stderr = $process->getErrorOutput();
-        $exitCode = $process->getExitCode() ?? 1;
+        [$path, $rest] = self::pathAndRest($args);
+        $service = (string) $service;
+        $needsClient = self::needsDatabaseClient($rest);
+        $asInstallOwner = $needsClient || self::writesInstallDirectory($rest);
+        $size = (string) $this->enginePharSize();
+        $withoutClient = false;
+        foreach ($this->candidates($service) as $id) {
+            $found = $this->probe($id, $path);
+            if ($found === null) {
+                continue;
+            }
+            if ($needsClient && $found['client'] !== '1') {
+                $withoutClient = true;
 
-        $marker = strpos($stderr, self::MARKER);
-        if ($exitCode !== 0 && $marker !== false) {
-            $message = trim(substr($stderr, $marker + strlen(self::MARKER)));
-            throw match ($exitCode) {
-                self::NOT_FOUND_EXIT => new WordPressNotFound($message),
-                self::NO_DATABASE_CLIENT_EXIT => new DatabaseClientMissing($message),
-                default => new \RuntimeException($message),
-            };
+                continue;
+            }
+            if ($found['have'] !== $size) {
+                $this->copyPhar($id);
+            }
+
+            return $this->wpCli($id, $found['path'], $asInstallOwner ? $found['tree'] : $found['owner'], $rest);
         }
 
-        return [
-            'stdout' => $process->getOutput(),
-            'stderr' => $stderr,
-            'exit_code' => $exitCode,
-        ];
+        throw self::nothingFound($path, $service, $withoutClient);
     }
 
     /**
      * @param  list<string>  $args
-     * @return list<string>
+     * @return array{0: string, 1: list<string>}
      */
-    public function command(array $args, ?string $service = null): array
+    private static function pathAndRest(array $args): array
     {
         $path = '';
         $rest = [];
@@ -190,21 +131,157 @@ class WordPressCli
             $rest[] = $arg;
         }
 
-        $script = strtr(self::SCRIPT, [
-            '__PHAR__' => escapeshellarg(self::PHAR),
-            '__DEST__' => escapeshellarg(self::CONTAINER_PHAR),
-            '__PROBE__' => escapeshellarg(self::PROBE),
-            '__MARKER__' => self::MARKER,
-            '__NOT_FOUND__' => (string) self::NOT_FOUND_EXIT,
-            '__NO_CLIENT__' => (string) self::NO_DATABASE_CLIENT_EXIT,
-        ]);
-        $needsClient = self::needsDatabaseClient($rest);
-        $asInstallOwner = $needsClient || self::writesInstallDirectory($rest);
+        return [$path, $rest];
+    }
 
-        return [
-            'bash', '-c', $script, 'wp', $path, (string) $service, self::MEMORY_LIMIT, MustUsePlugin::MEND_ON_LOAD,
-            $needsClient ? '1' : '0', $asInstallOwner ? '1' : '0', ...$rest,
-        ];
+    private function enginePharSize(): int
+    {
+        $phar = $this->dind->system()->projectFilesTemplateDirPath('dind').'/'.self::ENGINE_PHAR;
+        $size = is_file($phar) && is_readable($phar) ? filesize($phar) : false;
+        if ($size === false) {
+            throw new \RuntimeException("WP-CLI is missing from the engine: {$phar} is not readable.");
+        }
+
+        return $size;
+    }
+
+    /**
+     * The running containers' ids, $service's alone when given, WordPress ones first and WP-CLI ones last.
+     *
+     * @return list<string>
+     */
+    private function candidates(string $service): array
+    {
+        $rows = $this->runningContainers();
+        if ($rows === []) {
+            throw new \RuntimeException('The application is not running. Deploy or start the project, then try again.');
+        }
+        if ($service !== '') {
+            $rows = array_values(array_filter($rows, static fn (array $row): bool => $row['service'] === $service || $row['names'] === $service));
+            if ($rows === []) {
+                throw new \RuntimeException("No running container of this project belongs to service {$service}.");
+            }
+        }
+        usort($rows, static fn (array $a, array $b): int => self::preference($a) <=> self::preference($b));
+
+        return array_column($rows, 'id');
+    }
+
+    /**
+     * What `docker ps` prints of each running container; none when the daemon cannot say.
+     *
+     * @return list<array{id: string, service: string, image: string, names: string}>
+     */
+    private function runningContainers(): array
+    {
+        try {
+            $listed = $this->dind->accountDaemon()->listContainers(false, [], self::TIMEOUT_SECONDS);
+        } catch (\Throwable) {
+            return [];
+        }
+        $rows = [];
+        foreach ($listed as $row) {
+            if (is_string($row['Id'] ?? null)) {
+                $labels = is_array($row['Labels'] ?? null) ? $row['Labels'] : [];
+                $rows[] = [
+                    'id' => $row['Id'],
+                    'service' => (string) ($labels[self::SERVICE_LABEL] ?? ''),
+                    'image' => (string) ($row['Image'] ?? ''),
+                    'names' => self::names(is_array($row['Names'] ?? null) ? $row['Names'] : []),
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * `{{.Names}}`: the names without their leading slash, only the first one that is not a link's when there is one.
+     *
+     * @param  array<int, mixed>  $names
+     */
+    private static function names(array $names): string
+    {
+        $names = array_map(static fn (mixed $name): string => preg_replace('~\A/~', '', (string) $name) ?? '', array_values($names));
+        foreach ($names as $name) {
+            if (! str_contains($name, '/')) {
+                return $name;
+            }
+        }
+
+        return implode(',', $names);
+    }
+
+    /** @param  array{id: string, service: string, image: string, names: string}  $row */
+    private static function preference(array $row): int
+    {
+        return match (true) {
+            str_contains($row['service'].$row['image'], 'cli') => 3,
+            str_contains($row['service'], 'wordpress') || str_starts_with($row['service'], 'wp') || str_contains($row['image'], 'wordpress') => 0,
+            preg_match('/\A(app|php|web|fpm)/', $row['service']) === 1 => 1,
+            default => 2,
+        };
+    }
+
+    /**
+     * {@see PROBE}'s five lines, or null when it fails in $id.
+     *
+     * @return array{path: string, owner: string, have: string, client: string, tree: string}|null
+     */
+    private function probe(string $id, string $path): ?array
+    {
+        $probe = $this->dind->accountDaemon()->exec(
+            $id,
+            ['sh', '-c', self::PROBE, 'sh', $path, self::CONTAINER_PHAR],
+            timeout: self::TIMEOUT_SECONDS,
+        );
+        if ($probe['exit_code'] !== 0) {
+            return null;
+        }
+        $lines = explode("\n", rtrim($probe['stdout'], "\n"));
+        $line = static fn (int $at): string => trim($lines[$at] ?? '', " \t");
+
+        return ['path' => $line(0), 'owner' => $line(1), 'have' => $line(2), 'client' => $line(3), 'tree' => $line(4)];
+    }
+
+    private function copyPhar(string $id): void
+    {
+        try {
+            $this->dind->accountDaemon()->putEngineFile($id, self::ENGINE_FILE, self::CONTAINER_PHAR);
+        } catch (\Throwable) {
+            throw new \RuntimeException('Could not copy WP-CLI into the container: its /tmp is not writable.');
+        }
+    }
+
+    /**
+     * @param  list<string>  $rest
+     * @return array{exit_code: int, stdout: string, stderr: string}
+     */
+    private function wpCli(string $id, string $path, string $owner, array $rest): array
+    {
+        $allowRoot = explode(':', $owner, 2)[0] === '0' ? ['--allow-root'] : [];
+        $result = $this->dind->accountDaemon()->exec($id, [
+            'php', '-d', 'memory_limit='.self::MEMORY_LIMIT, ...WpCli::PHP_FLAGS, self::CONTAINER_PHAR, '--path='.$path,
+            '--exec='.MustUsePlugin::MEND_ON_LOAD, ...$allowRoot, ...$rest,
+        ], $owner, $path, self::ENVIRONMENT, self::TIMEOUT_SECONDS);
+
+        return ['stdout' => $result['stdout'], 'stderr' => $result['stderr'], 'exit_code' => $result['exit_code']];
+    }
+
+    private static function nothingFound(string $path, string $service, bool $withoutClient): \RuntimeException
+    {
+        $where = $service === '' ? '' : " in service {$service}";
+        if ($withoutClient) {
+            return new DatabaseClientMissing("WP-CLI's database commands need the MySQL client (mysql, mysqldump and mysqlcheck), and no running container{$where} that has WordPress has one. Run them in a service whose image has the client, such as wordpress:cli with the same volumes.");
+        }
+        if ($path !== '') {
+            return new WordPressNotFound("No WordPress with PHP was found at {$path}{$where}.");
+        }
+        if ($service !== '') {
+            return new WordPressNotFound("No WordPress with PHP was found{$where}. Pass path with the WordPress directory as the container sees it.");
+        }
+
+        return new WordPressNotFound("No WordPress install was found in this project's containers. Pass path with the WordPress directory as the container sees it.");
     }
 
     /** @param  list<string>  $args */

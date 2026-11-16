@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\Platform\ProjectContext;
+
 /**
  * The HTML file a static site is served from: the project's own index first,
  * then a single stray .html file, then the engine's placeholder.
@@ -47,7 +49,7 @@ final class StaticEntry
     private function soleHtmlFile(): ?string
     {
         $found = [];
-        foreach (scandir($this->projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($this->projectDir) as $entry) {
             if ($this->isProjectHtml($entry)) {
                 $found[] = $entry;
             }

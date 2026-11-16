@@ -9,6 +9,7 @@ use App\System\Project\Dind\AnsweringPort;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -245,9 +246,10 @@ class AnsweringPortTest extends TestCase
         $environment = $this->createStub(ProjectEnvironment::class);
         $environment->method('forPortDetection')->willReturn([]);
         $system = $this->createStub(System::class);
-        $system->method('exec')->willReturnCallback(static fn (string|array $cmd): string => str_contains(is_array($cmd) ? implode(' ', $cmd) : $cmd, "'config' '--format' 'json'")
+        $system->method('exec')->willReturnCallback(static fn (string|array $cmd): string => str_contains(LocalRoot::composeLine((array) $cmd), "'config' '--format' 'json'")
             ? (string) json_encode(self::config()) : '');
         $project = $this->createStub(Dind::class);
+        $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('username')->willReturn($user->username);
         $project->method('system')->willReturn($system);
         $project->method('userModel')->willReturn($user);

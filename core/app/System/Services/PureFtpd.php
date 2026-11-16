@@ -4,6 +4,8 @@ namespace App\System\Services;
 
 use App\Exceptions\DockerErrorException;
 use App\System as EngineSystem;
+use App\System\Privileged;
+use App\System\Privileged\RootEngineServices;
 
 class PureFtpd
 {
@@ -19,26 +21,21 @@ class PureFtpd
      */
     public function reload(): void
     {
-        $this->exec(['touch', '/etc/pureftpd/pureftpd.passwd']);
-        $this->exec(['pure-pw', 'mkdb']);
+        $this->system->exec($this->services()->ftpTouchPasswordFile());
+        $this->makeDatabase();
+    }
+
+    /**
+     * @throws DockerErrorException
+     */
+    public function makeDatabase(): void
+    {
+        $this->system->exec($this->services()->ftpMakeDatabase());
     }
 
     public function userExists(string $username): bool
     {
-        $composeFile = $this->system->composeFilePath();
-        $process = $this->system->runProcess([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $composeFile,
-            'exec',
-            '-T',
-            'ftp',
-            'pure-pw',
-            'show',
-            $username,
-        ]);
+        $process = $this->system->runProcess($this->services()->ftpShowUser($username));
 
         if ($process->getExitCode() == 0) {
             return true;
@@ -62,27 +59,11 @@ class PureFtpd
         string $containerPath,
         ?int $quota = null,
     ): void {
-        $pureftpdCmd = [
-            'pure-pw',
-            'useradd',
-            escapeshellarg($ftpUser),
-            '-m',
-            '-u',
-            escapeshellarg((string) $uid),
-            '-g',
-            escapeshellarg((string) $gid),
-            '-d',
-            escapeshellarg($containerPath),
-        ];
-
         $enforcedQuota = $this->enforcedQuota($quota);
-        if ($enforcedQuota !== null) {
-            $pureftpdCmd[] = '-N';
-            $pureftpdCmd[] = escapeshellarg((string) $enforcedQuota);
-        }
-
-        $this->execPasswordPipe($password, implode(' ', $pureftpdCmd));
-        $this->exec(['pure-pw', 'mkdb']);
+        $this->withPassword($password, $this->services()->ftpAddUser(
+            $ftpUser, $uid, $gid, $containerPath, $enforcedQuota === null ? '' : (string) $enforcedQuota,
+        ));
+        $this->makeDatabase();
     }
 
     /**
@@ -90,13 +71,7 @@ class PureFtpd
      */
     public function passwd(string $ftpUser, string $password): void
     {
-        $pureftpdCmd = [
-            'pure-pw',
-            'passwd',
-            escapeshellarg($ftpUser),
-            '-m',
-        ];
-        $this->execPasswordPipe($password, implode(' ', $pureftpdCmd));
+        $this->withPassword($password, $this->services()->ftpSetPassword($ftpUser));
     }
 
     /**
@@ -107,13 +82,7 @@ class PureFtpd
     public function usermodQuota(string $ftpUser, ?int $quota): void
     {
         $enforcedQuota = $this->enforcedQuota($quota);
-        $this->exec([
-            'pure-pw',
-            'usermod',
-            $ftpUser,
-            '-N',
-            $enforcedQuota === null ? '' : (string) $enforcedQuota,
-        ]);
+        $this->system->exec($this->services()->ftpSetQuota($ftpUser, $enforcedQuota === null ? '' : (string) $enforcedQuota));
     }
 
     /**
@@ -121,12 +90,7 @@ class PureFtpd
      */
     public function deleteUser(string $username): void
     {
-        $this->exec([
-            'pure-pw',
-            'userdel',
-            $username,
-            '-m',
-        ]);
+        $this->system->exec($this->services()->ftpDeleteUser($username));
     }
 
     /** Only a positive quota is set: 0 and unlimited (any negative) set none. */
@@ -136,54 +100,19 @@ class PureFtpd
     }
 
     /**
-     * @param  list<string>  $command
+     * pure-pw reads the password twice from stdin. It travels in the environment and a builtin printf, never in an argv.
+     *
+     * @param  list<string>  $argv
      *
      * @throws DockerErrorException
      */
-    public function exec(array $command): string
+    private function withPassword(string $password, array $argv): void
     {
-        $composeFile = $this->system->composeFilePath();
-
-        return $this->system->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $composeFile,
-            'exec',
-            '-T',
-            'ftp',
-            ...$command,
-        ]);
+        $this->system->exec($argv, [self::PASSWORD_ENV => $password]);
     }
 
-    /**
-     * pure-pw reads the password twice from stdin. It used to be spliced into
-     * the command as `echo '<password>'`, which put it in the argv of sudo,
-     * docker and the container's shell, where any `ps` shows it. It travels in
-     * the environment now: sudo keeps only the one named variable, compose
-     * copies it into the exec, and printf is a shell builtin.
-     *
-     * @throws DockerErrorException
-     */
-    private function execPasswordPipe(string $password, string $pureftpdCmd): void
+    private function services(): RootEngineServices
     {
-        $composeFile = $this->system->composeFilePath();
-        $this->system->exec([
-            'sudo',
-            '--preserve-env='.self::PASSWORD_ENV,
-            'docker',
-            'compose',
-            '-f',
-            $composeFile,
-            'exec',
-            '-T',
-            '-e',
-            self::PASSWORD_ENV,
-            'ftp',
-            '/bin/sh',
-            '-c',
-            'printf \'%s\\n%s\\n\' "$'.self::PASSWORD_ENV.'" "$'.self::PASSWORD_ENV.'" | '.$pureftpdCmd,
-        ], [self::PASSWORD_ENV => $password]);
+        return Privileged::engineServices($this->system->composeFilePath());
     }
 }

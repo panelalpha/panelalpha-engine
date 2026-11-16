@@ -10,6 +10,9 @@ final class AuditLogFiles
 {
     private const TAIL_BYTES = 1024 * 50;
 
+    /** The most entries one tail may ask for; the 50 KB window bounds it as well. */
+    public const MAX_TAIL_ENTRIES = 500;
+
     public function __construct(private readonly System $system = new System) {}
 
     /**
@@ -45,12 +48,12 @@ final class AuditLogFiles
     }
 
     /**
-     * The JSON lines in the file's last 50 KB, newest first, or null when
-     * there is no such file or it cannot be read. A rotated `.gz` log is read through zlib.
+     * The JSON lines in the file's last 50 KB, newest first, at most $limit of them, or null
+     * when there is no such file or it cannot be read. A rotated `.gz` log is read through zlib.
      *
      * @return list<mixed>|null
      */
-    public function tail(string $filename): ?array
+    public function tail(string $filename, ?int $limit = null): ?array
     {
         $path = $this->readablePath($filename);
         if ($path === null) {
@@ -62,15 +65,15 @@ final class AuditLogFiles
             return null;
         }
 
-        return self::decodedNewestFirst($data);
+        return self::decodedNewestFirst($data, $limit ?? PHP_INT_MAX);
     }
 
     /** @return list<mixed> */
-    private static function decodedNewestFirst(string $data): array
+    private static function decodedNewestFirst(string $data, int $limit): array
     {
         $logs = [];
         $lines = explode("\n", $data);
-        for ($i = count($lines) - 1; $i >= 0; $i--) {
+        for ($i = count($lines) - 1; $i >= 0 && count($logs) < $limit; $i--) {
             $log = @json_decode($lines[$i]);
             if ($log) {
                 $logs[] = $log;

@@ -4,11 +4,15 @@ namespace Tests\Unit\System\Project\Deployment;
 
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
+use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Finding;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
+use App\System\Project\Deployment\DeployMechanics;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\FailureDisposition;
 use App\System\Project\Deployment\RetainProject;
+use App\System\Project\Dind\AppHealth;
 use Tests\TestCase;
 
 /**
@@ -153,15 +157,15 @@ class DeployDispositionTest extends TestCase
         $model = $this->model();
         $mechanics = new RecordingMechanics($model, $this->domain());
         $mechanics->hasGit = true;
-        $mechanics->serving = ['nothing answered on 3000'];
-        $mechanics->publicUrl = ['certificate not trusted'];
+        $mechanics->serving = [new Finding(AppHealth::CODE_NOT_ANSWERING, 'nothing answered on 3000')];
+        $mechanics->publicUrl = [new Finding(PublicUrl::CERTIFICATE_REFUSED, 'certificate not trusted')];
 
         $this->workflow($mechanics, new RecordingDisposition())->run();
 
         $this->assertContains('persistPartial', $mechanics->calls);
         $this->assertNotContains('persistSuccess', $mechanics->calls);
         $this->assertSame(
-            ['nothing answered on 3000', 'certificate not trusted'],
+            [...$mechanics->serving, ...$mechanics->publicUrl],
             $mechanics->partialWarnings
         );
     }
@@ -170,13 +174,16 @@ class DeployDispositionTest extends TestCase
     {
         $mechanics = new RecordingMechanics($this->model(), $this->domain());
         $mechanics->hasGit = true;
-        $mechanics->serving = ['nothing answered on 3000'];
+        $mechanics->serving = [new Finding(AppHealth::CODE_NOT_ANSWERING, 'nothing answered on 3000')];
         $mechanics->envHint = 'custom env vars were set';
 
         $this->workflow($mechanics, new RecordingDisposition())->run();
 
-        $this->assertSame(
-            ['nothing answered on 3000', 'custom env vars were set'],
+        $this->assertEquals(
+            [
+                new Finding(AppHealth::CODE_NOT_ANSWERING, 'nothing answered on 3000'),
+                new Finding(DeployMechanics::CUSTOM_ENV_SUSPECTED, 'custom env vars were set'),
+            ],
             $mechanics->partialWarnings
         );
     }

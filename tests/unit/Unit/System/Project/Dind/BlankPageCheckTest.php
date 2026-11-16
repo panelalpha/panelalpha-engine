@@ -96,7 +96,7 @@ class BlankPageCheckTest extends TestCase
             $this->assertNotNull($check, $runtime);
             $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity']);
             $this->assertSame('_baseline', $check['group']);
-            $this->assertStringContainsString('container_service_logs', $check['fix']);
+            $this->assertStringContainsString('container output', $check['fix']);
             $this->assertStringNotContainsString('PHP', $check['fix']);
         }
     }

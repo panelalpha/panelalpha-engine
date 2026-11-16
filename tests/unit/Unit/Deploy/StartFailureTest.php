@@ -17,7 +17,12 @@ use Tests\TestCase;
  */
 class StartFailureTest extends TestCase
 {
-    private const RUNNING = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":0}';
+    private const RUNNING = [[
+        'Name' => '/project-app-1',
+        'Config' => ['Labels' => ['com.docker.compose.service' => 'app']],
+        'State' => ['Status' => 'running', 'ExitCode' => 0],
+        'RestartCount' => 0,
+    ]];
 
     private const PREVIOUS = [
         AppHealth::DETAIL_CHECKED => true,
@@ -68,7 +73,7 @@ class StartFailureTest extends TestCase
                 return array_shift($this->silentChecks);
             }
 
-            protected function containerSnapshot(): ?string
+            protected function containerSnapshot(): ?array
             {
                 return StartFailureTest::runningSnapshot();
             }
@@ -87,7 +92,8 @@ class StartFailureTest extends TestCase
         };
     }
 
-    public static function runningSnapshot(): string
+    /** @return list<array<string, mixed>> */
+    public static function runningSnapshot(): array
     {
         return self::RUNNING;
     }

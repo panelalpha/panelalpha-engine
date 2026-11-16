@@ -7,25 +7,15 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The checks under `resources/checks/`, and which of them a given application
- * is asked.
- *
- * A **group** is a directory. `_baseline` runs for everything; the rest are
- * named for a runtime (`nginx/`, `php/`, `node/`) and a manifest gets its
- * runtime's group without asking for it. Its own `check:` list is therefore
- * additions only -- `laravel/app-key-set` on top of the php group, never `php`
- * itself. Subtraction is a `when:` guard on the check.
+ * The checks under `resources/checks/` by group, and which of them an application is asked.
+ * A manifest's `check:` list only adds to its runtime's group; `when:` subtracts.
  */
 final class CheckRegistry
 {
     /** The group every application is asked, whatever it runs. */
     public const BASELINE = '_baseline';
 
-    /**
-     * Runtimes that run what the repository ships have no group of their own,
-     * so they borrow the framework checks (Django ALLOWED_HOSTS, Rails blocked
-     * host). Each is guarded by `when: file:`.
-     */
+    /** Runtimes that run what the repository ships borrow the framework checks, each guarded by `when: file:`. */
     private const BORROWED_GROUPS = [
         PlatformManifest::RUNTIME_COMPOSE => PlatformManifest::RUNTIME_COMMAND,
         PlatformManifest::RUNTIME_DOCKERFILE => PlatformManifest::RUNTIME_COMMAND,
@@ -76,13 +66,8 @@ final class CheckRegistry
     }
 
     /**
-     * The checks this application is asked: the baseline, its runtime's group,
-     * and whatever its manifest added.
-     *
-     * `$references` are the manifest's own `check:` entries -- `php` for a
-     * whole group, `php/no-db-error` for one check. Unknown ones throw, so a
-     * typo is a failed contract test rather than a check that silently never
-     * runs.
+     * The baseline, the runtime's group and the manifest's own `check:` references (unknown ones throw).
+     * A check named twice runs once.
      *
      * @param  list<string>  $references
      * @return list<HealthCheck>
@@ -103,8 +88,6 @@ final class CheckRegistry
             $selected = array_merge($selected, self::resolve($reference, $groups));
         }
 
-        // A manifest naming a check its runtime already brought is redundant
-        // rather than wrong, and running it twice would report it twice.
         $unique = [];
         foreach ($selected as $check) {
             $unique[$check->reference()] = $check;
@@ -147,18 +130,7 @@ final class CheckRegistry
     }
 
     /**
-     * The shipped checks, plus the ones a recipe directory brings.
-     *
-     * A source recipe is the only part of the engine a person can change
-     * without a release, and a check that knows *this application* belongs with
-     * the manifest that knows how to build it: the recipe that decides a
-     * project's document root also knows its health endpoint.
-     *
-     * The directory mirrors `resources/checks/`: group directories, one YAML
-     * per check, filenames matching ids. A group declared here is **merged**
-     * with the shipped one of the same name rather than replacing it.
-     * Collisions between checks are refused: two checks with one reference
-     * would report the same id twice, and the report is what telemetry counts.
+     * The shipped checks plus a recipe directory's own, merged by group; a recipe check may not shadow a shipped one.
      *
      * @return array<string, list<HealthCheck>>
      *
@@ -196,12 +168,7 @@ final class CheckRegistry
     }
 
     /**
-     * Which of `$references` the recipe directory answers to itself.
-     *
-     * The manifest reader needs this before `CheckRunner` is involved, because
-     * a recipe's own check is not in `resources/checks/` and a reference to it
-     * would otherwise be refused as unknown. Answering only "is it here" keeps
-     * the reader from having to reproduce the resolution rules.
+     * Which of `$references` the recipe directory answers to itself, so the manifest reader does not refuse them.
      *
      * @param  list<string>  $references
      * @return list<string>
@@ -272,6 +239,8 @@ final class CheckRegistry
     }
 
     /**
+     * A recipe's check is named as such in errors, and a file must be named for its id.
+     *
      * @return list<HealthCheck>
      *
      * @throws CheckException
@@ -284,8 +253,6 @@ final class CheckRegistry
                 continue;
             }
             $file = $path.'/'.$entry;
-            // A recipe's own check is named as such, so "check file is
-            // malformed" says whether to look in resources/checks/.
             $source = ($origin === 'shipped' ? '' : "{$origin} ").$group.'/'.$entry;
 
             try {
@@ -298,8 +265,6 @@ final class CheckRegistry
             }
 
             $check = HealthCheck::fromArray($raw, $group, $source);
-            // The filename is the id: a check whose file and id disagree cannot
-            // be found from a report that names it.
             if ($check->id.'.yaml' !== $entry) {
                 throw new CheckException("{$source}: file should be named {$check->id}.yaml");
             }

@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Platform\Metadata;
 
 /**
- * What one ecosystem's package file says this application *is*: the union of what
- * the ecosystems can say, so most fields are nullable. `platform` is the runtime
- * asked for (`php: ^8.2`, the `ext-*` list) as declared, never as resolved.
+ * What one ecosystem's package file says this application *is*, so most fields are nullable;
+ * `platform` is the runtime asked for (`php: ^8.2`, `ext-*`) as declared, never as resolved.
  */
 final class AppPackage
 {

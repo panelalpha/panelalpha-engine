@@ -7,6 +7,8 @@ use App\Models\ProxyRule;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
+use App\System\Project\Dind\AppManager;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\RouteSwitch;
 use App\System\Project\Dind\Generation\RoutingSnapshot;
@@ -16,6 +18,7 @@ use App\System\Services\Webserver;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -225,8 +228,11 @@ class RoutingSnapshotTest extends TestCase
         });
         $system = $this->createStub(System::class);
         $system->method('webserver')->willReturn($this->createStub(Webserver::class));
-        // `docker compose ps` + inspect, as ProjectBindMounts reads it: one running container.
-        $system->method('exec')->willReturn("old1\t/app\n");
+        $system->method('exec')->willReturnCallback(static fn (string|array $cmd): string => match (LocalRoot::action((array) $cmd)) {
+            'account-docker.containers' => '[{"Id":"old1"}]',
+            'account-docker.listContainers' => '[{"Id":"old1","Names":["/project-app-1"]}]',
+            default => "old1\n",
+        });
         $project = $this->createStub(Dind::class);
         $project->method('username')->willReturn($this->username);
         $project->method('userModel')->willReturn($user);
@@ -234,8 +240,9 @@ class RoutingSnapshotTest extends TestCase
         $project->method('networking')->willReturn($networking);
         $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('userAppDirPath')->willReturn('/home/u/project');
-        $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
+        $project->method('userAppComposeProjectName')->willReturn('project');
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
 
         return $project;
     }
@@ -252,12 +259,15 @@ class RoutingSnapshotTest extends TestCase
         $system = $this->createStub(System::class);
         $system->method('webserver')->willReturn($this->createStub(Webserver::class));
         $project = $this->createStub(Dind::class);
+        $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('username')->willReturn($this->username);
         $project->method('userModel')->willReturn($user);
         $project->method('system')->willReturn($system);
         $project->method('networking')->willReturn($networking);
         $project->method('shell')->willReturn(new ShellOperations($project));
-        $system->method('exec')->willReturn('');
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
+        $system->method('exec')->willReturnCallback(static fn (string|array $cmd): string => LocalRoot::action((array) $cmd) === 'account-docker.listContainers' ? '[]' : '');
 
         return $project;
     }
@@ -268,6 +278,7 @@ class RoutingSnapshotTest extends TestCase
         $system = $this->createStub(System::class);
         $system->method('exec')->willThrowException(new \RuntimeException('Cannot connect to the Docker daemon'));
         $project = $this->createStub(Dind::class);
+        $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('username')->willReturn($this->username);
         $project->method('system')->willReturn($system);
         $project->method('shell')->willReturn(new ShellOperations($project));
@@ -319,6 +330,32 @@ class RoutingSnapshotTest extends TestCase
         $this->assertArrayHasKey('deploy_runtime', $picked, 'absent before: put back as absent');
         $this->assertNull($picked['deploy_runtime']);
         $this->assertArrayNotHasKey('deployment_status', $picked, 'the failure records its own status');
+    }
+
+    /** A failed redeploy puts back what the previous version's app config allowed, as it puts back the port. */
+    public function test_a_restore_puts_back_whether_the_app_config_fits_and_its_admin_sso(): void
+    {
+        $user = new class extends User
+        {
+            public function save(array $options = []): bool
+            {
+                return true;
+            }
+        };
+        $user->setDetails(['app_port' => 3000, AppManager::DETAIL_APP_CONFIG_FITS => true, 'deploy_admin_sso' => true]);
+        (new GenerationState($this->username))->put(GenerationState::ROUTES, [
+            'details' => RoutingSnapshot::pick($user->getDetails()),
+            'owner' => GenerationState::owner(),
+        ]);
+        $user->setDetails([AppManager::DETAIL_APP_CONFIG_FITS => false, 'deploy_admin_sso' => false]);
+        $project = $this->createStub(Dind::class);
+        $project->method('username')->willReturn($this->username);
+        $project->method('userModel')->willReturn($user);
+
+        (new RoutingSnapshot($project))->restoreDetails();
+
+        $this->assertTrue($user->getDetails()[AppManager::DETAIL_APP_CONFIG_FITS]);
+        $this->assertTrue($user->getDetails()['deploy_admin_sso']);
     }
 
     public function test_the_rules_wait_while_this_process_redeploys(): void

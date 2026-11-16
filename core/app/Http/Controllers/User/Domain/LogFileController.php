@@ -36,14 +36,10 @@ class LogFileController extends Controller
      */
     public function index(Request $request, $username, $domain, EngineSystem $system)
     {
-        $params = $request->validate([
-            'all_webservers' => 'nullable',
-        ]);
-
         $user = $this->projectOr404($username);
         $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
 
-        return new JsonResponse(['data' => $logFiles->list(! empty($params['all_webservers']))]);
+        return new JsonResponse(['data' => $logFiles->list($request->boolean('all_webservers'))]);
     }
 
     #[OA\Get(
@@ -69,13 +65,9 @@ class LogFileController extends Controller
      */
     public function download(Request $request, $username, $domain, $filename, EngineSystem $system)
     {
-        $params = $request->validate([
-            'all_webservers' => 'nullable',
-        ]);
-
         $user = $this->projectOr404($username);
         $logFiles = DomainLogFiles::find($user, $domain, $system) ?? abort(404, 'Not found');
-        $path = $logFiles->readablePath($filename, ! empty($params['all_webservers'])) ?? abort(404, 'Not found');
+        $path = $logFiles->readablePath($filename, $request->boolean('all_webservers')) ?? abort(404, 'Not found');
 
         try {
             /** @var BinaryFileResponse */

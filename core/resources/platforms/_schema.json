@@ -446,10 +446,11 @@
           "description": "Stable name shown in deploy logs. Derived from `run` when omitted."
         },
         "stage": {
-          "description": "build = image build. install = first deploy only. upgrade = redeploy over existing data. start = every boot. A list means every listed stage \u2014 ['install','upgrade'] is how a migration says 'whenever the code changed, never on a restart'.",
+          "description": "prepare = the account's shell after the clone, before anything is built (a check that refuses a checkout belongs here). build = image build. install = first deploy only. upgrade = redeploy over existing data. start = every boot. A list means every listed stage \u2014 ['install','upgrade'] is how a migration says 'whenever the code changed, never on a restart'.",
           "oneOf": [
             {
               "enum": [
+                "prepare",
                 "build",
                 "install",
                 "upgrade",
@@ -460,6 +461,7 @@
               "type": "array",
               "items": {
                 "enum": [
+                  "prepare",
                   "build",
                   "install",
                   "upgrade",
@@ -474,6 +476,7 @@
           "type": "array",
           "items": {
             "enum": [
+              "prepare",
               "build",
               "install",
               "upgrade",

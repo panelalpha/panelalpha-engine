@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('file_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a file or directory
+
+    Deletes the file or directory at `path` for good; `recursive` takes everything inside a directory with it. This cannot be undone. Ask the operator to confirm first, naming the path.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -6,6 +6,7 @@ use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\System;
 use App\System\Project\Dind\HostDiskGuard;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
 
 /**
  * The pre-deploy host disk check: a nearly full host refuses the
@@ -37,6 +38,21 @@ class HostDiskGuardTest extends TestCase
         $guard = new HostDiskGuard($this->host([]), 3 * 1073741824);
 
         $this->assertNull($guard->refusal());
+    }
+
+    /** A host the broker cannot enter was never read, so the check must not pass as if it had room. */
+    public function test_a_host_namespace_refusal_is_not_an_unreadable_disk(): void
+    {
+        $system = new class extends System {
+            public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                throw new \RuntimeException('pa-root: cannot enter the host\'s namespaces: Operation not permitted');
+            }
+        };
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('pa-root: cannot enter the host\'s namespaces: Operation not permitted');
+        (new HostDiskGuard($system, 3 * 1073741824))->refusal();
     }
 
     public function test_off_never_asks_the_host(): void
@@ -82,6 +98,7 @@ class HostDiskGuardTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $this->asked[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $path = is_array($cmd) ? (string) end($cmd) : '';
                 if (!isset($this->freeMb[$path])) {

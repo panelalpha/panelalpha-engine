@@ -8,14 +8,19 @@ use App\Exceptions\DiskLimitException;
 use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\StepWatchdog;
+use App\Lib\Deploy\Dind\DindEngine;
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\RootAccountCompose;
+use App\System\Privileged\RootAccountContainer;
+use App\System\Privileged\RootCompose;
 use App\System\Project\Dind as DindProject;
-use Illuminate\Support\Str;
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 /**
- * Command execution inside an account's DinD container via the outer compose file.
+ * Command execution inside an account's DinD container, through the host daemon's Engine API.
  */
 final class ShellOperations
 {
@@ -32,6 +37,9 @@ final class ShellOperations
 
     /** Seconds a timed-out shell command gets between SIGTERM and SIGKILL. */
     private const SHELL_KILL_GRACE = 5;
+
+    /** Seconds a follow gets to end once stopped. */
+    private const FOLLOW_STOP_MARGIN = 5;
 
     /** Seconds the host waits past that grace, so the in-container `timeout` always ends the command first. */
     private const SHELL_HOST_MARGIN = 10;
@@ -86,33 +94,63 @@ final class ShellOperations
     }
 
     /**
-     * Root gets DOCKER_CONFIG in the account home, not /root: unmapped root in an account sysbox
-     * started cannot enter /root, and the docker CLI then finds no compose plugin.
+     * A compose or buildx line runs from the broker against the account's daemon ({@see RootAccountCompose}),
+     * anything else in the account's container. Root's DOCKER_CONFIG is in the home: unmapped root cannot enter /root.
      *
      * @param  list<string>  $cmd
      * @return list<string>
+     *
+     * @throws \InvalidArgumentException for a line running either client that the broker does not run
      */
     public function wrap(array $cmd, bool $asUser = false): array
     {
-        $args = [
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->project->composeFilePath(),
-            'exec',
-        ];
-        if ($asUser) {
-            $args[] = '-u';
-            $args[] = $this->project->userModel()->getChownString();
-        } elseif (($cmd[0] ?? null) !== 'su') {
-            $args[] = '-e';
-            $args[] = 'DOCKER_CONFIG='.$this->dockerConfigDir();
+        if (RootAccountCompose::isRunRequest($cmd)) {
+            return $cmd;
         }
-        $args[] = '-T';
-        $args[] = 'dind';
+        if (! $asUser && ($cmd[0] ?? null) === 'su') {
+            return $this->container()->exec($cmd);
+        }
+        $client = $this->accountClient($cmd, $asUser ? [] : ['DOCKER_CONFIG' => $this->dockerConfigDir()], ! $asUser);
+        if ($client !== null) {
+            return $client;
+        }
+        if ($asUser) {
+            return $this->container()->exec($cmd, (string) $this->project->userModel()->getChownString());
+        }
 
-        return [...$args, ...$cmd];
+        return $this->container()->exec($cmd, environment: ['DOCKER_CONFIG' => $this->dockerConfigDir()]);
+    }
+
+    /**
+     * The broker's run of a compose or buildx line, null for a line that runs neither. Either client run any other
+     * way is refused, as in the account's container it would reach the daemon around the broker.
+     *
+     * @param  list<string>  $cmd
+     * @param  array<string, string>  $environment
+     * @return ?list<string>
+     */
+    private function accountClient(array $cmd, array $environment = [], bool $asRoot = false): ?array
+    {
+        $client = $this->accountCompose()->forCommand($cmd, $environment, $asRoot);
+        if ($client === null && self::runsDockerClient($cmd)) {
+            throw new \InvalidArgumentException('Refusing to run '.json_encode(implode(' ', $cmd), JSON_UNESCAPED_SLASHES)
+                .' in the account\'s container: a docker compose or docker buildx build line runs from the root broker,'
+                .' with docker first, after an optional env NAME=value ...');
+        }
+
+        return $client;
+    }
+
+    /** @param  list<string>  $cmd */
+    private static function runsDockerClient(array $cmd): bool
+    {
+        foreach ($cmd as $at => $word) {
+            if (basename($word) === 'docker' && in_array($cmd[$at + 1] ?? null, ['compose', 'buildx'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function dockerConfigDir(): string
@@ -146,7 +184,7 @@ final class ShellOperations
         );
         $logger->throwIfCancelled();
         if (! $process->isSuccessful()) {
-            throw new \Exception($process->getErrorOutput() ?: $process->getOutput());
+            throw DockerErrorException::orPlainFailure($process->getErrorOutput() ?: $process->getOutput());
         }
 
         return $process->getOutput();
@@ -179,6 +217,10 @@ final class ShellOperations
      */
     private function asAccountUser(array $cmd): array
     {
+        $client = $this->accountClient($cmd);
+        if ($client !== null) {
+            return $client;
+        }
         $username = $this->project->username();
         $cmdStr = implode(' ', array_map('escapeshellarg', $cmd));
 
@@ -202,11 +244,7 @@ final class ShellOperations
             throw new DeployCancelledException('Deployment cancelled by user');
         }
         if (! $process->isSuccessful()) {
-            $message = $process->getErrorOutput() ?: $process->getOutput();
-            if (Str::contains($message, 'Error response from daemon')) {
-                throw new DockerErrorException($message);
-            }
-            throw new \Exception($message);
+            throw DockerErrorException::orPlainFailure($process->getErrorOutput() ?: $process->getOutput());
         }
 
         return $process->getOutput();
@@ -221,29 +259,26 @@ final class ShellOperations
     }
 
     /**
-     * Run as the account user and hand each chunk of output to $onOutput as it arrives.
-     * $onIdle is called after every $idleSeconds without output; throwing from it stops the run.
+     * Run as the account user for at most $seconds, streaming output to $onOutput; $onIdle runs after every
+     * $idleSeconds without output. A throw from either callback stops the run and is rethrown.
      *
      * @param  list<string>  $cmd
      * @param  callable(string, string): void  $onOutput
      * @param  ?callable(): void  $onIdle
      */
-    public function followAsUser(array $cmd, int $timeout, callable $onOutput, ?callable $onIdle = null, int $idleSeconds = 2): void
+    public function followAsUser(array $cmd, int $seconds, callable $onOutput, ?callable $onIdle = null, int $idleSeconds = 2): void
     {
-        $command = $this->asAccountUser($cmd);
-
         $lastOutput = microtime(true);
         $output = function (string $type, string $data) use ($onOutput, &$lastOutput): void {
             $lastOutput = microtime(true);
             $onOutput($type, $data);
         };
-        $poll = $onIdle === null ? null : self::pollWithIdleCallback($output, $onIdle, $idleSeconds, $lastOutput);
 
         $this->project->system()->runProcessWithCallbacks(
-            $this->wrap($command),
+            $this->wrap($this->asAccountUser($cmd)),
             [],
-            $timeout,
-            $poll,
+            $seconds + self::FOLLOW_STOP_MARGIN,
+            self::pollUntil(microtime(true) + $seconds, $output, $onIdle, $idleSeconds, $lastOutput),
             $output,
         );
     }
@@ -253,24 +288,33 @@ final class ShellOperations
      * may print nothing for minutes; so it also reads the output itself and hands it to $output.
      *
      * @param  callable(string, string): void  $output
-     * @param  callable(): void  $onIdle
+     * @param  ?callable(): void  $onIdle
      * @return \Closure(Process): void
      */
-    private static function pollWithIdleCallback(callable $output, callable $onIdle, int $idleSeconds, float &$lastOutput): \Closure
+    private static function pollUntil(float $deadline, callable $output, ?callable $onIdle, int $idleSeconds, float &$lastOutput): \Closure
     {
-        return function (Process $process) use ($output, $onIdle, $idleSeconds, &$lastOutput): void {
-            do {
-                $running = $process->isRunning();
-                $process->checkTimeout();
-                self::forwardIncrementalOutput($process, $output);
-                if ($running && microtime(true) - $lastOutput >= $idleSeconds) {
-                    $lastOutput = microtime(true);
-                    $onIdle();
-                }
-                if ($running) {
-                    usleep(100_000);
-                }
-            } while ($running);
+        return function (Process $process) use ($deadline, $output, $onIdle, $idleSeconds, &$lastOutput): void {
+            try {
+                do {
+                    $running = $process->isRunning();
+                    self::forwardIncrementalOutput($process, $output);
+                    if ($running && microtime(true) >= $deadline) {
+                        $process->stop(self::FOLLOW_STOP_MARGIN);
+
+                        return;
+                    }
+                    if ($running && $onIdle !== null && microtime(true) - $lastOutput >= $idleSeconds) {
+                        $lastOutput = microtime(true);
+                        $onIdle();
+                    }
+                    if ($running) {
+                        usleep(100_000);
+                    }
+                } while ($running);
+            } catch (\Throwable $e) {
+                $process->stop(self::FOLLOW_STOP_MARGIN);
+                throw $e;
+            }
         };
     }
 
@@ -365,8 +409,8 @@ final class ShellOperations
     }
 
     /**
-     * The timeout runs inside the account: killing the exec on the host leaves the
-     * command running there, so the host only waits a little longer as a backstop.
+     * The timeout runs inside the account, so the command reports 124 there; the host only waits longer as a
+     * backstop, and its own kill ends the command too.
      */
     public function runShellAsUser(string $command, ?string $cwd = null, int $timeout = 300): Process
     {
@@ -426,8 +470,8 @@ final class ShellOperations
     }
 
     /**
-     * Run a deploy step into the log under a watchdog. A stalled, disk-limited or cancelled step is
-     * also stopped inside the account by its tag, since killing the exec on the host does not reach it.
+     * A stalled, disk-limited or cancelled step is also stopped in the account's container by its tag, since killing
+     * the host exec does not reach it; the broker stops a docker client once its caller is gone.
      *
      * @param  list<string>  $cmd
      */
@@ -443,6 +487,22 @@ final class ShellOperations
             $watchdog = $this->stepWatchdog($cmd, $tag, $idle, $label, $diskFull);
         }
 
+        $process = $this->runWatched($cmd, $env, $timeout, $logger, $watchdog, $tag);
+
+        if ($tag !== null && $logger->isCancelled()) {
+            $this->stopTaggedStep($cmd, $tag);
+        }
+
+        return $process;
+    }
+
+    /**
+     * A step a cancel's signal ended comes back as finished, so {@see streamProcess()} still stops it by its tag.
+     *
+     * @param  list<string>  $cmd
+     */
+    private function runWatched(array $cmd, array $env, int $timeout, DeployLogger $logger, ?StepWatchdog $watchdog, ?string $tag): Process
+    {
         try {
             $process = $this->runLogged($cmd, $env, $timeout, $logger, $watchdog);
         } catch (BuildStalledException $e) {
@@ -452,13 +512,14 @@ final class ShellOperations
             $this->failStep($logger, $e, $cmd, (string) $tag);
             $this->reclaimStorageAfterDiskLimit($logger);
             throw $e;
+        } catch (ProcessSignaledException $e) {
+            if (! $logger->isCancelled()) {
+                throw $e;
+            }
+            $process = $e->getProcess();
         } finally {
             $logger->setPid(null);
             $logger->flushBuffers();
-        }
-
-        if ($tag !== null && $logger->isCancelled()) {
-            $this->stopTaggedStep($cmd, $tag);
         }
 
         return $process;
@@ -531,9 +592,10 @@ final class ShellOperations
     public function tagStep(array $cmd, string $tag): array
     {
         if ($this->isDindExec($cmd)) {
-            array_splice($cmd, 6, 0, ['-e', self::STEP_ENV.'='.$tag]);
-        } elseif (self::isHostDockerRun($cmd)) {
-            array_splice($cmd, 3, 0, ['--label', self::STEP_LABEL.'='.$tag]);
+            return $this->container()->withEnvironment($cmd, self::STEP_ENV, $tag);
+        }
+        if (self::isHostDockerRun($cmd)) {
+            return Privileged::docker()->withRunLabel($cmd, self::STEP_LABEL, $tag);
         }
 
         return $cmd;
@@ -551,7 +613,7 @@ final class ShellOperations
             } elseif (self::isHostDockerRun($cmd)) {
                 $ids = self::taggedHostContainerIds($system, $tag);
                 if ($ids !== []) {
-                    $system->runProcess(['sudo', 'docker', 'rm', '-f', ...$ids], [], 60);
+                    $system->runProcess(Privileged::docker()->forceRemoveContainers(...$ids), [], 60);
                 }
             }
         } catch (\Throwable $e) {
@@ -568,19 +630,18 @@ final class ShellOperations
     public function stepIsBusy(array $cmd, string $tag): bool
     {
         $system = $this->project->system();
-        $stats = ['sudo', 'docker', 'stats', '--no-stream', '--format', '{{.CPUPerc}}'];
-        if ($this->isDindExec($cmd)) {
+        if ($this->isDindExec($cmd) || RootAccountCompose::isRunRequest($cmd)) {
             $percent = $this->dindCgroupCpuPercent($system);
             if ($percent !== null) {
                 return $percent >= self::BUSY_CPU_PERCENT;
             }
-            $argv = ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), ...array_slice($stats, 2), 'dind'];
+            $argv = $this->compose()->cpuPercent(DindEngine::SERVICE);
         } elseif (self::isHostDockerRun($cmd)) {
             $ids = self::taggedHostContainerIds($system, $tag);
             if ($ids === []) {
                 return false;
             }
-            $argv = [...$stats, ...$ids];
+            $argv = Privileged::docker()->cpuPercents(...$ids);
         } else {
             return false;
         }
@@ -601,7 +662,7 @@ final class ShellOperations
     private static function taggedHostContainerIds(System $system, string $tag): array
     {
         $ids = preg_split('/\s+/', trim($system->exec(
-            ['sudo', 'docker', 'ps', '-q', '--filter', 'label='.self::STEP_LABEL.'='.$tag],
+            Privileged::docker()->runningContainerIdsWithLabel(self::STEP_LABEL, $tag),
             [],
             30
         ))) ?: [];
@@ -638,13 +699,28 @@ final class ShellOperations
     /** @param list<string> $cmd */
     private function isDindExec(array $cmd): bool
     {
-        return array_slice($cmd, 0, 6) === ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), 'exec'];
+        return $this->container()->isExec($cmd);
     }
 
     /** @param list<string> $cmd */
     private static function isHostDockerRun(array $cmd): bool
     {
-        return array_slice($cmd, 0, 3) === ['sudo', 'docker', 'run'];
+        return Privileged::docker()->isRun($cmd);
+    }
+
+    private function compose(): RootCompose
+    {
+        return Privileged::compose($this->project->composeFilePath());
+    }
+
+    private function container(): RootAccountContainer
+    {
+        return Privileged::accountContainer($this->project->username());
+    }
+
+    private function accountCompose(): RootAccountCompose
+    {
+        return Privileged::accountCompose($this->project->username());
     }
 
     /**
@@ -652,9 +728,11 @@ final class ShellOperations
      */
     public static function stepLabel(array $cmd): string
     {
-        $dind = array_search('dind', $cmd, true);
-        if ($cmd[0] === 'sudo' && ($cmd[2] ?? null) === 'compose' && $dind !== false) {
-            $cmd = array_slice($cmd, $dind + 1);
+        if (RootAccountCompose::isRunRequest($cmd)) {
+            return 'docker '.implode(' ', RootAccountCompose::commandOf($cmd));
+        }
+        if (RootAccountContainer::isExecRequest($cmd)) {
+            $cmd = RootAccountContainer::commandOf($cmd);
         }
         if (($cmd[0] ?? null) === 'su' && ($c = array_search('-c', $cmd, true)) !== false) {
             return (string) ($cmd[$c + 1] ?? '');

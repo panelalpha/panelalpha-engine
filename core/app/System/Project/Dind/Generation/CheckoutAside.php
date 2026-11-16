@@ -2,15 +2,16 @@
 
 namespace App\System\Project\Dind\Generation;
 
+use App\System;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\ProjectBindMounts;
 use App\System\Project\Git\Path as GitPath;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The checkout a running app was deployed from, moved aside while a redeploy prepares the new one in its
- * place: a container bind-mounting ~/project keeps the directory, so it serves on. Afterwards it is removed,
- * or put back with its branch records when the deploy failed and its containers still run.
+ * A running app's checkout, set aside while a redeploy prepares the new one: a container bind-mounting ~/project
+ * keeps it and serves on. Then removed, or put back with its branch records if the deploy failed and its app runs.
  */
 final class CheckoutAside
 {
@@ -22,10 +23,6 @@ final class CheckoutAside
 
     private const INSPECT_TIMEOUT_SECONDS = 30;
 
-    /** Asks dockerd first, so a daemon not up yet is not read as every container stopped. */
-    private const RUNNING_SCRIPT = 'docker version >/dev/null 2>&1 || { echo "docker is not answering" >&2; exit 1; }; '
-        .'for id in "$@"; do docker inspect --format "{{.State.Running}}" "$id" 2>/dev/null || echo gone; done';
-
     public function __construct(private readonly DindProject $project) {}
 
     public function asidePath(): string
@@ -34,9 +31,8 @@ final class CheckoutAside
     }
 
     /**
-     * $copyBack when the deploy builds on the files already there; $binds when
-     * a container reads the checkout through a bind mount. False when it
-     * could not, and the caller goes on as before.
+     * $copyBack when the deploy builds on the files already there; $binds when a container reads the checkout
+     * through a bind mount. False when it could not, and the caller goes on as before.
      *
      * @param  list<string>  $containers  the project's running containers
      */
@@ -103,8 +99,8 @@ final class CheckoutAside
     {
         $system = $this->project->system();
         try {
-            $system->exec(['sudo', 'rm', '-rf', $aside], [], 300);
-            $system->exec(['sudo', 'mv', '-T', $this->project->userAppDirPath(), $aside], [], 120);
+            $system->exec(Privileged::files()->removeTree($aside), [], 300);
+            $system->exec(Privileged::files()->rename($this->project->userAppDirPath(), $aside), [], 120);
         } catch (\Throwable $e) {
             Log::warning("Could not move the checkout of {$this->project->username()} aside: ".$e->getMessage());
             try {
@@ -121,7 +117,7 @@ final class CheckoutAside
     private function copyBack(GenerationState $state, string $aside): bool
     {
         try {
-            $this->project->system()->exec(['sudo', 'cp', '-a', '-T', $aside, $this->project->userAppDirPath()], [], self::COPY_TIMEOUT_SECONDS);
+            $this->project->system()->exec(Privileged::files()->copyTree($aside, $this->project->userAppDirPath()), [], self::COPY_TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
             Log::warning("Could not copy the checkout of {$this->project->username()} back: ".$e->getMessage());
             $this->putBack();
@@ -155,9 +151,8 @@ final class CheckoutAside
     }
 
     /**
-     * Before the checkout changes under a running app (a pull, a revert, a
-     * push): the tree it was deployed from stays aside, the change lands in a
-     * copy. What the app mounts (maybe nothing), or null when nothing was moved.
+     * Before the checkout changes under a running app (a pull, a revert, a push): its tree stays aside, the change
+     * lands in a copy. What the app mounts (maybe nothing), or null when nothing was moved.
      *
      * @return ?list<string>
      */
@@ -260,7 +255,7 @@ final class CheckoutAside
             if ($outcome === 'restored') {
                 $this->putBack();
             } else {
-                $this->project->system()->exec(['sudo', 'rm', '-rf', $this->asidePath()], [], 600);
+                $this->project->system()->exec(Privileged::files()->removeTree($this->asidePath()), [], 600);
             }
         } catch (\Throwable $e) {
             Log::warning("Could not settle the checkout of {$this->project->username()}: ".$e->getMessage());
@@ -279,10 +274,10 @@ final class CheckoutAside
     }
 
     /**
-     * An aside directory no record names, left by a process that died between
-     * the move and the record: put back while ~/project is gone, never deleted.
+     * An aside directory no record names (moved by hand, or by a process that recorded nothing):
+     * put back while ~/project is gone or empty, never deleted.
      *
-     * @return ?string 'restored', 'not-restorable' when ~/project exists, or
+     * @return ?string 'restored', 'not-restorable' when ~/project holds files, or
      *                 null when nothing is stranded or the move failed
      */
     public function reconcileStranded(): ?string
@@ -291,13 +286,13 @@ final class CheckoutAside
         if ($state->get(GenerationState::CHECKOUT) !== null || ! $this->asideExists()) {
             return null;
         }
-        if ($this->project->system()->filesystem()->directoryExists($this->project->userAppDirPath())) {
+        if (! $this->projectDirMissingOrEmpty()) {
             return 'not-restorable';
         }
 
         try {
             $this->project->system()->exec(
-                ['sudo', 'mv', '-T', $this->asidePath(), $this->project->userAppDirPath()],
+                Privileged::files()->rename($this->asidePath(), $this->project->userAppDirPath()),
                 [],
                 120
             );
@@ -308,6 +303,41 @@ final class CheckoutAside
         }
 
         return 'restored';
+    }
+
+    /** A directory that cannot be listed is read as holding files: nothing is moved onto what cannot be seen. */
+    private function projectDirMissingOrEmpty(): bool
+    {
+        $filesystem = $this->project->system()->filesystem();
+        $projectDir = $this->project->userAppDirPath();
+        if (! $filesystem->directoryExists($projectDir)) {
+            return true;
+        }
+        try {
+            return array_filter($filesystem->ls($projectDir), static fn (string $entry): bool => $entry !== '') === [];
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Accounts whose home holds an aside directory, recorded or not: one host command for every home.
+     *
+     * @return list<string>
+     */
+    public static function accountsWithAside(System $system): array
+    {
+        try {
+            $homes = $system->exec(
+                Privileged::files()->parentsOfDirectoriesTwoLevelsDownNamed($system->homesDirPath(), self::DIR),
+                [],
+                self::INSPECT_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map('basename', array_filter(array_map('trim', explode("\n", $homes))))));
     }
 
     private function asideExists(): bool
@@ -401,15 +431,17 @@ final class CheckoutAside
         if (! $this->asideExists()) {
             throw new \RuntimeException('nothing is aside to put back');
         }
-        $system->exec(['sudo', 'rm', '-rf', $failed], [], 600);
+        $system->exec(Privileged::files()->removeTree($failed), [], 600);
         if ($system->filesystem()->directoryExists($projectDir)) {
-            $system->exec(['sudo', 'mv', '-T', $projectDir, $failed], [], 120);
+            $system->exec(Privileged::files()->rename($projectDir, $failed), [], 120);
         }
-        $system->exec(['sudo', 'mv', '-T', $this->asidePath(), $projectDir], [], 120);
-        $system->exec(['sudo', 'rm', '-rf', $failed], [], 600);
+        $system->exec(Privileged::files()->rename($this->asidePath(), $projectDir), [], 120);
+        $system->exec(Privileged::files()->removeTree($failed), [], 600);
     }
 
     /**
+     * Null when the daemon could not be asked, so a daemon not up yet is not read as every container gone.
+     *
      * @param  list<string>  $ids
      */
     public static function allRunning(DindProject $project, array $ids): ?bool
@@ -418,18 +450,19 @@ final class CheckoutAside
             return false;
         }
         try {
-            $out = $project->shell()->execQuiet(['bash', '-c', self::RUNNING_SCRIPT, 'running', ...$ids], [], self::INSPECT_TIMEOUT_SECONDS);
+            $inspected = $project->accountDaemon()->containers($ids, self::INSPECT_TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
 
-        return self::allTrue($out, count($ids));
+        return self::allTrue($inspected, count($ids));
     }
 
-    public static function allTrue(string $inspect, int $expected): bool
+    /** @param  list<array<string, mixed>|null>  $inspected */
+    public static function allTrue(array $inspected, int $expected): bool
     {
-        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', trim($inspect)) ?: []), static fn (string $l): bool => $l !== ''));
+        $running = array_filter($inspected, static fn (?array $container): bool => ($container['State']['Running'] ?? null) === true);
 
-        return count($lines) === $expected && array_unique($lines) === ['true'];
+        return count($inspected) === $expected && count($running) === $expected;
     }
 }

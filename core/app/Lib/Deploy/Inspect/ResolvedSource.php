@@ -3,12 +3,8 @@
 namespace App\Lib\Deploy\Inspect;
 
 /**
- * A source made readable: the directory to inspect, what it came from, and how
- * to put it back.
- *
- * `release()` matters. A git source is a real clone in a temp directory, and an
- * inspection endpoint that leaked one per call would fill the disk of a server
- * whose whole job is other people's disks. Callers run it in a finally block.
+ * A source made readable: the directory to inspect, what it came from, and how to put it back. Callers
+ * run `release()` in a finally block, or every git source leaks a temp clone.
  */
 final class ResolvedSource
 {

@@ -62,7 +62,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository and running a Lighthouse report on one of this engine's sites still work. The tools that hand out a password or a login (`app_credentials_get`, `file_download`) are not offered. |
 | `modify` | Create and change things, and blocks only DELETE routes. It is **not** a "no destructive actions" setting: the write tools that are not plain creations (`ssh_run`, `wp_cli_run`, `backup_restore`, `file_write`, `system_update`, `firewall_disable`, `project_rebuild`) still run. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -108,7 +108,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 287 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 311 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -132,6 +132,8 @@ MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,task_get,deploy_log_
 Large results come back in pieces. `deploy_log_get` returns about 48 KB of log at a time, and `file_download` and `domain_log_download` return about 48 KB of a file at a time, as text when the file is text. Each result says whether there is `more` and where the next piece starts. Any other result over 256 KB is refused with a note on how to ask for less. The assistant handles this itself.
 
 One thing to know if your assistant asks before it runs a tool: it sees `execute_tools`, not the tool inside it. If you tell it to always allow `execute_tools`, you have allowed every tool it can find. Use `MCP_PERMISSION_MODE` and `MCP_DENIED_TOOLS` for the limits that must hold. The engine enforces those itself.
+
+The engine also tells every assistant to ask you what a delete, restore, archive deploy or import will remove or overwrite, and to wait for a yes before it calls the tool. That is an instruction to the assistant, not a block. The settings above are what hold.
 
 These settings only affect the assistant. They do not change the REST API or `pae`.
 
@@ -324,7 +326,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **225** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **231** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -339,12 +341,13 @@ pae mcp:tool:list
 | Group | Toolset | Default | Tools |
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
-| [Projects](#projects) | `projects` | On | 22 |
+| [Projects](#projects) | `projects` | On | 26 |
+| [Uploads](#projects) | `uploads` | On | 3 |
 | [Domains](#domains) | `domains` | On | 8 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
-| [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 4 |
+| [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 5 |
 | [MySQL databases](#mysql-databases) | `mysqldatabases` | On | 5 |
 | [MySQL users](#mysql-users) | `mysqlusers` | On | 6 |
 | [MySQL privileges](#mysql-privileges) | `mysqlprivileges` | On | 3 |
@@ -361,7 +364,7 @@ pae mcp:tool:list
 | [WordPress import](#wordpress-import) | `wordpressmigrations` | On | 7 |
 | [Deploy](#deploy) | `deploy` | On | 7 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
-| [System](#system) | `system` | On | 15 |
+| [System](#system) | `system` | On | 29 |
 | [Server metrics](#server-metrics) | `servermetrics` | On | 6 |
 | [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
@@ -372,11 +375,11 @@ pae mcp:tool:list
 | [Backups](#backups) | `backups` | On | 9 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
 | [CDN](#cdn) | `cdn` | On | 3 |
-| [Git](#git) | `git` | On | 16 |
+| [Git](#git) | `git` | On | 17 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
 | [Tasks](#tasks) | `tasks` | On | 4 |
-| [Secret vault](#secret-vault) | `secretvault` | On | 5 |
+| [Secret vault](#secret-vault) | `secretvault` | On | 6 |
 
 ## Engine summaries
 
@@ -393,8 +396,8 @@ pae mcp:tool:list
 | `env_var_list` | List the environment variables a container project holds, with the values hidden unless asked for |
 | `env_var_set` | Set or remove environment variables of a container project, and apply them without a rebuild if asked |
 | `project_clone` | Clone a project |
-| `project_create` | Create a new hosting project (async) |
-| `project_create_sync` | Create a project and wait for the deploy in the same call. Same body as `project_create` |
+| `project_create` | Create a project from a source: an empty one, a git repository (HTTPS, or SSH with a deploy key), an archive, a copy of another project, or a new WordPress; deployed in the background |
+| `project_create_sync` | Create a project and wait for the deploy in the same call. Takes the flat body (`git_repo`, `template`) |
 | `project_delete` | Delete a project and everything in it |
 | `project_deploy_archive` | Deploy an uploaded zip/tar into ~/project |
 | `project_get` | Get a project |
@@ -402,10 +405,17 @@ pae mcp:tool:list
 | `project_list_all` | List all projects (no pagination) |
 | `project_password_set` | Set a password visitors must type before they see the site |
 | `project_password_unset` | Remove that password |
+| `project_overlay_delete` | Remove a project's own overlay and show the global one on it again |
+| `project_overlay_get` | Read a project's overlay and whether the global one reaches it |
+| `project_overlay_set` | Write HTML (a banner, a script) into every page of a project |
 | `project_push` | Push project state to a paired staging or live project |
 | `project_push_diff` | Compare the database tables of a staging project with its live project, without copying anything |
 | `project_rebuild` | Redeploy a project |
-| `project_source_attach` | Attach a git repository to a project created without one, and deploy it |
+| `project_source_attach` | Attach an HTTPS git repository to a project created without one, and deploy it |
+| `project_source_set` | Set the git or archive source of a container project, and deploy it |
+| `upload_create` | Store an archive on the engine for a project not created yet |
+| `upload_get` | Get an upload |
+| `upload_delete` | Delete an upload no create has used |
 | `project_staging` | Create a linked staging mirror of a live project |
 | `project_suspend` | Suspend a project |
 | `project_unsuspend` | Unsuspend a project |
@@ -458,6 +468,7 @@ pae mcp:tool:list
 | `ssl_cert_get` | Get installed SSL cert for a domain |
 | `ssl_cert_install` | Install a custom SSL certificate on a domain |
 | `ssl_cert_list` | List installed SSL certificates for the domains of a project |
+| `ssl_cert_remove` | Remove the certificate installed on a domain and put it back on the engine's own |
 | `ssl_check` | Check the certificate a domain really serves |
 
 ## MySQL databases
@@ -585,7 +596,7 @@ pae mcp:tool:list
 | `project_bandwidth` | Project transfer over a date range (`start`, `end`, `group_by` day or month), in bytes |
 | `domain_bandwidth` | Transfer over a date range for one domain |
 | `domain_visitors` | Visitor overview for a domain. `start`/`end` clip daily hits and visits; unique visitors, session length, and breakdowns are overlapping calendar months. Period aliases such as last-week stay in the client. |
-| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain), or requests and bytes per HTTP status (`status_codes`, exact range) |
+| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os or browsers (month grain), or requests and bytes per HTTP status (`status_codes`, exact range) |
 | `project_metrics_history` | A project's CPU and memory over 1 hour, 24 hours, 7 days or 30 days |
 | `container_metrics` | CPU and memory of each container inside a project, now or over a `range` |
 
@@ -664,7 +675,7 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | Tool | What it does |
 |---|---|
 | `deploy_cancel` | Cancel a running or queued deploy: mark cancelled, kill the subprocess tree, clean up |
-| `deploy_list` | List the deploys the project still has a log of, newest first |
+| `deploy_list` | List the deploys the project still has a log of, newest first. `per_page` (1 to 200) or `page` returns one page |
 | `deploy_log_get` | Poll the deploy log (JSON-lines) from a byte-like line offset |
 | `deploy_log_read` | Read a page of one kept deploy's log by its id |
 | `project_inspect` | Inspect a project's deployed application files |
@@ -689,10 +700,24 @@ Moves a WordPress site from another host onto this engine: [Move a WordPress sit
 | `system_api_access_deny` | Take that access away from a project |
 | `system_api_access_list` | List the projects allowed to call the engine's API |
 | `system_api_access_rotate` | Replace an allowed project's API token |
+| `system_build_cache_build` | Build a public repository's caches ahead of its deploys |
+| `system_build_cache_list` | List the build caches the image cache holds |
+| `system_build_cache_remove` | Remove a repository's build caches |
+| `system_egress_list` | List the projects and builds the outbound limits stopped |
+| `system_egress_unblock` | Lift a project's or build's outbound scan block |
 | `system_engine_cert_request` | Request the engine's own Let's Encrypt certificate |
 | `system_exim_config_get` | Get Exim mail server configuration |
 | `system_exim_config_set` | Update Exim mail server configuration |
+| `system_image_create` | Add a base image every project's Dockerfile can start from |
+| `system_image_delete` | Remove a base image from the image cache |
+| `system_image_get` | Get one base image |
+| `system_image_list` | List the base images, yours and the engine's |
+| `system_image_refresh` | Build, download or publish a base image again |
+| `system_image_update` | Replace a base image's Dockerfile and rebuild it |
 | `system_info` | Get system information |
+| `system_overlay_delete` | Remove the global overlay |
+| `system_overlay_get` | Read the global overlay |
+| `system_overlay_set` | Write HTML (a banner, a script) into every page of every project |
 | `system_ssl_config_get` | How certificates for project sites are obtained |
 | `system_ssl_config_set` | Set how certificates for project sites are obtained |
 | `system_test_email_send` | Send a test email via Exim |
@@ -825,6 +850,7 @@ Cloudflare cache and security level for a domain, with the project's own Cloudfl
 | `git_deploy_hook_show` | Show a push-to-deploy hook |
 | `git_deploy_key_create` | Create a git deploy key |
 | `git_deploy_key_delete` | Delete a git deploy key |
+| `git_deploy_key_show` | Show a git deploy key |
 | `git_disconnect` | Disconnect git from a directory |
 | `git_pull` | Pull from the git remote |
 | `git_push` | Push local git changes |
@@ -863,6 +889,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 | Tool | What it does |
 |---|---|
 | `vault_secret_create` | Creates a paste page so you can give the engine a secret without putting it in chat |
+| `vault_deploy_key_create` | Generates an SSH deploy key and shows its public half, for a project created from an SSH remote |
 | `vault_secret_delete` | Deletes a paste slot |
 | `vault_secret_list` | Lists paste slots. The secret itself is never included |
 | `vault_secret_status` | Whether a paste slot has a secret yet |

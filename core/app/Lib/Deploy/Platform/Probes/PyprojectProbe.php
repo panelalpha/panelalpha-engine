@@ -7,9 +7,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 
 /**
- * Python declared by a `pyproject.toml`: a `[project]` (PEP 621) or
- * `[tool.poetry]` table. The name alone is not evidence — it is TOML's generic
- * config filename that any tool borrows. Yields the python platform.
+ * Python declared by a `pyproject.toml` `[project]` or `[tool.poetry]` table; the filename alone
+ * is not evidence, since any tool borrows it.
  */
 final class PyprojectProbe implements PlatformProbe
 {

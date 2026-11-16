@@ -4,10 +4,11 @@ namespace Tests\Unit\System\Project\Dind;
 
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\HeldImage;
 use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\InnerDocker;
-use App\System\Project\Dind\ShellOperations;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -16,7 +17,7 @@ use Tests\TestCase;
  */
 class HeldImageTest extends TestCase
 {
-    /** @var list<string> */
+    /** @var list<string> the account daemon requests, as action and values after the account */
     private array $docker = [];
 
     /** @var list<string> */
@@ -29,7 +30,7 @@ class HeldImageTest extends TestCase
         $held = HeldImage::hold($this->account(), 'panelalpha-live-app:latest');
 
         $this->assertSame('panelalpha-live-app:pre-push', $held?->holdingTag());
-        $this->assertSame(['tag panelalpha-live-app:latest panelalpha-live-app:pre-push'], $this->docker);
+        $this->assertSame(['account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push'], $this->docker);
     }
 
     public function test_nothing_is_held_when_the_account_has_no_such_image(): void
@@ -47,8 +48,8 @@ class HeldImageTest extends TestCase
 
         $this->assertSame(
             [
-                'tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
-                'tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
+                'account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
+                'account-docker.tag panelalpha-live-app:pre-push panelalpha-live-app:latest',
             ],
             $this->docker
         );
@@ -62,7 +63,10 @@ class HeldImageTest extends TestCase
         $held?->release();
 
         $this->assertSame(
-            ['tag panelalpha-live-app:latest panelalpha-live-app:pre-push', 'rmi -f panelalpha-live-app:pre-push'],
+            [
+                'account-docker.tag panelalpha-live-app:latest panelalpha-live-app:pre-push',
+                'account-docker.removeImages force panelalpha-live-app:pre-push',
+            ],
             $this->docker
         );
     }
@@ -82,9 +86,10 @@ class HeldImageTest extends TestCase
         $inner->method('seeding')->willReturn($seeding);
 
         $dind = $this->createStub(Dind::class);
+        $dind->method('username')->willReturn('u');
         $dind->method('system')->willReturn($this->system());
         $dind->method('innerDocker')->willReturn($inner);
-        $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
 
         return $dind;
     }
@@ -103,7 +108,7 @@ class HeldImageTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $cmd = (array) $cmd;
-                ($this->record)(implode(' ', array_slice($cmd, (int) array_search('dind', $cmd, true) + 2)));
+                ($this->record)(implode(' ', [LocalRoot::action($cmd), ...array_slice(LocalRoot::values($cmd), 1)]));
 
                 return '';
             }

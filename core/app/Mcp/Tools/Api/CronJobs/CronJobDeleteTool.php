@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('cron_job_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a cron job
+
+    The hash is derived from the job's entries, so it is the one the list or the last update returned. The job stops running and its schedule is not kept anywhere; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -59,7 +61,7 @@ class CronJobDeleteTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'hash' => $schema->string()->required(),
+            'hash' => $schema->string()->description('The job hash, as the list returned it.')->required(),
         ];
     }
 }

@@ -5,11 +5,8 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\Port\EnvVarDefault;
 
 /**
- * The `volumes:` block a reduced stack still needs.
- *
- * Only named volumes the kept services actually mount: a bind mount points at
- * a workstation path that does not exist in the account, and a declared
- * volume nothing uses is a directory the account pays for.
+ * The `volumes:` block a reduced stack still needs: named volumes the kept services mount. A bind mount is a workstation
+ * path the account lacks, and a volume nothing uses is a directory the account pays for.
  */
 final class NamedVolumes
 {
@@ -31,9 +28,8 @@ final class NamedVolumes
     }
 
     /**
-     * A mount whose whole source is a bare `${VAR}` nothing sets interpolates to
-     * `:/config`, and compose rejects the file (deemix: "Set DEEMIX_CONFIG_PATH in
-     * the shell"). Each becomes a named volume called after the variable.
+     * A mount whose whole source is a bare `${VAR}` nothing sets interpolates to `:/config`, which compose rejects; each
+     * becomes a named volume called after the variable.
      *
      * @param  array<string, mixed>  $compose
      * @param  array<string, list<?string>|string>  $env  what compose may interpolate with
@@ -89,13 +85,13 @@ final class NamedVolumes
     }
 
     /**
+     * A string is resolved before it is split: `${SOCK:-/run/docker.sock}:/run/docker.sock` split as written gives `${SOCK`.
+     *
      * @param  mixed  $volume
      */
     private static function sourceOf($volume): string
     {
         if (is_string($volume)) {
-            // Resolved first: `${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock`
-            // split as written gives `${DOCKER_SOCKET`, which compose rejects as a volume name.
             $volume = EnvVarDefault::resolve($volume);
 
             return str_contains($volume, ':') ? explode(':', $volume, 2)[0] : '';

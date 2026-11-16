@@ -4,6 +4,7 @@ namespace Tests\Unit\Console;
 
 use App\Jobs\DeployProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Project\ProjectDeleter;
 use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
@@ -46,10 +47,39 @@ class ProjectDeleteCommandTest extends TestCase
     public function test_an_operator_answering_no_still_exits_0(): void
     {
         $this->artisan('project:delete', ['project' => ['keepme']])
-            ->expectsConfirmation('User `keepme` will be completely deleted from server, are you sure?', 'no')
+            ->expectsConfirmation('Project `keepme` will be completely deleted from server, are you sure?', 'no')
             ->assertExitCode(0);
 
         $this->assertTrue(User::existsByUsername('keepme'));
+    }
+
+    public function test_an_unknown_project_is_reported_as_a_project(): void
+    {
+        $exit = Artisan::call('project:delete', ['project' => ['nosuch'], '--force' => true]);
+
+        $output = Artisan::output();
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('Project `nosuch` not found in database.', $output);
+        $this->assertStringNotContainsString('User `', $output);
+    }
+
+    public function test_a_deleted_project_is_reported_as_a_project(): void
+    {
+        $this->app->instance(ProjectDeleter::class, new class extends ProjectDeleter
+        {
+            public function delete(User $user): void
+            {
+                $user->delete();
+            }
+        });
+
+        $exit = Artisan::call('project:delete', ['project' => ['keepme'], '--force' => true]);
+
+        $output = Artisan::output();
+        $this->assertSame(0, $exit, $output);
+        $this->assertStringContainsString('Project `keepme` deleted.', $output);
+        $this->assertStringNotContainsString('User `', $output);
+        $this->assertFalse(User::existsByUsername('keepme'));
     }
 
     /** A PHP Error deleting one project is reported like any failure, and the next one is still deleted. */
@@ -73,8 +103,8 @@ class ProjectDeleteCommandTest extends TestCase
 
         $output = Artisan::output();
         $this->assertSame(1, $exit);
-        $this->assertStringContainsString("ERROR deleting user `{$first}`: type confusion", $output);
-        $this->assertStringContainsString("ERROR deleting user `{$second}`: host refused", $output, 'the loop went on past the Error');
+        $this->assertStringContainsString("ERROR deleting project `{$first}`: type confusion", $output);
+        $this->assertStringContainsString("ERROR deleting project `{$second}`: host refused", $output, 'the loop went on past the Error');
     }
 
     private function runningTask(string $username): void

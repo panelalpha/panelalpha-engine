@@ -85,7 +85,7 @@ final class S3 extends AbstractStorage
             $this->filesystem->write(self::PROBE_FILE, 'ok');
             $this->filesystem->delete(self::PROBE_FILE);
         } catch (UnableToWriteFile|UnableToDeleteFile $exception) {
-            throw new RuntimeException('Backup storage is not writable.', 0, $exception);
+            throw new RuntimeException('Backup storage is not writable: '.$exception->reason(), 0, $exception);
         }
     }
 

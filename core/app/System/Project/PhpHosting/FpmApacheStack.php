@@ -5,8 +5,11 @@ namespace App\System\Project\PhpHosting;
 use App\Models\Domain;
 use App\Models\User as ModelsUser;
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\Arguments;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\Services\Service;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 final class FpmApacheStack implements PhpStack
@@ -39,10 +42,10 @@ final class FpmApacheStack implements PhpStack
         return ['10-remoteip.sh' => 'a2enmod remoteip 2>/dev/null || true'];
     }
 
+    /** The PHP services, then Apache in the foreground after apache2ctl's own setup. */
     public function services(PhpHosting $project): array
     {
         $services = (new FpmStack($this->system, $this->model))->services($project);
-        // apache2ctl's own setup, then Apache in the foreground.
         $services[] = new Service(
             'apache2',
             '. /etc/apache2/envvars'."\n"
@@ -75,12 +78,15 @@ final class FpmApacheStack implements PhpStack
         (new FpmStack($this->system, $this->model))->restartPhpHandler($project, $phpVersion);
     }
 
+    public function reloadPhpHandler(PhpHosting $project, string $phpVersion): void
+    {
+        (new FpmStack($this->system, $this->model))->reloadPhpHandler($project, $phpVersion);
+    }
+
     public function isApacheRunning(PhpHosting $project): bool
     {
         try {
-            $result = $project->system()->exec(
-                "sudo docker compose -f {$project->composeFilePath()} exec -T php service apache2 status"
-            );
+            $result = $project->system()->exec($project->execArgv(['service', 'apache2', 'status']));
         } catch (\Exception $e) {
             return false;
         }
@@ -112,14 +118,7 @@ final class FpmApacheStack implements PhpStack
 
         $phpVersion = $domain->getPhpVersion();
         if ($phpVersion) {
-            // Through the account's services, never `service ... restart`: that
-            // starts a master they cannot see, and every later INI change missed it.
-            try {
-                $this->restartPhpHandler($project, $phpVersion);
-            } catch (PhpHandlerNotRunning) {
-                // A PHP version switch lands here before the services are
-                // written; the sync that follows starts it.
-            }
+            $this->reloadManagedPhpHandler($project, $phpVersion);
         }
 
         $this->reloadWebserver($project);
@@ -172,7 +171,7 @@ final class FpmApacheStack implements PhpStack
     public function deleteAllDomainsConfigs(PhpHosting $project): void
     {
         $domainConfigsDir = $project->system()->projectDirPath($project->username()).'/apache-sites';
-        $project->system()->runProcess("sudo rm -rf {$domainConfigsDir}/* {$domainConfigsDir}/.*");
+        $project->system()->runProcess(Privileged::fileLines()->emptyDirectory($domainConfigsDir));
     }
 
     /**
@@ -189,24 +188,37 @@ final class FpmApacheStack implements PhpStack
     {
         $dir = $project->system()->projectDirPath($project->username()).'/apache-sites';
         $configFile = $dir.'/'.$domainName.'.conf';
-        $project->system()->exec(['sudo', 'rm', '-f', $configFile]);
+        $project->system()->exec(Privileged::files()->removeIfExists($configFile));
     }
 
     public function reloadApache(PhpHosting $project): void
     {
-        $project->system()->exec(
-            "sudo docker compose -f {$project->composeFilePath()} exec -T php service apache2 reload"
-        );
+        $project->system()->exec($project->execArgv(['service', 'apache2', 'reload']));
     }
 
     public function enableApacheMod(PhpHosting $project, string $mod): void
     {
-        $project->system()->exec("sudo docker compose -f {$project->composeFilePath()} exec -T php a2enmod {$mod}");
+        $project->system()->exec($project->execArgv(['a2enmod', Arguments::apacheModule($mod)]));
     }
 
     public function disableApacheMod(PhpHosting $project, string $mod): void
     {
-        $project->system()->exec("sudo docker compose -f {$project->composeFilePath()} exec -T php a2dismod {$mod}");
+        $project->system()->exec($project->execArgv(['a2dismod', Arguments::apacheModule($mod)]));
+    }
+
+    /**
+     * Through the account's services, never `service ... restart`, whose master they cannot see: a vhost change
+     * leaves the handler's own configuration as it was, so its workers are replaced and running requests finish.
+     * A swap that fails is logged and never keeps the webserver from loading the new vhost.
+     */
+    private function reloadManagedPhpHandler(PhpHosting $project, string $phpVersion): void
+    {
+        try {
+            $this->reloadPhpHandler($project, $phpVersion);
+        } catch (PhpHandlerNotRunning) {
+        } catch (\RuntimeException $e) {
+            Log::warning("{$project->username()}: {$e->getMessage()}");
+        }
     }
 
     private function confirmApacheRunning(PhpHosting $project): bool

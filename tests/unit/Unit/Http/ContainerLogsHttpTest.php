@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Schema;
 use Laravel\Mcp\Request as McpRequest;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -90,7 +91,7 @@ class ContainerLogsHttpTest extends TestCase
                 $this->test->commands[] = (array) $cmd;
                 $this->test->timeouts[] = $timeout;
                 if ($this->test->execAnswer !== null) {
-                    return ($this->test->execAnswer)(end($this->test->commands)[13] ?? '');
+                    return ($this->test->execAnswer)(ContainerLogsHttpTest::insideAccount(end($this->test->commands)));
                 }
 
                 return "a log line\n";
@@ -229,17 +230,16 @@ class ContainerLogsHttpTest extends TestCase
             ['type' => 'finish'],
         ], $frames);
 
-        $inner = $this->innerCommand();
-        $this->assertMatchesRegularExpression("/^'timeout' '600' 'env' 'PANELALPHA_LOG_FOLLOW=[0-9a-f]{12}' 'PWD=/", $inner);
-        $this->assertStringContainsString(
+        $this->assertStringEndsWith(
             "'logs' '--tail=10' '--no-color' '--follow' '--timestamps' '--no-log-prefix' '--since=5m' '--' 'app'",
-            $inner,
+            $this->innerCommand(),
         );
+        $this->assertSame($this->tmpRoot . '/home/alice/project', LocalRoot::accountEnvironment(end($this->commands))['PWD'] ?? null);
     }
 
-    public function test_a_client_that_leaves_stops_the_follow_inside_the_account(): void
+    public function test_a_client_that_leaves_stops_the_follow(): void
     {
-        $this->followChunks = ["2026-10-03T12:00:00Z one\n", "2026-10-03T12:00:01Z two\n"];
+        $this->followCommand = ['sh', '-c', 'echo "2026-10-03T12:00:00Z one"; echo "2026-10-03T12:00:01Z two"; sleep 30'];
         $dind = User::findByUsername('alice')->project(app(System::class))->runtime();
         $seen = [];
 
@@ -254,8 +254,8 @@ class ContainerLogsHttpTest extends TestCase
         }
 
         $this->assertSame(['one'], $seen);
-        preg_match("/PANELALPHA_LOG_FOLLOW=[0-9a-f]{12}/", $this->commands[0][13], $tag);
-        $this->assertSame("'pkill' '-TERM' '-f' '{$tag[0]}'", $this->innerCommand());
+        $this->assertFalse($this->followProcess->isRunning());
+        $this->assertStringContainsString("'--follow'", $this->innerCommand());
     }
 
     /**
@@ -326,8 +326,7 @@ class ContainerLogsHttpTest extends TestCase
 
         $this->assertSame(0, $lines);
         $this->assertLessThan(ContainerOperations::FOLLOW_IDLE_SECONDS + 2, microtime(true) - $started);
-        preg_match("/PANELALPHA_LOG_FOLLOW=[0-9a-f]{12}/", $this->commands[0][13], $tag);
-        $this->assertSame("'pkill' '-TERM' '-f' '{$tag[0]}'", $this->innerCommand());
+        $this->assertFalse($this->followProcess->isRunning());
     }
 
     public function test_a_name_that_starts_with_a_dash_is_refused_before_compose_runs(): void
@@ -517,7 +516,7 @@ class ContainerLogsHttpTest extends TestCase
         $response = $this->get('/api/projects/alice/containers/app/logs/stream');
 
         $response->assertOk();
-        $this->assertStringEndsWith("'logs' '--tail=0' '--no-color' '--' 'app'", $this->commands[0][13]);
+        $this->assertStringEndsWith("'logs' '--tail=0' '--no-color' '--' 'app'", self::insideAccount($this->commands[0]));
         // Shorter than a read, since nothing is sent until compose answers.
         $this->assertSame(ContainerOperations::SERVICE_CHECK_SECONDS, $this->timeouts[0]);
         $this->assertStringContainsString('{"line":"up"', $response->streamedContent());
@@ -554,7 +553,7 @@ class ContainerLogsHttpTest extends TestCase
                 ->assertJsonPath('problems.0.examples', ['app', 'db']);
             $this->assertStringContainsString(
                 "'{$action}' '--' 'nosuchsvc'",
-                implode("\n", array_map(static fn (array $command): string => (string) ($command[13] ?? ''), $this->commands))
+                implode("\n", array_map(static fn (array $command): string => self::insideAccount($command), $this->commands))
             );
         }
         // A refused stop is not a stop the health sweep should respect.
@@ -624,13 +623,25 @@ class ContainerLogsHttpTest extends TestCase
         $this->assertSame(['plain', null], ContainerOperations::splitTimestamp('plain'));
     }
 
-    /** The command run inside the account, as `su -c` receives it. */
+    /**
+     * The docker client line a broker request runs for the account, quoted as a shell reads it; empty for any other
+     * command.
+     *
+     * @param  list<string>  $command
+     */
+    public static function insideAccount(array $command): string
+    {
+        return LocalRoot::composeLine($command);
+    }
+
+    /** The docker client line the last command ran as the account. */
     private function innerCommand(): string
     {
         $last = end($this->commands);
         $this->assertIsArray($last);
-        $this->assertSame(['su', '-s', '/bin/bash', 'alice', '-c'], array_slice($last, 8, 5));
+        $this->assertSame('account-compose.run', LocalRoot::action($last));
+        $this->assertSame(['alice', ''], array_slice(LocalRoot::values($last), 0, 2));
 
-        return $last[13];
+        return self::insideAccount($last);
     }
 }

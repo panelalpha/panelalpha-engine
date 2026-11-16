@@ -7,9 +7,11 @@ use App\Http\Middleware\Authenticate;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem;
-use App\System\Project\Cron;
+use App\System\Privileged;
+use App\System\Project\CronRunner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -86,9 +88,12 @@ class CronBeforeFirstDeployTest extends TestCase
         $created = $system->project($user)->cron()->create(self::JOB);
 
         $this->assertSame([
-            ['sudo', 'touch', $this->crontab()],
-            ['sudo', 'chown', '1500:1500', $this->crontab()],
-            ['sudo', 'chmod', '600', $this->crontab()],
+            Privileged::files()->touch($this->crontab()),
+            Privileged::files()->changeOwner('1500:1500', $this->crontab()),
+            Privileged::files()->changeMode('600', $this->crontab()),
+            Privileged::files()->makeDirectories($this->root . '/home/alice/' . CronRunner::LOG_DIR),
+            Privileged::files()->changeOwner('1500:1500', $this->root . '/home/alice/' . CronRunner::LOG_DIR),
+            Privileged::files()->changeMode('755', $this->root . '/home/alice/' . CronRunner::LOG_DIR),
         ], $system->calls);
         $this->assertSame([$created], $system->project($user)->cron()->list());
     }
@@ -139,8 +144,8 @@ class CronBeforeFirstDeployTest extends TestCase
     }
 
     /**
-     * The engine dir under a temp root; `sudo touch` creates the file, and a
-     * read through the filesystem is recorded, as `sudo cp` would run it.
+     * The engine dir under a temp root; a `files.touch` request creates the file, and a
+     * read through the filesystem is recorded, as the broker would run it.
      */
     private function system(): System
     {
@@ -168,8 +173,8 @@ class CronBeforeFirstDeployTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->calls[] = $cmd;
-                if (is_array($cmd) && $cmd[1] === 'touch') {
-                    touch($cmd[2]);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.touch') {
+                    touch(LocalRoot::values($cmd)[0]);
                 }
 
                 return '';
@@ -194,6 +199,12 @@ class CronBeforeFirstDeployTest extends TestCase
 
                     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
                     {
+                        file_put_contents($path, $contents);
+                    }
+
+                    public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
+                    {
+                        @mkdir(dirname($path), 0777, true);
                         file_put_contents($path, $contents);
                     }
                 };

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Lib\Deploy\Dind\AccountImage;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\LxcfsProc;
@@ -22,6 +23,7 @@ class LxcfsProcTest extends TestCase
     private function renderedVolumes(array $procMounts): array
     {
         $yaml = Blade::render((string) file_get_contents(self::TEMPLATE), [
+            'image' => AccountImage::REF,
             'user' => 'alice',
             'isolation' => 'runtime: sysbox-runc',
             'cpu_limit' => '',
@@ -38,7 +40,7 @@ class LxcfsProcTest extends TestCase
     private function hostAnswering(string $output): System
     {
         $system = $this->createStub(System::class);
-        $system->method('execOnHost')->willReturn($output);
+        $system->method('exec')->willReturn($output);
 
         return $system;
     }
@@ -97,7 +99,7 @@ class LxcfsProcTest extends TestCase
         }
         $dind = $this->createStub(Dind::class);
         $dind->method('system')->willReturn($system);
-        $dind->method('composeFilePath')->willReturn('/home/alice/docker-compose.yml');
+        $dind->method('username')->willReturn('alice');
         $dind->method('shell')->willReturnCallback(static fn () => new ShellOperations($dind));
 
         return $dind;
@@ -142,7 +144,7 @@ class LxcfsProcTest extends TestCase
     public function test_a_host_that_cannot_be_asked_mounts_nothing(): void
     {
         $system = $this->createStub(System::class);
-        $system->method('execOnHost')->willThrowException(new \RuntimeException('nsenter failed'));
+        $system->method('exec')->willThrowException(new \RuntimeException('nsenter failed'));
 
         $this->assertSame([], LxcfsProc::present($system));
     }

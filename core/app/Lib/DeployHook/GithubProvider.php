@@ -5,22 +5,13 @@ namespace App\Lib\DeployHook;
 use Illuminate\Http\Request;
 
 /**
- * GitHub webhooks: an `X-GitHub-Event` header names the event, and
- * `X-Hub-Signature-256` carries `sha256=` and the hex HMAC of the raw request
- * body under the hook's secret.
- *
- * Only the SHA-256 header is accepted. GitHub also sends a SHA-1 one for
- * compatibility, and honouring it would let a delivery choose the weaker
- * check by leaving the other out.
- *
- * A hook can be registered as `application/json` or as
- * `application/x-www-form-urlencoded`. The signature is over the bytes either
- * way -- for the second, the whole encoded body, `payload=` and all -- so
- * verification never depends on the content type and never touches a decoded
- * body.
+ * GitHub webhooks: `X-GitHub-Event` names the event; only `X-Hub-Signature-256` counts, so no sender can pick SHA-1,
+ * and it is checked over the raw bytes, whether the hook posts JSON or a form-encoded `payload=`.
  */
 final class GithubProvider implements HookProvider
 {
+    use SingleRefPush;
+
     private const NULL_SHA = '0000000000000000000000000000000000000000';
 
     /** Exactly `sha256=` and 64 hex digits, so hash_equals never compares a length the sender chose. */
@@ -78,27 +69,11 @@ final class GithubProvider implements HookProvider
      */
     private function pushEvent(string $event, ?string $delivery, array $payload): HookEvent
     {
-        $ref = $payload['ref'] ?? null;
-        if (! is_string($ref) || $ref === '') {
-            throw new InvalidPayload('A push without a ref.');
-        }
-
-        $isTag = str_starts_with($ref, 'refs/tags/');
-        $branch = str_starts_with($ref, 'refs/heads/') ? substr($ref, strlen('refs/heads/')) : null;
-        $after = is_string($payload['after'] ?? null) ? $payload['after'] : null;
+        $ref = self::pushedRef($payload);
+        $after = self::pushedAfter($payload);
         $deleted = ($payload['deleted'] ?? false) === true || $after === self::NULL_SHA;
 
-        return new HookEvent(
-            provider: $this->name(),
-            kind: HookEvent::PUSH,
-            event: $event,
-            deliveryId: $delivery,
-            ref: $ref,
-            branch: $branch,
-            tag: $isTag,
-            deleted: $deleted,
-            commit: $deleted ? null : $after,
-        );
+        return self::singleRefPush($this->name(), $event, $delivery, $ref, $after, $deleted);
     }
 
     /**
@@ -114,12 +89,7 @@ final class GithubProvider implements HookProvider
             $body = $this->formPayloadField($body);
         }
 
-        $decoded = json_decode($body, true);
-        if (! is_array($decoded)) {
-            throw new InvalidPayload('The push body is not JSON.');
-        }
-
-        return $decoded;
+        return self::decodedPush($body);
     }
 
     private function isFormEncoded(Request $request): bool

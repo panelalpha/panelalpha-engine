@@ -1,0 +1,2 @@
+exec ["/usr/local/lib/panelalpha/pa-root","scripts.removeStartingWith","--","/opt/engine/webserver-config/litespeed/vhosts/alice.test.xml"]
+exec ["/usr/local/lib/panelalpha/pa-root","scripts.removeStartingWith","--","/opt/engine/webserver-config/litespeed/vhosts/bob.test.xml"]

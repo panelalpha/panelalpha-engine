@@ -6,21 +6,14 @@ use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Paths;
 use Closure;
 
 /**
- * One-off, per-account cleanup that turns an account deployed by the previous
- * engine into the ADR-0001 layout: a run file under its own reserved name, no
- * more stashed compose files, and the client's own files (compose,
- * composer.json) restored to what git tracks wherever the previous engine had
- * written into them.
- *
- * Never restarts a container — every step here only rearranges files
- * `compose up` will read the same way whatever they are called, because the
- * compose project name does not depend on the file name (see the plan,
- * "Facts the plan relies on").
+ * One-off cleanup into the ADR-0001 layout: a reserved run file, no stashes, the client's files back as git has
+ * them. Never restarts a container: the compose project name does not depend on the file names it moves.
  */
 final class EngineArtifactMigration
 {
@@ -39,26 +32,29 @@ final class EngineArtifactMigration
         private Closure $deleteFile,
     ) {}
 
+    /**
+     * composeMode() answers `replace` even for an app config without a compose file: only one with a file
+     * has a mode.
+     */
     public static function forProject(DindProject $dind): self
     {
         $system = $dind->system();
         $appConfig = $dind->appConfig($dind->userModel()->getGitRepo());
+        $files = Privileged::accountFiles(...$dind->userModel()->linuxIds());
 
         return new self(
             new GitRepository($dind),
             $dind->userAppDirPath(),
             $dind->userModel()->getDeployStrategy(),
-            // composeMode() answers `replace` even for an app config that
-            // ships no compose file at all; only one that does has a mode.
             $appConfig?->compose() !== null ? $appConfig->composeMode() : null,
-            static function (string $from, string $to) use ($system): void {
-                $system->exec(['sudo', 'mv', '-f', $from, $to]);
+            static function (string $from, string $to) use ($system, $files): void {
+                $system->exec($files->moveOverwriting($from, $to));
             },
-            static function (string $from, string $to) use ($system): void {
-                $system->exec(['sudo', 'cp', '-p', '--no-dereference', '--remove-destination', $from, $to]);
+            static function (string $from, string $to) use ($system, $files): void {
+                $system->exec($files->replaceWithPreservedCopy($from, $to));
             },
-            static function (string $path) use ($system): void {
-                $system->exec(['sudo', 'rm', '-f', $path]);
+            static function (string $path) use ($system, $files): void {
+                $system->exec($files->removeIfExists($path));
             },
         );
     }
@@ -89,9 +85,8 @@ final class EngineArtifactMigration
     }
 
     /**
-     * A recipe's generated compose, still sitting under a name the client
-     * might own (`docker-compose.yml`, …) because the previous engine wrote
-     * it there — move it to the run file.
+     * A recipe's generated compose the previous engine left under a name the client might own
+     * (`docker-compose.yml`, …), moved to the run file.
      *
      * @return list<string>
      */
@@ -115,10 +110,8 @@ final class EngineArtifactMigration
     }
 
     /**
-     * `*.panelalpha-local`: the previous engine's way of getting a
-     * higher-priority compose name out of the way. With a git checkout, the
-     * name it stashed is trusted to already hold what should run — the
-     * stash is just discarded. Without one, both are kept for a human to sort.
+     * `*.panelalpha-local` stashes of a higher-priority compose name: discarded under git, which is trusted
+     * to hold what should run; without git both are kept for a human to sort.
      *
      * @return list<string>
      */
@@ -149,10 +142,8 @@ final class EngineArtifactMigration
     }
 
     /**
-     * The compose-strategy/PAEMD run file: a copy of whatever the project's
-     * own file has become (possibly hardened in place by the previous
-     * engine), with the original restored from git when that hardening is
-     * the only reason it differs from HEAD.
+     * The compose-strategy/PAEMD run file: a copy of what the project's own file has become, with the
+     * original restored from git when in-place hardening is all that differs from HEAD.
      *
      * @return list<string>
      */
@@ -163,6 +154,19 @@ final class EngineArtifactMigration
             return [];
         }
 
+        $source = $this->firstClientComposeFile();
+        if ($source === null) {
+            return [];
+        }
+
+        ($this->copyFile)($source, $run);
+        $report = ['copied '.basename($source).' to '.EngineArtifacts::RUN_COMPOSE.' (the version already running)'];
+
+        return [...$report, ...$this->keepAppConfigCompose($source), ...$this->restoreHardenedCompose($source)];
+    }
+
+    private function firstClientComposeFile(): ?string
+    {
         $source = null;
         foreach (Paths::composeFileCandidates() as $candidate) {
             $path = $this->path($candidate);
@@ -171,17 +175,19 @@ final class EngineArtifactMigration
                 break;
             }
         }
-        if ($source === null) {
-            return [];
-        }
 
-        ($this->copyFile)($source, $run);
-        $report = ['copied '.basename($source).' to '.EngineArtifacts::RUN_COMPOSE.' (the version already running)'];
+        return $source;
+    }
 
-        // An app config in `replace` mode had written its compose file over
-        // this one. Keep that under the app config's reserved name before git
-        // restores the client's, or the next `up` (ticket 05) would regenerate
-        // the run file from the client's compose instead of the app config's.
+    /**
+     * A `replace`-mode app config wrote its compose file over the client's: kept under its reserved name
+     * before git restores the client's, or the next `up` would regenerate the run file from the client's.
+     *
+     * @return list<string>
+     */
+    private function keepAppConfigCompose(string $source): array
+    {
+        $report = [];
         $appConfigCompose = $this->path(EngineArtifacts::APP_CONFIG_COMPOSE);
         if ($this->appConfigComposeMode === AppConfig::COMPOSE_REPLACE && ! is_file($appConfigCompose)) {
             ($this->copyFile)($source, $appConfigCompose);
@@ -189,6 +195,13 @@ final class EngineArtifactMigration
                 ." (this account's app config replaces the compose file)";
         }
 
+        return $report;
+    }
+
+    /** @return list<string> */
+    private function restoreHardenedCompose(string $source): array
+    {
+        $report = [];
         if ($this->git->hasRepository()) {
             $relative = $this->relative($source);
             if ($this->git->fileDiffersFromHead($relative)) {
@@ -201,12 +214,8 @@ final class EngineArtifactMigration
     }
 
     /**
-     * `docker-compose.override.yml` written under the client's own name by
-     * an app config in `override` mode — move it to the engine's reserved
-     * override name. An app config in `replace` mode is handled by
-     * {@see migrateNormalizedClientCompose()}, which keeps its compose file
-     * under {@see EngineArtifacts::APP_CONFIG_COMPOSE} and restores the file
-     * it had overwritten.
+     * An `override`-mode app config's `docker-compose.override.yml` under the client's name, moved to the
+     * engine's reserved override; `replace` mode is {@see migrateNormalizedClientCompose()}'s.
      *
      * @return list<string>
      */
@@ -227,9 +236,8 @@ final class EngineArtifactMigration
     }
 
     /**
-     * `composer.json`, restored from HEAD only when every difference from it
-     * is the platform pin the previous engine wrote — anything else is the
-     * client's own edit, which migration must not discard.
+     * `composer.json` restored from HEAD only when the previous engine's platform pin is all that differs:
+     * anything else is the client's own edit.
      *
      * @return list<string>
      */

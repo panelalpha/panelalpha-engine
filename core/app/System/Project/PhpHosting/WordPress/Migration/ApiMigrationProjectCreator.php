@@ -8,10 +8,8 @@ use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 /**
- * Creates a classic project on the kept domain with no tunnel, or, when there
- * is no domain to keep, with tunnel=panelalpha so DomainAllocator picks the
- * online label. Deploy runs in-process so create_project finishes only after
- * the container is ready.
+ * Creates a classic project on the kept domain with no tunnel, or without one with tunnel=panelalpha so DomainAllocator
+ * picks the online label. Deploy runs in-process so create_project finishes only after the container is ready.
  */
 final class ApiMigrationProjectCreator implements MigrationProjectCreator
 {

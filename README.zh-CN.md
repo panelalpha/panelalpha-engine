@@ -38,7 +38,7 @@
 <p>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="一行命令安装"></a>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="支持的系统"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-287_tools-6f42c1" alt="287 个 MCP 工具"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-311_tools-6f42c1" alt="311 个 MCP 工具"></a>
 <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="加入 Discord"></a>
 </p>
@@ -69,7 +69,7 @@ PanelAlpha Engine 是你装在 VPS 上的软件，用来托管用 AI 构建和 v
 
 ## 工作原理
 
-<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs the engine and manages databases and files; the root broker runs every step that needs root, including the isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
 
 ## 为什么需要这个
 
@@ -174,7 +174,7 @@ pae connect
 | `给 n8n.mydomain.com 配一个 Cloudflare 隧道。` | DNS 和隧道都配好，这也是从 NAT 后面的服务器对外提供服务的办法。 |
 | `上周我们有多少流量？` | 该项目以及整台服务器的用量、日志和限额。 |
 
-更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[287 个工具](docs/04-connecting-your-ai/your-assistant.md)。
+更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[311 个工具](docs/04-connecting-your-ai/your-assistant.md)。
 
 ---
 

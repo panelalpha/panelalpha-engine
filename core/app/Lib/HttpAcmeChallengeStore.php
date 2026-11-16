@@ -4,6 +4,7 @@ namespace App\Lib;
 
 use App\Models\Domain;
 use App\System;
+use App\System\Privileged;
 use InvalidArgumentException;
 
 class HttpAcmeChallengeStore
@@ -71,7 +72,7 @@ class HttpAcmeChallengeStore
             return [];
         }
 
-        $process = $this->system->runProcess(['sudo', 'ls', '-1A', $dir]);
+        $process = $this->system->runProcess(Privileged::files()->listAllNames($dir));
         if ($process->getExitCode() !== 0) {
             return [];
         }
@@ -163,7 +164,7 @@ class HttpAcmeChallengeStore
         }
 
         $wasEnabled = $this->enabled($primaryDomain);
-        $this->system->exec(['sudo', 'rm', '-f', $path]);
+        $this->system->exec(Privileged::files()->removeIfExists($path));
         $this->removeDomainDirIfEmpty($primaryDomain);
 
         return [
@@ -183,7 +184,7 @@ class HttpAcmeChallengeStore
         }
 
         $dir = $this->domainDir($primaryDomain);
-        $this->system->exec(['sudo', 'rm', '-rf', $dir]);
+        $this->system->exec(Privileged::files()->removeTree($dir));
 
         return [
             'became_disabled' => true,
@@ -195,13 +196,12 @@ class HttpAcmeChallengeStore
     {
         $dir = $this->domainDir($primaryDomain);
         if ($this->system->directoryExists($dir)) {
-            $this->system->exec(['sudo', 'rm', '-rf', $dir]);
+            $this->system->exec(Privileged::files()->removeTree($dir));
         }
     }
 
     /**
-     * Remove challenge files older than TTL. Returns primary domain names whose
-     * ACME vhost block should be disabled (dir became empty).
+     * Remove challenge files older than TTL; returns the domains whose ACME vhost block should be disabled.
      *
      * @return list<string>
      */
@@ -213,23 +213,10 @@ class HttpAcmeChallengeStore
         }
 
         $mmin = max(1, $ttlHours * 60);
-        $this->system->runProcess([
-            'sudo',
-            'find',
-            $base,
-            '-mindepth',
-            '2',
-            '-maxdepth',
-            '2',
-            '-type',
-            'f',
-            '-mmin',
-            '+'.$mmin,
-            '-delete',
-        ]);
+        $this->deleteExpired($base, $mmin);
 
         $domainsNeedingRebuild = [];
-        $process = $this->system->runProcess(['sudo', 'ls', '-1A', $base]);
+        $process = $this->system->runProcess(Privileged::files()->listAllNames($base));
         if ($process->getExitCode() !== 0) {
             return [];
         }
@@ -239,20 +226,34 @@ class HttpAcmeChallengeStore
                 continue;
             }
 
-            $dir = $this->domainDir($domainName);
-            if (! $this->system->directoryExists($dir)) {
-                continue;
-            }
-
-            if ($this->listTokens($domainName) === []) {
-                $this->system->exec(['sudo', 'rm', '-rf', $dir]);
-                if (Domain::findByName($domainName)) {
-                    $domainsNeedingRebuild[] = $domainName;
-                }
+            if ($this->removedEmptyDomainDir($domainName) && Domain::findByName($domainName)) {
+                $domainsNeedingRebuild[] = $domainName;
             }
         }
 
         return $domainsNeedingRebuild;
+    }
+
+    private function deleteExpired(string $base, int $mmin): void
+    {
+        $this->system->runProcess(Privileged::files()->deleteFilesTwoLevelsDownOlderThan($base, $mmin));
+    }
+
+    /** True when the domain's challenge directory existed with no token left, and was removed. */
+    private function removedEmptyDomainDir(string $domainName): bool
+    {
+        $dir = $this->domainDir($domainName);
+        if (! $this->system->directoryExists($dir)) {
+            return false;
+        }
+
+        if ($this->listTokens($domainName) !== []) {
+            return false;
+        }
+
+        $this->system->exec(Privileged::files()->removeTree($dir));
+
+        return true;
     }
 
     public function assertValidToken(string $token): void
@@ -280,7 +281,7 @@ class HttpAcmeChallengeStore
 
         $dir = $this->domainDir($primaryDomain);
         if ($this->system->directoryExists($dir)) {
-            $this->system->exec(['sudo', 'rm', '-rf', $dir]);
+            $this->system->exec(Privileged::files()->removeTree($dir));
         }
     }
 }

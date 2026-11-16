@@ -3,6 +3,7 @@
 namespace Tests\Unit\Git;
 
 use App\Jobs\DeployProject;
+use App\Exceptions\DeployBusyException;
 use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogPaths;
@@ -13,6 +14,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\TestNetwork;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
@@ -90,6 +92,79 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->assertSame(json_encode(['data' => $this->envelope('project', 'deploy', true)]), $response->getContent());
     }
 
+    /** A stopped container says nothing about the checkout in it: the answer names the container, not a missing repository. */
+    public function test_status_of_a_stopped_container_is_a_503_naming_it(): void
+    {
+        $this->user('main');
+        $this->respond("'rev-parse' '--is-inside-work-tree'", 1, "service \"dind\" is not running\n");
+
+        $response = $this->getJson(self::URL . '/status');
+
+        $response->assertStatus(503);
+        $this->assertSame(
+            json_encode(['message' => 'Git could not run: the project\'s container is not running (service "dind" is not running)']),
+            $response->getContent(),
+        );
+    }
+
+    public function test_status_of_a_container_that_refuses_the_exec_is_a_503_with_the_docker_error(): void
+    {
+        $this->user('main');
+        $refused = 'OCI runtime exec failed: exec failed: unable to start container process: unsafe procfs detected: unknown';
+        $this->respond("'rev-parse' '--is-inside-work-tree'", 126, $refused . "\n");
+
+        $response = $this->getJson(self::URL . '/status');
+
+        $response->assertStatus(503);
+        $this->assertSame(
+            json_encode(['message' => "Git could not run: docker would not run it in the project's container ({$refused})"]),
+            $response->getContent(),
+        );
+    }
+
+    /** @return array<string, array{string, string, string, array<string, string>, string, array<string, string>}> */
+    public static function queuedChangesGitCannotRunFor(): array
+    {
+        $stopped = "service \"dind\" is not running\n";
+        $refused = "OCI runtime exec failed: exec failed: unable to start container process: unsafe procfs detected: unknown\n";
+
+        return [
+            'pull, stopped' => [$stopped, 'POST', '/pull', ['strategy' => 'force'], ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'force']],
+            'branch change, stopped' => [$stopped, 'PUT', '/change-branch', ['branch' => 'dev'], ProjectRebuild::CHANGE_BRANCH, ['path' => 'project', 'branch' => 'dev']],
+            'revert, stopped' => [$stopped, 'POST', '/revert', ['ref' => 'abc123'], ProjectRebuild::REVERT, ['path' => 'project', 'ref' => 'abc123']],
+            'pull, exec refused' => [$refused, 'POST', '/pull', [], ProjectRebuild::GIT_PULL, ['path' => 'project', 'strategy' => 'ff']],
+        ];
+    }
+
+    /**
+     * The checks run git in the account's container, which a stopped account does not have: the change is queued
+     * anyway, as a push to it is, and the job starts the account before its change, which checks the same there.
+     *
+     * @param array<string, string> $body
+     * @param array<string, string> $queued
+     */
+    #[DataProvider('queuedChangesGitCannotRunFor')]
+    public function test_a_change_git_cannot_run_for_yet_is_queued_for_the_job_to_start_the_account(
+        string $dockerError,
+        string $method,
+        string $endpoint,
+        array $body,
+        string $action,
+        array $queued,
+    ): void {
+        Queue::fake();
+        $this->user('main');
+        $this->respond("'rev-parse' '--is-inside-work-tree'", 1, $dockerError);
+
+        $response = $this->json($method, self::URL . $endpoint, $body);
+
+        $response->assertStatus(202);
+        $response->assertJsonPath('data.details.action', $action);
+        Queue::assertPushed(RebuildProject::class, static fn (RebuildProject $job): bool => $job->action === $action && $job->git === $queued);
+        $this->assertCheckoutUntouched();
+        $this->assertSame([], $this->redeploy->starts, 'the account is started by the job, under its deploy, not in the request');
+    }
+
     public function test_status_fetch_accepts_a_string_flag(): void
     {
         $this->user('main');
@@ -115,7 +190,7 @@ class GitEndpointsTest extends DeployHookTestCase
 
         $response->assertStatus(422);
         $this->assertSame(
-            '{"message":"Invalid git ref name.","errors":{"branch":["Invalid git ref name."]},"problems":[{"field":"branch","code":"branch_invalid","message":"Invalid git ref name."}]}',
+            '{"message":"Invalid git ref name.","errors":{"branch":["Invalid git ref name."]},"problems":[{"field":"branch","code":"branch_invalid","message":"Invalid git ref name.","hints":[]}]}',
             $response->getContent(),
         );
     }
@@ -128,7 +203,7 @@ class GitEndpointsTest extends DeployHookTestCase
 
         $response->assertStatus(422);
         $this->assertSame(
-            '{"message":"Git is not connected.","errors":{"git":["Git is not connected."]},"problems":[{"field":"git","code":"git_invalid","message":"Git is not connected."}]}',
+            '{"message":"Git is not connected.","errors":{"git":["Git is not connected."]},"problems":[{"field":"git","code":"git_invalid","message":"Git is not connected.","hints":[]}]}',
             $response->getContent(),
         );
         $this->assertSame(0, $this->redeploy->requests);
@@ -182,6 +257,47 @@ class GitEndpointsTest extends DeployHookTestCase
         $this->assertTrue($this->called("'log' '-n' '7' '--format=%H%x1f%h%x1f%s%x1f%an%x1f%aI' 'dev'"));
     }
 
+    /** The branch list reads the remote, so a branch it offers is fetched to list its commits instead of git's error. */
+    public function test_commits_fetches_the_branch_first_and_refuses_one_the_remote_does_not_have(): void
+    {
+        $this->siteGitPublicHtml();
+        $this->withRepository();
+        $this->respond("'--end-of-options' 'origin/test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'--end-of-options' 'test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $sha = str_repeat('a', 40);
+        $this->respond("'ls-remote' '--heads' 'origin'", 0, "{$sha}\trefs/heads/main\n{$sha}\trefs/heads/develop\n");
+
+        $response = $this->getJson(self::URL . '/commits?path=public_html&branch=test');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_found')
+            ->assertJsonPath('problems.0.message', "The remote has no branch named 'test'. Its branches: main, develop.");
+        $this->assertTrue($this->called("'fetch' 'origin' '+refs/heads/test:refs/remotes/origin/test'"));
+        $this->assertFalse($this->called("'log'"));
+    }
+
+    /** A branch that cannot be fetched is a typed refusal, never git's own words. */
+    public function test_commits_refuses_a_branch_it_could_not_fetch(): void
+    {
+        $this->siteGitPublicHtml();
+        $this->withRepository();
+        $this->respond("'--end-of-options' 'origin/test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'--end-of-options' 'test^{commit}'", 128, "fatal: Needed a single revision\n");
+        $this->respond("'fetch' 'origin' '+refs/heads/test:refs/remotes/origin/test'", 128,
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n");
+
+        $response = $this->getJson(self::URL . '/commits?path=public_html&branch=test');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_fetched')
+            ->assertJsonPath('problems.0.message', "The branch 'test' could not be fetched from the remote, so this "
+                ."project's checkout has no commits of it to list. Check that this server can reach the repository "
+                .'and that the stored token still reads it, then try again.');
+        $this->assertFalse($this->called("'log'"));
+    }
+
     public function test_connect_keeps_the_deploy_origin_in_sync(): void
     {
         $user = $this->user('main');
@@ -193,6 +309,71 @@ class GitEndpointsTest extends DeployHookTestCase
         $response->assertStatus(200);
         $this->assertSame('deploy', $response->json('data.managed_by'));
         $this->assertSame('ghp_x', $user->fresh()->getDetails()['git_token']);
+    }
+
+    /** The repository is read before anything is written, so one that does not exist is never stored as connected. */
+    public function test_connect_refuses_a_repository_it_cannot_read(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withRepository();
+        $missing = 'https://github.com/mdn/t3d-no-such-repo-xyz';
+        $this->respond("'ls-remote' '--heads' '" . $missing, 128, "remote: Repository not found.\nfatal: repository '{$missing}/' not found\n");
+
+        $response = $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => $missing, 'branch' => 'main']);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_repository_not_found')
+            ->assertJsonPath('problems.0.message', 'The repository could not be read: github.com has no repository at '
+                .'this address, or it is private and needs a read token. Nothing was connected.');
+        $this->assertFalse($this->called("'remote' 'add'"));
+        $this->assertFalse($this->called("'remote' 'set-url'"));
+        $this->assertNull($user->fresh()->getSiteGit('public_html'));
+    }
+
+    public function test_connect_refuses_a_branch_the_remote_does_not_have(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withRepository();
+        $sha = str_repeat('a', 40);
+        $this->respond("'ls-remote' '--heads'", 0, "{$sha}\trefs/heads/main\n{$sha}\trefs/heads/develop\n");
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'mian'])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_found')
+            ->assertJsonPath('problems.0.message', "The remote has no branch named 'mian'. Did you mean 'main'?");
+        $this->assertFalse($this->called("'remote' 'add'"));
+        $this->assertFalse($this->called("'remote' 'set-url'"));
+        $this->assertNull($user->fresh()->getSiteGit('public_html'));
+    }
+
+    /** A repository that has no commits yet has no branch to check, and connecting one is still how it gets its first push. */
+    public function test_connect_accepts_a_repository_with_no_branches_yet(): void
+    {
+        $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $this->withoutRepository();
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'])
+            ->assertStatus(200)
+            ->assertJsonPath('data.connected', true);
+        $this->assertTrue($this->called("'ls-remote' '--heads' '" . self::REPO));
+    }
+
+    /** A private repository is read with the token the project stored, which the request does not have to send again. */
+    public function test_connect_reads_a_private_remote_with_the_stored_token(): void
+    {
+        $user = $this->user('main', ['git_repo' => '', 'git_branch' => null]);
+        $user->putSiteGit('public_html', ['repo_url' => self::REPO, 'branch' => 'main', 'token' => 'ghp_stored']);
+        $this->withRepository();
+        $this->respond("'config' '--get' 'remote.origin.url'", 0, self::REPO . "\n");
+
+        $this->postJson(self::URL . '/connect', ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'])
+            ->assertStatus(200);
+
+        $probe = array_values(array_filter($this->calls(), fn (string $call): bool => str_contains($call, "'ls-remote'")));
+        $this->assertCount(1, $probe);
+        $this->assertStringNotContainsString('GIT_ASKPASS=/bin/false', $probe[0]);
     }
 
     public function test_connect_refuses_a_repository_the_egress_guard_will_not_fetch(): void
@@ -210,6 +391,18 @@ class GitEndpointsTest extends DeployHookTestCase
             $this->postJson(self::URL . '/connect', ['repo_url' => $url, 'branch' => 'main'])
                 ->assertStatus(422);
         }
+        $this->assertSame([], $this->calls());
+    }
+
+    /** `repair: "false"` is not a repair: the repository and branch are still required, and git never runs. */
+    public function test_connect_with_repair_false_still_needs_a_repository_and_a_branch(): void
+    {
+        $this->user('main');
+        $this->withoutRepository();
+
+        $this->postJson(self::URL . '/connect', ['repair' => 'false'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['repo_url', 'branch']);
         $this->assertSame([], $this->calls());
     }
 
@@ -288,6 +481,25 @@ class GitEndpointsTest extends DeployHookTestCase
 
         $this->putJson(self::URL . '/update-credentials', ['path' => 'public_html', 'token' => 'new'])->assertStatus(200);
         $this->assertSame('new', $user->fresh()->getSiteGit('public_html')['token']);
+    }
+
+    /** A token stored on a stopped container is a 200 saying so, never a 503 that reads as nothing changed. */
+    public function test_update_credentials_on_a_stopped_container_stores_the_token_and_answers_200_with_a_warning(): void
+    {
+        $user = $this->user('main');
+        $this->respond("'rev-parse' '--is-inside-work-tree'", 1, "service \"dind\" is not running\n");
+
+        $response = $this->putJson(self::URL . '/update-credentials', ['token' => 'new-token']);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.connected', true);
+        $response->assertJsonPath('data.managed_by', 'deploy');
+        $this->assertSame(
+            'The credentials were stored, but the checkout could not be read: '
+            . "Git could not run: the project's container is not running (service \"dind\" is not running)",
+            $response->json('data.warning'),
+        );
+        $this->assertSame('new-token', $user->fresh()->getGitToken());
     }
 
     /** The remote's answer to `ls-remote --heads origin refs/heads/<branch>` when it has the branch. */
@@ -413,7 +625,9 @@ class GitEndpointsTest extends DeployHookTestCase
             $response = $this->{$method}(self::URL . $endpoint, $body);
             $response->assertStatus(409);
             $response->assertJsonPath('task_id', $taskId);
-            $this->assertStringContainsString("GET /tasks/{$taskId}", (string) $response->json('message'), $endpoint);
+            $response->assertJsonPath('code', DeployBusyException::TASK);
+            $response->assertJsonPath('problems.0.hints.0.path', '/tasks/{id}');
+            $response->assertJsonPath('problems.0.hints.0.path_params', ['id' => $taskId]);
         }
         Queue::assertPushedTimes(RebuildProject::class, 1);
         $this->assertSame([], $this->calls(), 'a refused call does not read the checkout a deploy may be moving aside');
@@ -456,10 +670,10 @@ class GitEndpointsTest extends DeployHookTestCase
         }
 
         $response->assertStatus(409);
-        $this->assertSame([
-            'message' => 'A deploy of this project is already running. Follow it with GET /projects/alice/deploy-log.',
-            'task_id' => null,
-        ], $response->json());
+        $response->assertJsonPath('message', 'A deploy of this project is already running; its deploy log follows it.');
+        $response->assertJsonPath('task_id', null);
+        $response->assertJsonPath('code', DeployBusyException::CODE);
+        $response->assertJsonPath('problems.0.hints.0.path_params', ['username' => 'alice']);
         Queue::assertNothingPushed();
         $this->assertCheckoutUntouched();
     }
@@ -524,5 +738,20 @@ class GitEndpointsTest extends DeployHookTestCase
         $response->assertStatus(200);
         $this->assertTrue($response->json('data.nothing_to_push'));
         $this->assertSame(0, $this->redeploy->requests);
+    }
+
+    public function test_a_push_the_repository_does_not_authorize_is_a_422_problem(): void
+    {
+        $this->siteGitPublicHtml();
+        $this->withRepository();
+        $this->respond("'status' '--porcelain'", 0, " M index.php\n");
+        $this->respond("'push' 'origin'", 128, "error: unable to read askpass response from '/bin/false'\n"
+            . "fatal: could not read Username for 'https://github.com': No such device or address\n");
+
+        $this->postJson(self::URL . '/push', ['path' => 'public_html'])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_push_unauthorized')
+            ->assertJsonPath('problems.0.message', fn (string $message): bool => str_starts_with($message, 'The repository did not let this project push to it'));
     }
 }

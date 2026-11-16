@@ -9,6 +9,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Unit\System\Project\SuccessfulProcess;
 
 /**
@@ -83,11 +84,12 @@ class AppConfigEnvSnippetModeTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $argv = (array) $cmd;
-                if (array_slice($argv, 0, 2) === ['sudo', 'chmod']) {
-                    $this->staged[$argv[3]] = $argv[2];
+                $values = LocalRoot::values($argv);
+                if (LocalRoot::action($argv) === 'files.changeMode') {
+                    $this->staged[$values[1]] = $values[0];
                 }
-                if (array_slice($argv, 0, 3) === ['sudo', 'mv', '-T'] && isset($this->staged[$argv[3]])) {
-                    $this->modes[$argv[4]] = $this->staged[$argv[3]];
+                if (LocalRoot::action($argv) === 'files.rename' && isset($this->staged[$values[0]])) {
+                    $this->modes[$values[1]] = $this->staged[$values[0]];
                 }
 
                 return '';
@@ -97,16 +99,15 @@ class AppConfigEnvSnippetModeTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $argv = (array) $cmd;
-                if (array_slice($argv, 0, 3) === ['sudo', 'test', '-L']) {
+                if (LocalRoot::action($argv) === 'files.isSymlink') {
                     $notALink = new Process(['php', '-r', 'exit(1);']);
                     $notALink->run();
 
                     return $notALink;
                 }
-                $rename = array_search('rename', $argv, true);
-                if (array_slice($argv, 0, 2) === ['sudo', 'python3'] && $rename !== false
-                    && isset($this->staged[$argv[$rename + 2]])) {
-                    $this->modes[$argv[$rename + 3]] = $this->staged[$argv[$rename + 2]];
+                [, $staged, $target] = LocalRoot::action($argv) === 'account.renameInHome' ? LocalRoot::values($argv) : [null, null, null];
+                if ($staged !== null && isset($this->staged[$staged])) {
+                    $this->modes[$target] = $this->staged[$staged];
                 }
 
                 return SuccessfulProcess::for($cmd);

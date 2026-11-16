@@ -8,8 +8,7 @@ class WpConfigGetCommand extends WordPressCommand
 {
     protected $signature = 'wordpress:config:get
                             {constant : Constant name}
-                            {--type=constant : constant, variable or all}
-                            {--json : Decode the value from JSON}';
+                            {--type=constant : constant, variable or all}';
 
     protected $description = 'Read a WordPress wp-config constant';
 
@@ -18,7 +17,6 @@ class WpConfigGetCommand extends WordPressCommand
         return $wordpress->config()->get(
             (string) $this->argument('constant'),
             (string) $this->option('type'),
-            (bool) $this->option('json'),
         );
     }
 }

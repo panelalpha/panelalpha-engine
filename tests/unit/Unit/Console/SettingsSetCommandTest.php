@@ -2,9 +2,11 @@
 
 namespace Tests\Unit\Console;
 
+use App\Jobs\RebuildDomainConfigs;
 use App\Lib\Domains\DomainPlan;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Bus;
 use Tests\TestCase;
 
 /**
@@ -53,9 +55,19 @@ class SettingsSetCommandTest extends TestCase
 
     public function test_other_settings_are_untouched_by_the_check(): void
     {
+        Bus::fake();
         Setting::setRuntimeSettings([DomainPlan::SETTING_DEFAULT_TUNNEL => '', 'cert_domain' => '']);
 
         $this->assertSame(0, Artisan::call('settings:set', ['name' => 'cert_domain', 'value' => 'engine.example.com']));
         $this->assertSame('engine.example.com', Setting::get('cert_domain'));
+        Bus::assertDispatchedTimes(RebuildDomainConfigs::class, 1);
+    }
+
+    public function test_a_setting_that_names_no_project_rebuilds_nothing(): void
+    {
+        Bus::fake();
+
+        $this->assertSame(0, Artisan::call('settings:set', ['name' => DomainPlan::SETTING_DEFAULT_TUNNEL, 'value' => 'none']));
+        Bus::assertNotDispatched(RebuildDomainConfigs::class);
     }
 }

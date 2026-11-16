@@ -89,10 +89,11 @@ class DeployTimingsCommand extends Command
         }
 
         $this->line(sprintf(
-            'Build: %ss across %d layers, %d cached (%s hit ratio)',
+            'Build: %ss across %d steps, %d of %d cacheable layers cached (%s hit ratio)',
             $build['total_seconds'],
             $build['step_count'],
             $build['cached_steps'],
+            $build['cacheable_steps'],
             $build['cache_hit_ratio'] === null ? '—' : (string) $build['cache_hit_ratio']
         ));
         // --timeline means every step, so show every layer too rather than

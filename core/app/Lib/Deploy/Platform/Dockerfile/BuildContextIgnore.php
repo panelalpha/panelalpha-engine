@@ -6,23 +6,8 @@ use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 
 /**
- * The ignore file BuildKit reads for one Dockerfile: `<Dockerfile>.dockerignore`
- * next to it, used instead of the context's `.dockerignore`.
- *
- * Written so the engine can keep its own files and `.git` out of the build
- * context without editing a `.dockerignore` the project owns (ADR-0001). The
- * project's rules are copied in first, unchanged, so they still apply.
- *
- * What it keeps out, and why:
- * - the compose files the engine writes: `PA_DEPLOY_PHASE` flips from
- *   `install` to `upgrade` on the second deploy, so `COPY . .` missed;
- * - `.git`: every deploy is a fresh clone, and two clones of one commit have
- *   different `.git` bytes, so `COPY . .` missed on every deploy;
- * - `.env.panelalpha`: secrets the engine generated, and a tracked .env's
- *   env_vars, which must not be baked into an image;
- * - an empty `.env` the engine created for `env_file:`, when the Dockerfile
- *   does not copy it by name: Apache Guacamole's RAT license check failed on
- *   it and on the compose file. See {@see excludesEnv()}.
+ * The `<Dockerfile>.dockerignore` BuildKit reads instead of the context's own (ADR-0001): the project's rules
+ * unchanged, then the engine's files, `.git` and an empty `.env`, which miss the cache or leak secrets.
  */
 final class BuildContextIgnore
 {
@@ -40,30 +25,25 @@ final class BuildContextIgnore
         return (string) preg_replace('#^(\./)+#', '', $dockerfile).self::SUFFIX;
     }
 
-    /**
-     * Whether this file is one the engine wrote, so it may be rewritten.
-     * A project's own `<Dockerfile>.dockerignore` is left alone.
-     */
+    /** Whether the engine wrote this file, so it may be rewritten; a project's own one is left alone. */
     public static function isEngineWritten(?string $contents): bool
     {
         return $contents !== null && str_starts_with(ltrim($contents), self::MARKER);
     }
 
-    /**
-     * A `.dockerignore` an older engine wrote rather than the project: the
-     * engine's rules stand in for it instead of it being copied as the project's.
-     */
+    /** A `.dockerignore` an older engine wrote: the engine's rules stand in for it instead of copying it. */
     public static function isLegacyEngineDockerignore(?string $contents): bool
     {
         return $contents !== null && str_starts_with(ltrim($contents), self::LEGACY_MARKER);
     }
 
     /**
+     * The engine's entries come after the project's rules, because the last match wins.
+     *
      * @param  string|null  $projectIgnore  the project's `.dockerignore`, or null when it has none
      * @param  string  $dockerfile  the Dockerfile path relative to the context
      * @param  bool  $excludeGit  false when the build reads git history ({@see GitHistoryUse})
-     * @param  bool  $generated  the engine wrote the Dockerfile, so its base rules apply
-     *                           when the project has no `.dockerignore`
+     * @param  bool  $generated  the engine wrote the Dockerfile, so its base rules apply without a `.dockerignore`
      * @param  bool  $excludeEnv  leave `.env` out too ({@see excludesEnv()})
      */
     public static function render(
@@ -87,7 +67,6 @@ final class BuildContextIgnore
             $lines[] = '';
         }
 
-        // Last match wins, so these come after the project's rules.
         $lines[] = '# The engine\'s own files: nothing in the image reads them.';
         foreach (self::engineEntries($dockerfile) as $entry) {
             $lines[] = $entry;
@@ -105,9 +84,8 @@ final class BuildContextIgnore
     }
 
     /**
-     * Engine files that sit in the context and no build reads.
-     * `panelalpha-entrypoint.sh` and the nginx config are not here: the
-     * generated Dockerfile copies them by name.
+     * Engine files in the context that no build reads, the 0600 base `.env` copy with its secrets included.
+     * The entrypoint and the nginx config are absent: the generated Dockerfile copies them by name.
      *
      * @return list<string>
      */
@@ -118,7 +96,6 @@ final class BuildContextIgnore
             EngineArtifacts::RUN_COMPOSE_OVERRIDE,
             EngineArtifacts::APP_CONFIG_COMPOSE,
             EngineArtifacts::ENV_OVERRIDES,
-            // The engine's 0600 copy of the base .env, generated secrets included.
             EngineArtifacts::ENV_DEFAULT,
             EngineArtifacts::RUN_PASSWD,
             EngineArtifacts::RUN_GROUP,
@@ -129,11 +106,8 @@ final class BuildContextIgnore
     }
 
     /**
-     * Whether `.env` can be left out: only when it holds nothing a build could
-     * read (the engine creates an empty one for `env_file:`) and the
-     * Dockerfile does not copy it by name. A `.env` with values stays, since
-     * `COPY . .` and a Vite or Next build reading it is how those values
-     * reach the build.
+     * Whether `.env` can be left out: only an empty one (created for `env_file:`) the Dockerfile does not copy
+     * by name. A `.env` with values stays, since `COPY . .` is how they reach a Vite or Next build.
      */
     public static function excludesEnv(?string $env, ?string $dockerfileContents): bool
     {

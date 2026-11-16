@@ -131,6 +131,9 @@ class UserController extends Controller
     #[OA\Delete(
         path: '/projects/{username}/mysql/users/{dbuser}',
         summary: 'Delete a MySQL user',
+        x: ['mcp-description' => 'Deletes the MySQL user and its grants; its password stops working at once and an '
+            .'application still using it starts failing. The databases and their data stay. This cannot be '
+            .'undone: ask the operator to confirm first.'],
         security: [['bearerAuth' => []]],
         tags: ['MySQL Users'],
         parameters: [

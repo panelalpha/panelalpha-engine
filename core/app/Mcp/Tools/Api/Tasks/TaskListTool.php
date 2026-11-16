@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List tasks newest first, filtered by project, status, action or time
 
-    Covers every queued job on the engine, not only deploys. `scope=mine` (the default) shows the tasks the calling token started plus engine-originated work (deploy hooks, schedules, CLI) on projects it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, push, backup, restore or attach_source.
+    Covers every queued job on the engine, not only deploys. `scope=mine` (the default) shows the tasks the calling token started plus engine-originated work (deploy hooks, schedules, CLI) on projects it may reach; `scope=all` shows every task and is refused with 403 for a token limited to part of the API. `status` takes a comma list of queued, running, completed, failed, cancelled; `active` is shorthand for queued, running. `action` matches details.action, for example deploy, rebuild, staging, push, backup, restore or attach_source. A deleted project's tasks stay listed under its name, the record of what was done to it, until the engine's operator prunes them.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

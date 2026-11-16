@@ -15,8 +15,11 @@ final class GitRepositoryUrl implements ProblemRule
 {
     use RaisesProblem;
 
-    /** @param bool $forToken a `git_token` came with it, so HTTP is out too */
-    public function __construct(private readonly bool $forToken = false) {}
+    /**
+     * @param  bool  $forToken  a `git_token` came with it, so HTTP is out too
+     * @param  bool  $sshWithKey  a deploy key came with it, so an SSH remote is accepted
+     */
+    public function __construct(private readonly bool $forToken = false, private readonly bool $sshWithKey = false) {}
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
@@ -34,7 +37,7 @@ final class GitRepositoryUrl implements ProblemRule
             return;
         }
 
-        $problem = GitRepoInput::problem($attribute, $value, $this->forToken);
+        $problem = GitRepoInput::problem($attribute, $value, $this->forToken, $this->sshWithKey);
         if ($problem !== null) {
             $this->reject($problem, $fail);
         }

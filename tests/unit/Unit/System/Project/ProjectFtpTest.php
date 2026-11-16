@@ -5,11 +5,13 @@ namespace Tests\Unit\System\Project;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project;
 use App\System\Project\Ftp;
 use App\System\Services\PureFtpd;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class ProjectFtpTest extends TestCase
@@ -22,10 +24,12 @@ class ProjectFtpTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-project-ftp-' . bin2hex(random_bytes(4));
         mkdir($this->tmpRoot . '/home/alice/public_html', 0777, true);
         file_put_contents($this->tmpRoot . '/docker-compose.yml', "services: {}\n");
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => $this->tmpRoot . '/home']));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -45,16 +49,14 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->create('ftp@example.com', 'secret', '/public_html', 256);
 
-        $this->assertGreaterThanOrEqual(2, count($system->execJournal));
-        $addCmd = $system->execJournal[0];
-        $this->assertStringContainsString('/bin/sh -c', $addCmd);
-        $this->assertStringNotContainsString('secret', $addCmd, 'the password is on a command line');
+        $this->assertGreaterThanOrEqual(2, count($system->requests));
+        $this->assertSame([
+            LocalRoot::CLIENT, '--env', 'PA_FTP_PASSWORD', 'compose.ftpAddUser', '--', $this->composeFile(),
+            'ftp@example.com', '1001', '1001', '/home/ftpuser/alice/public_html', '256',
+        ], $system->requests[0]);
+        $this->assertNotContains('secret', $system->requests[0], 'the password is on a command line');
         $this->assertSame(['PA_FTP_PASSWORD' => 'secret'], $system->envJournal[0]);
-        $this->assertStringContainsString('pure-pw useradd', $addCmd);
-        $this->assertStringContainsString('1001', $addCmd);
-        $this->assertStringContainsString('/home/ftpuser/alice/public_html', $addCmd);
-        $this->assertStringContainsString('256', $addCmd);
-        $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[1]);
+        $this->assertSame(['compose.ftpAddUser', 'compose.ftpMakeDatabase'], $system->actions());
     }
 
     public function test_create_rejects_missing_directory(): void
@@ -73,12 +75,13 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->update('ftp@example.com', 'newpass', 128);
 
-        $this->assertCount(3, $system->execJournal);
-        $this->assertStringContainsString('pure-pw passwd', $system->execJournal[0]);
-        $this->assertStringNotContainsString('newpass', $system->execJournal[0], 'the password is on a command line');
+        $this->assertSame(['compose.ftpSetPassword', 'compose.ftpSetQuota', 'compose.ftpMakeDatabase'], $system->actions());
+        $this->assertNotContains('newpass', $system->requests[0], 'the password is on a command line');
         $this->assertSame(['PA_FTP_PASSWORD' => 'newpass'], $system->envJournal[0]);
-        $this->assertStringContainsString('pure-pw usermod ftp@example.com -N 128', $system->execJournal[1]);
-        $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[2]);
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpSetQuota', '--', $this->composeFile(), 'ftp@example.com', '128'],
+            $system->requests[1],
+        );
     }
 
     public function test_update_skips_passwd_when_password_null(): void
@@ -88,9 +91,11 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->update('ftp@example.com', null, null);
 
-        $this->assertCount(2, $system->execJournal);
-        $this->assertStringContainsString('pure-pw usermod ftp@example.com -N', $system->execJournal[0]);
-        $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[1]);
+        $this->assertSame(['compose.ftpSetQuota', 'compose.ftpMakeDatabase'], $system->actions());
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpSetQuota', '--', $this->composeFile(), 'ftp@example.com', ''],
+            $system->requests[0],
+        );
     }
 
     public function test_delete_removes_existing_user_and_reloads(): void
@@ -100,10 +105,14 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->delete('ftp@example.com');
 
-        $joined = implode("\n", $system->execJournal);
-        $this->assertStringContainsString('pure-pw userdel ftp@example.com -m', $joined);
-        $this->assertStringContainsString('touch /etc/pureftpd/pureftpd.passwd', $joined);
-        $this->assertStringContainsString('pure-pw mkdb', $joined);
+        $this->assertSame(
+            ['compose.ftpShowUser', 'compose.ftpDeleteUser', 'compose.ftpTouchPasswordFile', 'compose.ftpMakeDatabase'],
+            $system->actions(),
+        );
+        $this->assertSame(
+            [LocalRoot::CLIENT, 'compose.ftpDeleteUser', '--', $this->composeFile(), 'ftp@example.com'],
+            $system->requests[1],
+        );
     }
 
     public function test_delete_skips_userdel_when_missing_but_still_reloads(): void
@@ -113,10 +122,10 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->delete('missing@example.com');
 
-        $joined = implode("\n", $system->execJournal);
-        $this->assertStringNotContainsString('userdel', $joined);
-        $this->assertStringContainsString('touch /etc/pureftpd/pureftpd.passwd', $joined);
-        $this->assertStringContainsString('pure-pw mkdb', $joined);
+        $this->assertSame(
+            ['compose.ftpShowUser', 'compose.ftpTouchPasswordFile', 'compose.ftpMakeDatabase'],
+            $system->actions(),
+        );
     }
 
     public function test_delete_many_reloads_once(): void
@@ -126,26 +135,39 @@ class ProjectFtpTest extends TestCase
 
         $project->ftp()->deleteMany(['a@example.com', 'b@example.com']);
 
-        $userdelCount = 0;
-        $touchCount = 0;
-        foreach ($system->execJournal as $cmd) {
-            if (str_contains($cmd, 'userdel')) {
-                $userdelCount++;
-            }
-            if (str_contains($cmd, 'touch /etc/pureftpd/pureftpd.passwd')) {
-                $touchCount++;
-            }
-        }
-        $this->assertSame(2, $userdelCount);
-        $this->assertSame(1, $touchCount);
+        $actions = $system->actions();
+
+        $this->assertSame(2, count(array_keys($actions, 'compose.ftpDeleteUser', true)));
+        $this->assertSame(1, count(array_keys($actions, 'compose.ftpTouchPasswordFile', true)));
+        $this->assertSame(1, count(array_keys($actions, 'compose.ftpMakeDatabase', true)));
     }
 
-    public function test_disk_usage_returns_du_megabytes(): void
+    public function test_disk_usage_of_a_dind_account_leaves_out_the_inner_daemon_data(): void
     {
         $system = $this->recordingSystem(duOutput: "42\t/home/alice/public_html\n");
-        $project = new Project($system, $this->userModel('alice', 1001, 1001));
+        $project = new Project($system, $this->userModel('alice', 1001, 1001, 'dind'));
 
         $this->assertSame('42', $project->ftp()->diskUsage('/public_html'));
+        $home = $this->tmpRoot.'/home/alice';
+        $this->assertContains(
+            Privileged::accountFiles(1001, 1001)->diskUsageInMegabytes($home.'/public_html', $home.'/docker'),
+            $system->requests
+        );
+        $this->assertContains('du -shm --exclude='.$home.'/docker -- '.$home.'/public_html', $system->execJournal);
+    }
+
+    public function test_disk_usage_of_a_php_hosting_account_counts_its_docker_directory(): void
+    {
+        $system = $this->recordingSystem(duOutput: "42\t/home/alice/public_html\n");
+        $project = new Project($system, $this->userModel('alice', 1001, 1001, 'php'));
+
+        $this->assertSame('42', $project->ftp()->diskUsage('/public_html'));
+        $home = $this->tmpRoot.'/home/alice';
+        $this->assertContains(
+            Privileged::accountFiles(1001, 1001)->diskUsageInMegabytes($home.'/public_html'),
+            $system->requests
+        );
+        $this->assertContains('du -shm -- '.$home.'/public_html', $system->execJournal);
     }
 
     public function test_disk_usage_creates_missing_directory_and_returns_zero(): void
@@ -153,25 +175,51 @@ class ProjectFtpTest extends TestCase
         $system = $this->recordingSystem();
         $project = new Project($system, $this->userModel('alice', 1001, 1001));
 
-        $this->assertSame('0', $project->ftp()->diskUsage('/newdir'));
-        $this->assertNotEmpty($system->processJournal);
-        $this->assertStringContainsString('mkdir -p', $system->processJournal[0]);
+        $this->assertSame('0', $project->ftp()->diskUsage('/newdir/sub'));
+        $home = $this->tmpRoot.'/home/alice';
+        $this->assertSame([
+            implode(' ', Privileged::scripts()->makeHomeEntry($home.'/newdir', '0755', '1001:1001')),
+            implode(' ', Privileged::accountFiles(1001, 1001)->makeDirectories($home.'/newdir/sub')),
+        ], $system->processJournal);
     }
 
-    private function userModel(string $username, int $uid, int $gid): ModelsUser
+    public function test_disk_usage_makes_nothing_for_the_home_itself(): void
+    {
+        $system = $this->recordingSystem();
+        $project = new Project($system, $this->userModel('bob', 1002, 1002));
+
+        $this->assertSame('0', $project->ftp()->diskUsage('/'));
+        $this->assertSame([], $system->processJournal);
+    }
+
+    public function test_disk_usage_makes_the_first_named_entry_of_a_dotted_path(): void
+    {
+        $system = $this->recordingSystem();
+        $project = new Project($system, $this->userModel('alice', 1001, 1001));
+
+        $this->assertSame('0', $project->ftp()->diskUsage('/./newdir'));
+        $home = $this->tmpRoot.'/home/alice';
+        $this->assertSame(
+            implode(' ', Privileged::scripts()->makeHomeEntry($home.'/newdir', '0755', '1001:1001')),
+            $system->processJournal[0] ?? null,
+        );
+    }
+
+    private function userModel(string $username, int $uid, int $gid, ?string $template = null): ModelsUser
     {
         $model = new ModelsUser();
         $model->username = $username;
         $model->setDetails([
             'UID' => $uid,
             'GID' => $gid,
+            'template' => $template,
         ]);
 
         return $model;
     }
 
     /**
-     * @return System&object{execJournal: list<string>, processJournal: list<string>}
+     * @return System&object{execJournal: list<string>, processJournal: list<string>, requests: list<list<string>>}
      */
     private function recordingSystem(int $userExistsExitCode = 0, string $duOutput = "0\tpath\n"): System
     {
@@ -183,6 +231,9 @@ class ProjectFtpTest extends TestCase
 
             /** @var list<string> */
             public array $processJournal = [];
+
+            /** @var list<list<string>> */
+            public array $requests = [];
 
             public function __construct(
                 private string $engineRoot,
@@ -213,7 +264,8 @@ class ProjectFtpTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $this->requests[] = (array) $cmd;
+                $line = is_array($cmd) ? implode(' ', LocalRoot::plain($cmd) ?: $cmd) : $cmd;
                 $this->execJournal[] = $line;
                 $this->envJournal[] = $env;
                 if (str_contains($line, 'du -shm')) {
@@ -223,12 +275,18 @@ class ProjectFtpTest extends TestCase
                 return '';
             }
 
+            /** @return list<string> */
+            public function actions(): array
+            {
+                return array_map(static fn (array $argv): ?string => LocalRoot::action($argv), $this->requests);
+            }
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->processJournal[] = $line;
+                $this->requests[] = (array) $cmd;
+                $this->processJournal[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
 
-                if (str_contains($line, 'pure-pw show')) {
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'compose.ftpShowUser') {
                     return new class ($this->userExistsExitCode) extends Process {
                         public function __construct(private int $fakeExitCode)
                         {
@@ -265,6 +323,11 @@ class ProjectFtpTest extends TestCase
                 };
             }
         };
+    }
+
+    private function composeFile(): string
+    {
+        return $this->tmpRoot . '/docker-compose.yml';
     }
 
     private function removeTree(string $path): void

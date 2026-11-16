@@ -3,6 +3,7 @@
 namespace App\Console\Commands\System;
 
 use App\System;
+use App\System\Privileged;
 use Illuminate\Console\Command;
 
 /**
@@ -74,7 +75,7 @@ class TrimRegistryProxy extends Command
     {
         try {
             $out = $system->exec(
-                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', self::CONTAINER],
+                Privileged::docker()->isRunning(self::CONTAINER),
                 [],
                 30
             );
@@ -91,15 +92,12 @@ class TrimRegistryProxy extends Command
      */
     public static function wipeArgv(): array
     {
-        return [
-            'sudo', 'docker', 'exec', self::CONTAINER,
-            'rm', '-rf', '/var/lib/registry/docker', '/var/lib/registry/scheduler-state.json',
-        ];
+        return Privileged::docker()->wipeRegistryStorage(self::CONTAINER);
     }
 
     /** Plain argv: nothing here is handed to a shell on either side. */
     public static function clearArgv(): array
     {
-        return ['sudo', 'docker', 'restart', self::CONTAINER];
+        return Privileged::docker()->restart(self::CONTAINER);
     }
 }

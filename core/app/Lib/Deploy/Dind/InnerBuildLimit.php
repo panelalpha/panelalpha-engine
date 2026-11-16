@@ -5,14 +5,8 @@ namespace App\Lib\Deploy\Dind;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * An image build in an account's own Docker daemon, held to the host build
- * ceiling and made the first thing the kernel kills when memory runs out.
- *
- * moby's embedded BuildKit runs each RUN step of a Dockerfile, compose or
- * Railpack (`docker buildx build`) build in a cgroup of its own below
- * {@see CGROUP}, as a child of dockerd and so at dockerd's -500 OOM score.
- * Only the account's own limit bounded a build, and the app was killed first.
- * Builds argv only; InnerBuildGuard runs it in the account.
+ * Argv holding an image build in an account's daemon to the host build ceiling and first in line for the OOM
+ * killer: BuildKit's RUN steps sit below {@see CGROUP} at dockerd's -500 score, so the app was killed first.
  */
 final class InnerBuildLimit
 {

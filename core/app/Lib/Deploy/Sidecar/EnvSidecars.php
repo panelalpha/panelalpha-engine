@@ -9,18 +9,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Backing services implied by a project's .env when the repo ships no compose
- * of its own.
- *
- * Framework recipes (TanStack, Nuxt, …) often only declare DATABASE_URL /
- * REDIS_URL pointing at localhost. Without a sidecar the generated app
- * container starts, then every request 500s. This class turns those URLs into
- * the same {services, volumes, env} shape {@see ComposeHarden::extractRuntimeSidecarsFromYaml()}
- * returns, so {@see DeployStrategy} can merge them unchanged.
- *
- * External hosts are left alone — the operator already runs the database.
- *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * Backing services implied by a project's .env (DATABASE_URL, REDIS_URL at a local host) when the repo
+ * ships no compose, in the shape {@see ComposeHarden::extractRuntimeSidecarsFromYaml()} returns.
  */
 class EnvSidecars
 {
@@ -39,8 +29,7 @@ class EnvSidecars
     ];
 
     /**
-     * Hostnames that mean "I expected a local companion process", not a
-     * managed database somewhere else.
+     * Hostnames that mean "I expected a local companion process", not a managed database elsewhere.
      *
      * @var list<string>
      */
@@ -66,8 +55,7 @@ class EnvSidecars
     ];
 
     /**
-     * Compose service name per engine — also the hostname written into
-     * DATABASE_URL / REDIS_URL.
+     * Compose service name per engine, also the hostname written into DATABASE_URL / REDIS_URL.
      *
      * @var array<string, string>
      */
@@ -93,8 +81,7 @@ class EnvSidecars
 
     /**
      * @param  array<string, string>  $variables
-     * @param  ?SidecarPasswords  $passwords  fills a password the URL left out;
-     *                                        null keeps the legacy `app`
+     * @param  ?SidecarPasswords  $passwords  fills a password the URL left out; null keeps the legacy `app`
      * @return array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
@@ -105,6 +92,37 @@ class EnvSidecars
     {
         $passwords ??= SidecarPasswords::legacy();
         $empty = ['services' => [], 'volumes' => [], 'env' => []];
+        $draft = self::drafts($variables);
+
+        if ($draft === []) {
+            return $empty;
+        }
+
+        [$services, $volumes] = self::sidecarServices($draft, $passwords);
+
+        if ($services === []) {
+            return $empty;
+        }
+
+        $compose = ['services' => $services];
+        if ($volumes !== []) {
+            $compose['volumes'] = $volumes;
+        }
+
+        return ComposeHarden::extractRuntimeSidecarsFromYaml(
+            Yaml::dump($compose, 4, 2),
+            true
+        );
+    }
+
+    /**
+     * One spec per engine from the URL keys, first match wins; Laravel's DB_* when no URL names one.
+     *
+     * @param  array<string, string>  $variables
+     * @return array<string, array{engine: string, username: string, password: string, database: string}>
+     */
+    private static function drafts(array $variables): array
+    {
         $draft = [];
         foreach (self::URL_KEYS as $key) {
             $raw = trim((string) ($variables[$key] ?? ''));
@@ -129,15 +147,21 @@ class EnvSidecars
             }
         }
 
-        if ($draft === []) {
-            return $empty;
-        }
+        return $draft;
+    }
 
+    /**
+     * Two database engines both want "db": the first keeps it.
+     *
+     * @param  array<string, array{engine: string, username: string, password: string, database: string}>  $draft
+     * @return array{0: array<string, array<string, mixed>>, 1: array<string, mixed>} services, volumes
+     */
+    private static function sidecarServices(array $draft, SidecarPasswords $passwords): array
+    {
         $services = [];
         $volumes = [];
         foreach ($draft as $engine => $spec) {
             $name = self::SERVICE_NAMES[$engine] ?? $engine;
-            // Two database engines both want "db" — keep the first.
             if (isset($services[$name])) {
                 continue;
             }
@@ -151,24 +175,11 @@ class EnvSidecars
             }
         }
 
-        if ($services === []) {
-            return $empty;
-        }
-
-        $compose = ['services' => $services];
-        if ($volumes !== []) {
-            $compose['volumes'] = $volumes;
-        }
-
-        return ComposeHarden::extractRuntimeSidecarsFromYaml(
-            Yaml::dump($compose, 4, 2),
-            true
-        );
+        return [$services, $volumes];
     }
 
     /**
-     * `.env.example` first, then `.env` so live values win. `$read` as in
-     * {@see EnvFile::databaseSettings()}.
+     * `.env.example` first, then `.env` so live values win. `$read` as in {@see EnvFile::databaseSettings()}.
      *
      * @param  (callable(string): ?string)|null  $read
      * @return array<string, string>
@@ -321,10 +332,7 @@ class EnvSidecars
     }
 
     /**
-     * Where each engine keeps its data, and therefore which ones need a volume.
-     *
-     * Redis is absent on purpose: a cache the engine invented on the strength
-     * of a REDIS_URL is not somewhere to persist anything.
+     * Where each engine keeps its data, so which need a volume; not Redis, an invented cache.
      *
      * @var array<string, string>
      */
@@ -335,8 +343,7 @@ class EnvSidecars
     ];
 
     /**
-     * The init variable that holds each engine's password; the engines that
-     * refuse to start without one.
+     * The init variable that holds each engine's password; the engines that refuse to start without one.
      *
      * @var array<string, string>
      */
@@ -347,14 +354,8 @@ class EnvSidecars
     ];
 
     /**
-     * The credentials this sidecar will accept, filled in where the URL did
-     * not say.
-     *
-     * A datastore with no password is unreachable rather than open — these
-     * images refuse to start without one — so the blank is filled for the
-     * engines that demand it, with a per-account password rather than the
-     * `app` everyone could guess. Redis numbers its databases
-     * rather than naming them, which is why its default is `0` and not `app`.
+     * The credentials this sidecar will accept: a blank password is filled per account for the engines
+     * that refuse to start without one; Redis numbers its databases, so its default is `0`.
      *
      * @param  array{username: string, password: string, database: string}  $spec
      * @return array{0: string, 1: string, 2: string} user, password, database
@@ -406,15 +407,8 @@ class EnvSidecars
     }
 
     /**
-     * MySQL is the awkward one: it will not create `root` as a normal user, so
-     * a URL naming root sets the root password instead of a user pair.
-     *
-     * There is no MYSQL_ALLOW_EMPTY_PASSWORD branch, because there cannot be
-     * one: {@see credentials()} fills an absent password for every engine
-     * that refuses to start without one, so `$pass` is never empty by the
-     * time it arrives here.
-     *
-     * Root no longer shares the user's password unless the account is legacy.
+     * MySQL will not create `root` as a normal user, so a URL naming root sets the root password instead.
+     * `$pass` is never empty here ({@see credentials()}); root shares it only on a legacy account.
      *
      * @return array<string, string>
      */

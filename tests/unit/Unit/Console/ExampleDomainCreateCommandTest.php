@@ -12,22 +12,26 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\User;
+use App\System\Services\Webserver;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
- * `system:example:create` as the installer sees it. The WordPress branch runs
- * wp-cli on the host and is not exercised here; everything up to it is.
+ * `system:example:create` as the installer sees it. The WordPress branch is
+ * exercised up to its first wp-cli run, which a stand-in root broker refuses.
  */
 class ExampleDomainCreateCommandTest extends TestCase
 {
     use InMemoryDatabase;
+
+    private string $tmpRoot = '';
 
     protected function setUp(): void
     {
@@ -37,11 +41,18 @@ class ExampleDomainCreateCommandTest extends TestCase
         // Settings are cached statically, across tests.
         Setting::clearRuntimeSettings();
         Queue::fake();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
     {
         Setting::clearRuntimeSettings();
+        LocalRoot::answerByBroker();
+        (new \ReflectionProperty(Webserver::class, 'currentWebserver'))->setValue(null, null);
+        if ($this->tmpRoot !== '') {
+            array_map('unlink', glob($this->tmpRoot . '/*') ?: []);
+            rmdir($this->tmpRoot);
+        }
         parent::tearDown();
     }
 
@@ -191,6 +202,66 @@ class ExampleDomainCreateCommandTest extends TestCase
         $this->assertSame('1', Setting::get('example-domain-created'));
     }
 
+    /**
+     * wp-cli runs as the account, which has its UID and GID only after its deploy, so the deploy comes first.
+     */
+    public function test_wordpress_is_installed_as_the_account_its_deploy_made(): void
+    {
+        $execAs = $this->rootRefusingWpCli();
+        (new \ReflectionProperty(Webserver::class, 'currentWebserver'))->setValue(null, 'apache');
+        $this->stubCreate(function (array $params): User {
+            $user = $this->makeUser($params['username'], [], $params['domain']);
+            $domain = $this->makeMainDomain($user, $params['domain']);
+            $domain->setDetails(['php_version' => '8.3']);
+            $domain->save();
+
+            return $user;
+        });
+
+        [$code, $out] = $this->example();
+
+        $this->assertSame(1, $code, $out);
+        $this->assertStringContainsString('Error during wp-cli core download: wp-cli refused', $out);
+        $this->assertContains('1001:1002', file($execAs, FILE_IGNORE_NEW_LINES) ?: []);
+        $this->assertSame('1', Setting::get('example-domain-created'));
+        $this->assertSame(0, Task::query()->count(), 'deployed in the command, not queued');
+    }
+
+    /** A repository needs nothing from the account once it exists, so its example is still left to the queue. */
+    public function test_an_example_from_a_repository_is_still_queued(): void
+    {
+        $this->stubCreate(function (array $params): User {
+            $user = $this->makeUser($params['username'], ['git_repo' => $params['git_repo']], $params['domain']);
+            $this->makeMainDomain($user, $params['domain']);
+
+            return $user;
+        });
+
+        [$code, $out] = $this->example(['--git-repo' => 'acme/app']);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertSame(1, Task::query()->count());
+        $this->assertNull(User::findByUsername('app')?->getUid(), 'its deploy has not run');
+    }
+
+    /**
+     * A root broker that answers every request with a refusal, and writes down the argv of the one that runs wp-cli.
+     *
+     * @return string the file it writes that argv to
+     */
+    private function rootRefusingWpCli(): string
+    {
+        $this->tmpRoot = sys_get_temp_dir() . '/pa-example-' . bin2hex(random_bytes(4));
+        mkdir($this->tmpRoot);
+        $log = $this->tmpRoot . '/exec-as';
+        $client = $this->tmpRoot . '/pa-root';
+        file_put_contents($client, "#!/bin/sh\n[ \"\$1\" = account-container.exec ] && printf '%s\\n' \"\$@\" > " . escapeshellarg($log) . "\necho 'wp-cli refused' >&2\nexit 1\n");
+        chmod($client, 0755);
+        LocalRoot::answerWith($client);
+
+        return $log;
+    }
+
     /** The CLI no longer goes through the HTTP router, so no root admin row is minted either. */
     public function test_the_command_does_not_touch_the_router(): void
     {
@@ -211,8 +282,8 @@ class ExampleDomainCreateCommandTest extends TestCase
     }
 
     /**
-     * Stand in for the create. `$behaviour` gets the validated fields and
-     * returns the project it made, or null for one that made nothing.
+     * Stand in for the create: `$behaviour` gets the validated fields and returns
+     * the project it made, or null; a create in this process has deployed.
      *
      * @param \Closure(array<string, mixed>): ?User $behaviour
      */
@@ -223,11 +294,20 @@ class ExampleDomainCreateCommandTest extends TestCase
             {
             }
 
-            public function queue(NewProjectInput $input): Task
+            public function queue(NewProjectInput $input, ?\App\Lib\Project\Create\CreateFollowUp $followUp = null): Task
             {
                 $user = ($this->behaviour)($input->params);
 
                 return Task::start(jobType: 'stub', queue: 'default', username: $user?->username, details: []);
+            }
+
+            public function create(NewProjectInput $input): User
+            {
+                $user = ($this->behaviour)($input->params) ?? throw new \LogicException('The create made no project.');
+                $user->setDetails(['UID' => 1001, 'GID' => 1002]);
+                $user->save();
+
+                return $user;
             }
         });
     }

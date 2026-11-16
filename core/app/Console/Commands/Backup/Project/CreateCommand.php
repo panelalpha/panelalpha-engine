@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Backup\Project;
 
+use App\Exceptions\DeployAlreadyRunningException;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\User;
@@ -13,7 +14,7 @@ class CreateCommand extends Command
 {
     protected $signature = 'project:backup:create
         {project : Project username}
-        {--container= : Backup container id or name}';
+        {--container= : Backup container id or name (default: the default store)}';
 
     protected $description = 'Create a full project backup in-process';
 
@@ -22,12 +23,6 @@ class CreateCommand extends Command
         $username = (string) $this->argument('project');
         $containerIdOrName = $this->stringOption('container');
 
-        if ($containerIdOrName === null) {
-            $this->error('The --container option is required.');
-
-            return 1;
-        }
-
         $user = User::query()->where('username', $username)->first();
         if ($user === null) {
             $this->error("Project '{$username}' not found.");
@@ -35,9 +30,11 @@ class CreateCommand extends Command
             return 1;
         }
 
-        $container = BackupContainer::findByIdOrName($containerIdOrName);
+        $container = BackupContainer::namedOrDefault($containerIdOrName);
         if ($container === null) {
-            $this->error("Backup container '{$containerIdOrName}' not found.");
+            $this->error($containerIdOrName === null
+                ? 'This server has no default backup container; name one with --container.'
+                : "Backup container '{$containerIdOrName}' not found.");
 
             return 1;
         }
@@ -45,7 +42,11 @@ class CreateCommand extends Command
         $backup = BackupRecord::prepare($user, $container, 'artisan');
 
         try {
-            $user->project()->backup($backup)->run();
+            $user->project()->backup($backup)->runOrDiscard();
+        } catch (DeployAlreadyRunningException $e) {
+            $this->error($e->getMessage());
+
+            return 1;
         } catch (LogicException $e) {
             $this->error($e->getMessage());
 

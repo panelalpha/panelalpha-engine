@@ -52,6 +52,13 @@ class EnvVarsHttpTest extends TestCase
         $response->assertJsonPath('data.applied_keys', ['KEEP', 'APP_KEY']);
     }
 
+    public function test_the_applied_keys_include_those_set_on_the_app_service(): void
+    {
+        $user = $this->dindUser(['env_override_keys' => ['KEEP'], 'env_service_keys' => ['KEEP', 'SEED']]);
+
+        $this->getJson("/api/projects/{$user->username}/env-vars")->assertJsonPath('data.applied_keys', ['KEEP', 'SEED']);
+    }
+
     public function test_reveal_returns_the_values(): void
     {
         $user = $this->dindUser();

@@ -7,6 +7,7 @@ use App\Jobs\DeleteBackupContainer;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,12 @@ class BackupDeletionJobsTest extends TestCase
         // Container credentials are an encrypted cast.
         config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $this->bootInMemoryDatabase();
+    }
+
+    protected function tearDown(): void
+    {
+        LocalRoot::answerByBroker();
+        parent::tearDown();
     }
 
     private function container(string $name = 'disk'): BackupContainer
@@ -67,6 +74,28 @@ class BackupDeletionJobsTest extends TestCase
 
         $this->assertNull(BackupContainer::query()->find($container->id));
         $this->assertSame(1, BackupContainer::query()->count(), 'only the one asked for');
+    }
+
+    public function test_an_empty_local_container_takes_its_empty_directory_with_it(): void
+    {
+        LocalRoot::answerLocally();
+        $location = sys_get_temp_dir() . '/pa-backup-container-' . bin2hex(random_bytes(6));
+        mkdir($location . '/alice', 0775, true);
+        $container = BackupContainer::create(['name' => 'disk', 'driver' => 'local', 'location' => $location, 'credentials' => null]);
+
+        (new DeleteBackupContainer($container->id))->handle();
+
+        $this->assertNull(BackupContainer::query()->find($container->id));
+        $this->assertDirectoryDoesNotExist($location);
+    }
+
+    public function test_an_empty_remote_container_is_deleted_without_reaching_its_store(): void
+    {
+        $container = BackupContainer::create(['name' => 'bucket', 'driver' => 's3', 'location' => 'bucket', 'credentials' => null]);
+
+        (new DeleteBackupContainer($container->id))->handle();
+
+        $this->assertNull(BackupContainer::query()->find($container->id));
     }
 
     public function test_a_backup_already_gone_is_nothing_to_do(): void

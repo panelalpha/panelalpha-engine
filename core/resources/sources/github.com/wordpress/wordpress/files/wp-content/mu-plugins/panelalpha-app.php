@@ -3,6 +3,18 @@
  * Plugin Name: PanelAlpha
  * Description: CLI user management and SSO login handler for PanelAlpha app management.
  */
+/** The user who receives a deleted user's content, or 0 when there is nobody to hand it to. */
+function panelalpha_reassign_target(int $deleteId, int $requested): int
+{
+    if ($requested > 0 && $requested !== $deleteId && get_user_by('id', $requested)) {
+        return $requested;
+    }
+
+    $admins = get_users(['role' => 'administrator', 'exclude' => [$deleteId], 'number' => 1, 'fields' => 'ID']);
+
+    return isset($admins[0]) ? (int) $admins[0] : 0;
+}
+
 // Only when run as a script: WP-CLI and wp-cron load this file too.
 if (PHP_SAPI === 'cli' && (get_included_files()[0] ?? '') === __FILE__) {
     global $argv;
@@ -48,9 +60,17 @@ if (PHP_SAPI === 'cli' && (get_included_files()[0] ?? '') === __FILE__) {
             echo json_encode(['id' => (string) $id]);
             break;
 
-        case 'users:delete': // users:delete <user_id>
+        case 'users:delete': // users:delete <user_id> [<reassign_user_id>]
             require_once ABSPATH . 'wp-admin/includes/user.php';
-            wp_delete_user((int) $argv[2]);
+            $deleteId = (int) $argv[2];
+            $reassign = panelalpha_reassign_target($deleteId, (int) ($argv[3] ?? 0));
+            if ($reassign <= 0) {
+                fwrite(STDERR, json_encode([
+                    'error' => "No user to reassign the deleted user's content to. Pass a reassign user id.",
+                ], JSON_PRETTY_PRINT));
+                exit(1);
+            }
+            wp_delete_user($deleteId, $reassign);
             echo json_encode(['success' => true]);
             break;
 

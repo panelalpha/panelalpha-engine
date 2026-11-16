@@ -95,7 +95,7 @@ class Databases
         $result = $conn->select($query, [$name]);
         $firstKey = array_key_first($result);
         if (
-            $firstKey
+            $firstKey !== null
             && is_object($result[$firstKey])
             && (is_string($result[$firstKey]->size) || is_int($result[$firstKey]->size))
         ) {

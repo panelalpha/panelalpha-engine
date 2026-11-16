@@ -6,12 +6,14 @@ use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
+use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\ComposeWriter;
 use App\System\Project\Dind\HostCompile;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -21,21 +23,21 @@ use Tests\TestCase;
  */
 class HostCompileNewerJdkTest extends TestCase
 {
-    private const FAILURE = "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile "
-        . '(default-compile) on project tigase-server: Fatal error compiling: error: release version 25 not supported -> [Help 1]';
+    private const FAILURE = '[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile '
+        .'(default-compile) on project tigase-server: Fatal error compiling: error: release version 25 not supported -> [Help 1]';
 
     private string $dir;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->dir = sys_get_temp_dir() . '/pa-jdk-' . bin2hex(random_bytes(4));
+        $this->dir = sys_get_temp_dir().'/pa-jdk-'.bin2hex(random_bytes(4));
         mkdir($this->dir, 0o777, true);
     }
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->dir));
+        exec('rm -rf '.escapeshellarg($this->dir));
         parent::tearDown();
     }
 
@@ -73,30 +75,27 @@ class HostCompileNewerJdkTest extends TestCase
 
     public function test_the_compile_reruns_on_the_newer_jdk_and_the_app_runs_on_it(): void
     {
-        $compose = $this->dir . '/docker-compose.panelalpha.yml';
+        $compose = $this->dir.'/docker-compose.panelalpha.yml';
         file_put_contents($compose, "services:\n  app:\n    image: 'maven:3-eclipse-temurin-21'\n"
-            . "    working_dir: /app\n  db:\n    image: 'postgres:17'\n");
+            ."    working_dir: /app\n  db:\n    image: 'postgres:17'\n");
 
-        $system = new class () extends System {
+        $system = new class extends System
+        {
             /** @var list<string> */
             public array $images = [];
 
-            public function __construct()
-            {
-            }
+            public function __construct() {}
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $cmd = is_array($cmd) ? $cmd : [$cmd];
-                if (($cmd[1] ?? null) === 'cp') {
-                    copy($cmd[2], $cmd[3]);
-                } elseif (($cmd[1] ?? null) === 'mv') {
-                    rename($cmd[count($cmd) - 2], $cmd[count($cmd) - 1]);
-                } elseif (($cmd[1] ?? null) === 'docker' && !in_array('exec', $cmd, true)) {
-                    // The compile is a `docker run`; a `docker compose exec` into the
-                    // account (the run file's rewrite asks it for its lxcfs files) is not.
-                    $sh = array_search('sh', $cmd, true);
-                    $this->images[] = (string) $cmd[$sh - 1];
+                $request = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $argv = LocalRoot::plain($request);
+                if (($argv[0] ?? null) === 'cp') {
+                    copy($argv[2], $argv[3]);
+                } elseif (($argv[0] ?? null) === 'mv') {
+                    rename($argv[count($argv) - 2], $argv[count($argv) - 1]);
+                } elseif (LocalRoot::build($request) !== []) {
+                    $this->images[] = LocalRoot::build($request)['image'];
                 }
                 $process = new Process(['true']);
                 $process->run();
@@ -105,11 +104,11 @@ class HostCompileNewerJdkTest extends TestCase
             }
         };
 
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = 'acme';
         $model->details = ['UID' => 1001, 'GID' => 1001];
         $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('hostBuilder')->willReturn(new DindHostBuilder());
+        $engine->method('hostBuilder')->willReturn(new DindHostBuilder);
         $dind = $this->createStub(Dind::class);
         $dind->method('userModel')->willReturn($model);
         $dind->method('system')->willReturn($system);

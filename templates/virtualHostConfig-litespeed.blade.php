@@ -135,6 +135,17 @@ RewriteRule ^ - [R=503,L]
     </extProcessor>
   </extProcessorList>
     <contextList>
+@if (!empty($cookie_isolation_headers))
+    <context>
+      <type>static</type>
+      <uri>/</uri>
+      <location>$DOC_ROOT/</location>
+      <allowBrowse>1</allowBrowse>
+      <allowOverride>31</allowOverride>
+      <accessFileName>.htaccess</accessFileName>
+      <extraHeaders>{!! $cookie_isolation_headers !!}</extraHeaders>
+    </context>
+@endif
 @if (!empty($http_acme_challenges_enabled))
     <context>
       <type>static</type>
@@ -154,6 +165,9 @@ RewriteRule ^ - [R=503,L]
     <enable>1</enable>
     <logLevel>0</logLevel>
     <rules>
+@if (!empty($cookie_isolation_rewrite))
+{!! $cookie_isolation_rewrite !!}
+@endif
 RewriteCond %{QUERY_STRING} pmassotoken=
 RewriteRule .* - [E=pmapass:1]
 RewriteCond %{HTTP_COOKIE} PMASignonSession
@@ -162,6 +176,9 @@ RewriteCond %{REQUEST_URI} ^/phpmyadmin$
 RewriteRule ^ /phpmyadmin/ [R=301,L]
 RewriteCond %{REQUEST_URI} ^/phpmyadmin/
 RewriteCond %{ENV:pmapass} =1
+@if (!empty($cookie_isolation_proxy_gate))
+{!! $cookie_isolation_proxy_gate !!}
+@endif
 RewriteRule ^/phpmyadmin/(.*)$ http://{{ $user }}-phpmyadmin/$1 [P,L]
     </rules>
   </rewrite>

@@ -9,11 +9,14 @@ use App\System\Project\Dind\CopyVolumes;
 use App\System\Projects;
 use App\System\Services\Mysql;
 use App\System\Services\Mysql\Databases;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Privileges;
 use App\System\Services\Mysql\Tables;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
+use Tests\Support\SitesDbRequest;
 use Tests\TestCase;
 
 class ProjectsPushRollbackTest extends TestCase
@@ -97,7 +100,7 @@ class ProjectsPushRollbackTest extends TestCase
 
         $this->assertFileExists($this->rollbackDir().'/live_wp.sql.gz');
         $this->assertStringContainsString("failed: restoring database 'live_wp'", $e->getMessage());
-        $this->assertStringContainsString('kept in '.$this->rollbackDir(), $e->getMessage());
+        $this->assertStringContainsString('kept in the core container at '.$this->rollbackDir(), $e->getMessage());
         $live = User::findByUsernameOrFail('live');
         $this->assertSame('failed', $live->getDetails()['async_status']['push'] ?? null);
         $this->assertSame($e->getMessage(), $live->getDetails()['error'] ?? null);
@@ -115,14 +118,14 @@ class ProjectsPushRollbackTest extends TestCase
 
         $this->assertFileExists($this->rollbackDir().'/live_wp.wp_posts.sql.gz');
         $this->assertStringContainsString("restoring table 'live_wp.wp_posts'", $e->getMessage());
-        $this->assertStringContainsString('kept in '.$this->rollbackDir(), $e->getMessage());
+        $this->assertStringContainsString('kept in the core container at '.$this->rollbackDir(), $e->getMessage());
     }
 
     public function test_kept_rollback_dumps_refuse_the_next_push_and_stay(): void
     {
         $record = $this->recorder();
         $this->stagingPair();
-        mkdir($this->rollbackDir());
+        mkdir($this->rollbackDir(), 0777, true);
         file_put_contents($this->rollbackDir().'/live_wp.sql.gz', 'only copy');
 
         $this->pushFails($record, 'restore or remove them before pushing again');
@@ -166,7 +169,7 @@ class ProjectsPushRollbackTest extends TestCase
 
     private function rollbackDir(): string
     {
-        return $this->root.'/live/.pre-push-db';
+        return $this->root.'/rollbacks/live';
     }
 
     private function recorder(
@@ -194,6 +197,11 @@ class ProjectsPushRollbackTest extends TestCase
         return new class($record, $this->root) extends System
         {
             public function __construct(private object $record, private string $root) {}
+
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
 
             public function project(User $model): Project
             {
@@ -234,7 +242,7 @@ class ProjectsPushRollbackTest extends TestCase
             {
                 $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
 
-                return new PushRollbackProcess($this->exitCode($argv));
+                return new PushRollbackProcess($this->exitCode(LocalRoot::isRequest($argv) ? LocalRoot::plain($argv) : $argv));
             }
 
             /**
@@ -244,12 +252,12 @@ class ProjectsPushRollbackTest extends TestCase
             {
                 $path = end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => is_dir($path) ? 0 : 1,
-                    ['sudo', 'test', '-e'] => file_exists($path) ? 0 : 1,
-                    ['sudo', 'test', '-L'] => is_link($path) ? 0 : 1,
-                    ['sudo', 'mkdir', '-p'] => (is_dir($path) || mkdir($path, 0777, true)) ? 0 : 1,
-                    ['sudo', 'rm', '-rf'] => $this->remove(array_slice($argv, 3)),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => is_dir($path) ? 0 : 1,
+                    ['test', '-e'] => file_exists($path) ? 0 : 1,
+                    ['test', '-L'] => is_link($path) ? 0 : 1,
+                    ['mkdir', '-p'] => (is_dir($path) || mkdir($path, 0777, true)) ? 0 : 1,
+                    ['rm', '-rf'] => $this->remove(array_slice($argv, 2)),
                     default => 0,
                 };
             }
@@ -317,9 +325,19 @@ class PushRollbackMysql extends Mysql
         $this->record->restores[] = [$name, $sqlGzPath];
     }
 
-    public function runSitesDbScript(string $script, string $failurePrefix): void
+    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void
     {
-        if ($this->record->failCopyOf !== null && str_contains($script, "'".$this->record->failCopyOf."'")) {
+        $this->recordScript(SitesDbRequest::copy($from, $to, $table, $definers), $failurePrefix);
+    }
+
+    public function dropTableInSitesDb(string $database, string $table): void
+    {
+        $this->recordScript(SitesDbRequest::drop($database, $table), 'table drop failed');
+    }
+
+    private function recordScript(string $script, string $failurePrefix): void
+    {
+        if ($this->record->failCopyOf !== null && str_contains($script, ' '.$this->record->failCopyOf)) {
             throw new \RuntimeException('copy exploded');
         }
 

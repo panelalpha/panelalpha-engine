@@ -311,6 +311,7 @@ class FrameworkServiceTest extends TestCase
         $this->assertStringContainsString('corepack enable --install-directory /tmp/corepack-bin', $script);
         $this->assertStringContainsString('corepack prepare pnpm@10.15.1 --activate', $script);
         $this->assertStringContainsString('PATH=/tmp/corepack-bin:/tmp/corepack-npm/bin:$$PATH', $script);
+        $this->assertStringContainsString('COREPACK_ENABLE_AUTO_PIN=0', $script);
         $this->assertStringEndsWith(' && exec /app/panelalpha-entrypoint.sh', $script);
         $this->assertStringNotContainsString('HUSKY', $script);
 

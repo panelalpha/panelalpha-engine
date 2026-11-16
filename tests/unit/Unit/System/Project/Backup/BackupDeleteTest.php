@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Backup;
 
+use App\Integrations\Storage\Local;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\User;
@@ -12,6 +13,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class BackupDeleteTest extends TestCase
@@ -22,11 +25,11 @@ class BackupDeleteTest extends TestCase
     {
         parent::setUp();
 
-        $this->tmpRoot = sys_get_temp_dir() . '/pa-sys-backup-delete-' . bin2hex(random_bytes(4));
-        mkdir($this->tmpRoot . '/users/alice', 0777, true);
+        $this->tmpRoot = sys_get_temp_dir().'/pa-sys-backup-delete-'.bin2hex(random_bytes(4));
+        mkdir($this->tmpRoot.'/users/alice', 0777, true);
 
         config([
-            'app.key' => 'base64:' . base64_encode(str_repeat('k', 32)),
+            'app.key' => 'base64:'.base64_encode(str_repeat('k', 32)),
             'database.default' => 'sqlite',
             'database.connections.sqlite.database' => ':memory:',
             'database.connections.sqlite.foreign_key_constraints' => true,
@@ -83,6 +86,7 @@ class BackupDeleteTest extends TestCase
 
     protected function tearDown(): void
     {
+        LocalRoot::answerByBroker();
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -106,11 +110,33 @@ class BackupDeleteTest extends TestCase
         $this->assertSame(3, $backup->items()->count());
     }
 
+    public function test_a_backup_the_local_store_could_not_remove_keeps_its_row_and_says_why(): void
+    {
+        $user = $this->makeUser('alice');
+        $record = BackupRecord::prepare($user, $this->makeContainer(), 'manual');
+        $storage = new Local($this->tmpRoot.'/store');
+        $key = 'alice/'.$record->id.'/database-alice_app.sql.gz';
+        $stream = fopen('php://memory', 'r+');
+        fwrite($stream, 'dump');
+        rewind($stream);
+        $storage->put($key, $stream);
+        fclose($stream);
+        $this->refuseEveryRootAction();
+
+        (new BackupDouble($this->project($user), $record, $storage))->delete();
+
+        $row = BackupRecord::query()->find($record->id);
+        $this->assertNotNull($row);
+        $this->assertSame('failed', $row->deleteStatus());
+        $this->assertSame("Could not remove backup objects under alice/{$record->id}/: Operation not permitted", $row->error);
+        $this->assertTrue($storage->exists($key));
+    }
+
     public function test_happy_delete_removes_row_and_storage_prefix(): void
     {
         $user = $this->makeUser('alice');
         $container = $this->makeContainer();
-        $storage = new FakeStorage();
+        $storage = new FakeStorage;
         $created = $this->createBackup($user, $container, $storage);
         $backup = $created->model()->fresh(['items']);
         $backupId = $backup->id;
@@ -119,14 +145,14 @@ class BackupDeleteTest extends TestCase
         $deleter->delete();
 
         $this->assertNull(BackupRecord::query()->find($backupId));
-        $this->assertSame(['alice/' . $backupId . '/'], $storage->deletePrefixCalls);
+        $this->assertSame(['alice/'.$backupId.'/'], $storage->deletePrefixCalls);
     }
 
     public function test_delete_all_backups_deletes_every_backup(): void
     {
         $user = $this->makeUser('alice');
         $container = $this->makeContainer();
-        $storage = new FakeStorage();
+        $storage = new FakeStorage;
         $project = $this->project($user);
 
         $first = $this->createBackup($user, $container, $storage)->model();
@@ -136,7 +162,7 @@ class BackupDeleteTest extends TestCase
 
         $this->assertSame(0, BackupRecord::query()->where('user_id', $user->id)->count());
         $this->assertSame(
-            ['alice/' . $first->id . '/', 'alice/' . $second->id . '/'],
+            ['alice/'.$first->id.'/', 'alice/'.$second->id.'/'],
             $storage->deletePrefixCalls,
         );
     }
@@ -151,9 +177,9 @@ class BackupDeleteTest extends TestCase
         );
         $project = $this->project($user);
 
-        $first = $this->createBackup($user, $container, new FakeStorage())->model();
+        $first = $this->createBackup($user, $container, new FakeStorage)->model();
         // Re-run create into failing storage's object map isn't needed — delete uses deletePrefix.
-        $second = $this->createBackup($user, $container, new FakeStorage())->model();
+        $second = $this->createBackup($user, $container, new FakeStorage)->model();
 
         // Point both records at the failing storage via BackupDouble.
         try {
@@ -207,6 +233,14 @@ class BackupDeleteTest extends TestCase
         }
     }
 
+    private function refuseEveryRootAction(): void
+    {
+        $client = $this->tmpRoot.'/pa-root';
+        file_put_contents($client, "#!/bin/sh\necho 'Operation not permitted' >&2\nexit 1\n");
+        chmod($client, 0755);
+        LocalRoot::answerWith($client);
+    }
+
     private function project(User $user): Project
     {
         return new Project($this->systemWithFreeSpace(), $user);
@@ -216,10 +250,9 @@ class BackupDeleteTest extends TestCase
     {
         $engineRoot = $this->tmpRoot;
 
-        return new class ($engineRoot) extends System {
-            public function __construct(private string $engineRoot)
-            {
-            }
+        return new class($engineRoot) extends System
+        {
+            public function __construct(private string $engineRoot) {}
 
             public function engineDirPath(): string
             {
@@ -228,10 +261,9 @@ class BackupDeleteTest extends TestCase
 
             public function filesystem(): Filesystem
             {
-                return new class ($this) extends Filesystem {
-                    public function assertFreeSpace(int $bytes): void
-                    {
-                    }
+                return new class($this) extends Filesystem
+                {
+                    public function assertFreeSpace(int $bytes): void {}
                 };
             }
 
@@ -242,12 +274,15 @@ class BackupDeleteTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                return new class () extends Process {
+                return new class extends Process
+                {
                     public function __construct()
                     {
                         parent::__construct(['php', '-r', '']);
@@ -279,10 +314,10 @@ class BackupDeleteTest extends TestCase
 
     private function makeUser(string $username): User
     {
-        $user = new User();
+        $user = new User;
         $user->username = $username;
-        $user->domain = $username . '.example.test';
-        $user->email = $username . '@example.test';
+        $user->domain = $username.'.example.test';
+        $user->email = $username.'@example.test';
         $user->name = $username;
         $user->status = 'active';
         $user->details = ['template' => 'dind'];
@@ -293,8 +328,8 @@ class BackupDeleteTest extends TestCase
 
     private function makeContainer(array $credentials = []): BackupContainer
     {
-        $container = new BackupContainer();
-        $container->name = 'test-' . uniqid('', true);
+        $container = new BackupContainer;
+        $container->name = 'test-'.uniqid('', true);
         $container->driver = 'local';
         $container->location = '/tmp/backups';
         $container->credentials = $credentials !== [] ? $credentials : null;
@@ -305,7 +340,7 @@ class BackupDeleteTest extends TestCase
 
     private function removeTree(string $path): void
     {
-        if (!is_dir($path)) {
+        if (! is_dir($path)) {
             return;
         }
         $items = new \RecursiveIteratorIterator(

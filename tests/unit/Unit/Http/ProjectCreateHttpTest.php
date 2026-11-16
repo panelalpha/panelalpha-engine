@@ -4,6 +4,8 @@ namespace Tests\Unit\Http;
 
 use App\Http\Middleware\Authenticate;
 use App\Jobs\DeployProject;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Inspect\Report\DeployVerdict;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
@@ -11,6 +13,7 @@ use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Http\OutboundUrl;
 use App\Lib\Project\CreateInspection;
 use App\Lib\Project\CreateInspector;
+use App\Lib\Project\ProjectCreator;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\User;
@@ -18,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -38,6 +42,7 @@ class ProjectCreateHttpTest extends TestCase
         Setting::clearRuntimeSettings();
         $this->withoutMiddleware(Authenticate::class);
         Queue::fake();
+        LocalRoot::answerLocally();
     }
 
     protected function tearDown(): void
@@ -46,6 +51,7 @@ class ProjectCreateHttpTest extends TestCase
         Setting::clearRuntimeSettings();
         app(DeployPlanContext::class)->clear();
         app(RecipeChoiceContext::class)->clear();
+        LocalRoot::answerByBroker();
         parent::tearDown();
     }
 
@@ -81,6 +87,7 @@ class ProjectCreateHttpTest extends TestCase
                     'expected' => '3-15 characters: lowercase letters a-z and digits, starting with a letter',
                     'pattern' => '^[a-z][a-z0-9]{2,14}$',
                     'examples' => ['shop', 'blog2', 'myapp01'],
+                    'hints' => [],
                 ]],
             ]);
         }
@@ -99,8 +106,8 @@ class ProjectCreateHttpTest extends TestCase
                     'template' => ['Template directory does not exist.'],
                 ],
                 'problems' => [
-                    ['field' => 'username', 'code' => 'name_taken', 'message' => "A project named 'taken' already exists. Choose another name."],
-                    ['field' => 'template', 'code' => 'template_not_found', 'message' => 'Template directory does not exist.'],
+                    ['field' => 'username', 'code' => 'name_taken', 'message' => "A project named 'taken' already exists. Choose another name.", 'hints' => []],
+                    ['field' => 'template', 'code' => 'template_not_found', 'message' => 'Template directory does not exist.', 'hints' => []],
                 ],
             ]);
         }
@@ -119,6 +126,7 @@ class ProjectCreateHttpTest extends TestCase
                     'message' => 'The domain format is invalid.',
                     'expected' => 'a hostname, lowercase, without scheme or path',
                     'examples' => ['shop.example.com'],
+                    'hints' => [],
                 ]],
             ]);
         }
@@ -131,12 +139,12 @@ class ProjectCreateHttpTest extends TestCase
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'stages' => ['nonsense' => []]]), 422, [
                 'message' => "stages: 'nonsense' is not a stage; expected one of precheck, prepare, build, install, upgrade, start",
                 'errors' => ['stages' => ["stages: 'nonsense' is not a stage; expected one of precheck, prepare, build, install, upgrade, start"]],
-                'problems' => [['field' => 'stages', 'code' => 'stages_invalid', 'message' => "stages: 'nonsense' is not a stage; expected one of precheck, prepare, build, install, upgrade, start"]],
+                'problems' => [['field' => 'stages', 'code' => 'stages_invalid', 'message' => "stages: 'nonsense' is not a stage; expected one of precheck, prepare, build, install, upgrade, start", 'hints' => []]],
             ]);
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'recipe' => 'Bad']), 422, [
                 'message' => "'Bad' is not a recipe id. Inspect the source and pick one of the ids under application.candidates.",
                 'errors' => ['recipe' => ["'Bad' is not a recipe id. Inspect the source and pick one of the ids under application.candidates."]],
-                'problems' => [['field' => 'recipe', 'code' => 'recipe_invalid', 'message' => "'Bad' is not a recipe id. Inspect the source and pick one of the ids under application.candidates."]],
+                'problems' => [['field' => 'recipe', 'code' => 'recipe_invalid', 'message' => "'Bad' is not a recipe id. Inspect the source and pick one of the ids under application.candidates.", 'hints' => []]],
             ]);
         }
         $this->assertNothingCreated();
@@ -146,14 +154,14 @@ class ProjectCreateHttpTest extends TestCase
     {
         foreach (self::uris() as $uri) {
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'git_repo' => 'https://github.com/acme/app.git', 'git_token' => 'vault:999']), 422, [
-                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned.",
-                'errors' => ['git_token' => ["No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
-                'problems' => [['field' => 'git_token', 'code' => 'git_token_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
+                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created.",
+                'errors' => ['git_token' => ["No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created."]],
+                'problems' => [['field' => 'git_token', 'code' => 'git_token_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created.", 'hints' => []]],
             ]);
             $this->assertBody($this->postJson($uri, ['username' => 'fresh', 'domain' => 'fresh.example.test', 'env_vars' => ['A' => 'vault:999']]), 422, [
-                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned.",
-                'errors' => ['env_vars' => ["No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
-                'problems' => [['field' => 'env_vars', 'code' => 'env_vars_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` vault_secret_create returned."]],
+                'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created.",
+                'errors' => ['env_vars' => ["No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created."]],
+                'problems' => [['field' => 'env_vars', 'code' => 'env_vars_invalid', 'message' => "No vault entry for 'vault:999'. Use the `vault:<key>` the vault returned when the secret was created.", 'hints' => []]],
             ]);
         }
         $this->assertNothingCreated();
@@ -238,7 +246,7 @@ class ProjectCreateHttpTest extends TestCase
                 $this->asked[] = [$repoUrl, $branch, $token, $recipe];
 
                 return CreateInspection::fromReport([
-                    'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'deployable' => true, 'issue' => null],
+                    'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'verdict' => DeployVerdict::PLACEHOLDER, 'deployable' => false, 'issue' => DeployVerdict::UNRECOGNISED],
                 ]);
             }
         });
@@ -279,6 +287,21 @@ class ProjectCreateHttpTest extends TestCase
         $this->assertArrayHasKey('inspection', (array) $response->json('data'));
     }
 
+    /** A new project is active from the start, and the create answers so. */
+    public function test_a_synchronous_create_answers_the_status_the_project_has(): void
+    {
+        $this->app->instance(ProjectCreator::class, new class extends ProjectCreator
+        {
+            public function deploy(User $user, ?DeployLogger $deployLogger): void {}
+        });
+
+        $response = $this->postJson('/api/users', ['username' => 'syncone', 'domain' => 'syncone.example.test', 'tunnel' => 'none']);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.status', 'active');
+        $this->assertSame('active', User::findByUsername('syncone')?->status);
+    }
+
     /**
      * The remote probe is resolved from the container, so a test can answer for
      * it: the same probe an attach runs through.
@@ -298,7 +321,8 @@ class ProjectCreateHttpTest extends TestCase
                 ?string $token,
                 string $tokenField = 'git_token',
                 ?string $branch = null,
-                string $branchField = 'git_branch'
+                string $branchField = 'git_branch',
+                ?array $deployKey = null,
             ): ?array {
                 $this->asked[] = [$repoField, $repoUrl, $branch];
 

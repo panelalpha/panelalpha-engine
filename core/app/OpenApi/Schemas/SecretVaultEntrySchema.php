@@ -23,6 +23,18 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'created_at', type: 'string', nullable: true, example: '2026-09-11T09:00:00+00:00'),
         new OA\Property(property: 'expires_at', type: 'string', nullable: true, description: 'When the secret expires and is deleted. Null: it never expires.', example: null),
         new OA\Property(property: 'url_expires_at', type: 'string', nullable: true, description: 'When the paste form closes.', example: '2026-09-11T10:00:00+00:00'),
+        new OA\Property(property: 'public_key', type: 'string', description: '`deploy_key` only: the line to add to the repository as a read-only deploy key.', example: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... panelalpha-shop'),
+        new OA\Property(property: 'fingerprint', type: 'string', description: '`deploy_key` only: the key\'s SHA256 fingerprint, as GitHub and GitLab list it.', example: 'SHA256:4Xz0m1VbX0c0y3oN6m4b8m1o0b2cZf1x8w2nQk3fJ1E'),
+        new OA\Property(
+            property: 'hosts',
+            type: 'array',
+            description: '`deploy_key` only: the git servers a clone with this key can verify. `published`: keys that ship with the engine; `scanned`: read from `host` when the key was made.',
+            items: new OA\Items(properties: [
+                new OA\Property(property: 'host', type: 'string', example: 'github.com'),
+                new OA\Property(property: 'pinned', type: 'string', enum: ['published', 'scanned']),
+                new OA\Property(property: 'fingerprints', type: 'array', items: new OA\Items(type: 'string')),
+            ], type: 'object'),
+        ),
     ],
     type: 'object', )]
 class SecretVaultEntrySchema {}

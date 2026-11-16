@@ -18,7 +18,7 @@ class FixDomains extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return "Fixing domains for user '{$user->username}'...";
+        return "Fixing domains for project '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void
@@ -30,7 +30,7 @@ class FixDomains extends ProjectFleetCommand
 
     protected function finished(User $user): string
     {
-        return '  Finished fixing domains for the user.';
+        return '  Finished fixing domains for the project.';
     }
 
     protected function afterAll(): void

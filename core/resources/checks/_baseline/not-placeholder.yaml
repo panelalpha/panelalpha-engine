@@ -1,10 +1,8 @@
 # yaml-language-server: $schema=../_schema.json
 #
 # The failure this whole mechanism exists for. The engine writes its own page
-# into a project it could not work out how to run, and nginx serves it with a
-# 200 -- so the deploy is green, the port answers, the domain resolves, and
-# the site is PanelAlpha's rather than the customer's. Nothing else in the
-# health report can tell those apart, because at the socket they are identical.
+# into a project it could not run, with a 404; many apps 404 on `/`, so this
+# check is how AppHealth knows its own page answered.
 #
 # Only the not-configured page. The welcome page is a separate check with a
 # separate severity, because an account that has never had an application is

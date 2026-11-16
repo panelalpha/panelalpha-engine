@@ -11,16 +11,10 @@ use App\System\Project\Git\WorkTree;
 use Illuminate\Support\Facades\DB;
 
 /**
- * A project's SSH deploy key: an ed25519 pair whose public half the customer
- * adds to one repository as a read-only deploy key, and the host keys a clone
- * with it is allowed to trust.
+ * A project's ed25519 deploy key, its private half kept encrypted and written out at 0600 only for one git command
+ * ({@see WorkTree::execute()}), and its pinned host keys: shipped ones, else one ssh-keyscan the egress guard allows.
  *
- * The private half is stored encrypted in the project details and only ever
- * leaves them as a 0600 file for the length of one git command
- * ({@see WorkTree::execute()}). Host keys are pinned:
- * github.com, gitlab.com and bitbucket.org from their published keys, any
- * other host from one ssh-keyscan when the caller names it, and only when the
- * egress guard lets core connect to it ({@see RepositoryAddress}).
+ * @see RepositoryAddress the egress guard
  */
 class DeployKey
 {
@@ -34,11 +28,8 @@ class DeployKey
     public function __construct(private readonly System $system) {}
 
     /**
-     * Create the key unless the project has one, and pin `$host` if it is not
-     * pinned yet. Never rotates: a key already registered with a forge keeps working.
-     *
-     * The key is re-read and written under a row lock on the project, so two
-     * concurrent calls return the same key and keep both pins.
+     * Create the key unless there is one and pin `$host`; never rotates, so a key a forge already has keeps working.
+     * Written under a row lock on the project, so two concurrent calls return the same key and keep both pins.
      *
      * @return array<string, mixed>
      */
@@ -107,6 +98,18 @@ class DeployKey
         return $host !== null && ! self::isShipped($host) && ! isset($key['known_hosts'][$host]);
     }
 
+    /**
+     * The key the project has, in the shape {@see ensure()} answers, or null when it has none.
+     *
+     * @return ?array<string, mixed>
+     */
+    public static function show(User $user): ?array
+    {
+        $key = self::stored($user);
+
+        return $key === null ? null : ['created' => false] + self::view($key);
+    }
+
     /** False when the project had no key. */
     public static function delete(User $user): bool
     {
@@ -136,8 +139,18 @@ class DeployKey
     /** The known_hosts file a clone with this key trusts: the shipped forges plus the pinned hosts. */
     public static function knownHosts(User $user): string
     {
+        return self::knownHostsOf(self::stored($user) ?? []);
+    }
+
+    /**
+     * The known_hosts file for a key that is not stored on a project yet.
+     *
+     * @param  array<string, mixed>  $key
+     */
+    public static function knownHostsOf(array $key): string
+    {
         $lines = [rtrim((string) file_get_contents(self::shippedFile()), "\n")];
-        foreach (self::stored($user)['known_hosts'] ?? [] as $hostLines) {
+        foreach ((array) ($key['known_hosts'] ?? []) as $hostLines) {
             foreach ((array) $hostLines as $line) {
                 $lines[] = (string) $line;
             }
@@ -149,7 +162,24 @@ class DeployKey
     /** Whether a clone from `$host` (known_hosts spelling) can verify the server. */
     public static function pins(User $user, string $host): bool
     {
-        return self::isShipped($host) || isset(self::stored($user)['known_hosts'][$host]);
+        return self::pinsIn(self::stored($user) ?? [], $host);
+    }
+
+    /** @param array<string, mixed> $key */
+    public static function pinsIn(array $key, string $host): bool
+    {
+        return self::isShipped($host) || isset($key['known_hosts'][$host]);
+    }
+
+    /**
+     * Whether $value is a key as {@see stored()} returns one, as read back from the vault.
+     */
+    public static function isKey(mixed $value): bool
+    {
+        return is_array($value)
+            && is_string($value['private_key'] ?? null) && $value['private_key'] !== ''
+            && is_string($value['public_key'] ?? null) && $value['public_key'] !== ''
+            && is_array($value['known_hosts'] ?? []);
     }
 
     /**
@@ -189,10 +219,12 @@ class DeployKey
     }
 
     /**
+     * The public half and the hosts a clone with the key trusts; never the private half.
+     *
      * @param  array{public_key: string, fingerprint: string, known_hosts: array<string, list<string>>}  $key
      * @return array<string, mixed>
      */
-    private static function view(array $key): array
+    public static function view(array $key): array
     {
         $hosts = array_map(static fn (string $h): array => ['host' => $h, 'pinned' => 'published'], self::SHIPPED_HOSTS);
         foreach ($key['known_hosts'] as $host => $lines) {
@@ -213,7 +245,7 @@ class DeployKey
     /**
      * @return array{private_key: string, public_key: string, fingerprint: string, known_hosts: array<string, list<string>>}
      */
-    private function generate(string $comment): array
+    public function generate(string $comment): array
     {
         $dir = sys_get_temp_dir().'/pa-deploy-key-'.bin2hex(random_bytes(8));
         if (! mkdir($dir, 0700)) {
@@ -246,7 +278,7 @@ class DeployKey
      *
      * @return list<string>
      */
-    private function scan(string $host): array
+    public function scan(string $host): array
     {
         [$name, $port] = preg_match('/^\[(.+)\]:(\d+)$/', $host, $m) === 1 ? [$m[1], $m[2]] : [$host, '22'];
         $address = self::checkedAddress($name);

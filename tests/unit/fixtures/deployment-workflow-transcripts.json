@@ -1,0 +1,1215 @@
+{
+    "run succeeds": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistSuccess()",
+            "logger->finish(success, NULL)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_status": "success",
+            "deployment_warnings": []
+        }
+    },
+    "run waits for files": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "mechanics->publishDomain(alice.example.test)",
+            "logger->throwIfCancelled()",
+            "logger->info(Environment ready, waiting for project files)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "run prepare fails with hint": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "logger->recordFailureOutput(prepare blew up)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(deploy_failed, 'prepare blew up | Deploy failed with custom environment variables.')",
+            "hook()",
+            "mechanics->removedTheAccount()",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "prepare blew up | Deploy failed with custom environment variables.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_failed",
+                    "message": "prepare blew up | Deploy failed with custom environment variables.",
+                    "stage": "preparing",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "prepare blew up | Deploy failed with custom environment variables.",
+            "deployment_status": "failed"
+        }
+    },
+    "run ingest fails without logger": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "mechanics->ingestApplicationSource()",
+            "mechanics->customEnvFailureHint()",
+            "mechanics->removedTheAccount()",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "clone failed",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_failed",
+                    "message": "clone failed",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "clone failed",
+            "deployment_status": "failed"
+        }
+    },
+    "run publish cancelled": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "logger->currentStage()",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "hook()",
+            "mechanics->removedTheAccount()",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_cancelled",
+                    "message": "Deployment cancelled by user",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "run cancel checked after start": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->currentStage()",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "hook()",
+            "Log::warning(Before-retention hook failed for alice: hook exploded)",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_cancelled",
+                    "message": "Deployment cancelled by user",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "run start fails, cleanup fails, hint": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->abortPartialDeploy(true)",
+            "Log::warning(Partial deploy cleanup failed for alice: compose down failed)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.')",
+            "hook()",
+            "Log::warning(Before-retention hook failed for alice: hook exploded)",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "deployment_status": "failed"
+        }
+    },
+    "run start fails on stdout": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->abortPartialDeploy(true)",
+            "logger->recordFailureOutput(container exited with code 3)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(app_did_not_start, 'Failed to start app: container exited with code 3')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: container exited with code 3",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "app_did_not_start",
+                    "message": "Failed to start app: container exited with code 3",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: container exited with code 3",
+            "deployment_status": "failed"
+        }
+    },
+    "run start throws": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->recordFailureOutput(docker daemon is not running)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(app_did_not_start, 'Failed to start app: docker daemon is not running | Deploy failed with custom environment variables.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: docker daemon is not running | Deploy failed with custom environment variables.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "app_did_not_start",
+                    "message": "Failed to start app: docker daemon is not running | Deploy failed with custom environment variables.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: docker daemon is not running | Deploy failed with custom environment variables.",
+            "deployment_status": "failed"
+        }
+    },
+    "run start cancelled": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->currentStage()",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "hook()",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_cancelled",
+                    "message": "Deployment cancelled by user",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "run serving and public warnings with hint": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->customEnvFailureHint()",
+            "mechanics->persistPartialSuccess(The application did not answer its health check. | Not reachable from the internet. | Deploy failed with custom environment variables.)",
+            "logger->finishPartial('The application did not answer its health check. | Not reachable from the internet. | Deploy failed with custom environment variables.')"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_warnings": [
+                {
+                    "code": "app_not_answering",
+                    "message": "The application did not answer its health check."
+                },
+                {
+                    "code": "public_url_unresolvable",
+                    "message": "Not reachable from the internet."
+                },
+                {
+                    "code": "custom_env_vars_suspected",
+                    "message": "Deploy failed with custom environment variables."
+                }
+            ],
+            "deployment_status": "partial"
+        }
+    },
+    "run public warning only": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistPartialSuccess(Not reachable from the internet.)",
+            "logger->finishPartial('Not reachable from the internet.')"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_warnings": [
+                {
+                    "code": "public_url_unresolvable",
+                    "message": "Not reachable from the internet."
+                }
+            ],
+            "deployment_status": "partial"
+        }
+    },
+    "run without git on another template": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "logger->stage(preparing)",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "logger->stage(cloning)",
+            "mechanics->ingestApplicationSource()",
+            "logger->stage(running)",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistSuccess()",
+            "logger->finish(success, NULL)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_status": "success",
+            "deployment_warnings": []
+        }
+    },
+    "run start fails without logger": {
+        "calls": [
+            "mechanics->requireMainDomain()",
+            "mechanics->prepareHostingEnvironment()",
+            "mechanics->isDindWithoutGit()",
+            "mechanics->ingestApplicationSource()",
+            "mechanics->publishDomain(alice.example.test)",
+            "mechanics->hasGitProject()",
+            "mechanics->startApplication()",
+            "mechanics->abortPartialDeploy(true)",
+            "mechanics->customEnvFailureHint()",
+            "Log::warning(Failed to persist deploy failure state for alice: …)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout succeeds reusing the running app": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "mechanics->syncHostingForCheckoutRebuild(true)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistSuccess()",
+            "logger->finish(success, NULL)",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_status": "success",
+            "deployment_warnings": []
+        }
+    },
+    "checkout succeeds from a push": {
+        "calls": [
+            "logger->info(Deploy started (source: push, commit: abc1234, branch: main))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistSuccess()",
+            "logger->finish(success, NULL)",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_status": "success",
+            "deployment_warnings": []
+        }
+    },
+    "checkout release failed": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The release failed before the new version started; the running app was left as it was)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout first release failed": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The release failed before the new version started; no version of the app is running)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout release failed, nothing known": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The release failed before the new version started)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout kept serving": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The previous version is still serving; nothing was torn down)",
+            "logger->recordFailureOutput(health check failed)",
+            "logger->finishFailed(app_did_not_start, 'Failed to start app: health check failed')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: health check failed",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "app_did_not_start",
+                    "message": "Failed to start app: health check failed",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: health check failed",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout start fails, cleanup fails": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->abortPartialDeploy(false)",
+            "Log::warning(Partial deploy cleanup failed for alice: compose down failed)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists.",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout reprepare fails": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "logger->recordFailureOutput(prepare blew up)",
+            "logger->finishFailed(deploy_failed, 'prepare blew up')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "logger->currentStage()",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "prepare blew up",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_failed",
+                    "message": "prepare blew up",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "prepare blew up",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout reprepare cancelled": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "logger->currentStage()",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_cancelled",
+                    "message": "Deployment cancelled by user",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout cancel checked after start": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->currentStage()",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "deploy_cancelled",
+                    "message": "Deployment cancelled by user",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "checkout serving warning with hint": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->customEnvFailureHint()",
+            "mechanics->persistPartialSuccess(The application did not answer its health check. | Deploy failed with custom environment variables.)",
+            "logger->finishPartial('The application did not answer its health check. | Deploy failed with custom environment variables.')",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_warnings": [
+                {
+                    "code": "app_not_answering",
+                    "message": "The application did not answer its health check."
+                },
+                {
+                    "code": "custom_env_vars_suspected",
+                    "message": "Deploy failed with custom environment variables."
+                }
+            ],
+            "deployment_status": "partial"
+        }
+    },
+    "checkout public warning only": {
+        "calls": [
+            "logger->info(Deploy started (source: git))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "mechanics->syncHostingForCheckoutRebuild(false)",
+            "logger->stage(running)",
+            "mechanics->reprepareApplicationFromCheckout()",
+            "mechanics->requireMainDomain()",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "mechanics->publicUrlWarnings(alice.example.test)",
+            "mechanics->persistPartialSuccess(Not reachable from the internet.)",
+            "logger->finishPartial('Not reachable from the internet.')",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": {
+            "deployment_warnings": [
+                {
+                    "code": "public_url_unresolvable",
+                    "message": "Not reachable from the internet."
+                }
+            ],
+            "deployment_status": "partial"
+        }
+    },
+    "source succeeds with an archive": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->info(Importing project archive before rebuild)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild('/tmp/upload.zip')",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild('/tmp/upload.zip')",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "logger->finish(success, NULL)",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "source continues a running deploy": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Continuing deploy with project files)",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "logger->finish(success, NULL)",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "source running log in another stage": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "logger->finish(success, NULL)",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "source release failed with hint": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The release failed before the new version started; the running app was left as it was)",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "mechanics->customEnvFailureHint()",
+            "logger->info(Deploy failed with custom environment variables.)",
+            "logger->currentStage()",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.')",
+            "logger->recordFailureOutput(Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.)",
+            "logger->finishFailed(rebuild_failed, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "deployment_status": "failed"
+        }
+    },
+    "source kept serving": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->info(The previous version is still serving; nothing was torn down)",
+            "logger->recordFailureOutput(health check failed)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(app_did_not_start, 'Failed to start app: health check failed')",
+            "logger->recordFailureOutput(Failed to start app: health check failed)",
+            "logger->finishFailed(rebuild_failed, 'Failed to start app: health check failed')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: health check failed",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "app_did_not_start",
+                    "message": "Failed to start app: health check failed",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: health check failed",
+            "deployment_status": "failed"
+        }
+    },
+    "source start fails on stdout": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->recordFailureOutput(container exited with code 3)",
+            "mechanics->customEnvFailureHint()",
+            "logger->currentStage()",
+            "logger->finishFailed(app_did_not_start, 'Failed to start app: container exited with code 3')",
+            "logger->recordFailureOutput(Failed to start app: container exited with code 3)",
+            "logger->finishFailed(rebuild_failed, 'Failed to start app: container exited with code 3')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: container exited with code 3",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "app_did_not_start",
+                    "message": "Failed to start app: container exited with code 3",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: container exited with code 3",
+            "deployment_status": "failed"
+        }
+    },
+    "source ingest fails": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->recordFailureOutput(prepare blew up)",
+            "logger->finishFailed(rebuild_failed, 'prepare blew up')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "RuntimeException",
+            "message": "prepare blew up",
+            "code": 0,
+            "problems": null
+        },
+        "details": {
+            "error": "prepare blew up",
+            "deployment_status": "failed"
+        }
+    },
+    "source ingest cancelled": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->finish(cancelled, 'Deployment cancelled by user')",
+            "Log::warning(Failed to persist deploy cancellation state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\DeployCancelledException",
+            "message": "Deployment cancelled by user",
+            "code": 0,
+            "problems": null
+        },
+        "details": {
+            "error": "Deployment cancelled by user",
+            "deployment_status": "failed"
+        }
+    },
+    "source serving warning": {
+        "calls": [
+            "logger->readLatest()",
+            "logger->isRunning()",
+            "logger->info(Deploy started (source: rebuild))",
+            "mechanics->recordRunningVersion()",
+            "mechanics->isApplicationEnvironmentRunning()",
+            "logger->stage(preparing)",
+            "logger->dim(Recreating home and project directories)",
+            "logger->dim(Preparing container environment)",
+            "logger->dim(Restarting container environment)",
+            "mechanics->syncHostingForSourceRebuild(NULL)",
+            "logger->stage(cloning)",
+            "mechanics->ingestForWipeRebuild(NULL)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "mechanics->servingWarnings()",
+            "logger->finishPartial('The application did not answer its health check.')",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "archive succeeds without logger": {
+        "calls": [
+            "mechanics->recordRunningVersion()",
+            "mechanics->ingestArchive(/tmp/upload.zip)",
+            "mechanics->startApplication()",
+            "mechanics->servingWarnings()",
+            "mechanics->settleRedeploy(true)"
+        ],
+        "thrown": null,
+        "details": []
+    },
+    "archive refused": {
+        "calls": [
+            "mechanics->recordRunningVersion()",
+            "logger->stage(cloning)",
+            "mechanics->ingestArchive(/tmp/upload.zip)",
+            "logger->finishFailed(archive_refused, 'Not a zip archive')",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "InvalidArgumentException",
+            "message": "Not a zip archive",
+            "code": 0,
+            "problems": null
+        },
+        "details": []
+    },
+    "archive start fails with hint": {
+        "calls": [
+            "mechanics->recordRunningVersion()",
+            "logger->stage(cloning)",
+            "mechanics->ingestArchive(/tmp/upload.zip)",
+            "logger->stage(running)",
+            "mechanics->startApplication()",
+            "logger->throwIfCancelled()",
+            "logger->recordFailureOutput(Error: manifest unknown)",
+            "mechanics->customEnvFailureHint()",
+            "logger->info(Deploy failed with custom environment variables.)",
+            "logger->currentStage()",
+            "logger->finishFailed(base-image-unavailable, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.')",
+            "logger->recordFailureOutput(Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.)",
+            "logger->finishFailed(deploy_failed, 'Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.')",
+            "Log::warning(Failed to persist deploy failure state for alice: …)",
+            "mechanics->settleRedeploy(false)"
+        ],
+        "thrown": {
+            "class": "App\\Exceptions\\ProblemException",
+            "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "code": 0,
+            "problems": [
+                {
+                    "field": "deploy",
+                    "code": "base-image-unavailable",
+                    "message": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+                    "stage": "running",
+                    "deploy_log_offset": 0
+                }
+            ]
+        },
+        "details": {
+            "error": "Failed to start app: A base image this project asks for could not be downloaded: its registry says it does not exist. That tag or repository was never published or has been removed, so the project has to name one that exists. | Deploy failed with custom environment variables.",
+            "deployment_status": "failed"
+        }
+    }
+}

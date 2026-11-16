@@ -144,6 +144,26 @@ http {
           root /opt/panelalpha/shared-hosting/webserver-config/document-root;
         }
     }
+{{-- A port a domain answers HTTPS on besides 443: a name nobody holds there gets a 404, not the first vhost on it. --}}
+@foreach ($extra_https_ports ?? [] as $port)
+    server {
+@forelse ($ips_v4 as $ip)
+        listen {{ $ip }}:{{ $port }} ssl default_server;
+@empty
+        listen {{ $port }} ssl default_server;
+@endforelse
+@foreach ($ips_v6 as $ip)
+        listen [{{ $ip }}]:{{ $port }} ssl default_server;
+@endforeach
+        http2 on;
+        server_name _;
+        ssl_certificate {{ $ssl_cert_file }};
+        ssl_certificate_key {{ $ssl_cert_key_file }};
+        location / {
+          return 404;
+        }
+    }
+@endforeach
 }
 
 # The tcp and udp proxy rules (NginxProxy::streamConfig). A glob, so a host

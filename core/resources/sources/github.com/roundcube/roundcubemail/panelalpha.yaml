@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Roundcube Webmail from upstream (1.7 and the development branch). The
+  shipped `roundcube` recipe already claims this tree by its files; naming it
+  here reaches the same recipe with one read instead of a walk of every
+  manifest above it. It is a mail client only: set ROUNDCUBE_IMAP_HOST and
+  ROUNDCUBE_SMTP_HOST in the project's env vars to the mail servers it should
+  log in to and send through.
+extends: roundcube

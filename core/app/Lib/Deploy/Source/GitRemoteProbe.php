@@ -2,28 +2,30 @@
 
 namespace App\Lib\Deploy\Source;
 
+use App\Lib\Git\DeployKey;
 use App\Lib\Http\OutboundUrl;
 use App\Lib\Net\EgressRefusedException;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
+use Illuminate\Support\Facades\Http;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 /**
- * Ask the forge whether it will hand a repository to these credentials.
- *
- * Runs before a create spends anything. The clone used to be where "private,
- * and you sent no token" surfaced, by which point a panelalpha.online label
- * had been allocated -- and those are never released.
- *
- * Runs from the core container: the account does not exist yet.
+ * Ask the forge whether it will hand a repository to these credentials, from core (no account exists yet) and before a create
+ * spends anything: found at clone time, "private, and no token" came after a panelalpha.online label, never released, was taken.
  */
 class GitRemoteProbe
 {
-    // Measured from the core container: github.com 0.4-0.6s idle and under
-    // 2.9s with 120 concurrent probes; a slow forge (code.castopod.org)
-    // 2.4-13s. A timeout is the forge, not the load, so it gets one more try.
+    /** A timeout is a slow forge, not the load, so it gets one more try. */
     public const TIMEOUT_SECONDS = 30;
 
     public const ATTEMPTS = 2;
+
+    private const ASKPASS_SCRIPT = 'askpass.sh';
+
+    /** Asking where a refused redirect leads is one request; the probe already waited for the forge once. */
+    private const REDIRECT_LOOKUP_SECONDS = 10;
 
     /** @var array<string, list<string>> stderr needles, by outcome */
     private const SIGNATURES = [
@@ -50,12 +52,10 @@ class GitRemoteProbe
     ) {}
 
     /**
-     * Null when the remote handed over its refs.
+     * Null when the remote handed over its refs, or on an engine-side failure (a missing git binary): refusing every git create
+     * over one would be worse than the late clone error. With a branch, ls-remote says whether it exists: a typo is a 422, not a failed clone.
      *
-     * Engine-side failures return null too: a missing git binary is not the
-     * caller's to answer for, and refusing every git create over one would be
-     * worse than the late clone error this pre-empts.
-     *
+     * @param  ?array<string, mixed>  $deployKey  the key an SSH remote is read with, as {@see DeployKey::stored()} holds it
      * @return ?array<string, mixed>
      */
     public function problem(
@@ -64,12 +64,14 @@ class GitRemoteProbe
         ?string $token,
         string $tokenField = 'git_token',
         ?string $branch = null,
-        string $branchField = 'git_branch'
+        string $branchField = 'git_branch',
+        ?array $deployKey = null,
     ): ?array {
         $branch = $branch === null || trim($branch) === '' ? null : trim($branch);
+        if ($deployKey !== null && GitRepoInput::isSsh($repoUrl)) {
+            return $this->sshProblem($repoField, trim($repoUrl), $deployKey, $branch, $branchField);
+        }
 
-        // With a branch, the same ls-remote also says whether the remote has
-        // it, so a typo is a 422 instead of a deploy that fails at clone.
         return $branch === null
             ? $this->check($repoField, $repoUrl, $token, $tokenField)->problem
             : $this->probe($repoField, $repoUrl, $token, $tokenField, $branch, $branchField)->problem;
@@ -95,7 +97,6 @@ class GitRemoteProbe
         $repoUrl = trim($repoUrl);
         $hasToken = $token !== null && trim($token) !== '';
         $workspace = null;
-        $askPass = null;
 
         try {
             $command = self::refsCommand($repoUrl);
@@ -113,13 +114,18 @@ class GitRemoteProbe
 
             return $this->interpretRefs($this->runWithRetry($command), $repoUrl, $hasToken);
         } finally {
-            if ($askPass !== null) {
-                @unlink($askPass);
-            }
-            if ($workspace !== null) {
-                @rmdir($workspace);
-            }
+            $this->removeWorkspace($workspace);
         }
+    }
+
+    /** By the script's known path: a write that failed partway leaves a file nobody was handed. */
+    private function removeWorkspace(?string $workspace): void
+    {
+        if ($workspace === null) {
+            return;
+        }
+        @unlink($workspace.'/'.self::ASKPASS_SCRIPT);
+        @rmdir($workspace);
     }
 
     private function probe(
@@ -135,17 +141,29 @@ class GitRemoteProbe
             return GitProbeResult::unchecked();
         }
 
+        try {
+            return $this->probeRemote($repoField, $repoUrl, $token, $tokenField, $branch, $branchField);
+        } catch (\InvalidArgumentException $e) {
+            return GitProbeResult::refused(['field' => $repoField, 'code' => EgressRefusedException::CODE, 'message' => $e->getMessage()]);
+        } catch (\Throwable $e) {
+            return GitProbeResult::unchecked();
+        }
+    }
+
+    /** The credential helper and its workspace are gone before probe() reads any exception this throws. */
+    private function probeRemote(
+        string $repoField,
+        string $repoUrl,
+        ?string $token,
+        string $tokenField,
+        ?string $branch,
+        string $branchField
+    ): GitProbeResult {
         $hasToken = $token !== null && trim($token) !== '';
         $workspace = null;
-        $askPass = null;
 
         try {
-            $command = $branch !== null
-                ? ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--symref',
-                    '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*']
-                : ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--heads', '--', $repoUrl];
-            $command = self::pinned(GitUrl::withoutRedirects($command), $repoUrl);
-
+            $command = self::probeCommand($branch, $repoUrl);
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
                 $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token, $repoUrl);
@@ -155,38 +173,128 @@ class GitRemoteProbe
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
-            $run = $this->runWithRetry($command);
+            $result = $this->interpret($this->runWithRetry($command), $repoField, $repoUrl, $hasToken, $tokenField);
 
-            $result = $this->interpret($run, $repoField, $repoUrl, $hasToken, $tokenField);
-            if ($branch !== null && $result->outcome === GitProbeResult::VERIFIED) {
-                $missing = self::branchProblem($branchField, $branch, $this->lastOutput, $this->hostOf($repoUrl));
-                if ($missing !== null) {
-                    return GitProbeResult::refused($missing);
-                }
-            }
-
-            return $result;
-        } catch (\InvalidArgumentException $e) {
-            return GitProbeResult::refused(['field' => $repoField, 'code' => EgressRefusedException::CODE, 'message' => $e->getMessage()]);
-        } catch (\Throwable $e) {
-            return GitProbeResult::unchecked();
+            return $this->branchChecked($result, $branch, $branchField, $repoUrl);
         } finally {
-            if ($askPass !== null) {
-                @unlink($askPass);
-            }
-            if ($workspace !== null) {
-                @rmdir($workspace);
+            $this->removeWorkspace($workspace);
+        }
+    }
+
+    /**
+     * @return list<string>
+     *
+     * @throws \InvalidArgumentException when core may no longer contact the host
+     */
+    private static function probeCommand(?string $branch, string $repoUrl): array
+    {
+        return self::pinned(GitUrl::withoutRedirects(self::lsRemoteCommand($repoUrl, $branch !== null)), $repoUrl);
+    }
+
+    private function branchChecked(GitProbeResult $result, ?string $branch, string $branchField, string $repoUrl): GitProbeResult
+    {
+        if ($branch !== null && $result->outcome === GitProbeResult::VERIFIED) {
+            $missing = self::branchProblem($branchField, $branch, $this->lastOutput, $this->hostOf($repoUrl));
+            if ($missing !== null) {
+                return GitProbeResult::refused($missing);
             }
         }
+
+        return $result;
+    }
+
+    /** @return list<string> */
+    private static function lsRemoteCommand(string $repoUrl, bool $withRefs): array
+    {
+        return $withRefs
+            ? self::symrefCommand($repoUrl)
+            : ['git', '-c', 'credential.helper=', '-c', 'core.askpass=', 'ls-remote', '--heads', '--', $repoUrl];
+    }
+
+    /**
+     * An SSH remote read with the deploy key and pinned host keys the clone
+     * will use, written to files of the engine's own for the one command.
+     *
+     * @param  array<string, mixed>  $deployKey
+     * @return ?array<string, mixed>
+     */
+    private function sshProblem(string $repoField, string $repoUrl, array $deployKey, ?string $branch, string $branchField): ?array
+    {
+        $workspace = $this->makeWorkspace();
+        if ($workspace === null) {
+            return null;
+        }
+        $keyPath = $workspace.'/key';
+        $knownHostsPath = $workspace.'/known_hosts';
+
+        try {
+            if (! self::writePrivate($keyPath, (string) ($deployKey['private_key'] ?? ''))
+                || ! self::writePrivate($knownHostsPath, DeployKey::knownHostsOf($deployKey))) {
+                return null;
+            }
+            $command = ['env', GitTransport::assignment(GitTransport::schemes(withSsh: true)), ...self::lsRemoteCommand($repoUrl, $branch !== null)];
+            $run = $this->runWithRetry(GitUrl::withSshKey($command, $keyPath, $knownHostsPath));
+            $problem = $this->interpretSsh($run, $repoField, $repoUrl);
+            if ($problem !== null || $branch === null) {
+                return $problem;
+            }
+
+            return self::branchProblem($branchField, $branch, $this->lastOutput, (string) GitRepoInput::sshHost($repoUrl));
+        } catch (\Throwable) {
+            return null;
+        } finally {
+            @unlink($keyPath);
+            @unlink($knownHostsPath);
+            @rmdir($workspace);
+        }
+    }
+
+    /**
+     * A forge answers a deploy key it does not know and one registered on
+     * another repository alike, so both read as the key not being accepted.
+     *
+     * @param  array{timedOut: bool, ok: bool, stderr: string}  $run
+     * @return ?array<string, mixed>
+     */
+    private function interpretSsh(array $run, string $repoField, string $repoUrl): ?array
+    {
+        $host = (string) GitRepoInput::sshHost($repoUrl);
+        if ($run['timedOut']) {
+            return $this->problemOf($repoField, 'timeout', "{$host} did not answer over SSH within {$this->timeout}s. Nothing was created; retry.", true);
+        }
+        if ($run['ok']) {
+            return null;
+        }
+
+        $stderr = strtolower(GitUrl::sanitize($run['stderr']));
+
+        return match (true) {
+            str_contains($stderr, 'host key verification failed'), str_contains($stderr, 'remote host identification has changed') => $this->problemOf($repoField, 'host_key_changed',
+                "{$host} presented an SSH host key that does not match the one pinned on the deploy key. "
+                .'If the server really changed its key, create a new deploy key with `host` set to it.'),
+            $this->matches($stderr, 'unreachable') => $this->problemOf($repoField, 'unreachable', "Could not reach {$host} over SSH.", true),
+            str_contains($stderr, 'permission denied'), $this->matches($stderr, 'auth'), $this->matches($stderr, 'missing') => $this->problemOf('git_deploy_key', 'rejected',
+                "{$host} did not accept the deploy key for this repository, or the repository does not exist. "
+                .'Add the public key to the repository as a deploy key (read access is enough), then try again.'),
+            default => $this->problemOf($repoField, 'unreadable', 'The repository could not be read: '.$this->firstLine($run['stderr'])),
+        };
+    }
+
+    private static function writePrivate(string $path, string $content): bool
+    {
+        if ($content === '' || file_put_contents($path, $content, LOCK_EX) === false) {
+            return false;
+        }
+
+        return chmod($path, 0600);
     }
 
     /** What the last ls-remote printed: its refs, when it succeeded. */
     private string $lastOutput = '';
 
     /**
-     * Only a timeout is retried: any answer, even a refusal, is final. A cut
-     * ref listing is retried over HTTP/1.1, as the account's clone and fetches
-     * do ({@see GitUrl::overHttp11()}).
+     * Only a timeout is retried: any answer, even a refusal, is final. A cut ref listing is retried over HTTP/1.1, as
+     * the account's clone and fetches do ({@see GitUrl::overHttp11()}).
      *
      * @param  list<string>  $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
@@ -205,6 +313,9 @@ class GitRemoteProbe
     }
 
     /**
+     * Runs outside any repository (a broken one in the cwd fails ls-remote), askpass at /bin/false (one would still launch),
+     * in the C locale since its sentences get matched on; a kill can land as a signal rather than an exception.
+     *
      * @param  list<string>  $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
      */
@@ -212,15 +323,11 @@ class GitRemoteProbe
     {
         $this->lastOutput = '';
 
-        // ls-remote needs no repository, and a broken one in the cwd would fail it.
         $process = new Process($command, sys_get_temp_dir(), [
             ...GitTransport::env(GitTransport::schemes()),
             'GIT_TERMINAL_PROMPT' => '0',
-            // The terminal is not the only thing that waits: an askpass
-            // program still launches unless it is pointed somewhere harmless.
             'GIT_ASKPASS' => '/bin/false',
             'SSH_ASKPASS' => '/bin/false',
-            // These sentences get matched on, so not in the server's language.
             'LC_ALL' => 'C',
             'LANG' => 'C',
         ], null, $this->timeout);
@@ -235,7 +342,6 @@ class GitRemoteProbe
         $this->lastOutput = $process->getOutput();
 
         return [
-            // A kill can also land as a signal rather than an exception.
             'timedOut' => $stderr === '' && $process->getExitCode() === null,
             'ok' => $process->isSuccessful(),
             'stderr' => $stderr,
@@ -243,6 +349,9 @@ class GitRemoteProbe
     }
 
     /**
+     * A timeout is unchecked, not `unreachable`: nothing refused the connection, and nothing was learned about the
+     * repository, least of all that it is private.
+     *
      * @param  array{timedOut: bool, ok: bool, stderr: string}  $result
      */
     private function interpret(
@@ -254,8 +363,6 @@ class GitRemoteProbe
     ): GitProbeResult {
         $host = $this->hostOf($repoUrl);
 
-        // Not `unreachable`: nothing refused the connection, and nothing was
-        // learned about the repository -- least of all that it is private.
         if ($result['timedOut']) {
             $tries = $this->attempts > 1 ? " ({$this->attempts} attempts)" : '';
 
@@ -269,6 +376,23 @@ class GitRemoteProbe
             return GitProbeResult::verified();
         }
 
+        return $this->refusal($result, $repoField, $repoUrl, $host, $hasToken, $tokenField);
+    }
+
+    /**
+     * A forge will not admit a private repository exists to a caller it has not authenticated, so without a token
+     * "auth" and "missing" must read as one.
+     *
+     * @param  array{timedOut: bool, ok: bool, stderr: string}  $result
+     */
+    private function refusal(
+        array $result,
+        string $repoField,
+        string $repoUrl,
+        string $host,
+        bool $hasToken,
+        string $tokenField
+    ): GitProbeResult {
         $stderr = strtolower(GitUrl::sanitize($result['stderr']));
 
         if ($this->matches($stderr, 'unreachable')) {
@@ -277,24 +401,74 @@ class GitRemoteProbe
                 true));
         }
 
-        // A forge will not admit a private repository exists to a caller it
-        // has not authenticated, so these two answers must read as one.
         if ($this->matches($stderr, 'auth') || (! $hasToken && $this->matches($stderr, 'missing'))) {
             return GitProbeResult::refused($hasToken
                 ? $this->problemOf($tokenField, 'rejected',
                     "The token was refused by {$host}. Check it has not expired and that it "
                     .'grants read access to this repository.')
                 : $this->problemOf($repoField, 'requires_token',
-                    'This repository is private, or does not exist. Pass a read token as '
-                    ."`{$tokenField}`, or check the address."));
+                    'This repository is private, or does not exist. Send a token that can read it, '
+                    .'or check the address.'));
         }
         if ($this->matches($stderr, 'missing')) {
             return GitProbeResult::refused($this->problemOf($repoField, 'not_found',
                 "No such repository on {$host}, or the token cannot see it."));
         }
 
-        return GitProbeResult::refused($this->problemOf($repoField, 'unreadable',
-            'The repository could not be read: '.$this->firstLine($result['stderr'])));
+        return GitProbeResult::refused($this->redirectProblem($result['stderr'], $repoField, $repoUrl)
+            ?? $this->problemOf($repoField, 'unreadable', 'The repository could not be read: '.$this->firstLine($result['stderr'])));
+    }
+
+    /**
+     * Redirects are not followed, so a moved repository, or a GitLab address without `.git`,
+     * is refused for what it is, with the address to use when the remote names it.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function redirectProblem(string $stderr, string $repoField, string $repoUrl): ?array
+    {
+        if (! GitUrl::refusedRedirect($stderr)) {
+            return null;
+        }
+        $target = GitUrl::redirectedTo($stderr) ?? $this->redirectTarget($repoUrl);
+
+        return $this->problemOf($repoField, 'redirect_not_followed', GitUrl::redirectRefusal(
+            $target === null ? null : GitUrl::sanitize($target)
+        ));
+    }
+
+    /**
+     * Where the remote's ref listing redirects, asked once without following it; null when it does
+     * not say. Pinned like the probe itself, so the lookup cannot be steered to an internal address.
+     */
+    private function redirectTarget(string $repoUrl): ?string
+    {
+        $refs = rtrim($repoUrl, '/').'/info/refs?service=git-upload-pack';
+        try {
+            $response = Http::withOptions(['allow_redirects' => false] + self::pinOption($repoUrl))
+                ->timeout(self::REDIRECT_LOOKUP_SECONDS)
+                ->get($refs);
+        } catch (\Throwable) {
+            return null;
+        }
+        $location = trim((string) $response->header('Location'));
+        if (! $response->redirect() || $location === '') {
+            return null;
+        }
+
+        return GitUrl::repositoryFromRedirect((string) UriResolver::resolve(new Uri($refs), new Uri($location)));
+    }
+
+    /**
+     * @return array<string, mixed> curl connects to the address the egress check passed, never resolving the host again
+     *
+     * @throws \InvalidArgumentException when the host resolves to an address core must not contact
+     */
+    private static function pinOption(string $repoUrl): array
+    {
+        $pin = OutboundUrl::pin($repoUrl, GitRepoInput::SCHEMES);
+
+        return $pin === null || $pin === '' ? [] : ['curl' => [CURLOPT_RESOLVE => [$pin]]];
     }
 
     /**
@@ -451,15 +625,19 @@ class GitRemoteProbe
         return @mkdir($dir, 0700) ? $dir : null;
     }
 
-    private function writeAskPass(string $workspace, string $token, string $repoUrl): ?string
+    protected function writeAskPass(string $workspace, string $token, string $repoUrl): ?string
     {
-        $path = $workspace.'/askpass.sh';
+        $path = $workspace.'/'.self::ASKPASS_SCRIPT;
         $written = file_put_contents($path, GitUrl::askPassScript($token, GitUrl::hostOf($repoUrl)), LOCK_EX);
 
         return $written === false || ! chmod($path, 0700) ? null : $path;
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * `retryable` says resend unchanged, an instruction no other problem this endpoint raises gives.
+     *
+     * @return array<string, mixed>
+     */
     private function problemOf(
         string $field,
         string $code,
@@ -470,8 +648,6 @@ class GitRemoteProbe
             'field' => $field,
             'code' => $field.'_'.$code,
             'message' => $message,
-            // Resend unchanged -- a different instruction from every other
-            // problem this endpoint raises.
             'retryable' => $retryable ?: null,
         ], static fn (mixed $v): bool => $v !== null);
     }

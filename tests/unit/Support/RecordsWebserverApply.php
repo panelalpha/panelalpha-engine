@@ -34,6 +34,7 @@ trait RecordsWebserverApply
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $cmd = (array) $cmd;
                 if (($cmd[0] ?? null) !== 'ss') {
                     throw new \RuntimeException('unexpected host command: ' . implode(' ', $cmd));

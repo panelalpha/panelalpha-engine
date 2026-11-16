@@ -10,11 +10,20 @@ use App\System\Filesystem;
 use App\System\Project;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\WebserverInterface;
+use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
 class DomainStatisticsLifecycleTest extends TestCase
 {
+    use InMemoryDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->bootInMemoryDatabase();
+    }
+
     public function test_create_ensures_provider_config(): void
     {
         $fake = new FakeStatistics();
@@ -73,6 +82,7 @@ class DomainStatisticsLifecycleTest extends TestCase
         );
         $user->method('getUid')->willReturn(1000);
         $user->method('getGid')->willReturn(1000);
+        $user->method('linuxIds')->willReturn([1000, 1000]);
         $user->method('hasGitProject')->willReturn(false);
         $user->method('getTemplate')->willReturn('dind');
 

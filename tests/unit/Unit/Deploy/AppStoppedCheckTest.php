@@ -21,7 +21,7 @@ class AppStoppedCheckTest extends TestCase
         $this->assertSame(AppHealth::CHECK_APP_STOPPED, $check['id']);
         $this->assertSame('error', $check['severity']);
         $this->assertStringContainsString('app (Exited (0) 3 hours ago)', $check['detail']);
-        $this->assertStringContainsString('container_project_action up', $check['fix']);
+        $this->assertStringContainsString('Start it again', $check['fix']);
     }
 
     public function test_created_and_paused_are_stopped_too(): void

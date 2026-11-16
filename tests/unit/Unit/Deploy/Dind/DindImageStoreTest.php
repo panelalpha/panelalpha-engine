@@ -8,12 +8,12 @@ use App\System\Project\Dind\Inner\ImageSeeding;
 use App\System\Project\Dind\TenantEgressGuard;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\HostImageLines;
+use Tests\Support\LocalRoot;
 
 /**
- * Getting an image into an account through registries only.
- *
- * The commands are run for real against a fake `sudo` and `docker` on PATH,
- * so each rung of the ladder is exercised, not just spelled.
+ * Getting an image into an account through registries only, run for real against a fake
+ * `docker`, pa-root-local and a fake `pa-root`, so each rung of the ladder is exercised.
  */
 class DindImageStoreTest extends TestCase
 {
@@ -28,10 +28,9 @@ class DindImageStoreTest extends TestCase
     {
         $this->dir = sys_get_temp_dir() . '/dind-image-store-' . bin2hex(random_bytes(4));
         mkdir($this->dir . '/bin', 0700, true);
-        foreach (['host', 'account', 'cache', 'hollow'] as $store) {
+        foreach (['host', 'account', 'cache', 'hollow', 'ghcr'] as $store) {
             mkdir($this->dir . '/state/' . $store, 0700, true);
         }
-        file_put_contents($this->dir . '/bin/sudo', "#!/bin/sh\nexec \"\$@\"\n");
         file_put_contents($this->dir . '/bin/docker', sprintf(<<<'SH'
 #!/bin/bash
 # State lives in $STATE: registry-running, remote-ok, host-remote-ok, push-fails (a count) and
@@ -39,42 +38,17 @@ class DindImageStoreTest extends TestCase
 echo "$*" >> "$STATE/calls"
 key() { printf '%%s' "$1" | tr '/:' '__'; }
 if [ "$1" = inspect ]; then
-  # inspect -f FORMAT NAME; down-NAME stops just that container.
-  [ -e "$STATE/registry-running" ] && [ ! -e "$STATE/down-$4" ] && echo true || echo false; exit 0
-fi
-if [ "$1" = compose ]; then
-  shift 6   # compose -f FILE exec -T SERVICE, then the inner "docker"
-  shift
-  # A pull with the project's registry login names its client config first.
-  if [ "$1" = --config ]; then [ -e "$2/config.json" ] || { echo "no config at $2" >&2; exit 1; }; shift 2; fi
-  case "$1 $2" in
-    "image inspect") [ -e "$STATE/account/$(key "$4")" ]; exit ;;
-    # A hollow tag (no config blob) answers inspect but not history.
-    "image history") [ -e "$STATE/account/$(key "$5")" ] && [ ! -e "$STATE/hollow/$(key "$5")" ]; exit ;;
-    "image rm") exit 0 ;;
-  esac
-  if [ "$1" = pull ]; then
-    ref="$3"
-    case "$ref" in
-      panelalpha-cache-registry:5000/*)
-        [ -e "$STATE/registry-running" ] || { echo "connection refused" >&2; exit 1; }
-        [ -e "$STATE/cache/$(key "${ref#panelalpha-cache-registry:5000/}")" ] || { echo "manifest unknown" >&2; exit 1; } ;;
-      *) [ -e "$STATE/remote-ok" ] || { echo "pull access denied for $ref" >&2; exit 1; }
-         touch "$STATE/account/$(key "$ref")"; rm -f "$STATE/hollow/$(key "$ref")" ;;
-    esac
-    exit 0
-  fi
-  if [ "$1" = tag ]; then touch "$STATE/account/$(key "$3")"; exit 0; fi
-  exit 0
+  # inspect --format FORMAT -- NAME; down-NAME stops just that container.
+  [ -e "$STATE/registry-running" ] && [ ! -e "$STATE/down-$5" ] && echo true || echo false; exit 0
 fi
 case "$1 $2" in
   "image inspect") for ref; do :; done; [ -e "$STATE/host/$(key "$ref")" ]; exit ;;
 esac
 if [ "$1" = tag ]; then exit 0; fi
 if [ "$1" = pull ]; then
-  # The host's own pull: host-remote-ok says its registry answers.
-  [ -e "$STATE/host-remote-ok" ] || { echo "pull access denied for $3" >&2; exit 1; }
-  touch "$STATE/host/$(key "$3")"; exit 0
+  # The host's own pull, pull -q -- REF: host-remote-ok says its registry answers.
+  [ -e "$STATE/host-remote-ok" ] || { echo "pull access denied for $4" >&2; exit 1; }
+  touch "$STATE/host/$(key "$4")"; exit 0
 fi
 if [ "$1" = build ]; then
   while [ $# -gt 0 ]; do [ "$1" = -t ] && t="$2"; shift; done
@@ -83,12 +57,49 @@ fi
 if [ "$1" = push ]; then
   n=$(cat "$STATE/push-fails" 2>/dev/null || echo 0)
   if [ "$n" -gt 0 ]; then echo $((n - 1)) > "$STATE/push-fails"; echo "push refused" >&2; exit 1; fi
-  ref="$3"; touch "$STATE/cache/$(key "${ref#%s/}")"; exit 0
+  ref="$4"; touch "$STATE/cache/$(key "${ref#%s/}")"; exit 0
 fi
 echo "unexpected docker call: $*" >&2; exit 99
 SH, DindImageStore::HOST_CACHE_REGISTRY));
-        chmod($this->dir . '/bin/sudo', 0755);
         chmod($this->dir . '/bin/docker', 0755);
+        file_put_contents($this->dir . '/bin/pa-root', <<<'SH'
+#!/bin/bash
+# The account's own daemon: account-docker.ACTION -- USER VALUE..., against $STATE/account/.
+# remote-id is what a public pull leaves in an image's file, which `images` prints as its Id.
+echo "$*" >> "$STATE/calls"
+key() { printf '%s' "$1" | tr '/:' '__'; }
+action=${1#account-docker.}
+shift 3
+case "$action" in
+  hasImage)
+    # A hollow tag (no config blob) has no history.
+    [ -e "$STATE/account/$(key "$1")" ] && [ ! -e "$STATE/hollow/$(key "$1")" ] && exit 0
+    echo "Error response from daemon: No such image: $1" >&2; exit 1 ;;
+  images)
+    if [ -e "$STATE/account/$(key "$1")" ]; then printf '[{"Id":"sha256:%s"}]\n' "$(cat "$STATE/account/$(key "$1")")"; else echo '[null]'; fi
+    exit 0 ;;
+  tag) touch "$STATE/account/$(key "$2")"; exit 0 ;;
+  removeImages) exit 0 ;;
+  pull)
+    ref="$1"
+    # A login directory, when given, has to hold the client config the broker reads it from.
+    [ -z "$2" ] || [ -e "$2/config.json" ] || { echo "no config at $2" >&2; exit 1; }
+    case "$ref" in
+      panelalpha-cache-registry:5000/*)
+        [ -e "$STATE/registry-running" ] || { echo "connection refused" >&2; exit 1; }
+        [ -e "$STATE/cache/$(key "${ref#panelalpha-cache-registry:5000/}")" ] || { echo "manifest unknown" >&2; exit 1; } ;;
+      panelalpha-ghcr-proxy:5000/*)
+        [ -e "$STATE/ghcr/$(key "${ref#panelalpha-ghcr-proxy:5000/}")" ] || { echo "manifest unknown" >&2; exit 1; } ;;
+      *) [ -e "$STATE/remote-ok" ] || { echo "pull access denied for $ref" >&2; exit 1; }
+         cat "$STATE/remote-id" > "$STATE/account/$(key "$ref")" 2>/dev/null || touch "$STATE/account/$(key "$ref")"
+         rm -f "$STATE/hollow/$(key "$ref")" ;;
+    esac
+    exit 0 ;;
+esac
+echo "unexpected account-docker request: $action $*" >&2; exit 99
+SH);
+        chmod($this->dir . '/bin/pa-root', 0755);
+        HostImageLines::install($this->dir . '/bin', 'pa-root-lines');
     }
 
     protected function tearDown(): void
@@ -98,7 +109,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
     private function account(): EngineAccount
     {
-        return new EngineAccount('demo', '/home/demo', '33:33', '/users/demo/docker-compose.yml');
+        return new EngineAccount('demo', '/home/demo', '33:33');
     }
 
     private function state(string $name, string $content = ''): void
@@ -130,7 +141,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
     private function start(string $script)
     {
         $proc = proc_open(
-            ['sh', '-c', $script],
+            ['sh', '-c', $this->routed($script)],
             [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
             $pipes,
             null,
@@ -169,13 +180,19 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         fclose($lock);
     }
 
+    /** Broker requests to pa-root-local, and those to the account's daemon, which run no command, to its fake. */
+    private function routed(string $script): string
+    {
+        return HostImageLines::line(str_replace(LocalRoot::CLIENT . ' account-docker.', 'pa-root account-docker.', $script));
+    }
+
     /**
      * @return array{0: int, 1: string, 2: string} exit code, stdout, stderr
      */
     private function sh(string $script, string $shell = 'sh'): array
     {
         $proc = proc_open(
-            [$shell, '-c', $script],
+            [$shell, '-c', $this->routed($script)],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             null,
@@ -213,7 +230,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertSame('Pulled base image ghcr.io/acme/base:1', $out);
-        $this->assertStringContainsString('docker --config ' . $this->dir . '/login pull -q ghcr.io/acme/base:1', $this->calls());
+        $this->assertStringContainsString('account-docker.pull -- demo ghcr.io/acme/base:1 ' . $this->dir . '/login', $this->calls());
         $this->assertStringNotContainsString('panelalpha-cache-registry', $this->calls());
         $this->assertStringNotContainsString('push', $this->calls());
     }
@@ -228,7 +245,140 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         $this->assertSame(1, $code);
         $this->assertStringContainsString('Could not get', $err);
         $this->assertStringNotContainsString('panelalpha-cache-registry', $this->calls());
-        $this->assertStringNotContainsString('--config', $this->calls());
+        $this->assertMatchesRegularExpression('~^account-docker\.pull -- demo ghcr\.io/acme/base:1 $~m', $this->calls(), 'pulled with no login');
+    }
+
+    public function test_an_operator_image_comes_from_the_cache_registry_even_when_the_account_has_one(): void
+    {
+        $this->state('registry-running');
+        $this->has('account', 'whmcs-dev-base:php8.3');
+        $this->has('cache', 'whmcs-dev-base:php8.3');
+
+        [$code, $out] = $this->sh((new DindImageStore())->operatorSeedCommand($this->account(), 'whmcs-dev-base:php8.3'));
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image whmcs-dev-base:php8.3 from the cache registry', $out);
+        $this->assertStringContainsString('account-docker.pull -- demo panelalpha-cache-registry:5000/whmcs-dev-base:php8.3', $this->calls());
+    }
+
+    public function test_an_operator_image_the_registry_lacks_keeps_the_account_copy(): void
+    {
+        $this->state('registry-running');
+        $this->has('account', 'whmcs-dev-base:php8.3');
+
+        [$code, $out] = $this->sh((new DindImageStore())->operatorSeedCommand($this->account(), 'whmcs-dev-base:php8.3'));
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Kept base image whmcs-dev-base:php8.3 already in the account: the cache registry did not have it', $out);
+    }
+
+    public function test_an_operator_image_nowhere_fails_and_never_goes_to_docker_hub(): void
+    {
+        $this->state('registry-running');
+        $this->state('remote-ok');
+
+        [$code, , $err] = $this->sh((new DindImageStore())->operatorSeedCommand($this->account(), 'whmcs-dev-base:php8.3'));
+
+        $this->assertNotSame(0, $code);
+        $this->assertSame('Could not get whmcs-dev-base:php8.3 into the account', $err);
+        $this->assertFalse($this->accountHas('whmcs-dev-base:php8.3'));
+    }
+
+    public function test_a_ghcr_image_comes_through_the_pull_through_cache(): void
+    {
+        $this->state('registry-running');
+        $this->state('remote-ok');
+        $this->has('ghcr', 'home-assistant/home-assistant:2026.9.4');
+
+        [$code, $out] = $this->seed(false, 'ghcr.io/home-assistant/home-assistant:2026.9.4');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ghcr.io/home-assistant/home-assistant:2026.9.4 through the pull-through cache', $out);
+        $this->assertStringContainsString('account-docker.pull -- demo panelalpha-ghcr-proxy:5000/home-assistant/home-assistant:2026.9.4', $this->calls());
+        $this->assertDoesNotMatchRegularExpression('#pull (-q -- |-- demo )ghcr\.io/#', $this->calls());
+        $this->assertTrue($this->accountHas('ghcr.io/home-assistant/home-assistant:2026.9.4'), 'retagged to the name compose runs');
+    }
+
+    public function test_the_cache_registry_still_comes_before_the_pull_through_cache(): void
+    {
+        $this->state('registry-running');
+        $this->has('cache', 'ghcr.io/home-assistant/home-assistant:2026.9.4');
+        $this->has('ghcr', 'home-assistant/home-assistant:2026.9.4');
+
+        [$code, $out] = $this->seed(false, 'ghcr.io/home-assistant/home-assistant:2026.9.4');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ghcr.io/home-assistant/home-assistant:2026.9.4 from the cache registry', $out);
+        $this->assertStringNotContainsString('panelalpha-ghcr-proxy', $this->calls());
+    }
+
+    public function test_a_stopped_pull_through_cache_falls_back_to_the_accounts_own_pull(): void
+    {
+        $this->state('registry-running');
+        $this->state('down-' . DindImageStore::GHCR_PROXY_CONTAINER);
+        $this->state('remote-ok');
+        $this->has('ghcr', 'home-assistant/home-assistant:2026.9.4');
+
+        [$code, $out] = $this->seed(false, 'ghcr.io/home-assistant/home-assistant:2026.9.4');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ghcr.io/home-assistant/home-assistant:2026.9.4', $out);
+        $this->assertStringNotContainsString('pull -- demo panelalpha-ghcr-proxy', $this->calls());
+    }
+
+    public function test_a_pull_through_cache_miss_falls_back_to_the_accounts_own_pull(): void
+    {
+        $this->state('registry-running');
+        $this->state('remote-ok');
+
+        [$code, $out] = $this->seed(false, 'ghcr.io/kanbn/kan:1');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ghcr.io/kanbn/kan:1', $out);
+    }
+
+    public function test_a_docker_hub_image_never_asks_the_pull_through_cache(): void
+    {
+        $this->state('registry-running');
+        $this->state('remote-ok');
+
+        [$code, $out] = $this->seed(false, 'redis:alpine');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image redis:alpine', $out);
+        $this->assertStringNotContainsString('panelalpha-ghcr-proxy', $this->calls());
+    }
+
+    public function test_a_private_ghcr_image_never_goes_through_the_pull_through_cache(): void
+    {
+        $this->state('registry-running');
+        $this->state('remote-ok');
+        $this->has('ghcr', 'acme/base:1');
+        mkdir($this->dir . '/login');
+        file_put_contents($this->dir . '/login/config.json', '{"auths":{}}');
+
+        [$code, $out] = $this->sh((new DindImageStore())->seedCommand(
+            $this->account(),
+            'ghcr.io/acme/base:1',
+            false,
+            true,
+            $this->dir . '/login'
+        ));
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ghcr.io/acme/base:1', $out);
+        $this->assertStringNotContainsString('panelalpha-ghcr-proxy', $this->calls());
+    }
+
+    public function test_only_a_registry_the_engine_caches_has_a_pull_through_name(): void
+    {
+        $this->assertSame(
+            'panelalpha-ghcr-proxy:5000/home-assistant/home-assistant:2026.9.4',
+            DindImageStore::pullThroughRef('ghcr.io/home-assistant/home-assistant:2026.9.4')
+        );
+        $this->assertNull(DindImageStore::pullThroughRef('quay.io/keycloak/keycloak:26'));
+        $this->assertNull(DindImageStore::pullThroughRef('redis:alpine'));
+        $this->assertNull(DindImageStore::pullThroughRef('ghcr.io'));
     }
 
     public function test_an_image_the_account_has_is_left_alone(): void
@@ -256,37 +406,47 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         $this->assertFileDoesNotExist($this->dir . '/state/hollow/diygod_rsshub_latest', 'the pull repairs it');
     }
 
-    public function test_presence_is_asked_with_history_not_inspect(): void
+    public function test_presence_is_asked_of_the_accounts_daemon_as_history_not_inspect(): void
     {
-        $this->assertSame(['docker', 'image', 'history', '-q', '--', 'redis:alpine'], (new DindImageStore())->imageIdArgv('redis:alpine'));
-    }
-
-    /**
-     * Nothing runs inside the account to patch its registry
-     * settings any more. daemon.json is rendered and rewritten on the host
-     * ({@see \App\System\Project\Dind\AccountTemplate::daemonJson()}); these
-     * three are the host-side argv a live refresh needs instead.
-     */
-    public function test_the_account_mounts_are_asked_on_the_host(): void
-    {
-        $this->assertSame(
-            ['sudo', 'docker', 'inspect', '--format', '{{json .Mounts}}', '--', 'demo'],
-            (new DindImageStore())->hostAccountMountsArgv($this->account())
+        $this->assertStringStartsWith(
+            'if ' . LocalRoot::CLIENT . ' account-docker.hasImage -- demo redis:alpine >/dev/null 2>&1; then :;',
+            (new DindImageStore())->seedCommand($this->account(), 'redis:alpine', false)
         );
     }
 
-    public function test_the_account_processes_are_asked_on_the_host(): void
+    public function test_a_refresh_that_pulled_a_new_image_says_so(): void
     {
-        $this->assertSame(
-            ['sudo', 'docker', 'top', 'demo', '-eo', 'pid,comm'],
-            (new DindImageStore())->hostAccountProcessesArgv($this->account())
-        );
+        $this->state('remote-ok');
+        $this->state('remote-id', str_repeat('b', 64));
+        $this->has('account', 'node:22-bookworm-slim');
+
+        [$code, $out] = $this->sh((new DindImageStore())->refreshCommand($this->account(), 'node:22-bookworm-slim'));
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Updated base image node:22-bookworm-slim', $out);
+        $this->assertStringContainsString('account-docker.pull -- demo node:22-bookworm-slim', $this->calls());
     }
 
-    /** No sudo: execOnHost() already enters the host namespace as root. */
-    public function test_the_dockerd_signal_carries_no_sudo_and_no_interpreter(): void
+    public function test_a_refresh_that_pulled_the_same_image_says_it_is_current(): void
     {
-        $this->assertSame(['kill', '-HUP', '4321'], (new DindImageStore())->hostSignalDockerdArgv(4321));
+        $this->state('remote-ok');
+        $this->has('account', 'node:22-bookworm-slim');
+
+        [$code, $out] = $this->sh((new DindImageStore())->refreshCommand($this->account(), 'node:22-bookworm-slim'));
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Base image node:22-bookworm-slim is current', $out);
+    }
+
+    public function test_a_refresh_whose_pull_fails_fails_with_the_pulls_error(): void
+    {
+        $this->has('account', 'node:22-bookworm-slim');
+
+        [$code, $out, $err] = $this->sh((new DindImageStore())->refreshCommand($this->account(), 'node:22-bookworm-slim'));
+
+        $this->assertNotSame(0, $code);
+        $this->assertSame('', $out);
+        $this->assertSame('pull access denied for node:22-bookworm-slim', $err);
     }
 
     public function test_the_cache_registry_comes_first(): void
@@ -312,8 +472,8 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::IMAGE . ' from the host through the cache registry', $out);
-        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
-        $this->assertStringContainsString('pull -q panelalpha-cache-registry:5000/' . self::IMAGE, $this->calls());
+        $this->assertStringContainsString('push -q -- ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
+        $this->assertStringContainsString('account-docker.pull -- demo panelalpha-cache-registry:5000/' . self::IMAGE, $this->calls());
         $this->assertTrue($this->accountHas(self::IMAGE));
     }
 
@@ -365,7 +525,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertNotSame(0, $code);
         $this->assertSame(DindImageStore::NOT_BUILT_HERE, $err);
-        $this->assertStringNotContainsString('pull -q ' . self::IMAGE, $this->calls());
+        $this->assertDoesNotMatchRegularExpression('#pull (-q -- |-- demo )' . preg_quote(self::IMAGE, '#') . '#', $this->calls());
     }
 
     /**
@@ -436,9 +596,9 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertSame('Loaded base image ' . self::RAILPACK_BUILDER . ' from the host through the cache registry', $out);
-        $this->assertMatchesRegularExpression('/^pull -q ' . preg_quote(self::RAILPACK_BUILDER, '/') . '$/m', $this->calls(), 'the host pulls it');
-        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::RAILPACK_BUILDER, $this->calls());
-        $this->assertStringNotContainsString('docker pull -q ' . self::RAILPACK_BUILDER, $this->calls(), 'the account never asks ghcr.io');
+        $this->assertMatchesRegularExpression('/^pull -q -- ' . preg_quote(self::RAILPACK_BUILDER, '/') . '$/m', $this->calls(), 'the host pulls it');
+        $this->assertStringContainsString('push -q -- ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::RAILPACK_BUILDER, $this->calls());
+        $this->assertStringNotContainsString('account-docker.pull -- demo ' . self::RAILPACK_BUILDER, $this->calls(), 'the account never asks ghcr.io');
         $this->assertTrue($this->accountHas(self::RAILPACK_BUILDER));
     }
 
@@ -480,7 +640,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertStringStartsWith('Loaded base image', $out);
-        $this->assertMatchesRegularExpression('/^pull -q ' . preg_quote($frontend, '/') . '$/m', $this->calls());
+        $this->assertMatchesRegularExpression('/^pull -q -- ' . preg_quote($frontend, '/') . '$/m', $this->calls());
     }
 
     public function test_a_latest_tag_the_host_cannot_refresh_is_published_as_it_has_it(): void
@@ -562,8 +722,8 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertSame("Pulled base image traefik/whoami@{$digest}", $out);
-        $this->assertStringContainsString("pull -q panelalpha-cache-registry:5000/traefik/whoami@{$digest}", $this->calls());
-        $this->assertStringContainsString("pull -q traefik/whoami@{$digest}", $this->calls());
+        $this->assertStringContainsString("account-docker.pull -- demo panelalpha-cache-registry:5000/traefik/whoami@{$digest}", $this->calls());
+        $this->assertStringContainsString("account-docker.pull -- demo traefik/whoami@{$digest}", $this->calls());
         $this->assertStringNotContainsString('v1.10.3', $this->calls(), 'docker ignores a tag beside a digest');
     }
 
@@ -585,7 +745,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, $code);
         $this->assertSame("Pulled base image ghcr.io/acme/base@{$digest}", $out);
-        $this->assertStringContainsString("--config {$this->dir}/login pull -q ghcr.io/acme/base@{$digest}", $this->calls());
+        $this->assertStringContainsString("account-docker.pull -- demo ghcr.io/acme/base@{$digest} {$this->dir}/login", $this->calls());
         $this->assertStringNotContainsString('base:1', $this->calls());
     }
 
@@ -618,11 +778,15 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
     public function test_the_host_pushes_to_loopback_and_the_account_pulls_by_name(): void
     {
-        $cmd = (new DindImageStore())->loadFromHostCommand($this->account(), self::IMAGE);
+        $this->state('registry-running');
+        $this->has('host', self::IMAGE);
 
-        $this->assertStringContainsString("docker push -q '" . DindImageStore::HOST_CACHE_REGISTRY . '/', $cmd);
-        $this->assertStringContainsString("docker pull -q '" . DindImageStore::CACHE_REGISTRY . '/', $cmd);
-        $this->assertStringNotContainsString("push -q '" . DindImageStore::CACHE_REGISTRY . '/', $cmd);
+        [$code] = $this->sh((new DindImageStore())->loadFromHostCommand($this->account(), self::IMAGE));
+
+        $this->assertSame(0, $code);
+        $this->assertStringContainsString("\npush -q -- " . DindImageStore::HOST_CACHE_REGISTRY . '/', "\n" . $this->calls());
+        $this->assertStringContainsString('account-docker.pull -- demo ' . DindImageStore::CACHE_REGISTRY . '/', $this->calls());
+        $this->assertStringNotContainsString('push -q -- ' . DindImageStore::CACHE_REGISTRY . '/', $this->calls());
     }
 
     public function test_publish_pushes_under_the_images_own_name(): void
@@ -632,7 +796,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         [$code] = $this->sh((new DindImageStore())->hostPublishCommand('node:22-bookworm-slim'));
 
         $this->assertSame(0, $code);
-        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/node:22-bookworm-slim', $this->calls());
+        $this->assertStringContainsString('push -q -- ' . DindImageStore::HOST_CACHE_REGISTRY . '/node:22-bookworm-slim', $this->calls());
         $this->assertFileExists($this->dir . '/state/cache/node_22-bookworm-slim');
     }
 
@@ -642,8 +806,8 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         $this->has('host', self::IMAGE);
         $push = (new DindImageStore())->loadFromHostCommand($this->account(), self::IMAGE);
 
-        @touch(DindImageStore::PUSH_LOCK);
-        $gc = fopen(DindImageStore::PUSH_LOCK, 'r');
+        @touch(DindImageStore::pushLock());
+        $gc = fopen(DindImageStore::pushLock(), 'r');
         $this->assertTrue(flock($gc, LOCK_EX));
         try {
             [$blocked] = $this->sh('timeout 1 sh -c ' . escapeshellarg($push));
@@ -664,7 +828,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
     {
         $rebuild = (new DindImageStore())->hostRebuildCommand(self::IMAGE, 'FROM php:8.3');
 
-        $gc = $this->lockExclusively(DindImageStore::PUSH_LOCK);
+        $gc = $this->lockExclusively(DindImageStore::pushLock());
         try {
             $proc = $this->start($rebuild);
             $this->assertTrue($this->waitFor(fn (): bool => $this->hostHas(self::IMAGE)), 'the build must not wait for the push lock');
@@ -675,7 +839,7 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
         }
 
         $this->assertSame(0, proc_close($proc));
-        $this->assertStringContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
+        $this->assertStringContainsString('push -q -- ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
     }
 
     /** Two deploys missing one base: the second waits, finds the first one's image and builds nothing; other images go on. */
@@ -699,28 +863,34 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertSame(0, proc_close($proc));
         $this->assertStringNotContainsString('-t ' . self::IMAGE, $this->calls());
-        $this->assertStringNotContainsString('push -q ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
+        $this->assertStringNotContainsString('push -q -- ' . DindImageStore::HOST_CACHE_REGISTRY . '/' . self::IMAGE, $this->calls());
     }
 
     public function test_a_refresh_rebuilds_even_when_the_tag_exists(): void
     {
         $store = new DindImageStore();
 
-        $this->assertStringStartsWith('sudo docker image inspect', $store->hostBuildCommand('panelalpha/php:x', 'FROM php'));
+        $this->assertStringStartsWith(LocalRoot::CLIENT . ' lines.inspectImage -- panelalpha/php:x ', $store->hostBuildCommand('panelalpha/php:x', 'FROM php'));
         $this->assertStringStartsWith("printf '%s'", $store->hostBuildCommand('panelalpha/php:x', 'FROM php', true));
-        $this->assertStringContainsString('--pull', $store->hostBuildCommand('panelalpha/php:x', 'FROM php', true));
+        $this->assertSame(0, $this->sh($store->hostBuildCommand('panelalpha/php:x', 'FROM php', true))[0]);
+        $this->assertStringContainsString('--pull', $this->calls());
         // FROM a base only this host has: --pull would ask Docker Hub for it.
-        $this->assertStringNotContainsString('--pull', $store->hostBuildCommand('panelalpha/build-node:x', 'FROM panelalpha/php:y', false, false));
+        unlink($this->dir . '/state/calls');
+        $this->assertSame(0, $this->sh($store->hostBuildCommand('panelalpha/build-node:x', 'FROM panelalpha/php:y', false, false))[0]);
+        $this->assertStringContainsString('build ', $this->calls());
+        $this->assertStringNotContainsString('--pull', $this->calls());
     }
 
     public function test_garbage_collect_drops_untagged_manifests(): void
     {
-        $argv = DindImageStore::garbageCollectArgv();
+        $request = DindImageStore::garbageCollectArgv();
 
-        $this->assertContains('--delete-untagged', $argv);
+        $this->assertTrue(LocalRoot::isRequest($request));
+        $this->assertSame('docker.registryGarbageCollect', LocalRoot::action($request));
         // The accounts' instance mounts the storage read-only; only the writer can collect.
-        $this->assertContains(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $argv);
-        $this->assertNotContains(DindImageStore::CACHE_REGISTRY_CONTAINER, $argv);
+        $this->assertSame([DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, '/etc/distribution/config.yml'],
+            LocalRoot::values($request));
+        $this->assertNotContains(DindImageStore::CACHE_REGISTRY_CONTAINER, $request);
     }
 
     /** Accounts pull from this registry by tag, so none of them may write to it. */
@@ -750,6 +920,31 @@ SH, DindImageStore::HOST_CACHE_REGISTRY));
 
         $this->assertContains(DindImageStore::CACHE_REGISTRY_CONTAINER, TenantEgressGuard::REGISTRY_NAMES);
         $this->assertNotContains(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, TenantEgressGuard::REGISTRY_NAMES);
+    }
+
+    /** Every account reads it, so it serves only what anyone may pull from ghcr.io. */
+    public function test_the_ghcr_pull_through_cache_is_anonymous_and_on_the_tenant_network(): void
+    {
+        $services = [];
+        foreach (Yaml::parseFile(dirname(__DIR__, 5) . '/docker-compose.yml')['services'] as $service) {
+            if (is_string($service['container_name'] ?? null)) {
+                $services[$service['container_name']] = $service;
+            }
+        }
+        $proxy = $services[DindImageStore::GHCR_PROXY_CONTAINER];
+
+        $this->assertSame('https://ghcr.io', $proxy['environment']['REGISTRY_PROXY_REMOTEURL']);
+        $this->assertArrayNotHasKey('REGISTRY_PROXY_USERNAME', $proxy['environment']);
+        $this->assertArrayNotHasKey('REGISTRY_PROXY_PASSWORD', $proxy['environment']);
+        $this->assertSame('true', $proxy['environment']['REGISTRY_STORAGE_DELETE_ENABLED']);
+        $this->assertSame('', $proxy['environment']['REGISTRY_HTTP_DEBUG_ADDR']);
+        $this->assertArrayNotHasKey('ports', $proxy);
+        $this->assertSame('${TENANT_NETWORK_PREFIX:-10.200}.0.6', $proxy['networks']['tenants']['ipv4_address']);
+        $this->assertContains(DindImageStore::GHCR_PROXY_CONTAINER, TenantEgressGuard::REGISTRY_NAMES);
+        $this->assertStringContainsString(
+            'GHCR_PROXY="$prefix.0.6"',
+            (string) file_get_contents(dirname(__DIR__, 5) . '/scripts/tenant-network-firewall.sh')
+        );
     }
 
     public function test_the_probe_is_the_registry_container(): void

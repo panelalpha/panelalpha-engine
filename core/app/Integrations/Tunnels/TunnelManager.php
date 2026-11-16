@@ -3,6 +3,7 @@
 namespace App\Integrations\Tunnels;
 
 use App\Exceptions\TunnelHostnameUnavailableException;
+use App\Jobs\ExpireTunnel;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Lib\Domains\DomainAllocator;
@@ -110,6 +111,7 @@ class TunnelManager
 
         $tunnel = self::createWithProvider($user, $domain, $hostname, $provider, $purpose === Tunnel::PURPOSE_PREVIEW);
         self::recordLifetime($tunnel, $purpose, $expiresAt);
+        self::scheduleExpiry($tunnel, $expiresAt);
 
         return $tunnel;
     }
@@ -142,7 +144,7 @@ class TunnelManager
                     $expiresAt
                 );
             } catch (CloudflareException|PanelAlphaException $e) {
-                if (! DomainAllocator::nameIsTaken($e->getMessage())) {
+                if (! DomainAllocator::nameIsTaken($e)) {
                     throw $e;
                 }
             }
@@ -196,6 +198,19 @@ class TunnelManager
             'expires_at' => $expiresAt?->toIso8601String(),
         ], static fn (?string $value): bool => $value !== null));
         $tunnel->save();
+    }
+
+    /**
+     * The pass that removes the tunnel at the lifetime it was given, instead of
+     * at the next sweep; the sweep stays as the fallback for a lost job.
+     */
+    private static function scheduleExpiry(Tunnel $tunnel, ?CarbonInterface $expiresAt): void
+    {
+        if ($expiresAt === null) {
+            return;
+        }
+
+        dispatch((new ExpireTunnel($tunnel->id))->delay($expiresAt));
     }
 
     /**

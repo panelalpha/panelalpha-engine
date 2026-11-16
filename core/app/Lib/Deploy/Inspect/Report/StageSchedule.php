@@ -13,13 +13,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\StageResolver;
 
 /**
- * Every command the matched platform declares, by the stage it runs in.
- *
- * The three-command projection in {@see ApplicationReport} is what the
- * Dockerfile generators consume; this is the whole schedule, including the
- * migrate that only runs on an upgrade and the seed that only runs once.
- * Empty for a project no manifest claimed — Railpack and the fallback have no
- * schedule to show.
+ * Every command the matched platform declares, by stage: the whole schedule behind {@see ApplicationReport}'s
+ * three commands, upgrade-only migrate and run-once seed included. Empty for a project no manifest claimed.
  */
 final class StageSchedule
 {
@@ -62,18 +57,8 @@ final class StageSchedule
      */
     public function build(): array
     {
-        // A recipe id nothing answers to is already reported as the
-        // application's `issue`; throwing again here would turn a finding into
-        // a 500 on the endpoint whose whole job is to report findings.
-        try {
-            $hit = PlatformSelector::forContext($this->context, null, $this->recipe);
-        } catch (ManifestException) {
-            $hit = null;
-        }
+        $hit = $this->matchedPlatform();
         if ($hit === null) {
-            // No manifest claimed the project, so there is no schedule to
-            // predict — except the stages a deploy plan spoke for, which run
-            // regardless of what detection concluded.
             return $this->planOnly();
         }
 
@@ -92,6 +77,26 @@ final class StageSchedule
     }
 
     /**
+     * A recipe id nothing answers to is already the application's `issue`, so it is not thrown again here:
+     * that would turn a finding into a 500 on the endpoint whose job is to report findings.
+     *
+     * @return array{manifest: PlatformManifest, decision: array<string, mixed>}|null
+     */
+    private function matchedPlatform(): ?array
+    {
+        try {
+            $hit = PlatformSelector::forContext($this->context, null, $this->recipe);
+        } catch (ManifestException) {
+            $hit = null;
+        }
+
+        return $hit;
+    }
+
+    /**
+     * With no manifest there is no schedule to predict, except the stages a deploy plan spoke for,
+     * which run whatever detection concluded.
+     *
      * @return array<string, list<array<string, mixed>>>
      */
     private function planOnly(): array
@@ -108,19 +113,21 @@ final class StageSchedule
     }
 
     /**
+     * Resolved by the deploy's own code, so the report shows the sequence the container will follow:
+     * app config commands beside the manifest's, and a deploy plan's replacing the stage outright.
+     *
      * @param  PlatformManifest  $manifest
      * @return list<PlatformCommand>
      */
     private function commandsFor($manifest, string $stage): array
     {
-        // Resolved by the same code the deploy resolves it with, which is the
-        // whole point: the app config's commands run alongside the manifest's, a
-        // deploy plan replaces the stage outright, and the report has to say
-        // so rather than describe a sequence the container will not follow.
         return StageResolver::commandsFor($stage, $manifest, $this->appConfig, $this->plan, $this->context);
     }
 
     /**
+     * `source` says which of the three possible speakers a command came from; `request` also means
+     * the rest of the stage is gone.
+     *
      * @return array<string, mixed>
      */
     private function describe(PlatformCommand $command, string $stage): array
@@ -128,9 +135,6 @@ final class StageSchedule
         return [
             'id' => $command->id,
             'run' => $this->resolvedRun($command),
-            // Which of the three possible speakers this command came from, so
-            // a reader can tell a platform default from something the request
-            // asked for. `request` also means the rest of the stage is gone.
             'source' => StageResolver::sourceOf(
                 $command,
                 $stage,
@@ -144,12 +148,8 @@ final class StageSchedule
     }
 
     /**
-     * A command's text as it will actually run.
-     *
-     * A manifest writes `{{js.install}}` because the install line depends on
-     * the project's lockfile, not on the platform. The decision already
-     * carries what that resolved to, so the schedule shows the string the
-     * build will run rather than the placeholder that produced it.
+     * A command's text as it will actually run: a `{{js.install}}` placeholder shows what the decision
+     * resolved it to for this project's lockfile.
      */
     private function resolvedRun(PlatformCommand $command): string
     {

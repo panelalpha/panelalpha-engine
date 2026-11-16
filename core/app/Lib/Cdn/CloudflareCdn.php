@@ -12,12 +12,8 @@ use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 
 /**
- * Cloudflare's cache and zone settings for one of a project's hostnames, read
- * and changed with the project's own Cloudflare API token, which only a
- * container-based project can hold. A zone-wide change is refused while the
- * zone also serves another project on this engine. A token Cloudflare does not
- * accept, a refused permission or a refused request is a ProblemException that
- * says which; anything else is a {@see CloudflareFailure}.
+ * Cloudflare's cache and zone settings for a hostname, through the project's own API token (container
+ * projects only). Token, permission and request refusals are a ProblemException; the rest a {@see CloudflareFailure}.
  */
 final class CloudflareCdn
 {

@@ -41,7 +41,7 @@ class UserCloneRequest extends FormRequest
                 return;
             }
 
-            $problems = app(System::class)->projects()->copyDatabasesProblems($source, $this->boolean('copy_databases', true));
+            $problems = app(System::class)->projects()->wordPressCopyProblems($source, $this->boolean('copy_databases', true));
             if ($problems !== []) {
                 throw ProblemException::of($problems);
             }

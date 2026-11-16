@@ -1,0 +1,12 @@
+#!/usr/bin/python3 -I
+"""pa-broker: run one of the root broker's actions as root in its own container, without the socket (see
+rootbroker.direct)."""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from rootbroker.direct import main  # noqa: E402
+
+sys.exit(main(sys.argv[1:]))

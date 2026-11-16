@@ -8,13 +8,11 @@ use App\Lib\Ssl\EngineCertificate;
 use App\Lib\Ssl\KeyPair;
 use App\Lib\Ssl\TrustStore;
 use App\System;
+use App\System\Privileged;
 
 /**
- * The certificate a proxy rule on 443 that no domain or alias is named after is served with.
- * Only the server's administrator provides one: the engine's own certificate, or a Let's Encrypt
- * lineage on the host, such as a wildcard obtained with DNS-01. A certificate on a project's domain
- * never counts, since any project may install one for any name. It must be publicly trusted, in
- * date and cover every name the rule answers for; without one the rule gets the host's default.
+ * The certificate for a 443 proxy rule no domain is named after: the engine's own or a host Let's Encrypt lineage, never a
+ * project's (any project may install one for any name); publicly trusted, in date and covering every name, else the default.
  */
 final class ProxyRuleCertificate
 {
@@ -141,7 +139,7 @@ final class ProxyRuleCertificate
     /** @return list<string> */
     private function lineages(): array
     {
-        $listing = $this->system->runProcess(['sudo', 'ls', '-1', $this->lineagesDir]);
+        $listing = $this->system->runProcess(Privileged::files()->listNames($this->lineagesDir));
         if (! $listing->isSuccessful()) {
             return [];
         }

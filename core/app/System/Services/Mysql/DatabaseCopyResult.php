@@ -3,9 +3,8 @@
 namespace App\System\Services\Mysql;
 
 /**
- * What a MySQL copy produced: the source→destination names and the fresh
- * credentials. Held in memory for the next step of the copy only; a password
- * here is never written to a task, a log or an API response.
+ * What a MySQL copy produced: the source→destination names and the fresh credentials, held in memory for the
+ * copy's next step only; a password here is never written to a task, a log or an API response.
  */
 final class DatabaseCopyResult
 {

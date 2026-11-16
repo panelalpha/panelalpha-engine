@@ -5,13 +5,8 @@ namespace App\Lib\Deploy\Env;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The `env_file:` paths a compose file expects to exist.
- *
- * Compose V2 refuses to start a stack whose `env_file` is missing, so these
- * have to be created before the deploy rather than discovered by it. Only
- * paths inside the project count: an absolute path, a `..` segment or an
- * unresolved `${VAR}` is not something the engine can create on the
- * repository's behalf.
+ * The `env_file:` paths a compose file expects to exist, which Compose V2 refuses to start without.
+ * Only paths inside the project count.
  */
 final class ComposeEnvFiles
 {
@@ -53,11 +48,8 @@ final class ComposeEnvFiles
     }
 
     /**
-     * Add $overridesFile as the last `env_file` of every service whose
-     * `env_file` already loads `.env` (ADR-0001 D3), so account overrides
-     * reach exactly where `.env` reached — the app, not a database sidecar
-     * that never read `.env`. Idempotent: an entry already there is moved to
-     * the end rather than added twice.
+     * Add $overridesFile as the last `env_file` of every service already loading `.env` (ADR-0001 D3).
+     * Idempotent: an entry already there is moved to the end.
      *
      * @param  array<string, mixed>  $compose  a decoded compose file
      * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
@@ -81,7 +73,7 @@ final class ComposeEnvFiles
                     break;
                 }
             }
-            if (! $loadsEnv) {
+            if (! $loadsEnv || self::loads($service, $overridesFile)) {
                 continue;
             }
             $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
@@ -133,6 +125,47 @@ final class ComposeEnvFiles
     }
 
     /**
+     * Append $envFile to the `env_file:` of $services, after what they already load, so a value there wins.
+     *
+     * @param  array<string, mixed>  $compose  a decoded compose file
+     * @param  list<string>  $services
+     * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
+     */
+    public static function appendTo(array $compose, array $services, string $envFile): array
+    {
+        $changed = [];
+        foreach ($services as $name) {
+            $service = $compose['services'][$name] ?? null;
+            if (! is_array($service) || self::loads($service, $envFile)) {
+                continue;
+            }
+            $declared = $service['env_file'] ?? null;
+            $entries = is_array($declared) ? array_values($declared) : ($declared === null ? [] : [$declared]);
+            $entries[] = $envFile;
+            $compose['services'][$name]['env_file'] = $entries;
+            $changed[] = $name;
+        }
+
+        return [$compose, $changed];
+    }
+
+    /**
+     * Whether one of the service's `env_file:` entries names $relative.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    private static function loads(array $service, string $relative): bool
+    {
+        foreach (self::entriesOf($service['env_file'] ?? null) as $entry) {
+            if (self::projectRelative($entry) === $relative) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private static function parse(string $raw): ?array
@@ -175,17 +208,11 @@ final class ComposeEnvFiles
         return $paths;
     }
 
+    /** An interpolation's default is the file compose will use, substituted before the guards so they still apply. */
     private static function projectRelative(string $raw): ?string
     {
         $path = str_replace('\\', '/', trim($raw));
 
-        // `env_file: ${ENV_FILE:-.env}` -- the default is what compose will use
-        // when nothing sets the variable, so it is the file that has to exist.
-        // Refusing every interpolated path left ideon with no `.env` at all and
-        // compose failing on `env file ... not found`, while the literal
-        // spelling of the same thing already gets one. Substituted before the
-        // guard below, so a default that escapes or names an absolute path is
-        // still refused.
         if (str_contains($path, '${')) {
             $path = self::substituteDefaults($path);
             if ($path === null) {
@@ -207,20 +234,12 @@ final class ComposeEnvFiles
     }
 
     /**
-     * `${VAR:-default}` and `${VAR-default}` collapse to `default`; anything
-     * whose default is itself interpolated or absent cannot be guessed at.
-     *
-     * Null means "no single answer": several candidates (`${A:-x}${B:-y}`), a
-     * nested reference, or a bare `${VAR}` whose value is the caller's to
-     * choose. Guessing one of those would create a file compose may not read
-     * and leave the real one missing, which is the bug this avoids rather than
-     * trades for.
+     * `${VAR:-default}` and `${VAR-default}` collapse to `default`; null when there is no single answer.
+     * The body is matched without a brace, so a nested reference survives the pass and is refused.
      */
     private static function substituteDefaults(string $path): ?string
     {
         $count = 0;
-        // Only the `:-`/`-` forms have a default to take. `\$\{[^}]*\}` would
-        // swallow a nested brace, so the body is matched without one.
         $substituted = preg_replace_callback(
             '/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-|-)([^}]*)\}/',
             static function (array $m) use (&$count): string {
@@ -235,8 +254,6 @@ final class ComposeEnvFiles
             return null;
         }
 
-        // A second pass is how a nested reference shows up: whatever remains is
-        // an interpolation with no default, and that is not a path to invent.
         return str_contains($substituted, '${') ? null : $substituted;
     }
 }

@@ -141,6 +141,15 @@ class DindEntrypointInitScriptsTest extends TestCase
         $this->assertContains('panelalpha-cache-registry:5000', $this->daemonJson()['insecure-registries'] ?? []);
     }
 
+    /** A ghcr.io image is pulled from ghcr-proxy by name, over plain HTTP like the other two. */
+    public function test_the_ghcr_pull_through_cache_is_marked_insecure_and_is_no_mirror(): void
+    {
+        $json = $this->daemonJson();
+
+        $this->assertContains('panelalpha-ghcr-proxy:5000', $json['insecure-registries'] ?? []);
+        $this->assertSame(['http://panelalpha-registry-proxy:5000'], $json['registry-mirrors'] ?? null);
+    }
+
     /** Without it, a dockerd OOM kill left every container Exited after s6 restarted it. */
     /** Docker's default json-file log has no cap and lives inside the account's quota. */
     public function test_container_logs_are_rotated_by_default(): void

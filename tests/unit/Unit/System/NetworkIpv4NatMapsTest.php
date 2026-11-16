@@ -5,6 +5,7 @@ namespace Tests\Unit\System;
 use App\System;
 use App\System\Network;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -40,6 +41,8 @@ TXT;
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return $this->process;
             }
         };

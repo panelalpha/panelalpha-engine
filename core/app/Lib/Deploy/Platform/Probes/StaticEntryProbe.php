@@ -7,15 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * An HTML entry point this project can actually be served from.
- *
- * The Static platform's manifest already says "and none of the manifests
- * that would make this an application" in JSON. What it cannot say is where
- * the entry document is: `index.html` may sit at the root, or under
- * `public/`, `dist/`, `build/` or `site/`, and picking the wrong one serves
- * a build artefact directory as if it were the site.
- *
- * Contributes the entry path the nginx root is pointed at.
+ * The HTML entry point the nginx root is pointed at: `index.html` may sit at the root or under
+ * `public/`, `dist/`, `build/` or `site/`, which the Static manifest cannot say.
  */
 final class StaticEntryProbe implements PlatformProbe
 {

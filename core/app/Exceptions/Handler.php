@@ -2,12 +2,15 @@
 
 namespace App\Exceptions;
 
+use App\Http\Responses\Refusal;
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Models\User;
 use App\Rules\RuleExpectation;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Psr\Log\LogLevel;
@@ -87,8 +90,8 @@ class Handler extends ExceptionHandler
     {
         $this->renderable(fn (DeployAlreadyRunningException $e) => self::conflict($e->getMessage()));
         $this->renderable(fn (MissingLinuxUserException $e) => self::conflict($e->getMessage()));
-        $this->renderable(fn (ProjectBusyException $e) => self::conflict($e->getMessage()));
-        $this->renderable(fn (DeployBusyException $e) => self::conflict($e->getMessage(), ['task_id' => $e->task?->id]));
+        $this->renderable(fn (ProjectBusyException $e, $request) => self::busy($e->getMessage(), $e->problem(), $request));
+        $this->renderable(fn (DeployBusyException $e, $request) => self::busy($e->getMessage(), $e->problem(), $request, ['task_id' => $e->task?->id]));
         $this->renderable(fn (TunnelHostnameUnavailableException $e) => self::conflict(
             $e->getMessage(),
             ['code' => TunnelHostnameUnavailableException::CODE]
@@ -101,6 +104,27 @@ class Handler extends ExceptionHandler
     private static function conflict(string $message, array $extra = []): JsonResponse
     {
         return new JsonResponse(['message' => $message] + $extra, 409);
+    }
+
+    /**
+     * A project something else is working on, as a 409 with the problem and its hints.
+     *
+     * @param  array{code: string, task_id?: int}  $problem
+     * @param  array<string, mixed>  $extra
+     */
+    private static function busy(string $message, array $problem, Request $request, array $extra = []): JsonResponse
+    {
+        $response = Refusal::json(409, 'project', $problem['code'], $message, self::project($request), array_diff_key($problem, ['code' => true]));
+
+        return $response->setData($extra + (array) $response->getData(true));
+    }
+
+    /** The project a request is about, when its route names one. */
+    private static function project(Request $request): ?string
+    {
+        $username = $request->route('username');
+
+        return is_string($username) && $username !== '' ? $username : null;
     }
 
     /**
@@ -181,7 +205,7 @@ class Handler extends ExceptionHandler
 
         /** @var array<string, mixed> $data */
         $data = (array) $response->getData(true);
-        $data['problems'] = $problems;
+        $data['problems'] = FindingPresenter::problems($problems, self::project($request));
 
         return $response->setData($data);
     }

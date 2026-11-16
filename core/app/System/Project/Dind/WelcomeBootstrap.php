@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -27,25 +28,32 @@ final class WelcomeBootstrap
             return;
         }
 
+        $this->writeWelcomeSite($appDir);
+    }
+
+    /** Root makes ~/project for the account, which writes every file in it. */
+    private function writeWelcomeSite(string $appDir): void
+    {
+        $owner = implode(':', $this->project->userModel()->linuxIds());
         $system = $this->project->system();
         $fs = $system->filesystem();
-        $system->exec(['sudo', 'mkdir', '-p', $appDir]);
+        $system->exec(Privileged::scripts()->makeHomeEntry($appDir, '0755', $owner));
         $fs->writeFileReplacingPath(
             $this->paths->composeFile(),
             DeployCompose::staticNginx(),
-            null,
+            $owner,
             '644'
         );
         $fs->writeFileReplacingPath(
             $appDir.'/'.NginxConfig::FILENAME,
             NginxConfig::site(null),
-            null,
+            $owner,
             '644'
         );
         $fs->writeFileReplacingPath(
             "{$appDir}/index.html",
             $this->welcomeHtml(),
-            null,
+            $owner,
             '644'
         );
     }
@@ -53,16 +61,7 @@ final class WelcomeBootstrap
     private function welcomeHtml(): string
     {
         $title = PlaceholderPage::WELCOME_TITLE;
-        $body = <<<'HTML'
-            <p>
-                PanelAlpha has set up your container environment. You can now log in and place your
-                application files in the <code>~/project</code> directory.
-            </p>
-            <p>
-                When you are ready, create <code>~/project/docker-compose.yml</code> with your
-                application's configuration, then start the project again (the <code>up</code> action).
-            </p>
-        HTML;
+        $body = $this->welcomeBody();
 
         return <<<HTML
         <!DOCTYPE html>
@@ -82,6 +81,20 @@ final class WelcomeBootstrap
         {$body}
         </body>
         </html>
+        HTML;
+    }
+
+    private function welcomeBody(): string
+    {
+        return <<<'HTML'
+            <p>
+                PanelAlpha has set up your container environment. You can now log in and place your
+                application files in the <code>~/project</code> directory.
+            </p>
+            <p>
+                When you are ready, create <code>~/project/docker-compose.yml</code> with your
+                application's configuration, then start the project again (the <code>up</code> action).
+            </p>
         HTML;
     }
 }

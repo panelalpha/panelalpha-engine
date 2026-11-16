@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Inspect;
 
 use App\Lib\Deploy\Inspect\GitHubTree;
+use App\Lib\Deploy\Inspect\InspectException;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Http\OutboundUrl;
@@ -11,10 +12,8 @@ use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
 /**
- * A public github.com repository is read from its file list first, and cloned
- * whenever that cannot be done exactly. The clone here is redirected to a
- * local repository with git's `insteadOf`, and the egress check's DNS is a
- * fake answering a public address, so no test touches the network.
+ * A public github.com repository is read from its file list only when git
+ * refuses it; the clone and the egress check's DNS are local fakes.
  */
 class SourceResolverTreeTest extends TestCase
 {
@@ -79,8 +78,31 @@ class SourceResolverTreeTest extends TestCase
         ]);
     }
 
-    public function test_a_public_github_repository_is_read_from_its_tree(): void
+    private function refuseGit(): void
     {
+        file_put_contents(
+            $this->tmp . '/home/.gitconfig',
+            "[url \"file://{$this->tmp}/missing\"]\n\tinsteadOf = " . self::URL . "\n"
+        );
+    }
+
+    public function test_a_public_github_repository_is_cloned_without_asking_github(): void
+    {
+        Http::fake();
+
+        $resolved = $this->resolver()->fromGit('github.com/owner/repo');
+        try {
+            $this->assertSame(SourceResolver::METHOD_PARTIAL, $resolved->meta['method']);
+            $this->assertStringContainsString('^8.3', (string) file_get_contents($resolved->dir . '/composer.json'));
+        } finally {
+            $resolved->release();
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_a_public_github_repository_git_refuses_is_read_from_its_tree(): void
+    {
+        $this->refuseGit();
         self::fakeTree();
 
         $resolved = $this->resolver()->fromGit('github.com/owner/repo');
@@ -94,31 +116,30 @@ class SourceResolverTreeTest extends TestCase
             $resolved->release();
         }
         $this->assertDirectoryDoesNotExist($resolved->dir);
-    }
-
-    public function test_a_tree_that_cannot_be_read_falls_back_to_the_clone(): void
-    {
-        self::fakeTree(404);
-
-        $resolved = $this->resolver()->fromGit(self::URL);
-        try {
-            $this->assertSame(SourceResolver::METHOD_CLONE, $resolved->meta['method']);
-            // The clone's own copy, not the tree's.
-            $this->assertStringContainsString('^8.3', (string) file_get_contents($resolved->dir . '/composer.json'));
-        } finally {
-            $resolved->release();
-        }
-        // Nothing of the abandoned tree is left behind.
         $this->assertSame([], glob($this->tmp . '/work/inspect-*') ?: []);
     }
 
-    public function test_a_token_means_a_private_repository_and_goes_straight_to_the_clone(): void
+    public function test_a_refused_clone_whose_tree_cannot_be_read_either_is_the_clone_error(): void
+    {
+        $this->refuseGit();
+        self::fakeTree(404);
+
+        try {
+            $this->resolver()->fromGit(self::URL);
+            $this->fail('A repository neither git nor its file list could read was resolved.');
+        } catch (InspectException $e) {
+            $this->assertStringStartsWith('Could not clone the repository', $e->getMessage());
+        }
+        $this->assertSame([], glob($this->tmp . '/work/inspect-*') ?: []);
+    }
+
+    public function test_a_token_means_a_private_repository_and_goes_straight_to_a_clone(): void
     {
         Http::fake();
 
         $resolved = $this->resolver()->fromGit(self::URL, null, 'ghp_secret');
         try {
-            $this->assertSame(SourceResolver::METHOD_CLONE, $resolved->meta['method']);
+            $this->assertSame(SourceResolver::METHOD_PARTIAL, $resolved->meta['method']);
         } finally {
             $resolved->release();
         }
@@ -131,23 +152,23 @@ class SourceResolverTreeTest extends TestCase
 
         $resolved = $this->resolver()->fromGit('https://gitlab.com/owner/repo');
         try {
-            $this->assertSame(SourceResolver::METHOD_CLONE, $resolved->meta['method']);
+            $this->assertSame(SourceResolver::METHOD_PARTIAL, $resolved->meta['method']);
         } finally {
             $resolved->release();
         }
         Http::assertNothingSent();
     }
 
-    public function test_a_resolver_without_a_tree_reader_always_clones(): void
+    public function test_a_resolver_without_a_tree_reader_reports_the_refused_clone(): void
     {
+        $this->refuseGit();
         Http::fake();
 
-        $resolved = (new SourceResolver($this->tmp . '/work', 60, null, ['https', 'http', 'file']))->fromGit(self::URL);
+        $this->expectException(InspectException::class);
         try {
-            $this->assertSame(SourceResolver::METHOD_CLONE, $resolved->meta['method']);
+            (new SourceResolver($this->tmp . '/work', 60, null, ['https', 'http', 'file']))->fromGit(self::URL);
         } finally {
-            $resolved->release();
+            Http::assertNothingSent();
         }
-        Http::assertNothingSent();
     }
 }

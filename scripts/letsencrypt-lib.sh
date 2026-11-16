@@ -34,6 +34,8 @@ LE_CERT_NAME="${LE_CERT_NAME:-panelalpha-engine-cert}"
 LE_IP_CERT_NAME="${LE_IP_CERT_NAME:-panelalpha-engine-ip-cert}"
 LE_BASE_DOMAIN="${PANELALPHA_CERT_BASE_DOMAIN:-panelalpha.direct}"
 LE_CERTBOT_IMAGE="${LE_CERTBOT_IMAGE:-certbot/certbot}"
+# Seconds certbot may keep sites-http down; the request scripts set 600, as nothing retries them.
+LE_CERTBOT_TIMEOUT="${LE_CERTBOT_TIMEOUT:-120}"
 
 le_info() { echo -e ">>> \e[32m$1\e[39m"; }
 le_warn() { echo -e ">>> \e[33m$1\e[39m" >&2; }
@@ -130,12 +132,42 @@ le_restore_stack() {
 # certbot [args...] inside the official image, with the host's account and
 # lineage directories. Stdout/stderr pass through. Host network, not -p 80:80:
 # a published port is forwarded traffic, which ufw drops without a route rule.
+# Never pulls, and is killed after LE_CERTBOT_TIMEOUT seconds.
 le_certbot() {
-    docker run --rm --name certbot-engine \
+    local status=0
+    timeout -s KILL "$LE_CERTBOT_TIMEOUT" docker run --rm --name certbot-engine --pull never \
         -v /etc/letsencrypt:/etc/letsencrypt \
         -v /var/lib/letsencrypt:/var/lib/letsencrypt \
         --network host \
-        "$LE_CERTBOT_IMAGE" "$@"
+        "$LE_CERTBOT_IMAGE" "$@" || status=$?
+    # GNU timeout reports a kill as 137, uutils as 124; the container outlives the client.
+    if [ "$status" = 124 ] || [ "$status" = 137 ]; then
+        le_warn "certbot did not finish within ${LE_CERTBOT_TIMEOUT}s; stopped it"
+        docker rm -f certbot-engine >/dev/null 2>&1 || true
+    fi
+    return "$status"
+}
+
+# Pulls the certbot image while sites-http still serves; 1 when it cannot, and nothing is stopped.
+le_prepare_certbot() {
+    docker image inspect "$LE_CERTBOT_IMAGE" >/dev/null 2>&1 && return 0
+    le_info "Pulling ${LE_CERTBOT_IMAGE}"
+    if ! timeout 600 docker pull -q "$LE_CERTBOT_IMAGE" >/dev/null; then
+        le_warn "Could not pull ${LE_CERTBOT_IMAGE}; the webserver was left running"
+        return 1
+    fi
+}
+
+# Stop sites-http, run certbot [args...], restart the stack; certbot's status, or 1 if it could not run.
+le_certbot_standalone() {
+    le_prepare_certbot || return 1
+    le_release_port_80
+    trap 'docker rm -f certbot-engine >/dev/null 2>&1; le_restore_stack; exit 1' INT TERM HUP
+    le_certbot "$@"
+    local status=$?
+    trap - INT TERM HUP
+    le_restore_stack
+    return "$status"
 }
 
 # certbot refuses to create an account non-interactively without being told
@@ -156,6 +188,28 @@ le_lineage_dir() {
 
 le_lineage_exists() {
     [ -f "$(le_lineage_dir "$1")/fullchain.pem" ] && [ -f "$(le_lineage_dir "$1")/privkey.pem" ]
+}
+
+# 0 inside the last third of the lineage's lifetime, capped at thirty days, as certbot decides.
+le_lineage_due() {
+    local cert="$(le_lineage_dir "$1")/fullchain.pem"
+    [ -f "$cert" ] || return 1
+    local not_before not_after now lifetime remaining threshold
+    not_before=$(date -d "$(openssl x509 -in "$cert" -noout -startdate | cut -d= -f2)" +%s 2>/dev/null) || return 0
+    not_after=$(date -d "$(openssl x509 -in "$cert" -noout -enddate | cut -d= -f2)" +%s 2>/dev/null) || return 0
+    now=$(date +%s)
+    lifetime=$((not_after - not_before))
+    remaining=$((not_after - now))
+    threshold=$((lifetime / 3))
+    [ "$threshold" -gt $((30 * 86400)) ] && threshold=$((30 * 86400))
+    [ "$remaining" -lt "$threshold" ]
+}
+
+# 0 when the lineage is for exactly these names and not yet due, as certbot would leave it.
+le_lineage_current() { # NAME IDENTIFIER...
+    le_lineage_exists "$1" || return 1
+    [ "$(le_cert_names "$(le_lineage_dir "$1")/fullchain.pem")" = "$(printf '%s\n' "${@:2}" | tr '[:upper:]' '[:lower:]' | sort -u)" ] || return 1
+    ! le_lineage_due "$1"
 }
 
 # The names a certificate is for, one per line, sorted: its subjectAltName

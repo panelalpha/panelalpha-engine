@@ -10,57 +10,11 @@ use Illuminate\Support\Facades\DB;
 /** CPU and memory per project (its DinD container) and per container inside it. */
 class ProjectMetricsTest extends HubTestCase
 {
-    private const OUTER = 'f4460b8fc7101cf1aef37843bf5454b7c564f71045118f7683c94f41b1e48c92';
     private const INNER = '39beaea46ea41bef038340d1aa445ec7ba7c48c64d0dad7c3456ac5c7f78e8e0';
-
-    public function test_the_host_script_is_valid_bash_and_names_only_projects(): void
-    {
-        $script = ProjectStats::script(['shop', "o'brien"]);
-        $path = (string) tempnam(sys_get_temp_dir(), 'stats-');
-        file_put_contents($path, $script);
-        exec('bash -n ' . escapeshellarg($path) . ' 2>&1', $out, $code);
-        @unlink($path);
-
-        $this->assertSame(0, $code, implode("\n", $out));
-        $this->assertStringContainsString("want=' shop o'\\''brien '", $script);
-    }
-
-    public function test_a_container_config_is_read_only_when_it_is_a_regular_file_at_its_own_path(): void
-    {
-        $root = $this->dataRoot();
-        $this->config($root, self::INNER, '{"Name":"/project-app-1"}');
-        $this->config($root . '/elsewhere', self::OUTER, '{"Name":"/someone-else-1"}');
-
-        $this->assertSame('{"Name":"/project-app-1"}', $this->readConfig($root, self::INNER));
-
-        unlink($root . '/containers/' . self::INNER . '/config.v2.json');
-        symlink($root . '/elsewhere/containers/' . self::OUTER . '/config.v2.json', $root . '/containers/' . self::INNER . '/config.v2.json');
-        $this->assertSame('', $this->readConfig($root, self::INNER), 'a linked file');
-
-        $this->removeTree($root . '/containers/' . self::INNER);
-        symlink($root . '/elsewhere/containers/' . self::OUTER, $root . '/containers/' . self::INNER);
-        $this->assertSame('', $this->readConfig($root, self::INNER), 'a linked container directory');
-
-        $this->removeTree($root);
-    }
-
-    public function test_a_fifo_in_place_of_a_container_config_does_not_block_the_sampler(): void
-    {
-        $root = $this->dataRoot();
-        mkdir($root . '/containers/' . self::INNER, 0700, true);
-        exec('mkfifo ' . escapeshellarg($root . '/containers/' . self::INNER . '/config.v2.json'));
-
-        $started = microtime(true);
-        $this->assertSame('', $this->readConfig($root, self::INNER));
-        $this->assertLessThan(1.5, microtime(true) - $started);
-
-        $this->removeTree($root);
-    }
 
     public function test_the_whole_host_run_is_time_limited(): void
     {
         $this->assertLessThan(60, ProjectStats::HOST_TIMEOUT_SECONDS, 'shorter than the sampling interval');
-        $this->assertMatchesRegularExpression('/timeout -k 1 2 bash -c .*head -c 1048576/', ProjectStats::script(['shop']));
     }
 
     public function test_parse_reads_both_levels_and_drops_reclaimable_cache(): void
@@ -76,8 +30,35 @@ class ProjectMetricsTest extends HubTestCase
         $this->assertCount(1, $read['containers'], 'only hex container ids');
         $this->assertSame([
             'username' => 'shop', 'id' => self::INNER, 'name' => 'project-app-1', 'service' => 'app',
-            'memory' => 52000000, 'limit' => null, 'usec' => 900000,
+            'memory' => 52000000, 'limit' => 1073741824, 'usec' => 900000,
         ], $read['containers'][0]);
+    }
+
+    public function test_a_container_limit_above_its_project_is_reported_as_the_project_limit(): void
+    {
+        $out = "P\tshop\t1\t4294967296\t0\t1\n"
+            . "C\tshop\t" . self::INNER . "\tproject-web-1\tweb\t1\t8589934592\t0\t1\n";
+
+        $this->assertSame(4294967296, ProjectStats::parse($out)['containers'][0]['limit']);
+    }
+
+    public function test_a_container_limit_below_its_project_is_kept(): void
+    {
+        $out = "P\tshop\t1\t4294967296\t0\t1\n"
+            . "C\tshop\t" . self::INNER . "\tproject-db-1\tdb\t1\t536870912\t0\t1\n";
+
+        $this->assertSame(536870912, ProjectStats::parse($out)['containers'][0]['limit']);
+    }
+
+    public function test_a_container_without_a_project_reading_keeps_its_own_limit(): void
+    {
+        $out = "C\tshop\t" . self::INNER . "\tproject-web-1\tweb\t1\t8589934592\t0\t1\n"
+            . "C\tblog\t" . self::INNER . "\tproject-web-1\tweb\t1\tmax\t0\t1\n";
+
+        $read = ProjectStats::parse($out)['containers'];
+
+        $this->assertSame(8589934592, $read[0]['limit']);
+        $this->assertNull($read[1]['limit']);
     }
 
     public function test_cpu_percent_is_cpu_time_over_wall_time(): void
@@ -97,7 +78,7 @@ class ProjectMetricsTest extends HubTestCase
     {
         $this->project('shop');
         $usec = 1_000_000;
-        $stats = new ProjectStats(function (string $script) use (&$usec): string {
+        $stats = new ProjectStats(function (array $argv) use (&$usec): string {
             return "P\tshop\t100\t1000\t0\t{$usec}\n"
                 . "C\tshop\t" . self::INNER . "\tproject-app-1\tapp\t60\tmax\t0\t{$usec}\n";
         });
@@ -277,34 +258,5 @@ class ProjectMetricsTest extends HubTestCase
     private function row(string $table, Carbon $at, array $values): void
     {
         DB::table($table)->insert(['timestamp' => $at->format('Y-m-d H:i:s'), 'username' => 'shop'] + $values);
-    }
-
-    private function dataRoot(): string
-    {
-        $root = sys_get_temp_dir() . '/stats-root-' . bin2hex(random_bytes(4));
-        mkdir($root . '/containers', 0700, true);
-
-        return (string) realpath($root);
-    }
-
-    private function config(string $root, string $id, string $json): void
-    {
-        @mkdir($root . '/containers/' . $id, 0700, true);
-        file_put_contents($root . '/containers/' . $id . '/config.v2.json', $json);
-    }
-
-    /** Runs the host script's own config() function against a test data root. */
-    private function readConfig(string $root, string $id): string
-    {
-        preg_match('/^config\(\) \{\n.*?^\}\n/ms', ProjectStats::script(['shop']), $function);
-        $this->assertNotEmpty($function, 'the host script defines config()');
-        $command = $function[0] . 'config ' . escapeshellarg($root) . ' ' . escapeshellarg($id);
-
-        return (string) shell_exec('bash -c ' . escapeshellarg($command));
-    }
-
-    private function removeTree(string $path): void
-    {
-        exec('rm -rf ' . escapeshellarg($path));
     }
 }

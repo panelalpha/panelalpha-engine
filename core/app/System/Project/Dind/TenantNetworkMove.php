@@ -4,19 +4,14 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Dind\TenantNetwork;
+use App\System as EngineSystem;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 use RuntimeException;
 
 /**
- * Moves a running account from pash-default-network to pash-tenants
- * without restarting it.
- *
- * The app goes with it: its compose file pins the database name to sites-db's
- * address on the old network, which the account cannot reach from the new one.
- * The account joins the new network first, the app is re-pinned and recreated
- * while both are attached, and only then does the account leave the old one --
- * so the app is without its database only for its own recreate. A failure
- * before that point leaves the account on both, working as it did.
+ * Moves a running account from pash-default-network to pash-tenants without a restart: join, re-pin the app's
+ * sites-db address and recreate it while on both, then leave, so a failure leaves it working on both.
  */
 final class TenantNetworkMove
 {
@@ -30,11 +25,13 @@ final class TenantNetworkMove
         private DindProject $dind,
     ) {}
 
-    /** @return self::MOVED|self::ALREADY|self::NOT_RUNNING */
+    /**
+     * A stopped account is left alone: started on the new network with the old pin it would not work.
+     *
+     * @return self::MOVED|self::ALREADY|self::NOT_RUNNING
+     */
     public function run(): string
     {
-        // A stopped account would start on the new network with the old pin;
-        // left alone, it starts where it was and still works.
         if (! $this->dind->isRunning()) {
             return self::NOT_RUNNING;
         }
@@ -44,13 +41,37 @@ final class TenantNetworkMove
         $networks = $this->networks();
         $onLegacy = array_key_exists(TenantNetwork::LEGACY_NAME, $networks);
 
+        $this->joinTenantNetwork($system, $account, $networks);
+        $this->moveAppToTenantAddress($system, $account);
+
+        $this->pointComposeAtTenantNetwork();
+
+        if (! $onLegacy) {
+            return self::ALREADY;
+        }
+        $system->exec(Privileged::docker()->disconnectNetwork(TenantNetwork::LEGACY_NAME, $account), [], 60);
+
+        $this->reloadProxy($system);
+
+        return self::MOVED;
+    }
+
+    /**
+     * The firewall goes on again once the account joined: the new port carries nothing until it is bound.
+     *
+     * @param  array<string, mixed>  $networks
+     */
+    private function joinTenantNetwork(EngineSystem $system, string $account, array $networks): void
+    {
         $system->exec(TenantNetwork::firewallArgv(), [], 60);
         if (! array_key_exists(TenantNetwork::NAME, $networks)) {
-            $system->exec(['sudo', 'docker', 'network', 'connect', TenantNetwork::NAME, $account], [], 60);
-            // The new port carries nothing until it is bound.
+            $system->exec(Privileged::docker()->connectNetwork(TenantNetwork::NAME, $account), [], 60);
             $system->exec(TenantNetwork::firewallArgv(), [], 60);
         }
+    }
 
+    private function moveAppToTenantAddress(EngineSystem $system, string $account): void
+    {
         $address = TenantNetwork::sitesDbAddressFor(
             $system->exec(TenantNetwork::accountNetworksArgv($account), [], 30)
         );
@@ -66,23 +87,18 @@ final class TenantNetworkMove
                 );
             }
         }
+    }
 
-        $this->pointComposeAtTenantNetwork();
-
-        if (! $onLegacy) {
-            return self::ALREADY;
-        }
-        $system->exec(['sudo', 'docker', 'network', 'disconnect', TenantNetwork::LEGACY_NAME, $account], [], 60);
-
-        // The proxy caches the account's address for 30s and kept sending to
-        // the old one: measured, the site timed out for 23s after the move. A
-        // reload re-resolves at once. A failed one only means waiting the 30s.
+    /**
+     * The proxy caches the account's address for 30s (the site timed out for 23s after a move); a reload
+     * re-resolves at once, and a failed one only means waiting those 30s.
+     */
+    private function reloadProxy(EngineSystem $system): void
+    {
         try {
             $system->reloadWebserver();
         } catch (\Throwable) {
         }
-
-        return self::MOVED;
     }
 
     /** @return array<string, mixed> the account container's networks, by name */
@@ -95,11 +111,8 @@ final class TenantNetworkMove
     }
 
     /**
-     * The account's compose file names the new network, so a recreate keeps it
-     * there. That one line only: the running container was made from this file
-     * and the files beside it. Re-rendering the template under it replaced files
-     * an older account mounts (supervisord.conf), and that account could not
-     * start again at the next Docker restart.
+     * The account's compose file names the new network, that one line only: re-rendering the template replaced
+     * files an older account mounts (supervisord.conf), and it could not start again after a Docker restart.
      */
     private function pointComposeAtTenantNetwork(): void
     {
@@ -115,15 +128,17 @@ final class TenantNetworkMove
         }
     }
 
-    /** Whether any of the app's compose files pinned the database elsewhere. */
+    /**
+     * Whether any of the app's compose files pinned the database elsewhere. The run file inlines env_vars and
+     * passwords, so it keeps its owner-only mode; the overrides are 0644 wherever written.
+     */
     private function repin(string $address): bool
     {
         $filesystem = $this->dind->system()->filesystem();
         $chown = $this->dind->userModel()->getChownString();
         $changed = false;
 
-        $files = explode(':', $this->dind->userAppComposeEnv()['COMPOSE_FILE']);
-        foreach (array_filter($files, static fn (string $f): bool => $f !== '') as $file) {
+        foreach ($this->dind->userAppComposeFiles() as $file) {
             if (! $filesystem->fileExists($file)) {
                 continue;
             }
@@ -131,7 +146,6 @@ final class TenantNetworkMove
             $yaml = $filesystem->fileGetContents($file);
             $repinned = AppDatabase::repinned($yaml, $address);
             if ($repinned !== $yaml) {
-                // The run file inlines env_vars and passwords; the overrides are 0644 wherever written.
                 $mode = basename($file) === EngineArtifacts::RUN_COMPOSE ? EngineArtifacts::RUN_COMPOSE_MODE : '644';
                 $filesystem->writeFileReplacingPath($file, $repinned, $chown, $mode);
                 $changed = true;

@@ -3,11 +3,8 @@
 namespace App\Lib\DeployHook;
 
 /**
- * One ref a push moved, in the words the engine acts on.
- *
- * GitHub and GitLab send one of these per request. Bitbucket sends a list --
- * one `git push main feature v1` is a single delivery naming three refs -- so
- * the decision of whether a delivery deploys is made per change.
+ * One ref a push moved, in the words the engine acts on; Bitbucket sends several per delivery, so whether
+ * a delivery deploys is decided per change.
  */
 final class RefChange
 {

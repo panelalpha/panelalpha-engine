@@ -5,13 +5,8 @@ namespace App\Lib\Deploy;
 use App\Http\Requests\UserStoreRequest;
 
 /**
- * Hosting-account usernames as {@see UserStoreRequest}
- * accepts them: lowercase ASCII letters and digits, starting with a letter,
- * 3–15 characters. Hyphens and dots from a Git repo name are stripped, not
- * kept — a 16-character `saas-starter-ts` is not a valid account name, and
- * appending a 4-digit suffix to a 13-character slug would overflow the cap.
- *
- * No Laravel dependencies — unit-testable with a string.
+ * Hosting-account usernames as {@see UserStoreRequest} accepts them: 3–15 lowercase ASCII letters and
+ * digits, starting with a letter; a repo name's hyphens and dots are stripped. No Laravel dependencies.
  */
 class HostingUsername
 {

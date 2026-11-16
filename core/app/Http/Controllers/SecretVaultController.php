@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\VaultDeployKeyStoreRequest;
 use App\Lib\Vault\RequestVault;
 use App\Lib\Vault\SecretMinter;
+use App\Lib\Vault\VaultDeployKeys;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -135,6 +137,49 @@ class SecretVaultController extends Controller
         ]], 201);
     }
 
+    #[OA\Post(
+        path: '/vault/deploy-keys',
+        summary: 'Generate an SSH deploy key in the vault',
+        description: 'Generates an ed25519 key pair and keeps it in the vault, so a project can be created with an '
+            .'SSH remote in one call. The answer carries `public_key`: add that line to the repository as a '
+            .'read-only deploy key (GitHub: Settings > Deploy keys), then pass `ref` (`vault:<key>`) as '
+            .'`source.auth.key` with `source.auth.type: deploy_key` on POST /projects or PUT /projects/{username}/source. '
+            .'The private half is never returned. The host keys of github.com, gitlab.com and bitbucket.org ship with '
+            .'the engine; for any other git server pass `host` (`git.example.com` or `git.example.com:2222`) and its '
+            .'SSH host keys are read now and trusted from then on. `scope` works as for every vault secret: a '
+            .'`project` key (the default) belongs to the first project created with it, a `global` one may be used by '
+            .'any project that names it. The key is stored on the project that uses it, so deleting the vault entry '
+            .'later does not take it away from that project.',
+        security: [['bearerAuth' => []]],
+        tags: ['Secret Vault'],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'scope', type: 'string', enum: ['project', 'global'], description: 'Who may use the key; `project` when omitted.'),
+                new OA\Property(property: 'project', type: 'string', nullable: true, description: 'A `project` key\'s owner from the start; omitted, the first project created with it owns it.'),
+                new OA\Property(property: 'purpose', type: 'string', nullable: true, maxLength: 255, example: 'shop repository', description: 'Free text shown in listings, to tell keys apart.'),
+                new OA\Property(property: 'host', type: 'string', nullable: true, maxLength: 260, example: 'git.example.com:2222', description: 'A git server other than github.com, gitlab.com or bitbucket.org, whose SSH host keys are pinned now.'),
+                new OA\Property(property: 'expires_in', type: 'integer', nullable: true, minimum: 60, description: 'Seconds until the vault entry expires and is deleted; omitted, never. A project already using the key keeps it.'),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 201, description: 'Deploy key generated', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'data', ref: '#/components/schemas/SecretVaultEntry'),
+                ],
+            )),
+            new OA\Response(response: 422, description: 'Invalid scope, project or host, or the host did not answer SSH (`host_unreachable`)', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+        x: ['mcp-description' => 'Generates an SSH deploy key in the vault. Show the user `public_key` to add to the repository as a '
+            .'read-only deploy key, then create the project with source {"type": "git", "url": "git@host:owner/repo.git", '
+            .'"auth": {"type": "deploy_key", "key": "<ref>"}}. Pass `host` for a git server other than github.com, gitlab.com or bitbucket.org.'],
+    )]
+    public function storeDeployKey(VaultDeployKeyStoreRequest $request, VaultDeployKeys $keys): JsonResponse
+    {
+        $entry = $keys->mint($request->scope(), $request->purpose(), $request->project(), $request->host(), $request->expiresIn());
+
+        return new JsonResponse(['data' => $this->format($entry)], 201);
+    }
+
     #[OA\Get(
         path: '/vault/secrets',
         summary: 'List vault entries',
@@ -210,7 +255,9 @@ class SecretVaultController extends Controller
         description: 'Removes the entry and its secret. References to it stop resolving. This is also how a '
             .'secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new '
             .'one. `ref` is its `vault:<key>`. A project that already used it keeps the '
-            .'copy it stored.',
+            .'copy it stored. '
+            .'The secret\'s value is gone and the engine keeps no copy of it; this cannot be undone. Ask the '
+            .'operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -227,9 +274,11 @@ class SecretVaultController extends Controller
     {
         $entry = SecretVaultEntry::findByReference($ref);
 
-        if ($entry !== null) {
-            $entry->delete();
+        if ($entry === null) {
+            abort(new JsonResponse(['message' => 'Not found'], 404));
         }
+
+        $entry->delete();
 
         return new JsonResponse(['data' => ['ref' => $ref, 'deleted' => true]]);
     }
@@ -324,8 +373,8 @@ class SecretVaultController extends Controller
 
     /**
      * Everything an agent may know, never the secret. `project` is null until a project claims the entry,
-     * `purpose` tells two entries of one type apart, a null `expires_at` never expires, and
-     * `url_expires_at` is when the paste form closes.
+     * `purpose` tells two entries of one type apart, a null `expires_at` never expires,
+     * `url_expires_at` is when the paste form closes, and a generated deploy key adds its public half.
      *
      * @return array<string, mixed>
      */
@@ -346,6 +395,7 @@ class SecretVaultController extends Controller
             'created_at' => $entry->created_at?->toIso8601String(),
             'expires_at' => $entry->expires_at?->toIso8601String(),
             'url_expires_at' => $entry->link_expires_at?->toIso8601String(),
+            ...$entry->publicPart(),
         ];
     }
 }

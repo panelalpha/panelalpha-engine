@@ -1,9 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
 import type { EngineApi } from '@/clients/engine-api';
+import { UNREFRESHED_LEASE_TTL_MS, type Lease } from '@/fixtures/helper/setup-state';
 import { testNetwork } from '@/helpers/test-network';
 import { buildAllowList } from '@/scripts/lib/leak-check/allow';
 import { compareSnapshots } from '@/scripts/lib/leak-check/compare';
-import { leakCheckEnabled } from '@/scripts/lib/leak-check/run';
+import { leakCheckEnabled, setupUsers } from '@/scripts/lib/leak-check/run';
 import { takeSnapshot } from '@/scripts/lib/leak-check/snapshot';
 import type { ConfigSection, ResourceSection, Snapshot } from '@/scripts/lib/leak-check/types';
 
@@ -258,5 +259,33 @@ test.describe('leakCheckEnabled', () => {
     expect(leakCheckEnabled({ CI: 'true' })).toBe(true);
     expect(leakCheckEnabled({ CI: 'true', LEAK_CHECK: '0' })).toBe(false);
     expect(leakCheckEnabled({ LEAK_CHECK: '1' })).toBe(true);
+  });
+});
+
+test.describe('setupUsers', () => {
+  const now = 1_800_000_000_000;
+  const lease = (heartbeatAgo: number, usernames: string[]): Lease => ({
+    runId: `run-${heartbeatAgo}`,
+    host: 'ci-1',
+    checkout: '/srv/other/tests/api',
+    pid: 1,
+    startedAt: now - heartbeatAgo,
+    heartbeatAt: now - heartbeatAgo,
+    usernames,
+  });
+
+  test("a concurrent run's leased setup project is exempt, a stale lease's is not", async () => {
+    const users = setupUsers(
+      [lease(60_000, ['PW5E7A0002']), lease(UNREFRESHED_LEASE_TTL_MS + 60_000, ['pw5e7a0003'])],
+      now
+    );
+    expect(users).toContain('pw5e7a0002');
+    expect(users).not.toContain('pw5e7a0003');
+
+    const after = await snap({ projects: ['pw5e7a0002', 'pw5e7a0003'] });
+    const result = compareSnapshots(await snap(), after, { allow: buildAllowList(users) });
+    const leaks = result.leaks.map((leak) => `${leak.section}/${leak.key}`);
+    expect(leaks).toContain('projects/pw5e7a0003');
+    expect(leaks.filter((leak) => leak.includes('pw5e7a0002'))).toEqual([]);
   });
 });

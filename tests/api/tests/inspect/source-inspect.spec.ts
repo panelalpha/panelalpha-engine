@@ -53,7 +53,9 @@ test.describe('source inspect', () => {
     expect(report.data.source.type).toBe('git');
     expect(typeof report.data.application.strategy).toBe('string');
     expect(report.data.application.strategy.length).toBeGreaterThan(0);
-    expect(typeof report.data.application.deployable).toBe('boolean');
+    expect(report.data.application.deployable).toBe(
+      ['deployable', 'no_start_command'].includes(report.data.application.verdict)
+    );
     expect(Array.isArray(report.data.application.candidates)).toBe(true);
     const candidateIds = (report.data.application.candidates ?? []).map((row) => row.id);
     for (const id of candidateIds) {

@@ -3,11 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime\Php;
 
 /**
- * composer.json and composer.lock, decoded once.
- *
- * The lockfile is what makes an extension list complete: a package the app
- * only depends on transitively still needs its `ext-*` compiled in, and only
- * the lock knows about it.
+ * composer.json and composer.lock, decoded once; only the lock knows the `ext-*` a transitive
+ * dependency needs compiled in.
  */
 final class ComposerManifest
 {
@@ -50,12 +47,8 @@ final class ComposerManifest
     }
 
     /**
-     * Whether the project's **own** composer.json requires a package.
-     *
-     * Deliberately not {@see requireMaps()}, which flattens every locked
-     * package's requirements too: half of Packagist depends on a symfony
-     * component, and "depends on symfony/console" is not "is a Symfony
-     * application".
+     * Whether the project's **own** composer.json requires a package; not {@see requireMaps()},
+     * since depending on symfony/console transitively is not being a Symfony application.
      */
     public function rootRequires(string $package): bool
     {
@@ -65,9 +58,8 @@ final class ComposerManifest
     }
 
     /**
-     * Whether a package is in the project at all: required at the root,
-     * pinned in the lock, or listed in the installed tree's
-     * `vendor/composer/installed.json` (Composer 1 or 2 shape).
+     * Whether a package is in the project at all: required at the root, pinned in the lock, or
+     * listed in `vendor/composer/installed.json` (Composer 1 or 2 shape).
      */
     public function resolves(string $package, ?string $installedJson = null): bool
     {

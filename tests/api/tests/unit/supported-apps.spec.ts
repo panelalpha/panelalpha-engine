@@ -69,7 +69,7 @@ test.describe('inspect ports contract', () => {
           port: 3000,
           reason: 'secondary',
           routable: true,
-          hint: 'proxy_rule_create',
+          hints: [{ type: 'mcp', action: 'route_port_http', tool: 'proxy_rule_create' }],
         },
       ],
       refused: [{ port: 3306, reason: 'datastore', routable: false, service: 'db' }],

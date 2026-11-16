@@ -5,13 +5,8 @@ namespace App\Lib\Host;
 use App\Exceptions\ProblemException;
 
 /**
- * The memory rules for a project's `memory_limit`:
- *
- *  - every project has one; unset at creation, it is {@see defaultMb()};
- *  - it may not be below {@see MIN_MB}, the least Docker starts a container with,
- *    or {@see CONTAINER_MIN_MB} for a container project, whose account runs its own Docker daemon;
- *  - it may not exceed {@see HostMemory::maxProjectMb()}, the host's RAM less
- *    what is kept for the engine. What is free right now does not matter.
+ * The rules for a project's `memory_limit`: always set ({@see defaultMb()}), at least {@see MIN_MB}
+ * ({@see CONTAINER_MIN_MB} for a container project), at most {@see HostMemory::maxProjectMb()}.
  */
 final class ProjectMemory
 {
@@ -27,13 +22,12 @@ final class ProjectMemory
     public const CONTAINER_MIN_MB = 256;
 
     /**
-     * `DEPLOY_PROJECT_MEMORY_DEFAULT` when set, else the most a project may
-     * have. Never above that maximum.
+     * `DEPLOY_PROJECT_MEMORY_DEFAULT` when set, else the most a project may have; never above that maximum.
+     * Config is not loaded outside the app, as in plain unit tests.
      */
     public static function defaultMb(?HostMemory $memory = null): int
     {
         $max = ($memory ?? HostMemoryProbe::current())->maxProjectMb();
-        // Config is not loaded outside the app, e.g. in plain unit tests.
         $configured = app()->bound('config') ? (int) config('deploy.project_memory_default', 0) : 0;
 
         return $configured > 0 ? min($configured, $max) : $max;

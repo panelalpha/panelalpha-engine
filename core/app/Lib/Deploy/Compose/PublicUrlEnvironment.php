@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\EnvFile;
 
 /**
- * Public-URL aliases. Applications behind the reverse proxy generate http://
- * links unless told the external origin, and every framework spells the
- * variable differently, so all the usual names are set.
+ * Public-URL aliases: an app behind the reverse proxy generates http:// links unless told its origin,
+ * and every framework spells the variable differently, so all the usual names are set.
  */
 final class PublicUrlEnvironment
 {
@@ -20,19 +19,16 @@ final class PublicUrlEnvironment
     private const URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ENDURAIN_HOST', 'ORIGIN'];
 
     /**
-     * URL keys many apps read as a sub-path prefix instead, where blank means
-     * "serve from /": DVinyl registers its routes under BASE_URL and exits on
-     * `/https://<domain>`.
+     * URL keys many apps read as a sub-path prefix instead, where blank means "serve from /":
+     * DVinyl registers its routes under BASE_URL and exits on `/https://<domain>`.
      *
      * @var list<string>
      */
     private const PATH_PREFIX_KEYS = ['BASE_URL'];
 
     /**
-     * The same fact spelled as a bare hostname: an Apache `php:*-apache` image
-     * ships a `ServerName ${SERVERNAME}` vhost whose default answers 403 over an
-     * empty document root. `VIRTUAL_HOST` is excluded because it tells a proxy
-     * sidecar where to route, which is a different claim from the app's own name.
+     * The origin as a bare hostname, for a `php:*-apache` vhost's `ServerName ${SERVERNAME}` (403 when
+     * unset). Not `VIRTUAL_HOST`: that tells a proxy sidecar where to route, not the app its own name.
      *
      * @var list<string>
      */
@@ -42,9 +38,8 @@ final class PublicUrlEnvironment
     private const HTTPS_FLAGS = ['HTTPS' => 'on', 'SSL' => 'true', 'FORCE_SSL' => 'true'];
 
     /**
-     * `$httpsFlags` is false for an image the engine did not write: MeTube
-     * reads `HTTPS=on` as "terminate TLS here" and dies looking for a
-     * certificate. TLS ends at the proxy; the URL keys say https.
+     * `$httpsFlags` is false for an image the engine did not write: MeTube reads `HTTPS=on` as
+     * "terminate TLS here" and dies looking for a certificate, while TLS ends at the proxy.
      *
      * @return array<string, string>
      */

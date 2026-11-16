@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DomainInstallSslCertRequest;
 use App\Http\Requests\DomainStoreRequest;
@@ -10,6 +11,10 @@ use App\Http\Resources\DomainCollection;
 use App\Http\Resources\DomainResource;
 use App\Http\Resources\SslCertificateCollection;
 use App\Http\Resources\SslCertificateResource;
+use App\Http\Resources\TaskResource;
+use App\Lib\Domains\DomainAddressChange;
+use App\Lib\Domains\HttpsPorts;
+use App\Lib\Domains\HttpsPortsChange;
 use App\Lib\Domains\NewDomain;
 use App\Lib\Mail\MailDnsRecords;
 use App\Lib\Ssl\ProjectCertificate;
@@ -230,7 +235,7 @@ class DomainController extends Controller
     {
         $exim = Setting::getEximConfig();
         $relay = MailDnsRecords::relay($exim['smarthost_provider']);
-        $sending = MailDnsRecords::sendingDomain($model->domain, $exim['sender_domain']);
+        $sending = MailDnsRecords::sendingDomain($model->domain);
         $ips = $relay === ''
             ? MailDnsRecords::hostAddresses(Setting::get('default_ipv4'), Setting::get('default_ipv6'), Ipv4NatMap::getLocalToPublicMap())
             : [];
@@ -293,6 +298,7 @@ class DomainController extends Controller
 
         $this->refuseOverLimit($user, $params['type']);
         $this->refuseNameProblem($params['domain'], $params['aliases']);
+        $this->refuseClaimProblem($user, $params['domain'], $params['aliases']);
 
         /** @var Domain */
         $domain = Domain::create([
@@ -318,6 +324,10 @@ class DomainController extends Controller
     #[OA\Put(
         path: '/projects/{username}/domains/{domain}',
         summary: 'Update a domain',
+        description: 'A container project moves to another of its domains with `main: true`: the old main domain stays as an addon '
+            .'until it is deleted. `https_ports` lists the ports the domain answers HTTPS on (443 by default) and `https_port` '
+            .'is the one the project\'s public URL names; a port other than 443 needs the operator\'s permission. When the '
+            .'public URL changes, the project is redeployed so its app is told the new one: `redeploy_task` is that task.',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -331,12 +341,16 @@ class DomainController extends Controller
                 new OA\Property(property: 'redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'force_https_redirect', type: 'boolean'),
                 new OA\Property(property: 'aliases', type: 'array', items: new OA\Items(type: 'string'), nullable: true),
+                new OA\Property(property: 'main', type: 'boolean', example: true, description: 'Make this domain the project\'s main one'),
+                new OA\Property(property: 'https_ports', type: 'array', items: new OA\Items(type: 'integer'), example: [443, 8443]),
+                new OA\Property(property: 'https_port', type: 'integer', example: 8443),
             ],
         )),
         responses: [
             new OA\Response(response: 200, description: 'Domain updated', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'Validation error, or an alias already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 409, description: 'A deploy is running, so the public URL cannot change now', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, an alias already on this engine, or a port or main domain refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -344,7 +358,7 @@ class DomainController extends Controller
      * @param  string  $domain
      * @return DomainResource
      */
-    public function update($username, $domain, DomainUpdateRequest $request)
+    public function update($username, $domain, DomainUpdateRequest $request, DomainAddressChange $address)
     {
         $user = $this->projectOr404($username);
 
@@ -356,10 +370,16 @@ class DomainController extends Controller
          *   redirect_enabled?: bool,
          *   redirect_url?: ?string,
          *   force_https_redirect?: bool,
-         *   aliases?: ?array<string>
+         *   aliases?: ?array<string>,
+         *   main?: bool,
+         *   https_ports?: list<int>,
+         *   https_port?: int
          * }
          */
         $params = $request->validated();
+        if (array_key_exists('main', $params)) {
+            $params['main'] = $request->boolean('main');
+        }
 
         $this->applyRedirect($domain, $params);
 
@@ -372,17 +392,27 @@ class DomainController extends Controller
         }
 
         $this->replaceAliases($domain, $params);
+        $redeploy = $address->apply($user, $domain, $params);
 
         $domain->save();
         $domain->projectDomain()->rebuild();
         $reloaded = (new System)->reloadWebserver();
 
-        return (new DomainResource($domain))->additional(['reload_pending' => ! $reloaded]);
+        return (new DomainResource($domain))->additional([
+            'reload_pending' => ! $reloaded,
+            'redeploy_task' => $redeploy === null ? null : new TaskResource($redeploy),
+        ]);
     }
 
     #[OA\Delete(
         path: '/projects/{username}/domains/{domain}',
         summary: 'Delete a domain',
+        description: 'Removes the domain, its aliases, proxy rules, vhosts and any attached tunnel. '
+            .'Its files are kept: the domain directory and its document root stay in the project home, '
+            .'listed in `files_kept`, since they may hold the site\'s files or serve another domain. '
+            .'Delete them with the file tools when they are no longer needed. '
+            .'The domain\'s record and its settings go and are not kept; this cannot be undone. Ask the operator '
+            .'to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -390,7 +420,7 @@ class DomainController extends Controller
             new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
-            new OA\Response(response: 200, description: 'Domain deleted', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
+            new OA\Response(response: 200, description: 'Domain deleted. `files_kept` lists the home-relative directories left in place', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 409, description: ApiDefinitions::PROTECTED_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ProjectConflictResponse')),
             new OA\Response(response: 422, description: 'The domain is the main domain, or has subdomains', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
@@ -407,10 +437,8 @@ class DomainController extends Controller
 
         $domain = $this->domainOr404($user, $domain);
 
-        if ($domain->type === 'main') {
-            throw ValidationException::withMessages([
-                'domain' => 'Cannot delete the main domain: rename it with project_update instead.',
-            ]);
+        if ($refusal = $domain->mainDomainDeleteRefusal()) {
+            throw ValidationException::withMessages(['domain' => $refusal]);
         }
 
         if ($domain->subdomains()->exists()) {
@@ -419,12 +447,16 @@ class DomainController extends Controller
             ]);
         }
 
+        $closesPorts = HttpsPorts::hasExtra($domain);
         $domain->projectDomain()->delete();
         $domain->delete();
+        if ($closesPorts) {
+            app(HttpsPortsChange::class)->listenersChanged();
+        }
         $domain->getUser()->project()->syncPhpHandlersScripts();
         $domain->getUser()->project()->syncServices();
 
-        return new DomainResource($domain);
+        return (new DomainResource($domain))->additional(['files_kept' => $domain->directoriesKeptOnDelete()]);
     }
 
     #[OA\Post(
@@ -563,12 +595,44 @@ class DomainController extends Controller
         }
 
         $hosted = $domain->projectDomain();
-        $hosted->putCertificate($params['cert'], $params['key'], $params['ca'] ?? '');
+        $hosted->installCertificate($params['cert'], $params['key'], $params['ca'] ?? '');
 
         $user->project()->reloadWebserver();
         (new System)->webserver()->reload();
 
         return new DomainResource($domain);
+    }
+
+    #[OA\Delete(
+        path: '/projects/{username}/domains/{domain}/installed-ssl-cert',
+        summary: 'Remove the installed SSL certificate from a domain',
+        description: 'Drops the certificate installed on the domain, private key included, and gives the domain the '
+            .'certificate a new domain of this engine gets: the engine\'s own where that covers the name, otherwise '
+            .'the one the issuer setting names (self-signed by default). Any ACME renewal state for the name is '
+            .'forgotten, the webserver is reloaded and the answer is the certificate the domain carries now. '
+            .'A domain already on a certificate the engine made keeps it and nothing is issued again. '
+            .'A main domain, an addon domain and a subdomain all work; a domain with SSL turned off is refused.',
+        x: ['mcp-description' => 'Removes an installed (custom or issued) certificate and puts the domain back on the '
+            .'engine\'s own, so nothing of the old one is served or renewed. '
+            .'The installed certificate and its private key are gone for good and the engine keeps no copy of '
+            .'either. This cannot be undone. Ask the operator to confirm first.'],
+        security: [['bearerAuth' => []]],
+        tags: ['SSL Certificates'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'The certificate the domain carries now', content: new OA\JsonContent(ref: '#/components/schemas/SslCert')),
+            new OA\Response(response: 404, description: 'Project or domain not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The domain has SSL turned off, so it has no certificate to put back', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function destroyInstalledSslCert(string $username, string $domain): SslCertificateResource
+    {
+        $user = $this->projectOr404($username);
+
+        return new SslCertificateResource(ProjectCertificate::remove($this->domainOr404($user, $domain)));
     }
 
     private function domainOr404(User $user, string $name): Domain
@@ -609,6 +673,19 @@ class DomainController extends Controller
                 NewDomain::INVALID_ALIAS => ['aliases' => 'Invalid alias domain name.'],
                 NewDomain::ALIAS_EXISTS => ['aliases' => 'Domain already exists.'],
             });
+        }
+    }
+
+    /**
+     * @param  array<mixed>  $aliases
+     *
+     * @throws ProblemException
+     */
+    private function refuseClaimProblem(User $user, string $name, array $aliases): void
+    {
+        $problem = NewDomain::claimProblem((string) $user->username, $name, $aliases);
+        if ($problem !== null) {
+            throw ProblemException::one($problem['field'], $problem['code'], $problem['message']);
         }
     }
 
@@ -681,7 +758,7 @@ class DomainController extends Controller
             $redirectUrl = $params['redirect_url'] ?? $domain->getRedirectUrl();
             if (empty($redirectUrl)) {
                 throw ValidationException::withMessages([
-                    'redirect_url' => 'redirect_url is required',
+                    'redirect_url' => 'Enter the URL to redirect the domain to.',
                 ]);
             }
             if ($redirectUrl != $domain->getRedirectUrl()) {
@@ -725,5 +802,6 @@ class DomainController extends Controller
                 'aliases' => "Domain alias {$alias} is not available",
             ]);
         }
+        $this->refuseClaimProblem($domain->getUser(), $domain->domain, [$alias]);
     }
 }

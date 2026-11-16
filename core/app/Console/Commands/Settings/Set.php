@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Settings;
 
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\NamingBaseSetting;
 use App\Models\Setting;
 use Illuminate\Console\Command;
 
@@ -26,7 +27,7 @@ class Set extends Command
         }
 
         try {
-            Setting::set($name, $value);
+            self::store($name, $value);
             $this->info("`{$name}` set to `{$value}`");
         } catch (\Exception $e) {
             $this->error('[ERROR] '.$e->getMessage());
@@ -35,6 +36,18 @@ class Set extends Command
         }
 
         return 0;
+    }
+
+    /** A base projects are named under re-renders every vhost when it changes. */
+    private static function store(string $name, string $value): void
+    {
+        if (NamingBaseSetting::covers($name)) {
+            NamingBaseSetting::save($name, $value);
+
+            return;
+        }
+
+        Setting::set($name, $value);
     }
 
     private static function rejection(string $name, string $value): ?string

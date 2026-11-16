@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+/** One form of an action that resolves a finding. See core FindingSchema. */
+export const hintSchema = z
+  .object({
+    type: z.enum(['rest', 'mcp', 'cli']),
+    action: z.string(),
+  })
+  .passthrough();
+
+/** A warning or refusal with a stable code; the facts beside `code` and `message` depend on it. */
+export const findingSchema = z
+  .object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    hints: z.array(hintSchema),
+  })
+  .passthrough();
+
 export const inspectCandidateSchema = z
   .object({
     id: z.string(),
@@ -9,8 +26,10 @@ export const inspectCandidateSchema = z
 export const inspectApplicationSchema = z
   .object({
     strategy: z.string(),
+    verdict: z.enum(['deployable', 'no_start_command', 'placeholder', 'not_deployable']),
     deployable: z.boolean(),
     candidates: z.array(inspectCandidateSchema).optional(),
+    issue: findingSchema.nullable().optional(),
   })
   .passthrough();
 
@@ -26,6 +45,7 @@ export const inspectPortNoteSchema = z
     port: z.number(),
     reason: z.string(),
     routable: z.boolean(),
+    hints: z.array(hintSchema).optional(),
   })
   .passthrough();
 
@@ -43,6 +63,7 @@ export const inspectPortsSchema = z
     refused: z.array(inspectPortNoteSchema),
     compose: z.array(z.number()),
     dockerfile_expose: z.number().nullable(),
+    issue: findingSchema.nullable().optional(),
   })
   .passthrough();
 
@@ -107,6 +128,8 @@ export const deployHistoryItemSchema = z
     id: z.string(),
     status: z.enum(['running', 'success', 'partial', 'failed', 'cancelled', 'unknown']),
     error: z.string().nullable(),
+    warnings: z.array(findingSchema),
+    failure: findingSchema.nullable(),
     started_at: z.number().nullable(),
     finished_at: z.number().nullable(),
     kind: z.enum(['install', 'redeploy']).nullable(),

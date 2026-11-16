@@ -10,16 +10,21 @@ use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\DeployHook\CheckoutSync;
 use App\Lib\DeployHook\GitCheckoutSync;
+use App\Lib\Project\ProvisionEnvironment;
+use App\Lib\Project\SystemProvisionEnvironment;
 use App\Models\PersonalAccessToken;
 use App\Models\Setting;
+use App\Support\BooleanWordsValidator;
 use App\System;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Factory as ValidationFactory;
 use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
 
@@ -36,6 +41,12 @@ class AppServiceProvider extends ServiceProvider
             static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
                 && ! $token->isRevoked()
         );
+
+        $this->app->bind(ProvisionEnvironment::class, SystemProvisionEnvironment::class);
+
+        $this->callAfterResolving('validator', static function (ValidationFactory $validation): void {
+            $validation->resolver(static fn (Translator $translator, array $data, array $rules, array $messages, array $attributes): BooleanWordsValidator => new BooleanWordsValidator($translator, $data, $rules, $messages, $attributes));
+        });
 
         // One per request, which is one per deploy: the plan a deploy request
         // carried has to be readable from inside the pipeline, and the

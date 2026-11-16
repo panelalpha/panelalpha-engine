@@ -3,16 +3,8 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * Whether this engine can clone a repository URL.
- *
- * The single answer for `git_repo` on POST /projects and `source` on
- * POST /source/inspect, which used to decide separately and disagree.
- * No Laravel dependencies: SourceResolver asks it too, and is not a request.
- *
- * Rejections carry a `suggestion` where the meant value is computable.
- * Suggest, never substitute -- rewriting `git@…` to HTTPS behind a caller's
- * back would send an SSH-only host a clone it cannot serve, failing a stage
- * later with nothing to tie it back to the rewrite.
+ * Whether this engine can clone a repository URL: the one answer for POST /projects and POST /source/inspect, Laravel-free
+ * for SourceResolver. A rejection suggests, never substitutes: a silent rewrite of `git@…` fails a stage later, untraceably.
  */
 final class GitRepoInput
 {
@@ -43,12 +35,8 @@ final class GitRepoInput
     public const DEFAULT_SHORTHAND_HOST = 'github.com';
 
     /**
-     * `owner/repo` as it is typed on a command line, spelled out as the URL it
-     * means. Only the bare two-segment form: anything carrying a scheme, a host
-     * or an SSH shape is already a URL and is left alone.
-     *
-     * `$host` is the forge to assume -- the `default_git_host` setting, where
-     * an operator set one. Null or empty means {@see DEFAULT_SHORTHAND_HOST}.
+     * A bare two-segment `owner/repo` spelled out as the URL it means; anything with a scheme, a host or an SSH shape is left
+     * alone. `$host` is the forge to assume (`default_git_host`); null or empty means {@see DEFAULT_SHORTHAND_HOST}.
      */
     public static function expandShorthand(string $raw, ?string $host = null): string
     {
@@ -63,9 +51,8 @@ final class GitRepoInput
     }
 
     /**
-     * A bare `owner/repo`. A host carries a dot and an owner does not, so
-     * `gitea.com/repo` is a URL with its scheme left off -- normalise()'s
-     * job -- and only a dotless first segment is the shorthand.
+     * A bare `owner/repo`. A host carries a dot and an owner does not, so `gitea.com/repo` is a URL with its scheme left
+     * off (normalise()'s job), and only a dotless first segment is the shorthand.
      */
     public static function isShorthand(string $raw): bool
     {
@@ -88,9 +75,8 @@ final class GitRepoInput
     }
 
     /**
-     * Supply the scheme a caller left off `github.com/owner/repo`. A bare
-     * `owner/repo` is left alone: `https://owner/repo` would send the probe
-     * to a host called `owner`, and problem() suggests the URL instead.
+     * Supply the scheme a caller left off `github.com/owner/repo`. A bare `owner/repo` is left alone: `https://owner/repo`
+     * would send the probe to a host called `owner`, and problem() suggests the URL instead.
      */
     public static function normalise(string $raw): string
     {
@@ -146,7 +132,7 @@ final class GitRepoInput
     {
         $host = self::sshHost($raw);
         if ($host === null) {
-            return self::problemOf($field, 'malformed', "'{$raw}' names no host.");
+            return self::namesNoHost($field, $raw);
         }
         if ($pinned($host)) {
             return null;
@@ -156,16 +142,28 @@ final class GitRepoInput
             'field' => $field,
             'code' => $field.'_ssh_host_not_pinned',
             'message' => "The host key of {$host} is not pinned, so the clone could not verify the server. "
-                .'Pin it with POST /projects/{name}/git/deploy-key and `host`.',
+                .'Pin it on the project\'s deploy key.',
+            'host' => $host,
             'expected' => 'an SSH remote on github.com, gitlab.com, bitbucket.org or a host pinned on the deploy key',
             'examples' => ['git@github.com:owner/repo.git', 'ssh://git@git.example.com:2222/owner/repo.git'],
         ];
     }
 
+    /** An SSH remote that names no host, which no key can reach; null when it names one. */
+    private static function sshHostProblem(string $field, string $raw): ?array
+    {
+        return self::sshHost($raw) === null ? self::namesNoHost($field, $raw) : null;
+    }
+
+    /** @return array<string, mixed> */
+    private static function namesNoHost(string $field, string $raw): array
+    {
+        return self::problemOf($field, 'malformed', "'{$raw}' names no host.");
+    }
+
     /**
-     * The HTTPS spelling of an SSH remote on a forge that serves the same path
-     * over HTTPS, or null. Any other host -- or a forge on another SSH port --
-     * is not guessed: its HTTPS address and port are its own.
+     * The HTTPS spelling of an SSH remote on a forge that serves the same path over HTTPS, or null. Any other host, or a
+     * forge on another SSH port, is not guessed: its HTTPS address and port are its own.
      */
     public static function httpsEquivalent(string $raw): ?string
     {
@@ -180,10 +178,13 @@ final class GitRepoInput
     }
 
     /**
+     * Shorthand is suggested, not expanded: the CLI assumes GitHub for its operator, but an API caller may mean any forge.
+     *
      * @param  bool  $forToken  a `git_token` came with it, so HTTP is out too
+     * @param  bool  $sshWithKey  a deploy key came with it, so an SSH remote is cloned with that key
      * @return ?array<string, mixed>
      */
-    public static function problem(string $field, string $raw, bool $forToken = false): ?array
+    public static function problem(string $field, string $raw, bool $forToken = false, bool $sshWithKey = false): ?array
     {
         $value = trim($raw);
         if ($value === '') {
@@ -194,10 +195,8 @@ final class GitRepoInput
                 'A repository URL must be at most '.self::MAX_LENGTH.' characters.');
         }
         if (self::isSsh($value)) {
-            return self::sshProblem($field, $value);
+            return $sshWithKey ? self::sshHostProblem($field, $value) : self::sshProblem($field, $value);
         }
-        // Suggested, not expanded: the CLI assumes GitHub for its operator,
-        // but an API caller may mean any forge.
         if (self::isShorthand($value)) {
             $url = self::expandShorthand($value);
 
@@ -207,6 +206,16 @@ final class GitRepoInput
                 $url);
         }
 
+        return self::urlProblem($field, $value, $forToken);
+    }
+
+    /**
+     * Credentials in the URL, which `git_token` exists to replace, would reach process arguments and .git/config.
+     *
+     * @return ?array<string, mixed>
+     */
+    private static function urlProblem(string $field, string $value, bool $forToken): ?array
+    {
         $url = self::normalise($value);
         $parts = parse_url($url);
         if (! is_array($parts)) {
@@ -223,15 +232,22 @@ final class GitRepoInput
             return self::problemOf($field, 'no_host', "'{$value}' names no host.");
         }
 
-        // What git_token exists to replace: credentials in the URL reach
-        // process arguments and .git/config.
         if (isset($parts['user']) || isset($parts['pass'])) {
             return self::problemOf($field, 'embedded_credentials',
-                'A repository URL must not embed credentials. Pass the token as `git_token` '
-                .'instead, which is injected at clone time and never written to .git/config.',
+                'A repository URL must not embed credentials. Send the token separately instead: '
+                .'the engine injects it at clone time and never writes it to .git/config.',
                 GitUrl::sanitize($url));
         }
 
+        return self::pathProblem($field, $value, $parts) ?? self::tokenProblem($field, $url, $scheme, $forToken);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parts
+     * @return ?array<string, mixed>
+     */
+    private static function pathProblem(string $field, string $value, array $parts): ?array
+    {
         $segments = self::pathSegments($parts['path'] ?? '');
         if ($segments === []) {
             return self::problemOf($field, 'incomplete', "'{$value}' names a host but no repository.");
@@ -242,7 +258,16 @@ final class GitRepoInput
                 .'Add the repository name.');
         }
 
-        // Last, so a caller with a token and a typo hears about the typo.
+        return null;
+    }
+
+    /**
+     * Asked last, so a caller with a token and a typo hears about the typo.
+     *
+     * @return ?array<string, mixed>
+     */
+    private static function tokenProblem(string $field, string $url, string $scheme, bool $forToken): ?array
+    {
         if ($forToken && $scheme !== 'https') {
             return self::problemOf($field, 'token_requires_https',
                 'A Git token requires an HTTPS repository URL.',
@@ -261,9 +286,8 @@ final class GitRepoInput
     public static function sshProblem(string $field, string $value): array
     {
         $message = 'An SSH remote clones only with a project\'s deploy key, and a project has none until it '
-            .'exists. Create the project without a repository, create its key with POST '
-            .'/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
-            .'then connect the SSH remote with POST /projects/{name}/git/connect.';
+            .'exists. Create the project without a repository, create its deploy key, add the public key to the '
+            .'repository as a deploy key, then connect the SSH remote.';
         $https = self::httpsEquivalent($value);
 
         return self::problemOf(

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -134,12 +135,12 @@ class FileFetchEgressTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = array_slice((array) $cmd, 7);
+                $argv = LocalRoot::plain((array) $cmd);
                 if (in_array('curl', $argv, true)) {
                     return $this->finished($this->curlExit, $this->curlExit === 0 ? $this->curlOutput($argv) : '000');
                 }
 
-                $process = new Process($argv);
+                $process = new Process(LocalRoot::argv((array) $cmd));
                 $process->run();
 
                 return $process;

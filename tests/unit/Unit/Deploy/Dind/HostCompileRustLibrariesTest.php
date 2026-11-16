@@ -2,18 +2,20 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
-use App\System;
-use App\System\Project\Dind;
-use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\InnerDocker;
-use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
+use App\Models\User;
+use App\System;
+use App\System\Project\Dind;
+use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\InnerDocker;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * After a Rust host compile, the binary is checked in the image it will run
@@ -23,12 +25,13 @@ use Symfony\Component\Process\Process;
 class HostCompileRustLibrariesTest extends TestCase
 {
     /**
-     * @param list<int> $exitCodes one per container, in order; 0 once they run out
+     * @param  list<int>  $exitCodes  one per container, in order; 0 once they run out
      * @return list<array{image: string, script: string}>
      */
     private function bundle(string $compileImage, string $runtimeImage, bool $missing, array $exitCodes = []): array
     {
-        $system = new class ($missing, $exitCodes) extends System {
+        $system = new class($missing, $exitCodes) extends System
+        {
             /** @var list<array{image: string, script: string}> */
             public array $containers = [];
 
@@ -36,28 +39,27 @@ class HostCompileRustLibrariesTest extends TestCase
             public array $pulls = [];
 
             /** @param list<int> $exitCodes */
-            public function __construct(private bool $missing, private array $exitCodes)
-            {
-            }
+            public function __construct(private bool $missing, private array $exitCodes) {}
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $cmd = is_array($cmd) ? $cmd : [$cmd];
                 // The host re-pulls a public image before its first container; not a container itself.
-                if (str_contains(implode(' ', $cmd), 'docker pull -q ')) {
-                    $this->pulls[] = (string) end($cmd);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'host.refreshPublicImage') {
+                    $this->pulls[] = (string) (LocalRoot::values($cmd)[0] ?? '');
 
                     return $this->exit(0);
                 }
-                if (($cmd[1] ?? null) === 'test') {
-                    $found = $this->missing && end($cmd) === '/home/acme/project/' . RustRuntimeLibraries::MISSING_FILE;
+                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $plain = LocalRoot::plain($argv);
+                if (($plain[0] ?? null) === 'test') {
+                    $found = $this->missing && end($plain) === '/home/acme/project/'.RustRuntimeLibraries::MISSING_FILE;
 
                     return $this->exit($found ? 0 : 1);
                 }
-                $sh = array_search('sh', $cmd, true);
+                $build = LocalRoot::build($argv);
                 // Without the OOM report every host build script starts with.
-                $script = (string) preg_replace("/^trap '[^']*' EXIT; /", '', (string) end($cmd));
-                $this->containers[] = ['image' => (string) $cmd[$sh - 1], 'script' => $script];
+                $script = (string) preg_replace("/^trap '[^']*' EXIT; /", '', $build['script']);
+                $this->containers[] = ['image' => $build['image'], 'script' => $script];
 
                 return $this->exit(array_shift($this->exitCodes) ?? 0);
             }
@@ -71,11 +73,11 @@ class HostCompileRustLibrariesTest extends TestCase
             }
         };
 
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = 'acme';
         $model->details = ['UID' => 1001, 'GID' => 1001];
         $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('hostBuilder')->willReturn(new DindHostBuilder());
+        $engine->method('hostBuilder')->willReturn(new DindHostBuilder);
         $dind = $this->createStub(Dind::class);
         $dind->method('userModel')->willReturn($model);
         $dind->method('system')->willReturn($system);
@@ -83,7 +85,7 @@ class HostCompileRustLibrariesTest extends TestCase
         $dind->method('engineAccount')->willReturn(new EngineAccount('acme', '/home/acme', '1001:1001'));
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
         $inner = $this->createStub(InnerDocker::class);
-        $inner->method('imageStore')->willReturn(new DindImageStore());
+        $inner->method('imageStore')->willReturn(new DindImageStore);
         $dind->method('innerDocker')->willReturn($inner);
 
         $compile = new HostCompile($dind);

@@ -1,6 +1,6 @@
 # How to turn telemetry off
 
-Telemetry is on by default, so reports do leave your VPS unless you change something. What it is, why it is there, and what it gives you: [Telemetry](what-is-collected.md).
+Telemetry is on by default, so reports do leave your VPS unless you change something. What it is, why it is there and what it gives you: [Telemetry](what-is-collected.md).
 
 The usual switch is a `pae` command. It takes effect immediately. You do not restart the engine. The options further down are lines in `/opt/panelalpha/shared-hosting/.env-core`, and those do nothing until you restart: [Change a setting](install.md#change-a-setting).
 
@@ -53,6 +53,8 @@ Leave the value empty, then restart the engine. Reports are still produced and r
 **It does not delete anything already on your VPS.** The queue and the local log stay where they are.
 
 **It does not affect the error messages you rely on.** The plain-sentence explanations in your deploy logs are produced locally and have nothing to do with telemetry: [Reading errors](reading-errors.md).
+
+**It does not stop the installer's own report.** The one short report the installer sends when an install or update finishes does not depend on this setting: [What it contains](what-is-collected.md#the-installers-own-report).
 
 **It does not disable on-demand health checks.** The scheduled six-hourly sweep is telemetry, so it stops when sending is fully off. Checking a site yourself still works:
 

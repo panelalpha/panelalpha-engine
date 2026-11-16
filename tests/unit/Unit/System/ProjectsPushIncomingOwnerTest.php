@@ -9,6 +9,7 @@ use App\System\Project\Dind\CopyVolumes;
 use App\System\Projects;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -45,7 +46,7 @@ class ProjectsPushIncomingOwnerTest extends TestCase
         (new Projects($this->system($record)))->pushToApp('stg', 'live');
 
         $log = $record->getArrayCopy();
-        $rsync = $this->firstIndex($log, fn (string $line): bool => str_starts_with($line, 'sudo rsync -a --delete'));
+        $rsync = $this->firstIndex($log, fn (string $line): bool => str_starts_with($line, 'rsync -a --delete'));
         $handOver = array_search($this->expectedHandOver(), $log, true);
         $volumeStep = $this->firstIndex($log, fn (string $line): bool => $line === 'volumes live', $rsync);
 
@@ -63,7 +64,7 @@ class ProjectsPushIncomingOwnerTest extends TestCase
         (new Projects($this->system($record)))->pushToApp('stg', 'live');
 
         $log = $record->getArrayCopy();
-        $rootOwned = array_search('sudo chown root:root '.escapeshellarg($this->root.'/live/.incoming'), $log, true);
+        $rootOwned = array_search('chown -- root:root '.$this->root.'/live/.incoming', $log, true);
         $handOver = array_search($this->expectedHandOver(), $log, true);
 
         $this->assertIsInt($rootOwned, 'the incoming directory is never made root-owned');
@@ -90,7 +91,7 @@ class ProjectsPushIncomingOwnerTest extends TestCase
         $swapSteps = array_filter(
             $record->getArrayCopy(),
             fn (string $line): bool => str_ends_with($line, ' '.$this->root.'/live/')
-                || $line === 'sudo mkdir -p '.$this->root.'/live/.pre-push',
+                || $line === 'mkdir -p -- '.$this->root.'/live/.pre-push',
         );
         $this->assertSame([], array_values($swapSteps));
         $this->assertFalse(is_link($this->root.'/live/.panelalpha'));
@@ -101,10 +102,9 @@ class ProjectsPushIncomingOwnerTest extends TestCase
         $incoming = $this->root.'/live/.incoming';
 
         return sprintf(
-            'sudo find %s -mindepth 1 -not \( -path %s -prune \) -not \( -path %s -prune \) -exec chown -h 1001:1001 {} +',
-            escapeshellarg($incoming),
-            escapeshellarg($incoming.'/.pre-push-db'),
-            escapeshellarg($incoming.'/docker/*'),
+            'find %s -mindepth 1 -not ( -path %s -prune ) -exec chown -h 1001:1001 {} +',
+            $incoming,
+            $incoming.'/docker/*',
         );
     }
 
@@ -135,6 +135,11 @@ class ProjectsPushIncomingOwnerTest extends TestCase
         return new class($record, $this->root, $afterRsync) extends System
         {
             public function __construct(private \ArrayObject $record, private string $root, private ?\Closure $afterRsync) {}
+
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
 
             public function project(User $model): Project
             {
@@ -172,9 +177,9 @@ class ProjectsPushIncomingOwnerTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
+                $argv = is_array($cmd) ? LocalRoot::plain(array_values($cmd)) : [$cmd];
                 $this->record[] = implode(' ', $argv);
-                if (array_slice($argv, 0, 2) === ['sudo', 'rsync'] && $this->afterRsync !== null) {
+                if (($argv[0] ?? '') === 'rsync' && $this->afterRsync !== null) {
                     ($this->afterRsync)();
                 }
 
@@ -188,15 +193,15 @@ class ProjectsPushIncomingOwnerTest extends TestCase
             {
                 $path = (string) end($argv);
 
-                return match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => new PushIncomingProcess(is_dir($path) ? 0 : 1),
-                    ['sudo', 'test', '-e'] => new PushIncomingProcess(file_exists($path) ? 0 : 1),
-                    ['sudo', 'test', '-L'] => new PushIncomingProcess(is_link($path) ? 0 : 1),
-                    ['sudo', 'mkdir', '-p'] => new PushIncomingProcess((is_dir($path) || mkdir($path, 0777, true)) ? 0 : 1),
-                    ['sudo', 'rm', '-rf'] => new PushIncomingProcess($this->remove(array_slice($argv, 3))),
-                    ['sudo', 'rmdir', $path] => new PushIncomingProcess(rmdir($path) ? 0 : 1),
-                    ['sudo', 'find', $argv[2] ?? null] => new PushIncomingProcess(0, $this->topLevelLinks($argv[2])),
-                    ['sudo', 'df', '-P'] => new PushIncomingProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
+                return match (array_slice($argv, 0, 2)) {
+                    ['test', '-d'] => new PushIncomingProcess(is_dir($path) ? 0 : 1),
+                    ['test', '-e'] => new PushIncomingProcess(file_exists($path) ? 0 : 1),
+                    ['test', '-L'] => new PushIncomingProcess(is_link($path) ? 0 : 1),
+                    ['mkdir', '-p'] => new PushIncomingProcess((is_dir($path) || mkdir($path, 0777, true)) ? 0 : 1),
+                    ['rm', '-rf'] => new PushIncomingProcess($this->remove(array_slice($argv, 2))),
+                    ['rmdir', $path] => new PushIncomingProcess(rmdir($path) ? 0 : 1),
+                    ['find', $argv[1] ?? null] => new PushIncomingProcess(0, $this->topLevelLinks($argv[1])),
+                    ['df', '-P'] => new PushIncomingProcess(0, "Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/sda1 1 1 999999999 1% /"),
                     default => new PushIncomingProcess(0),
                 };
             }

@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\CacheManager;
 use App\Lib\Deploy\CacheManager\CacheRegistry;
 use App\Lib\Deploy\Dind\DindImageStore;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * What prewarm keeps in panelalpha-cache-registry, and what it removes.
@@ -67,6 +68,18 @@ class CacheRegistryTest extends TestCase
         $this->assertNull($this->registry([])->refs());
     }
 
+    public function test_a_repository_left_with_no_tags_is_reported_empty(): void
+    {
+        $empty = $this->registry([
+            'GET ' . self::BASE . '/v2/_catalog?n=1000' => ['status' => 200, 'body' => '{"repositories":["node","panelalpha/php","gone"]}'],
+            'GET ' . self::BASE . '/v2/node/tags/list' => ['status' => 200, 'body' => '{"tags":["20"]}'],
+            'GET ' . self::BASE . '/v2/panelalpha/php/tags/list' => ['status' => 200, 'body' => '{"name":"panelalpha/php","tags":null}'],
+            'GET ' . self::BASE . '/v2/gone/tags/list' => ['status' => 200, 'body' => '{"tags":[]}'],
+        ])->emptyRepositories();
+
+        $this->assertSame(['panelalpha/php', 'gone'], $empty);
+    }
+
     public function test_digest_and_delete_address_the_manifest(): void
     {
         $sent = [];
@@ -98,16 +111,18 @@ class CacheRegistryTest extends TestCase
     /** The writer listens on the host's loopback only, which core's own network namespace is not. */
     public function test_requests_are_made_from_the_hosts_network_namespace(): void
     {
+        $delete = CacheRegistry::hostArgv('DELETE', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc', []);
+        $this->assertSame([LocalRoot::CLIENT, '--host'], array_slice($delete, 0, 2));
         $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--net', 'curl', '-sS', '-i', '--connect-timeout', '2', '--max-time', '30',
-                '-X', 'DELETE', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc'],
-            CacheRegistry::hostArgv('DELETE', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc', [])
+            ['curl', '-sS', '-i', '--connect-timeout', '2', '--max-time', '30',
+                '-X', 'DELETE', '--', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc'],
+            LocalRoot::plain($delete)
         );
 
-        $head = CacheRegistry::hostArgv('HEAD', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20', ['Accept' => 'a, b']);
+        $head = LocalRoot::plain(CacheRegistry::hostArgv('HEAD', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20', ['Accept' => 'a, b']));
         $this->assertContains('--head', $head);
         $this->assertNotContains('-X', $head);
-        $this->assertSame(['-H', 'Accept: a, b', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20'], array_slice($head, -3));
+        $this->assertSame(['-H', 'Accept: a, b', '--', 'http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/20'], array_slice($head, -4));
     }
 
     public function test_curl_output_is_read_as_status_headers_and_body(): void
@@ -126,6 +141,30 @@ class CacheRegistryTest extends TestCase
         ], CacheRegistry::parseResponse($raw));
         $this->assertSame(202, CacheRegistry::parseResponse("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")['status']);
         $this->assertNull(CacheRegistry::parseResponse(''));
+    }
+
+    public function test_the_tag_listing_reads_digest_and_push_time_per_tag(): void
+    {
+        $root = '/var/lib/registry/docker/registry/v2/repositories';
+        $a = 'sha256:' . str_repeat('a', 64);
+        $b = 'sha256:' . str_repeat('b', 64);
+
+        $tags = CacheRegistry::parseTagListing(
+            "1793504070 {$b} {$root}/ghcr.io/railwayapp/railpack-builder/_manifests/tags/mise-2026.10.14/current/link\n"
+            . "1793528154 {$a} {$root}/panelalpha/php/_manifests/tags/8.2-apache-bookworm-pa20261007/current/link\n"
+            . "stat: can't stat '/x': No such file or directory\n"
+            . "1793528154 sha256:short {$root}/panelalpha/php/_manifests/tags/broken/current/link\n"
+        );
+
+        $this->assertSame([
+            'ghcr.io/railwayapp/railpack-builder:mise-2026.10.14' => ['digest' => $b, 'pushed' => 1793504070],
+            'panelalpha/php:8.2-apache-bookworm-pa20261007' => ['digest' => $a, 'pushed' => 1793528154],
+        ], $tags);
+
+        $argv = CacheRegistry::tagListingArgv();
+        $this->assertTrue(LocalRoot::isRequest($argv));
+        $this->assertSame('docker.registryTagLinks', LocalRoot::action($argv));
+        $this->assertSame([DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $root], LocalRoot::values($argv));
     }
 
     public function test_only_what_the_catalogue_does_not_keep_is_unwanted(): void

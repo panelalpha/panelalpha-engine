@@ -1,6 +1,6 @@
 # Looking after your project
 
-Once a project is online, you keep using the same chat. Add a domain, take a backup, make a test copy, or ask why a page looks wrong. You do not switch to a control panel for this.
+Once a project is online, you keep using the same chat. Add a domain, take a backup, make a test copy or ask why a page looks wrong. You do not switch to a control panel for this.
 
 ```text
 List the projects on this engine.
@@ -86,7 +86,7 @@ A deploy keeps copies of downloaded packages so the next deploy of that same pro
 ## Other day-to-day work
 
 - **WordPress.** Ask for a new site without bringing your own code, or look after WordPress that is already on this engine: [WordPress](../05-capabilities/wordpress-and-apps.md).
-- **A database**, FTP or SFTP, or a scheduled task the application needs: [Databases](../05-capabilities/databases.md) · [Files, FTP and SFTP](../05-capabilities/files-and-access.md) · [Projects](../05-capabilities/projects.md#cron-jobs).
-- **Git.** Pull the latest commit, switch branch, or reconnect a private repository: [Connecting with Git](../05-capabilities/connecting-with-git.md).
+- **A database**, FTP or SFTP or a scheduled task the application needs: [Databases](../05-capabilities/databases.md) · [Files, FTP and SFTP](../05-capabilities/files-and-access.md) · [Projects](../05-capabilities/projects.md#cron-jobs).
+- **Git.** Pull the latest commit, switch branch or reconnect a private repository: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
-Not sure what to say? [What to ask](../04-connecting-your-ai/your-assistant.md#what-to-ask) has more examples.
+More examples: [What to ask](../04-connecting-your-ai/your-assistant.md#what-to-ask).

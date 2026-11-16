@@ -12,6 +12,7 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\DeployStrategy;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class DindDeployStrategyTest extends TestCase
@@ -201,8 +202,11 @@ class DindDeployStrategyTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                if (array_slice((array) $cmd, 0, 2) === ['sudo', 'realpath']) {
-                    return SuccessfulProcess::for($cmd);
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'files.existingRealPaths') {
+                    $process = new Process(['printf', '%s\n', ...LocalRoot::values($cmd)]);
+                    $process->run();
+
+                    return $process;
                 }
 
                 return new class extends Process {

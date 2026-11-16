@@ -1,0 +1,163 @@
+[1 log lines] ensurePhpBaseImage
+[
+    "php:8.3-apache-bookworm",
+    [],
+    [],
+    []
+]
+
+[1 log lines] entrypoint
+[
+    {
+        "platform": "laravel",
+        "start_command": "",
+        "app_root": ""
+    },
+    "{dir}",
+    "1001:1001",
+    {
+        "install": {
+            "wait-for-mysql": "for i in $(seq 1 60); do php -r 'try { $h=getenv(\"DB_HOST\") ?: \"127.0.0.1\"; $p=getenv(\"DB_PORT\") ?: \"3306\"; $u=getenv(\"DB_USERNAME\") ?: \"root\"; $pw=getenv(\"DB_PASSWORD\") ?: \"\"; new PDO(\"mysql:host={$h};port={$p}\", $u, $pw); exit(0);} catch (Throwable $e) { exit(1); }' 2>/dev/null && break; sleep 2; done; "
+        },
+        "upgrade": {
+            "wait-for-mysql": "for i in $(seq 1 60); do php -r 'try { $h=getenv(\"DB_HOST\") ?: \"127.0.0.1\"; $p=getenv(\"DB_PORT\") ?: \"3306\"; $u=getenv(\"DB_USERNAME\") ?: \"root\"; $pw=getenv(\"DB_PASSWORD\") ?: \"\"; new PDO(\"mysql:host={$h};port={$p}\", $u, $pw); exit(0);} catch (Throwable $e) { exit(1); }' 2>/dev/null && break; sleep 2; done; "
+        }
+    },
+    false
+]
+
+[1 log lines] runPhpBuild
+[
+    "php:8.3-apache-bookworm",
+    {
+        "strategy": "laravel",
+        "label": "Laravel",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 8000,
+        "runtime": "php",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader",
+        "build_command": "{ composer run-script --no-interaction post-autoload-dump; } || true",
+        "start_command": "/usr/local/bin/panelalpha-serve",
+        "env": {
+            "APP_ENV": "production",
+            "LOG_CHANNEL": "stderr"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "panelalpha/php:8.3-apache-bookworm-pa20261007",
+        "database": null,
+        "app_root": "",
+        "docroot": "public",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "laravel",
+        "requirements": [
+            {
+                "id": "php",
+                "version": "8.3",
+                "constraint": "^8.2",
+                "source": "composer.json require.php",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "php 8.3 (from composer.json require.php)"
+        ],
+        "build_images": [],
+        "resolved_commands": {
+            "asset-publish": ""
+        }
+    },
+    "",
+    true,
+    [],
+    []
+]
+
+[1 log lines] runForPhp
+[
+    "{dir}",
+    {
+        ".env": true,
+        "artisan": true,
+        "composer.json": true
+    },
+    "",
+    null,
+    "php:8.3-apache-bookworm"
+]
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root scripts.makeHomeEntry -- {dir}/.cache 0755 1001:1001
+
+
+[1 log lines] exec /usr/local/lib/panelalpha/pa-root account.makeDirectories -- 1001 1001 {dir}/.cache/composer
+
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'php:8.3-apache-bookworm'
+    working_dir: /app
+    volumes:
+      - './:/app'
+      - '{dir}/.cache/composer:/var/cache/pa-composer'
+    ports:
+      - '8000:8000'
+    user: '1001:1001'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '8000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      APP_ENV: production
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_DATABASE: app
+      DB_USERNAME: root
+      DB_PASSWORD: ''
+      PA_DOCROOT: /app/public
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    depends_on:
+      db: { condition: service_started }
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+  db:
+    image: 'mariadb:11'
+    restart: unless-stopped
+volumes:
+  dbdata: null
+
+
+== log
+#0 info: Starting stage: running

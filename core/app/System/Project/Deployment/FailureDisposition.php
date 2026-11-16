@@ -5,12 +5,8 @@ namespace App\System\Project\Deployment;
 use App\Models\User as ModelsUser;
 
 /**
- * What becomes of a project whose deploy did not finish.
- *
- * The two deploy paths agree on every step and disagree only here: a DinD
- * deploy keeps the project ({@see RetainProject}, ADR-0003) while a template
- * deploy rolls the account back ({@see RollBackProject}) so a retry can reuse
- * the name. That disagreement is why the pipeline used to be written twice.
+ * What becomes of a project whose deploy did not finish, the one step the two deploy paths disagree on: DinD keeps
+ * the project ({@see RetainProject}, ADR-0003), a template rolls it back ({@see RollBackProject}) so a retry can reuse the name.
  */
 interface FailureDisposition
 {

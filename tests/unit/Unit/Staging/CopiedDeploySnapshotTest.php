@@ -3,6 +3,7 @@
 namespace Tests\Unit\Staging;
 
 use App\Models\User;
+use App\System\Project\Dind\AppManager;
 use Tests\TestCase;
 
 class CopiedDeploySnapshotTest extends TestCase
@@ -39,6 +40,17 @@ class CopiedDeploySnapshotTest extends TestCase
         $this->assertArrayNotHasKey('disk_space_limit', $snapshot);
         $this->assertArrayNotHasKey('git_token', $snapshot);
         $this->assertArrayNotHasKey('env_vars', $snapshot);
+    }
+
+    /** A copy runs the stack its source ran, so it keeps whether the app config is written for that stack. */
+    public function test_a_copy_keeps_whether_the_app_config_fits_its_stack(): void
+    {
+        $snapshot = User::copiedDeploySnapshot([
+            'deploy_strategy' => 'php',
+            AppManager::DETAIL_APP_CONFIG_FITS => false,
+        ]);
+
+        $this->assertFalse($snapshot[AppManager::DETAIL_APP_CONFIG_FITS]);
     }
 
     public function test_details_for_copied_project_include_deploy_strategy(): void
@@ -132,13 +144,13 @@ class CopiedDeploySnapshotTest extends TestCase
         $stagingBlock = substr($userModel, $stagingFn, $nextFn - $stagingFn);
         $this->assertStringContainsString('detailsForCopiedProject($destUsername', $stagingBlock);
 
-        $clone = file_get_contents(app_path('Http/Controllers/UserController.php'));
+        $clone = file_get_contents(app_path('Lib/Project/ProjectCopier.php'));
         $this->assertIsString($clone);
-        $clonePos = strpos($clone, 'function clone(string $username, UserCloneRequest $request)');
+        $clonePos = strpos($clone, 'function prepare(User $source');
         $this->assertNotFalse($clonePos);
-        $verifyPos = strpos($clone, 'function verifyNewUsername(', $clonePos);
-        $this->assertNotFalse($verifyPos);
-        $cloneBlock = substr($clone, $clonePos, $verifyPos - $clonePos);
+        $copyPos = strpos($clone, 'function copy(', $clonePos);
+        $this->assertNotFalse($copyPos);
+        $cloneBlock = substr($clone, $clonePos, $copyPos - $clonePos);
         $this->assertStringContainsString('makeClone($newUsername', $cloneBlock);
         $this->assertStringNotContainsString("'deploy_strategy'", $cloneBlock);
 

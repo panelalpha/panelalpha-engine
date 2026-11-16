@@ -7,19 +7,14 @@ use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * A compose file layered over the engine's run file with `-f`, made as safe as
- * the run file itself.
- *
- * The run file goes through {@see ServiceHardener}; an override used to reach
- * Docker as written, so `privileged: true` or a docker.sock mount came back
- * through it. Only the escapes are removed: limits and defaults are the base
- * file's to set, and adding them here would override it.
- *
- * A file with nothing to remove is returned byte for byte, comments and all.
+ * A compose file layered over the engine's run file with `-f`, with only its escapes removed: limits and
+ * defaults are the base file's to set. A file with nothing to remove is returned byte for byte.
  */
 final class ComposeOverride
 {
     /**
+     * A top-level volume redefined here applies to the base file's services too.
+     *
      * @param  (callable(string): ?string)|null  $read  project-relative path => contents, for
      *                                                  the files it `include:`s; without one an include is refused
      * @param  array<string, list<?string>|string>  $env  what compose may interpolate the file with
@@ -33,29 +28,9 @@ final class ComposeOverride
         if ($parsed === null) {
             return ['yaml' => null, 'removed' => []];
         }
-        // Compose layers an included file's services as written; merged in
-        // here, they get the same checks as the override's own.
-        $sources = null;
-        if (array_key_exists('include', $parsed)) {
-            if ($read === null) {
-                throw new \InvalidArgumentException(
-                    'A compose override cannot use include: here; list the services in the override itself.'
-                );
-            }
-            ['compose' => $parsed, 'sources' => $sources] = ComposeInclude::flatten($parsed, $read);
-        }
-        // A top-level volume redefined here applies to the base file's services too.
+        [$parsed, $sources] = self::withIncludesMerged($parsed, $read);
         [$parsed, $removed] = ServiceHardener::withoutVolumeDriverOptions($parsed);
-        foreach (is_array($parsed['services'] ?? null) ? $parsed['services'] : [] as $name => $service) {
-            if (! is_array($service)) {
-                continue;
-            }
-            [$clean, $dropped] = self::withoutEscapes($service, $env, $accountUser, $projectDir);
-            foreach ($dropped as $what) {
-                $removed[] = $name.': '.$what;
-            }
-            $parsed['services'][$name] = $clean;
-        }
+        [$parsed, $removed] = self::withServicesHardened($parsed, $removed, $env, $accountUser, $projectDir);
         [$parsed, $files] = ServiceHardener::withoutUnsafeFileSources($parsed, $env, $accountUser, $projectDir);
         $removed = [...$removed, ...$files];
 
@@ -69,9 +44,52 @@ final class ComposeOverride
     }
 
     /**
-     * The override without its entries for services the base file no longer
-     * has: compose would bring each back as a fragment with no image (Appwrite's
-     * `traefik:` with only `command:`). A file naming none is returned as is.
+     * Compose layers an included file's services as written; merged in here, they get the override's checks.
+     *
+     * @param  array<string, mixed>  $parsed
+     * @param  (callable(string): ?string)|null  $read
+     * @return array{0: array<string, mixed>, 1: list<string>|null}
+     */
+    private static function withIncludesMerged(array $parsed, ?callable $read): array
+    {
+        $sources = null;
+        if (array_key_exists('include', $parsed)) {
+            if ($read === null) {
+                throw new \InvalidArgumentException(
+                    'A compose override cannot use include: here; list the services in the override itself.'
+                );
+            }
+            ['compose' => $parsed, 'sources' => $sources] = ComposeInclude::flatten($parsed, $read);
+        }
+
+        return [$parsed, $sources];
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     * @param  list<string>  $removed
+     * @param  array<string, list<?string>|string>  $env
+     * @return array{0: array<string, mixed>, 1: list<string>}
+     */
+    private static function withServicesHardened(array $parsed, array $removed, array $env, ?string $accountUser, ?string $projectDir): array
+    {
+        foreach (is_array($parsed['services'] ?? null) ? $parsed['services'] : [] as $name => $service) {
+            if (! is_array($service)) {
+                continue;
+            }
+            [$clean, $dropped] = self::withoutEscapes($service, $env, $accountUser, $projectDir);
+            foreach ($dropped as $what) {
+                $removed[] = $name.': '.$what;
+            }
+            $parsed['services'][$name] = $clean;
+        }
+
+        return [$parsed, $removed];
+    }
+
+    /**
+     * The override without its entries for services the base file lacks, which compose would bring
+     * back as fragments with no image. A file naming none is returned as is.
      *
      * @param  list<string>  $names
      * @return array{yaml: string, dropped: list<string>}
@@ -91,9 +109,8 @@ final class ComposeOverride
     }
 
     /**
-     * The override without the services none of the files under it define and
-     * it gives no image or build: compose refuses the whole project for one.
-     * A recipe written for a service the engine no longer keeps is the case.
+     * The override without the services nothing under it defines and it gives no image or build, which
+     * compose refuses the whole project for. An empty map dumps as `{  }`, which compose expects.
      *
      * @param  list<string>  $defined  services the files layered under it define
      * @return array{yaml: ?string, dropped: list<string>} yaml is null when the
@@ -123,15 +140,13 @@ final class ComposeOverride
         if ($dropped === []) {
             return ['yaml' => $raw, 'dropped' => []];
         }
-        // An empty array dumps as `{  }`, the empty map compose expects here.
         $parsed['services'] = $tag === null ? $services : new TaggedValue($tag, $services);
 
         return ['yaml' => Yaml::dump($parsed, 6, 2), 'dropped' => $dropped];
     }
 
     /**
-     * Compose's `!reset` and `!override` tags are read, not rejected: a recipe
-     * uses `ports: !reset []`, and a tag must not be a way around the check.
+     * Compose's `!reset` and `!override` tags are read, not rejected, so a tag is no way around the check.
      *
      * @return array<string, mixed>|null
      */
@@ -153,6 +168,24 @@ final class ComposeOverride
      */
     private static function withoutEscapes(array $service, array $env, ?string $accountUser, ?string $projectDir): array
     {
+        [$tag, $plain] = self::untagged($service);
+
+        $clean = ServiceHardener::withoutEscapes($plain, $env, $accountUser, $projectDir);
+
+        $dropped = self::droppedFrom($plain, $clean);
+        if ($dropped === []) {
+            return [$service, []];
+        }
+
+        return [self::retagged($clean, $tag), $dropped];
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @return array{0: array<string, string>|null, 1: array<string, mixed>}
+     */
+    private static function untagged(array $service): array
+    {
         $tag = null;
         $plain = [];
         foreach ($service as $key => $value) {
@@ -163,8 +196,16 @@ final class ComposeOverride
             $plain[$key] = $value;
         }
 
-        $clean = ServiceHardener::withoutEscapes($plain, $env, $accountUser, $projectDir);
+        return [$tag, $plain];
+    }
 
+    /**
+     * @param  array<string, mixed>  $plain
+     * @param  array<string, mixed>  $clean
+     * @return list<string>
+     */
+    private static function droppedFrom(array $plain, array $clean): array
+    {
         $dropped = [];
         foreach (array_keys($plain) as $key) {
             if (! array_key_exists($key, $clean)) {
@@ -178,16 +219,23 @@ final class ComposeOverride
                 }
             }
         }
-        if ($dropped === []) {
-            return [$service, []];
-        }
 
+        return $dropped;
+    }
+
+    /**
+     * @param  array<string, mixed>  $clean
+     * @param  array<string, string>|null  $tag
+     * @return array<string, mixed>
+     */
+    private static function retagged(array $clean, ?array $tag): array
+    {
         foreach ($clean as $key => $value) {
             if (isset($tag[$key])) {
                 $clean[$key] = new TaggedValue($tag[$key], $value);
             }
         }
 
-        return [$clean, $dropped];
+        return $clean;
     }
 }

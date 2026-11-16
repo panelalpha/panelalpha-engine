@@ -6,11 +6,8 @@ use App\Lib\Http\OutboundUrl;
 use App\Lib\Net\EgressRefusedException;
 
 /**
- * Whether a repository host is one core must not open a connection to: the
- * {@see OutboundUrl} guard for the git remotes core contacts itself (create,
- * inspection and its submodules, the vault paste check, an SSH remote's connect
- * and the deploy key's host-key scan). The deploy itself
- * runs in the account's DinD, whose network refuses those ranges anyway.
+ * Whether a repository host is one core must not connect to: the {@see OutboundUrl} guard for the git
+ * remotes core contacts itself. The deploy runs in the account's DinD, whose network refuses those ranges.
  */
 final class RepositoryAddress
 {
@@ -54,10 +51,8 @@ final class RepositoryAddress
     }
 
     /**
-     * The address core may connect to for $host, resolved once so the caller pins
-     * the connection to what was checked; $host itself when it is a literal address.
-     * OutboundUrl::target() refuses an internal address and a host PHP cannot
-     * resolve, which closes numeric IPv4 forms.
+     * The address core may connect to for $host ($host itself when literal), resolved once so the caller pins
+     * to it; OutboundUrl::target() refuses an internal or unresolvable host, which closes numeric IPv4 forms.
      *
      * @throws EgressRefusedException with the reason, when core must not contact $host
      */

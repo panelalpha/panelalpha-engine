@@ -36,6 +36,7 @@ if ($token) {
         die();
     }
 
+    session_regenerate_id(true);
     $_SESSION['PMA_single_signon_user'] = $result->data->username;
     $_SESSION['PMA_single_signon_password'] = $result->data->password;
     $_SESSION['PMA_single_signon_HMAC_secret'] = hash('sha1', uniqid(strval(rand()), true));

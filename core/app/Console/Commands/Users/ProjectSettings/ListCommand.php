@@ -2,27 +2,21 @@
 
 namespace App\Console\Commands\Users\ProjectSettings;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\User;
 use Illuminate\Console\Command;
 
 class ListCommand extends Command
 {
-    use ResolvesProject;
-
     protected $aliases = ['projects:settings:list'];
 
     protected $signature = 'project:settings:list
-        {--project= : Project username}
-        {--username= : Deprecated alias for --project}';
+        {--project= : Project username}';
 
     protected $description = 'List allowlisted project settings (secrets are redacted)';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         if ($project === '') {
             $this->error('--project is required.');
 

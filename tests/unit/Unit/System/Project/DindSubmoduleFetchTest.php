@@ -11,6 +11,7 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Git\Exception as GitException;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -311,7 +312,7 @@ class DindSubmoduleFetchTest extends TestCase
         return $runtime;
     }
 
-    /** Runs the app config reads without sudo, against the temporary home. */
+    /** Runs the app config reads without the broker, against the temporary home. */
     private function system(): System
     {
         return new class ($this->root) extends System {
@@ -331,18 +332,27 @@ class DindSubmoduleFetchTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                return parent::exec(self::withoutSudo($cmd), $env, $timeout);
+                return parent::exec(self::withoutBroker($cmd), $this->withLocalHomes($env), $timeout);
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                return parent::runProcess(self::withoutSudo($cmd), $env, $timeout);
+                return parent::runProcess(self::withoutBroker($cmd), $this->withLocalHomes($env), $timeout);
+            }
+
+            /**
+             * @param array<string, string> $env
+             * @return array<string, string>
+             */
+            private function withLocalHomes(array $env): array
+            {
+                return [...$env, 'PA_ROOT_LOCAL_ROOTS' => json_encode(['homes' => $this->root . '/home'], JSON_THROW_ON_ERROR)];
             }
 
             /** @return string|list<string> */
-            private static function withoutSudo(string|array $cmd): string|array
+            private static function withoutBroker(string|array $cmd): string|array
             {
-                return is_array($cmd) && ($cmd[0] ?? null) === 'sudo' ? array_values(array_slice($cmd, 1)) : $cmd;
+                return is_array($cmd) ? LocalRoot::argv($cmd) : $cmd;
             }
         };
     }

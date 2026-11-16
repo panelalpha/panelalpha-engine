@@ -32,10 +32,9 @@ final class HostMemoryProbe
         return new HostMemory($totalMb, $engineMb);
     }
 
-    /** `DEPLOY_ENGINE_MEMORY`, in MB; 512 when unset. */
+    /** `DEPLOY_ENGINE_MEMORY`, in MB; 512 when unset or when config is not loaded (plain unit tests). */
     private static function engineMb(): int
     {
-        // Config is not loaded outside the app, e.g. in plain unit tests.
         $configured = app()->bound('config') ? (int) config('deploy.engine_memory', 0) : 0;
 
         return $configured > 0 ? $configured : HostMemory::ENGINE_DEFAULT_MB;

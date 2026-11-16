@@ -19,6 +19,7 @@ use App\System\Services\Webserver\ProxyRulePorts;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
+use Tests\Support\HostCommand;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -208,6 +209,7 @@ class ProxyRulePortsTest extends TestCase
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
+                $cmd = HostCommand::argv($cmd);
                 $cmd = (array) $cmd;
                 if ($cmd === ['cat', '/etc/ufw/user.rules']) {
                     return FakeProcess::ok($this->tuples);
@@ -239,6 +241,8 @@ class ProxyRulePortsTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 

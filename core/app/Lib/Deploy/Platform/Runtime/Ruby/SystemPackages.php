@@ -3,31 +3,25 @@
 namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 
 /**
- * The apt packages a Ruby image needs to compile the project's native gems.
- *
- * Native builds need the client library of whichever database the Gemfile
- * actually asks for. Installing all of them would triple the image;
- * installing only Postgres breaks every mysql2 and sqlite3 app.
+ * The apt packages a Ruby image needs to compile the project's native gems, including the client
+ * library of whichever database the Gemfile asks for.
  */
 final class SystemPackages
 {
     /**
-     * Needed by every Ruby project, whatever it stores its data in.
-     *
-     * `libyaml-dev` is the one that is not obvious and is not optional. psych
-     * is Ruby's YAML parser; it ships as a default gem but builds a native
-     * extension against libyaml, and since Ruby 3.4 it is no longer bundled
-     * with the interpreter -- so bundler resolves and compiles it. Anything
-     * pulling in rdoc does, which is railties, which is every Rails app. The
-     * failure is `An error occurred while installing psych (5.2.6), and
-     * Bundler cannot continue`, four dependency levels from anything the
-     * Gemfile mentions, and it stops the whole install.
+     * Needed by every Ruby project; `libyaml-dev` because since Ruby 3.4 bundler compiles psych
+     * against it for every Rails app, and the install stops without it.
      *
      * @var list<string>
      */
     private const ALWAYS = ['curl', 'git', 'libjemalloc2', 'build-essential', 'libyaml-dev'];
 
-    /** @var array<string, string> database gem => apt package */
+    /**
+     * Only the client library the Gemfile asks for: all of them would triple the image, and Postgres
+     * alone breaks every mysql2 and sqlite3 app.
+     *
+     * @var array<string, string> database gem => apt package
+     */
     private const DATABASE_PACKAGES = [
         'pg' => 'libpq-dev',
         'mysql2' => 'default-libmysqlclient-dev',
@@ -36,21 +30,14 @@ final class SystemPackages
     ];
 
     /**
-     * Gems whose C extension or FFI binding needs a system library they do
-     * not vendor, by gem => apt package. Looked up in Gemfile.lock too, since these arrive
-     * transitively: idn-ruby through twitter-text, and extconf fails without
-     * the headers.
+     * Gems needing a system library they do not vendor, looked up in Gemfile.lock too; an FFI gem needs the
+     * exact name its ffi_lib dlopens (`ffi_lib 'assimp'` wants the unversioned libassimp.so only -dev ships).
      *
      * @var array<string, string>
      */
     private const NATIVE_GEM_PACKAGES = [
         'idn-ruby' => 'libidn-dev',
-        // FFI gems compile nothing; they dlopen the library when required,
-        // so a Rails app dies at boot without it (Manyfold:
-        // "Could not open library 'libarchive.so.13'"). The package must
-        // ship the exact name the gem's ffi_lib asks for.
         'ffi-libarchive' => 'libarchive13',
-        // ffi_lib 'assimp' wants the unversioned libassimp.so, which only -dev has.
         'assimp-ffi' => 'libassimp-dev',
         'ruby-vips' => 'libvips42',
         'rbnacl' => 'libsodium23',
@@ -61,6 +48,16 @@ final class SystemPackages
      * database gem is recognised; an unused -dev package only costs build time.
      */
     private const DEFAULT_DATABASE_PACKAGE = 'libpq-dev';
+
+    /**
+     * What every base of this runtime carries, whatever the project asks for: a catalogue entry names only what it adds.
+     *
+     * @return list<string>
+     */
+    public static function always(): array
+    {
+        return self::ALWAYS;
+    }
 
     /**
      * @return list<string>

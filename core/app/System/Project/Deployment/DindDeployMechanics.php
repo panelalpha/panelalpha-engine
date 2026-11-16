@@ -4,8 +4,11 @@ namespace App\System\Project\Deployment;
 
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Finding;
+use App\Lib\Project\ProjectNameRefusal;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
+use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AccountMapping;
@@ -17,6 +20,7 @@ use App\System\Project\Dind\Generation\ServingImages;
 use App\System\Project\Dind\ProjectBindMounts;
 use App\System\Project\Dind\Source\EngineArtifactExclude;
 use App\System\Project\Dind\Source\GitRepository;
+use App\System\Project\Dind\SysboxDaemons;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -64,21 +68,65 @@ final class DindDeployMechanics implements DeployMechanics
     {
         $project = $this->aggregate();
         if ($project->hostingExists()) {
-            throw new \Exception('User already exists.');
+            throw new \Exception(ProjectNameRefusal::heldOnHost($project->model()->username, app(System::class)));
         }
 
+        $this->refuseNewAccountWhileSysboxIsDown();
+        $this->createAccount($project);
+        $startedAt = microtime(true);
+        $this->startAccountContainer($project);
+        $this->handHomeToAccount($project);
+        $project->waitForAllRunning();
+        $this->reportAccountDaemon((int) round(microtime(true) - $startedAt));
+        $this->deleteHostingIfItFails($project, fn () => $this->logger()?->throwIfCancelled());
+    }
+
+    /** Refused before anything is made, so the failed create has no account to keep. */
+    private function refuseNewAccountWhileSysboxIsDown(): void
+    {
+        try {
+            $this->sysbox()->refuseWhenStopped();
+        } catch (RuntimeException $e) {
+            $this->removedTheAccount = true;
+            throw $e;
+        }
+    }
+
+    private function createAccount(ProjectAggregate $project): void
+    {
+        $this->logger()?->info("Creating the account's directories and Linux user");
         $this->deleteHostingIfItFails($project, fn () => $project->createDirectories());
         $project->syncLinuxUser();
         $project->model()->save();
-        $this->deleteHostingIfItFails($project, function () use ($project): void {
-            $project->createFromTemplate();
-            $project->up();
-        });
+    }
 
+    private function startAccountContainer(ProjectAggregate $project): void
+    {
+        $this->logger()?->info("Writing the account's compose file");
+        $this->deleteHostingIfItFails($project, fn () => $project->createFromTemplate());
+        $this->logger()?->info('Starting the account container and waiting for its Docker daemon');
+        $this->deleteHostingIfItFails($project, fn () => $project->up());
+    }
+
+    private function handHomeToAccount(ProjectAggregate $project): void
+    {
+        $this->logger()?->info('Handing the home to the account and setting its disk quota');
         $project->fixPermissions();
         $project->configureQuota();
-        $project->waitForAllRunning();
-        $this->deleteHostingIfItFails($project, fn () => $this->logger()?->throwIfCancelled());
+    }
+
+    /** The wait gives up silently, so a daemon that never answered would otherwise surface only as a later docker error. */
+    private function reportAccountDaemon(int $seconds): void
+    {
+        if ($this->dind->innerDockerIsUp()) {
+            $this->logger()?->ok("The account's Docker daemon answered {$seconds}s after the container start");
+
+            return;
+        }
+        $this->logger()?->warn(
+            "The account's Docker daemon did not answer within {$seconds}s of the container start;"
+                .' the deploy goes on, and its next docker command reports why'
+        );
     }
 
     public function removedTheAccount(): bool
@@ -240,13 +288,19 @@ final class DindDeployMechanics implements DeployMechanics
 
     /**
      * Its images and routing, before the redeploy prepares anything. Every redeploy passes here
-     * first, so the sysbox account mapping is repaired here too.
+     * first, so a stopped sysbox refuses it here and the sysbox account mapping is repaired here too.
      */
     public function recordRunningVersion(): void
     {
-        (new AccountMapping($this->dind))->ensureMapped();
+        $this->sysbox()->refuseWhenStopped();
+        $this->repairAccountMapping();
         (new ServingImages($this->dind))->remember();
         (new RoutingSnapshot($this->dind))->take();
+    }
+
+    public function repairAccountMapping(): void
+    {
+        (new AccountMapping($this->dind))->ensureMapped();
     }
 
     /**
@@ -348,7 +402,7 @@ final class DindDeployMechanics implements DeployMechanics
     public function persistPartialSuccess(array $warnings): void
     {
         $this->user()->setDetails([
-            'deployment_warnings' => $warnings,
+            'deployment_warnings' => Finding::storable($warnings),
             'deployment_status' => 'partial',
             'error' => null,
             'app_stopped_by_request' => null,
@@ -369,6 +423,11 @@ final class DindDeployMechanics implements DeployMechanics
     private function excludeEngineArtifacts(): void
     {
         EngineArtifactExclude::forProject($this->dind)->writeForDeploy();
+    }
+
+    private function sysbox(): SysboxDaemons
+    {
+        return new SysboxDaemons($this->dind->system());
     }
 
     private function aggregate(): ProjectAggregate

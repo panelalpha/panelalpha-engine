@@ -2,29 +2,23 @@
 
 namespace App\Console\Commands\Users\ProjectSettings;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\User;
 use App\System\Project\Settings;
 use Illuminate\Console\Command;
 
 class Get extends Command
 {
-    use ResolvesProject;
-
     protected $aliases = ['projects:settings:get'];
 
     protected $signature = 'project:settings:get
         {key : Setting key (e.g. cloudflare-api-token)}
-        {--project= : Project username}
-        {--username= : Deprecated alias for --project}';
+        {--project= : Project username}';
 
     protected $description = 'Get an allowlisted project setting (secrets are redacted)';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $key = Settings::normalizeKey((string) $this->argument('key'));
 
         if ($project === '') {

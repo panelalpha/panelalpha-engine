@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\Runtime\GoEmbeddedFrontends;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -114,5 +115,118 @@ class GoEmbeddedFrontendsTest extends TestCase
         $this->frontend('vendor/x/ui');
 
         $this->assertSame([], GoEmbeddedFrontends::missing($this->dir));
+    }
+
+    public function test_a_missing_project_directory_has_no_frontends(): void
+    {
+        $this->assertSame([], GoEmbeddedFrontends::missing($this->dir . '/absent'));
+        $this->assertSame([], GoEmbeddedFrontends::plan($this->dir . '/absent'));
+    }
+
+    public function test_go_files_without_an_embed_directive_are_skipped(): void
+    {
+        $this->write('main.go', "package main\n\nfunc main() {}\n");
+        $this->write('ui/ui.go', "package ui\n\n// go:embed dist is prose, not a directive\n");
+        $this->frontend('ui');
+
+        $this->assertSame([], GoEmbeddedFrontends::missing($this->dir));
+    }
+
+    public function test_quoted_patterns_and_the_first_embed_per_frontend_win(): void
+    {
+        $this->write('web/b.go', "package web\n\n//go:embed \"dist\" `static`\nvar FS embed.FS\n");
+        $this->write('web/a.go', "package web\n\n//go:embed all:build\nvar Other embed.FS\n");
+        $this->write('.hidden/x.go', "package x\n\n//go:embed dist\nvar FS embed.FS\n");
+        $this->write('_examples/x.go', "package x\n\n//go:embed dist\nvar FS embed.FS\n");
+        $this->write('tool/t.go', "package tool\n\n//go:embed ../web/dist *.tmpl\nvar FS embed.FS\n");
+        $this->frontend('web');
+        $this->frontend('.hidden');
+        $this->frontend('_examples');
+        $this->frontend('tool');
+
+        $this->assertSame(
+            [['dir' => 'web', 'embed' => 'web/a.go: build']],
+            GoEmbeddedFrontends::missing($this->dir)
+        );
+    }
+
+    public function test_the_scan_reads_at_most_three_thousand_go_files(): void
+    {
+        for ($i = 0; $i < 3005; $i++) {
+            $this->write(sprintf('pkg%02d/f%04d.go', $i % 50, $i), '');
+        }
+        $goFiles = new \ReflectionMethod(GoEmbeddedFrontends::class, 'goFiles');
+
+        $files = $goFiles->invoke(null, $this->dir);
+
+        $this->assertCount(3000, $files);
+        $sorted = $files;
+        sort($sorted);
+        $this->assertSame($sorted, $files);
+    }
+
+    /** @return array<string, array{string, list<string>}> */
+    public static function embeddingsPastTheCap(): array
+    {
+        return [
+            'a root file sorting after the fillers' => ['zz.go', ['web']],
+            'a file beside the fillers sorting before them' => ['pkg/main.go', ['pkg/web']],
+            'a file beside the fillers sorting after them' => ['pkg/zz.go', []],
+            'a deeper file sorting before the fillers' => ['pkg/a/main.go', []],
+        ];
+    }
+
+    /**
+     * Past the cap the shallowest files are read, then the first by name, whatever order the filesystem lists
+     * them in.
+     *
+     * @param list<string> $expected
+     */
+    #[DataProvider('embeddingsPastTheCap')]
+    public function test_the_cap_keeps_the_shallowest_files_whatever_order_they_were_written_in(string $embedding, array $expected): void
+    {
+        foreach (['first', 'last'] as $written) {
+            $root = $this->treePastTheCap($embedding, $written);
+
+            $this->assertSame($expected, array_column(GoEmbeddedFrontends::missing($root), 'dir'), "written {$written}");
+        }
+    }
+
+    public function test_reaching_the_cap_is_told_and_staying_under_it_is_not(): void
+    {
+        $notes = [];
+        $note = static function (string $line) use (&$notes): void {
+            $notes[] = $line;
+        };
+
+        GoEmbeddedFrontends::plan($this->treePastTheCap('zz.go', 'first'), $note);
+        $this->write('small/main.go', "package main\n");
+        GoEmbeddedFrontends::plan($this->dir . '/small', $note);
+
+        $this->assertSame(
+            ['Looked for embedded frontends in 3000 of 3001 Go files, the least nested first; '
+                . 'a frontend embedded by one of the others is not built before the Go build.'],
+            $notes
+        );
+    }
+
+    /** As many `pkg/z*.go` fillers as the cap allows, written before or after the embedding file. */
+    private function treePastTheCap(string $embedding, string $written): string
+    {
+        $root = 'cap-' . str_replace('/', '-', $embedding) . '-' . $written;
+        $cap = (new \ReflectionClassConstant(GoEmbeddedFrontends::class, 'MAX_GO_FILES'))->getValue();
+        $embed = "package main\n\nimport \"embed\"\n\n//go:embed web/dist\nvar ui embed.FS\n";
+        if ($written === 'first') {
+            $this->write($root . '/' . $embedding, $embed);
+        }
+        for ($i = 0; $i < $cap; $i++) {
+            $this->write(sprintf('%s/pkg/z%04d.go', $root, $i), "package pkg\n");
+        }
+        if ($written === 'last') {
+            $this->write($root . '/' . $embedding, $embed);
+        }
+        $this->frontend($root . '/' . (dirname($embedding) === '.' ? '' : dirname($embedding) . '/') . 'web');
+
+        return $this->dir . '/' . $root;
     }
 }

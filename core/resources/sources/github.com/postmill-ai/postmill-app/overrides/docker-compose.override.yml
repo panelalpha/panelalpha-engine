@@ -1,0 +1,48 @@
+# Adds the Redis the repo's compose file expects but ships none of, and the
+# database migration its image never runs.
+services:
+  postmill:
+    environment:
+      REDIS_URL: 'redis://postmill-redis:6379'
+    depends_on:
+      postmill-redis:
+        condition: service_healthy
+      postmill-migrate:
+        condition: service_completed_successfully
+
+  postmill-migrate:
+    image: ghcr.io/postmill-ai/postmill-app:latest
+    working_dir: /app
+    entrypoint:
+      - /app/node_modules/.bin/prisma
+      - migrate
+      - deploy
+      - --schema
+      - ./libraries/nestjs-libraries/src/database/prisma/schema.prisma
+    environment:
+      DATABASE_URL: 'postgresql://postmill-user:postmill-password@postmill-postgres:5432/postmill-db-local'
+    restart: 'no'
+    healthcheck:
+      disable: true
+    networks:
+      - postmill-network
+    depends_on:
+      postmill-postgres:
+        condition: service_healthy
+
+  postmill-redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - postmill-redis:/data
+    networks:
+      - postmill-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postmill-redis: {}

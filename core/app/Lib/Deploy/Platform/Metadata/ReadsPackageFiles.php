@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * The coercions every reader repeats, over hand-written and constantly wrong package
- * files: a `license` that is a string here and a list there, an `author` that is
- * sometimes an object. A trait, so the `*Metadata.php` scan does not claim it.
+ * The coercions every reader repeats over hand-written package files (a `license` string or list,
+ * an `author` object); a trait, so the `*Metadata.php` scan does not claim it.
  */
 trait ReadsPackageFiles
 {
@@ -26,8 +25,8 @@ trait ReadsPackageFiles
     }
 
     /**
-     * A list of strings from a scalar, a list, or a list of objects — the three
-     * shapes `authors`, `keywords` and `license` turn up in.
+     * A list of strings from a scalar, an object, a list, or a list of objects: the
+     * shapes `authors`, `keywords` and `license` turn up in. An object is one entry.
      *
      * @return list<string>
      */
@@ -39,6 +38,9 @@ trait ReadsPackageFiles
         }
         if (! is_array($value)) {
             return [];
+        }
+        if (! array_is_list($value)) {
+            $value = [$value];
         }
 
         $out = [];
@@ -84,10 +86,8 @@ trait ReadsPackageFiles
     }
 
     /**
-     * The frameworks in $table this project depends on, in the table's order.
-     *
-     * Order is precedence: every Next.js project also depends on React, and
-     * reporting React first would describe the wrong thing.
+     * The frameworks in $table this project depends on, in the table's order, which is
+     * precedence: every Next.js project also depends on React.
      *
      * @param  array<string, string>  $table  package id => display name, most specific first
      * @param  array<string, string>  $constraints  package id => declared range
@@ -120,11 +120,8 @@ trait ReadsPackageFiles
     }
 
     /**
-     * The body of a TOML table, without the tables that follow it.
-     *
-     * Enough TOML to read `[package]` and `[project]`, and no more: a reader
-     * that answers null on syntax it does not understand is worth more than a
-     * TOML parser dependency.
+     * The body of a TOML table, without the tables that follow it: enough TOML for `[package]`
+     * and `[project]`, answering null on anything else rather than adding a parser dependency.
      */
     protected static function tomlSection(string $toml, string $name): ?string
     {

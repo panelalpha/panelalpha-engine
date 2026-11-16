@@ -3,6 +3,7 @@
 namespace Tests\Unit\System;
 
 use App\System\Services\Mysql;
+use Tests\Support\LocalRoot;
 use Tests\Support\RecordingSystem;
 use Tests\TestCase;
 
@@ -15,22 +16,23 @@ class MysqlTableDumpTest extends TestCase
 
         (new Mysql($system))->dumpToGzip('alice_wp', '/tmp/alice.sql.gz', 'wp_posts');
 
-        $script = $system->firstScript();
-        $this->assertStringContainsString('mariadb-dump --single-transaction -uroot', $script);
-        $this->assertStringContainsString("'alice_wp'", $script);
-        $this->assertStringContainsString("'wp_posts'", $script);
-        $this->assertStringNotContainsString('--routines', $script);
-        $this->assertStringNotContainsString('--events', $script);
+        $this->assertSame(
+            LocalRoot::CLIENT.' compose.sitesDbDump -- /opt/panelalpha/shared-hosting alice_wp wp_posts',
+            self::asked($system),
+        );
     }
 
-    public function test_a_whole_database_dump_keeps_the_database_level_flags(): void
+    public function test_a_whole_database_dump_names_no_table(): void
     {
         $system = new RecordingSystem();
         $system->output = "-- Dump completed on 2026-01-01\n";
 
         (new Mysql($system))->dumpToGzip('alice_wp', '/tmp/alice.sql.gz');
 
-        $this->assertStringContainsString('--routines --triggers --events', $system->firstScript());
+        $this->assertSame(
+            LocalRoot::CLIENT." compose.sitesDbDump -- /opt/panelalpha/shared-hosting alice_wp ''",
+            self::asked($system),
+        );
     }
 
     public function test_a_table_name_outside_the_grammar_is_refused(): void
@@ -48,5 +50,11 @@ class MysqlTableDumpTest extends TestCase
         $this->assertTrue(Mysql::isValidTableName('wp_$posts'));
         $this->assertFalse(Mysql::isValidTableName('wp posts'));
         $this->assertFalse(Mysql::isValidTableName('wp_posts;'));
+    }
+
+    /** The broker request the first recorded line pipes into gzip. */
+    private static function asked(RecordingSystem $system): string
+    {
+        return explode(' | ', substr($system->firstScript(), strlen('set -o pipefail; ')))[0];
     }
 }

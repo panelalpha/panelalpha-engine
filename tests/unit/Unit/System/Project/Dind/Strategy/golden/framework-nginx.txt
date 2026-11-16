@@ -1,0 +1,100 @@
+[1 log lines] write {dir}/panelalpha.nginx.conf chown=1001:1001 mode=644
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    # A dotfile in a build output is never a page, and the SPA rewrite would
+    # otherwise answer /.env with index.html rather than a refusal. ACME
+    # stays reachable: a prefix match beats the regex.
+    location ^~ /.well-known/ {
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+
+}
+
+
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "vite",
+        "label": "Vite",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 8080,
+        "runtime": "nginx",
+        "output_directory": "dist",
+        "package_manager": "pnpm",
+        "install_command": "HUSKY=0 LEFTHOOK=0 CI=1 sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack' && corepack enable && corepack prepare pnpm@10 --activate && pnpm install --frozen-lockfile --dangerously-allow-all-builds",
+        "build_command": "pnpm run build",
+        "start_command": "",
+        "env": {
+            "FROM_RECIPE": "1",
+            "PA_DEPLOY_PHASE": "install"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "node:22-bookworm-slim",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "vite",
+        "requirements": [
+            {
+                "id": "node",
+                "version": "22",
+                "constraint": "",
+                "source": "engine default",
+                "role": "build"
+            }
+        ],
+        "toolchain": [
+            "node 22 (from engine default)"
+        ],
+        "build_images": {
+            "node": "node:22-bookworm-slim"
+        },
+        "resolved_commands": [],
+        "setup_command": null
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'nginx:alpine'
+    ports:
+      - '8080:80'
+    volumes:
+      - './dist:/usr/share/nginx/html:ro'
+      - './panelalpha.nginx.conf:/etc/nginx/conf.d/default.conf:ro'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

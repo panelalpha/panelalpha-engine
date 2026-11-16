@@ -16,9 +16,8 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts" && pwd)"
 
-# Sourcing runs the top-level `CURRENT_WEBSERVER=$(docker compose …)` probe,
-# which is read-only and degrades to "unknown" wherever docker or jq is
-# missing. The trailing `parse_args "$@"` is guarded against sourcing.
+# Sourcing defines the functions and runs nothing: the webserver label is read
+# only by the help, and the trailing `parse_args "$@"` is guarded against sourcing.
 # shellcheck source=./webserver.sh
 source "${SCRIPT_DIR}/webserver.sh" >/dev/null 2>&1
 
@@ -69,6 +68,69 @@ expect_serial "--serial-no=VALUE"  "ABC" --set litespeed --serial-no=ABC
 expect_serial "--serial-no VALUE"  "ABC" --set litespeed --serial-no ABC
 expect_serial "serial before args" "ABC" --serial-no ABC --set litespeed
 expect_serial "no serial given"    ""    --set nginx
+
+# The rebuild in core: the broker's own code where the broker runs the switch, else the docker CLI.
+expect_rebuild() {
+    local label="$1" expected="$2" scratch
+    scratch="$(mktemp -d)"
+    mkdir -p "$scratch/bin" "$scratch/lib"
+    [ "$3" = "broker" ] && mkdir -p "$scratch/lib/rootbroker"
+    printf '#!/bin/sh\necho "python3 $*"\n' >"$scratch/bin/python3"
+    printf '#!/bin/sh\necho "docker $*"\n' >"$scratch/bin/docker"
+    chmod +x "$scratch/bin/python3" "$scratch/bin/docker"
+    local actual
+    actual="$(BROKER_LIB="$scratch/lib" PATH="$scratch/bin:$PATH" rebuild_vhosts)"
+    rm -rf "$scratch"
+    if [ "$actual" = "$expected" ]; then
+        echo "PASS: ${label}"
+    else
+        echo "FAIL: ${label} -- expected '${expected}', got '${actual}'"
+        failures=$((failures + 1))
+    fi
+}
+
+expect_rebuild "rebuild from the broker" \
+    "python3 -m rootbroker.enginecommand core php artisan users:rebuild --all --wipe-vhosts-dir -v" broker
+expect_rebuild "rebuild by hand on the host" \
+    "docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec core php artisan users:rebuild --all --wipe-vhosts-dir -v" host
+
+# A switch to the webserver sites-http already runs touches nothing; any other state switches.
+expect_switch() {
+    local label="$1" running_label="$2" serial="$3" expected="$4" scratch
+    scratch="$(mktemp -d)"
+    mkdir -p "$scratch/bin"
+    cat >"$scratch/bin/docker" <<STUB
+#!/bin/sh
+echo "docker \$*" >>"$scratch/calls"
+case "\$*" in
+*" ps sites-http "*) [ -n "$running_label" ] && echo 'com.docker.compose.service=sites-http,com.panelalpha.webserver=$running_label' ;;
+esac
+exit 0
+STUB
+    chmod +x "$scratch/bin/docker"
+    (
+        ENGINE_DIR="$scratch"
+        SERIAL_NO="$serial"
+        rebuild_vhosts() { echo "rebuild" >>"$scratch/calls"; }
+        PATH="$scratch/bin:$PATH"
+        set_webserver nginx-proxy >/dev/null
+    )
+    local actual=kept
+    grep -q "down sites-http" "$scratch/calls" 2>/dev/null && actual=switched
+    grep -q "^rebuild$" "$scratch/calls" 2>/dev/null || [ "$actual" = kept ] || actual=switched-without-rebuild
+    rm -rf "$scratch"
+    if [ "$actual" = "$expected" ]; then
+        echo "PASS: ${label}"
+    else
+        echo "FAIL: ${label} -- expected '${expected}', got '${actual}'"
+        failures=$((failures + 1))
+    fi
+}
+
+expect_switch "already running nginx-proxy"     nginx-proxy ""    kept
+expect_switch "running another webserver"       nginx       ""    switched
+expect_switch "sites-http not running"          ""          ""    switched
+expect_switch "a serial number always switches" nginx-proxy "SER" switched
 
 if [ "$failures" -ne 0 ]; then
     echo "${failures} failure(s)"

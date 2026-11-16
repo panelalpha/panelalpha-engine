@@ -5,23 +5,8 @@ namespace App\Lib\DeployHook;
 use Illuminate\Http\Request;
 
 /**
- * Bitbucket Cloud (bitbucket.org). `repo:push` is the push event, and its body
- * is `push.changes[]`, one entry per ref the push moved:
- *
- *  - `new` is the ref after the push and is null when the branch was deleted;
- *  - `old` is the ref before and is null when it was just created;
- *  - each has a `type` (`branch`, `tag`, `annotated_tag` for Git), a `name`
- *    and `target.hash`.
- *
- * Cloud sends no full ref, so `refs/heads/<name>` and `refs/tags/<name>` are
- * rebuilt from the type. A Mercurial reference (`named_branch`, `bookmark`) is
- * neither, and the engine deploys Git only.
- *
- * `X-Request-UUID` identifies the request, and is the delivery id. Bitbucket
- * documents it only as "the UUID of the request", next to an
- * `X-Attempt-Number` that counts the retries of one payload, so a retry is
- * taken to repeat it. If a retry ever arrives with a fresh one, its signed body
- * is still the same, and HookReceiver acts on that once.
+ * Bitbucket Cloud: `repo:push` with `push.changes[]`, each full ref rebuilt from its Git type (Mercurial skipped).
+ * `X-Request-UUID` is the delivery id; a retry with a fresh one still carries the same signed body, acted on once.
  */
 final class BitbucketCloudProvider extends BitbucketProvider
 {

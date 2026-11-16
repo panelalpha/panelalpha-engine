@@ -7,6 +7,8 @@ use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * A rebuild re-clones ~/project. The running app may only be stopped, and
@@ -38,7 +40,7 @@ class DindGitRepositoryRecloneTest extends TestCase
         $this->assertNotEmpty(
             array_filter(
                 $this->events,
-                static fn (string $event): bool => str_starts_with($event, 'sudo rm -rf /home/alice/.project-next-')
+                static fn (string $event): bool => str_starts_with($event, 'rm -rf -- /home/alice/.project-next-')
             ),
             'the staging clone is removed'
         );
@@ -63,8 +65,8 @@ class DindGitRepositoryRecloneTest extends TestCase
         $this->assertMatchesRegularExpression('#/home/alice/\.project-next-[0-9a-f]+$#', $clone);
 
         $stop = array_search('stop app', $this->events, true);
-        $clear = $this->indexOf('sudo find /home/alice/project -mindepth 1 -maxdepth 1 -exec rm -rf');
-        $move = $this->indexOf('sudo find /home/alice/.project-next');
+        $clear = $this->indexOf('find /home/alice/project -mindepth 1 -maxdepth 1 -exec rm -rf --');
+        $move = $this->indexOf('find /home/alice/.project-next');
         $this->assertNotFalse($stop);
         $this->assertLessThan($clear, $stop, 'the app is stopped before ~/project is emptied');
         $this->assertLessThan($move, $clear);
@@ -106,7 +108,7 @@ class DindGitRepositoryRecloneTest extends TestCase
 
         $git->cloneConfiguredRepository(static function (): void {});
 
-        $this->assertSame(0, $this->indexOf('sudo find /home/alice -mindepth 1 -maxdepth 1 -name .project-next* -exec rm -rf'));
+        $this->assertSame(0, $this->indexOf('find /home/alice -mindepth 1 -maxdepth 1 -name .project-next* -exec rm -rf --'));
     }
 
     public function test_without_a_callback_it_clones_straight_into_the_project(): void
@@ -161,9 +163,18 @@ class DindGitRepositoryRecloneTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $this->events[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $this->events[] = is_array($cmd) ? implode(' ', LocalRoot::plain($cmd)) : $cmd;
 
                 return '';
+            }
+
+            /** No file the account could hold is there. */
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $missing = new Process(['php', '-r', 'exit(1);']);
+                $missing->run();
+
+                return $missing;
             }
         };
 

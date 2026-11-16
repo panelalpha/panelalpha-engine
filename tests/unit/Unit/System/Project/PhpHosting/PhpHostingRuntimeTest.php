@@ -12,6 +12,8 @@ use Illuminate\Container\Container;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 
 class PhpHostingRuntimeTest extends TestCase
 {
@@ -174,42 +176,38 @@ class PhpHostingRuntimeTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if ($cmd === TenantNetwork::firewallArgv()) {
                     $this->journal[] = 'tenant-firewall';
                 }
-                if (str_contains($line, 'docker compose') && str_contains($line, ' up ')) {
+                $action = is_array($cmd) ? LocalRoot::action($cmd) : null;
+                $values = $action === null ? [] : LocalRoot::values($cmd);
+                if ($action === 'compose.up') {
                     $this->journal[] = 'compose-up';
                     if ($this->failOnComposeUp) {
                         throw new \Exception('compose up failed');
                     }
                 }
-                if (str_contains($line, 'docker compose') && str_contains($line, ' down')) {
+                if (in_array($action, ['compose.down', 'compose.downWithVolumes'], true)) {
                     $this->journal[] = 'compose-down';
                 }
-                if (str_contains($line, 'mkdir')) {
-                    $this->simulateMkdir($line);
+                if ($action === 'files.makeDirectories' || $action === 'files.makeDirectory') {
+                    $this->simulateMkdir($values);
                 }
-                if (str_contains($line, 'sudo cp ')) {
-                    $parts = preg_split('/\s+/', $line);
-                    $source = $parts[2] ?? null;
-                    $target = $parts[3] ?? null;
-                    if (is_string($source) && is_string($target)) {
-                        if (!is_dir(dirname($target))) {
-                            mkdir(dirname($target), 0777, true);
-                        }
-                        if (is_file($source)) {
-                            copy($source, $target);
-                        } elseif (is_dir($source)) {
-                            if (!is_dir($target)) {
-                                mkdir($target, 0777, true);
-                            }
+                if ($action === 'files.makeDirectoriesWithMode' || $action === 'files.makeDirectoryWithMode') {
+                    $this->simulateMkdir(array_slice($values, 1));
+                }
+                if ($action === 'files.copy') {
+                    [$source, $target] = $values;
+                    if (!is_dir(dirname($target))) {
+                        mkdir(dirname($target), 0777, true);
+                    }
+                    if (is_file($source)) {
+                        copy($source, $target);
+                    } elseif (is_dir($source)) {
+                        if (!is_dir($target)) {
+                            mkdir($target, 0777, true);
                         }
                     }
-                }
-                if (str_contains($line, 'docker image inspect')) {
-                    // treat image as present so buildIfMissing is a no-op pull path
-                    return '';
                 }
 
                 return '';
@@ -217,13 +215,14 @@ class PhpHostingRuntimeTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (str_contains($line, 'docker compose') && str_contains($line, ' down')) {
+                if (is_array($cmd) && in_array(LocalRoot::action($cmd), ['compose.down', 'compose.downWithVolumes'], true)) {
                     $this->journal[] = 'compose-down';
                 }
 
@@ -235,14 +234,13 @@ class PhpHostingRuntimeTest extends TestCase
                 return $this->runProcess($cmd, $env);
             }
 
-            private function simulateMkdir(string $line): void
+            /** @param list<string> $paths */
+            private function simulateMkdir(array $paths): void
             {
-                if (!preg_match('/mkdir -p (.+)$/', $line, $m)) {
-                    return;
-                }
-                $path = trim($m[1]);
-                if (!is_dir($path)) {
-                    mkdir($path, 0777, true);
+                foreach ($paths as $path) {
+                    if (!is_dir($path)) {
+                        mkdir($path, 0777, true);
+                    }
                 }
             }
         };

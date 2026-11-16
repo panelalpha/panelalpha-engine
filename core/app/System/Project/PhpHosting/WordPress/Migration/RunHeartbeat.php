@@ -5,9 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use App\Models\WordpressMigration;
 
 /**
- * Keeps one run's claim on its migration alive while it waits on the source
- * site. The heartbeat is written at most every INTERVAL_SECONDS; once another
- * run has taken the record over, the run is told to stop and stays stopped.
+ * Keeps one run's claim on its migration alive while it waits on the source, writing at most every INTERVAL_SECONDS.
+ * Once another run has taken the record over, the run is told to stop and stays stopped.
  */
 final class RunHeartbeat
 {

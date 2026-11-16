@@ -12,18 +12,23 @@ use PHPUnit\Framework\TestCase;
  *
  * MintHCM (CMD `start.sh; exec bash`, no TTY) answered 200, exited 0 a second
  * later and restarted 11 times in three minutes behind a 502, while the deploy
- * said "Deploy finished successfully". Rows are the engine's inspect format as
- * the engine prints them for that container.
+ * said "Deploy finished successfully". Snapshots are the account daemon's
+ * inspect of each container, the fields the engine reads of that container.
  */
 class LateRestartLoopTest extends TestCase
 {
-    private const JUST_STARTED = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":0}';
+    private const JUST_STARTED = [
+        'Name' => '/project-app-1',
+        'Config' => ['Labels' => ['com.docker.compose.service' => 'app']],
+        'State' => ['Status' => 'running', 'ExitCode' => 0],
+        'RestartCount' => 0,
+    ];
 
     public function test_a_restart_between_the_snapshots_is_a_loop_even_on_exit_0(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":1}';
+        $after = [self::container('/project-app-1', 'app', 'running', 0, 1)];
 
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $this->assertNotNull($check, 'running again after a clean exit is still a restart');
         $this->assertSame(AppHealth::CHECK_RESTART_LOOPING, $check['id']);
@@ -35,27 +40,27 @@ class LateRestartLoopTest extends TestCase
 
     public function test_the_exit_code_is_quoted_while_the_container_is_down(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}';
+        $after = [self::container('/project-app-1', 'app', 'restarting', 1, 4)];
 
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $this->assertStringContainsString('app (restarting, last exit 1, restarted 4 times)', $check['detail']);
     }
 
     public function test_a_running_container_never_reads_as_a_clean_exit(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":3}';
+        $after = [self::container('/project-app-1', 'app', 'running', 0, 3)];
 
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $this->assertStringNotContainsString('last exit 0', $check['detail']);
     }
 
     public function test_the_state_the_host_actually_reported_is_a_loop(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":0,"restarts":10}';
+        $after = [self::container('/project-app-1', 'app', 'restarting', 0, 10)];
 
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $this->assertNotNull($check);
         $this->assertStringContainsString('restarted 10 times', $check['detail']);
@@ -63,15 +68,14 @@ class LateRestartLoopTest extends TestCase
 
     public function test_restarting_is_a_loop_without_an_earlier_snapshot(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":0,"restarts":3}';
+        $after = [self::container('/project-app-1', 'app', 'restarting', 0, 3)];
 
         $this->assertNotNull(AppHealth::restartLoopBetween(null, $after));
     }
 
     public function test_a_healthy_stack_is_not_a_loop(): void
     {
-        $before = self::JUST_STARTED . "\n"
-            . '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":0}';
+        $before = [self::JUST_STARTED, self::container('/project-db-1', 'db', 'running', 0, 0)];
         $after = $before;
 
         $this->assertNull(AppHealth::restartLoopBetween($before, $after));
@@ -80,7 +84,7 @@ class LateRestartLoopTest extends TestCase
     /** Restarts a kept sidecar collected in an older deploy say nothing about this one. */
     public function test_old_restarts_count_only_when_they_grow(): void
     {
-        $db = '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":5}';
+        $db = [self::container('/project-db-1', 'db', 'running', 0, 5)];
 
         $this->assertNull(AppHealth::restartLoopBetween($db, $db));
         $this->assertNull(AppHealth::restartLoopBetween(null, $db), 'no baseline, no count comparison');
@@ -88,9 +92,9 @@ class LateRestartLoopTest extends TestCase
 
     public function test_a_container_missing_from_the_first_snapshot_is_compared_against_zero(): void
     {
-        $after = '{"name":"/project-worker-1","service":"worker","state":"running","exit":0,"restarts":2}';
+        $after = [self::container('/project-worker-1', 'worker', 'running', 0, 2)];
 
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $this->assertNotNull($check);
         $this->assertStringContainsString('worker', $check['detail']);
@@ -98,22 +102,22 @@ class LateRestartLoopTest extends TestCase
 
     public function test_a_finished_one_shot_is_not_a_loop(): void
     {
-        $ready = '{"name":"/project-ready-1","service":"ready","state":"exited","exit":0,"restarts":0}';
+        $ready = [self::container('/project-ready-1', 'ready', 'exited', 0, 0)];
 
         $this->assertNull(AppHealth::restartLoopBetween($ready, $ready));
     }
 
     public function test_unreadable_output_is_not_a_loop(): void
     {
-        $this->assertNull(AppHealth::restartLoopBetween(null, ''));
-        $this->assertNull(AppHealth::restartLoopBetween('garbage', "not json\n{}"));
+        $this->assertNull(AppHealth::restartLoopBetween(null, []));
+        $this->assertNull(AppHealth::restartLoopBetween([null, 'garbage'], [[], ['Name' => 7, 'State' => ['Status' => 'restarting']]]));
     }
 
     /** Only the sidecar loops, so the verdict names it, not the application. */
     public function test_a_looping_sidecar_beside_a_steady_app_is_named_as_the_sidecar(): void
     {
-        $before = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":0}';
-        $after = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+        $before = [self::JUST_STARTED, self::container('/project-db-1', 'db', 'running', 0, 0)];
+        $after = [self::JUST_STARTED, self::container('/project-db-1', 'db', 'restarting', 1, 4)];
 
         $check = AppHealth::restartLoopBetween($before, $after, ['app']);
 
@@ -126,20 +130,22 @@ class LateRestartLoopTest extends TestCase
 
     public function test_the_app_looping_with_a_sidecar_is_still_the_application(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}' . "\n"
-            . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+        $after = [
+            self::container('/project-app-1', 'app', 'restarting', 1, 4),
+            self::container('/project-db-1', 'db', 'restarting', 1, 4),
+        ];
 
-        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(self::JUST_STARTED, $after, ['app'])['title']);
+        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween([self::JUST_STARTED], $after, ['app'])['title']);
         // Not knowing which service is the app keeps the old verdict.
-        $db = '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+        $db = [self::container('/project-db-1', 'db', 'restarting', 1, 4)];
         $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(null, $db)['title']);
     }
 
     /** The flattened check is what servingWarnings() turns into a partial deploy. */
     public function test_the_check_makes_the_deploy_not_clean(): void
     {
-        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":0,"restarts":4}';
-        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+        $after = [self::container('/project-app-1', 'app', 'restarting', 0, 4)];
+        $check = AppHealth::restartLoopBetween([self::JUST_STARTED], $after);
 
         $warnings = AppHealth::servingWarnings([
             AppHealth::DETAIL_CHECKED => true,
@@ -153,6 +159,17 @@ class LateRestartLoopTest extends TestCase
         ]);
 
         $this->assertCount(1, $warnings);
-        $this->assertStringContainsString('restarting, not running', $warnings[0]);
+        $this->assertStringContainsString('restarting, not running', $warnings[0]->message);
+    }
+
+    /** @return array<string, mixed> the account daemon's inspect of a container */
+    private static function container(string $name, string $service, string $status, int $exitCode, int $restarts): array
+    {
+        return [
+            'Name' => $name,
+            'Config' => ['Labels' => ['com.docker.compose.service' => $service]],
+            'State' => ['Status' => $status, 'ExitCode' => $exitCode],
+            'RestartCount' => $restarts,
+        ];
     }
 }

@@ -6,36 +6,31 @@ use App\Models\User;
 use App\System\Services\Mysql\DatabaseCopyResult;
 
 /**
- * A classic WordPress moved by a staging, copy or push. The files and the
- * database move as they are, so without this a copy keeps using the source's
- * database and answering as the source's domain, and a push leaves the target
- * on the source's wp-config.php and addresses. Every step reads wp-config.php
- * or runs without plugins and themes, so a broken plugin cannot stop it.
- * On a multisite the main site moves with every site on its host, which in
- * a subdirectory network is every site; subsites on their own hosts stay.
+ * A classic WordPress moved by staging, copy or push, which would otherwise keep the source's database, domain and
+ * wp-config.php. Every step reads wp-config.php or runs without plugins and themes, so a broken plugin cannot stop it.
  */
 final class SiteCopy
 {
     private const URL_CONSTANTS = ['WP_HOME', 'WP_SITEURL'];
 
-    /** @var \Closure(User): WordPress */
+    /** @var \Closure(User, string|null): WordPress */
     private \Closure $wordPress;
 
-    /** @param (callable(User): WordPress)|null $wordPress */
+    /** @param (callable(User, string|null): WordPress)|null $wordPress builds WordPress at the install directory given */
     public function __construct(?callable $wordPress = null)
     {
         $this->wordPress = \Closure::fromCallable(
-            $wordPress ?? static fn (User $user): WordPress => WordPress::for($user, skipPlugins: true),
+            $wordPress ?? static fn (User $user, ?string $path): WordPress => WordPress::for($user, $path, skipPlugins: true),
         );
     }
 
     /**
-     * After a staging or copy: the copy's wp-config.php uses the database
-     * copied for it, and the site answers as the copy's domain.
+     * After a staging or copy: the copy's wp-config.php uses the database copied for it, and the site answers as the
+     * copy's domain. Without an install given, WordPress is read where the project's own record says.
      */
-    public function pointCopyAtItself(User $copy, ?DatabaseCopyResult $databases): void
+    public function pointCopyAtItself(User $copy, ?DatabaseCopyResult $databases, ?Install $install = null): void
     {
-        $wordPress = ($this->wordPress)($copy);
+        $wordPress = ($this->wordPress)($copy, $install?->dir);
         if ($databases === null) {
             throw new Exception('A WordPress copy needs its own databases; without them it would use the source\'s.');
         }
@@ -45,32 +40,29 @@ final class SiteCopy
         $wordPress->cache()->flush();
     }
 
-    /** Before a push: what the target, whose wp-config.php is at the path given, keeps. */
-    public function beforePush(User $source, User $target, string $targetConfigPath): KeptSite
+    /** Before a push: what the target's install keeps. */
+    public function beforePush(User $source, User $target, Install $targetInstall, Install $sourceInstall): KeptSite
     {
-        $options = ($this->wordPress)($target)->options();
+        $options = ($this->wordPress)($target, $targetInstall->dir)->options();
 
         return new KeptSite(
-            $targetConfigPath,
+            $targetInstall,
             $options->get('home')['value'],
             $options->get('siteurl')['value'],
             $options->get('blog_public')['value'],
-            $this->hosts(($this->wordPress)($source)),
+            $this->hosts(($this->wordPress)($source, $sourceInstall->dir)),
         );
     }
 
     /**
-     * After a pushed database: the target answers on its own addresses again.
-     * A multisite target's own wp-config.php names its host while the pushed
-     * network tables name the source's, and WordPress cannot boot until they
-     * agree, so the tables are rewritten first, before anything loads it. A
-     * push of some tables rewrites only those, as the target holds them.
+     * After a pushed database the target answers on its own addresses again. A multisite cannot boot until its own host
+     * and the pushed network tables agree, so those are rewritten first; a push of some tables rewrites only those.
      *
      * @param  list<array{database: string, name: string}>|null  $tables
      */
     public function afterPushedDatabase(User $target, KeptSite $kept, ?array $tables = null): void
     {
-        $wordPress = ($this->wordPress)($target);
+        $wordPress = ($this->wordPress)($target, $kept->install->dir);
         $this->pointMultisiteTablesAtTarget($wordPress, $kept);
         HostRewrite::ofPushedTables($wordPress, $tables)->run($kept->sourceHosts, $kept->host());
         $options = $wordPress->options();
@@ -106,10 +98,8 @@ final class SiteCopy
     }
 
     /**
-     * The search-replace boots WordPress, which on a multisite finds its main
-     * site by DOMAIN_CURRENT_SITE in the network tables, so it runs while both
-     * still name the source's host. The network tables and DOMAIN_CURRENT_SITE
-     * follow, then the URL constants.
+     * The search-replace boots WordPress, which on a multisite finds its main site by DOMAIN_CURRENT_SITE in the network
+     * tables, so it runs while both still name the source's host; they follow, then the URL constants.
      *
      * @param  list<string>  $hosts
      */

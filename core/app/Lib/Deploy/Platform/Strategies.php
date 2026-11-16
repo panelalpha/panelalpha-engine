@@ -3,40 +3,22 @@
 namespace App\Lib\Deploy\Platform;
 
 /**
- * The strategy ids the deploy pipeline knows how to build and run.
- *
- * A fair question is why any of these are in PHP at all, when every platform
- * declares its own `strategy` in YAML. The answer is that they fall into two
- * groups, and only one of them is irreducible.
- *
- * **Dispatched** — {@see DeployStrategy::apply()} branches on these by name,
- * because "use the PHP writer" is not something a manifest can say: PAEMD,
- * COMPOSE, DOCKERFILE, LARAVEL, PHP, RAILS, RUBY, RAILPACK, STATIC, FALLBACK.
- * Ten ids, and each one exists because a distinct piece of code runs for it.
- *
- * **Grouped** — everything else reaches the one framework writer generically
- * via {@see isGenerated()}. Their individual constants earn their
- * place only in tests, which read better asserting `Strategies::NEXTJS` than
- * `'nextjs'`. Nothing in `app/` switches on them one by one; what it needs is
- * the group membership in {@see JS_FRAMEWORKS} and {@see LANGUAGES}.
- *
- * The lists stay hand-maintained rather than derived from the manifests. A
- * derived list would make the contract test assert that the manifests agree
- * with themselves; this way, a platform whose strategy is genuinely new has
- * to be admitted here, which is the moment to notice that the generators do
- * not handle it yet.
+ * The strategy ids the pipeline builds and runs, dispatched by name in {@see DeployStrategy::apply()}
+ * or grouped for {@see isGenerated()}; hand-listed so a genuinely new one has to be admitted here.
  */
 final class Strategies
 {
-    // ---- Dispatched: apply() branches on these by name ----------------
-    // Repository supplies its own build definition.
+    /**
+     * Dispatched by name in {@see DeployStrategy::apply()}, with COMPOSE and DOCKERFILE: the repository
+     * supplies its own build definition.
+     */
     public const PAEMD = 'paemd';
 
     public const COMPOSE = 'compose';
 
     public const DOCKERFILE = 'dockerfile';
 
-    // Engine-generated recipes.
+    /** Dispatched by name, with PHP, RAILS and RUBY: each has its own engine-generated recipe writer. */
     public const LARAVEL = 'laravel';
 
     public const PHP = 'php';
@@ -45,6 +27,7 @@ final class Strategies
 
     public const RUBY = 'ruby';
 
+    /** Grouped from here to NODE: reached generically via {@see isGenerated()}, named for readable tests. */
     public const DJANGO = 'django';
 
     public const PYTHON = 'python';
@@ -57,8 +40,6 @@ final class Strategies
 
     public const DOTNET = 'dotnet';
 
-    // ---- Grouped: handled generically; named here for readable tests ---
-    // JS frameworks.
     public const NEXTJS = 'nextjs';
 
     public const NUXT = 'nuxt';
@@ -84,14 +65,12 @@ final class Strategies
     public const FASTIFY = 'fastify';
 
     /**
-     * A package.json with no framework in it. Grouped with the JS frameworks
-     * because the build is the same shape -- install, an optional build
-     * script, start -- and it is the runtime that differs from a language
-     * strategy, not the recipe.
+     * A package.json with no framework in it, grouped with the JS frameworks because the build
+     * has the same shape: install, an optional build script, start.
      */
     public const NODE = 'node';
 
-    // Terminal outcomes; no manifest is required to produce them.
+    /** Dispatched by name, with STATIC and FALLBACK: terminal outcomes no manifest is required to produce. */
     public const RAILPACK = 'railpack';
 
     public const STATIC = 'static';
@@ -99,8 +78,7 @@ final class Strategies
     public const FALLBACK = 'fallback';
 
     /**
-     * Strategies whose image the engine builds from a JS project — the set
-     * that used to be `Strategies::JS_FRAMEWORKS`.
+     * Strategies whose image the engine builds from a JS project.
      *
      * @var list<string>
      */

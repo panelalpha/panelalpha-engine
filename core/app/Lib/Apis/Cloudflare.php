@@ -27,30 +27,8 @@ class Cloudflare
     }
 
     /**
-     * The account a tunnel will be created in, and the account's name when
-     * Cloudflare is willing to tell us it.
-     *
-     * Two routes, tried in that order, and the second is not a nicety.
-     * `GET /accounts` is the obvious one and needs a permission Cloudflare's
-     * own tunnel guide does not list -- so a token created exactly as
-     * documented, with `Account: Cloudflare Tunnel Edit` and `Zone: DNS Edit`,
-     * can be refused the account *object* while being perfectly able to manage
-     * tunnels inside it:
-     *
-     *   GET /accounts                          200  result: []
-     *   GET /accounts/{id}                     403  9109 Unauthorized
-     *   GET /accounts/{id}/cfd_tunnel          200  works
-     *
-     * That is a working token failing before the engine has asked it to do
-     * anything, which reads as a rejected token and is not one. The id is not
-     * secret to a token that can see a zone in that account: `GET /zones`
-     * returns each zone's `account.id`, and managing DNS in the zone is a
-     * permission this feature already requires.
-     *
-     * The list is tried first, deliberately. It is the route Cloudflare
-     * documents, it says which account the token belongs to when the token can
-     * see several, and it is the only one that works for an account with no
-     * zones yet.
+     * The tunnel's account and, if told, its name: `GET /accounts` first, as documented, refusing several and working
+     * with no zones; else a zone's `account.id`, as a token made per Cloudflare's tunnel guide may lack /accounts.
      *
      * @return array{id: string, name: string}
      *
@@ -70,13 +48,15 @@ class Cloudflare
             return $fromZone;
         }
 
-        // A token Cloudflare refused outright is a different problem from a
-        // token it accepted and scoped too narrowly, and only the second is
-        // about Account Resources. Both routes used to swallow every
-        // CloudflareException, so an expired or mistyped token -- the commoner
-        // case by far -- was answered with a lecture about resource scoping on
-        // a token that was never valid. Cloudflare's own sentence says it
-        // better, so it goes first and the scoping advice follows it.
+        $this->failWithoutAccount($refused);
+    }
+
+    /**
+     * A token Cloudflare refused outright gets Cloudflare's own sentence, not the Account Resources advice for a token
+     * scoped too narrowly; that advice names both routes, or a missing permission reads as a missing zone.
+     */
+    private function failWithoutAccount(?CloudflareException $refused): never
+    {
         if ($refused !== null) {
             throw new CloudflareException(
                 'Cloudflare rejected this API token: '.$refused->getMessage(),
@@ -84,10 +64,6 @@ class Cloudflare
             );
         }
 
-        // Neither route produced an id. Name both, because the operator cannot
-        // otherwise tell a missing permission from a missing zone -- and the
-        // sentence Cloudflare's guide would lead them to expect ("check the
-        // permissions") is not the answer.
         throw new CloudflareException(
             'Cloudflare API token has no accessible accounts. Check that it selects an '
             .'account under Account Resources, and that Zone Resources includes at least '
@@ -96,11 +72,8 @@ class Cloudflare
     }
 
     /**
-     * `GET /accounts`, or null when it is empty or refused.
-     *
-     * Refused is caught rather than propagated: a 403 here is the exact case
-     * the zone route exists for, and turning it into a hard failure would leave
-     * a usable token rejected for a permission nothing needs.
+     * `GET /accounts`, or null when it is empty or refused: a 403 is what the zone route is for, so it is not thrown but
+     * kept in $refused, for {@see resolveAccount()} to tell "Cloudflare said no" from "the token sees nothing here".
      *
      * @return array{id: string, name: string}|null
      */
@@ -109,33 +82,40 @@ class Cloudflare
         try {
             $json = $this->get('/accounts', ['per_page' => 50]);
         } catch (CloudflareException $e) {
-            // Kept rather than discarded: {@see resolveAccount()} needs it to
-            // tell "Cloudflare said no" from "the token sees nothing here".
             $refused ??= $e;
 
             return null;
         }
 
-        $accounts = $json['result'] ?? [];
-        if (! is_array($accounts) || $accounts === []) {
+        $accounts = self::listedAccounts($json['result'] ?? null);
+        if ($accounts === []) {
             return null;
         }
 
-        $first = $accounts[0];
-        $id = is_array($first) ? (string) ($first['id'] ?? '') : '';
-        if ($id === '') {
-            return null;
+        self::assertOneAccount($accounts);
+
+        $id = (string) array_key_first($accounts);
+
+        return ['id' => $id, 'name' => $accounts[$id]];
+    }
+
+    /** @return array<string, string> account id => name */
+    private static function listedAccounts(mixed $accounts): array
+    {
+        $listed = [];
+        foreach (is_array($accounts) ? $accounts : [] as $account) {
+            $id = is_array($account) ? (string) ($account['id'] ?? '') : '';
+            if ($id !== '') {
+                $listed[$id] = (string) ($account['name'] ?? '');
+            }
         }
 
-        return ['id' => $id, 'name' => is_array($first) ? (string) ($first['name'] ?? '') : ''];
+        return $listed;
     }
 
     /**
-     * The account id a visible zone names, or null.
-     *
-     * The longest-suffix match is not the question here -- any zone the token
-     * can see is in an account the token can work in, and a token scoped to one
-     * account can only see that account's zones.
+     * The account id a visible zone names, which the zone access this feature needs already exposes, or null. Any zone
+     * will do, not the longest-suffix match: a token scoped to one account sees only that account's zones.
      *
      * @return array{id: string, name: string}|null
      */
@@ -154,6 +134,25 @@ class Cloudflare
             return null;
         }
 
+        $accounts = self::zoneAccounts($zones);
+
+        if ($accounts === []) {
+            return null;
+        }
+
+        self::assertOneAccount($accounts);
+
+        $id = (string) array_key_first($accounts);
+
+        return ['id' => $id, 'name' => $accounts[$id]];
+    }
+
+    /**
+     * @param  array<mixed>  $zones
+     * @return array<string, string> account id => name
+     */
+    private static function zoneAccounts(array $zones): array
+    {
         $accounts = [];
         foreach ($zones as $zone) {
             if (! is_array($zone)) {
@@ -169,18 +168,17 @@ class Cloudflare
             }
         }
 
-        if ($accounts === []) {
-            return null;
-        }
+        return $accounts;
+    }
 
-        // This route infers the account from a zone, which is sound only while
-        // the premise above holds -- one account in view. A token that can see
-        // zones in several accounts breaks it, and silently: the id would come
-        // from whichever zone Cloudflare happened to list first, while
-        // findZoneForHostname() picks by longest suffix across all of them. The
-        // tunnel would be created in one account and the CNAME written into a
-        // zone in another, and the hostname would simply never route, with
-        // nothing anywhere saying why. Refuse instead, and name them.
+    /**
+     * Several accounts are refused, not guessed: the tunnel would go to the first one and the CNAME, picked by longest
+     * suffix, into a zone of another, and the hostname would silently never route.
+     *
+     * @param  array<string, string>  $accounts
+     */
+    private static function assertOneAccount(array $accounts): void
+    {
         if (count($accounts) > 1) {
             throw new CloudflareException(
                 'This API token can see zones in more than one Cloudflare account ('
@@ -194,60 +192,59 @@ class Cloudflare
                 .'scope Zone Resources to zones in that one account.'
             );
         }
-
-        $id = (string) array_key_first($accounts);
-
-        return ['id' => $id, 'name' => $accounts[$id]];
     }
 
     /**
-     * Longest-suffix zone match for a hostname (e.g. a.b.example.com → example.com).
+     * The hostname's zone, asked for by name from the longest parent down (a.b.example.com, then
+     * b.example.com, then example.com), so it is found however many zones the token can see.
      *
      * @return array{id: string, name: string}
      */
     public function findZoneForHostname(string $hostname): array
     {
         $hostname = strtolower(trim($hostname));
-        $json = $this->get('/zones', ['per_page' => 50]);
-        $zones = $json['result'] ?? [];
-        if (! is_array($zones) || $zones === []) {
-            // Three causes, and the operator can only tell them apart if all
-            // three are named: the permission, the account resource, and
-            // whether the zone is in this Cloudflare account at all.
-            throw new ZoneNotFoundException(
-                'No Cloudflare zones are visible to this API token. Check that it has '
-                .'Zone:DNS Edit, that Zone Resources includes the zone this hostname is '
-                .'under, and that the zone belongs to the account the token selects.'
-            );
-        }
-
-        $best = null;
-        $bestLen = -1;
-        foreach ($zones as $zone) {
-            if (! is_array($zone)) {
-                continue;
-            }
-            $name = strtolower(trim((string) ($zone['name'] ?? '')));
-            $id = (string) ($zone['id'] ?? '');
-            if ($name === '' || $id === '') {
-                continue;
-            }
-            if ($hostname === $name || str_ends_with($hostname, '.'.$name)) {
-                $len = strlen($name);
-                if ($len > $bestLen) {
-                    $bestLen = $len;
-                    $best = ['id' => $id, 'name' => $name];
-                }
+        foreach (self::zoneCandidates($hostname) as $candidate) {
+            $zone = $this->zoneNamed($candidate);
+            if ($zone !== null) {
+                return $zone;
             }
         }
 
-        if ($best === null) {
-            throw new ZoneNotFoundException(
-                "Hostname '{$hostname}' is not under any Cloudflare zone accessible with this API token."
-            );
+        throw new ZoneNotFoundException(
+            "Hostname '{$hostname}' is not under any Cloudflare zone this API token can read. Check that "
+            .'it has Zone > Zone > Read, that Zone Resources includes the zone this hostname is under, '
+            .'and that the zone belongs to the account the token selects.'
+        );
+    }
+
+    /**
+     * The hostname and each parent name that still has two labels.
+     *
+     * @return list<string>
+     */
+    private static function zoneCandidates(string $hostname): array
+    {
+        $labels = explode('.', $hostname);
+
+        return array_map(
+            static fn (int $first): string => implode('.', array_slice($labels, $first)),
+            range(0, max(0, count($labels) - 2))
+        );
+    }
+
+    /**
+     * @return ?array{id: string, name: string}
+     */
+    private function zoneNamed(string $name): ?array
+    {
+        $zones = $this->get('/zones', ['name' => $name])['result'] ?? [];
+        foreach (is_array($zones) ? $zones : [] as $zone) {
+            if (is_array($zone) && strtolower((string) ($zone['name'] ?? '')) === $name && ($zone['id'] ?? '') !== '') {
+                return ['id' => (string) $zone['id'], 'name' => $name];
+            }
         }
 
-        return $best;
+        return null;
     }
 
     /**
@@ -373,23 +370,32 @@ class Cloudflare
                     'content' => $target,
                 ];
             }
-            $json = $this->put("/zones/{$zoneId}/dns_records/{$existing['id']}", [
-                'type' => 'CNAME',
-                'name' => $hostname,
-                'content' => $target,
-                'proxied' => true,
-                'ttl' => 1,
-            ]);
+            $json = $this->put("/zones/{$zoneId}/dns_records/{$existing['id']}", self::cnameRecord($hostname, $target));
         } else {
-            $json = $this->post("/zones/{$zoneId}/dns_records", [
-                'type' => 'CNAME',
-                'name' => $hostname,
-                'content' => $target,
-                'proxied' => true,
-                'ttl' => 1,
-            ]);
+            $json = $this->post("/zones/{$zoneId}/dns_records", self::cnameRecord($hostname, $target));
         }
 
+        return self::upsertedCname($json, $hostname, $target);
+    }
+
+    /** @return array<string, mixed> */
+    private static function cnameRecord(string $hostname, string $target): array
+    {
+        return [
+            'type' => 'CNAME',
+            'name' => $hostname,
+            'content' => $target,
+            'proxied' => true,
+            'ttl' => 1,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     * @return array{id: string, name: string, content: string}
+     */
+    private static function upsertedCname(array $json, string $hostname, string $target): array
+    {
         $result = $json['result'] ?? [];
         if (! is_array($result) || empty($result['id'])) {
             throw new CloudflareException("Failed to upsert DNS CNAME for '{$hostname}'.");
@@ -402,12 +408,12 @@ class Cloudflare
         ];
     }
 
+    /** A record that is already gone is fine. */
     public function deleteDnsRecord(string $zoneId, string $recordId): void
     {
         try {
             $this->delete("/zones/{$zoneId}/dns_records/{$recordId}");
         } catch (CloudflareException $e) {
-            // Already gone is fine.
             if (! str_contains(strtolower($e->getMessage()), 'could not find')
                 && ! str_contains(strtolower($e->getMessage()), 'not found')
             ) {
@@ -506,7 +512,7 @@ class Cloudflare
     }
 
     /**
-     * Build ingress list with catch-all, replacing any existing rule for hostname.
+     * Build ingress list with catch-all last, replacing any existing rule for hostname and dropping the old catch-all.
      *
      * @param  list<array<string, mixed>>  $existing
      * @param  array<string, mixed>|\stdClass  $originRequest
@@ -524,7 +530,6 @@ class Cloudflare
             if (! is_array($rule)) {
                 continue;
             }
-            // Drop catch-all; re-append at end.
             if (! isset($rule['hostname']) || $rule['hostname'] === '' || $rule['hostname'] === null) {
                 continue;
             }
@@ -639,20 +644,7 @@ class Cloudflare
         } catch (RequestException $e) {
             $body = $response->json();
             $errors = is_array($body) ? ($body['errors'] ?? null) : null;
-            $message = 'Cloudflare API request failed';
-            if (is_array($errors) && $errors !== []) {
-                $parts = [];
-                foreach ($errors as $error) {
-                    if (is_array($error) && isset($error['message'])) {
-                        $parts[] = (string) $error['message'];
-                    }
-                }
-                if ($parts !== []) {
-                    $message .= ': '.implode('; ', $parts);
-                }
-            } else {
-                $message .= ' (HTTP '.$response->status().')';
-            }
+            $message = self::requestFailedMessage($errors, $response);
             throw new CloudflareException($message, $response->status(), $e, self::errorsOf($errors));
         }
 
@@ -662,22 +654,48 @@ class Cloudflare
         }
         if (($json['success'] ?? true) === false) {
             $errors = $json['errors'] ?? [];
-            $parts = [];
-            if (is_array($errors)) {
-                foreach ($errors as $error) {
-                    if (is_array($error) && isset($error['message'])) {
-                        $parts[] = (string) $error['message'];
-                    }
-                }
-            }
             throw new CloudflareException(
-                'Cloudflare API error'.($parts !== [] ? ': '.implode('; ', $parts) : ''),
+                self::apiErrorMessage($errors),
                 $response->status(),
                 errors: self::errorsOf($errors)
             );
         }
 
         return $json;
+    }
+
+    private static function requestFailedMessage(mixed $errors, Response $response): string
+    {
+        $message = 'Cloudflare API request failed';
+        if (is_array($errors) && $errors !== []) {
+            $parts = [];
+            foreach ($errors as $error) {
+                if (is_array($error) && isset($error['message'])) {
+                    $parts[] = (string) $error['message'];
+                }
+            }
+            if ($parts !== []) {
+                $message .= ': '.implode('; ', $parts);
+            }
+        } else {
+            $message .= ' (HTTP '.$response->status().')';
+        }
+
+        return $message;
+    }
+
+    private static function apiErrorMessage(mixed $errors): string
+    {
+        $parts = [];
+        if (is_array($errors)) {
+            foreach ($errors as $error) {
+                if (is_array($error) && isset($error['message'])) {
+                    $parts[] = (string) $error['message'];
+                }
+            }
+        }
+
+        return 'Cloudflare API error'.($parts !== [] ? ': '.implode('; ', $parts) : '');
     }
 
     /**

@@ -6,16 +6,8 @@ use App\Lib\Deploy\Port\ComposePortScan;
 use App\Lib\Deploy\Port\ListeningSockets;
 
 /**
- * Which port the engine should publish for an application.
- *
- * Two independent answers, and the pipeline uses both. Before the container
- * exists, {@see ComposePortScan} reads what the compose file offers and
- * filters out everything that belongs to a datastore. Once it is running,
- * {@see ListeningSockets} reads what the process actually bound — which is
- * the only way to catch an application that ignores $PORT and would otherwise
- * pass a green deploy behind a 502.
- *
- * No Laravel dependencies — unit-testable.
+ * Which port the engine publishes: {@see ComposePortScan} reads what compose offers before the container exists,
+ * {@see ListeningSockets} what it bound, catching an app ignoring $PORT behind a 502. No Laravel dependencies.
  */
 class DetectAppPort
 {

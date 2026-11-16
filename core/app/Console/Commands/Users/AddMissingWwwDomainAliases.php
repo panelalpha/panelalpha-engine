@@ -19,7 +19,7 @@ class AddMissingWwwDomainAliases extends ProjectFleetCommand
 
     protected function progress(User $user): string
     {
-        return "Adding www. aliases for user '{$user->username}'...";
+        return "Adding www. aliases for project '{$user->username}'...";
     }
 
     protected function applyTo(User $user): void

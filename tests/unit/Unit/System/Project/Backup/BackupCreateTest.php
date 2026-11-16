@@ -8,6 +8,7 @@ use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\BackupItem;
 use App\Models\User;
+use App\Support\JobDeadline;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project;
@@ -16,6 +17,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\HostCommand;
 use Tests\TestCase;
 
 class BackupCreateTest extends TestCase
@@ -228,6 +230,34 @@ class BackupCreateTest extends TestCase
         $this->assertSame(['put', 'put', 'put'], $storage->calls);
     }
 
+    public function test_a_spent_budget_fails_before_snapshotting_and_starts_the_app_again(): void
+    {
+        $user = $this->makeUser('alice');
+        $container = $this->makeContainer();
+        $storage = new FakeStorage();
+        $project = $this->project($user);
+        $record = BackupRecord::prepare($user, $container, 'artisan');
+        $backup = new BackupDouble(
+            $project,
+            $record,
+            $storage,
+            deadline: new JobDeadline(microtime(true) - 5),
+        );
+
+        try {
+            $backup->run();
+        } catch (\Throwable) {
+        }
+
+        $record->refresh();
+        $this->assertSame('failed', $record->backupStatus());
+        $this->assertContains('composeStop', $backup->calls);
+        $this->assertContains('composeStart', $backup->calls);
+        $this->assertNotContains('tarProject', $backup->calls);
+        $this->assertNotContains('tarVolume', $backup->calls);
+        $this->assertNotContains('dumpDatabase', $backup->calls);
+    }
+
     public function test_optional_storage_prefix_is_applied_to_object_keys(): void
     {
         $user = $this->makeUser('alice');
@@ -342,6 +372,8 @@ class BackupCreateTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
+
                 return '';
             }
 

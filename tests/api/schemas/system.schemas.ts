@@ -28,6 +28,16 @@ export const systemInfoSchema = z
     default_ipv4: z.string().nullable().optional(),
     default_ipv6: z.string().nullable().optional(),
     default_tunnel: z.enum(['panelalpha', 'none']).nullable().optional(),
+    project_domain_bases: z
+      .array(
+        z.object({
+          base: z.string().min(1),
+          source: z.enum(['sites_base_domain', 'panelalpha_online', 'panelalpha_direct', 'local']),
+          suffixed: z.boolean(),
+          publicly_resolvable: z.boolean().nullable(),
+        })
+      )
+      .min(1),
     ipv4_nat_mode: z.boolean().optional(),
     ipv4_nat_maps: z.array(ipv4NatMapSchema).optional(),
     latest_webserver_change: z
@@ -154,4 +164,112 @@ export const apiAccessRemovalResponseSchema = z.object({
 export const apiAccessRotationResponseSchema = z.object({
   data: apiAccessEntrySchema,
   task_id: z.number(),
+});
+
+export const systemImageSourceSchema = z.enum(['pull', 'build', 'local']);
+
+export const systemImageStatusSchema = z.enum(['pending', 'ready', 'failed', 'removing']);
+
+const systemImageFieldsSchema = z.object({
+  ref: z.string().min(1),
+  source: systemImageSourceSchema,
+  why: z.string().nullable(),
+  digest: z.string().nullable(),
+  size: z.number().int().nonnegative().nullable(),
+  refreshed_at: z.string().nullable(),
+});
+
+/** The fields every operator image carries. */
+export const operatorImageSchema = systemImageFieldsSchema.extend({
+  id: z.number().int().positive(),
+  owner: z.literal('operator'),
+  dockerfile: z.string().nullable(),
+  build_args: z.record(z.string(), z.string()),
+  status: systemImageStatusSchema,
+  error: z.string().nullable(),
+  task_id: z.number().int().positive().nullable(),
+});
+
+/** An operator image as every endpoint answers it, with whether the registry holds it. */
+export const listedOperatorImageSchema = operatorImageSchema.extend({
+  present: z.boolean().nullable(),
+});
+
+/** An image from the engine's own catalogue: no id, and what prewarm knows about it. */
+export const engineImageSchema = systemImageFieldsSchema.extend({
+  id: z.null(),
+  owner: z.literal('engine'),
+  source: z.enum(['pull', 'build']),
+  runtime: z.string().nullable(),
+  prewarm_id: z.string().nullable(),
+  selected: z.boolean().nullable(),
+  present: z.boolean().nullable(),
+});
+
+export const systemImageSchema = z.discriminatedUnion('owner', [
+  listedOperatorImageSchema,
+  engineImageSchema,
+]);
+
+export const systemImageListResponseSchema = z.object({
+  data: z.array(systemImageSchema),
+});
+
+/** One BuildKit cache of one build of a public repository. */
+export const systemBuildCacheSchema = z.object({
+  ref: z.string().regex(/^buildcache\/[a-z0-9./_-]+:[A-Za-z0-9_][A-Za-z0-9_.-]*$/),
+  repository: z.string(),
+  tag: z.string(),
+});
+
+export const systemBuildCacheListResponseSchema = z.object({
+  data: z.array(systemBuildCacheSchema),
+});
+
+export const systemBuildCacheQueuedResponseSchema = z.object({
+  task_id: z.number().int().positive(),
+});
+
+export const systemBuildCacheRemovedResponseSchema = z.object({
+  removed: z.array(z.string()),
+});
+
+/** One time the outbound limits stopped a project or a host build. */
+export const outboundEventSchema = z.object({
+  owner: z.string().min(1),
+  network: z.enum(['tenants', 'build']),
+  kind: z.enum(['scan', 'flood', 'smtp']),
+  address: z.string().min(1),
+  started_at: z.string(),
+  last_seen_at: z.string(),
+  blocked_until: z.string().nullable(),
+  active: z.boolean(),
+  lifted_at: z.string().nullable(),
+  lifted_by: z.string().nullable(),
+});
+
+export const systemEgressListResponseSchema = z.object({
+  active: z.boolean(),
+  settings: z.record(z.string(), z.number().int().nonnegative()),
+  data: z.array(outboundEventSchema),
+});
+
+export const systemEgressUnblockResponseSchema = z.object({
+  lifted: z.boolean(),
+  addresses: z.array(z.string()),
+});
+
+export const systemImageResponseSchema = z.object({
+  data: listedOperatorImageSchema,
+});
+
+/** A change that needs no work: the image, and no task. */
+export const operatorImageResponseSchema = z.object({
+  data: listedOperatorImageSchema,
+});
+
+/** A create, rebuild, refresh or delete: the image, and the task doing the work. */
+export const systemImageOperationResponseSchema = z.object({
+  data: listedOperatorImageSchema,
+  task_id: z.number().int().positive(),
 });

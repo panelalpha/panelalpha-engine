@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Users\ProjectSettings;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User;
 use App\System\Project\Settings;
@@ -12,7 +11,6 @@ use Illuminate\Console\Command;
 class Set extends Command
 {
     use ConfirmsChanges;
-    use ResolvesProject;
 
     protected $aliases = ['projects:settings:set'];
 
@@ -20,17 +18,14 @@ class Set extends Command
         {key : Setting key (e.g. cloudflare-api-token)}
         {value? : Setting value}
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--value= : Setting value (alternative to the positional argument)}
         {--force : Skip confirmation}';
 
-    protected $description = 'Set an allowlisted project setting (stored on the project/user)';
+    protected $description = 'Set an allowlisted project setting (stored on the project)';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $key = Settings::normalizeKey((string) $this->argument('key'));
         $positional = (string) ($this->argument('value') ?? '');
         $optionValue = (string) ($this->option('value') ?? '');
@@ -113,7 +108,7 @@ class Set extends Command
     private function explainCloudflareToken(): void
     {
         $this->line('Token will be validated against the Cloudflare API and stored encrypted.');
-        $this->line('Required permissions: Account Cloudflare Tunnel Edit and Zone DNS Edit; for the CDN also Zone Cache Purge and Zone Settings Edit.');
+        $this->line('Required permissions: Account Cloudflare Tunnel Edit, Zone Read and Zone DNS Edit; for the CDN also Zone Cache Purge and Zone Settings Edit.');
         $this->line('Account Resources must include the account, and Zone Resources the zones the project uses.');
         $this->line('Create one at https://dash.cloudflare.com/profile/api-tokens (Create Custom Token).');
     }

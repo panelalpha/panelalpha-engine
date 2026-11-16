@@ -1,0 +1,271 @@
+[1 log lines] write {dir}/panelalpha.serve.mjs chown=1001:1001 mode=644
+import { createServer } from 'node:http'
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { extname, join, normalize, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { spawn } from 'node:child_process'
+
+const ROOT = process.cwd()
+const PORT = Number(process.env.PORT || process.env.NITRO_PORT || 3000)
+const HOST = process.env.HOST || process.env.NITRO_HOST || '0.0.0.0'
+
+const ENTRIES = [
+  '.output/server/index.mjs',
+  '.output/server/index.js',
+  'dist/server/server.js',
+  'dist/server/index.js',
+  'dist/server/index.mjs',
+]
+
+const ASSETS = ['dist/client', '.output/public', 'dist/public']
+
+const MIME = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+}
+
+function firstExisting(paths) {
+  for (const rel of paths) {
+    const abs = resolve(ROOT, rel)
+    if (existsSync(abs)) {
+      return { rel: rel.replace(/\\/g, '/'), abs }
+    }
+  }
+  return null
+}
+
+function incomingToRequest(req) {
+  const host = req.headers.host || '127.0.0.1'
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value == null) continue
+    headers.set(key, Array.isArray(value) ? value.join(', ') : String(value))
+  }
+  const method = req.method || 'GET'
+  const hasBody = method !== 'GET' && method !== 'HEAD'
+  return new Request(`http://${host}${req.url}`, {
+    method,
+    headers,
+    body: hasBody ? req : undefined,
+    duplex: hasBody ? 'half' : undefined,
+  })
+}
+
+async function writeResponse(res, response) {
+  const headers = {}
+  response.headers.forEach((value, key) => {
+    headers[key] = value
+  })
+  res.writeHead(response.status, headers)
+  if (response.body == null) {
+    res.end()
+    return
+  }
+  const buf = Buffer.from(await response.arrayBuffer())
+  res.end(buf)
+}
+
+function safeAsset(root, urlPath) {
+  const decoded = decodeURIComponent((urlPath.split('?')[0] || '/'))
+  const abs = normalize(join(root, decoded))
+  const rel = relative(root, abs)
+  if (rel.startsWith('..') || rel.startsWith(sep) || rel.includes(`..${sep}`)) {
+    return null
+  }
+  return abs
+}
+
+function tryStatic(res, assetsRoot, urlPath) {
+  if (assetsRoot == null) {
+    return false
+  }
+  let file = safeAsset(assetsRoot, urlPath)
+  if (file == null) {
+    return false
+  }
+  try {
+    const st = statSync(file)
+    if (st.isDirectory()) {
+      file = join(file, 'index.html')
+    }
+    if (!existsSync(file) || !statSync(file).isFile()) {
+      return false
+    }
+  } catch {
+    return false
+  }
+  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream' })
+  createReadStream(file).pipe(res)
+  return true
+}
+
+const entry = firstExisting(ENTRIES)
+if (entry == null) {
+  console.error('No server build found. Looked for: ' + ENTRIES.join(', '))
+  process.exit(1)
+}
+
+// Self-contained servers under .output/ listen when executed as main. import() would skip that.
+if (entry.rel.startsWith('.output/')) {
+  const child = spawn(process.execPath, [entry.abs], { stdio: 'inherit', env: process.env })
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal)
+      return
+    }
+    process.exit(code ?? 1)
+  })
+} else {
+  const mod = await import(pathToFileURL(entry.abs).href)
+  const fetchHandler =
+    (typeof mod.fetch === 'function' && mod.fetch)
+    || (mod.default && typeof mod.default.fetch === 'function' && mod.default.fetch)
+    || (typeof mod.default === 'function' ? mod.default : null)
+  if (typeof fetchHandler !== 'function') {
+    console.error(entry.rel + ' has no fetch() export and is not a listening .output server')
+    process.exit(1)
+  }
+  const assets = firstExisting(ASSETS)
+  createServer(async (req, res) => {
+    try {
+      if (tryStatic(res, assets && assets.abs, req.url || '/')) {
+        return
+      }
+      await writeResponse(res, await fetchHandler(incomingToRequest(req)))
+    } catch (err) {
+      console.error(err)
+      if (!res.headersSent) {
+        res.writeHead(500)
+      }
+      res.end()
+    }
+  }).listen(PORT, HOST, () => {
+    console.log('Listening on ' + HOST + ':' + PORT + ' (' + entry.rel + ')')
+  })
+}
+
+
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "nuxt",
+        "label": "Nuxt",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 3000,
+        "runtime": "node",
+        "output_directory": ".output",
+        "package_manager": "npm",
+        "install_command": "HUSKY=0 LEFTHOOK=0 CI=1 npm install --no-audit --no-fund",
+        "build_command": "npm run build",
+        "start_command": "npm start",
+        "env": {
+            "HOST": "0.0.0.0",
+            "HOSTNAME": "0.0.0.0",
+            "PORT": "3000",
+            "HUSKY": "0",
+            "CI": "1",
+            "NITRO_HOST": "0.0.0.0",
+            "NITRO_PORT": "3000",
+            "PA_DEPLOY_PHASE": "install"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "node:22-bookworm-slim",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "nuxt",
+        "requirements": [
+            {
+                "id": "node",
+                "version": "22",
+                "constraint": "",
+                "source": "engine default",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "node 22 (from engine default)"
+        ],
+        "build_images": [],
+        "resolved_commands": [],
+        "setup_command": null
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    image: 'node:22-bookworm-slim'
+    working_dir: /app
+    command: 'node panelalpha.serve.mjs'
+    ports:
+      - '3000:3000'
+    volumes:
+      - './panelalpha.serve.mjs:/app/panelalpha.serve.mjs:ro'
+      - './.output:/app/.output:ro'
+      - './dist:/app/dist:ro'
+      - './node_modules:/app/node_modules:ro'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      HUSKY: '0'
+      CI: '1'
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: '3000'
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

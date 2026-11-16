@@ -5,13 +5,8 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * One toolchain the engine can put in an image: PHP, Node, Python, Ruby, Go,
- * Rust, Java. A manifest names it under `requires` and states no version; the
- * runtime reads the project (go.mod's `go` line, `requires-python`,
- * `engines.node`, composer's `require.php`) and answers with a `Requirement`.
- *
- * Distinct from a *tool* (npm, composer, bundler): a tool constrains the
- * runtime hosting it and provides no image of its own.
+ * One toolchain the engine can put in an image, named under a manifest's `requires`; it reads the
+ * version from the project (go.mod, `engines.node`, `require.php`) and answers with a `Requirement`.
  */
 interface Runtime
 {
@@ -31,19 +26,16 @@ interface Runtime
     public function defaultRequirement(): Requirement;
 
     /**
-     * The versions worth having on the host before anyone asks. What the
-     * prewarmer reads; anything outside this set is acquired on demand. Not a
-     * limit on what `resolve()` may answer — Go honours a go.mod newer than
-     * anything listed here.
+     * The versions the prewarmer puts on the host before anyone asks; not a limit on what
+     * `resolve()` may answer, since anything else is acquired on demand.
      *
      * @return list<string> versions in the spelling of `Requirement::$version`
      */
     public function supportedVersions(): array;
 
     /**
-     * The image providing this requirement on its own, for a requirement this
-     * runtime produced. Combining runtimes into one image is `ImageResolver`'s
-     * decision, not a runtime's.
+     * The image providing this requirement on its own; combining runtimes into one image is
+     * `ImageResolver`'s decision, not a runtime's.
      */
     public function image(Requirement $requirement): string;
 }

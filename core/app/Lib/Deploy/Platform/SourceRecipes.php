@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Platform;
 
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory;
+use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigSource;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Source\RepoUrl;
@@ -11,15 +12,8 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * The engine's per-repository directories: `resources/sources/<host>/<owner>/<repo>/`,
- * shaped exactly like a project's own `.panelalpha/` and found by the URL the
- * project was cloned from rather than by reading the checkout.
- *
- * This class answers only the recipe half — the `platform:` block in that
- * directory's `panelalpha.yaml`, turned into a manifest. The scripts, compose
- * file and file snippets beside it are read as an app config by
- * {@see AppConfigDirectory}, through the same locator a repository's own
- * directory goes through.
+ * The recipes in `resources/sources/<host>/<owner>/<repo>/`, shaped like a project's `.panelalpha/` and found by the clone URL.
+ * Only the `platform:` half; the scripts and files beside it are read by {@see AppConfigDirectory}, as for a repository's own.
  */
 final class SourceRecipes
 {
@@ -50,9 +44,8 @@ final class SourceRecipes
     }
 
     /**
-     * The recipe for the repository this URL names, or null when there is no
-     * directory for it or the directory declares no platform. Cached per recipe
-     * file stamp, so a long-lived worker sees an added or edited recipe.
+     * The recipe for the repository this URL names, or null when there is no directory or it declares no platform. Cached per
+     * recipe file stamp, so a long-lived worker sees an added or edited recipe.
      *
      * @throws ManifestException
      */
@@ -104,10 +97,8 @@ final class SourceRecipes
     }
 
     /**
-     * The recipe a `.panelalpha/`-shaped directory declares, wherever it is.
-     * Null when there is no directory or it declares no `platform:`, which most do
-     * not — but an existing directory without `panelalpha.yaml` is a half-written recipe.
-     * The recipe's own `checks/` are passed along, so a `check:` naming one is known.
+     * The recipe a `.panelalpha/`-shaped directory declares, null without a directory or a `platform:`; one without
+     * `panelalpha.yaml` is a half-written recipe. Its own `checks/` are passed along, so a `check:` naming one is known.
      *
      * @throws ManifestException
      */
@@ -125,16 +116,14 @@ final class SourceRecipes
         }
 
         return self::fromAppConfig(
-            AppConfig::fromYaml($config),
+            AppConfig::fromYaml($config, AppConfigLocator::recipeSubject($name ?? $dir)),
             $name ?? $dir,
             self::checksDirectory($dir)
         );
     }
 
     /**
-     * Where a recipe directory keeps its own health checks, if it keeps any.
-     *
-     * `checks/` beside `panelalpha.yaml`, and only when it exists: a recipe
+     * Where a recipe directory keeps its own health checks: `checks/` beside `panelalpha.yaml`, only when it exists, as a recipe
      * with no checks of its own must reach `CheckRegistry` as "no directory".
      */
     public static function checksDirectory(string $dir): ?string
@@ -145,11 +134,8 @@ final class SourceRecipes
     }
 
     /**
-     * The manifest an app config describes, if it describes one.
-     *
-     * `extends` names the recipe this application is an instance of; every
-     * other manifest key overrides that recipe, top level by top level. An id
-     * no shipped recipe answers to means the file is the whole manifest.
+     * The manifest an app config describes, if any: `extends` names the recipe it is an instance of, and every other key overrides
+     * that recipe's top level; an id no shipped recipe answers to means the file is the whole manifest.
      *
      * @throws ManifestException
      */
@@ -237,7 +223,8 @@ final class SourceRecipes
 
     /**
      * The pipeline falls back on a strategy it does not know, so a typo would deploy
-     * green and serve the placeholder page. An unset key keeps the default, the id.
+     * green and serve the placeholder page. An unset key defaults to the id, and that
+     * default is the strategy too, so it is checked the same way.
      *
      * @param  array<string, mixed>  $raw
      *
@@ -245,12 +232,15 @@ final class SourceRecipes
      */
     private static function assertKnownStrategy(array $raw, string $name): void
     {
-        if (isset($raw['strategy']) && is_string($raw['strategy']) && ! Strategies::isKnown($raw['strategy'])) {
-            throw new ManifestException(
-                "{$name}: strategy '{$raw['strategy']}' is not one this engine deploys; "
-                .'expected one of: '.implode(', ', Strategies::ALL)
-            );
+        $strategy = $raw['strategy'] ?? $raw['id'] ?? null;
+        if (! is_string($strategy) || Strategies::isKnown($strategy)) {
+            return;
         }
+
+        throw new ManifestException(
+            "{$name}: strategy '{$strategy}' is not one this engine deploys; "
+            .'expected one of: '.implode(', ', Strategies::ALL)
+        );
     }
 
     /**
@@ -274,13 +264,8 @@ final class SourceRecipes
     }
 
     /**
-     * Every recipe the tree declares, in path order. Only id lookups and the
-     * contract tests walk it; a deploy reads one directory. Several recipes may
-     * share an id; the first in path order answers for it.
-     *
-     * Cached until a recipe file changes, so a long-lived worker sees new recipes.
-     * A directory it cannot read is skipped and recorded in {@see skipped()},
-     * not thrown, so one malformed recipe does not break every lookup.
+     * Every recipe the tree declares, in path order (the first answers for a shared id), cached until a recipe file changes. One
+     * it cannot read is recorded in {@see skipped()}, not thrown, so a malformed recipe does not break every lookup.
      *
      * @return list<PlatformManifest>
      */
@@ -369,18 +354,8 @@ final class SourceRecipes
     }
 
     /**
-     * Every recipe directory under the tree, keyed by slug.
-     *
-     * A recipe lives at least at `<host>/<owner>/<repo>` (three levels) and is
-     * any directory there that carries a `panelalpha.yaml`. The owner may be a
-     * multi-level GitLab namespace, so the walk descends until it meets the
-     * manifest rather than stopping at a fixed depth: a namespace directory
-     * above a subgroup repo (`<host>/<group>/<subgroup>/`) is walked through,
-     * and the manifest, once found, ends the descent so a recipe's own nested
-     * `files/…/panelalpha.yaml` payload is not mistaken for another recipe.
-     *
-     * A three-level leaf with no manifest is kept — the half-written recipe
-     * {@see all()} reports rather than throws.
+     * Every recipe directory, by slug: from three levels down, the walk stops at a `panelalpha.yaml` (owners may be GitLab subgroups,
+     * and a recipe's own `files/…/panelalpha.yaml` is no recipe) or keeps a leaf without one, which {@see all()} reports.
      *
      * @return array<string, string>
      */
@@ -443,10 +418,8 @@ final class SourceRecipes
     }
 
     /**
-     * The shipped recipe an id names, as raw YAML — the override merge happens
-     * before validation, so the result is checked as the one thing it will be.
-     * Resolved by path rather than through {@see PlatformRegistry}, which
-     * would load every manifest and would recurse back into this class.
+     * The shipped recipe an id names, as raw YAML, as the merge precedes validation. Resolved by path, not through
+     * {@see PlatformRegistry}, which would load every manifest and recurse back into this class.
      *
      * @return array<string, mixed>
      *

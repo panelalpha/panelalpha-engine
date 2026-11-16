@@ -3,6 +3,7 @@
 namespace Tests\Unit\System;
 
 use App\System;
+use App\System\Privileged;
 use App\System\Services\Webserver;
 use App\System\Services\Webserver\NginxProxy;
 use PHPUnit\Framework\TestCase;
@@ -47,7 +48,7 @@ class NginxProxyVhostsDirTest extends TestCase
         $this->assertSame(['gone.test'], $proxy->listDomains());
         $this->assertTrue($proxy->domainConfigExists('gone.test'));
         $this->assertSame(['gone.test'], $proxy->pruneDomainConfigs([]));
-        $this->assertSame([['sudo', 'rm', '-f', $this->vhostsDir() . '/gone.test.conf']], $this->commands->getArrayCopy());
+        $this->assertSame([Privileged::files()->removeIfExists($this->vhostsDir() . '/gone.test.conf')], $this->commands->getArrayCopy());
     }
 
     private function vhostsDir(): string

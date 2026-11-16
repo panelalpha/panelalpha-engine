@@ -99,7 +99,7 @@ class DindDeployMechanicsTest extends TestCase
         $body = self::methodBody($files, 'importProjectArchive');
 
         $milestones = [
-            "info('Copying the project archive into the stage directory')",
+            "info('Copying the project archive '.basename(\$archive->path).' into the stage directory')",
             "info('Unpacking the project archive')",
             "info('Writing the project archive into ~/project')",
         ];
@@ -183,6 +183,29 @@ class DindDeployMechanicsTest extends TestCase
             "'-v'",
             $stop,
             "The pre-wipe stop must not pass -v; that removes the account's named volumes."
+        );
+    }
+
+    // The archive a deploy reads is gone by the end of the import that reads it: no cleanup is left to run once the
+    // deploy has reported itself finished, when the project may still answer busy and a client may already upload.
+    public function test_the_archive_a_deploy_read_is_removed_before_the_deploy_reports_finished(): void
+    {
+        $files = file_get_contents($this->coreAppRoot . '/System/Project/Dind/Source/Files.php');
+        $import = self::methodBody($files, 'importProjectArchive');
+        $this->assertStringContainsString('$this->removeConsumedArchive(', $import);
+        $this->assertLessThan(
+            strpos($import, '} finally {'),
+            strpos($import, '$this->removeConsumedArchive('),
+            'the import removes it itself, not a step that runs after the deploy'
+        );
+
+        $workflow = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
+        $prepare = self::methodBody($workflow, 'prepareSourceRebuild');
+        $this->assertStringContainsString('syncHostingForSourceRebuild', $prepare, 'the import is the prepare stage');
+        $this->assertLessThan(
+            strpos($workflow, 'finishSourceRebuildServing('),
+            strpos($workflow, '$this->prepareSourceRebuild('),
+            'the prepare stage, with the import and its removal, runs before the deploy is finished'
         );
     }
 

@@ -5,18 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Go identity, from go.mod's module path.
- *
- * The thinnest ecosystem here, and deliberately so: Go has no description, no
- * license field and no version — a module's version is a git tag, which is why
- * `go.mod` never mentions one. What it does have is a module path that is
- * usually a repository URL, so the name is real and the repository comes free.
- *
- * The compensation is that dependency versions are exact and cost nothing:
- * `require` lines carry the resolved version already, so a Go project reports
- * `Gin 1.9.1` where a Python one can only report a range.
- *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * Go identity, from go.mod: no description, license or version (a tag is the version), but a module path that
+ * names the repository, and `require` lines that carry exact versions.
  */
 final class GoMetadata implements PackageMetadata
 {
@@ -46,6 +36,7 @@ final class GoMetadata implements PackageMetadata
         return 'go';
     }
 
+    /** go.mod records the selected version, so constraints and versions are the same map. */
     public function read(ProjectContext $context): ?AppPackage
     {
         $gomod = $context->contents(self::FILE);
@@ -59,23 +50,24 @@ final class GoMetadata implements PackageMetadata
         return new AppPackage(
             ecosystem: $this->id(),
             file: self::FILE,
-            // The last segment, because `github.com/acme/shop` names the
-            // repository and `shop` names the application.
-            name: $module === null ? self::directoryName($context) : basename($module),
+            name: self::name($module, $context),
             nameSource: $module === null ? AppPackage::NAME_FROM_DIRECTORY : self::FILE.' module',
             repository: $module !== null && str_contains($module, '.') ? $module : null,
-            // Constraints and versions are the same map: go.mod records the
-            // selected version, so there is no range to report separately.
             frameworks: self::matchFrameworks(self::FRAMEWORKS, $requires, $requires, self::FILE, self::FILE),
             dependencyCounts: ['require' => count($requires)],
-            // The `go` directive is a minimum, and since 1.21 the toolchain
-            // treats it as one it will go and fetch. Either way it is the one
-            // platform fact go.mod states.
             platform: self::toolchain($gomod)
         );
     }
 
+    /** The module path's last segment: `github.com/acme/shop` names the repository, `shop` the application. */
+    private static function name(?string $module, ProjectContext $context): ?string
+    {
+        return $module === null ? self::directoryName($context) : basename($module);
+    }
+
     /**
+     * The `go` directive, a minimum the toolchain fetches since 1.21, and the one platform fact go.mod states.
+     *
      * @return array<string, string>
      */
     private static function toolchain(string $gomod): array
@@ -89,11 +81,8 @@ final class GoMetadata implements PackageMetadata
     }
 
     /**
-     * Module paths and their versions, from both `require` spellings.
-     *
-     * Indirect dependencies are skipped: `// indirect` marks something no line
-     * of this project imports, and reporting one as the project's framework
-     * would be actively misleading.
+     * Module paths and their versions, from both `require` spellings; `// indirect` ones are skipped, as no line
+     * of this project imports them.
      *
      * @return array<string, string>
      */

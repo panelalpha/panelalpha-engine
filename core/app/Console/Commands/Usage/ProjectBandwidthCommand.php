@@ -9,8 +9,8 @@ class ProjectBandwidthCommand extends UsageCommand
 {
     protected $signature = 'project:bandwidth
                             {project : Project username}
-                            {--start= : Range start (Y-m-d)}
-                            {--end= : Range end (Y-m-d)}
+                            {--start= : Range start (Y-m-d, required)}
+                            {--end= : Range end (Y-m-d, required)}
                             {--group-by=day : Bucket size (day or month)}';
 
     protected $description = 'Show bandwidth over a date range for a project';

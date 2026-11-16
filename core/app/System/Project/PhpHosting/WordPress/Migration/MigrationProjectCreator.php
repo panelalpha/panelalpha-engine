@@ -9,9 +9,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 interface MigrationProjectCreator
 {
     /**
-     * Create an empty classic project. With a domain it gets exactly that name
-     * and no tunnel; without one, DomainAllocator allocates a panelalpha.online
-     * name with tunnel=panelalpha. Returns only after the hosting container is ready.
+     * Create an empty classic project on exactly the domain with no tunnel, or on a panelalpha.online name with
+     * tunnel=panelalpha. Returns only after the hosting container is ready.
      *
      * @return string the project's domain
      */

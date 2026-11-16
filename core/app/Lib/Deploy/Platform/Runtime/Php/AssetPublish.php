@@ -3,14 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime\Php;
 
 /**
- * The asset publishes a project registers in its own composer scripts.
- *
- * Composer runs `post-update-cmd` and `post-create-project-cmd` on neither
- * `install` nor with `--no-scripts`, so assets a package ships under vendor/
- * (Cachet's Vite build, Filament's CSS) never reach public/. Only artisan
- * asset publishes are taken, and only with allow-listed arguments.
- *
- * No Laravel dependencies — unit-testable.
+ * The artisan asset publishes a project registers in `post-update-cmd`/`post-create-project-cmd`, which `install`
+ * never runs, so vendor assets (Filament's CSS) would not reach public/. Only allow-listed arguments are taken.
  */
 final class AssetPublish
 {
@@ -64,6 +58,7 @@ final class AssetPublish
         return implode('; ', $lines);
     }
 
+    /** One bad argument drops the whole entry: publishing without the tag it named publishes something else. */
     private static function parse(string $entry): ?string
     {
         $words = preg_split('/\s+/', trim($entry)) ?: [];
@@ -76,8 +71,6 @@ final class AssetPublish
             return null;
         }
 
-        // One bad argument drops the whole entry: publishing without the tag
-        // it named would publish something the project never asked for.
         $arguments = array_slice($words, 2);
         foreach ($arguments as $argument) {
             if (preg_match(self::SAFE_ARGUMENT, $argument) !== 1) {

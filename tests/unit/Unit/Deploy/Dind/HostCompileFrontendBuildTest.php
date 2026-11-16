@@ -2,20 +2,23 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
-use App\System;
-use App\System\Filesystem as SystemFilesystem;
-use App\System\Project\Dind;
-use App\System\Project\Dind\HostCompile;
-use App\System\Project\Dind\InnerDocker;
-use App\System\Project\Dind\Inner\SharedBaseImages;
-use App\System\Project\Dind\ProjectFiles;
-use App\System\Project\Dind\ShellOperations;
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Models\User;
+use App\System;
+use App\System\Filesystem as SystemFilesystem;
+use App\System\Project\Dind;
+use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
+use App\System\Project\Dind\ProjectFiles;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * The manifest's `frontend_build` in the PHP host frontend pass:
@@ -27,18 +30,18 @@ class HostCompileFrontendBuildTest extends TestCase
     /** @param array<string, string> $files absolute account path => contents */
     private function system(array $files, int $exit = 0, string $stderr = ''): System
     {
-        return new class ($files, $exit, $stderr) extends System {
+        return new class($files, $exit, $stderr) extends System
+        {
             /** @var list<list<string>> */
             public array $commands = [];
 
             /** @param array<string, string> $files */
-            public function __construct(private array $files, private int $exit = 0, private string $stderr = '')
-            {
-            }
+            public function __construct(private array $files, private int $exit = 0, private string $stderr = '') {}
 
             public function filesystem(): SystemFilesystem
             {
-                return new class ($this, $this->files) extends SystemFilesystem {
+                return new class($this, $this->files) extends SystemFilesystem
+                {
                     /** @param array<string, string> $files */
                     public function __construct(System $engine, private array $files)
                     {
@@ -64,12 +67,11 @@ class HostCompileFrontendBuildTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? $cmd : [$cmd];
-                if (in_array('docker', $argv, true)) {
-                    $this->commands[] = $argv;
+                if (is_array($cmd) && LocalRoot::build($cmd) !== []) {
+                    $this->commands[] = $cmd;
                 }
                 $process = new Process([
-                    'php', '-r', 'echo "Running webpack ..."; fwrite(STDERR, ' . var_export($this->stderr, true) . '); exit(' . $this->exit . ');',
+                    'php', '-r', 'echo "Running webpack ..."; fwrite(STDERR, '.var_export($this->stderr, true).'); exit('.$this->exit.');',
                 ]);
                 $process->run();
 
@@ -80,12 +82,12 @@ class HostCompileFrontendBuildTest extends TestCase
 
     private function project(System $system, ?SharedBaseImages $bases = null): Dind
     {
-        $model = new \App\Models\User();
+        $model = new User;
         $model->username = 'acme';
         $model->details = ['UID' => 1001, 'GID' => 1001];
 
         $engine = $this->createStub(ContainerEngine::class);
-        $engine->method('hostBuilder')->willReturn(new DindHostBuilder());
+        $engine->method('hostBuilder')->willReturn(new DindHostBuilder);
 
         $dind = $this->createStub(Dind::class);
         $dind->method('userModel')->willReturn($model);
@@ -105,7 +107,7 @@ class HostCompileFrontendBuildTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $files
+     * @param  array<string, string>  $files
      * @return array{0: bool, 1: list<list<string>>} whether it ran, and the containers
      */
     private function runForPhp(
@@ -138,7 +140,7 @@ class HostCompileFrontendBuildTest extends TestCase
 
         $this->assertTrue($ran);
         $this->assertCount(1, $commands);
-        $this->assertStringEndsWith(' && npm run build', (string) end($commands[0]));
+        $this->assertStringEndsWith(' && npm run build', LocalRoot::build($commands[0])['script']);
     }
 
     public function test_absent_and_no_build_script_runs_nothing(): void
@@ -159,13 +161,13 @@ class HostCompileFrontendBuildTest extends TestCase
     {
         [$ran, $commands] = $this->runForPhp([
             '/home/acme/project/package.json' => '{"scripts":{"postinstall":"patch-package --error-on-fail"},'
-                . '"workspaces":["resources/assets/v3"]}',
+                .'"workspaces":["resources/assets/v3"]}',
             '/home/acme/project/package-lock.json' => '{}',
         ], null);
 
         $this->assertTrue($ran);
         $this->assertCount(1, $commands);
-        $this->assertStringEndsWith(' && npm run build --workspaces --if-present', (string) end($commands[0]));
+        $this->assertStringEndsWith(' && npm run build --workspaces --if-present', LocalRoot::build($commands[0])['script']);
     }
 
     public function test_each_manager_builds_its_workspaces_its_own_way(): void
@@ -198,8 +200,8 @@ class HostCompileFrontendBuildTest extends TestCase
 
         $this->assertTrue($ran);
         $this->assertCount(1, $commands);
-        $script = (string) end($commands[0]);
-        $this->assertStringEndsWith('; fi && yarn install', $script);
+        $script = LocalRoot::build($commands[0])['script'];
+        $this->assertStringEndsWith('; fi; } && yarn install', $script);
         $this->assertStringNotContainsString('run build', $script);
     }
 
@@ -207,7 +209,7 @@ class HostCompileFrontendBuildTest extends TestCase
     {
         [, $commands] = $this->runForPhp(['/home/acme/project/package.json' => '{"scripts":{"build":"vite build"}}'], 'npm run production');
 
-        $script = (string) end($commands[0]);
+        $script = LocalRoot::build($commands[0])['script'];
         $this->assertStringEndsWith(' && npm run production', $script);
         $this->assertStringNotContainsString('npm run build', $script);
     }
@@ -243,7 +245,7 @@ class HostCompileFrontendBuildTest extends TestCase
             $bases
         );
 
-        $this->assertContains('panelalpha/build-node:php-pa12345678', $commands[0]);
+        $this->assertSame('panelalpha/build-node:php-pa12345678', LocalRoot::build($commands[0])['image']);
     }
 
     /** OSPOS: `build` is `gulp default`, and a gulp task runs `composer licenses`. */
@@ -257,14 +259,14 @@ class HostCompileFrontendBuildTest extends TestCase
             [
                 '/home/acme/project/package.json' => '{"scripts":{"build":"gulp default","gulp":"gulp"}}',
                 '/home/acme/project/gulpfile.js' => "gulp.task('update-licenses', function () {\n"
-                    . "    return Promise.all([run_completion(run('composer licenses --format=json --no-dev > public/license/composer.LICENSES').exec())]);\n});\n",
+                    ."    return Promise.all([run_completion(run('composer licenses --format=json --no-dev > public/license/composer.LICENSES').exec())]);\n});\n",
             ],
             null,
             'panelalpha/php:8.3-apache-bookworm-paXXXX',
             $bases
         );
 
-        $this->assertContains('panelalpha/build-node:php-pa12345678', $commands[0]);
+        $this->assertSame('panelalpha/build-node:php-pa12345678', LocalRoot::build($commands[0])['image']);
     }
 
     public function test_a_frontend_that_never_calls_php_keeps_the_node_image(): void
@@ -279,7 +281,7 @@ class HostCompileFrontendBuildTest extends TestCase
             $bases
         );
 
-        $this->assertNotContains('panelalpha/php:8.3-apache-bookworm-paXXXX', $commands[0]);
+        $this->assertNotSame('panelalpha/php:8.3-apache-bookworm-paXXXX', LocalRoot::build($commands[0])['image']);
     }
 
     /**
@@ -293,8 +295,8 @@ class HostCompileFrontendBuildTest extends TestCase
             '/home/acme/project/yarn.lock' => "__metadata:\n  version: 8\n",
         ], null);
 
-        $this->assertContains('YARN_NODE_LINKER=node-modules', $commands[0]);
-        $this->assertContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', $commands[0]);
+        $this->assertSame('node-modules', LocalRoot::build($commands[0])['environment']['YARN_NODE_LINKER'] ?? null);
+        $this->assertContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', LocalRoot::build($commands[0])['mounts']);
     }
 
     /**
@@ -322,8 +324,8 @@ class HostCompileFrontendBuildTest extends TestCase
             ''
         );
 
-        $this->assertContains('YARN_NODE_LINKER=node-modules', $system->commands[0]);
-        $this->assertNotContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', $system->commands[0]);
+        $this->assertSame('node-modules', LocalRoot::build($system->commands[0])['environment']['YARN_NODE_LINKER'] ?? null);
+        $this->assertNotContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', LocalRoot::build($system->commands[0])['mounts']);
     }
 
     public function test_a_project_linker_other_than_pnp_is_left_alone(): void
@@ -334,7 +336,7 @@ class HostCompileFrontendBuildTest extends TestCase
             '/home/acme/project/yarn.lock' => "__metadata:\n  version: 8\n",
         ], null);
 
-        $this->assertNotContains('YARN_NODE_LINKER=node-modules', $commands[0]);
+        $this->assertArrayNotHasKey('YARN_NODE_LINKER', LocalRoot::build($commands[0])['environment']);
     }
 
     /**
@@ -352,7 +354,7 @@ class HostCompileFrontendBuildTest extends TestCase
             $this->assertStringContainsString('Running webpack', $e->getMessage());
             $this->assertStringContainsString(
                 'DEPLOY_BUILD_MEMORY',
-                (string) \App\Lib\Deploy\DeployLog\DeployFailureExplainer::explain($e->getMessage())
+                (string) DeployFailureExplainer::explain($e->getMessage())
             );
         }
     }
@@ -365,7 +367,7 @@ class HostCompileFrontendBuildTest extends TestCase
                 ['/home/acme/project/package.json' => '{"scripts":{"build":"encore production"}}'],
                 null,
                 exit: 129,
-                stderr: DindHostBuilder::OOM_REPORT . "\n"
+                stderr: DindHostBuilder::OOM_REPORT."\n"
             );
             $this->fail('the build should have failed');
         } catch (\Exception $e) {
@@ -377,8 +379,9 @@ class HostCompileFrontendBuildTest extends TestCase
     {
         [, $commands] = $this->runForPhp(['/home/acme/project/package.json' => '{"scripts":{"build":"vite build"}}'], null);
 
-        $this->assertStringStartsWith("trap '", (string) end($commands[0]));
-        $this->assertStringContainsString('/sys/fs/cgroup/memory.events', (string) end($commands[0]));
+        $script = LocalRoot::build($commands[0])['script'];
+        $this->assertStringStartsWith("trap '", $script);
+        $this->assertStringContainsString('/sys/fs/cgroup/memory.events', $script);
     }
 
     public function test_any_other_failure_keeps_the_builds_own_output(): void

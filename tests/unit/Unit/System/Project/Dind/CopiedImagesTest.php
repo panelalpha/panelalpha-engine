@@ -8,6 +8,7 @@ use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Models\User;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\CopiedImages;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\Inner\ImageSeeding;
@@ -172,8 +173,11 @@ class CopiedImagesTest extends TestCase
     private function images(User $user): CopiedImages
     {
         $dind = $this->createStub(Dind::class);
+        $dind->method('composeFilePath')->willReturn($this->root . '/users/u/docker-compose.yml');
         $dind->method('system')->willReturn(new LocalHostSystem($this->root, $this->root));
         $dind->method('userModel')->willReturn($user);
+        $dind->method('username')->willReturn($user->username);
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
         $dind->method('homeDirPath')->willReturn($this->root);
         $dind->method('registryLogin')->willReturn(new RegistryLogin($dind));
         $dind->method('innerDocker')->willReturn($this->innerDocker());

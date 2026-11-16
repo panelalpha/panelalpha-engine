@@ -5,10 +5,8 @@ namespace App\System\Project\PhpHosting\WordPress\Migration;
 use RuntimeException;
 
 /**
- * The destination plugin's config.php: destination mode and a token that
- * belongs to one migration. The release zip's own token is never used, so two
- * migrations never accept each other's chunks. Disk I/O for account-owned
- * paths is done by the caller (AccountFileCopy).
+ * The destination plugin's config.php: destination mode and a token of one migration, never the release zip's own,
+ * so two migrations never accept each other's chunks. The caller does the disk I/O (AccountFileCopy).
  */
 final class MigratorDestinationConfig
 {

@@ -4,6 +4,8 @@ namespace Tests\Unit\System;
 
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
+use App\System\Privileged\InvalidArgument;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
@@ -16,16 +18,16 @@ class FilesystemMakeDirWithParentsTest extends TestCase
         (new Filesystem($system))->makeDirWithParents('/srv/a/b', '1000:1000');
 
         $this->assertSame([
-            ['sudo', 'mkdir', '/srv/a'],
-            ['sudo', 'chown', '1000:1000', '/srv/a'],
-            ['sudo', 'mkdir', '/srv/a/b'],
-            ['sudo', 'chown', '1000:1000', '/srv/a/b'],
+            Privileged::files()->makeDirectory('/srv/a'),
+            Privileged::files()->changeOwner('1000:1000', '/srv/a'),
+            Privileged::files()->makeDirectory('/srv/a/b'),
+            Privileged::files()->changeOwner('1000:1000', '/srv/a/b'),
         ], $system->execs);
     }
 
+    /** Every directory probe fails, as with a missing or refusing root broker. */
     public function test_throws_instead_of_looping_when_root_is_not_a_directory(): void
     {
-        // What a missing or password-prompting sudo looks like: every `test -d` fails.
         $system = $this->system([]);
 
         try {
@@ -39,18 +41,23 @@ class FilesystemMakeDirWithParentsTest extends TestCase
         $this->assertSame([], $system->execs);
     }
 
-    public function test_relative_path_stops_at_dot(): void
+    public function test_a_relative_path_is_refused_before_anything_runs(): void
     {
         $system = $this->system([]);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage("'.' does not read as a directory");
+        try {
+            (new Filesystem($system))->makeDirWithParents('a/b');
+            $this->fail('Expected makeDirWithParents() to refuse a relative path');
+        } catch (InvalidArgument $e) {
+            $this->assertSame('Refusing path "a/b" for a root command', $e->getMessage());
+        }
 
-        (new Filesystem($system))->makeDirWithParents('a/b');
+        $this->assertSame([], $system->probes);
+        $this->assertSame([], $system->execs);
     }
 
     /**
-     * @param list<string> $dirs paths `sudo test -d` reports as existing
+     * @param list<string> $dirs paths the root directory probe reports as existing
      */
     private function system(array $dirs): System
     {

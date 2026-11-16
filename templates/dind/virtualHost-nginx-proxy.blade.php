@@ -1,5 +1,8 @@
 {{-- DinD / container-app vhost: routing driven by ProxyRule rows for this domain. --}}
 {{-- Legacy WordPress/PHP-FPM keeps templates/virtualHost-nginx-proxy.blade.php. --}}
+@if (!empty($overlay_http))
+{!! $overlay_http !!}
+@endif
 server {
 @forelse (($proxy_http['ips_v4'] ?? $ips_v4) as $ip)
     listen {{ $ip }}:80;
@@ -32,6 +35,9 @@ server {
     if ($http_upgrade) {
         set $pa_connection_upgrade upgrade;
     }
+@if (!empty($cookie_isolation_server))
+    {!! $cookie_isolation_server !!}
+@endif
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -41,11 +47,17 @@ server {
             return 503;
         @elseif (!empty($redirect_url))
             return 301 "{!! $redirect_url !!}";
-        @elseif (!empty($force_https_redirect))
-            return 301 https://$host$request_uri;
+        @elseif (!empty($force_https_redirect) || (!empty($ssl_enabled) && !in_array(443, $https_ports ?? [443], true)))
+            return 301 https://$host{{ ($https_redirect_port ?? 443) !== 443 ? ':'.$https_redirect_port : '' }}$request_uri;
         @elseif (!empty($proxy_http))
 @if (!empty($site_password_enabled))
             {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+            {!! $overlay_location !!}
+@endif
+@if (!empty($cookie_isolation_location))
+            {!! $cookie_isolation_location !!}
 @endif
             resolver 127.0.0.54 valid=30s;
             proxy_http_version 1.1;
@@ -70,6 +82,9 @@ server {
         @else
 @if (!empty($site_password_enabled))
             {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+            {!! $overlay_location !!}
 @endif
             root /home/{{ $user }}{{ $relative_document_root }};
             index index.html index.htm;
@@ -96,6 +111,9 @@ server {
         return 503;
 @else
         proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_phpmyadmin))
+        {!! $cookie_isolation_phpmyadmin !!}
+@endif
         set $pmapass 0;
         if ($arg_pmassotoken) {
             set $pmapass 1;
@@ -128,13 +146,15 @@ server {
 }
 @if (!empty($ssl_enabled))
     server {
+@foreach ($https_ports ?? [443] as $https_port)
 @forelse (($proxy_https['ips_v4'] ?? $ips_v4) as $ip)
-        listen {{ $ip }}:443 ssl;
+        listen {{ $ip }}:{{ $https_port }} ssl;
 @empty
-        listen 443 ssl;
+        listen {{ $https_port }} ssl;
 @endforelse
 @foreach (($proxy_https['ips_v6'] ?? $ips_v6) as $ip)
-        listen [{{ $ip }}]:443 ssl;
+        listen [{{ $ip }}]:{{ $https_port }} ssl;
+@endforeach
 @endforeach
         http2 on;
         server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
@@ -156,6 +176,9 @@ server {
         if ($http_upgrade) {
             set $pa_connection_upgrade upgrade;
         }
+@if (!empty($cookie_isolation_server))
+        {!! $cookie_isolation_server !!}
+@endif
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -168,6 +191,12 @@ server {
             @elseif (!empty($proxy_https))
 @if (!empty($site_password_enabled))
                 {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+                {!! $overlay_location !!}
+@endif
+@if (!empty($cookie_isolation_location))
+                {!! $cookie_isolation_location !!}
 @endif
                 resolver 127.0.0.54 valid=30s;
                 proxy_http_version 1.1;
@@ -195,6 +224,9 @@ server {
                 grpc_set_header X-Forwarded-Proto $scheme;
                 grpc_set_header X-Forwarded-Host $host;
                 grpc_set_header X-Forwarded-Port $server_port;
+@if (!empty($cookie_isolation_grpc))
+                {!! $cookie_isolation_grpc !!}
+@endif
                 grpc_ssl_server_name on;
                 grpc_ssl_name $host;
                 if ($http_content_type ~* "^application/grpc(\+[^;]*)?\s*(;|$)") {
@@ -212,6 +244,9 @@ server {
             @else
 @if (!empty($site_password_enabled))
                 {!! $site_password_auth_request !!}
+@endif
+@if (!empty($overlay_enabled))
+                {!! $overlay_location !!}
 @endif
                 root /home/{{ $user }}{{ $relative_document_root }};
                 index index.html index.htm;
@@ -237,6 +272,9 @@ server {
             return 503;
 @else
             proxy_set_header X-Real-IP $remote_addr;
+@if (!empty($cookie_isolation_phpmyadmin))
+            {!! $cookie_isolation_phpmyadmin !!}
+@endif
             set $pmapass 0;
             if ($arg_pmassotoken) {
                 set $pmapass 1;
@@ -293,12 +331,18 @@ server {
     if ($http_upgrade) {
         set $pa_connection_upgrade upgrade;
     }
+@if (!empty($cookie_isolation_server))
+    {!! $cookie_isolation_server !!}
+@endif
     location / {
         @if(!empty($suspended))
             return 503;
         @else
 @if (!empty($site_password_enabled))
             {!! $site_password_auth_request !!}
+@endif
+@if (!empty($cookie_isolation_location))
+            {!! $cookie_isolation_location !!}
 @endif
             resolver 127.0.0.54 valid=30s;
             proxy_http_version 1.1;

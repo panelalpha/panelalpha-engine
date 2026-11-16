@@ -3,14 +3,15 @@
 namespace App\Console\Commands\System;
 
 use App\Lib\Helper;
+use App\Lib\Project\ExampleProjectCreator;
 use App\Lib\Project\NewProjectInput;
-use App\Lib\Project\ProjectCreator;
 use App\Models\Domain;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\Setting;
 use App\Models\User;
 use App\System;
+use App\System\Project\PhpHosting\WordPress\WpCli;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -46,7 +47,7 @@ class CreateExampleDomain extends Command
         return $repo;
     }
 
-    public function handle(ProjectCreator $creator): int
+    public function handle(ExampleProjectCreator $creator): int
     {
         $alreadyCreated = ! empty(Setting::get('example-domain-created'));
         if ($alreadyCreated) {
@@ -117,7 +118,7 @@ class CreateExampleDomain extends Command
         Log::debug('create-example-domain: creating user with params', [
             'params' => $params,
         ]);
-        $creator->queue(NewProjectInput::fromArray($params));
+        $creator->create(NewProjectInput::fromArray($params));
         Setting::set('example-domain-created', '1');
 
         $user = User::findByUsernameOrFail($params['username']);
@@ -173,17 +174,15 @@ class CreateExampleDomain extends Command
         if (! is_string($dbhost)) {
             $dbhost = 'database-users.shared-hosting.palocal';
         }
-        $result = $user->project()->runWpCli([
-            'config',
-            'create',
-            '--path='.$path,
-            '--dbname='.$dbname,
-            '--dbuser='.$dbuser,
-            '--dbpass='.$dbpass,
-            '--dbhost='.$dbhost,
-        ]);
-        if ($result['exit_code'] !== 0) {
-            $this->error('Error during wp-cli config create: '.($result['stderr'] ?: $result['stdout'])." (exit code {$result['exit_code']})");
+        try {
+            WpCli::for($user, $path)->createConfigFile([
+                '--dbname='.$dbname,
+                '--dbuser='.$dbuser,
+                '--dbpass='.$dbpass,
+                '--dbhost='.$dbhost,
+            ]);
+        } catch (\Exception $e) {
+            $this->error('Error during wp-cli config create: '.$e->getMessage());
 
             return 1;
         }

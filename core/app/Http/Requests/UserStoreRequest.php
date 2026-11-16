@@ -2,15 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Exceptions\ProblemException;
+use App\Http\Requests\Concerns\BuildsNewProjectInput;
 use App\Http\Requests\Concerns\ReportsProblems;
-use App\Lib\Domains\DomainPlan;
-use App\Lib\Host\ProjectMemory;
 use App\Lib\Project\NewProjectRules;
-use App\Rules\ProjectName;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserStoreRequest extends FormRequest
 {
+    use BuildsNewProjectInput;
     use ReportsProblems;
 
     /** What the caller called the project name: problems are reported under it. */
@@ -23,11 +23,31 @@ class UserStoreRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $this->refuseUnknownFields();
+
         // `name` is accepted for `username`; see NewProjectRules::normalised().
         [$changes, $this->nameField] = NewProjectRules::normalised($this->all());
         if ($changes !== []) {
             $this->merge($changes);
         }
+    }
+
+    /** The flat body takes no key it does not have, as the typed body already says. */
+    private function refuseUnknownFields(): void
+    {
+        $unknown = array_values(array_diff(array_keys($this->all()), NewProjectRules::flatKeys()));
+        if ($unknown === []) {
+            return;
+        }
+
+        throw ProblemException::of(array_map(
+            static fn (string $key): array => [
+                'field' => $key,
+                'code' => 'unknown_field',
+                'message' => "`{$key}` is not a field of this body.",
+            ],
+            $unknown
+        ));
     }
 
     public function rules(): array
@@ -53,28 +73,6 @@ class UserStoreRequest extends FormRequest
 
     protected function expectations(): array
     {
-        $count = static fn (string $what, string $example): array => [
-            'expected' => $what,
-            'examples' => [$example],
-        ];
-
-        return [
-            'username' => ['expected' => ProjectName::EXPECTED, 'examples' => ProjectName::EXAMPLES],
-            'domain' => ['expected' => 'a hostname, lowercase, without scheme or path', 'examples' => ['shop.example.com']],
-            'domain_redirect_url' => ['expected' => 'an absolute URL', 'examples' => ['https://example.com/']],
-            'email' => ['expected' => 'an email address', 'examples' => ['ops@example.com']],
-            'disk_space_limit' => $count('an integer number of MB, -1 for unlimited', '10240'),
-            'memory_limit' => $count('an integer number of MB, '.ProjectMemory::MIN_MB.' or more, '.ProjectMemory::CONTAINER_MIN_MB
-                .' or more for a container project; omitted, the server default', '512'),
-            'cpu_limit' => $count('a number of CPU cores, fractions allowed, -1 for unlimited', '1.5'),
-            'bandwidth_limit' => $count('an integer number of MB a month, -1 for unlimited', '100000'),
-            'inodes_limit' => $count('an integer, -1 for unlimited', '500000'),
-            'tunnel' => ['expected' => 'one of: '.implode(', ', DomainPlan::TUNNELS), 'examples' => DomainPlan::TUNNELS],
-            'git_branch' => ['expected' => 'the name of a branch or tag in the repository', 'examples' => ['main', 'v1.2.0']],
-            'env_vars' => ['expected' => 'an object of KEY: "value" strings, at most 200', 'examples' => ['{"APP_ENV": "production"}']],
-            'password' => ['expected' => 'a string of 1-255 characters'],
-            'recipe' => ['expected' => 'a recipe name, at most 64 characters'],
-            'template' => ['expected' => 'a template name; dind for a git_repo', 'examples' => ['dind']],
-        ];
+        return NewProjectRules::expectations();
     }
 }

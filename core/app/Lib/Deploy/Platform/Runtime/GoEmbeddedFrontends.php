@@ -6,18 +6,8 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Frontends a Go program embeds but the checkout does not contain.
- *
- * A server that serves its web UI with `//go:embed dist` compiles only after
- * that directory is built, usually by `npm run build` beside it. The checkout
- * has the sources, not the output, so the Go build stopped on
- * `pattern dist: no matching files found` (Dropserver, zincsearch, nginx-ui).
- *
- * A missing pattern is matched to the package.json in the directory that
- * would hold it (`frontend/` for `frontend/dist`) or in the embedding
- * package's own directory, and only when that package.json has a `build`
- * script. Anything else (a downloaded binary, a build driven from elsewhere)
- * is left to fail as before.
+ * Frontends a Go program embeds but the checkout lacks (`pattern dist: no matching files found`); one
+ * {@see frontendFor()} cannot match (a downloaded binary, a build driven elsewhere) is left to fail as before.
  */
 final class GoEmbeddedFrontends
 {
@@ -26,33 +16,20 @@ final class GoEmbeddedFrontends
     private const SKIP_DIRS = ['node_modules', 'vendor', 'testdata'];
 
     /**
+     * @param  (\Closure(string): void)|null  $note  told in a sentence when the scan stops at the cap
      * @return list<array{dir: string, embed: string}> frontend dir relative to
      *                                                 the project ('' for the root), and `<file>: <pattern>` that needs it
      */
-    public static function missing(string $projectDir): array
+    public static function missing(string $projectDir, ?\Closure $note = null): array
     {
         $root = rtrim($projectDir, '/');
         $found = [];
-        foreach (self::goFiles($root) as $relative) {
+        foreach (self::goFiles($root, $note) as $relative) {
             $source = AccountHomeRead::contents($root.'/'.$relative);
             if (! is_string($source) || ! str_contains($source, '//go:embed')) {
                 continue;
             }
-            $goDir = dirname($relative) === '.' ? '' : dirname($relative);
-            preg_match_all('/^\s*\/\/go:embed\s+(.+)$/m', $source, $lines);
-            foreach ($lines[1] as $line) {
-                preg_match_all('/"([^"]+)"|`([^`]+)`|(\S+)/', $line, $tokens, PREG_SET_ORDER);
-                foreach ($tokens as $token) {
-                    $pattern = preg_replace('/^all:/', '', $token[1] ?: ($token[2] ?? '') ?: ($token[3] ?? ''));
-                    if (! is_string($pattern) || $pattern === '' || self::exists($root, $goDir, $pattern)) {
-                        continue;
-                    }
-                    $dir = self::frontendFor($root, $goDir, $pattern);
-                    if ($dir !== null && ! isset($found[$dir])) {
-                        $found[$dir] = ['dir' => $dir, 'embed' => $relative.': '.$pattern];
-                    }
-                }
-            }
+            $found = self::withMissingEmbeds($found, $root, $relative, $source);
         }
 
         return array_values($found);
@@ -62,12 +39,13 @@ final class GoEmbeddedFrontends
      * {@see missing()} with what to run for each: the Node image, the install
      * for its package manager and lockfile, and its `build` script.
      *
+     * @param  (\Closure(string): void)|null  $note  told in a sentence when the scan stops at the cap
      * @return list<array{dir: string, embed: string, image: string, install: string, build: string}>
      */
-    public static function plan(string $projectDir): array
+    public static function plan(string $projectDir, ?\Closure $note = null): array
     {
         $plan = [];
-        foreach (self::missing($projectDir) as $frontend) {
+        foreach (self::missing($projectDir, $note) as $frontend) {
             $abs = rtrim($projectDir, '/').($frontend['dir'] === '' ? '' : '/'.$frontend['dir']);
             $package = json_decode((string) AccountHomeRead::contents($abs.'/package.json'), true);
             $package = is_array($package) ? $package : [];
@@ -94,6 +72,10 @@ final class GoEmbeddedFrontends
         return file_exists($path);
     }
 
+    /**
+     * The directory of a package.json with a `build` script, beside the missing pattern or in the
+     * embedding package's own directory.
+     */
     private static function frontendFor(string $root, string $goDir, string $pattern): ?string
     {
         if (strpbrk($pattern, '*?[') !== false || str_contains($pattern, '..')) {
@@ -111,13 +93,71 @@ final class GoEmbeddedFrontends
         return null;
     }
 
-    /** @return list<string> paths relative to $root */
-    private static function goFiles(string $root): array
+    /**
+     * @param  array<string, array{dir: string, embed: string}>  $found
+     * @return array<string, array{dir: string, embed: string}>
+     */
+    private static function withMissingEmbeds(array $found, string $root, string $relative, string $source): array
+    {
+        $goDir = dirname($relative) === '.' ? '' : dirname($relative);
+        preg_match_all('/^\s*\/\/go:embed\s+(.+)$/m', $source, $lines);
+        foreach ($lines[1] as $line) {
+            preg_match_all('/"([^"]+)"|`([^`]+)`|(\S+)/', $line, $tokens, PREG_SET_ORDER);
+            foreach ($tokens as $token) {
+                $pattern = preg_replace('/^all:/', '', $token[1] ?: ($token[2] ?? '') ?: ($token[3] ?? ''));
+                if (! is_string($pattern) || $pattern === '' || self::exists($root, $goDir, $pattern)) {
+                    continue;
+                }
+                $dir = self::frontendFor($root, $goDir, $pattern);
+                if ($dir !== null && ! isset($found[$dir])) {
+                    $found[$dir] = ['dir' => $dir, 'embed' => $relative.': '.$pattern];
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * At most MAX_GO_FILES paths in name order; past the cap the least nested are kept, then the first by name,
+     * so the filesystem's listing order never decides which files are read.
+     *
+     * @param  (\Closure(string): void)|null  $note
+     * @return list<string> paths relative to $root
+     */
+    private static function goFiles(string $root, ?\Closure $note = null): array
     {
         if (! is_dir($root)) {
             return [];
         }
-        $iterator = new \RecursiveIteratorIterator(
+        $files = [];
+        foreach (self::goFileIterator($root) as $file) {
+            $files[] = ltrim(substr($file->getPathname(), strlen($root)), '/');
+        }
+        usort($files, self::shallowestFirst(...));
+        if (count($files) > self::MAX_GO_FILES && $note !== null) {
+            $note(sprintf(
+                'Looked for embedded frontends in %d of %d Go files, the least nested first; '
+                .'a frontend embedded by one of the others is not built before the Go build.',
+                self::MAX_GO_FILES,
+                count($files)
+            ));
+        }
+        $kept = array_slice($files, 0, self::MAX_GO_FILES);
+        sort($kept);
+
+        return $kept;
+    }
+
+    private static function shallowestFirst(string $a, string $b): int
+    {
+        return substr_count($a, '/') <=> substr_count($b, '/') ?: strcmp($a, $b);
+    }
+
+    /** Non-test .go files outside skipped, hidden and `_` directories; an unreadable directory is skipped. */
+    private static function goFileIterator(string $root): \RecursiveIteratorIterator
+    {
+        return new \RecursiveIteratorIterator(
             new \RecursiveCallbackFilterIterator(
                 new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
                 static function (\SplFileInfo $file): bool {
@@ -130,17 +170,9 @@ final class GoEmbeddedFrontends
 
                     return str_ends_with($file->getFilename(), '.go') && ! str_ends_with($file->getFilename(), '_test.go');
                 }
-            )
+            ),
+            \RecursiveIteratorIterator::LEAVES_ONLY,
+            \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
-        $files = [];
-        foreach ($iterator as $file) {
-            $files[] = ltrim(substr($file->getPathname(), strlen($root)), '/');
-            if (count($files) >= self::MAX_GO_FILES) {
-                break;
-            }
-        }
-        sort($files);
-
-        return $files;
     }
 }

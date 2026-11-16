@@ -42,7 +42,8 @@ class DomainMailDnsHttpTest extends TestCase
         $this->assertArrayNotHasKey('status', $data['records'][0]);
     }
 
-    public function test_a_relay_sender_domain_moves_the_records(): void
+    /** A configured sender domain does not move a project's own records: the relay keeps the domain it serves. */
+    public function test_a_configured_sender_domain_leaves_the_records_with_the_domain(): void
     {
         Setting::setRuntimeSettings([
             'default_ipv4' => TestNetwork::public(10),
@@ -51,10 +52,10 @@ class DomainMailDnsHttpTest extends TestCase
 
         $data = $this->getJson('/api/projects/alice/domains/shop.example.test/mail-dns?dkim_selector=s1')->assertOk()->json('data');
 
-        $this->assertSame('mail.host.example', $data['sending_domain']);
+        $this->assertSame('shop.example.test', $data['sending_domain']);
         $this->assertSame('sendgrid', $data['relay']);
         $this->assertSame('v=spf1 include:sendgrid.net ~all', $data['records'][0]['expected']);
-        $this->assertSame('s1._domainkey.mail.host.example', $data['records'][1]['host']);
+        $this->assertSame('s1._domainkey.shop.example.test', $data['records'][1]['host']);
     }
 
     public function test_an_unknown_domain_or_a_bad_selector_is_refused(): void

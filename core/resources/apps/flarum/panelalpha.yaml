@@ -29,3 +29,16 @@ detect:
     - file: flarum
     - path: public/index.php
 commands:
+  - id: database-login
+    stage: [install, upgrade]
+    description: 'Flarum''s installer writes the database login and the forum''s address into config.php once. A staging or clone copies that file while the engine hands the copy a database of its own in DB_* and its own APP_URL, so both are put back on every boot, in the form the installer writes, and nothing is written while they already match. Left alone until the installer has written the file.'
+    run: >-
+      php -r '
+      $f = "/app/config.php";
+      $c = is_file($f) ? include $f : null;
+      if ((string) getenv("DB_DATABASE") === "" || !is_array($c["database"] ?? null)) { exit(0); }
+      $n = array_replace_recursive($c, ["database" => ["host" => getenv("DB_HOST"), "port" => (int) getenv("DB_PORT"), "database" => getenv("DB_DATABASE"), "username" => getenv("DB_USERNAME"), "password" => getenv("DB_PASSWORD")]], array_filter(["url" => rtrim((string) getenv("APP_URL"), "/")]));
+      if ($n === $c) { exit(0); }
+      if (file_put_contents($f, "<?php return " . var_export($n, true) . ";") === false) { fwrite(STDERR, "database-login: cannot rewrite $f\n"); exit(1); }
+      fwrite(STDERR, "database-login: $f now points at database " . getenv("DB_DATABASE") . "\n");
+      '

@@ -8,6 +8,7 @@ namespace App\System\Project\Git;
  */
 final class Ref
 {
+    /** Refuses, among others, control characters, spaces and any of `~^:?*[\` anywhere in the name. */
     public static function isValidName(string $name): bool
     {
         if ($name === '' || $name === '@') {
@@ -19,7 +20,6 @@ final class Ref
         if (str_contains($name, '..') || str_contains($name, '@{')) {
             return false;
         }
-        // Control chars, space, tilde, caret, colon, question, asterisk, bracket, backslash
         if (preg_match('/[\x00-\x20~^:?*\[\\\\]/', $name) === 1) {
             return false;
         }

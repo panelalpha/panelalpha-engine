@@ -16,6 +16,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\ShellOperations;
 use Mockery;
 use ReflectionMethod;
+use Tests\Support\RecordingSystem;
 use Tests\TestCase;
 
 /**
@@ -177,6 +178,8 @@ class FailedAccountCreateTest extends TestCase
         $dind->shouldReceive('userModel')->andReturn($user);
         $dind->shouldReceive('username')->andReturn($this->username);
         $dind->shouldReceive('shell')->andReturnUsing(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->shouldReceive('system')->andReturn(new RecordingSystem);
+        $dind->shouldReceive('innerDockerIsUp')->andReturn(true);
 
         return $dind;
     }

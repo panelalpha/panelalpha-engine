@@ -10,16 +10,26 @@ class QueueWorkersTest extends TestCase
 {
     private string $scanDir;
 
+    private string $shimDir;
+
+    private string|false $path;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->scanDir = sys_get_temp_dir() . '/pa-queue-workers-' . bin2hex(random_bytes(4));
         mkdir($this->scanDir);
+
+        $this->shimDir = sys_get_temp_dir() . '/pa-queue-s6-' . bin2hex(random_bytes(4));
+        mkdir($this->shimDir);
+        $this->path = getenv('PATH');
+        putenv('PATH=' . $this->shimDir . ':' . $this->path);
     }
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->scanDir));
+        putenv('PATH=' . $this->path);
+        exec('rm -rf ' . escapeshellarg($this->scanDir) . ' ' . escapeshellarg($this->shimDir));
         parent::tearDown();
     }
 
@@ -112,6 +122,65 @@ class QueueWorkersTest extends TestCase
         QueueWorkers::writeServices(2, $this->scanDir);
 
         $this->assertNull(QueueWorkers::running($this->scanDir));
+    }
+
+    /** The state is root's until the run script opens it to www-data, before it leaves the service directory. */
+    public function test_a_worker_lets_www_data_read_its_state(): void
+    {
+        $script = QueueWorkers::runScript();
+
+        $this->assertStringContainsString("s6-svperms -g www-data . >/dev/null 2>&1\ncd /var/www/html", $script);
+    }
+
+    public function test_it_counts_the_workers_s6_reports_up(): void
+    {
+        $this->queueServices(2);
+        $this->fakeS6('echo true');
+
+        $this->assertSame(2, QueueWorkers::running($this->scanDir));
+    }
+
+    /** A worker started before its run script granted www-data the state: unknown, never down. */
+    public function test_a_worker_it_cannot_read_is_unknown_not_down(): void
+    {
+        $this->queueServices(2);
+        $this->fakeS6("echo 's6-svstat: fatal: unable to check: Permission denied' >&2; exit 111");
+
+        $this->assertNull(QueueWorkers::running($this->scanDir));
+    }
+
+    public function test_a_stopped_worker_is_not_counted(): void
+    {
+        $this->queueServices(2);
+        $this->fakeS6('echo false');
+
+        $this->assertSame(0, QueueWorkers::running($this->scanDir));
+    }
+
+    /** Written by a rescan s6-svscan has not acted on yet: nothing to ask s6 about. */
+    public function test_a_worker_s6_has_not_picked_up_yet_is_down(): void
+    {
+        $this->queueServices(2);
+        QueueWorkers::writeServices(3, $this->scanDir);
+        $this->fakeS6('echo true');
+
+        $this->assertSame(2, QueueWorkers::running($this->scanDir));
+    }
+
+    /** A scan directory s6-svscan is running on, supervising $count worker services. */
+    private function queueServices(int $count): void
+    {
+        mkdir($this->scanDir . '/.s6-svscan');
+        QueueWorkers::writeServices($count, $this->scanDir);
+        for ($i = 1; $i <= $count; $i++) {
+            mkdir($this->scanDir . '/queue-' . $i . '/supervise');
+        }
+    }
+
+    private function fakeS6(string $body): void
+    {
+        file_put_contents($this->shimDir . '/s6-svstat', "#!/bin/sh\n" . $body . "\n");
+        chmod($this->shimDir . '/s6-svstat', 0755);
     }
 
     /** @return list<string> */

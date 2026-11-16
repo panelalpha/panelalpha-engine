@@ -28,9 +28,8 @@ final class Gemfile
     }
 
     /**
-     * Whether Gemfile.lock resolves the gem, directly or through another one:
-     * a spec line at four spaces (`    idn-ruby (0.1.5)`), not a dependency
-     * line at six. Diaspora gets idn-ruby only through twitter-text.
+     * Whether Gemfile.lock resolves the gem, directly or not (Diaspora's idn-ruby): a spec line at four spaces,
+     * not a dependency line at six.
      */
     public function locks(string $gem): bool
     {
@@ -45,19 +44,15 @@ final class Gemfile
     }
 
     /**
-     * Groups the built image does not install: `BUNDLE_WITHOUT="development:test"`
-     * (ruby.yaml and the Dockerfile template). A gem declared only in one of
-     * these is in the Gemfile but not in the image.
+     * Groups the image does not install (`BUNDLE_WITHOUT="development:test"` in ruby.yaml and the template).
      *
      * @var list<string>
      */
     private const EXCLUDED_GROUPS = ['development', 'test'];
 
     /**
-     * Whether the image installs the gem, not just whether the Gemfile names
-     * it: Redmine's `gem 'puma'` sits in `group :test` and the container exited
-     * 127 on `bundler: command not found: puma`. Handles the `group ... do`
-     * block and the inline `group:` form; a gem also declared outside counts.
+     * Whether the image installs the gem, outside excluded `group ... do` blocks and `group:` options:
+     * Redmine's test-only `puma` exited 127.
      */
     public function requiresAtRuntime(string $gem): bool
     {
@@ -89,7 +84,6 @@ final class Gemfile
                 : [];
             $named = array_merge($enclosing, $inline);
 
-            // No group, or a group that does get installed.
             if ($named === [] || array_diff($named, self::EXCLUDED_GROUPS) !== []) {
                 return true;
             }
@@ -119,9 +113,8 @@ final class Gemfile
     }
 
     /**
-     * The `ruby` directive's constraints as written: `ruby '3.2.2'` is one,
-     * `ruby '>= 3.2', '< 4.0'` is two. Empty when the Gemfile declares none or
-     * defers to `ruby file: '.ruby-version'`.
+     * The `ruby` directive's constraints as written (`ruby '>= 3.2', '< 4.0'` is two); empty without one, or when
+     * `file:`/`ENV[...]` defer to a version source already read.
      *
      * @return list<string>
      */
@@ -130,7 +123,6 @@ final class Gemfile
         if (preg_match('/^\s*ruby\s+(.+)$/m', $this->contents, $line) !== 1) {
             return [];
         }
-        // `file:`/`ENV[...]` defer to a version source already read.
         if (preg_match('/^\s*(file|ENV)\b/i', trim($line[1])) === 1) {
             return [];
         }

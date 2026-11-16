@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Delete the automatic backup schedule of a project
 
-    Idempotent: answers 204 whether or not the project had a schedule.
+    Idempotent: answers 204 whether or not the project had a schedule. The schedule goes and no automatic backup is taken until a new one is set; the backups it already took stay. This cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -9,9 +9,8 @@ use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
 
 /**
- * The inspection POST /source/inspect runs in its tree mode, run by a create
- * before anything is provisioned: seconds for a public github.com repository,
- * and skipped for every other source rather than paid for with a second clone.
+ * An inspection from the GitHub file list alone, run by a create before anything is provisioned:
+ * a public github.com repository only, never a second clone.
  */
 class CreateInspector
 {
@@ -29,6 +28,7 @@ class CreateInspector
         );
     }
 
+    /** As the inspect endpoint does, a recipe's files are laid over the checkout before detection. */
     public function inspect(
         string $repoUrl,
         ?string $branch = null,
@@ -52,8 +52,6 @@ class CreateInspector
         }
 
         try {
-            // As the inspect endpoint does: the deploy lays a recipe's files
-            // over the checkout before detection.
             RecipeFileOverlay::apply($resolved->dir, $repoUrl);
 
             return CreateInspection::fromReport(AppInspector::inspect($resolved->dir, $repoUrl, $plan, $recipe));

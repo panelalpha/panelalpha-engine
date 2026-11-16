@@ -6,11 +6,8 @@ use App\Models\WordpressMigration;
 use RuntimeException;
 
 /**
- * Whether the source plugin refuses its transfer routes without the token. A
- * release from {@see WordpressMigratorZip::AUTHENTICATED_VERSION} on must, and
- * the import stops when it does not. An older one cannot: the import goes on
- * with a warning, and the plugin is removed (wp_admin), or the user is told to
- * remove it (manual_plugin), as soon as the import ends, fails or is cancelled.
+ * Whether the source plugin refuses its routes without the token: from {@see WordpressMigratorZip::AUTHENTICATED_VERSION} it
+ * must or the import stops; an older one cannot, so the import warns and the plugin goes (or the user is told) once it ends.
  */
 final class SourcePluginTokenCheck
 {

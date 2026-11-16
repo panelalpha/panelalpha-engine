@@ -9,6 +9,7 @@ use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Models\ProxyRule;
 use App\Models\User;
+use App\System\Privileged;
 use App\System\Project\Dind\AnsweringPort;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\AppLauncher;
@@ -19,10 +20,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 
 /**
- * A redeploy with the site always served: the new version starts
- * beside the running one, traffic moves to it once it answers, the app's own
- * services are replaced behind it, and traffic moves back before the second
- * copy goes. The rest of the engine only ever sees the one project it had.
+ * The site stays served: the new version starts beside the running one, takes traffic once it answers while the
+ * app's services are replaced, and hands it back before the copy goes. The rest of the engine sees one project.
  */
 final class ZeroDowntimeRedeploy
 {
@@ -39,15 +38,13 @@ final class ZeroDowntimeRedeploy
     public const SWITCHED = 'switched';
 
     /**
-     * {@see begin()}: replace in place, for reasons that say nothing about the new version: the override could
-     * not be written, compose could not start the copy for a reason other than its command (a network, volume or
-     * image missing, an address the running copy holds), the realigned run file could not be planned, Docker
-     * names no port of a copy that runs, or the site's rules could not be moved.
+     * {@see begin()}: replace in place, for a reason that says nothing about the new version: no override; compose
+     * not starting the copy but not for its command; no realigned plan; no port of a running copy; rules not moved.
      */
     public const IN_PLACE = 'in_place';
 
-    /** Root-owned tmpfs in the account container: nothing the account can plant a link in. */
-    private const OVERRIDE_FILE = '/run/panelalpha-next-generation.yml';
+    /** In the home, where the broker's compose client reads it; the broker writes and removes it and follows no link. */
+    private const OVERRIDE_FILE = '.panelalpha-next-generation.yml';
 
     /** Time for the webserver's old workers to finish what they were sending to the old port. */
     private const DRAIN_SECONDS = 5;
@@ -70,6 +67,8 @@ final class ZeroDowntimeRedeploy
     private const COMPOSE_TIMEOUT_SECONDS = 600;
 
     private const QUICK_TIMEOUT_SECONDS = 30;
+
+    private const DISCARD_TIMEOUT_SECONDS = 120;
 
     private const LOG_LINES = 40;
 
@@ -122,6 +121,12 @@ final class ZeroDowntimeRedeploy
         if ($routed === null || self::canonicalId($project, null) === null) {
             return null;
         }
+
+        return self::planBesideRunning($project, $user, $logger, $routed);
+    }
+
+    private static function planBesideRunning(DindProject $project, User $user, DeployLogger $logger, int $routed): ?self
+    {
         $config = self::composeConfig($project);
         $choice = AnsweringPort::choice($project);
         $kept = self::keepLastDeploysPort($project, $user, $logger, $choice, $config, $routed);
@@ -222,6 +227,12 @@ final class ZeroDowntimeRedeploy
         $failure = $this->chooseOnCopy($container);
         $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => $this->routes, 'rules' => []]);
 
+        return $this->switchOnceItAnswers($state, $nextProject, $container, $failure);
+    }
+
+    /** @return string|array{stdout: string, stderr: string, exit_code: int, previous_kept: true} */
+    private function switchOnceItAnswers(GenerationState $state, string $nextProject, ?string $container, ?string $failure): string|array
+    {
         $port = $this->routes[$this->routedPort];
         $failure ??= $this->awaitAnswer($port, $container);
         if ($failure !== null) {
@@ -397,10 +408,8 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * Once the replaced app answers on its own port, traffic goes there: the new version's port. When it
-     * does not, or the replace failed and the running version no longer answers, the copy serves while the
-     * previous version is started again ({@see rollBack()}). Null once traffic is on the app, else the
-     * failed start the deploy reports.
+     * Traffic moves to the replaced app's port once it answers; else, or if a failed replace left nothing answering, the
+     * copy serves during {@see rollBack()}. Null once traffic is on the app, else the failed start the deploy reports.
      *
      * @return ?array{stdout: string, stderr: string, exit_code: int, previous_kept?: true, copy_kept?: true, serving: string}
      */
@@ -484,9 +493,8 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * A second copy holds the site: the switch moved the site's rules to it and nothing has settled it since.
-     * While it does, nothing routes the site elsewhere; {@see GenerationSweep::settleNext()} decides, by
-     * what answers, when it goes.
+     * A second copy holds the site: the switch moved the site's rules to it and nothing has settled it since. Until
+     * {@see GenerationSweep::settleNext()} decides by what answers, nothing routes the site elsewhere.
      */
     public static function copyHeld(string $username): bool
     {
@@ -586,12 +594,25 @@ final class ZeroDowntimeRedeploy
         return str_ends_with($image, ':latest') ? substr($image, 0, -strlen(':latest')) : $image;
     }
 
-    /** Remove a second generation's containers and its override. */
+    /** Remove a second generation's containers and its override; only the override's removal fails it. */
     public static function discardProject(DindProject $project, string $nextProject): void
     {
-        $script = 'ids=$(docker ps -aq --filter "label=com.docker.compose.project=$1"); '
-            .'[ -z "$ids" ] || docker rm -f -v $ids >/dev/null; rm -f "$2"';
-        $project->shell()->execQuiet(['bash', '-c', $script, 'discard', $nextProject, self::OVERRIDE_FILE], [], 120);
+        self::removeContainersOf($project, $nextProject);
+        $project->system()->exec(Privileged::files()->removeIfExists(self::overridePath($project)), [], self::DISCARD_TIMEOUT_SECONDS);
+    }
+
+    private static function removeContainersOf(DindProject $project, string $composeProject): void
+    {
+        try {
+            $daemon = $project->accountDaemon();
+            $daemon->removeContainers(
+                $daemon->containerIds(true, ['label' => ['com.docker.compose.project='.$composeProject]], self::DISCARD_TIMEOUT_SECONDS),
+                true,
+                true,
+                self::DISCARD_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable) {
+        }
     }
 
     /**
@@ -620,33 +641,40 @@ final class ZeroDowntimeRedeploy
         return $inverse;
     }
 
-    /** From `docker port <container> <target>/tcp`: the IPv4 binding, else any. */
-    public static function boundPort(string $dockerPort): ?int
+    /**
+     * The host port of one container port's `NetworkSettings.Ports` bindings: the IPv4 one, else any.
+     *
+     * @param  list<mixed>  $bindings
+     */
+    public static function boundPort(array $bindings): ?int
     {
         $fallback = null;
-        foreach (preg_split('/\R/', trim($dockerPort)) ?: [] as $line) {
-            if (preg_match('/:(\d+)\s*$/', trim($line), $m) !== 1) {
+        foreach ($bindings as $binding) {
+            $port = is_array($binding) ? (string) ($binding['HostPort'] ?? '') : '';
+            if (preg_match('/\A\d+\z/', $port) !== 1) {
                 continue;
             }
-            if (str_starts_with(trim($line), '0.0.0.0:')) {
-                return (int) $m[1];
+            if (($binding['HostIp'] ?? null) === '0.0.0.0') {
+                return (int) $port;
             }
-            $fallback ??= (int) $m[1];
+            $fallback ??= (int) $port;
         }
 
         return $fallback;
     }
 
     /**
-     * Why "<status> <exit code> <restarts>" from `docker inspect` will not answer; null while it may.
+     * Why a container will not answer, from its inspect or null when it is gone; null while it may.
      * A container running again after a restart has its exit code reset, so restarts count instead.
+     *
+     * @param  array<string, mixed>|null  $container
      */
-    public static function containerFailure(string $inspect): ?string
+    public static function containerFailure(?array $container): ?string
     {
-        $fields = preg_split('/\s+/', trim($inspect)) ?: [];
-        $status = strtolower($fields[0] ?? '');
-        $exit = $fields[1] ?? '?';
-        $restarts = (int) ($fields[2] ?? 0);
+        $state = is_array($container['State'] ?? null) ? $container['State'] : [];
+        $status = strtolower((string) ($state['Status'] ?? ''));
+        $exit = isset($state['ExitCode']) ? (string) $state['ExitCode'] : '?';
+        $restarts = (int) ($container['RestartCount'] ?? 0);
         if ($status === '') {
             return 'its container is gone';
         }
@@ -669,18 +697,11 @@ final class ZeroDowntimeRedeploy
     /** A running container of the app's own project (of $service), or null. */
     public static function canonicalId(DindProject $project, ?string $service): ?string
     {
-        $rest = ['ps', '--quiet', '--status', 'running'];
-        if ($service !== null) {
-            $rest[] = $service;
-        }
         try {
-            $out = trim($project->shell()->execAsUserQuiet($project->userAppComposeCommand($rest), [], self::QUICK_TIMEOUT_SECONDS));
+            return $project->accountDaemon()->stackContainerIds(false, true, $service, self::QUICK_TIMEOUT_SECONDS)[0] ?? null;
         } catch (\Throwable) {
             return null;
         }
-        $first = trim((string) (preg_split('/\R/', $out)[0] ?? ''));
-
-        return $first === '' ? null : $first;
     }
 
     /** @return ?array<string, mixed> */
@@ -705,14 +726,20 @@ final class ZeroDowntimeRedeploy
         return in_array($project->userModel()->getDeployStrategy(), [Strategies::COMPOSE, Strategies::PAEMD], true);
     }
 
+    private static function overridePath(DindProject $project): string
+    {
+        return rtrim($project->homeDirPath(), '/').'/'.self::OVERRIDE_FILE;
+    }
+
     /** Null once written, else why not. */
     private function writeOverride(): ?string
     {
         try {
-            $this->project->shell()->execQuiet(
-                ['sh', '-c', 'printf %s "$1" | base64 -d > "$2"', 'override', base64_encode($this->next->override()), self::OVERRIDE_FILE],
-                [],
-                self::QUICK_TIMEOUT_SECONDS
+            $this->project->system()->filesystem()->writeFileReplacingPath(
+                self::overridePath($this->project),
+                $this->next->override(),
+                (string) $this->project->userModel()->getChownString(),
+                '600'
             );
         } catch (\Throwable $e) {
             return AppHealth::trimReason($e->getMessage());
@@ -727,7 +754,7 @@ final class ZeroDowntimeRedeploy
         $shell = $this->project->shell();
         $process = $shell->streamProcess(
             $shell->wrap($this->project->userAppComposeCommand([
-                '-f', self::OVERRIDE_FILE, '--project-name', $this->next->projectName(),
+                '-f', self::overridePath($this->project), '--project-name', $this->next->projectName(),
                 'up', '-d', '--no-deps', '--no-build', '--pull', 'never', ...($recreate ? ['--force-recreate'] : []), $this->next->service,
             ])),
             [],
@@ -762,9 +789,8 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * The guess between equal ports no deploy settled, made again on the copy before it is probed: the site goes
-     * where a first deploy's health check would send it ({@see AnsweringPort::better()}). Null once decided,
-     * else why the copy will not answer.
+     * The unsettled guess between equal ports, remade on the copy before its probe: the site goes where a first deploy's
+     * health check would send it ({@see AnsweringPort::better()}). Null once decided, else why the copy will not answer.
      */
     private function chooseOnCopy(?string $container): ?string
     {
@@ -803,15 +829,26 @@ final class ZeroDowntimeRedeploy
 
                 return null;
             }
-            $dead = $this->failureOf($container);
+            $dead = $this->whyTheCopyWillNotAnswer($container, $answeredSince, $now, $deadline, $results);
             if ($dead !== null) {
                 return $dead;
             }
-            if ($answeredSince === null && $now >= $deadline) {
-                return 'nothing answered within '.$this->startPeriod()." s ({$results[0]['detail']})";
-            }
             Sleep::sleep(self::POLL_SECONDS);
         }
+    }
+
+    /** @param list<array{port: int, http_code: ?int, detail: string}> $results */
+    private function whyTheCopyWillNotAnswer(string $container, ?int $answeredSince, int $now, int $deadline, array $results): ?string
+    {
+        $dead = $this->failureOf($container);
+        if ($dead !== null) {
+            return $dead;
+        }
+        if ($answeredSince === null && $now >= $deadline) {
+            return 'nothing answered within '.$this->startPeriod()." s ({$results[0]['detail']})";
+        }
+
+        return null;
     }
 
     /**
@@ -1021,36 +1058,31 @@ final class ZeroDowntimeRedeploy
     /** Why $container will not answer, from {@see containerFailure()}; null while it may. */
     private function failureOf(string $container): ?string
     {
-        return self::containerFailure($this->inspect($container));
+        return self::containerFailure($this->inspected($container));
     }
 
-    private function inspect(string $container): string
+    /** @return array<string, mixed>|null null when it is gone or the daemon could not say */
+    private function inspected(string $container): ?array
     {
         try {
-            return $this->project->shell()->execQuiet(
-                ['docker', 'inspect', '--format', '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}', $container],
-                [],
-                self::QUICK_TIMEOUT_SECONDS
-            );
+            return $this->project->accountDaemon()->container($container, self::QUICK_TIMEOUT_SECONDS);
         } catch (\Throwable) {
-            return '';
+            return null;
         }
     }
 
     private function containerOf(string $composeProject): ?string
     {
         try {
-            $out = $this->project->shell()->execQuiet([
-                'docker', 'ps', '-aq',
-                '--filter', 'label=com.docker.compose.project='.$composeProject,
-                '--filter', 'label=com.docker.compose.service='.$this->next->service,
-            ], [], self::QUICK_TIMEOUT_SECONDS);
+            $ids = $this->project->accountDaemon()->containerIds(true, ['label' => [
+                'com.docker.compose.project='.$composeProject,
+                'com.docker.compose.service='.$this->next->service,
+            ]], self::QUICK_TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
-        $first = trim((string) (preg_split('/\R/', trim($out))[0] ?? ''));
 
-        return $first === '' ? null : $first;
+        return $ids[0] ?? null;
     }
 
     private function canonicalContainer(): ?string
@@ -1061,14 +1093,11 @@ final class ZeroDowntimeRedeploy
     /** @return array<int, int> */
     private function publishedPorts(string $container): array
     {
+        $ports = $this->inspected($container)['NetworkSettings']['Ports'] ?? [];
         $routes = [];
         foreach ($this->next->ports as $published => $target) {
-            try {
-                $out = $this->project->shell()->execQuiet(['docker', 'port', $container, $target.'/tcp'], [], self::QUICK_TIMEOUT_SECONDS);
-            } catch (\Throwable) {
-                continue;
-            }
-            $bound = self::boundPort($out);
+            $bindings = $ports[$target.'/tcp'] ?? null;
+            $bound = is_array($bindings) ? self::boundPort($bindings) : null;
             if ($bound !== null) {
                 $routes[$published] = $bound;
             }
@@ -1083,11 +1112,7 @@ final class ZeroDowntimeRedeploy
             return;
         }
         try {
-            $out = trim($this->project->shell()->execQuiet(
-                ['sh', '-c', 'docker logs --tail '.self::LOG_LINES.' "$1" 2>&1', 'logs', $container],
-                [],
-                self::QUICK_TIMEOUT_SECONDS
-            ));
+            $out = trim($this->project->accountDaemon()->logTail($container, self::LOG_LINES, self::QUICK_TIMEOUT_SECONDS));
         } catch (\Throwable) {
             return;
         }
@@ -1132,9 +1157,8 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * The new version replaced the running one and serves only from its second copy: the previous version
-     * is started again from what the redeploy kept, as the sweep does after an interrupted one, and the
-     * site moves to it once it answers. Until then, and when it cannot be started, the copy serves.
+     * The new version serves only from its copy: the previous one is started again from what was kept, as the sweep
+     * does, and the site moves to it once it answers. Until then, and when it cannot be started, the copy serves.
      *
      * @return array{stdout: string, stderr: string, exit_code: int, previous_kept?: true, copy_kept?: true, serving: string}
      */
@@ -1166,9 +1190,8 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * Nothing else answers: the copy keeps the site, and moves back only to the app's port once that
-     * answers ({@see GenerationSweep::settleNext()}). The routing snapshot goes: nothing is left to restore,
-     * and nothing may route the site away from the copy.
+     * Nothing else answers: the copy keeps the site until {@see GenerationSweep::settleNext()} finds the app's port
+     * answering. The routing snapshot goes: nothing is left to restore, and nothing may route the site off the copy.
      *
      * @return array{stdout: string, stderr: string, exit_code: int, copy_kept: true, serving: string}
      */

@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Compose;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
- * How much of the account a service is allowed to use. A datastore keeps its
- * catalogue entry; everything else is the application, and Node production
- * images OOM under 256m, so the default is generous.
+ * How much of the account a service is allowed to use: a datastore keeps its catalogue entry, the rest is
+ * the application, with a generous default since Node production images OOM under 256m.
  */
 final class ServiceLimits
 {
@@ -54,10 +53,8 @@ final class ServiceLimits
     private const SIZE_PATTERN = '/^(\d+(?:\.\d+)?)\s*([kmgt])i?b?$/i';
 
     /**
-     * A datastore keeps its catalogue size. Everything else answers to the
-     * project's `memory_limit` when set, else the role default. The account
-     * container carries the same limit and is the parent cgroup of the services,
-     * so handing the figure to each of them is not additive.
+     * A datastore keeps its catalogue size; the rest answer to the project's `memory_limit`, else the role
+     * default. The account container is the services' parent cgroup, so the figure is not additive.
      *
      * @param  array<string, mixed>  $service
      * @param  int|null  $accountMemoryMb  the project's own limit, in MB
@@ -80,24 +77,37 @@ final class ServiceLimits
     }
 
     /**
-     * What one service may take out of the account's budget: an eighth, floored
-     * at 64 MB and capped at 512. The rest is dockerd, the sidecars and page
-     * cache sharing the account's cgroup, so an application holding the whole
-     * budget can starve the daemon supervising it. Limits are ceilings, so
-     * sidecars summing past the remainder is normal.
+     * A size above what the account leaves its services is held to that figure, since the account cgroup caps it anyway.
+     *
+     * @param  mixed  $limit  a byte count or a Compose size string ("8g")
+     * @param  int|null  $accountMemoryMb  the project's own limit, in MB
+     * @return mixed
+     */
+    public static function heldToAccount($limit, ?int $accountMemoryMb)
+    {
+        if ($accountMemoryMb === null || $accountMemoryMb <= 0) {
+            return $limit;
+        }
+        $limitMb = self::toMegabytes($limit);
+        $ceilingMb = self::underAccountCeiling($accountMemoryMb);
+
+        return $limitMb !== null && $limitMb > $ceilingMb ? $ceilingMb.'m' : $limit;
+    }
+
+    /**
+     * The account's budget less a reserve (an eighth, 64 to 512 MB) for dockerd, the sidecars and page cache,
+     * so the application cannot starve the daemon; a very small account still gets the floor.
      */
     private static function underAccountCeiling(int $accountMemoryMb): int
     {
         $reserve = (int) round($accountMemoryMb * self::ACCOUNT_RESERVE_SHARE);
         $reserve = max(self::MIN_ACCOUNT_RESERVE_MB, min(self::MAX_ACCOUNT_RESERVE_MB, $reserve));
 
-        // A very small account still gets the floor.
         return max(self::MIN_SERVICE_MEMORY_MB, $accountMemoryMb - $reserve);
     }
 
     /**
-     * The V8 heap for a container of this size. Without a cap Node sizes its
-     * heap from the host and is OOM-killed before a collection happens.
+     * The V8 heap for a container of this size; uncapped, Node sizes it from the host and is OOM-killed.
      *
      * @param  mixed  $memoryLimit
      */
@@ -112,11 +122,8 @@ final class ServiceLimits
     }
 
     /**
-     * The JVM heap for a container of this size, in MB. HotSpot's
-     * `MaxRAMPercentage` defaults to 25, so a JVM sizing itself inside an N-MB
-     * cgroup gets N/4: the 2g build container gave Maven 512 MB and a
-     * multi-module reactor died with `[ERROR] Java heap space` while three
-     * quarters of the cgroup sat unused.
+     * The JVM heap for a container of this size, in MB; HotSpot's own default is a quarter of the cgroup,
+     * which ran a Maven reactor out of heap.
      *
      * @param  mixed  $memoryLimit
      */
@@ -126,9 +133,8 @@ final class ServiceLimits
     }
 
     /**
-     * Parallel cargo jobs for a build container of this size. Cargo runs one
-     * job per CPU and a `-sys` crate's C++ gets one compiler per job: liwan's
-     * libduckdb-sys was OOM-killed at 8 jobs in 5202 MB (cc1plus ~1.2 GB each).
+     * Parallel cargo jobs for a build container of this size, since a `-sys` crate's C++ gets one
+     * ~1.2 GB compiler per job.
      *
      * @param  mixed  $memoryLimit
      */
@@ -141,11 +147,8 @@ final class ServiceLimits
     }
 
     /**
-     * The V8 heap for a build inside the account's own container, or null when
-     * there is no ceiling to size it against: a cap of ours would be smaller
-     * than the host-sized default Node already takes. A cap larger than the
-     * cgroup is worse than none -- the kernel kills before any collection and
-     * the only trace is a bare `Killed`.
+     * The V8 heap for a build inside the account's own container, or null when there is no ceiling to size
+     * it against; a cap larger than the cgroup is worse than none.
      */
     public static function nodeHeapMbForAccount(?int $accountMemoryMb): ?int
     {

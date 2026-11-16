@@ -30,7 +30,7 @@ class AutoUpdateTest extends TestCase
         $auto = $this->autoUpdateWithFakeRunner(
             $sequence,
             results: [
-                ['exit_code' => 0, 'stdout' => "minor\n", 'stderr' => ''],
+                ['exit_code' => 0, 'stdout' => "\"minor\"\n", 'stderr' => ''],
                 ['exit_code' => 0, 'stdout' => '[{"name":"akismet","status":"enabled"},{"name":"hello","status":"enabled"}]', 'stderr' => ''],
                 ['exit_code' => 0, 'stdout' => '[{"name":"twentytwentyfour","status":"disabled"}]', 'stderr' => ''],
             ],
@@ -39,7 +39,7 @@ class AutoUpdateTest extends TestCase
         $body = $auto->get();
 
         $this->assertSame(
-            ['config', 'get', 'WP_AUTO_UPDATE_CORE', '--type=constant', '--path=/home/alice/example.test/public_html'],
+            ['config', 'get', 'WP_AUTO_UPDATE_CORE', '--type=constant', '--format=json', '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
         $this->assertSame(
@@ -242,6 +242,40 @@ class AutoUpdateTest extends TestCase
     }
 
     /**
+     * Each mode reads back as written: WP-CLI echoes a false constant as an empty line, so the read asks for JSON.
+     */
+    public function test_each_core_mode_written_reads_back_as_itself(): void
+    {
+        foreach (['off', 'on', 'minor'] as $mode) {
+            $auto = $this->autoUpdateOn($this->wordPressConfig());
+
+            $auto->set(['core' => $mode]);
+
+            $this->assertSame($mode, $auto->get()['core'], $mode);
+        }
+    }
+
+    /**
+     * `wp config set` and `wp config get` on one constant, printed the way WP_CLI::print_value() prints a scalar.
+     *
+     * @return \Closure(list<string>): array{exit_code: int, stdout: string, stderr: string}
+     */
+    private function wordPressConfig(): \Closure
+    {
+        $constant = null;
+
+        return function (array $args) use (&$constant): array {
+            if (array_slice($args, 0, 2) === ['config', 'set']) {
+                $constant = in_array('--raw', $args, true) ? $args[3] === 'true' : $args[3];
+            }
+            $printed = in_array('--format=json', $args, true) ? json_encode($constant) : (string) $constant;
+            $stdout = array_slice($args, 0, 2) === ['config', 'get'] ? $printed."\n" : '[]';
+
+            return ['exit_code' => 0, 'stdout' => $stdout, 'stderr' => ''];
+        };
+    }
+
+    /**
      * @param  list<list<string>>  $sequence
      * @param  list<array{exit_code: int, stdout: string, stderr: string}>  $results
      */
@@ -250,21 +284,29 @@ class AutoUpdateTest extends TestCase
         array $results = [['exit_code' => 0, 'stdout' => '', 'stderr' => '']],
         ?string $path = null,
     ): AutoUpdate {
+        $call = 0;
+
+        return $this->autoUpdateOn(function (array $args) use (&$sequence, &$call, $results): array {
+            $sequence[] = $args;
+            $result = $results[$call] ?? ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+            $call++;
+
+            return $result;
+        }, $path);
+    }
+
+    /**
+     * @param  \Closure(list<string>): array{exit_code: int, stdout: string, stderr: string}  $wpCli
+     */
+    private function autoUpdateOn(\Closure $wpCli, ?string $path = null): AutoUpdate
+    {
         $user = Mockery::mock(User::class)->makePartial();
         $user->username = 'alice';
         $project = Mockery::mock(Project::class);
         $project->shouldReceive('homeDirPath')->andReturn('/home/alice');
         $project->shouldReceive('resolvePath')
             ->andReturnUsing(fn (string $path): string => (new FileManager($project))->resolvePath($path));
-        $call = 0;
-        $project->shouldReceive('runWpCli')
-            ->andReturnUsing(function (array $args) use (&$sequence, &$call, $results): array {
-                $sequence[] = $args;
-                $result = $results[$call] ?? ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
-                $call++;
-
-                return $result;
-            });
+        $project->shouldReceive('runWpCli')->andReturnUsing($wpCli);
         $user->shouldReceive('project')->andReturn($project);
         $user->shouldReceive('getMainDomain')->andReturn($this->domain('/example.test/public_html'));
 

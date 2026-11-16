@@ -3,31 +3,28 @@
 namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
-use App\Lib\Deploy\Platform\Runtime\Images;
+use App\Lib\Deploy\Dind\AccountImage;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
+use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\ProjectCache;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class DindAccountCleanupTest extends TestCase
 {
-    public function test_host_cleanup_removes_node_modules_volume_and_inner_data_root(): void
+    public function test_host_cleanup_removes_the_node_modules_volume_through_the_broker(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv('acme-shop', '/home/acme-shop');
+        [$store] = DindAccountCleanup::hostCleanupArgvs('acme-shop', '/home/acme-shop');
 
+        $this->assertTrue(LocalRoot::isRequest($store));
+        $this->assertSame('--host', $store[1]);
+        $this->assertSame('host.removeAccountDockerStore', $store[2]);
         $this->assertSame(
-            ['sudo', 'nsenter', '--target', '1', '--all', 'sh', '-c'],
-            array_slice($argv, 0, 7)
+            [HostNodeBuild::nodeModulesVolumeName('acme-shop'), '0'],
+            array_slice($store, 4)
         );
-        $script = $argv[array_key_last($argv)];
-        $this->assertStringContainsString(
-            'docker volume rm -f ' . escapeshellarg(HostNodeBuild::nodeModulesVolumeName('acme-shop')),
-            $script
-        );
-        $this->assertStringContainsString(escapeshellarg('/home/acme-shop/docker'), $script);
-        $this->assertStringContainsString(escapeshellarg(HostNodeBuild::cacheDirFor('acme-shop')), $script);
-        $this->assertStringNotContainsString('docker rmi', $script);
     }
 
     /**
@@ -39,10 +36,9 @@ class DindAccountCleanupTest extends TestCase
      */
     public function test_host_cleanup_removes_every_cache_by_removing_the_project_directory(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv('acme-shop', '/home/acme-shop');
-        $script = $argv[array_key_last($argv)];
+        [, $files] = DindAccountCleanup::hostCleanupArgvs('acme-shop', '/home/acme-shop');
 
-        $this->assertStringContainsString(escapeshellarg(ProjectCache::dirFor('acme-shop')), $script);
+        $this->assertSame([ProjectCache::dirFor('acme-shop')], array_slice($files, 4, 1));
         foreach (ProjectCache::NAMES as $name) {
             $this->assertStringStartsWith(
                 ProjectCache::dirFor('acme-shop') . '/',
@@ -61,56 +57,40 @@ class DindAccountCleanupTest extends TestCase
      */
     public function test_host_cleanup_still_removes_the_pre_project_scoped_directories(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv('acme-shop', '/home/acme-shop');
-        $script = $argv[array_key_last($argv)];
+        [, $files] = DindAccountCleanup::hostCleanupArgvs('acme-shop', '/home/acme-shop');
 
         foreach (ProjectCache::legacyDirsFor('acme-shop') as $legacy) {
-            $this->assertStringContainsString(escapeshellarg($legacy), $script);
+            $this->assertContains($legacy, $files);
         }
     }
 
     public function test_host_cleanup_never_reaches_another_account_s_composer_cache(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv('acme', '/home/acme');
-        $script = $argv[array_key_last($argv)];
+        [, $files] = DindAccountCleanup::hostCleanupArgvs('acme', '/home/acme');
 
-        $this->assertStringNotContainsString(PhpHostBuild::cacheDirFor('acme-shop'), $script);
+        $this->assertNotContains(PhpHostBuild::cacheDirFor('acme-shop'), $files);
         // The shared parent as an argument of its own would wipe every
         // account's cache, not this one's.
-        $this->assertStringNotContainsString("'" . ProjectCache::ROOT . "'", $script);
+        $this->assertNotContains(ProjectCache::ROOT, $files);
     }
 
     public function test_host_cleanup_removes_sidecar_images_but_not_prewarm(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv(
+        [$store] = DindAccountCleanup::hostCleanupArgvs(
             'shopware',
             '/home/shopware',
             ['opensearchproject/opensearch:2', 'mysql:8.4']
         );
-        $script = $argv[array_key_last($argv)];
 
-        $this->assertStringContainsString('docker rmi ', $script);
-        $this->assertStringContainsString(escapeshellarg('opensearchproject/opensearch:2'), $script);
-        $this->assertStringContainsString(escapeshellarg('mysql:8.4'), $script);
-        $this->assertStringNotContainsString('nginx:alpine', $script);
-        $this->assertStringNotContainsString('panelalpha/php', $script);
-    }
-
-    /**
-     * -f would untag an image a stopped host container is waiting on, and the
-     * daemon's own refusal is a better guard than anything we can enumerate.
-     */
-    public function test_host_cleanup_never_forces_image_removal(): void
-    {
-        $argv = DindAccountCleanup::hostCleanupArgv('shopware', '/home/shopware', ['mysql:8.4']);
-
-        $this->assertStringNotContainsString('docker rmi -f', $argv[array_key_last($argv)]);
+        $this->assertSame(['2', 'opensearchproject/opensearch:2', 'mysql:8.4'], array_slice($store, 5));
+        $this->assertNotContains('nginx:alpine', $store);
+        $this->assertNotContains('panelalpha/php', $store);
     }
 
     public function test_host_cleanup_rejects_unsafe_paths(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        DindAccountCleanup::hostCleanupArgv('alice', '/tmp/alice');
+        DindAccountCleanup::hostCleanupArgvs('alice', '/tmp/alice');
     }
 
     public function test_sidecar_removal_keeps_prewarm_engine_and_in_use_images(): void
@@ -120,7 +100,7 @@ class DindAccountCleanupTest extends TestCase
             'mysql:8.4',
             Images::NGINX_IMAGE,
             'node:20-bookworm-slim',
-            'ghcr.io/panelalpha/engine-user-dind:v2.0.2',
+            AccountImage::REF,
             'panelalpha/php:8.4-apache-bookworm-pab1ff14ca',
             'postgres:16',
         ];
@@ -148,15 +128,13 @@ class DindAccountCleanupTest extends TestCase
 
     public function test_skips_unsafe_sidecar_refs_in_argv(): void
     {
-        $argv = DindAccountCleanup::hostCleanupArgv(
+        [$store] = DindAccountCleanup::hostCleanupArgvs(
             'acme',
             '/home/acme',
             ['mysql:8.4', 'evil; rm -rf /', '']
         );
-        $script = $argv[array_key_last($argv)];
 
-        $this->assertStringContainsString(escapeshellarg('mysql:8.4'), $script);
-        $this->assertStringNotContainsString('rm -rf /', $script);
+        $this->assertSame(['1', 'mysql:8.4'], array_slice($store, 5));
     }
 
     public function test_sidecar_removal_keeps_images_another_account_declares(): void
@@ -171,13 +149,16 @@ class DindAccountCleanupTest extends TestCase
 
     public function test_sibling_compose_scan_skips_the_account_being_deleted(): void
     {
-        $argv = DindAccountCleanup::otherAccountComposeImagesArgv('/home/', 'shopware');
+        $request = DindAccountCleanup::otherAccountComposeImagesArgv('/home/', 'shopware');
+        $argv = LocalRoot::plain($request);
 
-        $this->assertSame(['sudo', 'sh', '-c'], array_slice($argv, 0, 3));
-        $script = $argv[3];
+        $this->assertTrue(LocalRoot::isRequest($request));
+        $this->assertSame(['sh', '-c'], array_slice($argv, 0, 2));
+        $script = $argv[2];
         $this->assertStringContainsString("/*/project/docker-compose.yml", $script);
         $this->assertStringContainsString("/*/project/compose.yaml", $script);
-        $this->assertStringContainsString(escapeshellarg('/home/shopware') . '/*) continue', $script);
+        $this->assertStringContainsString('"$1/$2"/*) continue', $script);
+        $this->assertSame(['sh', '/home', 'shopware'], array_slice($argv, 3));
     }
 
     /**
@@ -188,8 +169,8 @@ class DindAccountCleanupTest extends TestCase
      */
     public function test_sibling_compose_scan_also_covers_the_reserved_run_file_names(): void
     {
-        $argv = DindAccountCleanup::otherAccountComposeImagesArgv('/home/', 'shopware');
-        $script = $argv[3];
+        $argv = LocalRoot::plain(DindAccountCleanup::otherAccountComposeImagesArgv('/home/', 'shopware'));
+        $script = $argv[2];
 
         $this->assertStringContainsString('/*/project/' . EngineArtifacts::RUN_COMPOSE, $script);
         $this->assertStringContainsString('/*/project/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE, $script);

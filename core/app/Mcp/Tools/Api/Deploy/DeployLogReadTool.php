@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Read a page of one kept deploy's log by its id
 
-    A page of one kept deploy's log from `offset`, by the id deploy_list names. While `more` is true, call again with `next_offset`. deploy_log_get follows the latest deploy instead.
+    A page of one kept deploy's log from `offset`, by the id deploy_list names. While `more` is true, call again with `next_offset`. deploy_log_get follows the latest deploy instead. Container projects only.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

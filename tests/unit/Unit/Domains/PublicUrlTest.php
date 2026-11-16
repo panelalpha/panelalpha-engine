@@ -70,13 +70,14 @@ class PublicUrlTest extends TestCase
         ));
 
         $this->assertCount(2, $warnings);
-        $this->assertStringContainsString('not reachable from the internet', $warnings[0]);
-        $this->assertStringContainsString('shop.local', $warnings[0]);
+        $this->assertSame([PublicUrl::UNRESOLVABLE, PublicUrl::CERTIFICATE_REFUSED], [$warnings[0]->code, $warnings[1]->code]);
+        $this->assertStringContainsString('not reachable from the internet', $warnings[0]->message);
+        $this->assertStringContainsString('shop.local', $warnings[0]->message);
         // The reason travels with the warning: this is what tells an operator
         // Connect refused them rather than that the host has no address.
-        $this->assertStringContainsString('License is not valid (HTTP 403)', $warnings[0]);
-        $this->assertStringContainsString('browsers will refuse', $warnings[1]);
-        $this->assertStringContainsString('self_signed', $warnings[1]);
+        $this->assertStringContainsString('License is not valid (HTTP 403)', $warnings[0]->message);
+        $this->assertStringContainsString('browsers will refuse', $warnings[1]->message);
+        $this->assertStringContainsString('self_signed', $warnings[1]->message);
     }
 
     /**
@@ -97,8 +98,33 @@ class PublicUrlTest extends TestCase
         ));
 
         $this->assertCount(1, $warnings);
-        $this->assertStringContainsString('answers on this network only', $warnings[0]);
-        $this->assertStringNotContainsString('resolves on this host only', $warnings[0]);
+        $this->assertStringContainsString('answers on this network only', $warnings[0]->message);
+        $this->assertStringNotContainsString('resolves on this host only', $warnings[0]->message);
+        $this->assertSame([
+            'domain' => 'shop.10-0-0-4.panelalpha.direct',
+            'resolves_on' => 'private_network',
+            'fallback_reason' => "no public IPv4: the host's address is private",
+        ], $warnings[0]->facts);
+    }
+
+    public function test_a_refused_certificate_carries_its_facts_and_names_no_command(): void
+    {
+        $warnings = PublicUrl::warnings('pvvk.136-243-229-118.panelalpha.direct', $this->details(
+            ['source' => DomainPlan::SOURCE_PANELALPHA_DIRECT, 'publicly_resolvable' => true, 'tls_terminated_at' => 'engine'],
+            ['domain' => 'pvvk.136-243-229-118.panelalpha.direct'],
+        ));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame(PublicUrl::CERTIFICATE_REFUSED, $warnings[0]->code);
+        $this->assertSame(
+            'https://pvvk.136-243-229-118.panelalpha.direct is served a certificate browsers will refuse (self_signed, '
+                .'issued by PanelAlpha). A trusted one can be requested once the name resolves to this host.',
+            $warnings[0]->message,
+        );
+        $this->assertSame([
+            'domain' => 'pvvk.136-243-229-118.panelalpha.direct',
+            'certificate' => ['status' => CertificateStatus::SELF_SIGNED, 'issuer' => 'PanelAlpha'],
+        ], $warnings[0]->facts);
     }
 
     public function test_an_unresolvable_name_warns_even_without_a_recorded_reason(): void
@@ -109,7 +135,7 @@ class PublicUrlTest extends TestCase
         ));
 
         $this->assertCount(1, $warnings);
-        $this->assertStringNotContainsString('skipped', $warnings[0]);
+        $this->assertStringNotContainsString('skipped', $warnings[0]->message);
     }
 
     public function test_expired_and_mismatched_certificates_warn_too(): void
@@ -121,7 +147,7 @@ class PublicUrlTest extends TestCase
             ));
 
             $this->assertCount(1, $warnings, $status);
-            $this->assertStringContainsString($status, $warnings[0]);
+            $this->assertStringContainsString($status, $warnings[0]->message);
         }
     }
 

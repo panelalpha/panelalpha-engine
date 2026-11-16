@@ -6,10 +6,11 @@ use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\System;
 use App\System\Project\Dind;
-use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Inner\HostCommands;
 use App\System\Project\Dind\Inner\SharedBaseImages;
+use App\System\Project\Dind\InnerDocker;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The host composer pass runs our base image by its plain name. The host prune
@@ -41,8 +42,8 @@ class HostCompilePrunedBaseTest extends TestCase
         $bases->ensureOnHost(self::IMAGE, [], []);
 
         $this->assertCount(1, $commands->built);
-        $this->assertStringContainsString('docker build', $commands->built[0]);
-        $this->assertStringContainsString('docker push', $commands->built[0]);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' lines.buildFromStdin -- '.self::IMAGE.' ', $commands->built[0]);
+        $this->assertStringContainsString(LocalRoot::CLIENT.' lines.pushQuietly -- ', $commands->built[0]);
         $this->assertStringContainsString('flock -x', $commands->built[0]);
     }
 
@@ -126,8 +127,7 @@ class HostCompilePrunedBaseTest extends TestCase
         $system = $this->createStub(System::class);
         $system->method('execOnHost')->willReturnCallback(
             function (string|array $cmd) use ($commands): string {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                if (str_starts_with($line, 'docker image inspect') && ! $commands->hostHas) {
+                if (is_array($cmd) && LocalRoot::action($cmd) === 'probes.hostImage' && ! $commands->hostHas) {
                     throw new \Exception('Error: No such image');
                 }
 
@@ -137,11 +137,11 @@ class HostCompilePrunedBaseTest extends TestCase
 
         $host = $this->createStub(HostCommands::class);
         $host->method('cancellable')->willReturnCallback(
-            function (string|array $cmd) use ($commands, $buildFails, $afterBuild): void {
+            function (array $argv) use ($commands, $buildFails, $afterBuild): void {
                 if ($buildFails) {
                     throw new \Exception('E: Unable to locate package imagick');
                 }
-                $commands->built[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $commands->built[] = implode(' ', $argv);
                 if ($afterBuild !== null) {
                     $commands->hostHas = true;
                     throw $afterBuild;

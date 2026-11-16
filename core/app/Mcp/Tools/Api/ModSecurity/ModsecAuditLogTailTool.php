@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_audit_log_tail')]
 #[Description(<<<'MARKDOWN'
     Tail a ModSecurity audit log file
+
+    The audit log entries in the last 50 KB of the file, newest first.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -42,12 +44,33 @@ class ModsecAuditLogTailTool extends ApiTool
     }
 
     /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'limit',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function defaults(): array
+    {
+        return [
+            'limit' => '10',
+        ];
+    }
+
+    /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
     public function schema(JsonSchema $schema): array
     {
         return [
             'filename' => $schema->string()->required(),
+            'limit' => $schema->integer()->min(1)->max(500)->description('The most entries to return, newest first, up to 500. This tool sends 10 when it is omitted.'),
         ];
     }
 }

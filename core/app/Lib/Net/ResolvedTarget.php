@@ -3,11 +3,8 @@
 namespace App\Lib\Net;
 
 /**
- * A URL that passed the egress guard, with the addresses it resolved to and the
- * one the connection must be pinned to.
- *
- * A literal address has nothing to resolve: the address list is empty and
- * {@see pin()} is null.
+ * A URL that passed the egress guard, with the addresses it resolved to. A literal address has nothing to
+ * resolve: the list is empty and {@see pin()} is null.
  */
 final class ResolvedTarget
 {

@@ -4,6 +4,8 @@ namespace App\Console\Commands\Ssl;
 
 use App\Models\Setting;
 use App\System;
+use App\System\Privileged;
+use App\System\Privileged\InvalidArgument;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -33,19 +35,12 @@ class EngineCertRequest extends Command
 
     public function handle(System $system): int
     {
-        $script = $system->engineDirPath().'/scripts/letsencrypt-request-cert.sh';
-        $args = ['sudo', 'nsenter', '--target', '1', '--all', 'bash', $script];
+        try {
+            $args = Privileged::host()->requestEngineCertificate($system->engineDirPath(), $this->values(), $this->flags());
+        } catch (InvalidArgument $refused) {
+            $this->error($refused->getMessage());
 
-        foreach (['domain', 'email', 'ip'] as $name) {
-            $value = $this->option($name);
-            if (is_string($value) && $value !== '') {
-                $args[] = "--{$name}={$value}";
-            }
-        }
-        foreach (['staging', 'force-renewal', 'skip-dns-check', 'dry-run'] as $flag) {
-            if ($this->option($flag)) {
-                $args[] = "--{$flag}";
-            }
+            return 1;
         }
 
         $domain = $this->option('domain') ?: Setting::get('cert_domain');
@@ -70,5 +65,26 @@ class EngineCertRequest extends Command
         }
 
         return 0;
+    }
+
+    /** @return array{domain: ?string, email: ?string, ip: ?string} */
+    private function values(): array
+    {
+        $values = [];
+        foreach (['domain', 'email', 'ip'] as $name) {
+            $value = $this->option($name);
+            $values[$name] = is_string($value) ? $value : null;
+        }
+
+        return $values;
+    }
+
+    /** @return list<string> */
+    private function flags(): array
+    {
+        return array_values(array_filter(
+            ['staging', 'force-renewal', 'skip-dns-check', 'dry-run'],
+            fn (string $flag): bool => (bool) $this->option($flag)
+        ));
     }
 }

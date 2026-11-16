@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Platform\Runtime\Ruby;
 
 /**
- * Whether the engine has to generate a secret_key_base. Only `config/master.key`
- * settles it: `credentials.yml.enc` is ciphertext without that key.
- * RAILS_MASTER_KEY or SECRET_KEY_BASE in the environment counts too.
+ * Whether the engine has to generate a secret_key_base: only `config/master.key`, RAILS_MASTER_KEY
+ * or SECRET_KEY_BASE settles it, since `credentials.yml.enc` is ciphertext without that key.
  */
 final class RailsSecret
 {

@@ -1,15 +1,15 @@
 # Domains and HTTPS
 
-Every project has at least one hostname - the address visitors type. This page is about making that a name you own, with a working padlock.
+Every project has at least one hostname, the address visitors type. This page is about making that a name you own, with a working padlock.
 
-> **Two different certificates, do not confuse them.** Your *sites* have certificates, and *the engine itself* has one for its API and its connection to your AI assistant. This page is about site certificates. The engine's own is on [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate). A common source of confusion is a site working perfectly in a browser while an assistant still cannot connect, or vice versa - different certificates, different problems.
+> **Two different certificates, do not confuse them.** Your *sites* have certificates, and *the engine itself* has one for its API and its connection to your AI assistant. This page is about site certificates. The engine's own is on [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate). A common source of confusion is a site working perfectly in a browser while an assistant still cannot connect, or vice versa: different certificates, different problems.
 
 ## Adding your own domain
 
-**Point DNS at your VPS first.** Let's Encrypt issues a certificate by checking that it really reaches your VPS at that name. If the name does not resolve here yet, the request fails - and there is nothing the engine can do about it.
+**Point DNS at your VPS first.** Let's Encrypt issues a certificate by checking that it really reaches your VPS at that name. If the name does not resolve here yet, the request fails, and there is nothing the engine can do about it.
 
 1. At your DNS provider, create an **A record** for the name (for example `shop.example.com`) pointing to your VPS's public IPv4 address.
-2. Wait for it to take effect. Check with `nslookup shop.example.com` - it should return your VPS's address. This can take minutes or, on some providers, hours.
+2. Wait for it to take effect. Check with `nslookup shop.example.com`. It should return your VPS's address. This can take minutes or, on some providers, hours.
 3. Then ask your assistant:
 
 ```text
@@ -23,14 +23,16 @@ Open `https://shop.example.com/` in a browser. You want a padlock with no warnin
 
 If you create a project without naming a domain, the engine picks the best public name it can. It tries, in order:
 
-1. **`<project>.<your base domain>`**, if you have configured a base domain for sites. The best option - you control it.
+1. **`<project>.<your base domain>`**, if you have configured a base domain for sites. The best option: you control it.
 2. **A `panelalpha.online` name**, if your VPS has a public IPv4. Works immediately with no DNS setup from you. Skipped when the engine is set to give new projects its own names instead (below).
 3. **A name derived from the engine's own certificate.**
-4. **`<project>.local`** - which resolves nowhere.
+4. **`<project>.local`**, which resolves nowhere.
 
-**A `.local` name is not a public website.** The application built and started correctly; it simply has no address the world can reach. This is why such deploys are marked `partial`. Attach a domain you control before putting more work into the site.
+**A `.local` name is not a public website.** The application built and started correctly; it has no address the world can reach. This is why such deploys are marked `partial`. Attach a domain you control before putting more work into the site.
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it. The same goes for a staging copy or clone that got a name of its own there, and for a create or copy that fails: the name it was given is released with it.
+
+PanelAlpha Online serves those names through its own proxy, which passes a request on without a `multipart/form-data` body; pages, downloads and a form that posts only plain fields are unaffected, while **every upload sent through such a name fails**: a file in phpMyAdmin, a media file in WordPress ([phpMyAdmin](../05-capabilities/databases.md#troubleshooting)). A name that points straight at the server takes the same upload at once.
 
 The server operator can switch the `panelalpha.online` step off for every new project. With the engine setting `default_tunnel` set to `none`, a project created without a name gets step 1 or step 3 above, and nothing is registered at PanelAlpha Online. The value `panelalpha`, or no value, keeps the order above. A request that names `panelalpha` or `none` itself always wins over the setting. Change it with `pae settings:set default_tunnel none`, or with `pae configure address`: [CLI commands](../06-commands/pae-cli.md#configuring-the-engine).
 
@@ -46,7 +48,7 @@ This works for applications that let you choose those names (an `API_DOMAIN` set
 
 ## A preview address
 
-To show a site before its domain points here, ask for a preview address. It is a `panelalpha.online` name that opens the site over HTTPS, and it stops working by itself after 24 hours unless you ask for another time (5 minutes up to 30 days):
+To show a site before its domain points here, ask for a preview address. It is a `panelalpha.online` name that opens the site over HTTPS, and it stops working when its time is up, to within a few seconds: after 24 hours, unless you ask for another time (5 minutes up to 30 days):
 
 ```text
 Give shop a preview address that lasts 3 days.
@@ -82,7 +84,7 @@ Set memory_limit to 256M on shop.example.com, and keep the other PHP settings
 that are already there.
 ```
 
-Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set.
+Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set. A saved set reaches the site within a few seconds: PHP keeps a directory's settings in a cache the engine limits to three seconds, so nothing is restarted and the requests already running finish on the settings they started with. A project whose PHP handler has not started again since an engine update still caches those settings for five minutes; there the engine tells that handler's workers to quit on a save: each finishes the request it is running, and the next request gets a fresh worker with the saved set.
 
 This is not the project's own PHP settings. Those belong to the project and, like these, apply only to traditional PHP hosting: [Change the PHP version](wordpress-and-apps.md#change-the-php-version).
 
@@ -94,7 +96,7 @@ The engine already sends HTTP and HTTPS for your project hostnames to the right 
 List the proxy rules on this engine.
 ```
 
-Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
+Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall). An application that needs a port of its own says so in its `panelalpha.yaml`: [Ports and the server's name an application asks for](#ports-and-the-servers-name-an-application-asks-for).
 
 Two rules cannot serve the same hostname on the same port, and two TCP or UDP rules cannot listen on the same address and port: the second one is refused, also when it was saved switched off and is switched on later. A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
 
@@ -102,9 +104,77 @@ On port 443 a rule named after a container project's domain is served with that 
 
 A rule named after a domain is served by that domain's own site, which takes it only under the domain's name and only in a container project; it then serves the domain's aliases too. A rule named after an alias, or after a domain or alias of a traditional PHP project, is refused, whoever owns it: that site already answers for the name, so the rule would never be served.
 
+## Ports and the server's name an application asks for
+
+An application can say in its `panelalpha.yaml` that it needs more than a hostname: a TCP or UDP port on the server (a game server, MQTT, SMTP), or the server's own name instead of a name of its own (a control panel that should answer on the address the server is known by).
+
+```yaml
+domain: host               # the server's own name; leave it out for a name of the project's own
+public_ports:
+  - { listen: 8081, to: 3000, transport: tcp }
+  - { listen: 27015, transport: udp }     # to defaults to listen, transport to tcp
+```
+
+`listen` is the port on the server. `to` is the port the application listens on in its project. `port:` is unchanged: it is still where the project's hostname sends HTTP. Ports 80 and 443 and the engine's own ports cannot be listed. The file's other settings: [panelalpha.yaml](../07-supported-projects/panelalpha-yaml.md).
+
+Nothing happens until you allow it, because whoever writes the repository would otherwise be opening ports on your server:
+
+```bash
+pae system:public-routing:allow <project> --ports --host-domain
+```
+
+- **Ports** open at once, as proxy rules belonging to the project, and the firewall opens with them. Removing a line from the file closes its port on the next deploy. A port another project or a service on the server already uses is skipped, with a warning in the deploy log, and the deploy carries on.
+- **The server's own name** is the one the engine's certificate is issued for (`cert_domain`). The first deploy allowed to makes it the project's main domain, served with that certificate, and keeps the name the project had. That happens once: afterwards the project's domains are its own to change ([moving to another domain](#moving-a-project-to-another-domain-or-https-port)), and no later deploy moves it back, whether the file still asks or not. A project whose permission you take back leaves the name at once, back on the name it had. Only one project can hold the server's name, and without the permission no project can take it through the API either, as a main domain, an addon or an alias. An engine with no name of its own (installed without `--domain`) has none to give.
+- `pae system:public-routing:deny <project>` takes both back at once. `pae system:public-routing:list` shows who is allowed what, and what each project's last deploy applied.
+
+The project's `public_routing` says the same once a deploy has read the file: what it asks for, what you allowed, and each port's state, `open`, `refused` or `not_allowed`, with the reason.
+
+A project on the server's name shares cookies with the engine's own `:2011`, since cookies ignore ports. Allow it only for an application you trust as much as the engine.
+
+## Moving a project to another domain or HTTPS port
+
+Every domain of a container project answers with its application, not only the main one. The main domain is the address the application is told (`PA_PUBLIC_URL`). Moving to another name takes three steps, and the old address keeps working until the last one:
+
+1. **Add** the new domain and request its certificate.
+2. **Make it the main domain.** The old main domain becomes an addon domain and keeps answering. The project is redeployed so the application is told its new address.
+3. **Delete** the old domain. Its name is free for another project.
+
+```text
+Make shop.example.com the main domain of shop. Once https://shop.example.com/
+works, delete shop.panelalpha.online.
+```
+
+This is for container projects only, and the new main domain has to be an addon domain: a subdomain is refused (add the name as an addon first), and so is a project on PHP hosting, which is renamed instead. Without the assistant: `pae project:domain:main shop.example.com --project=shop`.
+
+Ports work the same way. A domain of a container project answers HTTPS on 443 unless you give it other ports: add the port, make it the domain's main port, then remove 443 if it should stop answering there.
+
+```bash
+pae project:domain:https-ports shop.example.com --project=shop --ports=443,8443
+pae project:domain:https-ports shop.example.com --project=shop --main=8443
+pae project:domain:https-ports shop.example.com --project=shop --ports=8443
+```
+
+- The main domain's main port is part of the address the application is told: `PA_PUBLIC_URL` becomes `https://shop.example.com:8443`, and `PA_PUBLIC_HOST` `shop.example.com:8443`, as a browser sends it. Changing it redeploys the project.
+- A port other than 443 needs the operator's permission (`pae system:public-routing:allow <project> --ports`). The firewall opens with the port and closes when no domain uses it any more. Taking the permission back puts every domain of the project on 443 again.
+- Projects share a port by name, as they share 443. A port a proxy rule or another service on the server uses is refused.
+- Once 443 is not one of a domain's ports, plain HTTP on port 80 redirects to the main port.
+- A name never answers for two projects on two ports: cookies ignore ports, so the two would share them. To give a name to another project, the first one leaves it completely.
+
 ## Removing and renaming a domain
 
-A project's main domain cannot be deleted. To change it, ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+Every deploy routes all of a container project's domains to its application again, so a domain you added is served without further steps.
+
+A project's main domain cannot be deleted. To change it, make another domain the main one first ([above](#moving-a-project-to-another-domain-or-https-port)), or ask for it to be renamed. If the rename fails part way, the engine puts the routing back as it was. A name given with `www.` is taken as the name under it, the way adding a domain takes it: renaming to `www.shop.example.com` makes `shop.example.com` the main domain and keeps `www.shop.example.com` answering as its alias, never `www.www.shop.example.com`. The old main domain's own `www.` alias moves to the new name and its other aliases stay. A rename keeps the certificate of the old name for ten minutes: add that name again as a domain within them, as a primary-domain switch does, and it keeps the certificate it had. Added any later, the name gets a certificate of its own, never the one it had before. A main domain is not renamed to a name under `panelalpha.online`: add that name as a tunnel instead. Renaming a main domain that is a `panelalpha.online` name releases that name on PanelAlpha Online; any other tunnel of the main domain has to be deleted before the rename. A subdomain remembers the domain it belongs to, so the domain above it cannot be removed while the subdomain exists: remove the subdomain first.
+
+Deleting a domain keeps its files. Its folder (`~/<domain>`) and its document root stay in the project home, because they may hold the site's files or be shared with another domain. The answer lists them in `files_kept`. Delete them with the file tools or over SFTP when you no longer need them.
+
+## Cookies between projects under one parent name
+
+Projects named under one parent name, such as the `panelalpha.online` names or the base domain you gave the engine for sites, are different sites to you but the same site to a browser, which lets them share cookies. The engine keeps them apart. A cookie one project sets for the parent name is narrowed to that project's own name, and a request that comes from a neighbouring project's page loses its cookies unless it is a plain link the visitor followed. Nothing is set up. A login that relies on a cookie shared between such projects stops working, by design.
+
+## Notices on every page
+
+A banner, a notice or a script can be written into every page the engine serves, for all projects or for one: [Overlays](projects.md#overlays).
 
 ## Mail from a domain
 
@@ -114,9 +184,17 @@ Mail a site sends ends up in spam when its domain does not vouch for the server 
 Check the mail DNS records for shop.example.com.
 ```
 
-Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. If the mail relay rewrites senders to its own sender domain, the records belong to that domain, and the answer says so.
+Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. The records belong to the domain itself: a project's mail keeps the domain it owns once the engine can show the domain is this server's (it resolves here, it is below the server's own names, or a tunnel of the project holds it), and any other sender leaves as the relay's sender domain ([sending mail](projects.md#sending-mail-through-the-server)).
 
 The engine does not sign mail itself. A DKIM signature comes from a relay (SendGrid, Amazon SES, MailChannels or your own SMTP server) that signs for the domain. Give the assistant the relay's DKIM selector to check that record too.
+
+## Removing an installed certificate
+
+A certificate you install on a domain yourself (`install-ssl-cert`, or the panel's Custom Certificate) replaces the one the engine gave the site, and the engine keeps no copy of what it replaced. The way back is the way forward: `DELETE /projects/{username}/domains/{domain}/installed-ssl-cert` and `pae ssl:project-cert:remove shop.example.com` (or `ssl_cert_remove` for the assistant) drop the installed certificate and give the domain the one it would get if it were added now: the server's own where that covers the name, otherwise the one this engine is set to issue, self-signed on a stock engine. It works for a main domain, an addon domain and a subdomain alike.
+
+The new certificate replaces all four files of the domain's (`crt`, `key`, `ca`, `pem`), so the installed key is gone, and any ACME challenge state of the name is forgotten. The webserver is reloaded and the answer is the certificate the domain carries now, the same shape `installed-ssl-cert` returns. A domain already on a certificate the engine made (one it issued, its self-signed one or the server's own) keeps it: the call answers with it and nothing is issued again, so repeating it spends no Let's Encrypt rate limit. A domain with SSL turned off has no certificate to put back and is refused.
+
+A self-signed certificate is what browsers warn about, and `ssl:project-cert:renew` leaves a self-signed certificate alone: once the name resolves here, `pae ssl:project-cert:request shop.example.com` is what gets a trusted one back.
 
 ## Checking what visitors really get
 
@@ -139,7 +217,7 @@ Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` 
 ## Troubleshooting
 
 **The certificate request fails with a DNS error.**
-The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80 - Let's Encrypt uses it to verify ownership, even though your site will run on 443.
+The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80, because Let's Encrypt uses it to verify ownership, even though your site will run on 443.
 
 **The certificate request fails with `Timeout during connect (likely firewall problem)`.**
 DNS is fine, but Let's Encrypt cannot reach port 80 on the VPS. Most often a firewall in your provider's control panel lets only some addresses in, so the site opens for you and not for Let's Encrypt. Port 80 has to be open to everyone, also later for automatic renewals. See [A firewall in front of the VPS](../02-getting-started/install.md#a-firewall-in-front-of-the-vps).
@@ -160,7 +238,7 @@ Visitors to that name already get HTTPS from PanelAlpha Online (see the previous
 Covered on the [Cloudflare](cloudflare.md#troubleshooting) page.
 
 **"Let's Encrypt rate limit."**
-Let's Encrypt caps how many new certificates you can get per week. If you have been retrying a failing request, stop, fix the DNS, and wait - retrying burns the allowance without getting you a certificate.
+Let's Encrypt caps how many new certificates you can get per week. If you have been retrying a failing request, stop, fix the DNS and wait. Retrying burns the allowance without getting you a certificate.
 
 ## More requests to try
 
@@ -286,6 +364,24 @@ project tshop's app, change it to point at port 3000, and delete it.
 ```
 
 Mode: full. Tools: `proxy_rule_list`, `proxy_rule_create`, `proxy_rule_get`, `proxy_rule_update`, `proxy_rule_delete`. Check: a rule that belongs to a project can only point at that project's own app, and any other destination is refused. The rule's port is opened in the firewall and removed again with the rule.
+
+**Switch the main domain**
+
+```text
+Make shop.example.com the main domain of tshop. When https://shop.example.com/
+works, delete the old main domain.
+```
+
+Mode: full. Tools: `domain_update` with `main`, `task_get`, `domain_delete`. Check: the old main domain stays as an addon and answers until it is deleted. The project is redeployed so the app learns its new address. Deleting the main domain before the switch is refused. A subdomain, or a project on PHP hosting, cannot become the main domain.
+
+**HTTPS on another port**
+
+```text
+Let shop.example.com on tshop answer HTTPS on port 8443 as well as 443, and
+make 8443 the port in the project's public address.
+```
+
+Mode: full. Tools: `domain_update` with `https_ports` and `https_port`, `task_get`. Check: without the operator's permission for ports the change is refused and the assistant tells you to run `pae system:public-routing:allow tshop --ports` on the server. Afterwards `https://shop.example.com:8443/` opens and the app is told that address. Skip it where the operator has not allowed ports.
 
 **Remove a domain**
 

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Remove a public tunnel hostname
 
-    Cloudflare tunnels lose their DNS record and ingress rule. A PanelAlpha Online hostname is released here and at the proxy, so the label can be taken again. A remote delete that fails is logged rather than raised: the local row goes either way, and the registration then expires on its own.
+    Cloudflare tunnels lose their DNS record and ingress rule. A PanelAlpha Online hostname is released here and at the proxy, so the label can be taken again. A remote delete that fails is logged rather than raised: the local row goes either way, and the registration then expires on its own. The hostname's registration is gone for good; this cannot be undone. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

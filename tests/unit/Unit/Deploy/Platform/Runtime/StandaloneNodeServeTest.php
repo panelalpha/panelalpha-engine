@@ -2,10 +2,11 @@
 
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
-use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
+use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class StandaloneNodeServeTest extends TestCase
 {
@@ -98,11 +99,11 @@ class StandaloneNodeServeTest extends TestCase
         );
     }
 
-    /** @return list<string> the real `find` listing, sudo dropped, parsed */
+    /** @return list<string> the real `find` listing, run as the test's user, parsed */
     private function nestedOutputDirs(): array
     {
         $process = new \Symfony\Component\Process\Process(
-            array_slice(StandaloneNodeServe::nestedEntriesArgv($this->tmpDir . '/'), 1)
+            LocalRoot::argv(StandaloneNodeServe::nestedEntriesArgv($this->tmpDir . '/'))
         );
         $process->mustRun();
         return StandaloneNodeServe::nestedOutputDirs($this->tmpDir, $process->getOutput());

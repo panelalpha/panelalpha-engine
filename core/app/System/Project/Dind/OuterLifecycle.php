@@ -4,6 +4,8 @@ namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
 use App\System\AccountContainers;
+use App\System\Privileged;
+use App\System\Privileged\RootCompose;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -42,24 +44,23 @@ final class OuterLifecycle
     /** A new account container in place of the old one; {@see AccountMapping}. */
     public function recreate(): void
     {
-        $this->composeUp('--force-recreate');
+        $this->composeUp(forceRecreate: true);
     }
 
     /**
      * The tenant firewall is applied again after up: a port is bound to its container's address
      * only once the container exists, and until then the bridge drops its frames.
      */
-    private function composeUp(string ...$flags): void
+    private function composeUp(bool $forceRecreate = false): void
     {
         $this->prepareTenantNetwork();
-        $this->project->system()->exec($this->composeArgv('up', '-d', '--remove-orphans', ...$flags));
+        $this->project->system()->exec($this->compose()->up($forceRecreate));
         $this->prepareTenantNetwork();
     }
 
-    /** @return list<string> */
-    private function composeArgv(string ...$args): array
+    private function compose(): RootCompose
     {
-        return ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), ...$args];
+        return Privileged::compose($this->project->composeFilePath());
     }
 
     /**
@@ -79,7 +80,7 @@ final class OuterLifecycle
 
     public function down(): void
     {
-        $this->project->system()->exec($this->composeArgv('down'));
+        $this->project->system()->exec($this->compose()->down());
     }
 
     public function tearDown(): void
@@ -100,7 +101,7 @@ final class OuterLifecycle
     public function deleteOuterStack(): void
     {
         if ($this->project->exists()) {
-            $this->project->system()->runProcess($this->composeArgv('down', '-v', '--remove-orphans'));
+            $this->project->system()->runProcess($this->compose()->downWithVolumes());
         }
         $this->removeAccountContainer();
     }
@@ -110,7 +111,7 @@ final class OuterLifecycle
     {
         $username = $this->project->username();
         if ((new AccountContainers($this->project->system()))->ownsContainerNamed($username)) {
-            $this->project->system()->runProcess(['sudo', 'docker', 'rm', '-f', $username]);
+            $this->project->system()->runProcess(Privileged::docker()->forceRemoveContainer($username));
         }
     }
 }

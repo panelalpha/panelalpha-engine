@@ -3,24 +3,8 @@
 namespace App\Lib\Ssl;
 
 /**
- * Does anything actually trust this certificate?
- *
- * `status: trusted` used to mean "not self-signed", which is a different
- * question and sometimes the opposite answer. A certificate from Let's
- * Encrypt's *staging* authority is signed by a CA, in date, and for the right
- * name -- and every client on earth refuses it. The engine reported it as
- * `trusted (issuer: Let's Encrypt)` while curl was answering
- * `SSL certificate problem: unable to get local issuer certificate`. Anyone
- * testing an issuance path against staging, which is the responsible way to
- * test one, was told it had worked.
- *
- * So the question is asked of the host's own root store rather than inferred
- * from a name. Null where it cannot be asked -- no CA bundle on the box, an
- * openssl build without the call, intermediates that cannot be written out
- * for it -- because "we could not check" and "we checked and it fails" must
- * not collapse into one answer.
- *
- * No Laravel dependencies — unit-testable.
+ * Whether the host's own root store trusts a certificate: null when it cannot be asked,
+ * since "could not check" and "checked and it fails" must stay apart.
  */
 final class TrustStore
 {
@@ -28,7 +12,7 @@ final class TrustStore
      * Whether a chain leads to a root this host trusts.
      *
      * @param  string  $pem  the leaf, optionally followed by its intermediates
-     * @return ?bool null when the chain could not be checked
+     * @return ?bool null when the chain could not be checked; -1 from openssl is not "untrusted"
      */
     public static function verifies(string $pem, ?string $caBundle = null): ?bool
     {
@@ -41,9 +25,6 @@ final class TrustStore
             return null;
         }
 
-        // A chain in one file is the leaf plus its intermediates; checkpurpose
-        // wants the leaf and is given the rest as untrusted candidates, which
-        // is exactly what `openssl verify -untrusted` does.
         $blocks = self::blocks($pem);
         if ($blocks === []) {
             return null;
@@ -58,8 +39,16 @@ final class TrustStore
             }
         }
 
+        $result = self::checkPurpose($leaf, $bundle, $untrusted);
+
+        return $result === true ? true : ($result === false ? false : null);
+    }
+
+    /** Like `openssl verify -untrusted`: the leaf, with the intermediates as untrusted candidates. */
+    private static function checkPurpose(string $leaf, string $bundle, ?string $untrusted): bool|int
+    {
         try {
-            $result = @openssl_x509_checkpurpose(
+            return @openssl_x509_checkpurpose(
                 $leaf,
                 X509_PURPOSE_SSL_SERVER,
                 [$bundle],
@@ -70,14 +59,10 @@ final class TrustStore
                 @unlink($untrusted);
             }
         }
-
-        // -1 is "the check itself failed", which is not the same as "untrusted".
-        return $result === true ? true : ($result === false ? false : null);
     }
 
     /**
-     * The intermediates in a temp file, or null when they cannot be written in
-     * full: the leaf checked without them would read as untrusted.
+     * The intermediates in a temp file, or null when they cannot be written in full.
      *
      * @param  list<string>  $blocks
      */
@@ -98,12 +83,7 @@ final class TrustStore
         return $path;
     }
 
-    /**
-     * The root store openssl was built to use, when it is readable.
-     *
-     * A file, not a directory: `checkpurpose` takes either, but the hashed
-     * directory form is empty on plenty of images while the bundle is there.
-     */
+    /** The root store openssl was built to use, when readable: a file, since the hashed directory is often empty. */
     public static function defaultBundle(): ?string
     {
         $locations = function_exists('openssl_get_cert_locations') ? openssl_get_cert_locations() : [];

@@ -6,12 +6,8 @@ use App\Models\MysqlDatabase;
 use App\Models\User;
 
 /**
- * A WordPress in the project's own containers moved by a staging, clone or
- * push. Its database comes with the copied volumes and is named per project,
- * so nothing is rewired: the copy only has to answer as its own domain rather
- * than redirect to the source's. A database another project owns on the
- * account MySQL server is never rewritten, since that would move the other
- * project to the copy's address. Every step runs without plugins and themes.
+ * A container WordPress moved by staging, clone or push: its per-project database comes with the volumes, so it only has
+ * to answer as its own domain. Another project's database is never rewritten, as that would move that project too.
  */
 final class ContainerSiteCopy
 {
@@ -34,9 +30,8 @@ final class ContainerSiteCopy
     }
 
     /**
-     * Before the copy, while the source runs: the hosts its WordPress answers
-     * on, with the project's domain. None when its containers hold no
-     * installed WordPress.
+     * Before the copy, while the source runs: the hosts its WordPress answers on, with the project's domain;
+     * none when its containers hold no installed WordPress.
      *
      * @return list<string>
      */

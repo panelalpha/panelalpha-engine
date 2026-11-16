@@ -39,19 +39,17 @@ final class CommandScript
         ]));
     }
 
+    /** Prefixes every line, so a folded description cannot land in the entrypoint as bare shell. */
     private function descriptionLine(): ?string
     {
-        // Prefix every line: a folded multi-line description must stay fully
-        // commented, or a subsequent line lands in the entrypoint as bare shell.
         return $this->command->description === null
             ? null
             : '# '.str_replace("\n", "\n# ", $this->command->description);
     }
 
     /**
-     * An optional step must not take the boot down, but it must still be
-     * visible: silence here is how a half-configured container reaches
-     * production looking healthy.
+     * An optional step must not take the boot down, but it must still be visible, or a
+     * half-configured container reaches production looking healthy.
      */
     private function runLine(): string
     {

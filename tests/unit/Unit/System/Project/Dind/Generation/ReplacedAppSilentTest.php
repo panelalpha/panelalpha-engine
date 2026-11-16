@@ -9,6 +9,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\AppPortAlignment;
 use App\System\Project\Dind\Generation\GenerationState;
@@ -25,6 +26,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -133,7 +135,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->assertNull($this->swap->finish(true));
 
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port);
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'), 'the copy is removed');
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'), 'the copy is removed');
         $this->assertSame([], $this->ranMatching("'--remove-orphans' '--no-build'"), 'nothing started again');
         $this->assertContains("Traffic is back on the app's own port 8080; the second copy was removed", $this->logged());
     }
@@ -155,10 +157,10 @@ class ReplacedAppSilentTest extends TestCase
             $result['stderr']
         );
         $this->assertNotEmpty($this->ranMatching("'up' '-d' '--remove-orphans' '--no-build'"), 'the previous version is started again');
-        $this->assertNotEmpty($this->ranMatching('project-app panelalpha-serving:bbbbbbbbbbbb'), 'from its held image');
+        $this->assertNotEmpty($this->ranMatching("account-docker.tag -- {$this->username} panelalpha-serving:bbbbbbbbbbbb project-app"), 'from its held image');
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port);
         $this->assertSame([8080], $this->routed, 'the site\'s rules on the previous version\'s port');
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'), 'the copy goes once the previous version serves');
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'), 'the copy goes once the previous version serves');
         $this->assertFileDoesNotExist(GenerationState::path($this->username), 'nothing left for a settle or the sweep');
         $this->assertContains('The replaced app does not answer on port 8080: nothing answered within 30 s (Recv failure: Connection reset by peer). '
             . 'The second copy keeps serving while the previous version is started again', $this->logged());
@@ -192,7 +194,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->assertStringEndsWith('so the new version\'s second copy keeps serving the site on port 32768 until the app answers on port 8080.', $result['stderr']);
         $this->assertSame('The new version\'s second copy keeps serving the site; nothing was torn down', ZeroDowntimeRedeploy::keptServing($result));
         $this->assertSame(self::COPY, ProxyRule::find($rule)->upstream_port, 'the site stays on the copy');
-        $this->assertSame([], $this->ranMatching('docker rm -f'), 'the copy is not removed');
+        $this->assertSame([], $this->ranMatching('account-docker.removeContainers'), 'the copy is not removed');
         $this->assertSame([], $this->routed);
         $state = new GenerationState($this->username);
         $this->assertSame(8080, $state->get(GenerationState::NEXT)['back']);
@@ -202,7 +204,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->assertNotNull(GenerationSweep::settleIfIdle($this->project(), false));
         GenerationSweep::settleInterrupted($this->project());
         $this->assertSame(self::COPY, ProxyRule::find($rule)->upstream_port);
-        $this->assertSame([], $this->ranMatching('docker rm -f'));
+        $this->assertSame([], $this->ranMatching('account-docker.removeContainers'));
         $this->assertSame([], $this->routed);
 
         // Once the app answers, the next settle moves the site there and removes the copy.
@@ -210,7 +212,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->previousUp = false;
         $this->assertContains('second generation removed', GenerationSweep::settleIfIdle($this->project(), false));
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port);
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'));
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'));
     }
 
     /** The replace itself failed and the running version is gone: rolled back the same way. */
@@ -236,7 +238,7 @@ class ReplacedAppSilentTest extends TestCase
 
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port);
         $this->assertSame([], $this->ranMatching("'--remove-orphans' '--no-build'"));
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'));
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'));
     }
 
     /** A deploy stopped mid-replace: traffic does not go back to a port that no longer answers. */
@@ -248,7 +250,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->swap->abandon();
 
         $this->assertSame(self::COPY, ProxyRule::find($rule)->upstream_port);
-        $this->assertSame([], $this->ranMatching('docker rm -f'));
+        $this->assertSame([], $this->ranMatching('account-docker.removeContainers'));
         $this->assertContains('Traffic stays on the second copy: nothing answers on port 8080', $this->logged());
     }
 
@@ -266,7 +268,7 @@ class ReplacedAppSilentTest extends TestCase
         $this->assertContains('Replacing the running app in place, not beside it: a second copy an earlier redeploy left still serves the site, '
             . 'and it does until the new version answers', $this->logged());
         $this->assertSame(self::COPY, ProxyRule::find($rule)->upstream_port);
-        $this->assertSame([], $this->ranMatching('docker rm -f'));
+        $this->assertSame([], $this->ranMatching('account-docker.removeContainers'));
 
         // In place, the new version has not answered yet: the site stays on the copy.
         $this->snapshot();
@@ -280,7 +282,7 @@ class ReplacedAppSilentTest extends TestCase
         (new RoutingSnapshot($this->project()))->apply();
         $this->assertSame(8080, ProxyRule::find($rule)->upstream_port);
         $this->assertSame([8080], $this->routed);
-        $this->assertNotEmpty($this->ranMatching('docker rm -f'));
+        $this->assertNotEmpty($this->ranMatching('account-docker.removeContainers'));
         $this->assertNull((new GenerationState($this->username))->get(GenerationState::NEXT));
     }
 
@@ -307,7 +309,7 @@ class ReplacedAppSilentTest extends TestCase
 
         $this->assertNull(ZeroDowntimeRedeploy::plan($this->project()));
 
-        $this->assertSame([], $this->ranMatching('docker rm -f'), 'the copy is not removed');
+        $this->assertSame([], $this->ranMatching('account-docker.removeContainers'), 'the copy is not removed');
         $this->assertTrue(ZeroDowntimeRedeploy::copyHeld($this->username));
         $this->assertContains('Replacing the running app in place, not beside it: a second copy an earlier redeploy left still serves the site, '
             . 'and it does until the new version answers', $this->logged());
@@ -434,6 +436,8 @@ class ReplacedAppSilentTest extends TestCase
         $project->method('userAppComposeFileToRun')->willReturn(self::RUN_PATH);
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return $project;
     }
@@ -441,8 +445,12 @@ class ReplacedAppSilentTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         $this->ran[] = $line;
+        $asked = array_slice(LocalRoot::values($argv), 1);
+        if (LocalRoot::action($argv) === 'account-docker.images') {
+            return (string) json_encode(array_map(fn (): ?array => $this->held ? ['Id' => self::OLD_IMAGE] : null, $asked));
+        }
         if (str_contains($line, "'config' '--format' 'json'")) {
             return (string) json_encode([
                 'name' => 'project',
@@ -459,31 +467,29 @@ class ReplacedAppSilentTest extends TestCase
 
             return '';
         }
-        if (str_contains($line, "'ps' '--quiet' '--status' 'running'")) {
-            return "old1\n";
+        if (preg_match('/account-docker\.listContainers .*label com\.docker\.compose\.project=project(?: |$)/', $line) === 1) {
+            return '[{"Id":"old1","Names":["/project-app-1"]}]';
         }
-        if (str_contains($line, 'docker ps -aq') && str_contains($line, 'project-next')) {
-            return "next1\n";
+        if (str_contains($line, 'account-docker.listContainers') && str_contains($line, 'project-next')) {
+            return '[{"Id":"next1"}]';
         }
-        if (str_contains($line, 'docker port next1 8080/tcp')) {
-            return TestNetwork::ANY . ':' . self::COPY . "\n";
+        if (preg_match('/account-docker\.containers -- \S+ (.+)$/', $line, $m) === 1) {
+            return (string) json_encode(array_map(static fn (string $container): array => [
+                'State' => ['Status' => 'running', 'ExitCode' => 0],
+                'RestartCount' => 0,
+                'NetworkSettings' => [
+                    'Networks' => ['project-next_default' => ['IPAddress' => '172.18.0.9']],
+                    'Ports' => $container === 'next1' ? ['8080/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => (string) self::COPY]]] : [],
+                ],
+            ], explode(' ', $m[1])));
         }
-        if (str_contains($line, 'net/tcp')) {
+        if (str_contains($line, 'account-docker.listeningSockets')) {
             return self::HEADER . "\n   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1000 1\n";
         }
-        if (str_contains($line, 'NetworkSettings.Networks')) {
+        if (str_contains($line, 'curl') && str_contains($line, ' probe 172.18.0.9 ')) {
             return '200';
         }
-        if (str_contains($line, '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')) {
-            return 'running 0 0';
-        }
-        if (str_contains($line, 'echo held')) {
-            return $this->held ? 'held' : 'gone';
-        }
-        if (str_contains($line, 'docker tag "$2" "$1"') || in_array('retag', $argv, true)) {
-            return '1';
-        }
-        if (str_contains($line, 'docker logs')) {
+        if (str_contains($line, 'account-docker.logTail')) {
             return "replaced app printed this\n";
         }
         if (preg_match('/for port in ([\d ]+); do/', $line, $m) === 1) {

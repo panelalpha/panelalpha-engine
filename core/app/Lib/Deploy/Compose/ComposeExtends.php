@@ -3,18 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * A service's `extends:` merged into it, so the keys Compose would pull in are
- * the ones the hardening reads. Left as an `extends:`, the extended service's
- * `privileged`, host mounts, `network_mode: host` and the rest were merged by
- * Compose at run time, after {@see ServiceHardener} had already run over the
- * service's own keys and found nothing to strip.
- *
- * Same-file `extends` resolves against the file's own services; `extends.file`
- * reads the named file, confined to the project root ({@see NestedCompose}),
- * with its relative paths rebased to mean the same from there. The extending
- * service's own keys win the merge.
- *
- * No Laravel dependencies -- unit-testable.
+ * A service's `extends:` merged into it, so {@see ServiceHardener} reads the keys Compose would pull in;
+ * `extends.file` is confined to the project root and rebased ({@see NestedCompose}). Own keys win.
  */
 final class ComposeExtends
 {
@@ -64,15 +54,41 @@ final class ComposeExtends
         }
 
         if ($file === null) {
-            $key = ':'.$targetName;
-            if (in_array($key, $seen, true) || ! is_array($siblings[$targetName] ?? null)) {
-                throw new \InvalidArgumentException("The compose file extends {$targetName}, which it does not define.");
-            }
-            $base = self::resolveService($siblings[$targetName], $siblings, $read, array_merge($seen, [$key]), $depth + 1);
-
-            return self::merge($base, $service);
+            return self::extendSibling($service, $targetName, $siblings, $read, $seen, $depth);
         }
 
+        return self::extendFromFile($service, $targetName, $file, $read, $seen, $depth);
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @param  array<array-key, mixed>  $siblings
+     * @param  callable(string): ?string  $read
+     * @param  list<string>  $seen
+     * @return array<string, mixed>
+     */
+    private static function extendSibling(array $service, string $targetName, array $siblings, callable $read, array $seen, int $depth): array
+    {
+        $key = ':'.$targetName;
+        if (in_array($key, $seen, true)) {
+            throw new \InvalidArgumentException("The compose file extends {$targetName} in a cycle.");
+        }
+        if (! is_array($siblings[$targetName] ?? null)) {
+            throw new \InvalidArgumentException("The compose file extends {$targetName}, which it does not define.");
+        }
+        $base = self::resolveService($siblings[$targetName], $siblings, $read, array_merge($seen, [$key]), $depth + 1);
+
+        return self::merge($base, $service);
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     * @param  callable(string): ?string  $read
+     * @param  list<string>  $seen
+     * @return array<string, mixed>
+     */
+    private static function extendFromFile(array $service, string $targetName, string $file, callable $read, array $seen, int $depth): array
+    {
         $relative = self::fromRoot($file);
         if (str_starts_with($relative, '/') || str_starts_with($relative, '..')) {
             throw new \InvalidArgumentException("The compose file extends {$file}, which is outside the project.");
@@ -113,10 +129,8 @@ final class ComposeExtends
     }
 
     /**
-     * Compose's `extends` merge: the extending service's keys win; lists are
-     * appended (base first), maps are merged one level deeper the same way.
-     * Every escaping key the base carries therefore lands in the service, where
-     * {@see ServiceHardener} then removes it.
+     * Compose's `extends` merge: the extending service's keys win; lists are appended (base first),
+     * maps merged one level deeper the same way, so every escaping key lands where the hardener sees it.
      *
      * @param  array<string, mixed>  $base
      * @param  array<string, mixed>  $over

@@ -1,0 +1,171 @@
+[1 log lines] entrypoint
+[
+    {
+        "strategy": "rails",
+        "label": "Rails",
+        "compose_path": null,
+        "dockerfile": null,
+        "port_hint": 0,
+        "runtime": "command",
+        "output_directory": null,
+        "package_manager": null,
+        "install_command": "bundle install --jobs 4 --retry 3",
+        "build_command": "{ SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile; } || true",
+        "start_command": "bundle exec rails server -b 0.0.0.0 -p 3000",
+        "env": {
+            "RAILS_ENV": "production",
+            "RAILS_LOG_TO_STDOUT": "1",
+            "RAILS_SERVE_STATIC_FILES": "1"
+        },
+        "static_index": null,
+        "port_scheme": null,
+        "runtime_image": null,
+        "image": "ruby:3.3-slim-bookworm",
+        "database": null,
+        "app_root": "",
+        "docroot": "",
+        "build_args": [],
+        "system_packages": [],
+        "frontend_build": null,
+        "credentials": null,
+        "platform": "rails",
+        "requirements": [
+            {
+                "id": "ruby",
+                "version": "3.3",
+                "constraint": "",
+                "source": "engine default",
+                "role": "runtime"
+            }
+        ],
+        "toolchain": [
+            "ruby 3.3 (from engine default)"
+        ],
+        "build_images": [],
+        "resolved_commands": []
+    },
+    "{dir}",
+    "1001:1001",
+    [],
+    false
+]
+
+[1 log lines] ensureRubyBaseImage
+[
+    "ruby:3.3-slim-bookworm",
+    [
+        "curl",
+        "git",
+        "libjemalloc2",
+        "build-essential",
+        "libyaml-dev",
+        "libpq-dev"
+    ]
+]
+
+[1 log lines] write {dir}/panelalpha.Dockerfile chown=1001:1001 mode=644
+FROM ruby:3.3-slim-bookworm AS base
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl git libjemalloc2 build-essential libyaml-dev libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+ENV BUNDLE_PATH=/usr/local/bundle
+ENV BUNDLE_WITHOUT="development:test"
+ENV RAILS_ENV=production
+ENV RAILS_LOG_TO_STDOUT=1
+ENV RAILS_SERVE_STATIC_FILES=1
+WORKDIR /app
+COPY Gemfile ./
+COPY Gemfile.lock* ./
+COPY .ruby-version* .tool-versions* ./
+RUN bundle install --jobs 4 --retry 3 \
+ && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache
+
+FROM base AS app
+COPY . .
+EXPOSE 3000
+CMD ["bundle","exec","rails","server","-b","0.0.0.0","-p","3000"]
+
+
+[1 log lines] write {dir}/panelalpha.Dockerfile.dockerignore chown=1001:1001 mode=644
+# Written by PanelAlpha on every deploy; edits here are overwritten.
+
+node_modules
+.panelalpha
+npm-debug.log
+
+# The engine's own files: nothing in the image reads them.
+docker-compose.panelalpha.yml
+docker-compose.panelalpha.override.yml
+docker-compose.panelalpha.app-config.yml
+.env.panelalpha
+.env.default
+panelalpha.passwd
+panelalpha.group
+panelalpha.Dockerfile
+panelalpha.Dockerfile.dockerignore
+# A fresh clone every deploy: its bytes differ even when the commit does not.
+.git
+
+
+[2 log lines] write {dir}/config/initializers/zz_panelalpha_hosts.rb chown=1001:1001 mode=644
+# frozen_string_literal: true
+# Written by PanelAlpha Engine for the configured reverse-proxy hostname.
+# An empty config.hosts already accepts every Host; only extend a whitelist
+# the application chose to keep.
+
+Rails.application.config.after_initialize do
+  hosts = Rails.application.config.hosts
+  hosts << 'acme.example.test' unless hosts.empty? || hosts.include?('acme.example.test')
+end
+
+
+[2 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[2 log lines] compose {dir} chown=1001:1001
+services:
+  app:
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: framework-recipe
+    build:
+      context: .
+      dockerfile: panelalpha.Dockerfile
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      URL: 'https://acme.example.test'
+      PUBLIC_URL: 'https://acme.example.test'
+      BASE_URL: 'https://acme.example.test'
+      APP_URL: 'https://acme.example.test'
+      ASSET_URL: 'https://acme.example.test'
+      SITE_URL: 'https://acme.example.test'
+      ENDURAIN_HOST: 'https://acme.example.test'
+      ORIGIN: 'https://acme.example.test'
+      SERVERNAME: acme.example.test
+      SERVER_NAME: acme.example.test
+      DEFAULT_DOMAIN: acme.example.test
+      HTTPS: 'on'
+      SSL: 'true'
+      FORCE_SSL: 'true'
+      RAILS_ENV: production
+      RAILS_LOG_TO_STDOUT: '1'
+      RAILS_SERVE_STATIC_FILES: '1'
+      RAILS_FORCE_SSL: 'false'
+      RAILS_ASSUME_SSL: 'true'
+      SECRET_KEY_BASE: stub-secret-key-base
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running
+#1 info: Build context: .git and the engine's compose files left out (panelalpha.Dockerfile.dockerignore)

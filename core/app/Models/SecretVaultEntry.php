@@ -50,6 +50,14 @@ class SecretVaultEntry extends Model
 {
     public const TYPE_GIT_TOKEN = 'git_token';
 
+    /**
+     * What a git route's `token` field accepts: an entry made for that field,
+     * or the `git_token` every other git credential field takes.
+     *
+     * @var list<string>
+     */
+    public const GIT_TOKEN_FIELD_TYPES = ['token', self::TYPE_GIT_TOKEN];
+
     public const TYPE_ENV_VARS = 'env_vars';
 
     /**
@@ -64,6 +72,12 @@ class SecretVaultEntry extends Model
 
     /** The `registry-auth` setting: private registry logins, one per line. */
     public const TYPE_REGISTRY_AUTH = 'registry_auth';
+
+    /**
+     * An SSH deploy key the vault generated itself (POST /vault/deploy-keys):
+     * the key pair and pinned host keys as JSON, the public half in `public_part`.
+     */
+    public const TYPE_DEPLOY_KEY = 'deploy_key';
 
     /**
      * The types that ship with a help file of their own. Anything else is
@@ -109,6 +123,7 @@ class SecretVaultEntry extends Model
         'project',
         'link_expires_at',
         'expires_at',
+        'public_part',
     ];
 
     protected $casts = [
@@ -118,6 +133,7 @@ class SecretVaultEntry extends Model
         'last_used_at' => 'datetime',
         'verify_with' => 'array',
         'verification' => 'array',
+        'public_part' => 'array',
     ];
 
     /** `use_count` mirrors the column default, so a freshly created entry does not serialise null. */
@@ -232,6 +248,19 @@ class SecretVaultEntry extends Model
         }
 
         return $this->linkExpired() ? 'abandoned' : 'pending';
+    }
+
+    /**
+     * What a generated secret shows of itself: a deploy key's public half and
+     * the hosts it trusts. Empty for a pasted secret.
+     *
+     * @return array<string, mixed>
+     */
+    public function publicPart(): array
+    {
+        return is_array($this->public_part)
+            ? array_intersect_key($this->public_part, array_flip(['public_key', 'fingerprint', 'hosts']))
+            : [];
     }
 
     public function setSecret(string $secret): void

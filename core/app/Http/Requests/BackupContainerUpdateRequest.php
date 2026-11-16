@@ -33,7 +33,14 @@ class BackupContainerUpdateRequest extends FormRequest
             'driver' => ['sometimes', Rule::in(['local', 's3', 'ftp', 'ftps', 'sftp'])],
             'location' => ['sometimes', 'string', 'max:1024'],
             'credentials' => ['nullable', 'array'],
+            'default' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /** Any truthy `default` the boolean rule accepts (true, 1, "1", "true") makes the store the default one. */
+    public function makesDefault(): bool
+    {
+        return $this->boolean('default');
     }
 
     public function withValidator(Validator $validator): void
@@ -43,31 +50,25 @@ class BackupContainerUpdateRequest extends FormRequest
                 return;
             }
 
+            $container = BackupContainer::find((int) $this->route('id'));
             $driver = $this->input('driver');
-            $location = $this->input('location');
-            $resolvedDriver = is_string($driver) ? $driver : null;
-            if ($resolvedDriver === null) {
-                $container = BackupContainer::find((int) $this->route('id'));
-                $resolvedDriver = $container?->driver;
+            $resolvedDriver = is_string($driver) ? $driver : $container?->driver;
+
+            if ($this->has('default') && ! $this->boolean('default') && $container?->is_default) {
+                $validator->errors()->add(
+                    'default',
+                    'Make another store the default first; the host must keep one.',
+                );
             }
 
-            if ($resolvedDriver === 'local' && is_string($location) && $location !== '') {
-                try {
-                    $this->assertLocalLocationIsSafe($location);
-                } catch (ValidationException $e) {
-                    foreach ($e->errors() as $field => $messages) {
-                        foreach ($messages as $message) {
-                            $validator->errors()->add($field, $message);
-                        }
-                    }
-                }
+            if ($resolvedDriver === 'local') {
+                $this->checkEffectiveLocalLocation($validator, $container);
             }
 
             if (! is_string($driver) || $driver === 'local' || $this->has('credentials')) {
                 return;
             }
 
-            $container = BackupContainer::find((int) $this->route('id'));
             if ($container !== null && $container->credentials === null) {
                 $validator->errors()->add(
                     'credentials',
@@ -75,5 +76,24 @@ class BackupContainerUpdateRequest extends FormRequest
                 );
             }
         });
+    }
+
+    /** The location a local store ends up with, the one sent or the one it keeps, must pass the local rules. */
+    private function checkEffectiveLocalLocation(Validator $validator, ?BackupContainer $container): void
+    {
+        $sent = $this->input('location');
+        $location = is_string($sent) && $sent !== ''
+            ? $sent
+            : (is_string($container?->location) ? $container->location : '');
+
+        try {
+            $this->assertLocalLocationIsSafe($location);
+        } catch (ValidationException $e) {
+            foreach ($e->errors() as $field => $messages) {
+                foreach ($messages as $message) {
+                    $validator->errors()->add($field, $message);
+                }
+            }
+        }
     }
 }

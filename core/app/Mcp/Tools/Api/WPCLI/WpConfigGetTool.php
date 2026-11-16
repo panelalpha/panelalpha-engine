@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Read a WordPress wp-config constant
 
-    Reads one constant (or, with `type`, a variable) from wp-config.php via `wp config get`. The value is evaluated, as WP-CLI prints it: true is "1", false is "". With `format=json` the value is decoded JSON instead. An entry that is not defined is a 422 whose message says it is not defined. Optional `path` selects the install.
+    Reads one constant (or, with `type`, a variable) from wp-config.php via `wp config get`, read as JSON so the value keeps the type wp-config.php gives it: a string is a string, true and false are booleans, a number is a number, an array is a JSON array. An entry that is not defined is a 422 whose message says it is not defined. Optional `path` selects the install.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -54,7 +54,6 @@ class WpConfigGetTool extends ApiTool
             'service',
             'skip_plugins',
             'type',
-            'format',
         ];
     }
 
@@ -80,7 +79,6 @@ class WpConfigGetTool extends ApiTool
             'service' => $schema->string()->description('Compose service whose container runs WordPress, on a project running in its own containers. Omitted: the first container with both PHP and WordPress.'),
             'skip_plugins' => $schema->boolean()->description('Run without loading plugins and themes (--skip-plugins --skip-themes), so a plugin or theme with a fatal error does not block the operation. Omitted: false.'),
             'type' => $schema->string()->description('Look the name up as a constant, a variable, or either. Omitted: constant. One of: constant, variable, all.'),
-            'format' => $schema->string()->description('json: return the value decoded from JSON, for arrays such as WP_REDIS_CONFIG. Omitted: the value as a string. One of: json.'),
         ];
     }
 }

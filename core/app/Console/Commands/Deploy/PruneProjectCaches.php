@@ -31,7 +31,7 @@ use Illuminate\Console\Command;
  * since reusing node_modules needs a byte-identical lockfile and a project
  * that has not deployed in a long time is unlikely to have one.
  *
- * The work itself is {@see ProjectCache::PRUNE_SCRIPT}; this decides the
+ * scripts/prune-project-caches.sh does the work on the host. This command picks the
  * window, protects deploys in flight, and reports.
  */
 class PruneProjectCaches extends Command

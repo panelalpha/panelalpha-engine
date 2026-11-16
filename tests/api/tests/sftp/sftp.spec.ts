@@ -243,17 +243,21 @@ test.describe('SFTP validation', () => {
     expectOneOf(response.status(), [400, 422]);
   });
 
-  const malformedKeys = [
-    ['plain text', 'not-a-key'],
-    ['a private key', '-----BEGIN RSA PRIVATE KEY-----\nnot-valid'],
-    ['digits', '12345'],
+  const refusedKeys = [
+    ['plain text', 'not-a-key', 'ssh_key_invalid'],
+    ['a private key', '-----BEGIN RSA PRIVATE KEY-----\nnot-valid', 'ssh_key_invalid'],
+    ['digits', '12345', 'ssh_key_invalid'],
+    ['base64 that is not a key', 'ssh-ed25519 AAAAnotakeyatall', 'ssh_key_corrupt'],
+    ['a DSA key', 'ssh-dss AAAAB3NzaC1kc3MAAACBAP1 user@host', 'ssh_key_type_not_accepted'],
+    [
+      'a 1024-bit RSA key',
+      'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQDkI2XmjUrsnhH62flwcGdiTOueAB4iXG9kUm36sHtJGPAvHGoyiAf7e0SlYt1O4VKvS4JdUFN5Kj8TomNg7hLqMdb8Y1ipRPUZZBINdaWvdlzuQOhLeWZoeavq1naeOig4pTkOqDcxF6YJo0MWnWmqKnVmtkSmxNS8wmLNJrEFnQ== user@laptop',
+      'ssh_key_too_weak',
+    ],
   ] as const;
 
-  for (const [label, key] of malformedKeys) {
-    // 201 is tolerated here because current engines do not validate the key
-    // format on create. Tighten this to [400, 422] once they do — the wide
-    // range is a known gap, not the intended contract.
-    test(`a public key that is ${label} does not break the endpoint`, async ({
+  for (const [label, key, code] of refusedKeys) {
+    test(`a public key that is ${label} is refused as ${code}`, async ({
       api,
       authedRequest,
       setupUser,
@@ -265,7 +269,9 @@ test.describe('SFTP validation', () => {
       });
 
       try {
-        expectOneOf(response.status(), [201, 400, 422]);
+        await expectStatus(response, 422);
+        const body = (await response.json()) as { problems?: { code: string }[] };
+        expect(body.problems?.[0]?.code).toBe(code);
       } finally {
         if (response.status() === 201) {
           await api.deleteSftpAccount(setupUser.username, username);

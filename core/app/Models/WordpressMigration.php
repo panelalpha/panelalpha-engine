@@ -45,6 +45,7 @@ use InvalidArgumentException;
  * @property ?Carbon $heartbeat_at
  * @property ?string $created_database
  * @property ?string $created_database_user
+ * @property ?bool $source_plugin_preinstalled
  * @property Carbon $created_at
  * @property Carbon $updated_at
  */
@@ -157,6 +158,7 @@ class WordpressMigration extends Model
         'created_database',
         'created_database_user',
         'warnings',
+        'source_plugin_preinstalled',
     ];
 
     protected $hidden = [
@@ -174,6 +176,7 @@ class WordpressMigration extends Model
         'migrator_token' => 'encrypted',
         'created_project' => 'boolean',
         'domain_given' => 'boolean',
+        'source_plugin_preinstalled' => 'boolean',
         'dns_switched_at' => 'datetime',
         'heartbeat_at' => 'datetime',
         'source_token' => 'encrypted',
@@ -225,6 +228,12 @@ class WordpressMigration extends Model
     public function usesManualPlugin(): bool
     {
         return $this->importMethod() === self::METHOD_MANUAL_PLUGIN;
+    }
+
+    /** The source's wordpress-migrator is the operator's, never this import's to remove: installed by hand, or there before. */
+    public function keepsSourcePlugin(): bool
+    {
+        return $this->usesManualPlugin() || $this->source_plugin_preinstalled === true;
     }
 
     /**
@@ -720,6 +729,19 @@ class WordpressMigration extends Model
     public function storeSourceToken(string $token): void
     {
         $this->source_token = $token;
+        $this->save();
+    }
+
+    /**
+     * Called by install_source_plugin before its first upload: whether wordpress-migrator was already on the source,
+     * which makes that copy the operator's to keep. A later install finds this import's own copy, so changes nothing.
+     */
+    public function recordSourcePluginPreinstalled(bool $installed): void
+    {
+        if ($this->source_plugin_preinstalled !== null) {
+            return;
+        }
+        $this->source_plugin_preinstalled = $installed;
         $this->save();
     }
 

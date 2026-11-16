@@ -6,10 +6,8 @@ use App\Models\Domain;
 use App\Models\ProxyRule;
 
 /**
- * A project's rule answers for no name or for its own domains and aliases: another
- * project's name puts the rule into that project's vhost. System rules are not limited,
- * except that no rule may take a name whose domain's own vhost answers for it without
- * rendering the rule.
+ * A project's rule answers for no name or its own domains and aliases, as another's would land in that vhost; system
+ * rules are free, but none may take a name whose domain's vhost answers for it without rendering the rule.
  */
 final class ProxyRuleServerName
 {
@@ -19,9 +17,8 @@ final class ProxyRuleServerName
         ."default self-signed certificate and clients will warn. Name a container project's domain to use its certificate.";
 
     /**
-     * Why clients will not get a live HTTP rule on 443 under a certificate for its name, or null. A domain's
-     * own vhost answers for its name and aliases, and serves only a container project's rule named after the
-     * domain, on 443 only with SSL on; any other name takes the server's trusted certificate covering it, or the host's default.
+     * Why clients will not get a live HTTP rule on 443 under a certificate for its name, or null: a domain's vhost serves only
+     * a container project's rule named after it, with SSL on; any other name takes the server's trusted one, or the default.
      */
     public static function defaultCertificateWarning(ProxyRule $rule): ?string
     {

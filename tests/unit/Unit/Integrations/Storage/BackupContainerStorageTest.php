@@ -11,7 +11,9 @@ use InvalidArgumentException;
 use League\Flysystem\Filesystem;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use League\Flysystem\UnableToWriteFile;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
+use RuntimeException;
 use Tests\TestCase;
 
 class BackupContainerStorageTest extends TestCase
@@ -21,9 +23,9 @@ class BackupContainerStorageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
         $this->app->forgetInstance('encrypter');
-        $this->root = sys_get_temp_dir() . '/pa-backup-factory-' . bin2hex(random_bytes(8));
+        $this->root = sys_get_temp_dir().'/pa-backup-factory-'.bin2hex(random_bytes(8));
         mkdir($this->root, 0775, true);
     }
 
@@ -101,8 +103,8 @@ class BackupContainerStorageTest extends TestCase
         $storage->put($key, $stream);
         fclose($stream);
 
-        $this->assertFileExists($this->root . '/' . $key);
-        $this->assertFileDoesNotExist($this->root . '/backups/backups/alice/1/files.tar.gz');
+        $this->assertFileExists($this->root.'/'.$key);
+        $this->assertFileDoesNotExist($this->root.'/backups/backups/alice/1/files.tar.gz');
     }
 
     public function test_ftp_storage_delete_prefix_only_removes_matching_keys(): void
@@ -126,6 +128,43 @@ class BackupContainerStorageTest extends TestCase
         $this->assertTrue($storage->exists('bob/1/d.bin'));
     }
 
+    public function test_ftp_storage_delete_prefix_removes_the_directory_it_emptied(): void
+    {
+        $filesystem = $this->localFilesystem();
+        $storage = new Ftp($filesystem);
+
+        foreach (['alice/1/a.bin', 'alice/2/c.bin'] as $key) {
+            $stream = fopen('php://memory', 'r+');
+            fwrite($stream, 'x');
+            rewind($stream);
+            $storage->put($key, $stream);
+            fclose($stream);
+        }
+
+        $storage->deletePrefix('alice/1/');
+
+        $this->assertDirectoryDoesNotExist($this->root.'/alice/1');
+        $this->assertDirectoryExists($this->root.'/alice');
+        $this->assertTrue($storage->exists('alice/2/c.bin'));
+    }
+
+    public function test_ftp_storage_delete_prefix_removes_the_parents_it_emptied(): void
+    {
+        $filesystem = $this->localFilesystem();
+        $storage = new Ftp($filesystem);
+
+        $stream = fopen('php://memory', 'r+');
+        fwrite($stream, 'x');
+        rewind($stream);
+        $storage->put('alice/1/a.bin', $stream);
+        fclose($stream);
+
+        $storage->deletePrefix('alice/1/');
+
+        $this->assertDirectoryDoesNotExist($this->root.'/alice');
+        $this->assertDirectoryExists($this->root);
+    }
+
     public function test_remote_storage_test_writes_and_removes_probe(): void
     {
         foreach ([S3::class, Ftp::class] as $class) {
@@ -139,9 +178,27 @@ class BackupContainerStorageTest extends TestCase
         }
     }
 
+    public function test_remote_storage_test_keeps_the_drivers_reason(): void
+    {
+        foreach ([S3::class, Ftp::class] as $class) {
+            $filesystem = $this->createStub(FilesystemOperator::class);
+            $filesystem->method('write')->willThrowException(
+                UnableToWriteFile::atLocation('.panelalpha-backup-probe', 'NoSuchBucket (client): The specified bucket does not exist')
+            );
+            $storage = new $class($filesystem);
+
+            try {
+                $storage->test();
+                $this->fail("{$class} passed its test");
+            } catch (RuntimeException $e) {
+                $this->assertSame('Backup storage is not writable: NoSuchBucket (client): The specified bucket does not exist', $e->getMessage(), $class);
+            }
+        }
+    }
+
     private function container(string $driver, string $location, ?array $credentials = null): BackupContainer
     {
-        $container = new BackupContainer();
+        $container = new BackupContainer;
         $container->driver = $driver;
         $container->location = $location;
         $container->credentials = $credentials;
@@ -173,14 +230,14 @@ class BackupContainerStorageTest extends TestCase
 
     private function removeDir(string $dir): void
     {
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             return;
         }
         foreach (scandir($dir) ?: [] as $item) {
             if ($item === '.' || $item === '..') {
                 continue;
             }
-            $path = $dir . '/' . $item;
+            $path = $dir.'/'.$item;
             is_dir($path) ? $this->removeDir($path) : @unlink($path);
         }
         @rmdir($dir);

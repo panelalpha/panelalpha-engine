@@ -9,6 +9,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use ReflectionMethod;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -57,7 +58,7 @@ class GitCredentialsSweepCommandTest extends TestCase
         $this->assertFileExists($nestedFresh, "a running command's nested credentials were deleted");
         $this->assertFileExists($fresh, "a running command's credentials were deleted");
         $this->assertFileExists($ordinary);
-        $this->assertContains(['sudo', 'rm', '-f', '--', $nestedStale], $host->removals);
+        $this->assertContains(['rm', '-f', '--', $nestedStale], $host->removals);
         $this->assertSame(2, count($host->finds), 'one find per home, with no second pass over the directories');
         $this->assertStringNotContainsString('-maxdepth', implode(' ', $host->finds[0] ?? []));
         $this->assertStringContainsString(CredentialFiles::ASKPASS_PREFIX, implode(' ', $host->finds[0] ?? []));
@@ -134,16 +135,16 @@ class GitCredentialsSweepCommandTest extends TestCase
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $argv = array_values((array) $cmd);
-                if (array_slice($argv, 0, 2) === ['sudo', 'find']) {
-                    if ($this->failOn !== null && ($argv[2] ?? null) === $this->failOn) {
-                        throw new \RuntimeException('find: ' . $argv[2] . ' is unreadable');
+                $argv = LocalRoot::isRequest((array) $cmd) ? LocalRoot::plain((array) $cmd) : [];
+                if (($argv[0] ?? null) === 'find') {
+                    if ($this->failOn !== null && ($argv[1] ?? null) === $this->failOn) {
+                        throw new \RuntimeException('find: ' . $argv[1] . ' is unreadable');
                     }
                     $this->finds[] = $argv;
 
                     return $this->find($argv);
                 }
-                if (array_slice($argv, 0, 2) === ['sudo', 'rm']) {
+                if (($argv[0] ?? null) === 'rm') {
                     @unlink((string) end($argv));
                     $this->removals[] = $argv;
                 }
@@ -156,7 +157,7 @@ class GitCredentialsSweepCommandTest extends TestCase
              */
             private function find(array $argv): string
             {
-                $root = rtrim((string) ($argv[2] ?? ''), '/');
+                $root = rtrim((string) ($argv[1] ?? ''), '/');
                 $minutes = 0;
                 foreach ($argv as $i => $arg) {
                     if ($arg === '-mmin') {

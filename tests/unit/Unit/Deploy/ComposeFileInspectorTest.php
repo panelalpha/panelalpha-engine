@@ -590,8 +590,7 @@ DOCKER
         $labelled = $this->writeFile('compose.labelled.yml', "services:\n  app:\n    image: nginx\n    labels:\n      panelalpha.generated: framework-recipe\n");
         $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($labelled));
 
-        // The unlabelled shape the engine wrote before the label existed.
-        $welcome = $this->writeFile('compose.welcome.yml', <<<'YAML'
+        $welcome = $this->writeFile('docker-compose.yml', <<<'YAML'
 services:
   app:
     image: nginx:alpine
@@ -628,15 +627,41 @@ YAML
             'serves ./public' => ["services:\n  web:\n    image: nginx:alpine\n    volumes:\n      - ./public:/usr/share/nginx/html\n"],
             'root plus a second service' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html/:ro\n  cache:\n    image: redis:7\n"],
             'mentions the path only in a comment' => ["# serves /usr/share/nginx/html\nservices:\n  web:\n    image: nginx:alpine\n    ports: ['8080:80']\n"],
+            'serves the root under another service name' => ["services:\n  web:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n"],
+            'root plus a named volume' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n      - cache:/var/cache/nginx\n"],
+            'root plus a volume declared at the top level' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\nvolumes:\n  cache: {}\n"],
+            'root plus a key the engine never wrote' => ["services:\n  app:\n    image: nginx:alpine\n    environment:\n      TZ: Europe/Warsaw\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n"],
         ];
     }
 
+    /** Written as docker-compose.yml, the one name the engine's bootstrap has. */
     #[DataProvider('clientNginxStacks')]
     public function test_a_clients_own_nginx_stack_is_not_taken_for_the_bootstrap(string $contents): void
     {
-        $path = $this->writeFile('client-nginx.yml', $contents);
+        $path = $this->writeFile('docker-compose.yml', $contents);
 
         $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($path));
+    }
+
+    /** The engine's bootstrap is only ever docker-compose.yml; the same shape under another name is the client's. */
+    #[DataProvider('composeNamesTheEngineNeverGaveItsBootstrap')]
+    public function test_the_bootstrap_shape_under_another_file_name_is_the_clients(string $name): void
+    {
+        $path = $this->writeFile($name, "services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n");
+
+        $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($path));
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function composeNamesTheEngineNeverGaveItsBootstrap(): array
+    {
+        return [
+            'compose.yaml' => ['compose.yaml'],
+            'compose.yml' => ['compose.yml'],
+            'docker-compose.yaml' => ['docker-compose.yaml'],
+        ];
     }
 
     /**
@@ -666,6 +691,42 @@ YAML
         $path = $this->writeFile('engine-dockerfile.yml', "services:\n  app:\n    build:\n      context: .\n      dockerfile: panelalpha.Dockerfile\n    ports: ['3000:3000']\n");
 
         $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($path));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: ?string}>
+     */
+    public static function ignoredComposeFiles(): array
+    {
+        return [
+            'the old static bootstrap' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html:ro\n", "reads as one the engine generated, not the project's own"],
+            'a workstation dev compose' => ["services:\n  app:\n    build: .\n    volumes:\n      - .:/var/www/html\n", 'looks like a workstation dev compose (service `app` mounts the project root)'],
+            'the v1 layout' => ["web:\n  image: nginx\n", 'uses the v1 layout (no `services:`), which Docker Compose v2 refuses'],
+            'a client stack' => ["services:\n  web:\n    image: myorg/app\n", null],
+        ];
+    }
+
+    #[DataProvider('ignoredComposeFiles')]
+    public function test_the_ignored_reason_says_why_a_compose_file_is_passed_over(string $contents, ?string $reason): void
+    {
+        $this->assertSame($reason, ComposeFileInspector::ignoredReason($this->writeFile('docker-compose.yml', $contents)));
+    }
+
+    /** Skipped as the engine's own may be, but the log says only what is known: it could not be read. */
+    public function test_an_unreadable_compose_file_is_ignored_because_it_cannot_be_read(): void
+    {
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $this->markTestSkipped('root ignores file permission bits.');
+        }
+
+        $path = $this->writeFile('docker-compose.yml', "services:\n  web:\n    image: myorg/app\n");
+        chmod($path, 0000);
+
+        try {
+            $this->assertSame('cannot be read by the engine', ComposeFileInspector::ignoredReason($path));
+        } finally {
+            chmod($path, 0644);
+        }
     }
 
     public function test_is_generated_bootstrap_compose_treats_unreadable_file_as_engine_written(): void

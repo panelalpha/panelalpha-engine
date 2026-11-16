@@ -10,6 +10,7 @@ use App\System\EngineUpdate;
 use App\System\Filesystem;
 use App\System\HostProcess;
 use App\System\Network;
+use App\System\Privileged;
 use App\System\ProcessRunner;
 use App\System\Project as SystemProject;
 use App\System\Projects;
@@ -27,6 +28,14 @@ use Symfony\Component\Process\Process;
 
 class System implements ProcessRunner
 {
+    public const HOLDER_ACCOUNT = 'account';
+
+    public const HOLDER_HOME = 'home directory';
+
+    public const HOLDER_PROJECT_DIRECTORY = 'project directory';
+
+    public const HOLDER_CONTAINER = 'container';
+
     /**
      * The two roots every other path derives from; methods rather than
      * constants so a test subclass can redirect every derived path at once.
@@ -39,6 +48,15 @@ class System implements ProcessRunner
     public function engineDirPath(): string
     {
         return EnginePaths::ENGINE_DIR;
+    }
+
+    /**
+     * A push's rollback dumps, replayed as the sites database's root: in core's own storage, which no account's
+     * container mounts, never in the target's home.
+     */
+    public function pushRollbacksDirPath(): string
+    {
+        return storage_path('push-rollback');
     }
 
     /** Built from this instance's roots, so a subclass's override still wins. */
@@ -189,6 +207,11 @@ class System implements ProcessRunner
         return $this->webserver()->isChangeWebserverScriptRunning();
     }
 
+    public function isWebserverActive(string $webserver): bool
+    {
+        return $this->webserver()->isActive($webserver);
+    }
+
     /**
      * Render every domain's config and apply it, reporting whether the reload
      * reached the webserver.
@@ -251,15 +274,38 @@ class System implements ProcessRunner
     /**
      * Whether this host could take a project by that name: the name itself has
      * to be acceptable ({@see UsernamePolicy}) and nothing here may hold it
-     * already -- an OS user, a home directory, or a project directory.
+     * already ({@see usernameHolders}).
      */
     public function isUsernameAvailable(string $username): bool
     {
-        return UsernamePolicy::isAcceptable($username)
-            && ! $this->isUidExists($username)
-            && ! is_dir($this->projectHomeDirPath($username))
-            && ! is_dir($this->projectDirPath($username))
-            && ! $this->isContainerNameTaken($username);
+        return UsernamePolicy::isAcceptable($username) && $this->usernameHolders($username) === [];
+    }
+
+    /**
+     * What keeps the host from taking $username, in the order an operator looks: the account, its home, the
+     * project directory, a container. Empty when nothing holds it.
+     *
+     * @return list<string>
+     *
+     * @throws Exception
+     */
+    public function usernameHolders(string $username): array
+    {
+        $holders = [];
+        if ($this->isUidExists($username)) {
+            $holders[] = self::HOLDER_ACCOUNT;
+        }
+        if (is_dir($this->projectHomeDirPath($username))) {
+            $holders[] = self::HOLDER_HOME;
+        }
+        if (is_dir($this->projectDirPath($username))) {
+            $holders[] = self::HOLDER_PROJECT_DIRECTORY;
+        }
+        if ($this->isContainerNameTaken($username)) {
+            $holders[] = self::HOLDER_CONTAINER;
+        }
+
+        return $holders;
     }
 
     /**
@@ -268,28 +314,70 @@ class System implements ProcessRunner
      */
     public function isContainerNameTaken(string $name): bool
     {
-        $result = $this->runProcess([
-            'sudo', 'docker', 'ps', '-a', '--filter', 'name=^/'.preg_quote($name, null).'$', '--format', '{{.Names}}',
-        ]);
+        $result = $this->runProcess(Privileged::docker()->containerNamed($name));
 
         return $result->isSuccessful() && trim($result->getOutput()) !== '';
     }
 
+    /**
+     * Whether the host has that user. `id -u` answers 0 for one and 1 for none; any other answer leaves the question
+     * open, so it raises instead of reading as "no account".
+     *
+     * @throws Exception
+     */
     public function isUidExists(string $username): bool
     {
-        $result = $this->runProcessOnHost([
-            'id',
-            '-u',
-            $username,
-        ]);
+        $result = $this->runProcessOnHost(Privileged::users()->uid($username));
 
-        return $result->getExitCode() === 0;
+        $error = $result->getErrorOutput() ?: $result->getOutput();
+        if (! $result->isSuccessful() && Privileged::hostNamespacesUnavailable($error)) {
+            throw new Exception($error);
+        }
+
+        $code = $result->getExitCode();
+
+        return match ($code) {
+            0 => true,
+            1 => false,
+            default => throw new Exception(
+                "The host did not answer whether the account '{$username}' exists (exit code "
+                .($code === null ? 'none' : (string) $code).'): '.trim($error)
+            ),
+        };
+    }
+
+    /**
+     * The host's hosting accounts, by name, with whether this engine made each one.
+     *
+     * @return array<string, array{uid: int, gid: int, home: string, shell: string, engine: bool}>
+     *
+     * @throws DockerErrorException
+     * @throws Exception
+     */
+    public function hostingAccounts(): array
+    {
+        $accounts = [];
+        $lines = preg_split('/\R/', trim($this->execOnHost(Privileged::users()->hostingAccounts()))) ?: [];
+        foreach ($lines as $line) {
+            $fields = explode("\t", $line);
+            if (count($fields) !== 6) {
+                continue;
+            }
+            $accounts[$fields[0]] = [
+                'uid' => (int) $fields[1],
+                'gid' => (int) $fields[2],
+                'home' => $fields[3],
+                'shell' => $fields[4],
+                'engine' => $fields[5] === '1',
+            ];
+        }
+
+        return $accounts;
     }
 
     public function isComposeServiceRunning(string $service): bool
     {
-        $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
-        $services = explode("\n", trim($this->exec($command)));
+        $services = explode("\n", trim($this->exec(Privileged::engineServices($this->composeFilePath())->runningServices())));
 
         return in_array($service, $services);
     }
@@ -315,13 +403,15 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces ({@see Privileged::onHost()}).
+     *
+     * @param  list<string>  $cmd
      *
      * @throws DockerErrorException
      */
-    public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
+    public function execOnHost(array $cmd, array $env = [], int $timeout = 600): string
     {
-        return $this->exec(HostProcess::onHost($cmd), $env, $timeout);
+        return $this->exec(Privileged::onHost($cmd), $env, $timeout);
     }
 
     /**
@@ -347,11 +437,13 @@ class System implements ProcessRunner
     }
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces ({@see Privileged::onHost()}).
+     *
+     * @param  list<string>  $cmd
      */
-    public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
+    public function runProcessOnHost(array $cmd, array $env = [], int $timeout = 600): Process
     {
-        return $this->runProcess(HostProcess::onHost($cmd), $env, $timeout);
+        return $this->runProcess(Privileged::onHost($cmd), $env, $timeout);
     }
 
     public function update(): EngineUpdate
@@ -366,6 +458,7 @@ class System implements ProcessRunner
      *   pid: ?int,
      *   exit_code: ?int,
      *   failed: bool,
+     *   result: ?string,
      *   reason: ?string,
      *   tail_stdout: ?string,
      *   tail_stderr: ?string,

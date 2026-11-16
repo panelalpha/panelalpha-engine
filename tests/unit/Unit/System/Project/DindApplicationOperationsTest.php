@@ -2,20 +2,22 @@
 
 namespace Tests\Unit\System\Project;
 
-use Tests\Support\FakeProcess;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppCertificate;
-use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Generation\GenerationState;
+use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class DindApplicationOperationsTest extends TestCase
@@ -54,7 +56,7 @@ class DindApplicationOperationsTest extends TestCase
         $flat = $this->flattenExecuted();
         $this->assertStringContainsString('down', $flat);
         $this->assertStringContainsString('remove-orphans', $flat);
-        $this->assertStringNotContainsString('docker rm -f alice', $flat);
+        $this->assertStringNotContainsString(implode(' ', Privileged::docker()->forceRemoveContainer('alice')), $flat);
     }
 
     public function test_abort_running_deploy_keeps_volumes_unless_asked(): void
@@ -145,7 +147,7 @@ class DindApplicationOperationsTest extends TestCase
         (new ProjectAggregate($this->recordingSystem(), $model))->cancelRunningDeploy();
 
         $this->assertSame([], $this->composeDowns());
-        $this->assertStringContainsString('--all', $this->flattenExecuted());
+        $this->assertStringContainsString('account-docker.listContainers -- alice all 2 label com.docker.compose.project=project label com.docker.compose.config-hash', $this->flattenExecuted());
         $this->assertStringNotContainsString('prune', $this->flattenExecuted());
         $deploy->finish(DeployLogger::STATUS_CANCELLED);
     }
@@ -177,7 +179,7 @@ class DindApplicationOperationsTest extends TestCase
 
         $flat = $this->flattenExecuted();
         $this->assertStringContainsString('up', $flat);
-        $this->assertStringNotContainsString('docker rm -f alice', $flat);
+        $this->assertStringNotContainsString(implode(' ', Privileged::docker()->forceRemoveContainer('alice')), $flat);
         $this->assertFileExists($runtime->composeFilePath());
     }
 
@@ -192,7 +194,7 @@ class DindApplicationOperationsTest extends TestCase
 
         $flat = $this->flattenExecuted();
         $this->assertStringContainsString('down', $flat);
-        $this->assertStringNotContainsString('docker rm -f alice', $flat);
+        $this->assertStringNotContainsString(implode(' ', Privileged::docker()->forceRemoveContainer('alice')), $flat);
     }
 
     public function test_deprovision_runs_inner_teardown_then_outer_remove(): void
@@ -212,7 +214,7 @@ class DindApplicationOperationsTest extends TestCase
 
         $flat = $this->flattenExecuted();
         $downPos = strpos($flat, 'down');
-        $rmPos = strpos($flat, 'docker rm -f alice');
+        $rmPos = strpos($flat, implode(' ', Privileged::docker()->forceRemoveContainer('alice')));
         $this->assertNotFalse($downPos);
         $this->assertNotFalse($rmPos);
         $this->assertLessThan($rmPos, $downPos);
@@ -326,8 +328,7 @@ class DindApplicationOperationsTest extends TestCase
     }
 
     /**
-     * Killing `docker compose exec` on the host leaves the command running inside the
-     * account, so the timeout is enforced there and the host only waits longer.
+     * The in-account `timeout` ends the command, so the host only waits longer than it as a backstop.
      */
     public function test_a_shell_command_is_timed_inside_the_account_before_the_host_gives_up(): void
     {
@@ -449,12 +450,27 @@ class DindApplicationOperationsTest extends TestCase
                 if (is_array($cmd) && ($cmd[0] ?? null) === 'test' && ($cmd[1] ?? null) === '-e') {
                     return file_exists((string) ($cmd[2] ?? '')) ? FakeProcess::ok() : FakeProcess::failed();
                 }
-                // The account's own container is on the host, under its Compose label.
-                if (is_array($cmd) && str_starts_with(implode(' ', $cmd), 'sudo docker ps -a --filter name=^/alice$')) {
-                    return FakeProcess::ok("alice\n");
-                }
 
-                return FakeProcess::forCommand($cmd);
+                return is_array($cmd) ? ($this->answered($cmd) ?? FakeProcess::forCommand($cmd)) : FakeProcess::forCommand($cmd);
+            }
+
+            /**
+             * Answers container lookups by Compose label and path probes from the fixture tree.
+             *
+             * @param  list<string>  $cmd
+             */
+            private function answered(array $cmd): ?\Symfony\Component\Process\Process
+            {
+                $values = LocalRoot::values($cmd);
+
+                return match (LocalRoot::action($cmd)) {
+                    'docker.containerNamed', 'docker.containerNamedWithLabel' => ($values[0] ?? null) === 'alice' ? FakeProcess::ok("alice\n") : FakeProcess::ok(),
+                    'files.existingRealPaths' => FakeProcess::ok(implode("\n", array_map(static fn (string $path): string => realpath($path) ?: $path, $values))."\n"),
+                    'files.isFile' => is_file($values[0] ?? '') ? FakeProcess::ok() : FakeProcess::failed(),
+                    'files.isDirectory' => is_dir($values[0] ?? '') ? FakeProcess::ok() : FakeProcess::failed(),
+                    'files.exists' => file_exists($values[0] ?? '') ? FakeProcess::ok() : FakeProcess::failed(),
+                    default => null,
+                };
             }
 
             public function filesystem(): Filesystem

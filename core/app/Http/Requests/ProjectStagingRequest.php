@@ -48,7 +48,7 @@ class ProjectStagingRequest extends FormRequest
 
             $problems = [
                 ...self::createProblems($source, $this->requestedMysqlPrefix()),
-                ...app(System::class)->projects()->copyDatabasesProblems($source, $this->boolean('copy_databases', true)),
+                ...app(System::class)->projects()->wordPressCopyProblems($source, $this->boolean('copy_databases', true)),
             ];
             if ($problems !== []) {
                 throw ProblemException::of($problems);

@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Probes;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * The SvelteKit adapter svelte.config imports, which decides what the build
- * writes: adapter-static an HTML tree, adapter-node `build/index.js`, the
- * platform adapters and adapter-auto nothing a server here can run.
+ * The SvelteKit adapter svelte.config imports, which decides what the build writes: an HTML tree,
+ * `build/index.js`, or (platform adapters, adapter-auto) nothing a server here can run.
  */
 final class SvelteKitAdapter
 {
@@ -23,9 +22,8 @@ final class SvelteKitAdapter
     private const CONFIGS = ['svelte.config.js', 'svelte.config.mjs', 'svelte.config.ts', 'svelte.config.cjs'];
 
     /**
-     * `static`, `node`, `auto`, `cloudflare`, ... for `@sveltejs/adapter-<x>`,
-     * or null when there is no config, no adapter import, or more than one
-     * (a config choosing by environment).
+     * `static`, `node`, `auto`, ... for `@sveltejs/adapter-<x>`, or null when there is no config,
+     * no adapter import, or more than one (a config choosing by environment).
      */
     public static function configured(ProjectContext $context): ?string
     {

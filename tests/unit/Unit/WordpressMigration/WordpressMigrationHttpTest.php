@@ -44,12 +44,27 @@ class WordpressMigrationHttpTest extends WordpressMigrationTestCase
     public function test_start_status_and_resume_routes_are_registered(): void
     {
         $uris = collect(Route::getRoutes()->getRoutes())
-            ->map(fn ($route): string => implode('|', $route->methods()) . ' ' . $route->uri())
+            ->map(fn ($route): string => implode('|', $route->methods()).' '.$route->uri())
             ->all();
 
         $this->assertTrue($this->routeExists($uris, 'POST', 'api/wordpress/migrations'));
         $this->assertTrue($this->routeExists($uris, 'GET', 'api/wordpress/migrations/{id}'));
         $this->assertTrue($this->routeExists($uris, 'POST', 'api/wordpress/migrations/{id}/resume'));
+    }
+
+    public function test_an_id_that_is_not_a_number_is_not_found_instead_of_a_server_error(): void
+    {
+        $this->withoutMiddleware();
+
+        $this->getJson('/api/wordpress/migrations/abc')->assertNotFound();
+
+        foreach ([
+            $this->postJson('/api/wordpress/migrations/abc/resume'),
+            $this->postJson('/api/wordpress/migrations/abc/cancel'),
+            $this->deleteJson('/api/wordpress/migrations/abc'),
+        ] as $response) {
+            $this->assertLessThan(500, $response->getStatusCode());
+        }
     }
 
     public function test_start_without_password_does_not_create_a_record(): void
@@ -70,7 +85,7 @@ class WordpressMigrationHttpTest extends WordpressMigrationTestCase
         $this->withoutMiddleware();
 
         $response = $this->postJson('/api/wordpress/migrations', [
-            'url' => 'http://' . TestNetwork::LOOPBACK . '/latest/meta-data',
+            'url' => 'http://'.TestNetwork::LOOPBACK.'/latest/meta-data',
             'username' => 'admin',
             'password' => 'secret-must-not-persist',
         ]);
@@ -113,22 +128,22 @@ class WordpressMigrationHttpTest extends WordpressMigrationTestCase
         $migration->status = WordpressMigration::STATUS_FAILED;
         $migration->save();
 
-        $first = $this->postJson('/api/wordpress/migrations/' . $migration->id . '/resume');
+        $first = $this->postJson('/api/wordpress/migrations/'.$migration->id.'/resume');
         $first->assertStatus(202);
         Queue::assertPushed(MigrateWordpress::class, 1);
 
-        $second = $this->postJson('/api/wordpress/migrations/' . $migration->id . '/resume');
+        $second = $this->postJson('/api/wordpress/migrations/'.$migration->id.'/resume');
         $second->assertStatus(409);
         Queue::assertPushed(MigrateWordpress::class, 1);
     }
 
     /**
-     * @param list<string> $uris
+     * @param  list<string>  $uris
      */
     private function routeExists(array $uris, string $method, string $uri): bool
     {
         foreach ($uris as $line) {
-            if (str_contains($line, $method) && str_ends_with($line, ' ' . $uri)) {
+            if (str_contains($line, $method) && str_ends_with($line, ' '.$uri)) {
                 return true;
             }
         }

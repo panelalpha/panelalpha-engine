@@ -7,34 +7,13 @@ use App\Lib\Deploy\Health\ProbedResponse;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Why a PHP application's `/` was refused rather than served.
- *
- * A 403 on the front page is the webserver saying it has no document for this
- * directory, and where the project keeps its entry point says which of three
- * things happened -- each needing a different sentence, and none of them
- * derivable from the status code alone.
- *
- * The application may keep its entry point one directory down, which is the
- * normal shape for every modern PHP framework: Laravel, Symfony and Magento
- * all put `index.php` under `public/` or `pub/`, and a document root left at
- * the project root then has nothing to serve. It may have `index.php` exactly
- * where the server is looking, in which case the file is not the problem and
- * its permissions are. Or it may have no entry point at all -- a library
- * checked out as though it were a site, which is a repository that was never
- * going to serve anything.
- *
- * Distinct from {@see PhpDocrootExplainer} on purpose. That one explains a
- * document root pointing *above* the interpreter's reach, where the source
- * arrives as text; this one explains a document root pointing at a directory
- * with no index in it. Same misconfiguration in two projects out of three,
- * opposite symptoms, and a sentence about source code being disclosed would
- * be wrong here.
+ * Why a PHP application's `/` was refused (403) rather than served: an entry point one directory
+ * down, an unreadable root index, or none at all. Unlike {@see PhpDocrootExplainer}, nothing is disclosed.
  */
 final class PhpEntryExplainer implements Explainer
 {
     /**
-     * Where PHP applications keep their entry point, in the order worth
-     * reporting. Root last: a project with both is served from the subdirectory.
+     * Where PHP applications keep their entry point, in the order worth reporting; root last.
      *
      * @var list<string>
      */
@@ -66,35 +45,52 @@ final class PhpEntryExplainer implements Explainer
                 continue;
             }
 
-            if (str_contains($entry, '/')) {
-                $dir = dirname($entry);
+            return self::foundEntry($context, $entry);
+        }
 
-                return [
-                    'detail' => 'The entry point is '.$entry.', so the document root should be '
-                        .$dir.' rather than the project root, which has no index to serve.',
-                    'fix' => self::docrootFix($context, $dir),
-                ];
-            }
+        return self::searchedEntry($context);
+    }
 
-            // An index-less public/ is what the image serves when nothing is
-            // declared, so the root index is not the one being looked for.
-            if (is_dir($context->path('public')) && ! $context->isFile('public/index.html')) {
-                return [
-                    'detail' => 'The document root has no index file: public/ exists without one, '
-                        .'while index.php is at the project root.',
-                    'fix' => 'Redeploy, which serves the project root when public/ has no index, '
-                        .'or set `docroot` in panelalpha.yaml to the directory holding the entry point.',
-                ];
-            }
+    /**
+     * An index-less public/ is what the image serves when nothing is declared, so a root index is not looked for.
+     *
+     * @return array{detail: string, fix: string}
+     */
+    private static function foundEntry(ProjectContext $context, string $entry): array
+    {
+        if (str_contains($entry, '/')) {
+            $dir = dirname($entry);
 
             return [
-                'detail' => 'index.php is at the project root, where the server is looking, '
-                    .'so the file is not missing -- it cannot be read.',
-                'fix' => 'Check the permissions on ~/project and index.php, then redeploy.',
+                'detail' => 'The entry point is '.$entry.', so the document root should be '
+                    .$dir.' rather than the project root, which has no index to serve.',
+                'fix' => self::docrootFix($context, $dir),
             ];
         }
 
-        // oPodSync keeps it in server/: the docroot hint is still the fix there.
+        if (is_dir($context->path('public')) && ! $context->isFile('public/index.html')) {
+            return [
+                'detail' => 'The document root has no index file: public/ exists without one, '
+                    .'while index.php is at the project root.',
+                'fix' => 'Redeploy, which serves the project root when public/ has no index, '
+                    .'or set `docroot` in panelalpha.yaml to the directory holding the entry point.',
+            ];
+        }
+
+        return [
+            'detail' => 'index.php is at the project root, where the server is looking, '
+                .'so the file is not missing -- it cannot be read.',
+            'fix' => 'Check the permissions on ~/project and index.php, then redeploy.',
+        ];
+    }
+
+    /**
+     * No usual place holds one; a deeper one still makes the docroot hint the remedy.
+     *
+     * @return array{detail: string, fix: string}
+     */
+    private static function searchedEntry(ProjectContext $context): array
+    {
         $dir = self::shallowestIndexDir($context->projectDir);
         if ($dir !== null) {
             return [
@@ -114,10 +110,7 @@ final class PhpEntryExplainer implements Explainer
         ];
     }
 
-    /**
-     * A panelalpha.yaml with `docroot:` alone is refused: changing how the app
-     * is served needs `extends` naming the platform to start from.
-     */
+    /** A panelalpha.yaml with `docroot:` alone is refused: it needs `extends` naming the platform to start from. */
     public static function docrootFix(ProjectContext $context, string $dir): string
     {
         return 'Set `docroot: '.$dir.'` in panelalpha.yaml and redeploy. A file with no `id` or `extends` '
@@ -130,10 +123,7 @@ final class PhpEntryExplainer implements Explainer
         return $context->isFile('composer.json') ? 'php' : 'php-plain';
     }
 
-    /**
-     * The shallowest directory below $root holding an index.php, alphabetical
-     * within a level. Unreadable directories and symlinks are skipped.
-     */
+    /** The shallowest directory below $root holding an index.php, alphabetical within a level; symlinks skipped. */
     private static function shallowestIndexDir(string $root): ?string
     {
         $root = rtrim($root, '/');

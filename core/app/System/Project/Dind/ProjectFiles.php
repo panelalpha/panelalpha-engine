@@ -6,18 +6,8 @@ use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\System\Project\Dind as DindProject;
 
 /**
- * Reading a file out of the account's project directory.
- *
- * Always through the System API rather than PHP's own filesystem functions:
- * ~/project is inside the account container and root-owned on the host, so a
- * plain file_get_contents() would answer for the wrong tree — or for nothing
- * at all. {@see ProcfileWebProbe} reads host
- * paths directly and is right to; anything asking what the *account* has must
- * come through here.
- *
- * Absent and empty are one answer on purpose. Every caller is asking "is
- * there a composer.json to read", and a zero-byte one is not something to
- * hand a JSON parser.
+ * Reading a file out of ~/project through the System API, never PHP's own functions, which would read the wrong tree
+ * ({@see ProcfileWebProbe} reads host paths). Absent and empty are one answer: a zero-byte file is no JSON to parse.
  */
 class ProjectFiles
 {

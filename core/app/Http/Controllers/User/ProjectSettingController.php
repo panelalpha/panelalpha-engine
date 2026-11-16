@@ -4,6 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
+use App\Http\Responses\Refusal;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Vault\RequestVault;
 use App\System\Project\Settings;
@@ -27,6 +28,8 @@ use OpenApi\Attributes as OA;
  */
 class ProjectSettingController extends Controller
 {
+    public const READ_ONLY = 'setting_read_only';
+
     #[OA\Get(
         path: '/projects/{username}/settings',
         summary: "List a project's settings",
@@ -150,7 +153,9 @@ class ProjectSettingController extends Controller
         path: '/projects/{username}/settings/{key}',
         summary: 'Clear one project setting',
         description: 'Clearing a Cloudflare API token is refused while the project still has Cloudflare '
-            .'tunnels, unless `force` is true, which tears them down first.',
+            .'tunnels, unless `force` is true, which tears them down first. '
+            .'The stored value goes and is not kept anywhere; this cannot be undone. Ask the operator to confirm '
+            .'first.',
         security: [['bearerAuth' => []]],
         tags: ['Project Settings'],
         parameters: [
@@ -204,9 +209,7 @@ class ProjectSettingController extends Controller
             return null;
         }
 
-        return new JsonResponse([
-            'message' => "The 'protected' setting is read-only over the API. An operator changes it on the "
-                ."host: pae project:settings:set protected on --project={$username}, or unset it the same way.",
-        ], 403);
+        return Refusal::json(403, 'key', self::READ_ONLY, "The 'protected' setting is read-only over the API; an operator "
+            .'sets or clears it on the host.', $username);
     }
 }

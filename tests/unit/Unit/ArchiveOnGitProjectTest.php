@@ -57,7 +57,7 @@ class ArchiveOnGitProjectTest extends TestCase
             $body = substr($source, (int) strpos($source, $entry));
             $body = substr($body, 0, (int) strpos($body, '$this->startRedeploy('));
             $refuse = strpos($body, 'ProjectRebuild::refuseArchiveOnGitProject($user)');
-            $work = strpos($body, 'EnvVarOverrides::applyIncoming(');
+            $work = strpos($body, 'ProjectRebuild::sentEnvVars(');
 
             $this->assertNotFalse($refuse, "{$entry} does not refuse an archive into a git project");
             $this->assertNotFalse($work, "{$entry} no longer applies env_vars before it queues");

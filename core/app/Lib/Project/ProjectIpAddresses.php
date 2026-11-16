@@ -8,14 +8,11 @@ use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
-use Symfony\Component\HttpFoundation\IpUtils;
 use Tests\Unit\UserIpAddressesTest;
 
 /**
- * The addresses a project answers on: its own dedicated IPs if it has any,
- * else the engine's defaults, translated through the NAT map when NAT mode
- * is on. Moved out of User as it was, dead branches included -- see
- * {@see UserIpAddressesTest} for why they stay.
+ * The addresses a project answers on: its dedicated IPs, else the engine's defaults, through the NAT map
+ * in NAT mode. Moved out of User as it was ({@see UserIpAddressesTest}).
  */
 final class ProjectIpAddresses
 {
@@ -44,6 +41,8 @@ final class ProjectIpAddresses
     }
 
     /**
+     * In NAT mode local IPs map to their public counterparts, which clients and DNS see.
+     *
      * @return array{
      *   ipv4: list<string>,
      *   ipv6: list<string>,
@@ -51,10 +50,8 @@ final class ProjectIpAddresses
      */
     public function getIpAddresses(): array
     {
-        $ips = $this->resolveIpAddresses(false);
+        $ips = $this->resolveIpAddresses();
 
-        // When NAT mode is active, map local IPs to their public counterparts
-        // so clients and DNS see the public address.
         if (Ipv4NatMap::isNatModeEnabled()) {
             $localToPublic = Ipv4NatMap::getLocalToPublicMap();
             $ips['ipv4'] = self::mapIps($ips['ipv4'], $localToPublic);
@@ -64,10 +61,8 @@ final class ProjectIpAddresses
     }
 
     /**
-     * Returns the IPs that should be used for webserver bind/listen directives.
-     * Under NAT mode public IPs are translated back to local IPs. When no NAT
-     * maps exist, non-local default IPv4 addresses are filtered out to prevent
-     * webserver bind failures on cloud VMs.
+     * The IPs for webserver bind/listen directives, unfiltered: a public default_ipv4 is bound as it is. In NAT
+     * mode public IPs are translated back to local ones.
      *
      * @return array{
      *   ipv4: array<string>,
@@ -76,7 +71,7 @@ final class ProjectIpAddresses
      */
     public function getBindIpAddresses(): array
     {
-        $ips = $this->resolveIpAddresses(true);
+        $ips = $this->resolveIpAddresses();
 
         if (Ipv4NatMap::isNatModeEnabled()) {
             $publicToLocal = Ipv4NatMap::getPublicToLocalMap();
@@ -92,7 +87,7 @@ final class ProjectIpAddresses
      *   ipv6: array<string>,
      * }
      */
-    private function resolveIpAddresses(bool $forBinding): array
+    private function resolveIpAddresses(): array
     {
         $ips = [
             'ipv4' => [],
@@ -127,13 +122,8 @@ final class ProjectIpAddresses
     }
 
     /**
-     * The engine's own addresses: what a user with no dedicated IP resolves to.
-     *
-     * Static and user-independent on purpose. The webserver's main config has
-     * to declare these listen addresses from install time, and there are no
-     * users then -- deriving them from the user table instead makes them
-     * appear only once somebody is hosted, which is a bind address nginx
-     * cannot adopt on a reload. {@see AbstractWebserver::getAllIpsVars()}.
+     * The engine's own addresses, user-independent on purpose: the webserver declares them from install time,
+     * before any user exists ({@see AbstractWebserver::getAllIpsVars()}).
      *
      * @return array{
      *   ipv4: array<string>,
@@ -165,8 +155,7 @@ final class ProjectIpAddresses
     }
 
     /**
-     * {@see defaultIpAddresses()} translated for binding, the way
-     * {@see getBindIpAddresses()} translates a user's own addresses.
+     * {@see defaultIpAddresses()} translated for binding, as {@see getBindIpAddresses()} translates a user's own.
      *
      * @return array{
      *   ipv4: array<string>,
@@ -197,49 +186,6 @@ final class ProjectIpAddresses
         }
 
         return array_values(array_unique($mapped));
-    }
-
-    private function isBindableIpv4(string $ip): bool
-    {
-        if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return false;
-        }
-
-        // NAT mode handles public IPs via the mapping table.
-        if (Ipv4NatMap::isNatModeEnabled()) {
-            return true;
-        }
-
-        return $this->isLocalIpv4($ip);
-    }
-
-    private function isLocalIpv4(string $ip): bool
-    {
-        // 127.0.0.0/8 is local but not usable as a default bind address.
-        if (strpos($ip, '127.') === 0) {
-            return false;
-        }
-
-        // 0.0.0.0/8 is invalid.
-        if (strpos($ip, '0.') === 0) {
-            return false;
-        }
-
-        // RFC 1918 private ranges and RFC 6598 CGNAT range are local bindable.
-        $privateRanges = [
-            '10.0.0.0/8',
-            '172.16.0.0/12',
-            '192.168.0.0/16',
-            '100.64.0.0/10',
-        ];
-
-        foreach ($privateRanges as $range) {
-            if (IpUtils::checkIp($ip, $range)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public function assignFreeDedicatedIpv4(): bool

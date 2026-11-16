@@ -5,10 +5,12 @@ namespace Tests\Unit\System\Project\Dind;
 use App\Models\User;
 use App\System;
 use App\System\Filesystem;
+use App\System\Privileged;
 use App\System\Project\Dind;
 use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The logins exist in the account only while a deploy step runs, in a
@@ -37,8 +39,8 @@ class RegistryLoginTest extends TestCase
         $this->assertSame($seen . '/config.json', $this->written[0][0]);
         $this->assertSame(base64_encode('acme:tok1'), json_decode($this->written[0][1], true)['auths']['ghcr.io']['auth']);
         $this->assertSame(['1000:1000', '600'], [$this->written[0][2], $this->written[0][3]]);
-        $this->assertContains(['sudo', 'chmod', '700', $seen], $this->commands);
-        $this->assertSame(['sudo', 'rm', '-rf', '--', $seen], end($this->commands));
+        $this->assertContains(Privileged::accountFiles(1000, 1000)->changeMode('700', $seen), $this->commands);
+        $this->assertSame(Privileged::files()->removeTree($seen), end($this->commands));
     }
 
     public function test_the_config_is_removed_when_the_step_fails(): void
@@ -55,7 +57,7 @@ class RegistryLoginTest extends TestCase
         }
 
         $this->assertNull($login->configDir());
-        $this->assertSame(['sudo', 'rm', '-rf', '--'], array_slice(end($this->commands), 0, 4));
+        $this->assertSame('files.removeTree', LocalRoot::action(end($this->commands)));
     }
 
     public function test_nested_steps_share_one_config(): void
@@ -65,7 +67,7 @@ class RegistryLoginTest extends TestCase
         $login->during(fn () => $login->during(fn () => null));
 
         $this->assertCount(1, $this->written);
-        $this->assertCount(1, array_filter($this->commands, static fn (array $c): bool => ($c[1] ?? '') === 'rm'));
+        $this->assertCount(1, array_filter($this->commands, static fn (array $c): bool => LocalRoot::action($c) === 'files.removeTree'));
     }
 
     public function test_a_project_without_logins_writes_nothing(): void
@@ -82,6 +84,7 @@ class RegistryLoginTest extends TestCase
         $user = $this->createStub(User::class);
         $user->method('getRegistryAuth')->willReturn($registryAuth);
         $user->method('getChownString')->willReturn('1000:1000');
+        $user->method('linuxIds')->willReturn([1000, 1000]);
 
         $fs = $this->createStub(Filesystem::class);
         $fs->method('writeFileReplacingPath')->willReturnCallback(

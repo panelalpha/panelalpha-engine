@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\Models\User;
 use App\System;
+use App\System\Privileged;
 use App\System\Project;
 use App\System\Project\Dind\CopyVolumes;
 use App\System\Project\Dind\HeldImage;
@@ -11,11 +12,13 @@ use App\System\Project\PhpHosting\WordPress\ContainerSiteCopy;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Projects;
 use App\System\Services\Mysql;
+use App\System\Services\Mysql\DefinerMap;
 use App\System\Services\Mysql\Tables;
 use Mockery;
 use PDO;
 use Symfony\Component\Process\Process;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 use Tests\Unit\System\Project\PhpHosting\WordPress\FakeWordPressSite;
 
@@ -46,16 +49,13 @@ class ProjectsWordPressPushTest extends TestCase
     public function test_the_target_keeps_its_wp_config_and_answers_on_its_addresses_again(): void
     {
         $this->stagingPair(withWordPress: true);
-        $live = new FakeWordPressSite([], ['home' => 'https://shop.example', 'siteurl' => 'https://shop.example', 'blog_public' => '1']);
-        $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test', 'siteurl' => 'https://staging.shop.test', 'blog_public' => '0']);
+        $live = new FakeWordPressSite([], ['home' => 'https://shop.example', 'siteurl' => 'https://shop.example', 'blog_public' => '1'], home: "{$this->root}/live");
+        $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test', 'siteurl' => 'https://staging.shop.test', 'blog_public' => '0'], home: "{$this->root}/stg");
 
         $this->projects(['live' => $live, 'stg' => $staging])->pushToApp('stg', 'live');
 
         $config = '/shop.example/public_html/wp-config.php';
-        $keep = [
-            'sudo', 'setpriv', '--reuid', '2001', '--regid', '2002', '--clear-groups',
-            'cp', '-P', '--remove-destination', "{$this->root}/live/.pre-push{$config}", "{$this->root}/live{$config}",
-        ];
+        $keep = Privileged::account()->copyReplacingAsAccount(2001, 2002, "{$this->root}/live/.pre-push{$config}", "{$this->root}/live{$config}");
         $this->assertContains($keep, $this->commands);
         $this->assertGreaterThan(
             array_search(['fixPermissions'], $this->commands, true),
@@ -66,7 +66,7 @@ class ProjectsWordPressPushTest extends TestCase
         $this->assertSame([[
             'search-replace', '(//|\\\\/\\\\/)staging\\.shop\\.test(?![A-Za-z0-9.-])', '${1}shop.example',
             '--regex', '--regex-delimiter=~', '--all-tables-with-prefix', '--precise', '--skip-columns=guid',
-            '--skip-plugins', '--skip-themes', '--path=/home/site/site.test/public_html',
+            '--skip-plugins', '--skip-themes', '--path='.$this->root.'/live/shop.example/public_html',
         ]], $live->searchReplaces());
     }
 
@@ -149,6 +149,44 @@ class ProjectsWordPressPushTest extends TestCase
         $this->assertSame([], array_filter($this->commands, static fn (array $argv): bool => in_array('setpriv', $argv, true)));
     }
 
+    public function test_a_subdirectory_wordpress_push_keeps_the_targets_config_and_answers_on_its_own_addresses(): void
+    {
+        $this->subdirectoryPair();
+        $live = new FakeWordPressSite([], ['home' => 'https://shop.example/blog', 'siteurl' => 'https://shop.example/blog', 'blog_public' => '1'], home: "{$this->root}/live");
+        $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test/blog', 'siteurl' => 'https://staging.shop.test/blog', 'blog_public' => '0'], home: "{$this->root}/stg");
+        $liveInstall = "{$this->root}/live/shop.example/public_html/blog";
+        $stagingInstall = "{$this->root}/stg/staging.shop.test/public_html/blog";
+
+        $this->projects(['live' => $live, 'stg' => $staging])->pushToApp('stg', 'live');
+
+        $keep = Privileged::account()->copyReplacingAsAccount(2001, 2002, "{$this->root}/live/.pre-push/shop.example/public_html/blog/wp-config.php", "{$liveInstall}/wp-config.php");
+        $this->assertContains($keep, $this->commands);
+        $this->assertSame([
+            'search-replace', '(//|\\\\/\\\\/)staging\\.shop\\.test(?![A-Za-z0-9.-])', '${1}shop.example',
+            '--regex', '--regex-delimiter=~', '--all-tables-with-prefix', '--precise', '--skip-columns=guid',
+            '--skip-plugins', '--skip-themes', '--path='.$liveInstall,
+        ], $live->searchReplaces()[0]);
+        $this->assertSame(['home' => 'https://shop.example/blog', 'siteurl' => 'https://shop.example/blog', 'blog_public' => '1'], $live->options);
+        $this->assertContains('--path='.$stagingInstall, $staging->calls[0], 'the source is read where its own install is');
+        $this->assertContains('--path='.$liveInstall, $live->calls[0], 'the target is read where its own install is');
+    }
+
+    public function test_a_push_keeps_the_targets_config_above_its_wordpress_and_runs_wp_cli_in_the_wordpress_directory(): void
+    {
+        $this->subdirectoryPair(configAbove: true);
+        $live = new FakeWordPressSite([], ['home' => 'https://shop.example/blog', 'siteurl' => 'https://shop.example/blog', 'blog_public' => '1'], home: "{$this->root}/live");
+        $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test/blog', 'siteurl' => 'https://staging.shop.test/blog', 'blog_public' => '0'], home: "{$this->root}/stg");
+        $liveDocroot = "{$this->root}/live/shop.example/public_html";
+
+        $this->projects(['live' => $live, 'stg' => $staging])->pushToApp('stg', 'live');
+
+        $keep = Privileged::account()->copyReplacingAsAccount(2001, 2002, "{$this->root}/live/.pre-push/shop.example/public_html/wp-config.php", "{$liveDocroot}/wp-config.php");
+        $this->assertContains($keep, $this->commands);
+        $this->assertContains('--path='.$liveDocroot.'/blog', $live->searchReplaces()[0]);
+        $this->assertContains('--path='."{$this->root}/stg/staging.shop.test/public_html/blog", $staging->calls[0]);
+        $this->assertSame(['home' => 'https://shop.example/blog', 'siteurl' => 'https://shop.example/blog', 'blog_public' => '1'], $live->options);
+    }
+
     private function stagingPair(bool $withWordPress, ?string $template = null): void
     {
         $live = $this->makeUser('live', ['UID' => 2001, 'GID' => 2002, 'mysql_prefix' => 'live_', 'template' => $template], 'shop.example');
@@ -160,15 +198,41 @@ class ProjectsWordPressPushTest extends TestCase
         foreach (['live/shop.example', 'stg/staging.shop.test'] as $site) {
             mkdir("{$this->root}/{$site}/public_html", 0777, true);
             if ($withWordPress) {
-                file_put_contents("{$this->root}/{$site}/public_html/wp-config.php", '<?php');
+                $this->writeWordPress("{$this->root}/{$site}/public_html");
             }
         }
+    }
+
+    /**
+     * A live WordPress in public_html/blog, with its wp-config.php there or in public_html, and its staging copy, which
+     * is itself unrecorded as an install.
+     */
+    private function subdirectoryPair(bool $configAbove = false): void
+    {
+        $live = $this->makeUser('live', ['UID' => 2001, 'GID' => 2002, 'mysql_prefix' => 'live_'], 'shop.example');
+        $this->makeMainDomain($live, 'shop.example');
+        $live->app_path = "{$this->root}/live/shop.example/public_html/blog";
+        $live->save();
+        $stg = $this->makeUser('stg', ['mysql_prefix' => 'stg_'], 'staging.shop.test');
+        $this->makeMainDomain($stg, 'staging.shop.test');
+        $stg->staging = $live->id;
+        $stg->save();
+        foreach (['live/shop.example', 'stg/staging.shop.test'] as $site) {
+            $this->writeWordPress("{$this->root}/{$site}/public_html/blog", $configAbove);
+        }
+    }
+
+    private function writeWordPress(string $dir, bool $configAbove = false): void
+    {
+        mkdir("{$dir}/wp-includes", 0777, true);
+        file_put_contents("{$dir}/wp-includes/version.php", '<?php');
+        file_put_contents(($configAbove ? dirname($dir) : $dir).'/wp-config.php', '<?php');
     }
 
     /** @param array<string, FakeWordPressSite> $sites */
     private function projects(array $sites): Projects
     {
-        $wordPress = static fn (User $user) => $sites[$user->username]->wordPress();
+        $wordPress = static fn (User $user, ?string $path = null) => $sites[$user->username]->wordPress($path);
 
         return new class($this->system(), new SiteCopy($wordPress), new ContainerSiteCopy($wordPress)) extends Projects
         {
@@ -201,12 +265,22 @@ class ProjectsWordPressPushTest extends TestCase
             /** @param list<list<string>> $commands */
             public function __construct(private string $root, private array &$commands) {}
 
+            public function pushRollbacksDirPath(): string
+            {
+                return $this->root.'/rollbacks';
+            }
+
             public function project(User $model): Project
             {
-                return new class($this->root.'/'.$model->username, $this->commands) extends Project
+                return new class($this->root.'/'.$model->username, $this->commands, $model) extends Project
                 {
                     /** @param list<list<string>> $commands */
-                    public function __construct(private string $home, private array &$commands) {}
+                    public function __construct(private string $home, private array &$commands, private User $user) {}
+
+                    public function model(): User
+                    {
+                        return $this->user;
+                    }
 
                     public function homeDirPath(): string
                     {
@@ -256,7 +330,9 @@ class ProjectsWordPressPushTest extends TestCase
 
                     public function dumpToGzip(string $name, string $dest, ?string $table = null): void {}
 
-                    public function runSitesDbScript(string $script, string $failurePrefix): void {}
+                    public function copyInSitesDb(string $from, string $to, ?string $table, DefinerMap $definers, string $failurePrefix): void {}
+
+                    public function dropTableInSitesDb(string $database, string $table): void {}
 
                     public function tables(): Tables
                     {
@@ -280,11 +356,12 @@ class ProjectsWordPressPushTest extends TestCase
             {
                 $argv = is_array($cmd) ? array_values($cmd) : [$cmd];
                 $this->commands[] = $argv;
-                $path = (string) end($argv);
-                $code = match (array_slice($argv, 0, 3)) {
-                    ['sudo', 'test', '-d'] => is_dir($path) ? 0 : 1,
-                    ['sudo', 'test', '-e'] => file_exists($path) ? 0 : 1,
-                    ['sudo', 'test', '-L'] => is_link($path) ? 0 : 1,
+                $plain = is_array($cmd) && LocalRoot::isRequest($argv) ? LocalRoot::plain($argv) : $argv;
+                $path = (string) end($plain);
+                $code = match (array_slice($plain, 0, 2)) {
+                    ['test', '-d'] => is_dir($path) ? 0 : 1,
+                    ['test', '-e'] => file_exists($path) ? 0 : 1,
+                    ['test', '-L'] => is_link($path) ? 0 : 1,
                     default => 0,
                 };
 

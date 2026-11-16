@@ -2,7 +2,7 @@
 
 PanelAlpha Connect is the customer portal; the engine reaches it at `https://hub.panelalpha.com`. Once your engine is connected to your Connect account, Connect shows its status, version, server capacity, CPU/RAM/disk usage, your applications, usage charts and monitoring events. If you allow it, Connect can also open a one-time admin login into your apps.
 
-A license is optional. You can connect without one and attach a license later in Connect.
+A licence is optional. You can connect without one and attach a licence later in Connect.
 
 ## Before you start
 
@@ -12,7 +12,7 @@ A license is optional. You can connect without one and attach a license later in
 
 ## Connect
 
-1. In Connect, click **Connect engine** (Licenses page). Pick a license or none, and the permissions.
+1. In Connect, click **Connect engine** (Licenses page). Pick a licence or none, and the permissions.
 2. Connect shows a command with a one-time code. Run it on your VPS within 10 minutes:
 
 ```bash
@@ -49,7 +49,7 @@ Connect then shows "Engine connected". A code works once. If it has expired or b
 Pass the code to the installer and the new engine connects as soon as it is up:
 
 ```bash
-curl -fsSL https://get.panelalpha.com/engine | sh -s -- --hub-code WDJB-MJHT
+curl --proto '=https' -fsSL https://get.panelalpha.com/engine | sh -s -- --hub-code WDJB-MJHT
 ```
 
 On a server that already runs an engine, the same command only connects it; add `--update-engine` to update the engine first. It works together with `--repo`. An engine that is already connected is left as it is: connect it elsewhere with `pae hub:connect CODE --replace`.
@@ -58,7 +58,7 @@ A code lasts ten minutes from when you create it, and a fresh install takes a fe
 
 ## What Connect can do on your server
 
-Connect gets an API token limited to a handful of read-only routes: the engine version and host details, CPU/RAM/disk usage and its history, the project list with each project's status, and each project's backup history. It works out monitoring events itself from what it reads. It cannot deploy, change settings, read files or credentials, or use the assistant (MCP) interface.
+Connect gets an API token limited to a handful of read-only routes: the engine version and host details, CPU/RAM/disk usage and its history, the project list with each project's status and each project's backup history. It works out monitoring events itself from what it reads. It cannot deploy, change settings, read files or credentials or use the assistant (MCP) interface.
 
 Admin login into apps is a separate permission, off unless it was ticked when the code was created. With it, Connect may also list an app's users and ask for a one-time login link. Every call Connect makes is recorded; `pae hub:status` shows the last ones.
 
@@ -70,7 +70,7 @@ Connect replaces its token every week by itself, and the token expires after 30 
 pae hub:status
 ```
 
-Shows the account, address, permissions, when the token expires, and the last 20 calls Connect made (admin logins highlighted). When Connect itself says it no longer knows the connection, the engine revokes Connect's tokens and forgets the connection.
+Shows the account, address, permissions, when the token expires and the last 20 calls Connect made (admin logins highlighted). When Connect itself says it no longer knows the connection, the engine revokes Connect's tokens and forgets the connection.
 
 ```bash
 pae hub:disconnect

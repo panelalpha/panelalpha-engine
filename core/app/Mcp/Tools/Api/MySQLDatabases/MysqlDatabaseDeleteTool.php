@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_database_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a MySQL database
+
+    Deletes the database and every table and row in it; this cannot be undone. The project's MySQL users stay but lose access to it. Ask the operator to confirm first.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

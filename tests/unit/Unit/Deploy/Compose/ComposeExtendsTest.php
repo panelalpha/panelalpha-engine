@@ -151,6 +151,7 @@ class ComposeExtendsTest extends TestCase
         $compose = ['services' => ['app' => ['extends' => 'nope']]];
 
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The compose file extends nope, which it does not define.');
         ComposeExtends::resolve($compose, $this->reader([]));
     }
 
@@ -181,6 +182,16 @@ class ComposeExtendsTest extends TestCase
         ];
 
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The compose file extends b in a cycle.');
+        ComposeExtends::resolve($compose, $this->reader([]));
+    }
+
+    public function test_a_service_extending_itself_is_a_cycle(): void
+    {
+        $compose = ['services' => ['a' => ['image' => 'x', 'extends' => 'a']]];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The compose file extends a in a cycle.');
         ComposeExtends::resolve($compose, $this->reader([]));
     }
 

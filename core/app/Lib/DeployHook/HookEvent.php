@@ -3,12 +3,8 @@
 namespace App\Lib\DeployHook;
 
 /**
- * What a provider's request says happened, in the words the engine acts on.
- *
- * Providers disagree on everything about how a push is spelled -- header
- * names, signature scheme, payload shape -- and agree on nothing else, so a
- * provider's job ends at producing one of these. The decision of whether a
- * push deploys is made from it and never sees a provider's payload.
+ * What a provider's request says happened, in the words the engine acts on; a provider's job ends at
+ * producing one, so whether a push deploys is never decided from a provider's payload.
  */
 final class HookEvent
 {
@@ -22,10 +18,8 @@ final class HookEvent
     public const OTHER = 'other';
 
     /**
-     * Every ref the push moved. A push that names one ref (GitHub, GitLab)
-     * fills the flat `ref`..`commit` fields below and gets a single change out
-     * of them; one that names several (Bitbucket) is built with {@see push()},
-     * and the flat fields then describe its first change.
+     * Every ref the push moved: one built from the flat `ref`..`commit` fields (GitHub, GitLab), or a list
+     * given to {@see push()} (Bitbucket), whose first change the flat fields then describe.
      *
      * @var list<RefChange>
      */

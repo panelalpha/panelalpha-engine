@@ -35,6 +35,16 @@ class FtpAccountQuotaTest extends TestCase
         $this->assertNull($this->update(['unlimited_quota' => false, 'quota' => 0])->getQuota());
     }
 
+    /** A form or a query string sends the flag as a word: `false` keeps the quota it names. */
+    public function test_unlimited_quota_false_sent_as_a_word_keeps_the_quota(): void
+    {
+        $this->assertSame(500, $this->store([
+            'user' => 'ftp1', 'domain' => 'shop.test', 'password' => 'secret-pass', 'unlimited_quota' => 'false', 'quota' => '500',
+        ])->getQuota());
+        $this->assertSame(500, $this->update(['unlimited_quota' => 'false', 'quota' => '500'])->getQuota());
+        $this->assertNull($this->update(['unlimited_quota' => 'true', 'quota' => '500'])->getQuota());
+    }
+
     /**
      * @param array<string, mixed> $payload
      */

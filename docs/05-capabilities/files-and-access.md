@@ -14,7 +14,7 @@ Upload this archive into the project and deploy it: /path/to/app.zip
 Write these files into the project and rebuild.
 ```
 
-The assistant can upload a file, write files directly, download a file from an address, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be.
+The assistant can upload a file, write files directly, download a file from an address, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be. A deploy removes the archive it was given once it has unpacked it, and only that one: anything else in the folder the archive was staged in stays, an archive staged there for a later deploy included, while the files the archive itself holds for that folder are written into it. That happens inside the deploy, so a deploy that has finished has nothing left to delete.
 
 ```text
 Download https://example.com/plugin.zip into /project on this project.
@@ -26,7 +26,7 @@ The file is saved into a directory that already exists. Only an `http` or `https
 List what is in /project on this project.
 ```
 
-The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, or a path that is a file, is refused. A very long folder is cut off after 5000 entries by default, and the answer says so.
+The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, including one that gets out through a link, or a path that is a file, is refused. A path outside the home answers 422 with the code `outside_home`. A very long folder is cut off after 5000 entries by default, and the answer says so.
 
 ```text
 Set the permissions on /project/script.sh to 755.
@@ -56,7 +56,9 @@ with directory /project.
 
 The directory must already exist inside the project's home: `/project` on a repository-deployed project. On traditional PHP hosting each domain has its own folder, `/<domain>/public_html` (`/shop.example.com/public_html` here), which the domain shows as its `document_root`; there is no `/public_html` at the top. Leave the directory out to give the account the whole home. A folder that does not exist is refused.
 
-An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted.
+An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it: plain FTP sends the password unencrypted.
+
+An SFTP login is the project's name, an underscore and a suffix (`tshop_sftp1`). You can give the suffix alone, and the engine adds the `tshop_` part. The whole login, with that part, is at most 32 characters. Each login is one account: deleting it removes it completely.
 
 An SFTP login can only move files. It cannot open a shell, and it sees only that project's files.
 
@@ -72,16 +74,23 @@ To end the sessions of every SFTP account on the project at once, say "all SFTP 
 
 **Upload into `/project/`**, not into `/`. Anything at the top level is outside what the webserver serves. For traditional PHP hosting (including most existing WordPress sites) the folder is the domain's `/<domain>/public_html` instead, and those files are served as soon as you upload them. Ask the assistant to inspect the project if you are unsure which applies.
 
+An upload keeps the permissions the file has on your computer. A file only you can read (mode `600`) is not served, and its address answers 403: upload it as `644`, or `chmod 644` it over SFTP.
+
+The name must be a plain file name, with no folder part. PHP keeps only the part after the last `/` or `\` of a multipart file name, so the engine refuses a name such as `sub\upload.txt` with `file_name_changed` and writes nothing, rather than replace another file of the shortened name.
+
 ## Troubleshooting
 
 **"I uploaded my files and the site did not change."**
-Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `<domain>/public_html` on traditional PHP hosting). Or this is a site deployed from an archive or from files and it needs a rebuild - the running application is still the previously built version. On a project connected to git, a rebuild replaces the uploaded files with the repository's, so the change has to go into the repository. Traditional PHP hosting, including WordPress in `<domain>/public_html`, does not need a rebuild after an upload.
+Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `<domain>/public_html` on traditional PHP hosting). Or this is a site deployed from an archive or from files and it needs a rebuild: the running application is still the previously built version. On a project connected to git, a rebuild replaces the uploaded files with the repository's, so the change has to go into the repository. Traditional PHP hosting, including WordPress in `<domain>/public_html`, does not need a rebuild after an upload.
 
 **"Permission denied" on upload.**
-The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
+The account has hit its disk quota. A path outside the account's home directory is a different refusal: a 422 with the code `outside_home`. Ask the assistant to check the project's usage against its limits.
 
-**"... is not a folder the project's account can write to" on upload, write or new folder.**
-The folder exists but does not belong to the account, so nothing was written or created; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
+**"The file name ... would be stored as ..." on upload.**
+The name has a folder part, for example `sub\upload.txt`. PHP keeps only the part after the last `/` or `\`, so the engine refuses it with the code `file_name_changed` and writes nothing: the file of the shortened name is left as it was. Upload it under a plain name.
+
+**"... is not a folder the project's account can write to" on upload, write, new folder or unzip.**
+The folder exists but does not belong to the account, so nothing was written, created or unpacked; the answer is a 422 on `path`. On traditional PHP hosting the top level of the account (`/`) is one of these folders. Upload into the folder the site is served from instead: `/project`, or the domain's `/<domain>/public_html` on traditional PHP hosting. The code is `not_writable`.
 
 **"Could not connect to ...", "... answered HTTP 404." or "... timed out." when fetching a URL.**
 The engine could not download the address, so nothing was written; the answer is a 422 on `url` with the code `download_failed` and a `reason` (`resolve`, `connect`, `timeout`, `http` with `http_status`, `tls`, `interrupted`, `other`). Check that the address opens from the internet, without a login, and fetch it again. When the download worked but the file could not be saved where you asked, the answer is a 422 on `path` with `write_failed`: pick a folder the project can write to.
@@ -90,13 +99,16 @@ The engine could not download the address, so nothing was written; the answer is
 The folder already holds a file or folder with the same name as one the archive unpacks to at its top level. Unpacking never replaces or merges, so nothing was extracted; the answer names the entries. Unpack into a new or empty folder, or move the existing entries away first.
 
 **The FTP account connects but shows an empty folder.**
-It is looking at the directory it was configured with. Check that against where the site's files actually are - for repository deploys, `/project`; on traditional PHP hosting, the domain's `/<domain>/public_html`.
+It is looking at the directory it was configured with. Check that against where the site's files actually are: for repository deploys, `/project`; on traditional PHP hosting, the domain's `/<domain>/public_html`.
 
 **I deployed an archive and the site is showing a directory listing.**
 Your archive had a wrapper folder inside it, so the site's files ended up one level too deep. Repackage it with the files at the top level of the zip.
 
 **Unpacking an archive fails.**
-The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
+The answer is a 422 on `zip_path`: `not_found` when no file is there, otherwise the reason the archive was refused or could not be unpacked. Unzip reads a `.zip`, `.tar.gz`, `.tgz` or `.gz` by its name, in any letter case, and refuses any other, such as `.rar` or `.7z`, with the reason. The engine checks every entry in the archive before it unpacks. It refuses an archive with absolute paths, paths that climb out of the folder, links that point outside it, zip entry names that unzip would change while unpacking (a control character, byte 0xff, or a trailing `;1`), or more than 100,000 entries or 5 GB once unpacked. It unpacks as the project's own account, so it cannot write where that account cannot.
+
+**Unpacking a zip made on Windows reports a warning about backslashes.**
+Some Windows tools write backslashes between folder names. A zip that says it was made on Windows is unpacked into the right folders, and the warning comes back in `warnings` (in the deploy log for an archive deploy); nothing more to do. A zip that uses backslashes without saying so is refused, because each backslash would end up inside a file name: re-create it with forward slashes, for example with 7-Zip or `tar -a -cf archive.zip <folder>`. A zip made on VMS or an Amiga is refused too: re-create it on Windows, macOS or Linux.
 
 ## More requests to try
 
@@ -181,10 +193,12 @@ Mode: full. Tools: `ftp_account_create`, `ftp_account_list`, `ftp_account_update
 
 ```text
 Give tshop an SFTP account tshop_sftp1 with a password. Then change it to key
-login using this public key: ssh-ed25519 AAAA...example. Delete it afterwards.
+login using this public key:
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIApWAkKVzgReKYul8SQpaYM0MJfdnc92MJi/XNWjUoKh example
+Delete it afterwards.
 ```
 
-Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), and any other name is refused. After the update the account accepts the key and not the password. Prefer SFTP in the answer over plain FTP.
+Mode: full. Tools: `sftp_account_create`, `sftp_account_list`, `sftp_account_update` with `auth_method` set to `public_key` and the key as `public_key`, `sftp_account_delete`. Check: an SFTP account name is the project's name, an underscore and a suffix (`tshop_sftp1`), a suffix alone gets the prefix added, and a login over 32 characters is refused. After the update the account accepts the key and not the password. The key is one line of a `.pub` file: Ed25519, ECDSA, a security-key form of either, or RSA of at least 2048 bits. A shorter RSA key is refused as `ssh_key_too_weak`, a DSA key as `ssh_key_type_not_accepted`, and a line whose key data is not a key of its type as `ssh_key_corrupt`. Prefer SFTP in the answer over plain FTP.
 
 **End SFTP sessions**
 
@@ -200,7 +214,7 @@ Mode: modify. Tools: `sftp_session_kill`, `sftp_session_kill_all`. Check: each a
 Run `ls -la /project | head` inside the tshop container and show me the output.
 ```
 
-Mode: modify. Tools: `ssh_run` with `cwd` and `timeout`. Check: pipes work, a non-zero exit is reported in the answer rather than as an error, and the same request on traditional PHP hosting is refused.
+Mode: modify. Tools: `ssh_run` with `cwd` and `timeout`. Check: pipes work, a non-zero exit is reported in the answer rather than as an error, the same request on traditional PHP hosting is refused, and a command is stopped when the caller that started it goes away, instead of running on in the container.
 
 ## From the server
 

@@ -93,6 +93,7 @@ echo "\$(basename "\$0") \$*" >>"$W/calls"
 rules="$W/\$(basename "\$0")-\$2"
 case "\$1 \$2" in
 "-n -L") grep -qx "\$3" "$W/chains" 2>/dev/null ;;
+"-L INPUT") [ "\$(basename "\$0")" != ip6tables ] || [ ! -f "$W/ipv6-off" ] ;;
 "-N "*) echo "\$2" >>"$W/chains" ;;
 "-S "*) cat "\$rules" 2>/dev/null ;;
 "-C "*) shift; chain=\$1; shift; grep -qxF -- "-A \$chain \$*" "\$rules" 2>/dev/null ;;
@@ -378,7 +379,7 @@ expect "SFTP is facility local5" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFI
 expect "FTP by its syslog name" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=pure-ftpd$' "$W/etc/fail2ban/filter.d/panelalpha-ftp.conf")"
 expect "the API filter counts 401s on /api and /mcp" "1" "$(grep -c '"\[A-Z\]+ /(?:api|mcp)' "$W/etc/fail2ban/filter.d/panelalpha-api.conf")"
 expect "with CSF's trusted addresses ignored" "ignoreip = $TN_LOOPBACK/8 ::1 $PUB14 $PUB5" "$(section DEFAULT | grep '^ignoreip')"
-expect "by the API jail too, which has its own ignoreip" "ignoreip = $TN_LOOPBACK/8 ::1 $PUB14 $PUB5" "$(section engine-api | grep '^ignoreip')"
+expect "by the API jail too, which has its own ignoreip" "ignoreip = $TN_LOOPBACK/8 ::1 $PUB14 $PUB5 $(sorted "$PRIV_NET" "$TN_DOCKER_BRIDGE_CIDR" fd00:1::/64)" "$(section engine-api | grep '^ignoreip')"
 expect "and an API list to read it from" "yes" "$([ -f "$W/etc/fail2ban/panelalpha-api-ignoreip" ] && echo yes)"
 expect "fail2ban restarted, its ban action being new" "1:0" "$(calls 'systemctl restart fail2ban'):$(calls 'fail2ban-client reload')"
 
@@ -486,6 +487,13 @@ rm -f "$W/calls"
 run fail2ban >/dev/null
 expect "a stopped fail2ban is started instead" "1|0" "$(calls 'systemctl restart fail2ban')|$(calls 'fail2ban-client reload')"
 
+# The root broker reads the host's Docker networks itself and hands them over.
+reset
+printf "$TN_DOCKER_BRIDGE_CIDR \n" >"$W/docker-subnets"
+PA_DOCKER_SUBNETS="$CONT2_NET fd00:2::/64" run fail2ban >/dev/null
+expect "the broker's Docker subnets are never banned" "ignoreip = $TN_LOOPBACK/8 ::1 $CONT2_NET fd00:2::/64" "$(section site-password | grep '^ignoreip')"
+expect "and docker's CLI is not asked for them" "0" "$(calls '^docker')"
+
 # CSF stays until ufw can take over: a failure before that leaves it running.
 csf_kept() { echo "$(calls csf-uninstall)|$([ -f "$W/etc/csf/csf.conf" ] && echo kept || echo gone)"; }
 reset
@@ -541,10 +549,22 @@ expect "and that CSF is left in place" "1" "$(grep -c 'ufw would not start with 
 rm "$W/restore-refuses"
 expect "once it is deleted, the next install moves the host" "0|1|gone" "$(run install)|$(csf_kept)"
 
+# A kernel booted with ipv6.disable=1: ufw skips IPv6, so user6.rules, which
+# ip6tables cannot load there, does not keep CSF or ufw off.
+reset
+csf "$PUB14\n" ''
+ufw_rules "$W/etc/ufw/user6.rules" 443
+sed -i "s|$TN_ANY_CIDR|::/0|g" "$W/etc/ufw/user6.rules"
+printf '%s\n' '::/0' >"$W/restore-refuses"
+touch "$W/ipv6-off"
+expect "IPv6 unavailable: a user6.rules ip6tables cannot load does not keep CSF" "0|1|gone|1" "$(run install)|$(csf_kept)|$(calls 'ufw --force enable')"
+rm "$W/ipv6-off" "$W/restore-refuses"
+
 reset
 ufw_rules "$W/etc/ufw/user.rules" 22 08080 443 09090
 ufw_rules "$W/etc/ufw/user6.rules" 0443
 sed -i "s|$TN_ANY_CIDR|::/0|g" "$W/etc/ufw/user6.rules"
+sed -i 's/^IPV6=.*/IPV6=yes/' "$W/etc/default-ufw"
 before=$(cat "$W/etc/ufw/user.rules")
 printf '%s\n' '--dport 0' >"$W/restore-refuses"
 expect "refused: every rule iptables refuses, in both files" "0|$(printf '%s\t%s\n' \
@@ -557,6 +577,17 @@ printf '%s\n' ':ufw-user-input' >"$W/restore-refuses"
 expect "a refused line outside any rule is named by its file and line" "$(printf '%s\t%s' "$W/etc/ufw/user.rules line 2" 'invalid rule')" "$(run refused >/dev/null; head -n 1 "$W/out")"
 rm "$W/restore-refuses"
 expect "nothing refused: nothing said" "0|" "$(run refused)|$(cat "$W/out")"
+
+# ufw skips IPv6 when the kernel has none, so user6.rules is not tested then.
+printf '%s\n' '--dport 0443' >"$W/restore-refuses"
+touch "$W/ipv6-off"
+rm -f "$W/calls"
+expect "IPv6 unavailable: user6.rules is not tested" "0||0" "$(run refused)|$(cat "$W/out")|$(calls 'ip6tables-restore')"
+rm "$W/ipv6-off"
+sed -i 's/^IPV6=.*/IPV6=no/' "$W/etc/default-ufw"
+rm -f "$W/calls"
+expect "nor with IPv6 off in ufw's defaults" "0||0" "$(run refused)|$(cat "$W/out")|$(calls 'ip6tables-restore')"
+rm "$W/restore-refuses"
 
 # A load that fails never leaves the host behind INPUT DROP with ufw's user
 # chains empty: the rule files go back and load again, or ufw goes off.

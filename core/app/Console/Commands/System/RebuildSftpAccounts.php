@@ -14,15 +14,16 @@ class RebuildSftpAccounts extends Command
 
     protected $description = 'Recreate configuration files for sftp accounts from database.';
 
-    public function handle(): int
+    public function handle(System $system): int
     {
         try {
-            $system = new System;
             $system->sftp()->rebuildSftpAccounts();
         } catch (\Exception $e) {
             $this->error($e->getMessage());
+
+            return self::FAILURE;
         }
 
-        return 0;
+        return self::SUCCESS;
     }
 }

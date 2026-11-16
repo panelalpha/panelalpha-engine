@@ -369,6 +369,23 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $compose['services']['app']['env_file']);
         $this->assertSame('.env.db', $compose['services']['db']['env_file']);
         $this->assertTrue($model->usedCustomEnvVars());
+        $this->assertSame(['APP_NAME'], Dind\ProjectEnvironment::appliedKeys($model));
+    }
+
+    /** With no service loading `.env`, `.env.panelalpha` reaches nothing, so no key counts as applied. */
+    public function test_tracked_overrides_no_service_loads_are_not_applied(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+        YAML);
+
+        $model = $this->dindModel(['env_vars' => ['APP_NAME' => 'Custom']]);
+        $this->forcedEnvironment($model, tracked: true)->apply();
+
+        $this->assertSame([], Dind\ProjectEnvironment::appliedKeys($model));
     }
 
     /**
@@ -394,6 +411,7 @@ class DindProjectEnvironmentTest extends TestCase
 
         $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
         $this->assertSame('.env', $compose['services']['app']['env_file']);
+        $this->assertSame(['APP_NAME'], Dind\ProjectEnvironment::appliedKeys($model));
     }
 
     /**

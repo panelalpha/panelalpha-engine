@@ -4,24 +4,25 @@ namespace App\Lib\Deploy;
 
 use App\Lib\Deploy\Detect\DetectionResult;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\AppConfig\AppConfigStack;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformSelector;
 use App\Lib\Deploy\Platform\PlatformValues;
 use App\Lib\Deploy\Platform\ProjectContext;
-use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Strategies;
 
 /**
- * Detect how to run a project, in precedence order: `resources/sources/
- * <host>/<owner>/<repo>/`, then the manifests under `resources/platforms/` and
- * `resources/apps/` by descending `priority`, then Railpack, then fallback.
+ * Detect how to run a project: `resources/sources/<host>/<owner>/<repo>/`, then the platform and app manifests by
+ * descending `priority`, then fallback. Railpack builds only a project whose request names it.
  */
 class DetectProjectStrategy
 {
     public const COMPOSE_GENERATED_LABEL = 'static-bootstrap';
 
     /**
+     * A pinned Railpack is answered here, since it has no manifest to pin to.
+     *
      * @param  ?string  $sourceUrl  the repository the checkout was cloned from,
      *                              when there was one; an uploaded archive has none.
      * @param  ?string  $recipe  the recipe the request named, which replaces the
@@ -51,20 +52,16 @@ class DetectProjectStrategy
     ): array {
         $context = ProjectContext::at($projectDir, $sourceUrl);
 
-        // Railpack has no manifest to pin to, so pinning it is answered here:
-        // otherwise the only way to reach Railpack is to be unrecognisable.
         if ($recipe === Strategies::RAILPACK) {
             return DetectionResult::of(Strategies::RAILPACK, 'Railpack');
         }
 
-        return self::fromPlatforms($context, $recipe)
-            ?? self::fromRailpack($context)
-            ?? self::unknown();
+        return self::fromPlatforms($context, $recipe) ?? self::unknown();
     }
 
     /**
-     * The platforms and apps in `resources/platforms/` and `resources/apps/`,
-     * by descending `priority`: the first whose `detect` block claims it.
+     * The first platform or app manifest, by descending `priority`, whose `detect` block claims the project; its app
+     * config speaks for the build stage too when written for that stack.
      *
      * @return array<string, mixed>|null
      */
@@ -75,29 +72,15 @@ class DetectProjectStrategy
             return null;
         }
 
-        // The project's app config speaks for the build stage too.
-        $appConfig = AppConfigLocator::findCandidate(
+        $appConfig = AppConfigStack::for($hit['decision'], AppConfigLocator::findCandidate(
             new LocalAppConfigSource,
             $context->projectDir,
             $context->sourceUrl
-        )['config'] ?? null;
+        )['config'] ?? null);
 
         return DetectionResult::fromPlatform(
             PlatformValues::withAppConfigBuild($hit['manifest'], $appConfig, $context, $hit['decision'])
         );
-    }
-
-    /**
-     * Railpack packs the long tail: anything no platform claims but some
-     * runtime in RuntimeRegistry recognises.
-     *
-     * @return array<string, mixed>|null
-     */
-    private static function fromRailpack(ProjectContext $context): ?array
-    {
-        return RuntimeRegistry::anyRecognises($context)
-            ? DetectionResult::of(Strategies::RAILPACK, 'Railpack')
-            : null;
     }
 
     /** @return array<string, mixed> */

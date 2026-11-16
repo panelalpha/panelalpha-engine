@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use Illuminate\Console\Command;
 
 /**
@@ -10,14 +9,11 @@ use Illuminate\Console\Command;
  */
 class SetCloudflareApiToken extends Command
 {
-    use ResolvesProject;
-
     protected $aliases = ['projects:set-cloudflare-api-token', 'users:set-cloudflare-api-token'];
 
     protected $signature = 'project:set-cloudflare-api-token
-        {token? : Cloudflare API token (Account: Cloudflare Tunnel Edit + Zone: DNS Edit + Zone Cache Purge + Zone Settings Edit, with the account and zones selected under Resources)}
+        {token? : Cloudflare API token (Account: Cloudflare Tunnel Edit + Zone: Zone Read + Zone: DNS Edit + Zone Cache Purge + Zone Settings Edit, with the account and zones selected under Resources)}
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--token= : Cloudflare API token (alternative to the positional argument)}
         {--force : Skip confirmation}';
 
@@ -25,9 +21,7 @@ class SetCloudflareApiToken extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $project = trim((string) $this->option('username'));
+        $project = trim((string) $this->option('project'));
         $positional = trim((string) ($this->argument('token') ?? ''));
         $optionToken = trim((string) ($this->option('token') ?? ''));
         if ($positional !== '' && $optionToken !== '' && $positional !== $optionToken) {

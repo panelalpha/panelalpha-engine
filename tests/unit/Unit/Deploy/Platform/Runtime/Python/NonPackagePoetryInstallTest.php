@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Platform\Runtime\Python;
 
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -111,5 +112,28 @@ TOML;
     {
         $this->assertFalse(PythonRuntime::isNonPackagePoetry(null));
         $this->assertTrue(PythonRuntime::isNonPackagePoetry(self::ACTIVITYWATCH));
+    }
+
+    /** @return array<string, array{0: string, 1: bool}> */
+    public static function tomlSpellings(): array
+    {
+        return [
+            'comment after the header' => ["[tool.poetry]  # app\nname = \"x\"\npackage-mode = false\n", true],
+            'indented header' => ["  [tool.poetry]\n  name = \"x\"\n  package-mode = false\n", true],
+            'comment after the value' => ["[tool.poetry]\nname = \"x\"\npackage-mode = false  # no package\n", true],
+            'windows line endings' => ["[tool.poetry]  # app\r\nname = \"x\"\r\npackage-mode = false # no package\r\n", true],
+            'under an indented table that follows' => ["[tool.poetry]\nname = \"x\"\n  [tool.other]\n  package-mode = false\n", false],
+        ];
+    }
+
+    /** Read with the TOML rules {@see PythonRuntime::declaresProject()} uses: indentation, and a comment after a header or value. */
+    #[DataProvider('tomlSpellings')]
+    public function test_package_mode_is_read_with_the_toml_rules_of_the_rest_of_the_pyproject(string $pyproject, bool $application): void
+    {
+        $command = PythonRuntime::installCommand(['pyproject.toml' => true], $pyproject);
+
+        $this->assertTrue(PythonRuntime::declaresProject($pyproject));
+        $this->assertSame($application, PythonRuntime::isNonPackagePoetry($pyproject));
+        $this->assertSame($application, str_contains($command, 'poetry install --no-root'));
     }
 }

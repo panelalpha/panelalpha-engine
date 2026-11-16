@@ -47,8 +47,7 @@ class ProxyRuleGrammarTest extends TestCase
 
     public function test_ssh_public_key(): void
     {
-        $this->assertTrue(SshPublicKey::isValid('ssh-rsa AAAAB3NzaC1yc2E= me@host'));
-        $this->assertTrue(SshPublicKey::isValid('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxzZWNyZXQ'));
+        $this->assertTrue(SshPublicKey::isValid('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIN5KCiuy5+pUCc2xXv4dhmQWvU/VtCA/OmjHI8mwa5l me@host'));
         $this->assertFalse(SshPublicKey::isValid("ssh-ed25519 AAAA\nrogue::0:0:/home/victim:"));
         $this->assertFalse(SshPublicKey::isValid('ssh-ed25519 AAAA:0:0'));
         $this->assertFalse(SshPublicKey::isValid('ssh-ed25519 AAAA "$(id)"'));

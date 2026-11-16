@@ -43,16 +43,17 @@ class AppHealthController extends Controller
         summary: 'Check that the deployed application answers on its published ports',
         description: 'Probes each port the application publishes from inside the account container, over loopback. '
             .'Does not go through the domain, DNS, TLS or the reverse proxy, so a failure here means the application '
-            .'itself is not answering. `healthy` is null when the application publishes no port to probe. '
-            .'`checks` answers a different question from `healthy`: not whether something answered, but whether what '
-            .'answered is the application - a project the engine could not recognise is served the engine\'s own '
-            .'placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while '
-            .'every other page works. Each check names a stable id, the group it came from, and where it can be said, '
+            .'itself is not answering. `healthy` is false when a published port does not answer, or when only the '
+            .'engine\'s own placeholder page answers (a project the engine could not recognise, 404 on every path), '
+            .'and null when the application publishes no port to probe. `checks` answers a different question: not '
+            .'whether something answered, but whether what answered is the application - a static site that has lost '
+            .'its front page answers 404 on `/` while every other page works. Each check names a stable id, the group it came from, and where it can be said, '
             .'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead. '
             .'A `secrets-readable` warning names stored secrets that cannot be decoded.',
         x: ['mcp-description' => 'Probes the app on its published ports from inside its container, bypassing domain, '
-            .'DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it '
-            .'is the app - `ok`, or what answered instead; `checks` say why and what to do.'],
+            .'DNS, TLS and proxy. `healthy`: the app answered (false for the engine\'s placeholder page; null: no port published). `serving`: whether it '
+            .'is the app - `ok`, or what answered instead; `checks` say why and what to do. It returns that status '
+            .'and, on an error page, its title - never the page\'s content; read the page itself with `ssh_run`.'],
         security: [['bearerAuth' => []]],
         tags: ['Containers'],
         parameters: [

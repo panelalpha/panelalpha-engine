@@ -8,9 +8,11 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\DeployHook\CheckoutSync;
 use App\Lib\DeployHook\DeliveryRunner;
 use App\Lib\DeployHook\InterruptedDeliveries;
+use App\Lib\Findings\Finding;
 use App\Models\DeployHook;
 use App\Models\HookDelivery;
 use App\Models\User;
+use App\System\Project\Dind\AppHealth;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Support\Facades\Queue;
 
@@ -347,7 +349,9 @@ final class RecordingCheckoutSync implements CheckoutSync
             if ($onDeployStarted !== null) {
                 $onDeployStarted($logger->getDeployId());
             }
-            $logger->finish($this->deployStatus, $this->deployError);
+            $this->deployStatus === DeployLogger::STATUS_PARTIAL
+                ? $logger->finishPartial([new Finding(AppHealth::CODE_CHECK_FAILED, (string) $this->deployError)])
+                : $logger->finish($this->deployStatus, $this->deployError);
         }
 
         if ($this->failure !== null) {

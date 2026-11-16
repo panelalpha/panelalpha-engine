@@ -6,9 +6,8 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Why the source WordPress could not be used, as the `error_type` the test
- * endpoint answers with. The rank orders how far a check got, so a lookup over
- * several candidate URLs reports the one that came closest.
+ * Why the source WordPress could not be used, as the test endpoint's `error_type`. The rank orders how far a check
+ * got, so a lookup over several candidate URLs reports the one that came closest.
  */
 final class SourceCheckFailed extends RuntimeException
 {

@@ -13,5 +13,5 @@ namespace App\Console\Commands\Concerns;
 final class ProjectOptions
 {
     public const SIGNATURE =
-        ' {--project= : Project username} {--username= : Deprecated alias for --project} {--all}';
+        ' {--project= : Project username} {--all}';
 }

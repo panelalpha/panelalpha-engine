@@ -1,0 +1,24 @@
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
+[1 log lines] compose {dir} chown=
+services:
+  app:
+    build: .
+    ports:
+      - '8080:8080'
+    restart: unless-stopped
+    labels:
+      panelalpha.generated: dockerfile
+    env_file:
+      - .env
+    environment:
+      PA_DEPLOY_PHASE: install
+      PA_INSTANCE_SECRET: '0000000000000000000000000000000000000000000000000000000000000000'
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+
+
+== log
+#0 info: Starting stage: running

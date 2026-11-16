@@ -2,9 +2,13 @@
 
 namespace Tests\Unit\Cloudflare;
 
+use App\Integrations\Tunnels\Cloudflare as TunnelCloudflare;
 use App\Lib\Apis\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Models\User;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Http;
+use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
 /**
@@ -28,6 +32,8 @@ use Tests\TestCase;
  */
 class AccountResolutionTest extends TestCase
 {
+    use InMemoryDatabase;
+
     private const ACCOUNT = '54390c0589dac7b4a1474b79d7ec7dde';
 
     private function client(): Cloudflare
@@ -190,6 +196,35 @@ class AccountResolutionTest extends TestCase
             $this->assertStringContainsString('Alpha', $e->getMessage());
             $this->assertStringContainsString('Beta', $e->getMessage());
         }
+    }
+
+    /**
+     * A token is saved before any tunnel hostname exists, so no zone can say which listed account
+     * is meant; the token is refused, not stored against the first one.
+     */
+    public function test_a_project_token_listing_several_accounts_is_refused_and_not_stored(): void
+    {
+        Http::fake([
+            '*/accounts*' => Http::response(['success' => true, 'result' => [
+                ['id' => 'acc1', 'name' => 'Alpha'],
+                ['id' => 'acc2', 'name' => 'Beta'],
+            ]], 200),
+        ]);
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
+        $this->app->forgetInstance('encrypter');
+        Facade::clearResolvedInstance('encrypter');
+        $this->bootInMemoryDatabase();
+        $user = $this->makeUser('shop');
+
+        try {
+            TunnelCloudflare::setApiToken($user, 'cf-token-not-real');
+            $this->fail('a token that lists several accounts must not be stored');
+        } catch (CloudflareException $e) {
+            $this->assertStringContainsString('more than one Cloudflare account (Alpha [acc1], Beta [acc2])', $e->getMessage());
+        }
+        $stored = User::query()->findOrFail($user->id);
+        $this->assertNull($stored->getCloudflareAccountId());
+        $this->assertNull($stored->getCloudflareApiToken());
     }
 
     /** Several zones in the *same* account are not ambiguous. */

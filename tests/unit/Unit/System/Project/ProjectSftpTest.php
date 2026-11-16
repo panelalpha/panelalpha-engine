@@ -10,6 +10,8 @@ use App\System\Project;
 use App\System\Project\Sftp;
 use Illuminate\Support\Collection;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\HostCommand;
+use Tests\Support\LocalRoot;
 
 class ProjectSftpTest extends TestCase
 {
@@ -21,10 +23,12 @@ class ProjectSftpTest extends TestCase
         $this->tmpRoot = sys_get_temp_dir() . '/pa-project-sftp-' . bin2hex(random_bytes(4));
         mkdir($this->tmpRoot . '/config/sftp', 0777, true);
         mkdir($this->tmpRoot . '/home', 0777, true);
+        putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->tmpRoot, 'homes' => $this->tmpRoot . '/home'], JSON_THROW_ON_ERROR));
     }
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         $this->removeTree($this->tmpRoot);
         parent::tearDown();
     }
@@ -103,17 +107,8 @@ class ProjectSftpTest extends TestCase
             $contents
         );
 
-        $this->assertContains('sync-logins', $system->journal);
-        $syncCmd = null;
-        foreach ($system->processJournal as $cmd) {
-            if (str_contains($cmd, 'sync-logins.sh')) {
-                $syncCmd = $cmd;
-                break;
-            }
-        }
-        $this->assertNotNull($syncCmd);
-        $this->assertStringContainsString('exec sftp bash /etc/sftp/sync-logins.sh', $syncCmd);
-        $this->assertStringNotContainsString('exec -T sftp', $syncCmd);
+        $this->assertSame(['sync-logins'], $system->journal);
+        $this->assertStringContainsString('compose.sftpSyncLogins', implode("\n", $system->processJournal));
     }
 
     /**
@@ -187,6 +182,7 @@ class ProjectSftpTest extends TestCase
 
             public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $cmd = HostCommand::argv($cmd);
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (preg_match('/id -u (.+)$/', $line, $m)) {
                     return $m[1] === 'alice' ? '1001' : '1002';
@@ -200,9 +196,9 @@ class ProjectSftpTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->processJournal[] = $line;
-                if (str_contains($line, 'sync-logins.sh')) {
+                $argv = (array) $cmd;
+                $this->processJournal[] = implode(' ', LocalRoot::plain($argv) ?: $argv);
+                if (in_array('compose.sftpSyncLogins', $argv, true)) {
                     $this->journal[] = 'sync-logins';
                 }
 

@@ -22,7 +22,7 @@ class ProjectPushRequest extends FormRequest
             'target' => 'required|string',
             'files' => 'sometimes|boolean',
             'databases' => 'sometimes|boolean',
-            'tables' => 'sometimes|array|max:500',
+            'tables' => 'sometimes|array|min:1|max:500',
             'tables.*.database' => 'required|string',
             'tables.*.name' => ['required', 'string', 'regex:/^[A-Za-z0-9_$]+$/D'],
         ];

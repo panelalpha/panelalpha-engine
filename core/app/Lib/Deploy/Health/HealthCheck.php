@@ -3,9 +3,8 @@
 namespace App\Lib\Deploy\Health;
 
 /**
- * One question asked of a deployed application's own response, in a file per
- * check under `resources/checks/<group>/<id>.yaml`. `path` and `json` exist
- * because an API answers at another URL than `/` and as a JSON document.
+ * One question asked of a deployed application's own response, from `resources/checks/<group>/<id>.yaml`.
+ * `path` and `json` exist because an API answers elsewhere than `/`, as JSON.
  */
 final class HealthCheck
 {
@@ -30,7 +29,7 @@ final class HealthCheck
     /**
      * @param  array<string, mixed>  $expect
      * @param  array<string, mixed>|null  $when
-     * @param  list<string>  $landing
+     * @param  list<string>  $landing  asked only when the probe's redirects from `/` ended under one of these; empty: always
      */
     private function __construct(
         public readonly string $group,
@@ -43,8 +42,6 @@ final class HealthCheck
         public readonly ?string $serving,
         public readonly ?string $explain,
         public readonly string $source,
-        // Asked only when the probe's redirects from `/` ended under one of
-        // these paths; any other landing passes. Empty: always asked.
         public readonly array $landing = []
     ) {}
 
@@ -54,11 +51,7 @@ final class HealthCheck
         return $this->group.'/'.$this->id;
     }
 
-    /**
-     * The URL this check is asked about, as a path and query: `/` unless the
-     * check names another. Read here because the probe needs it before any
-     * check runs, one fetch per distinct path.
-     */
+    /** The URL this check is asked about, as a path and query: `/` unless the check names another. */
     public function path(): string
     {
         $path = $this->expect['path'] ?? null;
@@ -85,56 +78,14 @@ final class HealthCheck
      */
     public static function fromArray(array $raw, string $group, string $source): self
     {
-        $unknown = array_diff(array_keys($raw), self::KNOWN_KEYS);
-        if ($unknown !== []) {
-            throw new CheckException("{$source}: unknown key(s) ".implode(', ', $unknown));
-        }
-
-        $id = $raw['id'] ?? null;
-        if (! is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]*$/', $id) !== 1) {
-            throw new CheckException("{$source}: 'id' must be a lowercase slug");
-        }
-
-        // The file's own name where there is one -- a recipe can ship checks
-        // too, so two trees to search. `group/id` otherwise.
-        $where = $source !== '' ? $source : "{$group}/{$id}";
-
-        $message = $raw['message'] ?? null;
-        if (! is_string($message) || trim($message) === '') {
-            throw new CheckException("{$where}: 'message' must be a non-empty string");
-        }
-
-        $severity = $raw['severity'] ?? self::SEVERITY_ERROR;
-        if (! is_string($severity) || ! in_array($severity, self::SEVERITIES, true)) {
-            throw new CheckException(
-                "{$group}/{$id}: 'severity' must be one of ".implode(', ', self::SEVERITIES)
-            );
-        }
-
-        $expect = $raw['expect'] ?? [];
-        if (! is_array($expect)) {
-            throw new CheckException("{$group}/{$id}: 'expect' must be an object");
-        }
-        $unknownExpect = array_diff(array_keys($expect), self::EXPECT_KEYS);
-        if ($unknownExpect !== []) {
-            throw new CheckException(
-                "{$group}/{$id}: unknown expect key(s) ".implode(', ', $unknownExpect)
-                .'; a question needing more than '.implode(', ', self::EXPECT_KEYS).' belongs in an explain class'
-            );
-        }
-
-        $when = $raw['when'] ?? null;
-        if ($when !== null && ! is_array($when)) {
-            throw new CheckException("{$group}/{$id}: 'when' must be an object");
-        }
-
-        // A check that asserts nothing passes for every application. `path`
-        // alone says where to look, not what the answer must be; `json` does
-        // assert, so it counts.
-        if ($expect === [] || array_keys($expect) === ['path']) {
-            throw new CheckException("{$group}/{$id}: 'expect' declares no condition, so the check can never fail");
-        }
-
+        self::assertKnownKeys($raw, $source);
+        $id = self::idOf($raw, $source);
+        $where = self::whereOf($source, $group, $id);
+        $message = self::messageOf($raw, $where);
+        $severity = self::severityOf($raw, $group, $id);
+        $expect = self::expectOf($raw, $group, $id);
+        $when = self::whenOf($raw, $group, $id);
+        self::assertExpectsSomething($expect, $group, $id);
         self::assertPath($expect, $group, $id);
         self::assertJson($expect, $group, $id);
         $landing = self::landing($raw, $group, $id);
@@ -154,10 +105,106 @@ final class HealthCheck
         );
     }
 
+    /** @param  array<string, mixed>  $raw */
+    private static function assertKnownKeys(array $raw, string $source): void
+    {
+        $unknown = array_diff(array_keys($raw), self::KNOWN_KEYS);
+        if ($unknown !== []) {
+            throw new CheckException("{$source}: unknown key(s) ".implode(', ', $unknown));
+        }
+    }
+
+    /** @param  array<string, mixed>  $raw */
+    private static function idOf(array $raw, string $source): string
+    {
+        $id = $raw['id'] ?? null;
+        if (! is_string($id) || preg_match('/^[a-z0-9][a-z0-9-]*$/', $id) !== 1) {
+            throw new CheckException("{$source}: 'id' must be a lowercase slug");
+        }
+
+        return $id;
+    }
+
+    /** The file's own name where there is one, since a recipe can ship checks too; `group/id` otherwise. */
+    private static function whereOf(string $source, string $group, string $id): string
+    {
+        return $source !== '' ? $source : "{$group}/{$id}";
+    }
+
+    /** @param  array<string, mixed>  $raw */
+    private static function messageOf(array $raw, string $where): string
+    {
+        $message = $raw['message'] ?? null;
+        if (! is_string($message) || trim($message) === '') {
+            throw new CheckException("{$where}: 'message' must be a non-empty string");
+        }
+
+        return $message;
+    }
+
+    /** @param  array<string, mixed>  $raw */
+    private static function severityOf(array $raw, string $group, string $id): string
+    {
+        $severity = $raw['severity'] ?? self::SEVERITY_ERROR;
+        if (! is_string($severity) || ! in_array($severity, self::SEVERITIES, true)) {
+            throw new CheckException(
+                "{$group}/{$id}: 'severity' must be one of ".implode(', ', self::SEVERITIES)
+            );
+        }
+
+        return $severity;
+    }
+
     /**
-     * `path` must be a local absolute path: the probe dials loopback, so an
-     * absolute URL would make the engine request a host the check author chose.
-     * A query string is allowed (`/health?deep=1`).
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>
+     */
+    private static function expectOf(array $raw, string $group, string $id): array
+    {
+        $expect = $raw['expect'] ?? [];
+        if (! is_array($expect)) {
+            throw new CheckException("{$group}/{$id}: 'expect' must be an object");
+        }
+        $unknownExpect = array_diff(array_keys($expect), self::EXPECT_KEYS);
+        if ($unknownExpect !== []) {
+            throw new CheckException(
+                "{$group}/{$id}: unknown expect key(s) ".implode(', ', $unknownExpect)
+                .'; a question needing more than '.implode(', ', self::EXPECT_KEYS).' belongs in an explain class'
+            );
+        }
+
+        return $expect;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>|null
+     */
+    private static function whenOf(array $raw, string $group, string $id): ?array
+    {
+        $when = $raw['when'] ?? null;
+        if ($when !== null && ! is_array($when)) {
+            throw new CheckException("{$group}/{$id}: 'when' must be an object");
+        }
+
+        return $when;
+    }
+
+    /**
+     * A check that asserts nothing passes for every application: `path` alone asserts nothing, `json` does.
+     *
+     * @param  array<string, mixed>  $expect
+     */
+    private static function assertExpectsSomething(array $expect, string $group, string $id): void
+    {
+        if ($expect === [] || array_keys($expect) === ['path']) {
+            throw new CheckException("{$group}/{$id}: 'expect' declares no condition, so the check can never fail");
+        }
+    }
+
+    /**
+     * `path` must be a local path, since the probe dials loopback; a query string is allowed.
+     * `//host` is protocol-relative to curl, and whitespace or a newline would forge a probe line.
      *
      * @param  array<string, mixed>  $expect
      */
@@ -173,20 +220,16 @@ final class HealthCheck
                 "{$group}/{$id}: 'path' must be a local path beginning with '/', not a URL"
             );
         }
-        // `//host/x` is a protocol-relative URL, and curl reads it as one.
         if (str_starts_with($path, '//')) {
             throw new CheckException("{$group}/{$id}: 'path' must not begin with '//'");
         }
-        // Whitespace and control characters do not survive the shell hop, and a
-        // newline would forge a second probe line.
         if (preg_match('/[\s\x00-\x1f]/', $path) === 1) {
             throw new CheckException("{$group}/{$id}: 'path' must not contain whitespace or control characters");
         }
     }
 
     /**
-     * `landing` is a non-empty list of local paths, the same shape `path`
-     * must have.
+     * `landing` is a non-empty list of local paths, the same shape `path` must have.
      *
      * @param  array<string, mixed>  $raw
      * @return list<string>
@@ -211,10 +254,7 @@ final class HealthCheck
     }
 
     /**
-     * `json` must be a non-empty flat object of scalars. A list is read as "any
-     * of these", so `json: {status: [ok, healthy]}` accepts both spellings; a
-     * member compared as an object is a claim about shape and belongs in an
-     * explain class.
+     * `json` must be a non-empty flat object of scalars; a list is read as "any of these".
      *
      * @param  array<string, mixed>  $expect
      */
@@ -237,24 +277,32 @@ final class HealthCheck
                 throw new CheckException("{$group}/{$id}: 'json' member names must be non-empty strings");
             }
             if (is_array($wanted)) {
-                // PHP has one type for both: a list is "any of these", a
-                // mapping is a shape claim and is refused.
-                if (! array_is_list($wanted)) {
-                    throw new CheckException(
-                        "{$group}/{$id}: 'json.{$key}' must not be nested — a member compared as an object "
-                        .'belongs in an explain class'
-                    );
-                }
-                if ($wanted === []) {
-                    throw new CheckException("{$group}/{$id}: 'json.{$key}' must name at least one value");
-                }
-                foreach ($wanted as $one) {
-                    self::assertJsonScalar($one, "{$key}", $group, $id);
-                }
+                self::assertJsonAlternatives($wanted, $key, $group, $id);
 
                 continue;
             }
             self::assertJsonScalar($wanted, $key, $group, $id);
+        }
+    }
+
+    /**
+     * A list is "any of these"; a mapping is a shape claim and is refused.
+     *
+     * @param  array<mixed>  $wanted
+     */
+    private static function assertJsonAlternatives(array $wanted, string $key, string $group, string $id): void
+    {
+        if (! array_is_list($wanted)) {
+            throw new CheckException(
+                "{$group}/{$id}: 'json.{$key}' must not be nested — a member compared as an object "
+                .'belongs in an explain class'
+            );
+        }
+        if ($wanted === []) {
+            throw new CheckException("{$group}/{$id}: 'json.{$key}' must name at least one value");
+        }
+        foreach ($wanted as $one) {
+            self::assertJsonScalar($one, "{$key}", $group, $id);
         }
     }
 

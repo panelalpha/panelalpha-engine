@@ -3,11 +3,8 @@
 namespace App\Lib\Ssl;
 
 /**
- * One TLS handshake with an address, the name sent as SNI, returning what the
- * server presents.
- *
- * Verification is off on purpose: an expired, self-signed or wrong-name
- * certificate is the answer being looked for, not a reason to hang up.
+ * One TLS handshake with an address, the name sent as SNI, returning what the server presents. Verification is
+ * off on purpose: an expired, self-signed or wrong-name certificate is the answer being looked for.
  */
 class TlsHandshake
 {

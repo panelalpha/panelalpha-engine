@@ -10,20 +10,8 @@ use App\Lib\Deploy\Platform\Stage\WorkingDirectory;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * Renders a manifest's runtime stages into the container entrypoint.
- *
- * This is where the stage vocabulary stops being metadata and starts being
- * behaviour. The generated script reads {@see PlatformStage::PHASE_ENV}, runs
- * the install *or* upgrade block accordingly, then always runs start and
- * `exec`s the serve command — so a restart re-runs `optimize` and nothing
- * else, while a redeploy that changed the code runs the migration first.
- *
- * It defaults to the upgrade phase when the engine did not say. Guessing
- * "install" for an account that already holds data would re-run seeders over
- * live rows; guessing "upgrade" for a fresh one merely skips a first-boot
- * convenience that the next deploy repeats.
- *
- * No Laravel dependencies — unit-testable.
+ * The container entrypoint: the install or upgrade block by {@see PlatformStage::PHASE_ENV} (upgrade when unset,
+ * so seeders never re-run over live rows), then start, then `exec` of the serve command.
  */
 final class StageScript
 {
@@ -33,26 +21,12 @@ final class StageScript
     private const PHASE_STAGES = [PlatformStage::INSTALL, PlatformStage::UPGRADE];
 
     /**
-     * @param  ?ProjectContext  $context  project to evaluate `when` guards
-     *                                    against; null keeps every command
-     * @param  array<string, string>  $overrides  command id => the command as
-     *                                            resolved for this project, replacing the manifest's default
-     *                                            (a `{{js.start:…}}` placeholder is the manifest speaking in
-     *                                            generalities; by render time the project has answered)
-     * @param  array<string, string>  $extraInstall  install-stage commands the
-     *                                               caller discovered rather than the manifest — a `setup` script in
-     *                                               package.json or composer.json, `bin/setup`
-     * @param  array<string, array<string, string>>  $prepend  stage => commands
-     *                                                         to run before the manifest's own
-     * @param  ?AppConfig  $appConfig  the project's own app config, whose staged
-     *                                 commands run alongside the platform's — ahead of them where it
-     *                                 said `before`, and whose `serve` command replaces the platform's
-     *                                 entrypoint outright
-     * @param  ?DeployPlan  $plan  what this deploy was told to run. A stage it
-     *                             names replaces that stage entirely — manifest, app config and the
-     *                             `extra` commands discovered from the project alike. What the
-     *                             engine prepends survives it: only the engine knows whether this
-     *                             account's migration has a MySQL sidecar to wait for
+     * @param  ?ProjectContext  $context  project to evaluate `when` guards against; null keeps every command
+     * @param  array<string, string>  $overrides  command id => the command as resolved for this project
+     * @param  array<string, string>  $extraInstall  install commands discovered in the project, such as `bin/setup`
+     * @param  array<string, array<string, string>>  $prepend  stage => engine commands run first, kept under a plan
+     * @param  ?AppConfig  $appConfig  the project's app config, whose `serve` replaces the platform's
+     * @param  ?DeployPlan  $plan  a stage it names replaces that stage's manifest, app config and extra commands
      */
     public static function render(
         PlatformManifest $manifest,
@@ -75,8 +49,7 @@ final class StageScript
     }
 
     /**
-     * Build-stage commands as Dockerfile RUN lines, split by layer so the
-     * dependency install can be cached above the source copy.
+     * Build-stage commands as Dockerfile RUN lines, split by layer so the dependency install is cached above the source copy.
      *
      * @return array{dependencies: list<string>, assets: list<string>}
      */
@@ -101,6 +74,8 @@ final class StageScript
     }
 
     /**
+     * A request that replaced the install stage drops the project's own `setup` script too: it is a default like any other.
+     *
      * @param  array<string, string>  $overrides
      * @param  array<string, string>  $extraInstall
      * @param  array<string, array<string, string>>  $prepend
@@ -123,10 +98,6 @@ final class StageScript
                 self::commandsFor($manifest, $stage, $context, $appConfig, $plan),
                 $overrides,
                 $prepend[$stage] ?? [],
-                // A project's own `setup` script is a default like any other,
-                // so a request that spoke for the install stage replaces it
-                // too. Leaving it in would make "install runs exactly this"
-                // false for the one command nobody listed.
                 $stage === PlatformStage::INSTALL && ! $overridden ? $extraInstall : [],
                 $overridden
             );
@@ -167,9 +138,8 @@ final class StageScript
     }
 
     /**
-     * An app config's own `serve` command replaces the platform's. Naming a
-     * platform and then correcting how it starts is a smaller statement than
-     * taking the whole deployment over, and used to be impossible.
+     * An app config's own `serve` command replaces the platform's: correcting how a named platform starts is a
+     * smaller statement than taking the whole deployment over.
      *
      * @param  array<string, string>  $overrides
      * @return list<string>
@@ -182,35 +152,49 @@ final class StageScript
         ?ProjectContext $context = null
     ): array {
         if (StageResolver::isOverridden(PlatformStage::START, $plan)) {
-            $serve = self::serveIn($plan?->commandsFor(PlatformStage::START) ?? []);
-
-            // A replaced start stage with nothing marked `serve` leaves the
-            // container with no process to become. That is the caller's call
-            // to make, but it must not be a silent one: falling off the end of
-            // the script exits 0, which reads as a clean shutdown and restarts
-            // forever without ever saying why.
-            return $serve === null
-                ? [
-                    "pa_step start 'no serve command'",
-                    "printf '[panelalpha] the deploy request replaced the start stage without a serve"
-                    ." command; there is nothing to run\\n' >&2",
-                    'exit 1',
-                ]
-                : (new ServeCommand($serve, []))->lines();
+            return self::replacedServe($plan);
         }
 
         $own = $appConfig?->serveCommand();
         if ($own !== null) {
-            // Stated for this project on purpose. The overrides are the
-            // platform serve's resolution, keyed by id, and a recipe serve that
-            // shared that id ran the package.json default instead of its own.
-            $run = $context === null ? $own->run : PlatformValues::resolveJsPlaceholder($manifest, $context, $own->run);
-
-            return (new ServeCommand($own, [$own->id => $run]))->lines();
+            return self::ownServe($manifest, $own, $context);
         }
         $serve = $manifest->serveCommand();
 
         return $serve === null ? [] : (new ServeCommand($serve, $overrides))->lines();
+    }
+
+    /**
+     * A replaced start stage with nothing marked `serve` fails loudly: falling off the script's end exits 0,
+     * which reads as a clean shutdown and restarts forever without saying why.
+     *
+     * @return list<string>
+     */
+    private static function replacedServe(?DeployPlan $plan): array
+    {
+        $serve = self::serveIn($plan?->commandsFor(PlatformStage::START) ?? []);
+
+        return $serve === null
+            ? [
+                "pa_step start 'no serve command'",
+                "printf '[panelalpha] the deploy request replaced the start stage without a serve"
+                ." command; there is nothing to run\\n' >&2",
+                'exit 1',
+            ]
+            : (new ServeCommand($serve, []))->lines();
+    }
+
+    /**
+     * Resolved for this project rather than through the overrides: those are keyed by the platform serve's id,
+     * and a recipe serve sharing that id ran the package.json default instead of its own.
+     *
+     * @return list<string>
+     */
+    private static function ownServe(PlatformManifest $manifest, PlatformCommand $own, ?ProjectContext $context): array
+    {
+        $run = $context === null ? $own->run : PlatformValues::resolveJsPlaceholder($manifest, $context, $own->run);
+
+        return (new ServeCommand($own, [$own->id => $run]))->lines();
     }
 
     /**

@@ -3,10 +3,14 @@
 namespace App\System\Services\Webserver;
 
 use App\Integrations\Tunnels\PanelAlphaConnect;
+use App\Lib\Domains\HttpsPorts;
+use App\Lib\Overlay\OverlayDirectives;
+use App\Lib\Overlay\OverlayStore;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\Setting;
 use App\Models\User;
+use App\System\Privileged;
 use App\System\Project\Domain as ProjectDomain;
 use App\System\Project\SitePasswordProtection;
 use Illuminate\Support\Facades\Blade;
@@ -73,7 +77,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $listenIpv6 = $ips['ips_v6'] !== [];
         $this->renderProxyRuleVhosts($compiledRules['http'], $listenIpv6, [...$ips['ips_v4'], ...$ips['ips_v6']]);
         $this->renderStreamRules($compiledRules['stream'], $listenIpv6);
-        $this->syncProxyRulePorts([...$compiledRules['http'], ...$compiledRules['stream']]);
+        $this->syncProxyRulePorts([...$compiledRules['http'], ...$compiledRules['stream'], ...self::httpsPortRules()]);
     }
 
     private function rebuildMainConfig(): void
@@ -85,6 +89,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $modseConfig = Setting::getModsecConfig();
         $templateVars = [
             'modsecurity_enabled' => $modseConfig['mode'] !== 'off',
+            'extra_https_ports' => array_keys(HttpsPorts::held()),
             ...$this->getAllIpsVars(),
             ...$this->getFallbackVars(),
             ...$this->getSslCertVars(),
@@ -97,24 +102,14 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     {
         $appLiteProxyEnabled = (bool) config('env.APP_LITE_PROXY_ENABLED');
         if (! $appLiteProxyEnabled) {
-            $this->system->runProcess([
-                'sudo',
-                'rm',
-                '-f',
-                $this->appLiteConfigPath(),
-            ]);
+            $this->system->runProcess(Privileged::files()->removeIfExists($this->appLiteConfigPath()));
 
             return;
         }
 
         $this->renderAppLiteFromLegacyTemplate();
 
-        $this->system->exec([
-            'sudo',
-            'mkdir',
-            '-p',
-            $this->system->engineDirPath().'/webserver-logs/nginx-proxy/app-lite',
-        ]);
+        $this->system->exec(Privileged::files()->makeDirectories($this->system->engineDirPath().'/webserver-logs/nginx-proxy/app-lite'));
     }
 
     /**
@@ -144,10 +139,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * True when main nginx.conf still uses wildcard default listens. Adding
-     * address-specific vhost listens then needs a full container restart —
-     * reload fails with EADDRINUSE against the old wildcard sockets.
-     * Once default_server is already IP-bound, a normal reload is enough.
+     * True when main nginx.conf still uses wildcard default listens: address-specific vhost listens then need a full
+     * container restart, as a reload fails with EADDRINUSE on the old wildcard sockets; IP-bound, a reload is enough.
      */
     public function needsIpListenerRebind(): bool
     {
@@ -173,7 +166,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
             return;
         }
-        $this->exec('/etc/init.d/nginx reload');
+        $this->reloadNginx();
         $this->ensureReloadApplied();
     }
 
@@ -183,16 +176,13 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      */
     public function reloadRouting(): void
     {
-        $this->exec('/etc/init.d/nginx reload');
+        $this->reloadNginx();
         $this->ensureReloadApplied(restartIfNeeded: false);
     }
 
     /**
-     * Restart the webserver when the reload it was just asked for did not take.
-     *
-     * A reload exits 0 even when the master cannot bind its new listeners and keeps
-     * serving the old config; the listeners are the only observable that tells.
-     * A routing-only reload passes false: its config cannot move a listener, so it only logs.
+     * Restart when the reload did not take: it exits 0 even when the master cannot bind its new listeners and keeps
+     * the old config; only the listeners tell. A routing-only reload cannot move a listener: it passes false, and logs.
      */
     private function ensureReloadApplied(bool $restartIfNeeded = true): void
     {
@@ -211,6 +201,11 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             return;
         }
 
+        $this->restartAfterFailedReload();
+    }
+
+    private function restartAfterFailedReload(): void
+    {
         Log::warning(
             'nginx-proxy reload did not apply: the running listeners do not match '
             .'the rendered config, so the webserver is still serving the '
@@ -255,9 +250,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Whether every IPv4 address the rendered main config declares is bound; every vhost
-     * derives its addresses from the same list. A check that cannot run reads as matching.
-     * Extra listeners are fine: with `network_mode: host` /proc/net/tcp is the whole host's table.
+     * Whether every IPv4 address the main config declares (every vhost derives from it) is bound; a check that cannot
+     * run reads as matching. Extra listeners are fine: with `network_mode: host` /proc/net/tcp is the whole host's.
      */
     public function listenersMatchConfig(): bool
     {
@@ -306,18 +300,15 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * IPv4 addresses nginx is actually listening on, by port.
-     *
-     * Read from /proc/net/tcp rather than `ss` or `netstat`, neither of which
-     * the webserver image ships.
+     * IPv4 addresses nginx is actually listening on, by port. Read from /proc/net/tcp rather than `ss` or `netstat`,
+     * neither of which the webserver image ships.
      *
      * @return array<int, list<string>>
      */
     private function boundListenAddresses(): array
     {
-        $composeFile = $this->system->composeFilePath();
         $raw = $this->system->exec(
-            "sudo docker compose -f {$composeFile} exec -T sites-http cat /proc/net/tcp"
+            Privileged::engineServices($this->system->composeFilePath())->openTcpSockets()
         );
 
         $bound = [];
@@ -401,9 +392,12 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $domainName = $domain->domain;
         $user = $domain->getUser();
 
+        $domainVars = $this->domainTemplateVars($domain, $user);
         $templateVars = array_merge(
-            $this->domainTemplateVars($domain, $user),
+            $domainVars,
             SitePasswordProtection::nginxTemplateVars($user),
+            OverlayDirectives::templateVars((new OverlayStore)->effective($user)),
+            CookieIsolation::forDomain($domain, $user, $domainVars['trusted_fronts'] !== []),
             $this->httpAcmeChallengeTemplateVars($domain),
             $this->sslTemplateVars($this->system->project($user)->domain($domain)),
         );
@@ -414,7 +408,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         }
 
         $domainLogsDir = "{$this->logsDirPath()}/{$domainName}";
-        $this->system->exec(['sudo', 'mkdir', '-p', $domainLogsDir]);
+        $this->system->exec(Privileged::files()->makeDirectories($domainLogsDir));
 
         $domainConfigFile = "{$this->domainsConfigsDirPath()}/{$domainName}.conf";
         $this->system->filesystem()->makeFileFromTemplate($domainConfigFile, $this->domainTemplatePath($isDind), $templateVars);
@@ -439,6 +433,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             'relative_document_root' => $domain->getDocumentRoot(),
             'app_port' => $user->getAppPort() ?? 80,
             'app_ssl_port' => $user->getAppPort() ?? 443,
+            'https_ports' => HttpsPorts::of($domain),
+            'https_redirect_port' => HttpsPorts::main($domain),
             'trusted_fronts' => PanelAlphaConnect::trustedFrontsFor($domain),
         ];
     }
@@ -497,9 +493,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Build proxy_http / proxy_https / proxy_extra for the DinD vhost template.
-     * Routing is driven only by ProxyRule rows for this domain (no app_port fallback).
-     * Each entry carries ips_v4/ips_v6 resolved from ProxyRule.listen_ip (* = all account IPs).
+     * Build proxy_http / proxy_https / proxy_extra for the DinD vhost template, only from this domain's ProxyRule rows
+     * (no app_port fallback), each with ips_v4/ips_v6 resolved from ProxyRule.listen_ip (* = all account IPs).
      *
      * @return array{
      *   proxy_http: ?array{host: string, port: int, protocol: string, ips_v4: list<string>, ips_v6: list<string>},
@@ -581,9 +576,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     }
 
     /**
-     * Map ProxyRule.listen_ip onto concrete listen addresses.
-     * "*" / null / empty → all account bind IPs; a specific IP → only that address
-     * (IPv4 or IPv6), even if it is not currently in the account bind list.
+     * Map ProxyRule.listen_ip onto listen addresses: "*" / null / empty → all account bind IPs; a specific IP → only
+     * that address (IPv4 or IPv6), even if it is not currently in the account bind list.
      *
      * @param  array{ipv4: list<string>, ipv6: list<string>}  $accountIps
      * @return array{ipv4: list<string>, ipv6: list<string>}
@@ -613,7 +607,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     public function deleteDomainConfig(string $domainName): void
     {
         $configFile = $this->domainsConfigsDirPath().'/'.$domainName.'.conf';
-        $this->system->exec(['sudo', 'rm', '-f', $configFile]);
+        $this->system->exec(Privileged::files()->removeIfExists($configFile));
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
@@ -698,8 +692,8 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     private function writeProxyRuleVhosts(array $vhosts): void
     {
         $vhostsDir = $this->domainsConfigsDirPath();
-        $this->system->exec("sudo mkdir -p {$vhostsDir}");
-        $this->system->exec("sudo rm -f {$vhostsDir}/proxy-rule-*.conf");
+        $this->system->exec(Privileged::files()->makeDirectories($vhostsDir));
+        $this->system->exec(Privileged::fileLines()->removeProxyRuleConfigsIfAny($vhostsDir));
         foreach ($vhosts as $configPath => $vhostConfig) {
             $this->system->filesystem()->filePutContents($configPath, $vhostConfig);
         }
@@ -848,6 +842,17 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
 
         $listen = self::proxyRuleListen($vars, $listenIpv6, $hostIps);
 
+        return self::httpProxyRuleConfig($vars, $listen, $serverNames, $logAddress, $sslConfig, $scheme);
+    }
+
+    private static function httpProxyRuleConfig(
+        array $vars,
+        string $listen,
+        string $serverNames,
+        string $logAddress,
+        string $sslConfig,
+        string $scheme,
+    ): string {
         return <<<NGINX
 upstream upstream-{$vars['id']}-{$vars['upstream_host']}-{$vars['upstream_port']} {
   resolver 127.0.0.54 valid=30s;
@@ -858,8 +863,8 @@ server {
     {$listen}
     server_name {$serverNames};
 
-    access_log /var/log/nginx/proxy-rule-{$logAddress}.access.log;
-    error_log /var/log/nginx/proxy-rule-{$logAddress}.error.log;
+    access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/proxy-rule-{$logAddress}.access.log;
+    error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/proxy-rule-{$logAddress}.error.log;
 {$sslConfig}
 
     location / {
@@ -949,10 +954,8 @@ NGINX;
     }
 
     /**
-     * Keep the host firewall open for the ports the custom rules listen on.
-     *
-     * Only a host that has or had such a port touches the firewall: the
-     * marker lists the ports the last successful sync was asked to open.
+     * Keep the host firewall open for the ports the custom rules listen on. Only a host that has or had such a port
+     * touches the firewall: the marker lists the ports the last successful sync was asked to open.
      *
      * @psalm-param list<HttpRule|StreamRule> $rules
      */
@@ -975,17 +978,37 @@ NGINX;
         }
     }
 
+    /**
+     * The default servers and firewall allows of the ports domains answer HTTPS on besides 443, after one changed.
+     */
+    public function applyHttpsPorts(): void
+    {
+        $this->rebuildMainConfig();
+        $compiled = (new RoutingCompiler($this->system))->compile([]);
+        $this->syncProxyRulePorts([...$compiled['http'], ...$compiled['stream'], ...self::httpsPortRules()]);
+    }
+
+    /**
+     * One allow per port a domain answers HTTPS on besides 443, in the shape of a custom rule.
+     *
+     * @return list<array{id: string, transport: string, listen_ip: string, listen_port: int, is_generated: bool}>
+     */
+    private static function httpsPortRules(): array
+    {
+        return array_map(
+            static fn (int $port): array => ['id' => 'https-'.$port, 'transport' => 'tcp', 'listen_ip' => '*', 'listen_port' => $port, 'is_generated' => false],
+            array_keys(HttpsPorts::held())
+        );
+    }
+
     protected function proxyRulePorts(): ProxyRulePorts
     {
         return new ProxyRulePorts;
     }
 
     /**
-     * stream {} content for the custom (non-generated) tcp/udp rules.
-     *
-     * The upstream is resolved at run time, as the http rules' are: a name
-     * resolved at load (an account that is not running) makes nginx refuse
-     * the whole config, and an account's address changes when it is recreated.
+     * stream {} content for the custom (non-generated) tcp/udp rules, the upstream resolved at run time as the http
+     * rules' is: resolved at load, a stopped account's name fails the whole config, and an address changes on recreate.
      *
      * @psalm-param list<StreamRule> $streamRules
      */

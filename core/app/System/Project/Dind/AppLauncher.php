@@ -7,6 +7,7 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\ServiceHardener;
+use App\Lib\Deploy\DeployLog\ComposeLogLayout;
 use App\Lib\Deploy\DeployLog\DependencyFailure;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\FailureOutput;
@@ -288,9 +289,8 @@ final class AppLauncher
     }
 
     /**
-     * A Procfile `release:` line, run once to completion before `up`: its failure is the deploy's,
-     * and the app is not started on top of it. Null when there is none or it succeeded.
-     * Whether anything runs is asked first, since the release's own run may start the services it depends on.
+     * A Procfile `release:` line, run to completion before `up`: its failure is the deploy's, and nothing starts on
+     * it. Null when none or it succeeded. Asks first whether anything runs: the release may start its dependencies.
      *
      * @param  \Closure(): void  $reload  puts back the images the ENOSPC reclaim deletes
      * @return ?array{stdout: string, stderr: string, exit_code: ?int, release_failed?: true, ran_before_release?: ?bool, previous_kept?: true}
@@ -406,16 +406,10 @@ final class AppLauncher
     private function anythingRunning(): ?bool
     {
         try {
-            $out = $this->project->shell()->execAsUserQuiet(
-                $this->project->userAppComposeCommand(['ps', '--quiet', '--status', 'running']),
-                [],
-                self::PS_TIMEOUT_SECONDS
-            );
+            return $this->project->accountDaemon()->stackContainerIds(false, true, timeout: self::PS_TIMEOUT_SECONDS) !== [];
         } catch (\Throwable) {
             return null;
         }
-
-        return trim($out) !== '';
     }
 
     /**
@@ -589,11 +583,7 @@ final class AppLauncher
     private function psAll(): ?string
     {
         try {
-            return $this->project->shell()->execAsUserQuiet(
-                $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
-                [],
-                self::PS_TIMEOUT_SECONDS
-            );
+            return $this->project->accountDaemon()->stackPs(true, self::PS_TIMEOUT_SECONDS);
         } catch (\Throwable) {
             return null;
         }
@@ -842,9 +832,8 @@ final class AppLauncher
     }
 
     /**
-     * What the containers compose gave up on printed, to lead the failure
-     * instead of `dependency failed to start`. Empty when compose
-     * named none, or their output could not be read.
+     * What the containers compose gave up on printed, to lead the failure instead of `dependency failed to start`.
+     * Empty when compose named none, or their output could not be read.
      */
     private function failedDependencyCause(string $composeOutput): string
     {
@@ -864,28 +853,44 @@ final class AppLauncher
     /** The last lines a failed container or compose service printed; empty when they could not be read. */
     private function failedDependencyLogs(string $kind, string $name): string
     {
-        $command = $kind === 'container'
-            ? ['docker', 'logs', '--tail='.self::FAILURE_LOG_LINES, $name]
-            : $this->project->userAppComposeCommand(['logs', '--tail='.self::FAILURE_LOG_LINES, '--no-color', $name]);
         try {
-            return $this->project->shell()->execAsUserQuiet(array_merge(['sh', '-c', '"$@" 2>&1', 'sh'], $command), [], self::FAILURE_LOG_TIMEOUT_SECONDS);
+            return $kind === 'container'
+                ? $this->project->accountDaemon()->logTail($name, self::FAILURE_LOG_LINES, self::FAILURE_LOG_TIMEOUT_SECONDS)
+                : $this->failedServiceLogs($name);
         } catch (\Throwable) {
             return '';
         }
     }
 
-    /** The container's `.State.Health` as JSON; empty when it could not be read. */
-    private function failedDependencyHealth(string $container): string
+    /** The last lines of each of the service's containers, laid out as `docker compose logs` prints them. */
+    private function failedServiceLogs(string $service): string
+    {
+        $daemon = $this->project->accountDaemon();
+        $tails = [];
+        foreach ($daemon->stackContainers(true, false, $service, self::FAILURE_LOG_TIMEOUT_SECONDS) as $container) {
+            $tails[] = [
+                ltrim((string) ($container['Names'][0] ?? ''), '/'),
+                $daemon->logTail((string) $container['Id'], self::FAILURE_LOG_LINES, self::FAILURE_LOG_TIMEOUT_SECONDS, true),
+            ];
+        }
+
+        return ComposeLogLayout::of($tails);
+    }
+
+    /**
+     * The container's `State.Health`; null when it has none or could not be read.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function failedDependencyHealth(string $container): ?array
     {
         try {
-            return $this->project->shell()->execAsUserQuiet(
-                ['docker', 'inspect', '--format', '{{json .State.Health}}', $container],
-                [],
-                self::FAILURE_LOG_TIMEOUT_SECONDS,
-            );
+            $health = $this->project->accountDaemon()->container($container, self::FAILURE_LOG_TIMEOUT_SECONDS)['State']['Health'] ?? null;
         } catch (\Throwable) {
-            return '';
+            return null;
         }
+
+        return is_array($health) ? $health : null;
     }
 
     private function healthSawAFailingContainer(): bool
@@ -894,9 +899,8 @@ final class AppLauncher
     }
 
     /**
-     * The site was routed before anything ran, to the lowest port of a service when nothing else told them
-     * apart (Cabernet: 5004, a stream, over 6077, its web UI), or a rebuild kept it on another one.
-     * When the probe shows that port serving no page and exactly one of the others serving one, the site goes there.
+     * The site was routed before anything ran, to a service's lowest port when nothing told them apart, or a
+     * rebuild kept it on another. When the probe finds no page there and one on exactly one other, it goes there.
      *
      * @param  array<string, mixed>  $report
      */
@@ -929,9 +933,8 @@ final class AppLauncher
     }
 
     /**
-     * The rule itself: only a `lowest` guess whose routed port, the guess or
-     * the equal a rebuild kept, did not bear it out (no answer, or 4xx/5xx),
-     * and only to the one other port of the guess that answered 2xx/3xx.
+     * The rule itself: only a `lowest` guess whose routed port, the guess or the equal a rebuild kept, did not bear
+     * it out (no answer, or 4xx/5xx), and only to the one other port of the guess that answered 2xx/3xx.
      *
      * @param  array{reason: string, alternatives: list<int>}|null  $choice
      * @param  list<array<string, mixed>>  $results  the health probe's per-port results

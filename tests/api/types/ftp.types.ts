@@ -9,11 +9,15 @@ export interface FtpAccount {
   disk_usage_mb: number | null;
 }
 
+/** As SftpAccountResource renders it. */
 export interface SftpAccount {
+  id: number;
+  user_id: number;
   username: string;
-  directory: string;
-  auth_type: 'password' | 'key';
+  /** Comma-separated `password` and/or `public_key`. */
+  auth_method: string;
   created_at: string;
+  updated_at: string;
 }
 
 /** How many SFTP sessions a kill-sessions call found open. */

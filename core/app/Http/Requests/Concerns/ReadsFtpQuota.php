@@ -11,7 +11,7 @@ trait ReadsFtpQuota
      */
     public function getQuota(): ?int
     {
-        if (! empty($this->get('unlimited_quota'))) {
+        if ($this->boolean('unlimited_quota')) {
             return null;
         }
         $quota = (int) $this->get('quota');

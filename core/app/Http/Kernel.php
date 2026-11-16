@@ -13,6 +13,7 @@ use App\Http\Middleware\LogHubCalls;
 use App\Http\Middleware\McpAuthMiddleware;
 use App\Http\Middleware\PreventRequestsDuringMaintenance;
 use App\Http\Middleware\RedirectIfAuthenticated;
+use App\Http\Middleware\RefuseMalformedJson;
 use App\Http\Middleware\TrimStrings;
 use App\Http\Middleware\TrustProxies;
 use App\Http\Middleware\ValidateSignature;
@@ -75,6 +76,8 @@ class Kernel extends HttpKernel
             'auth:api',
             // Before the ability check, so refused calls are logged too.
             LogHubCalls::class,
+            // Before anything decides on the body: an unreadable one reads as empty.
+            RefuseMalformedJson::class,
             // Straight after authentication: who the token is, then what it
             // was issued to do, then whether the project it acts on lets a
             // token touch it at all.

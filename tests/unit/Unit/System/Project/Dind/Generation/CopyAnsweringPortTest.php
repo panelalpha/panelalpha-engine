@@ -8,6 +8,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AnsweringPort;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\GenerationState;
@@ -23,6 +24,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -54,7 +56,7 @@ class CopyAnsweringPortTest extends TestCase
     /** @var array<int, string> the copy's port => what it answers: page, silent, or an HTTP code */
     private array $copyAnswers = [];
 
-    /** What `docker inspect` says of the copy once it has been probed $upFor times. */
+    /** The copy's "<status> <exit code> <restarts>" once it has been probed $upFor times. */
     private string $copyDown = 'running 0 0';
 
     private int $upFor = PHP_INT_MAX;
@@ -394,6 +396,7 @@ class CopyAnsweringPortTest extends TestCase
         });
 
         $project = $this->createStub(Dind::class);
+        $project->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $project->method('username')->willReturn($this->username);
         $project->method('system')->willReturn($system);
         $project->method('userModel')->willReturn($this->user);
@@ -405,6 +408,8 @@ class CopyAnsweringPortTest extends TestCase
         $project->method('userAppComposeFileToRun')->willReturn('/home/u/project/docker-compose.panelalpha.yml');
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturn(new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return $project;
     }
@@ -431,23 +436,18 @@ class CopyAnsweringPortTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         if (str_contains($line, "'config' '--format' 'json'")) {
             return (string) json_encode($this->config());
         }
-        if (str_contains($line, "'ps' '--quiet' '--status' 'running'")) {
-            return "old1\n";
+        if (preg_match('/account-docker\.listContainers .*label com\.docker\.compose\.project=project(?: |$)/', $line) === 1) {
+            return '[{"Id":"old1","Names":["/project-app-1"]}]';
         }
-        if (str_contains($line, 'docker ps -aq') && str_contains($line, 'project-next')) {
-            return "next1\n";
+        if (str_contains($line, 'account-docker.listContainers') && str_contains($line, 'project-next')) {
+            return '[{"Id":"next1"}]';
         }
-        if (preg_match('/docker port next1 (\d+)\/tcp/', $line, $m) === 1) {
-            return TestNetwork::ANY . ':' . self::COPY_PORTS[(int) $m[1]] . "\n";
-        }
-        if (str_contains($line, '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')) {
-            $copyProbes = count(array_filter($this->probed, static fn (int $p): bool => $p >= 32768));
-
-            return str_ends_with(trim($line), 'next1') && $copyProbes >= $this->upFor ? $this->copyDown : 'running 0 0';
+        if (preg_match('/account-docker\.containers -- \S+ (.+)$/', $line, $m) === 1) {
+            return (string) json_encode(array_map($this->inspected(...), explode(' ', $m[1])));
         }
         if (preg_match('/for port in ([\d ]+); do/', $line, $m) === 1) {
             $out = '';
@@ -466,6 +466,24 @@ class CopyAnsweringPortTest extends TestCase
         }
 
         return '';
+    }
+
+    /** @return array<string, mixed> the account daemon's inspect of $container */
+    private function inspected(string $container): array
+    {
+        $copyProbes = count(array_filter($this->probed, static fn (int $p): bool => $p >= 32768));
+        $copy = $container === 'next1';
+        [$status, $exitCode, $restarts] = explode(' ', $copy && $copyProbes >= $this->upFor ? $this->copyDown : 'running 0 0');
+        $ports = [];
+        foreach ($copy ? self::COPY_PORTS : [] as $target => $port) {
+            $ports["{$target}/tcp"] = [['HostIp' => TestNetwork::ANY, 'HostPort' => (string) $port]];
+        }
+
+        return [
+            'State' => ['Status' => $status, 'ExitCode' => (int) $exitCode],
+            'RestartCount' => (int) $restarts,
+            'NetworkSettings' => ['Ports' => $ports],
+        ];
     }
 
     /** @return list<string> */

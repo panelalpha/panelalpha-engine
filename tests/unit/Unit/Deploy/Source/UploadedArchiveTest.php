@@ -2,11 +2,13 @@
 
 namespace Tests\Unit\Deploy\Source;
 
+use App\Lib\Deploy\Source\ArchiveSafety;
 use App\Lib\Deploy\Source\UploadedArchive;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\InfoZip;
+use Tests\Support\LocalRoot;
 
 /**
  * What an account is allowed to hand the extractor.
@@ -18,6 +20,9 @@ use Tests\Support\InfoZip;
  */
 class UploadedArchiveTest extends TestCase
 {
+    /** Where a deploy stages its copy; the broker hands unzip that copy as /proc/self/fd/N. */
+    private const STAGED = '/var/lib/panelalpha/archive-stage/ab/archive.zip';
+
     private string $home = '';
 
     protected function setUp(): void
@@ -184,16 +189,218 @@ class UploadedArchiveTest extends TestCase
         $this->touchInHome('site.zip');
         $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
 
-        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-Z1', '/staged'], $archive->listNamesArgv('/staged'));
-        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-Z', '/staged'], $archive->listModesArgv('/staged'));
-        $this->assertSame(['sudo', 'env', 'LC_ALL=C.UTF-8', 'unzip', '-p', '/staged', 'a/l'], $archive->readMemberArgv('/staged', 'a/l'));
+        $this->assertSame(['env', 'LC_ALL=C.UTF-8', 'unzip', '-Z1', '/staged'], $archive->listNamesArgv('/staged'));
+        $this->assertSame(['env', 'LC_ALL=C.UTF-8', 'unzip', '-Z', '/staged'], $archive->listModesArgv('/staged'));
+        $this->assertSame(['env', 'LC_ALL=C.UTF-8', 'unzip', '-p', '/staged', 'a/l'], $archive->readMemberArgv('/staged', 'a/l'));
+        $extract = $archive->extractArgv(1001, 1001, '/staged', '/tmp/x');
+        $this->assertSame([LocalRoot::CLIENT, 'account.extractZip', '--', '1001', '1001', '/staged', '/tmp/x'], $extract);
+        $this->assertSame(['sh', '-c', LocalRoot::script($extract), 'sh', '/staged', '/tmp/x'], LocalRoot::plain($extract));
+    }
+
+    /** As PowerShell's Compress-Archive writes it: made on MS-DOS, `\` between the folders. */
+    public function test_a_zip_made_on_windows_passes_the_checks_and_unpacks_into_its_folders(): void
+    {
+        $archive = $this->zipMadeOn(\ZipArchive::OPSYS_DOS, ['index.php' => '<?php require "inc/hello.php";', 'inc\\hello.php' => '<?php echo 1;']);
+        $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
+        mkdir($into);
+        try {
+            $members = $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+            $extraction = new \Symfony\Component\Process\Process(LocalRoot::plain($archive->extractArgv(1, 1, $archive->path, $into)));
+            $extraction->run();
+            $archive->assertExtracted($extraction, $archive->path);
+
+            $this->assertSame(['index.php', 'inc\\hello.php'], $members);
+            $this->assertSame('<?php echo 1;', file_get_contents($into . '/inc/hello.php'));
+            $this->assertSame(
+                ['warning: site.zip appears to use backslashes as path separators'],
+                $archive->extractionWarnings($extraction, $archive->path)
+            );
+        } finally {
+            $this->runOk(['rm', '-rf', $into]);
+        }
+    }
+
+    /** The real `unzip -Z` of a zip made on MS-DOS, a folder in it: every member's declared size counts. */
+    public function test_the_listing_of_a_zip_made_on_windows_declares_every_members_size(): void
+    {
+        $zip = new \ZipArchive();
+        $zip->open($this->home . '/site.zip', \ZipArchive::CREATE);
+        $zip->addEmptyDir('inc');
+        $zip->setExternalAttributesName('inc/', \ZipArchive::OPSYS_DOS, 0x10);
+        foreach (['inc\\hello.php' => '<?php echo 1;', 'big.bin' => str_repeat("\0", 1000)] as $name => $contents) {
+            $zip->addFromString($name, $contents);
+            $zip->setExternalAttributesName($name, \ZipArchive::OPSYS_DOS, 0x20);
+        }
+        $zip->close();
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $listing = $this->listInCLocale($archive->listModesArgv($archive->path));
+
+        $this->assertMatchesRegularExpression('~^drwx--- +\d+\.\d+ fat +0 .* inc/$~m', $listing);
+        ArchiveSafety::assertRegularMembersOnly($listing);
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 1013);
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/unpacks to more than/');
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 1012);
+    }
+
+    /** unzip extracts a member made on VMS with a link's mode as that link; `unzip -Z` lists it as `RWED,RWED,RWED`. */
+    public function test_a_zip_member_listed_in_a_form_the_checks_cannot_read_is_refused(): void
+    {
+        $zip = new \ZipArchive();
+        $zip->open($this->home . '/site.zip', \ZipArchive::CREATE);
+        $zip->addFromString('index.php', '<?php');
+        $zip->addFromString('etc', '/etc');
+        $zip->setExternalAttributesName('etc', \ZipArchive::OPSYS_OPENVMS, 0120777 << 16);
+        $zip->close();
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive lists a member whose type or size cannot be read');
+
+        $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+    }
+
+    /** @return iterable<string, array{int, string}> */
+    public static function backslashesUnzipKeeps(): iterable
+    {
+        yield 'made on Unix' => [\ZipArchive::OPSYS_UNIX, 'inc\\hello.php'];
+        yield 'made on NTFS (ntf in unzip -Z)' => [11, 'inc\\hello.php'];
+        yield 'made on MS-DOS, with a slash too' => [\ZipArchive::OPSYS_DOS, 'inc/sub\\hello.php'];
+    }
+
+    /** unzip writes these as one file named `inc\hello.php`, and `require 'inc/hello.php'` fails. */
+    #[DataProvider('backslashesUnzipKeeps')]
+    public function test_a_backslash_unzip_would_keep_in_a_file_name_is_refused(int $system, string $name): void
+    {
+        $archive = $this->zipMadeOn($system, ['index.php' => '<?php', $name => '<?php echo 1;']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive uses backslashes in file names, which would be extracted as part of each name rather than as folders; re-create it with forward slashes.');
+
+        $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+    }
+
+    public function test_a_zip_made_on_windows_climbing_out_with_backslashes_is_refused(): void
+    {
+        $archive = $this->zipMadeOn(\ZipArchive::OPSYS_DOS, ['index.php' => '<?php', '..\\..\\evil.php' => '<?php']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Archive contains a path outside the project directory.');
+
+        $archive->assertSafeContents($archive->path, $this->listInCLocale(...));
+    }
+
+    public function test_a_zip_unzip_cannot_read_still_fails_to_unpack(): void
+    {
+        $this->touchInHome('site.zip');
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
+        mkdir($into);
+        try {
+            $extraction = new \Symfony\Component\Process\Process(LocalRoot::plain($archive->extractArgv(1, 1, $archive->path, $into)));
+            $extraction->run();
+
+            $this->assertSame(9, $extraction->getExitCode(), $extraction->getErrorOutput());
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Could not unpack site.zip: ');
+            $archive->assertExtracted($extraction, $archive->path);
+        } finally {
+            $this->runOk(['rm', '-rf', $into]);
+        }
+    }
+
+    /** A corrupt zip already fails its listing, before anything is extracted. */
+    public function test_a_listing_that_fails_names_the_archive_not_the_staged_copy(): void
+    {
+        $this->touchInHome('site.zip');
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $zipinfo = static fn (array $argv): string => throw new \Exception('['.self::STAGED."]\n  End-of-central-directory signature not found.\nzipinfo:  cannot find zipfile directory in one of ".self::STAGED.' or '.self::STAGED.'.zip');
+
+        try {
+            $archive->assertSafeContents(self::STAGED, $zipinfo);
+            $this->fail('A listing that failed was accepted.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringStartsWith('Could not read site.zip: [site.zip] End-of-central-directory signature not found.', $e->getMessage());
+            $this->assertStringNotContainsString('archive-stage', $e->getMessage());
+        }
+    }
+
+    /** What the broker relays: unzip named the archive by the descriptor the broker opened it as. */
+    public function test_a_warning_and_a_failure_name_the_archive_not_the_brokers_descriptor(): void
+    {
+        $this->touchInHome('site.zip');
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $warned = self::ended(0, "warning:  /proc/self/fd/7 appears to use backslashes as path separators\n");
+        $failed = self::ended(9, "[/proc/self/fd/7]\n  End-of-central-directory signature not found.\n");
+
+        $this->assertSame(['warning: site.zip appears to use backslashes as path separators'], $archive->extractionWarnings($warned, self::STAGED));
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Could not unpack site.zip: [site.zip] End-of-central-directory signature not found.');
+        $archive->assertExtracted($failed, self::STAGED);
+    }
+
+    /** @return iterable<string, array{string, bool, string, string}> */
+    public static function failuresNamingTheStagedCopy(): iterable
+    {
+        yield 'zip' => ['site.zip', true, "[%s]\n  End-of-central-directory signature not found.\n", 'Could not unpack site.zip: [site.zip] End-of-central-directory signature not found.'];
+        yield 'tar.gz' => ['site.tar.gz', false, "tar (child): %s: Cannot open: No such file or directory\ntar (child): Error is not recoverable: exiting now\n", 'Could not unpack site.tar.gz: tar (child): site.tar.gz: Cannot open: No such file or directory tar (child): Error is not recoverable: exiting now'];
+        yield 'gz' => ['notes.gz', false, "gzip: %s: not in gzip format\n", 'Could not unpack notes.gz: gzip: notes.gz: not in gzip format'];
+    }
+
+    /** What the file manager relays: it hands unzip, tar and gzip its staged copy by path. */
+    #[DataProvider('failuresNamingTheStagedCopy')]
+    public function test_a_failure_names_the_archive_not_the_staged_copy_the_extractor_was_handed(string $name, bool $isZip, string $said, string $message): void
+    {
+        $staged = '/home/.panelalpha-unzip-stage/ab12/' . $name;
+        $archive = UploadedArchive::confined('/home/alice/dir/' . $name, $isZip);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage($message);
+        $archive->assertExtracted(self::ended(2, sprintf($said, $staged)), $staged);
+    }
+
+    /** What the file manager relays: it hands unzip its staged copy by path. */
+    public function test_a_warning_names_the_archive_not_the_staged_copy_unzip_was_handed(): void
+    {
+        $this->touchInHome('site.zip');
+        $archive = UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
+        $warned = self::ended(0, "warning:  /home/.panelalpha-unzip-stage/ab12/site.zip appears to use backslashes as path separators\n");
+
         $this->assertSame(
-            [
-                'sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups',
-                'env', 'LC_ALL=C.UTF-8', 'unzip', '-o', '/staged', '-d', '/tmp/x',
-            ],
-            $archive->extractArgv(1001, 1001, '/staged', '/tmp/x')
+            ['warning: site.zip appears to use backslashes as path separators'],
+            $archive->extractionWarnings($warned, '/home/.panelalpha-unzip-stage/ab12/site.zip')
         );
+    }
+
+    /** GNU tar warns once per member about a macOS header it ignores, with nothing wrong. */
+    public function test_a_tarball_extraction_logs_no_warnings(): void
+    {
+        $this->touchInHome('site.tar.gz');
+        $archive = UploadedArchive::inHome('site.tar.gz', $this->home, self::locate(...));
+
+        $this->assertSame([], $archive->extractionWarnings(self::ended(0, "tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'\n"), self::STAGED));
+    }
+
+    private static function ended(int $code, string $stderr): \Symfony\Component\Process\Process
+    {
+        $process = new \Symfony\Component\Process\Process(['sh', '-c', 'printf %s "$1" >&2; exit "$0"', (string) $code, $stderr]);
+        $process->run();
+
+        return $process;
+    }
+
+    /** @param array<string, string> $members name => contents */
+    private function zipMadeOn(int $system, array $members): UploadedArchive
+    {
+        $zip = new \ZipArchive();
+        $zip->open($this->home . '/site.zip', \ZipArchive::CREATE);
+        foreach ($members as $name => $contents) {
+            $zip->addFromString($name, $contents);
+            $zip->setExternalAttributesName($name, $system, $system === \ZipArchive::OPSYS_UNIX ? 0100644 << 16 : 0x20);
+        }
+        $zip->close();
+
+        return UploadedArchive::inHome('site.zip', $this->home, self::locate(...));
     }
 
     public function test_a_tarball_is_listed_and_extracted_with_the_tar_tools(): void
@@ -201,15 +408,39 @@ class UploadedArchiveTest extends TestCase
         $this->touchInHome('site.tar.gz');
         $archive = UploadedArchive::inHome('site.tar.gz', $this->home, self::locate(...));
 
-        $this->assertSame(['sudo', 'tar', '--quoting-style=escape', '-tzf', '/staged'], $archive->listNamesArgv('/staged'));
-        $this->assertSame(['sudo', 'tar', '--quoting-style=escape', '-tvzf', '/staged'], $archive->listModesArgv('/staged'));
+        $this->assertSame(['tar', '--quoting-style=escape', '-tzf', '/staged'], $archive->listNamesArgv('/staged'));
+        $this->assertSame(['tar', '--quoting-style=escape', '-tvzf', '/staged'], $archive->listModesArgv('/staged'));
+        $extract = $archive->extractArgv(1001, 1001, '/staged', '/tmp/x');
+        $this->assertSame([LocalRoot::CLIENT, 'account.extractTar', '--', '1001', '1001', '/staged', '/tmp/x'], $extract);
         $this->assertSame(
-            [
-                'sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups', 'tar',
-                '--no-same-owner', '--no-same-permissions', '-xzf', '/staged', '-C', '/tmp/x',
-            ],
-            $archive->extractArgv(1001, 1001, '/staged', '/tmp/x')
+            ['tar', '--no-same-owner', '--no-same-permissions', '-xzf', '/staged', '-C', '/tmp/x'],
+            LocalRoot::plain($extract)
         );
+    }
+
+    /** @return iterable<string, array{0: string, 1: string, 2: string}> */
+    public static function refusedReads(): iterable
+    {
+        yield 'zip, a relative staged path' => ['site.zip', 'names', 'archive.zip'];
+        yield 'zip, an option as the staged path' => ['site.zip', 'modes', '-x'];
+        yield 'zip, a member that is an option' => ['site.zip', 'member', '-d/etc'];
+        yield 'zip, a member with a line break' => ['site.zip', 'member', "a\nb"];
+        yield 'tar, an option as the staged path' => ['site.tar.gz', 'names', '--to-command=id'];
+        yield 'tar, a relative staged path' => ['site.tar.gz', 'modes', 'a.tgz'];
+    }
+
+    #[DataProvider('refusedReads')]
+    public function test_a_read_of_a_value_a_tool_could_misread_is_refused(string $name, string $read, string $value): void
+    {
+        $this->touchInHome($name);
+        $archive = UploadedArchive::inHome($name, $this->home, self::locate(...));
+
+        $this->expectException(InvalidArgumentException::class);
+        match ($read) {
+            'names' => $archive->listNamesArgv($value),
+            'modes' => $archive->listModesArgv($value),
+            'member' => $archive->readMemberArgv('/staged', $value),
+        };
     }
 
     /**
@@ -223,11 +454,12 @@ class UploadedArchiveTest extends TestCase
         $argv = UploadedArchive::inHome('site.tar.gz', $this->home, self::locate(...))
             ->extractArgv(1001, 1001, '/staged', '/tmp/x');
 
-        $this->assertContains('--no-same-owner', $argv);
-        $this->assertContains('--no-same-permissions', $argv);
+        $this->assertContains('--no-same-owner', LocalRoot::plain($argv));
+        $this->assertContains('--no-same-permissions', LocalRoot::plain($argv));
+        $this->assertStringStartsWith('account.', (string) LocalRoot::action($argv));
         $this->assertSame(
-            ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'],
-            array_slice($argv, 0, 7),
+            ['1001', '1001'],
+            array_slice(LocalRoot::values($argv), 0, 2),
             'extraction runs as the account, by id: the core container has no passwd entry for it'
         );
     }
@@ -285,8 +517,8 @@ class UploadedArchiveTest extends TestCase
         $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
         mkdir($into);
         try {
-            $listed = $this->runOk(array_slice($archive->listNamesArgv($archive->path), 1));
-            $this->runOk(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
+            $listed = $this->runOk($archive->listNamesArgv($archive->path));
+            $this->runOk(LocalRoot::plain($archive->extractArgv(1, 1, $archive->path, $into)));
 
             $this->assertSame("safe/x\n", $listed);
             $this->assertFileExists($into . '/safe/x');
@@ -319,7 +551,7 @@ class UploadedArchiveTest extends TestCase
         mkdir($into);
         try {
             $listed = $this->listInCLocale($archive->listNamesArgv($archive->path));
-            $this->runInCLocale(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
+            $this->runInCLocale(LocalRoot::plain($archive->extractArgv(1, 1, $archive->path, $into)));
 
             $this->assertSame($name . "\n", $listed);
             $this->assertSame('x', file_get_contents($into . '/' . $name));
@@ -394,14 +626,14 @@ class UploadedArchiveTest extends TestCase
     {
         $this->touchInHome('site.zip');
 
-        $this->assertSame(
-            ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1002', '--clear-groups', 'chmod', '-R', 'u+rwX,go=rX', '--', '/tmp/x'],
-            UploadedArchive::inHome('site.zip', $this->home, self::locate(...))->normaliseModesArgv(1001, 1002, '/tmp/x')
-        );
+        $argv = UploadedArchive::inHome('site.zip', $this->home, self::locate(...))->normaliseModesArgv(1001, 1002, '/tmp/x');
+
+        $this->assertSame([LocalRoot::CLIENT, 'account.normaliseModes', '--', '1001', '1002', '/tmp/x'], $argv);
+        $this->assertSame(['chmod', '-R', 'u+rwX,go=rX', '--', '/tmp/x'], LocalRoot::plain($argv));
     }
 
     /**
-     * Extract and normalise for real, as ourselves (the sudo setpriv prefix dropped).
+     * Extract and normalise for real, as ourselves.
      *
      * @param list<string> $paths
      * @return array<string, string> path => octal mode
@@ -412,8 +644,8 @@ class UploadedArchiveTest extends TestCase
         $into = sys_get_temp_dir() . '/pa-unpack-' . bin2hex(random_bytes(8));
         mkdir($into);
         try {
-            $this->runOk(array_slice($archive->extractArgv(1, 1, $archive->path, $into), 7));
-            $this->runOk(array_slice($archive->normaliseModesArgv(1, 1, $into), 7));
+            $this->runOk(LocalRoot::plain($archive->extractArgv(1, 1, $archive->path, $into)));
+            $this->runOk(LocalRoot::plain($archive->normaliseModesArgv(1, 1, $into)));
             clearstatcache();
             $modes = [];
             foreach ($paths as $path) {
@@ -429,7 +661,7 @@ class UploadedArchiveTest extends TestCase
     /** @param list<string> $argv */
     private function listInCLocale(array $argv): string
     {
-        return $this->runInCLocale(array_slice($argv, 1));
+        return $this->runInCLocale($argv);
     }
 
     /**

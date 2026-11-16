@@ -120,7 +120,9 @@ class WpApplicationPasswordController extends WordPressController
 
     #[OA\Delete(
         path: '/projects/{username}/wp/users/{user}/application-passwords/{uuid}',
-        description: 'Deletes an application password by UUID. Optional `path` selects the install.',
+        description: 'Deletes an application password by UUID. Optional `path` selects the install. '
+            .'The password stops working at once and cannot be read back or restored; this cannot be undone. Ask '
+            .'the operator to confirm first.',
         summary: 'Delete an application password for a WordPress user',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],

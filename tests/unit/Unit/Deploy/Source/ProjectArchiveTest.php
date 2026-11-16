@@ -3,18 +3,20 @@
 namespace Tests\Unit\Deploy\Source;
 
 use App\Lib\Deploy\Source\ProjectArchive;
+use App\System\Privileged\AccountFiles;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 class ProjectArchiveTest extends TestCase
 {
     private const DIR = '/home/acct/.panelalpha/archive-extract-0123';
 
-    public function test_lists_the_top_level_as_root(): void
+    public function test_lists_the_top_level_as_the_account(): void
     {
-        $this->assertSame(
-            ['sudo', 'find', self::DIR, '-mindepth', '1', '-maxdepth', '1', '-printf', '%y %f\0'],
-            ProjectArchive::topLevelArgv(self::DIR)
-        );
+        $argv = ProjectArchive::topLevelArgv(new AccountFiles(1004, 1005), self::DIR);
+
+        $this->assertSame([LocalRoot::CLIENT, 'account.listEntryTypes', '--', '1004', '1005', self::DIR], $argv);
+        $this->assertSame(['find', self::DIR, '-mindepth', '1', '-maxdepth', '1', '-printf', '%y %f\0'], LocalRoot::plain($argv));
     }
 
     public function test_unwraps_single_subdirectory(): void

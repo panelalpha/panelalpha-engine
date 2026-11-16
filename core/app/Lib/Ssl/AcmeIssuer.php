@@ -9,29 +9,8 @@ use RuntimeException;
 use skoerfgen\ACMECert\ACMECert;
 
 /**
- * A real certificate for a project domain, from Let's Encrypt or any other
- * RFC 8555 authority, over HTTP-01.
- *
- * Almost all of this was already here. Every vhost template — apache, nginx,
- * litespeed, openlitespeed — already serves `/.well-known/acme-challenge/`
- * out of {@see HttpAcmeChallengeStore}, and {@see Domain::putCertificate()}
- * already installs a certificate where the proxy reads it. What was missing
- * was the half that talks to the authority, which is why the panel had to do
- * it from outside and a plain engine had no way to obtain one at all.
- *
- * Deliberately *not* the mechanism the engine's own admin certificate uses.
- * That one runs `certbot --standalone` and takes `sites-http` down to free
- * :80 — acceptable once, for one name; catastrophic per project, where it
- * would drop every hosted site on the box each time a certificate is issued
- * or renewed. Here the challenge is served by the running webserver, so
- * nothing goes offline and issuing for a hundred domains is a loop.
- *
- * The one subtlety is ordering. `http_acme_challenges_enabled` is baked into
- * the vhost when it is rendered, so writing the token is not enough: the
- * vhost has to be re-rendered and the webserver reloaded *before* the
- * authority is told to validate, and again after the token is removed. The
- * store reports the transition (`became_enabled` / `became_disabled`) so the
- * reload happens once per issuance rather than once per token.
+ * A certificate from Let's Encrypt or any RFC 8555 authority over HTTP-01, served by the running webserver, as certbot
+ * --standalone would take every site off :80. The vhost bakes the alias in: re-rendered before validation and after.
  */
 final class AcmeIssuer implements Issuer
 {
@@ -65,19 +44,17 @@ final class AcmeIssuer implements Issuer
     }
 
     /**
-     * Only the names no authority could ever issue for are refused, and only
-     * because a failed authorization is spent whether or not it stood a
-     * chance — Let's Encrypt counts 5 per account per hostname per hour.
+     * Only names no authority could issue for are refused, since a failed authorization counts anyway (Let's Encrypt:
+     * 5 per account per hostname per hour). A shared-zone name passes: its reported budget is the operator's to spend.
      *
-     * A name on a zone the fleet shares is *not* refused. It costs the shared
-     * budget, which is reported where an operator can see it, and spending it
-     * is their decision. {@see SharedZones}
+     * @see SharedZones
      */
     public function ineligibleReason(string $domain): ?string
     {
         return SharedZones::ineligibleReason($domain, $this->sharedZoneAllowed);
     }
 
+    /** Reloads after installing: the proxy reads the certificate off disk, and keeps serving the old one until then. */
     public function issue(IssuableDomain $domain): void
     {
         $name = $domain->model()->domain;
@@ -87,12 +64,7 @@ final class AcmeIssuer implements Issuer
             throw new RuntimeException($reason);
         }
 
-        $client = new ACMECert($this->directoryUrl);
-        $client->setLogger(static function (string $message): void {
-            Log::info('[acme] '.$message);
-        });
-        $client->loadAccountKey((new AcmeAccountKey($this->system))->pem());
-        $client->register(true, $this->email === null || $this->email === '' ? [] : $this->email);
+        $client = $this->registeredClient();
 
         $leafKey = $client->generateECKey(self::LEAF_CURVE);
         $chain = $client->getCertificateChain(
@@ -107,27 +79,41 @@ final class AcmeIssuer implements Issuer
             throw new RuntimeException("The authority returned no certificate for {$name}");
         }
 
-        // Each intermediate separately trimmed and newline-joined: the
-        // authority's chain arrives as PEM blocks that do not all end in one.
-        $intermediates = implode(PHP_EOL, array_map(
-            static fn ($part): string => trim((string) $part),
-            $parts
-        ));
+        $intermediates = self::intermediates($parts);
 
-        $domain->putCertificate($certificate, $leafKey, $intermediates);
+        $domain->putIssuedCertificate($certificate, $leafKey, $intermediates);
 
-        // The proxy reads the certificate straight off disk
-        // (`<account>/ssl-certs/<domain>.pem`), so nothing but a reload stands
-        // between installing it and serving it -- and without one the site
-        // keeps answering with the certificate it had, which is how this
-        // looked like a no-op the first time it worked.
         $this->publish($domain);
     }
 
+    private function registeredClient(): ACMECert
+    {
+        $client = new ACMECert($this->directoryUrl);
+        $client->setLogger(static function (string $message): void {
+            Log::info('[acme] '.$message);
+        });
+        $client->loadAccountKey((new AcmeAccountKey($this->system))->pem());
+        $client->register(true, $this->email === null || $this->email === '' ? [] : $this->email);
+
+        return $client;
+    }
+
     /**
-     * Publish one challenge, make the webserver serve it, and hand back the
-     * closure that takes it down again. The client calls the returned closure
-     * in a `finally`, so a failed validation cleans up too.
+     * Each part trimmed and newline-joined: the authority's PEM blocks do not all end in one.
+     *
+     * @param  array<mixed>  $parts
+     */
+    private static function intermediates(array $parts): string
+    {
+        return implode(PHP_EOL, array_map(
+            static fn ($part): string => trim((string) $part),
+            $parts
+        ));
+    }
+
+    /**
+     * Publish one challenge and return its removal, called in a `finally`; reloads follow the store's transitions, once per
+     * issuance. A failed removal is only logged: `acme:challenge:prune` drops the token after 24 hours.
      */
     private function challengeHandler(IssuableDomain $domain, string $name): \Closure
     {
@@ -144,9 +130,6 @@ final class AcmeIssuer implements Issuer
                         $this->publish($domain);
                     }
                 } catch (\Throwable $e) {
-                    // A token left behind is served for 24 hours and then
-                    // pruned by `acme:challenge:prune`. Failing the issuance
-                    // over it would be the worse outcome.
                     Log::warning("Could not remove the ACME challenge for {$name}: ".$e->getMessage());
                 }
             };
@@ -154,13 +137,8 @@ final class AcmeIssuer implements Issuer
     }
 
     /**
-     * The bare token, which is what the store is keyed by.
-     *
-     * For http-01 the client hands back the whole request path --
-     * `/.well-known/acme-challenge/<token>` -- because its own docroot
-     * handler appends that to a document root. The store owns the
-     * `.well-known` part already (the vhost aliases it), so only the last
-     * segment belongs to it.
+     * The bare token the store is keyed by: the client hands back the whole `/.well-known/acme-challenge/<token>` path,
+     * for its own docroot handler, and the store, which the vhost aliases, already owns the `.well-known` part.
      *
      * @param  array<string, mixed>  $opts
      */
@@ -170,14 +148,8 @@ final class AcmeIssuer implements Issuer
     }
 
     /**
-     * Re-render the domain's vhost and reload, so the challenge alias the
-     * template writes only when a token exists actually takes effect.
-     *
-     * The vhost is re-rendered directly rather than through
-     * {@see Domain::rebuild()}, which issues a certificate when the domain
-     * has none — the very call this issuer is running underneath. Going
-     * through it would recurse until the stack ran out, on exactly the path
-     * that matters: a brand new domain getting its first certificate.
+     * Re-render the vhost and reload, so the challenge alias written only while a token exists takes effect. Not through
+     * {@see Domain::rebuild()}: it issues for a domain with no certificate, which would recurse from here on a new domain.
      */
     private function publish(IssuableDomain $domain): void
     {

@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('domain_update')]
 #[Description(<<<'MARKDOWN'
     Update a domain
+
+    A container project moves to another of its domains with `main: true`: the old main domain stays as an addon until it is deleted. `https_ports` lists the ports the domain answers HTTPS on (443 by default) and `https_port` is the one the project's public URL names; a port other than 443 needs the operator's permission. When the public URL changes, the project is redeployed so its app is told the new one: `redeploy_task` is that task.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -53,6 +55,9 @@ class DomainUpdateTool extends ApiTool
             'redirect_url',
             'force_https_redirect',
             'aliases',
+            'main',
+            'https_ports',
+            'https_port',
         ];
     }
 
@@ -79,6 +84,9 @@ class DomainUpdateTool extends ApiTool
             'redirect_url' => $schema->string(),
             'force_https_redirect' => $schema->boolean(),
             'aliases' => $schema->array(),
+            'main' => $schema->boolean()->description('Make this domain the project\'s main one'),
+            'https_ports' => $schema->array()->description('Example: [443,8443].'),
+            'https_port' => $schema->integer(),
         ];
     }
 }

@@ -5,18 +5,12 @@ namespace App\System\Project\Dind;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Platform\Runtime\Php\AccountUserFiles;
 use App\Models\User;
+use App\System\Privileged;
 use App\System\Project\Dind as DindProject;
 
 /**
- * The passwd and group files a PHP deploy mounts beside its run file
- * ({@see AccountUserFiles}), brought over from another project by a staging,
- * clone or push.
- *
- * Their `app` entry names the source account's uid and gid, so the copy's
- * container would run as an account that owns none of the copy's files.
- * The source's entry is taken out, which leaves the image's own files, and
- * the entry for this project is added back by the code the deploy writes it
- * with.
+ * The passwd and group files a PHP deploy mounts beside its run file ({@see AccountUserFiles}), copied by a staging, clone
+ * or push: the source's `app` entry, whose uid:gid owns none of the copy's files, gives way to this project's.
  */
 final class CopiedAccountUserFiles
 {
@@ -62,7 +56,7 @@ final class CopiedAccountUserFiles
         if (! $system->filesystem()->fileExists($path)) {
             return;
         }
-        if ($system->runProcess(['sudo', 'test', '-L', $path])->isSuccessful()) {
+        if ($system->runProcess(Privileged::accountFiles(...$this->project->userModel()->linuxIds())->isSymlink($path))->isSuccessful()) {
             throw new \RuntimeException("Refusing to rewrite '{$path}': it is a symlink.");
         }
         $contents = $system->filesystem()->fileGetContents($path);

@@ -3,6 +3,8 @@
 namespace App\System;
 
 use App\System;
+use App\System\Privileged\AccountFiles;
+use App\System\Privileged\Exchange;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -24,10 +26,7 @@ class Filesystem
     /** Root-only directory beside the account homes where a write into a home is staged, owned and moded. */
     public const WRITE_STAGE_NAME = '.panelalpha-write-stage';
 
-    /** Reads and renames a file in a home without following a link; relative to core/. */
-    private const ACCOUNT_HOME_FILE = '/resources/system/account-home-file.py';
-
-    /** Its exit code when a directory on the path is a symlink, or the file itself is one. */
+    /** The account-home-file helper's exit code when a directory on the path is a symlink, or the file itself is one. */
     private const ACCOUNT_HOME_FILE_REFUSED = 3;
 
     /** @psalm-var ?FilesystemInfo */
@@ -43,19 +42,19 @@ class Filesystem
     public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
     {
         $this->makeDirWithParents(dirname($target), $chown);
-        $this->system->exec(['sudo', 'cp', $source, $target]);
+        $this->system->exec(Privileged::files()->copy($source, $target));
         $this->setOwnerAndMode($target, $chown, $chmod);
     }
 
     /**
-     * Write $contents at $path without ever opening what is already there: a
-     * temp file, then `mv -T` over $path, so a symlink at $path (one a tenant
-     * could plant) is replaced, never followed or entered. Inside an account's
-     * home the temp file is owned and moded in the root-only write stage, so
-     * no chown or chmod ever names a path the tenant can swap for a link.
+     * Write $contents via a temp file and `mv -T` over $path: a symlink a tenant planted is replaced, not followed.
+     * In an account home it is owned and moded in the root-only stage, so no chown or chmod names a swappable path.
      */
     public function writeFileReplacingPath(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
     {
+        if ($this->isInAccountHome($path) && ! $this->staysInTheAccountHomeItNames($path)) {
+            throw $this->renameRefused($path);
+        }
         $this->makeDirWithParents(dirname($path), $chown);
         $staged = $this->stagedPathFor($path);
         try {
@@ -63,7 +62,7 @@ class Filesystem
             $this->setOwnerAndMode($staged, $chown, $chmod);
             $this->renameOnto($staged, $path);
         } catch (\Throwable $e) {
-            $this->system->runProcess(['sudo', 'rm', '-f', $staged]);
+            $this->system->runProcess(Privileged::files()->removeIfExists($staged));
             throw $e;
         }
     }
@@ -102,8 +101,8 @@ class Filesystem
     private function writeStageFor(string $dir): string
     {
         $stage = $this->writeStage();
-        $this->system->exec(['sudo', 'mkdir', '-p', '-m', '0700', $stage]);
-        $devices = $this->system->runProcess(['sudo', 'stat', '-c', '%d', $stage, $dir]);
+        $this->system->exec(Privileged::files()->makeDirectoriesWithMode('0700', $stage));
+        $devices = $this->system->runProcess(Privileged::files()->deviceNumbers($stage, $dir));
         $lines = preg_split('/\R/', trim($devices->getOutput())) ?: [];
         if ($devices->getExitCode() !== 0 || count($lines) !== 2 || ! ctype_digit($lines[0]) || $lines[0] !== $lines[1]) {
             throw new \RuntimeException("Refusing to write into '{$dir}': it is not on the filesystem of {$stage}, so the file cannot be renamed into place.");
@@ -113,23 +112,20 @@ class Filesystem
     }
 
     /**
-     * Rename $staged onto $path. Inside an account's home every directory above
-     * $path may be one the tenant can swap for a symlink, or a `..` it chose,
-     * which would carry the rename into another account's tree: the path must
-     * stay in the account home it names, and {@see ACCOUNT_HOME_FILE} walks it
-     * without following a link and renames in the same system calls.
+     * Rename $staged onto $path. In an account home any directory above it may be a tenant's link or `..` into another
+     * account: it must stay in its home, and the account-home-file helper walks it, following no link, as it renames.
      */
     private function renameOnto(string $staged, string $path): void
     {
         if (! $this->isInAccountHome($path)) {
-            $this->system->exec(['sudo', 'mv', '-T', $staged, $path]);
+            $this->system->exec(Privileged::files()->rename($staged, $path));
 
             return;
         }
         if (! $this->staysInTheAccountHomeItNames($path)) {
             throw $this->renameRefused($path);
         }
-        $renamed = $this->system->runProcess($this->accountHomeFileArgv('rename', rtrim($this->homesDir(), '/'), $staged, self::lexicalPath($path)));
+        $renamed = $this->system->runProcess(Privileged::account()->renameInHome(rtrim($this->homesDir(), '/'), $staged, self::lexicalPath($path)));
         if ($renamed->getExitCode() === self::ACCOUNT_HOME_FILE_REFUSED) {
             throw $this->renameRefused($path);
         }
@@ -153,15 +149,6 @@ class Filesystem
         return new \RuntimeException("Refusing to write '{$path}': a directory above it is a symlink or leads out of the account's home.");
     }
 
-    /**
-     * @param  string  $root  the directory the walk starts from, as the host has it
-     * @return list<string>
-     */
-    private function accountHomeFileArgv(string $operation, string $root, string ...$paths): array
-    {
-        return ['sudo', 'python3', '-I', dirname(__DIR__, 2).self::ACCOUNT_HOME_FILE, $operation, $root, ...$paths];
-    }
-
     /** $path with `.`, `..` and repeated slashes resolved by name alone, nothing on disk followed. */
     private static function lexicalPath(string $path): string
     {
@@ -178,9 +165,8 @@ class Filesystem
     }
 
     /**
-     * Overwrite $path in place, keeping its inode, unless it is a symlink. For a
-     * file a running container bind-mounts, where a rename would stay invisible
-     * until the container is recreated.
+     * Overwrite $path in place, keeping its inode, unless it is a symlink. For a file a running container
+     * bind-mounts, where a rename would stay invisible until the container is recreated.
      *
      * @return bool whether it wrote
      */
@@ -215,13 +201,13 @@ class Filesystem
         }
     }
 
-    /** Stage $contents in a local temp file and `sudo cp` it to $target; the temp file is removed either way. */
+    /** Stage $contents in a local temp file and copy it to $target as root; the temp file is removed either way. */
     private function copyContents(string $contents, string $target): void
     {
-        $local = tempnam(sys_get_temp_dir(), 'tmp_');
+        $local = Exchange::file('tmp_');
         try {
             file_put_contents($local, $contents);
-            $this->system->exec(['sudo', 'cp', $local, $target]);
+            $this->system->exec(Privileged::files()->copy($local, $target));
         } finally {
             @unlink($local);
         }
@@ -230,16 +216,16 @@ class Filesystem
     private function setOwnerAndMode(string $path, ?string $chown, ?string $chmod): void
     {
         if ($chown) {
-            $this->system->exec(['sudo', 'chown', $chown, $path]);
+            $this->system->exec(Privileged::files()->changeOwner($chown, $path));
         }
         if ($chmod) {
-            $this->system->exec(['sudo', 'chmod', $chmod, $path]);
+            $this->system->exec(Privileged::files()->changeMode($chmod, $path));
         }
     }
 
     public function isDir(string $target): bool
     {
-        $process = $this->system->runProcess(['sudo', 'test', '-d', $target]);
+        $process = $this->system->runProcess(Privileged::files()->isDirectory($target));
 
         return $process->getExitCode() === 0;
     }
@@ -253,7 +239,7 @@ class Filesystem
 
     private function makeDir(string $dir, ?string $chown): void
     {
-        $this->system->exec(['sudo', 'mkdir', $dir]);
+        $this->system->exec(Privileged::files()->makeDirectory($dir));
         $this->setOwnerAndMode($dir, $chown, null);
     }
 
@@ -265,14 +251,14 @@ class Filesystem
             $this->makeDir($staged, $chown);
             $this->renameOnto($staged, $dir);
         } catch (\Throwable $e) {
-            $this->system->runProcess(['sudo', 'rm', '-rf', $staged]);
+            $this->system->runProcess(Privileged::files()->removeTree($staged));
             throw $e;
         }
     }
 
     /**
      * $target and each missing parent, deepest first. Stops with an error at
-     * the root, where dirname('/') is '/' and a failing `sudo test` would loop forever.
+     * the root, where dirname('/') is '/' and a failing root `test` would loop forever.
      *
      * @return list<string>
      */
@@ -282,7 +268,7 @@ class Filesystem
         $dir = $target;
         while (! $this->isDir($dir)) {
             if (dirname($dir) === $dir) {
-                throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is sudo working?)");
+                throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is the root broker reachable?)");
             }
             $missing[] = $dir;
             $dir = dirname($dir);
@@ -294,11 +280,7 @@ class Filesystem
     public function makeFileFromTemplate(string $filePath, string $templatePath, array $templateVars, ?string $chown = null, ?string $chmod = null): void
     {
         $content = file_get_contents($templatePath);
-        $rendered = Blade::render($content, $templateVars);
-        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        file_put_contents($tmpFile, $rendered);
-        $this->copyFile($tmpFile, $filePath, $chown, $chmod);
-        unlink($tmpFile);
+        $this->filePutContents($filePath, Blade::render($content, $templateVars), $chown, $chmod);
     }
 
     /**
@@ -321,6 +303,42 @@ class Filesystem
                 $chmod,
             );
         }
+    }
+
+    /**
+     * makeDirFromTemplate() written as the account, so a planted link reaches only the account's own files.
+     *
+     * @param  array<string, mixed>  $templateVars
+     */
+    public function makeDirFromTemplateAsAccount(AccountFiles $account, string $dir, string $templateDir, array $templateVars): void
+    {
+        [$copy, $render] = $this->templateTargets($dir, $templateDir, []);
+
+        foreach ($copy as $source => $target) {
+            $this->placeAsAccount($account, $source, $target, self::copiedMode($source));
+        }
+
+        foreach ($render as $template => $target) {
+            $local = tempnam(sys_get_temp_dir(), 'tmp_');
+            try {
+                file_put_contents($local, Blade::render((string) file_get_contents($template), $templateVars));
+                $this->placeAsAccount($account, $local, $target, '0644');
+            } finally {
+                @unlink($local);
+            }
+        }
+    }
+
+    private function placeAsAccount(AccountFiles $account, string $source, string $target, string $mode): void
+    {
+        $this->system->exec($account->makeDirectories(dirname($target)));
+        $this->system->exec($account->writeFrom($source, $target, $mode));
+    }
+
+    /** The mode `cp` gives a copy under a 022 umask. */
+    private static function copiedMode(string $source): string
+    {
+        return ((int) @fileperms($source) & 0111) !== 0 ? '0755' : '0644';
     }
 
     /**
@@ -365,10 +383,10 @@ class Filesystem
         if ($this->isInAccountHome($path)) {
             return $this->readInsideAccountHome($path);
         }
-        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
+        $tmpFile = Exchange::file('tmp_');
 
         try {
-            $this->system->exec(['sudo', 'cp', $path, $tmpFile]);
+            $this->system->exec(Privileged::files()->copy($path, $tmpFile));
 
             return (string) file_get_contents($tmpFile);
         } finally {
@@ -391,9 +409,8 @@ class Filesystem
     }
 
     /**
-     * $path resolved, then read by {@see ACCOUNT_HOME_FILE} from inside the
-     * resolved home without following a link, so a directory swapped for one
-     * after the check fails the read.
+     * $path resolved, then read by the account-home-file helper from inside the resolved home without following a
+     * link, so a directory swapped for one after the check fails the read.
      *
      * @return list<string>
      */
@@ -401,21 +418,23 @@ class Filesystem
     {
         [$home, $resolved] = $this->realPathInsideAccountHome($path);
 
-        return $this->accountHomeFileArgv('read', $home, $resolved);
+        return Privileged::account()->readInHome($home, $resolved);
     }
 
     /**
-     * The account home and $path with every symlink and `..` resolved, refused
-     * unless the path is still inside that home: as root, a tenant's link would
-     * otherwise hand the engine another account's file to copy into its own.
+     * The account home and $path with every symlink and `..` resolved, refused unless the path is still inside that
+     * home: as root, a tenant's link would otherwise hand the engine another account's file to copy into its own.
      *
      * @return array{0: string, 1: string}
      */
     private function realPathInsideAccountHome(string $path): array
     {
         $home = $this->accountHomeOf($path);
-        $resolved = $this->system->runProcess(['sudo', 'realpath', '-e', '--', $home, $path]);
+        $resolved = $this->system->runProcess(Privileged::files()->existingRealPaths($home, $path));
         $lines = preg_split('/\R/', trim($resolved->getOutput())) ?: [];
+        if ($resolved->getExitCode() === Privileged::REFUSED) {
+            throw new \RuntimeException("Refusing to read '{$path}': ".trim($resolved->getErrorOutput()));
+        }
         if ($resolved->getExitCode() !== 0) {
             throw new \RuntimeException("Cannot read '{$path}': ".trim($resolved->getErrorOutput() ?: 'it does not exist.'));
         }
@@ -439,7 +458,7 @@ class Filesystem
 
     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void
     {
-        $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
+        $tmpFile = Exchange::file('tmp_');
         file_put_contents($tmpFile, $contents);
 
         try {
@@ -451,29 +470,19 @@ class Filesystem
 
     public function fileExists(string $path): bool
     {
-        $response = $this->system->runProcess([
-            'sudo',
-            'test',
-            '-f',
-            $path,
-        ]);
+        $response = $this->system->runProcess(Privileged::files()->isFile($path));
 
         return $response->getExitCode() === 0;
     }
 
     public function isSymlink(string $path): bool
     {
-        return $this->system->runProcess(['sudo', 'test', '-L', $path])->getExitCode() === 0;
+        return $this->system->runProcess(Privileged::files()->isSymlink($path))->getExitCode() === 0;
     }
 
     public function directoryExists(string $path): bool
     {
-        $response = $this->system->runProcess([
-            'sudo',
-            'test',
-            '-d',
-            $path,
-        ]);
+        $response = $this->system->runProcess(Privileged::files()->isDirectory($path));
 
         return $response->getExitCode() === 0;
     }
@@ -483,12 +492,7 @@ class Filesystem
      */
     public function ls(string $path): array
     {
-        $response = $this->system->exec([
-            'sudo',
-            'ls',
-            '-A1',
-            $path,
-        ]);
+        $response = $this->system->exec(Privileged::files()->listAllNames($path));
         $files = explode("\n", trim($response));
 
         return $files;
@@ -496,13 +500,7 @@ class Filesystem
 
     public function mtime(string $path): ?int
     {
-        $process = $this->system->runProcess([
-            'sudo',
-            'stat',
-            '-c',
-            '%Y',
-            $path,
-        ]);
+        $process = $this->system->runProcess(Privileged::files()->modificationTime($path));
 
         return is_numeric($process->getOutput()) ? (int) $process->getOutput() : null;
     }
@@ -510,13 +508,7 @@ class Filesystem
     /** Permission bits of $path, or null when there is no such file. */
     public function mode(string $path): ?int
     {
-        $process = $this->system->runProcess([
-            'sudo',
-            'stat',
-            '-c',
-            '%a',
-            $path,
-        ]);
+        $process = $this->system->runProcess(Privileged::files()->permissionBits($path));
         $mode = trim($process->getOutput());
 
         return $process->getExitCode() === 0 && preg_match('/\A[0-7]{3,4}\z/', $mode) === 1 ? (int) octdec($mode) : null;
@@ -525,7 +517,7 @@ class Filesystem
     public function cat(string $path): ?string
     {
         if (! $this->isInAccountHome($path)) {
-            return $this->outputOrNull(['sudo', 'cat', $path]);
+            return $this->outputOrNull(Privileged::files()->read($path));
         }
         try {
             return $this->outputOrNull($this->accountHomeReadArgv($path));
@@ -536,7 +528,7 @@ class Filesystem
 
     public function tail(string $path, int $lines): ?string
     {
-        return $this->outputOrNull(['sudo', 'tail', '-n', (string) $lines, $path]);
+        return $this->outputOrNull(Privileged::files()->lastLines($lines, $path));
     }
 
     /** @param list<string> $argv */
@@ -553,8 +545,8 @@ class Filesystem
     public function getHomeFilesystemInfo(): array
     {
         if (self::$homeFilesystemInfo === null) {
-            $output = $this->system->execOnHost('df -P /home | tail -1');
-            $info = preg_split('/\s+/', trim($output));
+            $lines = preg_split('/\R/', trim($this->system->exec(Privileged::hostFiles()->diskFree('/home')))) ?: [];
+            $info = preg_split('/\s+/', trim((string) end($lines)));
 
             self::$homeFilesystemInfo = [
                 'filesystem' => $info[0],
@@ -604,11 +596,11 @@ class Filesystem
         if (! str_starts_with($filesystem, '/dev/')) {
             return null;
         }
-        $parent = trim($this->system->execOnHost(['lsblk', '-no', 'PKNAME', $filesystem]));
+        $parent = trim($this->system->execOnHost(Privileged::probes()->blockDeviceParent($filesystem)));
         if ($parent !== '') {
             return '/dev/'.$parent;
         }
-        $type = trim($this->system->execOnHost(['lsblk', '-no', 'TYPE', $filesystem]));
+        $type = trim($this->system->execOnHost(Privileged::probes()->blockDeviceType($filesystem)));
 
         return $type !== '' ? '/dev/'.basename($filesystem) : null;
     }
@@ -642,7 +634,7 @@ class Filesystem
     private function parseDfAvailableBytes(string $path): ?int
     {
         try {
-            $output = $this->system->execOnHost(['df', '-P', $path]);
+            $output = $this->system->execOnHost(Privileged::probes()->diskFree($path));
         } catch (\Throwable) {
             return null;
         }

@@ -6,21 +6,16 @@ use App\Lib\Deploy\Template\Template;
 use App\Lib\Deploy\Template\TemplateLoader;
 
 /**
- * The nginx configs the static recipes ship.
- *
- * Two, because "static" covers two things: a framework's build output is a
- * single-page app, where every path that is not a file rewrites to index.html;
- * a site of documents is the opposite, and rewriting a typo to the front page
- * turns a 404 into a page that says the wrong thing.
+ * The nginx configs the static recipes ship: a single-page app rewrites every path that is not a file to index.html, while a
+ * site of documents must not, as rewriting a typo to the front page turns a 404 into a page that says the wrong thing.
  */
 final class NginxConfig
 {
     public const FILENAME = 'panelalpha.nginx.conf';
 
     /**
-     * A path nginx can be handed inside double quotes: relative, no traversal,
-     * and none of the characters that would end the string. Spaces and
-     * parentheses are allowed -- `plan (1).html` is a real deployed filename.
+     * A path nginx can be handed inside double quotes: relative, no traversal, and none of the characters that would end the
+     * string. Spaces and parentheses are allowed: `plan (1).html` is a real deployed filename.
      */
     private const SAFE_ENTRY = '/^(?!\/)(?!.*\.\.)[^\x00-\x1f"\'\\\\$;{}]+$/u';
 
@@ -30,10 +25,15 @@ final class NginxConfig
         return TemplateLoader::asset('nginx.conf');
     }
 
+    /** The engine's "Project not configured" page as the answer to every path, with a 404. */
+    public static function placeholder(): string
+    {
+        return TemplateLoader::asset('nginx-placeholder.conf');
+    }
+
     /**
-     * `$entry` goes from the customer's repository into a config file, so
-     * anything not plainly a relative filename is dropped rather than escaped;
-     * nginx then serves index.html as before.
+     * `$entry` goes from the customer's repository into a config file, so anything not plainly a relative filename is dropped
+     * rather than escaped; nginx then serves index.html as before.
      */
     public static function site(?string $entry = null): string
     {

@@ -4,11 +4,15 @@ namespace Tests\Unit\Http;
 
 use App\Http\Middleware\Authenticate;
 use App\Jobs\CreateBackup;
+use App\Jobs\CreateStaging;
 use App\Jobs\DeleteBackup;
+use App\Jobs\PushState;
+use App\Jobs\RestoreBackup;
 use App\Models\Backup as BackupRecord;
 use App\Models\BackupContainer;
 use App\Models\BackupItem;
 use App\Models\BackupSchedule;
+use App\Models\Task;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\InMemoryDatabase;
@@ -83,6 +87,118 @@ class BackupHttpTest extends TestCase
         $record = BackupRecord::query()->findOrFail($backupId);
         $this->assertSame('manual', $record->kind);
         $this->assertSame(['files' => false, 'databases' => true], $record->contents);
+    }
+
+    public function test_each_operation_keeps_its_own_task_id_and_task_id_names_the_latest(): void
+    {
+        $user = $this->classicUser();
+        $container = $this->localContainer();
+
+        $created = $this->postJson("/api/projects/{$user->username}/backups", ['container' => (string) $container->id]);
+        $this->assertSame(202, $created->getStatusCode(), (string) $created->getContent());
+        $backupTask = $this->taskOf(CreateBackup::class);
+        $created->assertJsonPath('data.async_status.backup_task_id', $backupTask);
+        $created->assertJsonPath('data.async_status.task_id', $backupTask);
+
+        $backup = $this->withHomeItem(BackupRecord::query()->findOrFail((int) $created->json('data.id')));
+        $backup->setBackupStatus('completed');
+        $backup->save();
+        Task::query()->findOrFail($backupTask)->markCompleted();
+
+        $restored = $this->postJson("/api/projects/{$user->username}/backups/{$backup->id}/restore", ['confirm' => true]);
+        $this->assertSame(202, $restored->getStatusCode(), (string) $restored->getContent());
+        $restoreTask = $this->taskOf(RestoreBackup::class);
+        $restored->assertJsonPath('data.async_status.backup_task_id', $backupTask);
+        $restored->assertJsonPath('data.async_status.restore_task_id', $restoreTask);
+        $restored->assertJsonPath('data.async_status.task_id', $restoreTask);
+        Task::query()->findOrFail($restoreTask)->markCompleted();
+
+        $deleted = $this->deleteJson("/api/projects/{$user->username}/backups/{$backup->id}");
+        $this->assertSame(202, $deleted->getStatusCode(), (string) $deleted->getContent());
+        $deleteTask = $this->taskOf(DeleteBackup::class);
+        $deleted->assertJsonPath('data.async_status.backup_task_id', $backupTask);
+        $deleted->assertJsonPath('data.async_status.restore_task_id', $restoreTask);
+        $deleted->assertJsonPath('data.async_status.delete_task_id', $deleteTask);
+        $deleted->assertJsonPath('data.async_status.task_id', $deleteTask);
+    }
+
+    public function test_creating_a_backup_is_refused_while_a_push_is_running(): void
+    {
+        $user = $this->busyUser('push');
+        $container = $this->localContainer();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", [
+            'container' => (string) $container->id,
+        ]);
+
+        $this->assertSame(409, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame("Project '{$user->username}' is busy: a push is running. Wait for it to finish.", $response->json('message'));
+        Queue::assertNothingPushed();
+        $this->assertSame(0, BackupRecord::query()->count());
+    }
+
+    public function test_creating_a_backup_is_refused_while_a_staging_copy_is_running(): void
+    {
+        $user = $this->busyUser('staging');
+        $container = $this->localContainer();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", [
+            'container' => (string) $container->id,
+        ]);
+
+        $this->assertSame(409, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame("Project '{$user->username}' is busy: a staging copy is running. Wait for it to finish.", $response->json('message'));
+        Queue::assertNothingPushed();
+        $this->assertSame(0, BackupRecord::query()->count());
+    }
+
+    public function test_restoring_a_backup_is_refused_while_a_push_is_running(): void
+    {
+        $user = $this->busyUser('push');
+        $container = $this->localContainer();
+        $backup = $this->completedBackup($user, $container);
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups/{$backup->id}/restore", [
+            'confirm' => true,
+        ]);
+
+        $this->assertSame(409, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame("Project '{$user->username}' is busy: a push is running. Wait for it to finish.", $response->json('message'));
+        Queue::assertNothingPushed();
+        $this->assertNull($backup->refresh()->restoreStatus());
+    }
+
+    public function test_creating_a_backup_is_refused_while_a_staging_copy_reads_from_the_project(): void
+    {
+        $user = $this->classicUser();
+        $container = $this->localContainer();
+        $copy = $this->copyReadingFrom($user, CreateStaging::class);
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", [
+            'container' => (string) $container->id,
+        ]);
+
+        $this->assertSame(409, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertStringStartsWith("Project '{$user->username}' is busy: staging copy task {$copy->id} is running.", (string) $response->json('message'));
+        Queue::assertNothingPushed();
+        $this->assertSame(0, BackupRecord::query()->count());
+    }
+
+    public function test_restoring_a_backup_is_refused_while_a_push_reads_from_the_project(): void
+    {
+        $user = $this->classicUser();
+        $container = $this->localContainer();
+        $backup = $this->completedBackup($user, $container);
+        $copy = $this->copyReadingFrom($user, PushState::class);
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups/{$backup->id}/restore", [
+            'confirm' => true,
+        ]);
+
+        $this->assertSame(409, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertStringStartsWith("Project '{$user->username}' is busy: push task {$copy->id} is running.", (string) $response->json('message'));
+        Queue::assertNothingPushed();
+        $this->assertNull($backup->refresh()->restoreStatus());
     }
 
     public function test_listing_filters_by_kind(): void
@@ -218,6 +334,76 @@ class BackupHttpTest extends TestCase
         $unknownContainer->assertJsonPath('problems.0.code', 'container_not_found');
     }
 
+    public function test_a_backup_naming_no_container_goes_to_the_default_one(): void
+    {
+        $user = $this->classicUser();
+        $this->localContainer();
+        $default = $this->localContainer();
+        $default->makeDefault();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", []);
+
+        $this->assertSame(202, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame($default->id, BackupRecord::query()->sole()->container_id);
+    }
+
+    public function test_a_backup_naming_no_container_on_a_host_without_a_default_is_refused(): void
+    {
+        $user = $this->classicUser();
+
+        $response = $this->postJson("/api/projects/{$user->username}/backups", ['container' => null]);
+
+        $this->assertSame(422, $response->getStatusCode(), (string) $response->getContent());
+        $response->assertJsonPath('problems.0.field', 'container');
+        $response->assertJsonPath('problems.0.code', 'no_default_container');
+        $this->assertSame(0, BackupRecord::query()->count());
+    }
+
+    public function test_a_new_schedule_naming_no_container_uses_the_default_one(): void
+    {
+        $user = $this->classicUser();
+        $this->localContainer();
+        $default = $this->localContainer();
+        $default->makeDefault();
+
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 3 * * *']);
+
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+        $this->assertSame($default->id, BackupSchedule::query()->sole()->container_id);
+    }
+
+    public function test_a_schedule_change_naming_no_container_keeps_its_store(): void
+    {
+        $user = $this->classicUser();
+        $current = $this->localContainer();
+        $this->putJson("/api/projects/{$user->username}/backup-schedule", [
+            'container' => (string) $current->id,
+            'cron' => '0 3 * * *',
+        ])->assertOk();
+
+        $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 4 * * *'])->assertOk();
+        $this->assertSame($current->id, BackupSchedule::query()->sole()->container_id);
+
+        $this->localContainer()->makeDefault();
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 5 * * *']);
+
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+        $schedule = BackupSchedule::query()->sole();
+        $this->assertSame($current->id, $schedule->container_id);
+        $this->assertSame('0 5 * * *', $schedule->cron);
+    }
+
+    public function test_a_new_schedule_naming_no_container_on_a_host_without_a_default_is_refused(): void
+    {
+        $user = $this->classicUser();
+
+        $response = $this->putJson("/api/projects/{$user->username}/backup-schedule", ['cron' => '0 3 * * *']);
+
+        $this->assertSame(422, $response->getStatusCode(), (string) $response->getContent());
+        $response->assertJsonPath('problems.0.code', 'no_default_container');
+        $this->assertSame(0, BackupSchedule::query()->count());
+    }
+
     public function test_deleting_a_schedule_is_idempotent(): void
     {
         $user = $this->classicUser();
@@ -269,9 +455,54 @@ class BackupHttpTest extends TestCase
         $this->assertNotNull($manual->fresh());
     }
 
+    public function test_a_delete_backup_retention_starts_keeps_its_task_id(): void
+    {
+        $user = $this->classicUser();
+        $container = $this->localContainer();
+        $schedule = new BackupSchedule();
+        $schedule->user_id = $user->id;
+        $schedule->container_id = $container->id;
+        $schedule->cron = '0 3 * * *';
+        $schedule->keep_last = 1;
+        $schedule->save();
+        $older = $this->completedBackup($user, $container, 'scheduled');
+        $newer = $this->completedBackup($user, $container, 'scheduled');
+
+        app(\App\Lib\Project\BackupRetention::class)->prune($newer);
+
+        $status = $older->fresh()->async_status;
+        $this->assertSame($this->taskOf(DeleteBackup::class), $status['delete_task_id'] ?? null);
+        $this->assertSame($status['delete_task_id'], $status['task_id'] ?? null);
+    }
+
+    /** @param class-string $jobType */
+    private function taskOf(string $jobType): int
+    {
+        return (int) Task::query()->where('job_type', $jobType)->latest('id')->value('id');
+    }
+
     private function classicUser(): User
     {
         return $this->makeUser('cl' . bin2hex(random_bytes(4)), ['template' => 'default']);
+    }
+
+    private function busyUser(string $flag): User
+    {
+        return $this->makeUser('bu' . bin2hex(random_bytes(4)), [
+            'template' => 'default',
+            'async_status' => [$flag => 'running'],
+        ]);
+    }
+
+    /** A staging copy or push runs as the destination's task, naming its source in the details. */
+    private function copyReadingFrom(User $source, string $jobType): Task
+    {
+        $task = Task::start(jobType: $jobType, queue: 'default', username: 'dest' . bin2hex(random_bytes(4)), details: [
+            'source' => $source->username,
+        ]);
+        $task->markRunning();
+
+        return $task;
     }
 
     private function localContainer(): BackupContainer
@@ -292,7 +523,12 @@ class BackupHttpTest extends TestCase
         $backup->setBackupStatus('completed');
         $backup->save();
 
-        $key = $user->username . '/' . $backup->id . '/home.tar.gz';
+        return $this->withHomeItem($backup);
+    }
+
+    private function withHomeItem(BackupRecord $backup): BackupRecord
+    {
+        $key = $backup->username . '/' . $backup->id . '/home.tar.gz';
         $path = $this->storageRoot . '/' . $key;
         if (!is_dir(dirname($path))) {
             mkdir(dirname($path), 0777, true);

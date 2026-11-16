@@ -11,6 +11,7 @@ use App\Models\User;
 use App\System;
 use App\System\Filesystem;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\AppLauncher;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use App\System\Project\Dind\InnerBuildGuard;
@@ -18,6 +19,7 @@ use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 /**
@@ -30,7 +32,7 @@ class AppLauncherReleaseTest extends TestCase
     /** @var list<string> compose subcommand per process run, in order */
     private array $ran = [];
 
-    /** What `compose ps` answers before the release; null makes it fail. */
+    /** The ids of the stack's running containers before the release; null makes the daemon fail. */
     private ?string $ps = "0123abcd\n";
 
     /** What `compose build` runs as. */
@@ -249,14 +251,16 @@ class AppLauncherReleaseTest extends TestCase
 
                     return '';
                 }
-                if (!str_contains(implode(' ', (array) $cmd), "'ps' '--quiet' '--status' 'running'")) {
+                if (LocalRoot::action((array) $cmd) !== 'account-docker.listContainers') {
                     throw new \RuntimeException('unexpected command');
                 }
                 if ($this->onPs !== null) {
                     ($this->onPs)();
                 }
 
-                return $this->ps ?? throw new \RuntimeException('docker daemon not reachable');
+                $ids = preg_split('/\s+/', trim($this->ps ?? throw new \RuntimeException('docker daemon not reachable')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+                return (string) json_encode(array_map(static fn (string $id): array => ['Id' => $id, 'Names' => ["/{$id}"]], $ids));
             }
 
             public function filesystem(): Filesystem
@@ -266,9 +270,8 @@ class AppLauncherReleaseTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                // Only the compose commands the launcher runs itself (marked `--` below); the
-                // zero-downtime check for a running version goes through the account's shell.
-                $sub = in_array('--', $cmd, true) ? array_slice($cmd, (int) array_search('--', $cmd, true) + 1) : [];
+                $inner = LocalRoot::composeCommand((array) $cmd);
+                $sub = in_array('--', $inner, true) ? array_slice($inner, (int) array_search('--', $inner, true) + 1) : [];
                 if ($sub !== []) {
                     $this->ran[] = implode(' ', $sub);
                 }
@@ -312,7 +315,6 @@ class AppLauncherReleaseTest extends TestCase
         $project->method('system')->willReturn($system);
         $project->method('username')->willReturn($user->username);
         $project->method('userModel')->willReturn($user);
-        $project->method('composeFilePath')->willReturn('/users/acme/docker-compose.yml');
         $project->method('userAppComposeFileToRun')->willReturn('/home/acme/.panelalpha/docker-compose.yml');
         // The real command is `env ... docker compose ...`; `--` marks where the subcommand starts here.
         $project->method('userAppComposeCommand')->willReturnCallback(
@@ -321,6 +323,8 @@ class AppLauncherReleaseTest extends TestCase
         $project->method('registryLogin')->willReturn(new RegistryLogin($project));
         $project->method('innerBuildGuard')->willReturn(new InnerBuildGuard($project));
         $project->method('shell')->willReturn(new ShellOperations($project));
+        $project->method('accountDaemon')->willReturnCallback(static fn (): AccountDaemon => new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return new AppLauncher($project);
     }

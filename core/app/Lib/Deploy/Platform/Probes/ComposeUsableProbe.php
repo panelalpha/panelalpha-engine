@@ -9,14 +9,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\System\Project\Dind\Strategy\AppConfigBootstrap;
 
 /**
- * A compose file worth running as-is: not the engine's generated bootstrap, not
- * a workstation file, not sidecars-only, not a v1 file Compose v2 refuses. A missing Dockerfile reference is
- * accepted when the repo has a root Dockerfile. Yields `compose_path` or false.
- *
- * An app config's `replace`-mode compose (ADR-0001: written under its own
- * reserved name, never the repository's) is read ahead of the repository's
- * own — it is what {@see AppConfigBootstrap}
- * already decided the deploy should run.
+ * A compose file worth running as-is, the app config's `replace`-mode one ({@see AppConfigBootstrap}) read first;
+ * a missing Dockerfile reference is accepted when the repo has a root Dockerfile. Yields `compose_path` or false.
  */
 final class ComposeUsableProbe implements PlatformProbe
 {
@@ -33,16 +27,7 @@ final class ComposeUsableProbe implements PlatformProbe
                 continue;
             }
             $path = $context->path($candidate);
-            // An app config's file was written for the engine on purpose; the
-            // workstation and sidecars-only guesses are for a repository's own.
-            $guess = $candidate !== EngineArtifacts::APP_CONFIG_COMPOSE;
-
-            if (ComposeFileInspector::isGeneratedBootstrapCompose($path)
-                || ($guess && ComposeFileInspector::isLocalDevCompose($path))
-                || ($guess && ComposeFileInspector::isSidecarsOnlyCompose($path))
-                || ComposeFileInspector::isLegacyV1Compose($path)
-                || ($guess && $this->startsNothing($candidate, $context))
-            ) {
+            if ($this->rejects($candidate, $path, $context)) {
                 continue;
             }
 
@@ -53,6 +38,21 @@ final class ComposeUsableProbe implements PlatformProbe
         }
 
         return false;
+    }
+
+    /**
+     * The generated bootstrap and v1 files always; the workstation, sidecars-only and starts-nothing guesses only for a
+     * repository's own file, as an app config's was written for the engine on purpose.
+     */
+    private function rejects(string $candidate, string $path, ProjectContext $context): bool
+    {
+        $guess = $candidate !== EngineArtifacts::APP_CONFIG_COMPOSE;
+
+        return ComposeFileInspector::isGeneratedBootstrapCompose($path)
+            || ($guess && ComposeFileInspector::isLocalDevCompose($path))
+            || ($guess && ComposeFileInspector::isSidecarsOnlyCompose($path))
+            || ComposeFileInspector::isLegacyV1Compose($path)
+            || ($guess && $this->startsNothing($candidate, $context));
     }
 
     private function startsNothing(string $candidate, ProjectContext $context): bool

@@ -8,10 +8,8 @@ use Throwable;
 use ZipArchive;
 
 /**
- * Downloads the pinned migrator release once per migration run, refuses it
- * unless its SHA-256 is the pinned one, and repacks it so WordPress installs
- * the plugin under wordpress-migrator/, not the GitHub tag folder. The run
- * removes it when it ends ({@see discard}).
+ * Downloads the migrator release pinned by its SHA-256 once per migration run and repacks it under
+ * wordpress-migrator/, not the GitHub tag folder; the run removes it when it ends ({@see discard}).
  */
 class WordpressMigratorZip
 {
@@ -58,9 +56,8 @@ class WordpressMigratorZip
     }
 
     /**
-     * Delete the temp work directory for a migration once the plugin installs
-     * have read the zip, and when its run ends. Ignores paths outside the
-     * migrator temp prefix.
+     * Delete a migration's temp work directory once the plugin installs have read the zip, and when its run
+     * ends; paths outside the migrator temp prefix are left alone.
      */
     public static function discard(int $migrationId): void
     {
@@ -226,18 +223,30 @@ class WordpressMigratorZip
 
         $extractDir = $workDir.'/extracted';
         if (! mkdir($extractDir, 0700, true) && ! is_dir($extractDir)) {
-            if ($ownWorkDir) {
-                self::removeDir($workDir);
-            }
-            throw new RuntimeException('Could not create extract directory for migrator archive');
+            self::abandonRepack($workDir, $ownWorkDir, 'Could not create extract directory for migrator archive');
         }
 
+        self::extractTagArchive($tagArchivePath, $extractDir, $workDir, $ownWorkDir);
+
+        $pluginSource = self::findPluginSourceRoot($extractDir);
+        $main = $pluginSource.'/'.self::REQUIRED_ENTRY;
+        if (! is_file($main)) {
+            self::abandonRepack(
+                $workDir,
+                $ownWorkDir,
+                'Migrator tag archive is missing '.self::REQUIRED_ENTRY
+                .' under the top-level directory'
+            );
+        }
+
+        return self::packInstallZip($pluginSource, $workDir, $ownWorkDir);
+    }
+
+    private static function extractTagArchive(string $tagArchivePath, string $extractDir, string $workDir, bool $ownWorkDir): void
+    {
         $zip = new ZipArchive;
         if ($zip->open($tagArchivePath) !== true) {
-            if ($ownWorkDir) {
-                self::removeDir($workDir);
-            }
-            throw new RuntimeException('Could not open migrator tag archive');
+            self::abandonRepack($workDir, $ownWorkDir, 'Could not open migrator tag archive');
         }
         try {
             self::extractSafely($zip, $extractDir);
@@ -249,26 +258,14 @@ class WordpressMigratorZip
             throw $e;
         }
         $zip->close();
+    }
 
-        $pluginSource = self::findPluginSourceRoot($extractDir);
-        $main = $pluginSource.'/'.self::REQUIRED_ENTRY;
-        if (! is_file($main)) {
-            if ($ownWorkDir) {
-                self::removeDir($workDir);
-            }
-            throw new RuntimeException(
-                'Migrator tag archive is missing '.self::REQUIRED_ENTRY
-                .' under the top-level directory'
-            );
-        }
-
+    private static function packInstallZip(string $pluginSource, string $workDir, bool $ownWorkDir): string
+    {
         $installZip = $workDir.'/wordpress-migrator-install.zip';
         $out = new ZipArchive;
         if ($out->open($installZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            if ($ownWorkDir) {
-                self::removeDir($workDir);
-            }
-            throw new RuntimeException('Could not create migrator install zip');
+            self::abandonRepack($workDir, $ownWorkDir, 'Could not create migrator install zip');
         }
 
         self::addDirectoryToZip($out, $pluginSource, self::PLUGIN_DIR);
@@ -289,6 +286,15 @@ class WordpressMigratorZip
         return $installZip;
     }
 
+    /** Removes the work directory when the repack created it, then fails with $message. */
+    private static function abandonRepack(string $workDir, bool $ownWorkDir, string $message): never
+    {
+        if ($ownWorkDir) {
+            self::removeDir($workDir);
+        }
+        throw new RuntimeException($message);
+    }
+
     /**
      * Extract only relative entries that stay under $extractDir.
      * Absolute paths and `..` segments are rejected before any write.
@@ -302,39 +308,50 @@ class WordpressMigratorZip
         $rootPrefix = rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
-            $name = $zip->getNameIndex($i);
-            if (! is_string($name) || $name === '') {
-                throw new RuntimeException('Migrator tag archive has an unreadable entry');
-            }
+            self::extractEntry($zip, $i, $rootPrefix);
+        }
+    }
 
-            $relative = self::safeRelativeEntry($name);
-            $target = $rootPrefix.str_replace('/', DIRECTORY_SEPARATOR, $relative);
-            if ($relative === '' || str_ends_with($name, '/') || str_ends_with($name, '\\')) {
-                if (! is_dir($target) && ! mkdir($target, 0700, true) && ! is_dir($target)) {
-                    throw new RuntimeException('Could not create directory from migrator archive');
-                }
+    private static function extractEntry(ZipArchive $zip, int $i, string $rootPrefix): void
+    {
+        $name = $zip->getNameIndex($i);
+        if (! is_string($name) || $name === '') {
+            throw new RuntimeException('Migrator tag archive has an unreadable entry');
+        }
 
-                continue;
-            }
-
-            $parent = dirname($target);
-            if (! is_dir($parent) && ! mkdir($parent, 0700, true) && ! is_dir($parent)) {
+        $relative = self::safeRelativeEntry($name);
+        $target = $rootPrefix.str_replace('/', DIRECTORY_SEPARATOR, $relative);
+        if ($relative === '' || str_ends_with($name, '/') || str_ends_with($name, '\\')) {
+            if (! is_dir($target) && ! mkdir($target, 0700, true) && ! is_dir($target)) {
                 throw new RuntimeException('Could not create directory from migrator archive');
             }
 
-            $contents = $zip->getFromIndex($i);
-            if ($contents === false) {
-                throw new RuntimeException('Could not read migrator archive entry');
-            }
-            if (file_put_contents($target, $contents) === false) {
-                throw new RuntimeException('Could not write migrator archive entry');
-            }
+            return;
+        }
 
-            $written = realpath($target);
-            if ($written === false || ! str_starts_with($written, $rootPrefix)) {
-                @unlink($target);
-                throw new RuntimeException('Migrator tag archive contains an unsafe path');
-            }
+        self::writeEntry($zip, $i, $target, $rootPrefix);
+    }
+
+    /** Writes the file entry, then removes it again when it resolved outside the extract root. */
+    private static function writeEntry(ZipArchive $zip, int $i, string $target, string $rootPrefix): void
+    {
+        $parent = dirname($target);
+        if (! is_dir($parent) && ! mkdir($parent, 0700, true) && ! is_dir($parent)) {
+            throw new RuntimeException('Could not create directory from migrator archive');
+        }
+
+        $contents = $zip->getFromIndex($i);
+        if ($contents === false) {
+            throw new RuntimeException('Could not read migrator archive entry');
+        }
+        if (file_put_contents($target, $contents) === false) {
+            throw new RuntimeException('Could not write migrator archive entry');
+        }
+
+        $written = realpath($target);
+        if ($written === false || ! str_starts_with($written, $rootPrefix)) {
+            @unlink($target);
+            throw new RuntimeException('Migrator tag archive contains an unsafe path');
         }
     }
 
@@ -359,10 +376,14 @@ class WordpressMigratorZip
     }
 
     /**
-     * Top-level directory inside the tag archive (e.g. panelalpha-wordpress-migrator-1.1.4/).
+     * The extract root of a flat archive, else its single top-level directory (e.g. panelalpha-wordpress-migrator-1.1.4/).
      */
     private static function findPluginSourceRoot(string $extractDir): string
     {
+        if (self::isFlatExtract($extractDir)) {
+            return $extractDir;
+        }
+
         $entries = scandir($extractDir);
         if ($entries === false) {
             throw new RuntimeException('Could not list extracted migrator archive');
@@ -381,10 +402,6 @@ class WordpressMigratorZip
 
         if (count($dirs) === 1) {
             return $dirs[0];
-        }
-
-        if (self::isFlatExtract($extractDir)) {
-            return $extractDir;
         }
 
         throw new RuntimeException(

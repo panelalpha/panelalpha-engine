@@ -5,8 +5,10 @@ namespace App\Console\Commands\Projects;
 use App\Http\Requests\ProjectStagingRequest;
 use App\Lib\Domains\CopyDomain;
 use App\Lib\Helper;
+use App\Lib\Project\ProjectNameRefusal;
 use App\Models\User;
 use App\System;
+use App\System\Projects;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -17,14 +19,14 @@ class ProjectStagingCommand extends Command
 
     protected $signature = 'project:staging {project : Live project username} {--new-username=} {--domain=}';
 
-    protected $description = 'Create a linked staging mirror of a live dind project (synchronous)';
+    protected $description = 'Create a linked staging mirror of a live project, container or classic hosting alike (synchronous)';
 
     public function handle(): int
     {
         $username = (string) $this->argument('project');
         $source = User::findByUsername($username);
         if (! $source) {
-            $this->error("No such user: '{$username}'");
+            $this->error("No such project: '{$username}'");
 
             return 1;
         }
@@ -39,18 +41,20 @@ class ProjectStagingCommand extends Command
                 return 1;
             }
 
-            $destDomain = $this->stagingDomain($source);
+            $destDomain = $this->stagingDomain($source, $newUsername);
             if ($destDomain === null) {
                 return 1;
             }
 
             if ($this->hostingExists($source, $newUsername)) {
-                $this->error('Username not available.');
+                $this->error(ProjectNameRefusal::heldOnHost($newUsername, app(System::class)));
+                $this->line(self::freeAName($newUsername));
 
                 return 1;
             }
 
             ProjectStagingRequest::assertCanCreate($source, $newUsername.'_');
+            Projects::assertIdle($source);
             $dest = $source->makePendingStaging($newUsername, $destDomain, 'artisan');
             $system->projects()->copy($source->username, $dest->username);
 
@@ -65,6 +69,12 @@ class ProjectStagingCommand extends Command
         }
     }
 
+    /** The engine's own messages name no command; a command's output may. */
+    private static function freeAName(string $name): string
+    {
+        return "Free it with `pae project:orphan:delete {$name} --force`, once `pae project:orphan:list` shows what holds it.";
+    }
+
     /** The staging username from --new-username or generated, or null once a refusal has been printed. */
     private function stagingUsername(User $source, System $system): ?string
     {
@@ -76,13 +86,9 @@ class ProjectStagingCommand extends Command
             return null;
         }
 
-        if (User::existsByUsername($newUsername)) {
-            $this->error('User already exists.');
-
-            return null;
-        }
-        if (! $system->isUsernameAvailable($newUsername)) {
-            $this->error('Username not available.');
+        $refusal = ProjectNameRefusal::messageFor($newUsername, $system);
+        if ($refusal !== null) {
+            $this->error($refusal);
 
             return null;
         }
@@ -91,17 +97,18 @@ class ProjectStagingCommand extends Command
     }
 
     /** The staging domain from --domain (without "www.") or planned, or null once a refusal has been printed. */
-    private function stagingDomain(User $source): ?CopyDomain
+    private function stagingDomain(User $source, string $newUsername): ?CopyDomain
     {
-        $destDomain = CopyDomain::forCopy($source->domain, self::lowercaseOption($this->option('domain')));
+        $destDomain = CopyDomain::forStaging($source->domain, self::lowercaseOption($this->option('domain')));
         if ($destDomain === null) {
             $this->error('Could not generate an available staging domain.');
 
             return null;
         }
 
-        if ($destDomain->isTaken()) {
-            $this->error('Domain already exists.');
+        $refusal = $destDomain->refusal($newUsername);
+        if ($refusal !== null) {
+            $this->error($refusal['message']);
 
             return null;
         }

@@ -2,55 +2,25 @@
 
 namespace App\Lib\Domains;
 
+use App\Lib\Findings\Finding;
 use App\Lib\Ssl\CertificateStatus;
 use App\System\Project\Dind\AppCertificate;
 use App\System\Project\Dind\AppHealth;
 
 /**
- * Whether a visitor can actually open the URL the deploy just reported.
- *
- * {@see AppHealth} answers the question
- * one layer down -- is the application serving -- and answers it deliberately
- * against `127.0.0.1`, so that the domain, DNS and TLS cannot colour a verdict
- * about the application itself. That is the right call there and it leaves a
- * gap here: an application that serves perfectly on loopback, under a name
- * that resolves nowhere, behind a certificate no browser accepts, finished as
- * a clean success and was reported to the fleet as one.
- *
- * The case that made it worth writing down is the licensing one. When Connect
- * will not sell a `panelalpha.online` label -- an expired key, an unreachable
- * proxy -- {@see DomainAllocator} does not fail the creation: it drops a rung
- * and the project is built under `<name>.local` with a self-signed
- * certificate. That is the correct behaviour (a project whose preferred name
- * was unavailable still gets a name) and it must not be silent, because from
- * the outside it is indistinguishable from a site that works.
- *
- * Both halves read what the deploy already recorded -- `details.domain` from
- * {@see AllocatedDomain::toDetails()} and `details.ssl` from
- * {@see AppCertificate} -- so nothing here probes anything.
+ * Whether a visitor can open the URL the deploy reported: {@see AppHealth} judges only loopback.
+ * Reads what the deploy recorded in `details.domain` and `details.ssl`; probes nothing.
  */
 final class PublicUrl
 {
-    /**
-     * TLS the engine does not serve.
-     *
-     * A `panelalpha.online` name is terminated at the WithoutDNS proxy, whose
-     * certificate is the one a visitor is shown; what sits in the project's
-     * `ssl-certs` is never presented to anybody. Judging that local
-     * certificate would mark every working proxied site partial, which is the
-     * false positive that would teach operators to ignore the field.
-     */
+    /** TLS the engine does not serve: the WithoutDNS proxy's certificate is what a visitor is shown. */
     public const TLS_AT_PROXY = 'proxy';
 
-    /**
-     * Certificate verdicts a browser refuses to proceed past.
-     *
-     * `missing` and `unreadable` are deliberately not here. Missing is what a
-     * domain with SSL switched off reports, and unreadable means the snapshot
-     * failed rather than that the certificate is bad -- {@see AppCertificate}
-     * is advisory, and a deploy that worked is not undone by a file we could
-     * not parse.
-     */
+    public const UNRESOLVABLE = 'public_url_unresolvable';
+
+    public const CERTIFICATE_REFUSED = 'certificate_refused';
+
+    /** Certificate verdicts a browser refuses; `missing` and `unreadable` are not, on purpose. */
     private const REFUSED_BY_BROWSERS = [
         CertificateStatus::SELF_SIGNED,
         CertificateStatus::UNTRUSTED_ISSUER,
@@ -63,7 +33,7 @@ final class PublicUrl
      * What is wrong with this project's public URL, if anything.
      *
      * @param  array<string, mixed>  $details  the account's details
-     * @return list<string>
+     * @return list<Finding>
      */
     public static function warnings(string $domain, array $details): array
     {
@@ -74,13 +44,7 @@ final class PublicUrl
     }
 
     /**
-     * Said in the deploy log without marking the deploy partial.
-     *
-     * A fallback that still resolves publicly, such as `panelalpha_direct`
-     * after PanelAlpha Online refused a label, works, so it is not a warning.
-     * It used to be said nowhere but `details.domain`, so a used-up quota went
-     * unnoticed. A fallback that does not resolve is left to the warning,
-     * which already carries the reason.
+     * A fallback name that still resolves publicly: said in the deploy log without marking it partial.
      *
      * @param  array<string, mixed>  $details  the account's details
      * @return list<string>
@@ -88,31 +52,23 @@ final class PublicUrl
     public static function notices(string $domain, array $details): array
     {
         $allocation = self::allocation($details);
-        $reason = $allocation['fallback_reason'] ?? null;
+        $reason = self::fallbackReason($allocation);
 
-        if (! is_string($reason) || trim($reason) === '' || ($allocation['publicly_resolvable'] ?? null) === false) {
+        if ($reason === null || ($allocation['publicly_resolvable'] ?? null) === false) {
             return [];
         }
 
         $source = is_string($allocation['source'] ?? null) ? " ({$allocation['source']})" : '';
 
-        return ["Serving under {$domain}{$source}, a fallback name: the preferred public name was skipped: "
-            .rtrim(trim($reason), '.').'.'];
+        return ["Serving under {$domain}{$source}, a fallback name: the preferred public name was skipped: {$reason}."];
     }
 
     /**
-     * A name that answers only on this host.
-     *
-     * Strictly `false`, never null. Null is what
-     * {@see DomainAllocator::resolvability()} reports for a name whose DNS
-     * this engine does not control -- an operator's own `sites_base_domain`,
-     * or a domain the caller typed -- and those are working installs on every
-     * self-hosted engine there is. Warning on "we cannot tell" would make
-     * partial the normal outcome for them.
+     * A name that answers only on this host or network: strictly `false`, since null means DNS we do not control.
      *
      * @param  array<string, mixed>  $details
      */
-    private static function unresolvableWarning(string $domain, array $details): ?string
+    private static function unresolvableWarning(string $domain, array $details): ?Finding
     {
         $allocation = self::allocation($details);
 
@@ -120,25 +76,40 @@ final class PublicUrl
             return null;
         }
 
-        // A `.direct` name on a private address is not the same claim as a
-        // `.local` one: it resolves for every machine on that network, and
-        // saying "this host only" would send an operator looking for a fault
-        // in a name that works from the next VM along.
-        $message = ($allocation['source'] ?? null) === DomainPlan::SOURCE_PANELALPHA_DIRECT
-            ? "The application is deployed but not reachable from the internet: {$domain}"
-                ." resolves to this host's private address, so it answers on this network only."
-            : "The application is deployed but not reachable from the internet: {$domain}"
-                .' resolves on this host only.';
+        $privateNetwork = ($allocation['source'] ?? null) === DomainPlan::SOURCE_PANELALPHA_DIRECT;
+        $reason = self::fallbackReason($allocation);
 
-        // Why the better name was not had. This is the field that names the
-        // licensing failure, and it is the whole reason an operator can tell
-        // "Connect refused us" from "this engine has no public address".
+        return new Finding(
+            self::UNRESOLVABLE,
+            self::unreachableSentence($domain, $privateNetwork, $reason),
+            array_filter([
+                'domain' => $domain,
+                'resolves_on' => $privateNetwork ? 'private_network' : 'this_host',
+                'fallback_reason' => $reason,
+            ], static fn (?string $fact): bool => $fact !== null),
+        );
+    }
+
+    /** A `.direct` name on a private address works from the next VM along, so "this host only" would be wrong for it. */
+    private static function unreachableSentence(string $domain, bool $privateNetwork, ?string $reason): string
+    {
+        $where = $privateNetwork
+            ? " resolves to this host's private address, so it answers on this network only."
+            : ' resolves on this host only.';
+        $skipped = $reason !== null ? " The public name was skipped: {$reason}." : '';
+
+        return "The application is deployed but not reachable from the internet: {$domain}{$where}{$skipped}"
+            .' Point a domain you control at this host, or redeploy once a public name can be allocated.';
+    }
+
+    /**
+     * @param  array<string, mixed>  $allocation
+     */
+    private static function fallbackReason(array $allocation): ?string
+    {
         $reason = $allocation['fallback_reason'] ?? null;
-        if (is_string($reason) && trim($reason) !== '') {
-            $message .= ' The public name was skipped: '.rtrim(trim($reason), '.').'.';
-        }
 
-        return $message.' Point a domain you control at this host, or redeploy once a public name can be allocated.';
+        return is_string($reason) && trim($reason) !== '' ? rtrim(trim($reason), '.') : null;
     }
 
     /**
@@ -146,7 +117,7 @@ final class PublicUrl
      *
      * @param  array<string, mixed>  $details
      */
-    private static function certificateWarning(string $domain, array $details): ?string
+    private static function certificateWarning(string $domain, array $details): ?Finding
     {
         if ((self::allocation($details)['tls_terminated_at'] ?? null) === self::TLS_AT_PROXY) {
             return null;
@@ -162,15 +133,19 @@ final class PublicUrl
 
         $name = is_string($ssl['domain'] ?? null) && $ssl['domain'] !== '' ? $ssl['domain'] : $domain;
         $issuer = $ssl['issuer'] ?? null;
+        $issuer = is_string($issuer) && $issuer !== '' && $issuer !== 'Unknown' ? $issuer : null;
 
-        return "https://{$name} is served a certificate browsers will refuse ({$status}"
-            .(is_string($issuer) && $issuer !== '' && $issuer !== 'Unknown' ? ", issued by {$issuer}" : '')
-            .'). Request a real one with `ssl:project-cert:request` once the name resolves to this host.';
+        return new Finding(
+            self::CERTIFICATE_REFUSED,
+            "https://{$name} is served a certificate browsers will refuse ({$status}"
+                .($issuer !== null ? ", issued by {$issuer}" : '')
+                .'). A trusted one can be requested once the name resolves to this host.',
+            ['domain' => $name, 'certificate' => array_filter(['status' => $status, 'issuer' => $issuer])],
+        );
     }
 
     /**
-     * The `details.domain` block, or an empty one on a project created before
-     * the allocator recorded it.
+     * The `details.domain` block, or an empty one on a project created before the allocator recorded it.
      *
      * @param  array<string, mixed>  $details
      * @return array<string, mixed>

@@ -5,12 +5,13 @@ namespace App\Lib\DeployHook\Registration;
 use App\Lib\DeployHook\ProviderRegistrationRefused;
 
 /**
- * Bitbucket Cloud repository webhooks. `POST /repositories/{workspace}/{slug}/hooks`
- * with the `repo:push` event; the `secret` field is the HMAC key the receiver
- * checks, and the hook is addressed afterwards by its `uuid`, not an int.
+ * Bitbucket Cloud repository webhooks: `POST /repositories/{workspace}/{slug}/hooks` for `repo:push`, with
+ * the HMAC key in `secret`; the hook is addressed afterwards by its `uuid`.
  */
 final class BitbucketCloudRegistrar extends ApiRegistrar
 {
+    use RepositoryUrlParts;
+
     private const API = 'https://api.bitbucket.org/2.0';
 
     public function name(): string
@@ -25,19 +26,13 @@ final class BitbucketCloudRegistrar extends ApiRegistrar
 
     public function address(string $repoUrl): ?WebhookTarget
     {
-        $parts = parse_url(trim($repoUrl));
-        if (! is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https') {
+        $parts = self::httpsParts($repoUrl);
+        if ($parts === null || self::lowerHost($parts) !== 'bitbucket.org' || self::carriesMoreThanAPath($parts)) {
             return null;
         }
-        $host = strtolower((string) ($parts['host'] ?? ''));
-        if ($host !== 'bitbucket.org' || isset($parts['user']) || isset($parts['query']) || isset($parts['fragment'])) {
-            return null;
-        }
-        if (preg_match('#^/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$#', (string) ($parts['path'] ?? ''), $m) !== 1) {
-            return null;
-        }
+        $repository = self::ownerAndName($parts);
 
-        return new WebhookTarget(self::API, $m[1].'/'.$m[2]);
+        return $repository === null ? null : new WebhookTarget(self::API, $repository);
     }
 
     protected function headers(string $token): array

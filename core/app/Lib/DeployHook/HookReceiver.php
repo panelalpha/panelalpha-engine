@@ -11,32 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
- * Takes one request a git host made to a hook and decides what it means.
- *
- * Everything here happens while the host is waiting, so it is only reading a
- * header, checking an HMAC or a token and writing a row. Nothing that touches git or
- * Docker runs here: a push that should deploy becomes a queued job and the
- * host is told 202 straight away, long before a build finishes.
- *
- * The order of the checks is the order of how much each has to be trusted:
- *
- *  0. Has this hook already failed to prove who is sending it too many times
- *     in the last minute -- an unrecognised provider or a bad signature? 429,
- *     and nothing below is checked -- a leaked or guessed URL cannot be used
- *     to burn CPU or fill the deliveries table forever.
- *  1. Who claims to be sending this? Nobody we support: 400, and it counts
- *     against that hook's throttle -- this costs nothing to send and nothing
- *     to reject, so it is the cheapest way to flood a leaked URL.
- *  2. Can they prove it with the hook's secret? No: 401, and it counts
- *     against that hook's throttle too. Nothing about the body has been
- *     looked at yet, and nothing the request said is written down beyond the
- *     provider's name.
- *  3. Only now is the body read, because only now is it the sender's.
- *  4. Have we already seen this delivery, or this signed push body? A
- *     redelivery is a no-op, and so is a replay under a new delivery id.
- *  5. What does it say, and is it for the branch this checkout tracks? A push
- *     can name several refs (Bitbucket sends them in one delivery); it deploys,
- *     once, if any of them is the tracked branch moving forward.
+ * Decides, while the host waits, what a request to a hook means; deploys are only queued (202). Checks go by trust:
+ * throttle 429, provider 400 and secret 401 (both throttled) before the body is read, then replays, then the branch.
  */
 class HookReceiver
 {
@@ -166,9 +142,8 @@ class HookReceiver
     }
 
     /**
-     * Records the delivery, or returns null when it was already recorded. The delivery id is not
-     * signed, so a signed push body is acted on once too, in the same transaction as the row so a
-     * failed write does not burn the body. A concurrent request for the same delivery gets the row.
+     * Records the delivery, or returns null when it was already recorded, a concurrent duplicate too. The id is
+     * unsigned, so a signed push body is acted on once too, in the row's transaction so a failed write does not burn it.
      */
     private function recordOnce(
         DeployHook $hook,

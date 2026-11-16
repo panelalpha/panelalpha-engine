@@ -250,7 +250,8 @@ class WpThemeController extends WordPressController
         path: '/projects/{username}/wp/themes/install',
         summary: 'Install a WordPress theme',
         description: 'Installs a theme by slug. Optional `force` reinstalls over an existing copy. '
-            .'Optional `path` selects the install.',
+            .'Optional `path` selects the install. A field the body does not take is refused with 422 '
+            .'(`unknown_field`), naming it, rather than ignored.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -286,7 +287,7 @@ class WpThemeController extends WordPressController
                 ])],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'The body has a field this call does not take (`unknown_field`), WP-CLI failed, or no WordPress install was found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function install(string $username, WpThemeInstallRequest $request): JsonResponse
@@ -388,7 +389,9 @@ class WpThemeController extends WordPressController
     #[OA\Delete(
         path: '/projects/{username}/wp/themes/{theme}',
         summary: 'Delete a WordPress theme',
-        description: 'Deletes an installed theme by slug. Optional `path` selects the install.',
+        description: 'Deletes an installed theme by slug. Optional `path` selects the install. '
+            .'The theme\'s files are deleted from the install and the engine keeps no copy of them; this cannot be '
+            .'undone. Ask the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['WP-CLI'],
         parameters: [

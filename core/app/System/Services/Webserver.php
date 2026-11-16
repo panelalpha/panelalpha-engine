@@ -4,6 +4,7 @@ namespace App\System\Services;
 
 use App\Models\Domain;
 use App\System as EngineSystem;
+use App\System\Privileged;
 use App\System\Services\Webserver\Apache;
 use App\System\Services\Webserver\Litespeed;
 use App\System\Services\Webserver\Nginx;
@@ -29,10 +30,7 @@ class Webserver implements WebserverInterface
         return $this->system->isComposeServiceRunning('sites-http');
     }
 
-    /**
-     * Whether an nginx-proxy vhost file exists for the domain.
-     * Always the nginx-proxy tree — not the currently selected webserver driver.
-     */
+    /** Whether an nginx-proxy vhost file exists for the domain, whichever webserver driver is selected. */
     public function domainExists(string $domainName): bool
     {
         return (new NginxProxy($this->system))->domainConfigExists($domainName);
@@ -55,37 +53,31 @@ class Webserver implements WebserverInterface
             return self::$currentWebserver;
         }
 
+        $webserver = $this->webserverFromComposeOverride() ?? $this->webserverFromContainerLabels();
+        self::$currentWebserver = $webserver;
+
+        return $webserver;
+    }
+
+    /** The label in docker-compose.yml-webserver, lowercased, or null when there is none. */
+    private function webserverFromComposeOverride(): ?string
+    {
         $composeWebserverFile = $this->system->engineDirPath().'/docker-compose.yml-webserver';
         if (file_exists($composeWebserverFile)) {
             $contents = @file_get_contents($composeWebserverFile);
             if (is_string($contents)) {
                 if (preg_match('/com\.panelalpha\.webserver\s*=\s*([a-z0-9_\-]+)/i', $contents, $m)) {
-                    $webserver = strtolower($m[1]);
-                    self::$currentWebserver = $webserver;
-
-                    return $webserver;
-                }
-                if (preg_match('/-\s*com\.panelalpha\.webserver\s*=\s*([a-z0-9_\-]+)/i', $contents, $m2)) {
-                    $webserver = strtolower($m2[1]);
-                    self::$currentWebserver = $webserver;
-
-                    return $webserver;
+                    return strtolower($m[1]);
                 }
             }
         }
 
-        $response = $this->system->exec([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $this->system->composeFilePath(),
-            'ps',
-            '-a',
-            'sites-http',
-            '--format',
-            'json',
-        ]);
+        return null;
+    }
+
+    private function webserverFromContainerLabels(): string
+    {
+        $response = $this->system->exec(Privileged::compose($this->system->composeFilePath())->serviceContainers('sites-http'));
 
         /** @var ?object{Labels: string} $result */
         $result = json_decode($response);
@@ -93,16 +85,21 @@ class Webserver implements WebserverInterface
             throw new \Exception('Could not parse docker compose response');
         }
 
-        $webserver = 'unknown';
         $labels = explode(',', $result->Labels);
+
+        return self::webserverLabel($labels);
+    }
+
+    /** @param  array<string>  $labels */
+    private static function webserverLabel(array $labels): string
+    {
+        $webserver = 'unknown';
         foreach ($labels as $label) {
             if (Str::startsWith($label, 'com.panelalpha.webserver=')) {
                 $webserver = Str::after($label, 'com.panelalpha.webserver=');
                 break;
             }
         }
-
-        self::$currentWebserver = $webserver;
 
         return $webserver;
     }
@@ -219,8 +216,8 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * `started_at` is the mtime of `pid` -- the one file a run writes once, at
-     * its start; the `latest` symlink's own time moves whenever it is re-pointed.
+     * `started_at` is the mtime of `pid`, the one file a run writes once, at its start; the `latest` symlink's
+     * own time moves whenever it is re-pointed.
      *
      * @return ?array{
      *   started_at: ?int,
@@ -276,31 +273,28 @@ class Webserver implements WebserverInterface
 
     public function runChangeWebserverScript(string $newWebserver, ?string $serialNumber = null): void
     {
-        $command = [
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-            'bash',
-            $this->system->engineDirPath().'/webserver.sh',
-            '--set',
-            $newWebserver,
-        ];
-
-        if ($serialNumber !== null && $serialNumber !== '') {
-            $command[] = '--serial-no='.$serialNumber;
-        }
-
-        $command[] = '--background';
-
-        $process = $this->system->runProcess($command);
+        $process = $this->system->runProcess(
+            Privileged::host()->changeWebserver($this->system->engineDirPath(), $newWebserver, $serialNumber)
+        );
 
         if ($process->getExitCode() !== 0) {
             $message = 'Failed to run change webserver script: ';
             $message .= ($process->getErrorOutput() ?: $process->getOutput());
             $message .= ' (exit code '.(string) $process->getExitCode().')';
             throw new \Exception($message);
+        }
+    }
+
+    /**
+     * Whether sites-http already runs `$webserver`, so switching to it would only recreate it and rebuild every
+     * project. False when either cannot be read: the switch then repairs whatever is wrong.
+     */
+    public function isActive(string $webserver): bool
+    {
+        try {
+            return $this->detectWebserver() === $webserver && $this->isRunning();
+        } catch (\Throwable) {
+            return false;
         }
     }
 
@@ -318,27 +312,18 @@ class Webserver implements WebserverInterface
 
         $pid = trim(file_get_contents($pidFile));
 
-        if (! ctype_digit($pid)) {
+        if (! ctype_digit($pid) || (int) $pid < 1) {
             return false;
         }
 
-        $process = $this->system->runProcess([
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-            'kill',
-            '-0',
-            $pid,
-        ]);
+        $process = $this->system->runProcess(Privileged::host()->processExists((int) $pid));
 
         return $process->getExitCode() === 0;
     }
 
     /**
-     * A proxy rule on 443 names a certificate on the server, which certbot or an administrator
-     * renews, replaces or removes outside the engine: follow it. True when nginx was reloaded.
+     * Follows the certificates proxy rules on 443 name, which certbot or an administrator change outside the
+     * engine. True when nginx was reloaded.
      */
     public function refreshProxyRuleCertificates(): bool
     {
@@ -351,6 +336,15 @@ class Webserver implements WebserverInterface
         return true;
     }
 
+    /** The default servers and firewall allows of the ports domains answer HTTPS on besides 443; only nginx-proxy has any. */
+    public function applyHttpsPorts(): void
+    {
+        $driver = $this->driver();
+        if ($driver instanceof NginxProxy) {
+            $driver->applyHttpsPorts();
+        }
+    }
+
     public function rebuildDomains(): void
     {
         $driver = $this->driver();
@@ -359,21 +353,11 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * Restart the webserver container from the host namespace.
-     * Prefer this over `/etc/init.d/nginx restart` inside the container —
-     * that exits PID 1 and loops the service (see Modsec::restartWebserver).
-     *
-     * A restart is the one path here with no fallback: handed an unusable
-     * config the container exits on the `[emerg]` and loops under
-     * `restart: always`, taking every site on the host down with it.
-     * So the config is tested first, and the restart is refused while
-     * the test fails. Only nginx's own verdict refuses -- a container that is
-     * down is exactly what a restart is for.
+     * Restarts sites-http from the host (an in-container restart exits PID 1), refused while `nginx -t` fails, which
+     * would crash-loop it; what nginx said names every account's paths, so only the log gets it.
      */
     public function restartWebserverContainerFromHost(): void
     {
-        // What nginx said names vhost and certificate paths of every account on
-        // the host, so it goes to the log; the caller gets the verdict alone.
         if ($this->webserverConfigProblem() !== null) {
             throw new \Exception(
                 'Refusing to restart sites-http: the rendered configuration does not pass `nginx -t`. '
@@ -382,9 +366,8 @@ class Webserver implements WebserverInterface
             );
         }
 
-        $composeFile = $this->system->composeFilePath();
         $this->system->runProcessOnHost(
-            'sudo docker compose -f '.escapeshellarg($composeFile).' restart sites-http'
+            Privileged::compose($this->system->composeFilePath())->restart('sites-http')
         );
     }
 
@@ -392,17 +375,11 @@ class Webserver implements WebserverInterface
     private const CONFIG_TEST_TIMEOUT = 20;
 
     /**
-     * The nginx config test's verdict when it fails, or null when the config is
-     * fine -- or when there was nothing to ask. The test runs *inside*
-     * sites-http so the paths in the vhosts resolve the way the webserver
-     * resolves them; running it on the host would read a different filesystem.
-     *
-     * A config that cannot be tested is never a reason to refuse.
+     * `nginx -t`'s verdict when it fails, run inside sites-http so vhost paths resolve as the webserver's do;
+     * null when the config passes, the webserver is not nginx, or the test could not run.
      */
     private function webserverConfigProblem(): ?string
     {
-        // `nginx -t` is nginx's own test and says nothing about the others, so
-        // Apache and LiteSpeed are not tested here, and are not refused.
         try {
             $webserver = $this->detectWebserver();
         } catch (\Throwable $e) {
@@ -412,17 +389,15 @@ class Webserver implements WebserverInterface
             return null;
         }
 
-        $composeFile = $this->system->composeFilePath();
         try {
             $process = $this->system->runProcessOnHost(
-                'sudo docker compose -f '.escapeshellarg($composeFile).' exec -T sites-http nginx -t',
+                Privileged::engineServices($this->system->composeFilePath())->nginxConfigTest(),
                 [],
                 self::CONFIG_TEST_TIMEOUT
             );
             $output = trim($process->getErrorOutput()."\n".$process->getOutput());
             $problem = self::configProblemFrom($process->getExitCode(), $output);
         } catch (\Throwable $e) {
-            // A test that timed out or never started is not a verdict about the config.
             Log::warning('Webserver config test could not be run: '.$e->getMessage());
 
             return null;
@@ -436,10 +411,8 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * The decision itself, over an `nginx -t` exit code and its output.
-     *
-     * Separated from running it so it can be tested without a host, a compose
-     * file or a container.
+     * The decision over an `nginx -t` exit code and its output: only nginx's own verdict refuses, never a paused
+     * container, a failed exec, a broker that refused, or no output. Testable without a host.
      */
     public static function configProblemFrom(?int $exitCode, string $output): ?string
     {
@@ -447,11 +420,6 @@ class Webserver implements WebserverInterface
             return null;
         }
 
-        // Only nginx's own verdict refuses. Everything else that makes the
-        // command fail -- a paused or stopping container, an exec that never
-        // reached nginx, a sudo or nsenter error, no output at all -- says
-        // nothing about the configuration, and a restart is what fixes most of
-        // it.
         if (! self::isNginxTestVerdict($output)) {
             return null;
         }
@@ -464,7 +432,7 @@ class Webserver implements WebserverInterface
         return Str::contains($output, ['[emerg]', 'test failed']);
     }
 
-    /** The line nginx refused on, bounded -- compose warnings must not push it out. */
+    /** The line nginx refused on, bounded, so compose warnings cannot push it out. */
     private static function nginxVerdictLine(string $output): string
     {
         foreach (preg_split('/\R/', $output) ?: [] as $line) {
@@ -477,73 +445,37 @@ class Webserver implements WebserverInterface
     }
 
     /**
-     * A restart with `nginx -t` in front of it, as one shell command: a queued
-     * restart has to test the config next to the restart, not when the job was
-     * scheduled. Only nginx's own verdict stops it -- a test that could not run
-     * does not, since a container that is down is what a restart is for.
-     */
-    public static function restartGuardedByConfigTest(string $testCmd, string $restartCmd): string
-    {
-        return 'out=$('.$testCmd.' 2>&1); '
-            .'case "$out" in *"[emerg]"*|*"test failed"*) '
-            .'echo "sites-http restart refused, nginx -t: $out" >&2; exit 1;; esac; '
-            .$restartCmd;
-    }
-
-    /**
-     * Schedule a webserver reload on the host in the background (non-blocking).
-     * Uses `at now` to enqueue the command inside the host namespace.
+     * Asks the broker to reload once this request is answered, detecting the webserver afresh, since a
+     * `change-webserver` earlier in this process may have replaced it. A failed detection queues nothing.
      *
-     * @param  bool  $rebindIpListeners  When true (nginx only), schedule a host-level
-     *                                   container restart after a short delay so the current HTTP response can
-     *                                   leave through the proxy first. Never uses in-container init.d restart.
+     * @param  bool  $rebindIpListeners  nginx only: a delayed host-level container restart, never an init.d one inside
      */
     public function scheduleWebserverReloadInBackground(bool $rebindIpListeners = false): void
     {
         $composeFile = $this->system->composeFilePath();
         $webserver = null;
         try {
-            // Freshly read: a `change-webserver` earlier in this process would
-            // otherwise have this queue a reload for the server that is gone.
             $webserver = $this->detectWebserver();
         } catch (\Exception $e) {
-            // if detection fails, do nothing
             return;
         }
 
-        $composeFileArg = escapeshellarg($composeFile);
-
-        switch ($webserver) {
-            case 'litespeed':
-            case 'openlitespeed':
-                $inner = "sudo docker compose -f {$composeFileArg} exec -T sites-http /usr/local/lsws/bin/lswsctrl condrestart";
-                break;
-            case 'nginx':
-            case 'nginx-proxy':
-                if ($rebindIpListeners) {
-                    // Delay so the in-flight API response can finish through the proxy.
-                    // The restart is the one path that turns an unusable config into a
-                    // crash loop, so the queued job tests it right before restarting.
-                    $inner = 'sleep 5; '.self::restartGuardedByConfigTest(
-                        "sudo docker compose -f {$composeFileArg} exec -T sites-http nginx -t",
-                        "sudo docker compose -f {$composeFileArg} restart sites-http"
-                    );
-                } else {
-                    $inner = "sudo docker compose -f {$composeFileArg} exec -T sites-http /etc/init.d/nginx reload";
-                }
-                break;
-            case 'apache':
-                $inner = "sudo docker compose -f {$composeFileArg} exec -T sites-http apachectl -k graceful";
-                break;
-            default:
-                // unsupported or no-op
-                return;
+        $queue = Privileged::webserver()->queueReload($composeFile, $webserver, $rebindIpListeners);
+        if ($queue === null) {
+            return;
         }
 
-        $pipeline = 'echo '.escapeshellarg($inner).' | at now';
-        $hostCmd = 'bash -lc '.escapeshellarg($pipeline);
-        $process = $this->system->runProcessOnHost($hostCmd);
-        // Nothing else would say so: a host without `at` never runs the job.
+        $this->queueOnHost($queue);
+    }
+
+    /**
+     * Nothing else would say so: a reload the broker could not be asked to run never happens.
+     *
+     * @param  list<string>  $queue
+     */
+    private function queueOnHost(array $queue): void
+    {
+        $process = $this->system->runProcessOnHost($queue);
         if (! $process->isSuccessful()) {
             Log::warning('Could not queue the webserver reload on the host: '
                 .Str::limit(trim($process->getErrorOutput().' '.$process->getOutput()), 200));

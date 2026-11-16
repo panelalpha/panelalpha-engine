@@ -4,6 +4,7 @@ namespace Tests\Unit\System\Project\PhpHosting\WordPress;
 
 use App\Models\User;
 use App\System\Project\PhpHosting\WordPress\Exception as WordPressException;
+use App\System\Project\PhpHosting\WordPress\Install;
 use App\System\Project\PhpHosting\WordPress\SiteCopy;
 use App\System\Services\Mysql\DatabaseCopyResult;
 use Mockery;
@@ -126,7 +127,7 @@ class SiteCopyMultisiteTest extends TestCase
         $live->options['home'] = 'https://shop.example';
         $live->options['siteurl'] = 'https://shop.example';
         $siteCopy = $this->siteCopy(['live' => $live, 'stg' => $staging]);
-        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), '/home/live/wp-config.php');
+        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), new Install('/home/live', '/home/live/wp-config.php'), new Install('/home/stg', '/home/stg/wp-config.php'));
         $live->options = $staging->options;
         $live->networkSiteUrl = 'https://staging.shop.test/';
         $live->mainSiteHost = 'staging.shop.test';
@@ -175,7 +176,7 @@ class SiteCopyMultisiteTest extends TestCase
         $staging = $this->multisite(['SUBDOMAIN_INSTALL' => false], constants: ['DOMAIN_CURRENT_SITE' => 'staging.shop.test']);
         $staging->options = ['home' => 'https://staging.shop.test', 'siteurl' => 'https://staging.shop.test', 'blog_public' => '0'];
         $siteCopy = $this->siteCopy(['live' => $live, 'stg' => $staging]);
-        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), '/home/live/wp-config.php');
+        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), new Install('/home/live', '/home/live/wp-config.php'), new Install('/home/stg', '/home/stg/wp-config.php'));
         $live->options = $staging->options;
         $live->networkTables = $this->networkTables('staging.shop.test', [
             1 => ['staging.shop.test', '/'],
@@ -194,7 +195,7 @@ class SiteCopyMultisiteTest extends TestCase
         $live = $this->site([]);
         $staging = new FakeWordPressSite([], ['home' => 'https://staging.shop.test', 'siteurl' => 'https://staging.shop.test', 'blog_public' => '0']);
         $siteCopy = $this->siteCopy(['live' => $live, 'stg' => $staging]);
-        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), '/home/live/wp-config.php');
+        $kept = $siteCopy->beforePush($this->user('stg', 'staging.shop.test'), $this->user('live', 'shop.example'), new Install('/home/live', '/home/live/wp-config.php'), new Install('/home/stg', '/home/stg/wp-config.php'));
         $live->options = $staging->options;
 
         $siteCopy->afterPushedDatabase($this->user('live', 'shop.example'), $kept);
@@ -301,7 +302,7 @@ class SiteCopyMultisiteTest extends TestCase
     /** @param array<string, FakeWordPressSite> $sites username => site */
     private function siteCopy(array $sites): SiteCopy
     {
-        return new SiteCopy(static fn (User $user) => $sites[$user->username]->wordPress());
+        return new SiteCopy(static fn (User $user, ?string $path = null) => $sites[$user->username]->wordPress($path));
     }
 
     private function user(string $username, string $domain): User

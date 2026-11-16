@@ -3,17 +3,8 @@
 namespace App\System\Project\Git;
 
 /**
- * The `ff` pull strategy: fetch, then `git merge --ff-only`, and nothing else.
- *
- * The engine does not judge the working tree itself. Untracked files (uploads,
- * caches) and edits to files the incoming commits do not touch are not a
- * reason to refuse -- only git knows what a fast-forward would overwrite, so
- * it is asked, and its refusal is what surfaces. `merge --ff-only` is
- * all-or-nothing, so a refusal leaves the checkout exactly as it was; the
- * caller must therefore NOT run its backup restore for this strategy, which is
- * `reset --hard` plus `clean -fd` and would destroy the very files git spared.
- *
- * Using classes provide `git(array $args, ?string $token = null): string`.
+ * The `ff` pull strategy, `git merge --ff-only` after a fetch: git alone judges the tree, and its refusal leaves
+ * the checkout as it was, so the caller must not run its backup restore. Users provide `git(array, ?string)`.
  */
 trait FastForwardPull
 {
@@ -36,6 +27,7 @@ trait FastForwardPull
         }
     }
 
+    /** A checkout with no commits yet has no history to have diverged from. */
     private function explainRefusedFastForward(string $ref, Exception $refusal): Exception
     {
         try {
@@ -44,7 +36,6 @@ trait FastForwardPull
             return new Exception('Branch does not exist on remote.', 422);
         }
 
-        // A checkout with no commits yet has no history to have diverged from.
         $hasHead = $this->headCommitExists();
         if ($hasHead && ! $this->headIsAncestorOf($ref)) {
             return new FastForwardRefused(
@@ -83,30 +74,19 @@ trait FastForwardPull
     }
 
     /**
-     * Incoming paths that collide with something local, so the message can name
-     * them. A path collides when it is the same path, or when one is a file
-     * where the other needs a directory.
+     * Incoming paths that collide with something local, so the message can name them: the same path, or a
+     * file where the other needs a directory.
      *
      * @return list<string>
      */
     private function pathsBlockingFastForward(string $ref, bool $hasHead): array
     {
-        // Without a HEAD there is nothing to diff against: everything in the
-        // target is incoming, and whatever is in the index counts as local.
-        $incoming = $hasHead
-            ? $this->nulSeparated(['diff', '--name-only', '--no-renames', '-z', 'HEAD', $ref])
-            : $this->nulSeparated(['ls-tree', '-r', '--name-only', '-z', $ref]);
+        $incoming = $this->incomingPaths($ref, $hasHead);
         if ($incoming === []) {
             return [];
         }
 
-        // Tracked paths modified against HEAD (staged or not), plus untracked ones.
-        $local = [
-            ...($hasHead
-                ? $this->nulSeparated(['diff', '--name-only', '--no-renames', '-z', 'HEAD'])
-                : $this->nulSeparated(['ls-files', '-z'])),
-            ...$this->nulSeparated(['ls-files', '--others', '--exclude-standard', '-z']),
-        ];
+        $local = $this->localPaths($hasHead);
 
         $localPaths = [];
         $localDirs = [];
@@ -125,6 +105,33 @@ trait FastForwardPull
         }
 
         return $blocking;
+    }
+
+    /**
+     * The paths $ref changes; without a HEAD there is nothing to diff against, so everything in it.
+     *
+     * @return list<string>
+     */
+    private function incomingPaths(string $ref, bool $hasHead): array
+    {
+        return $hasHead
+            ? $this->nulSeparated(['diff', '--name-only', '--no-renames', '-z', 'HEAD', $ref])
+            : $this->nulSeparated(['ls-tree', '-r', '--name-only', '-z', $ref]);
+    }
+
+    /**
+     * Tracked paths modified against HEAD, staged or not, or the whole index without a HEAD, then untracked ones.
+     *
+     * @return list<string>
+     */
+    private function localPaths(bool $hasHead): array
+    {
+        return [
+            ...($hasHead
+                ? $this->nulSeparated(['diff', '--name-only', '--no-renames', '-z', 'HEAD'])
+                : $this->nulSeparated(['ls-files', '-z'])),
+            ...$this->nulSeparated(['ls-files', '--others', '--exclude-standard', '-z']),
+        ];
     }
 
     /**

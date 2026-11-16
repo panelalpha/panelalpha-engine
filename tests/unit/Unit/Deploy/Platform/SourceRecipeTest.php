@@ -11,6 +11,9 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\SourceRecipes;
+use App\Lib\Project\PublicRouting\PublicPort;
+use App\Lib\Project\PublicRouting\PublicRouting;
+use App\System\Services\Webserver\ProxyListenPort;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -69,7 +72,7 @@ class SourceRecipeTest extends TestCase
 
     public function test_a_standalone_recipe_needs_neither_detect_nor_priority(): void
     {
-        $this->write("id: widget\nlabel: Widget\nruntime: node\nport: 4000\n");
+        $this->write("id: widget\nlabel: Widget\nstrategy: node\nruntime: node\nport: 4000\n");
 
         $recipe = SourceRecipes::for('https://github.com/acme/widget.git', $this->tmpDir);
 
@@ -315,6 +318,37 @@ class SourceRecipeTest extends TestCase
         sort($parser);
 
         $this->assertSame($schema, $parser);
+    }
+
+    /** A shipped manifest is not an app config: it takes no `domain:` or `public_ports:`, and its schema offers none. */
+    public function test_the_manifest_schema_and_the_manifest_parser_agree_on_the_keys(): void
+    {
+        $schema = array_keys($this->schema('platforms/_schema.json')['properties']);
+        $parser = PlatformManifest::KNOWN_KEYS;
+        sort($schema);
+        sort($parser);
+
+        $this->assertSame($schema, $parser);
+    }
+
+    /** `domain:` and `public_ports:` take in the schema what the reader takes, and the ports it refuses are refused there too. */
+    public function test_the_schema_describes_public_routing_as_the_reader_reads_it(): void
+    {
+        $properties = $this->schema('sources/_schema.json')['properties'];
+        $entry = $properties['public_ports']['anyOf'][0]['items']['oneOf'][1];
+
+        $this->assertSame(PublicRouting::DOMAINS, $properties['domain']['anyOf'][0]['enum']);
+        $this->assertSame(['listen'], $entry['required']);
+        $this->assertSame(['listen', 'to', 'transport'], array_keys($entry['properties']));
+        $this->assertSame(PublicPort::TRANSPORTS, $entry['properties']['transport']['enum']);
+        $this->assertSame(
+            [...ProxyListenPort::WEBSERVER, ...ProxyListenPort::RESERVED],
+            $entry['properties']['listen']['not']['enum']
+        );
+        $this->assertSame(
+            ['$ref' => '#/properties/public_ports/anyOf/0/items/oneOf/1/properties/listen'],
+            $properties['public_ports']['anyOf'][0]['items']['oneOf'][0]
+        );
     }
 
     /** @return array<string, mixed> */

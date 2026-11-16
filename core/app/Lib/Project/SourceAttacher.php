@@ -6,16 +6,13 @@ use App\Exceptions\ProblemException;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Git\DeployKey;
 use App\Models\Task;
 use App\Models\User;
 
 /**
- * Giving a project created before its source was known the git source it
- * deploys from.
- *
- * The onboarding domain step creates a dind account with no source, so its
- * deploy stops waiting for files. This reads the repository as a create does,
- * stores it, and runs the source rebuild a redeploy runs.
+ * Giving a project created before its source was known (the onboarding domain step's dind account, waiting for files)
+ * the git source it deploys from: read as a create reads it, stored, then rebuilt as a redeploy rebuilds.
  */
 final class SourceAttacher
 {
@@ -111,19 +108,23 @@ final class SourceAttacher
     }
 
     /**
-     * The source the deploy will read: the token encrypted by the model, and
-     * the env overrides merged onto the ones the project already carries.
+     * The source the deploy will read, with the token and deploy key encrypted by the model and the env overrides
+     * merged onto the project's.
      *
      * @param  array<string, mixed>  $params
      * @param  mixed  $sentEnvVars  the env_vars as sent, before their vault references were read
      */
     private function storeSource(User $user, array $params, mixed $sentEnvVars): void
     {
-        $user->setDetails([
+        $details = [
             'git_repo' => $params['git_repo'],
             'git_branch' => $params['git_branch'] ?? null,
             'git_token' => $params['git_token'] ?? null,
-        ]);
+        ];
+        if (is_array($params[DeployKey::DETAIL] ?? null)) {
+            $details[DeployKey::DETAIL] = $params[DeployKey::DETAIL];
+        }
+        $user->setDetails($details);
         if (array_key_exists('env_vars', $params)) {
             $user->setEnvVars(EnvVarOverrides::applyIncoming($params['env_vars'], $user->getEnvVars()), $sentEnvVars);
         }

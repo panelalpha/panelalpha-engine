@@ -14,6 +14,7 @@ use App\Lib\Project\ProjectRebuild;
 use App\Models\Task;
 use App\Models\User;
 use App\OpenApi\ApiDefinitions;
+use App\System\Project\Dind\ProjectEnvironment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -42,7 +43,7 @@ class EnvVarsController extends Controller
             ),
         ],
         responses: [
-            new OA\Response(response: 200, description: 'The stored variables and the keys the last deploy applied', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'The stored variables and the keys the last deploy or env var apply delivered to the application', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', ref: '#/components/schemas/EnvVars')],
             )),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
@@ -59,7 +60,7 @@ class EnvVarsController extends Controller
                 ApiAccess::withoutReservedKeys($user->getEnvVars()),
                 $request->boolean('reveal') ? $user->getVaultEnvKeys() : null,
             ),
-            'applied_keys' => self::appliedKeys($user),
+            'applied_keys' => ProjectEnvironment::appliedKeys($user),
         ]);
     }
 
@@ -217,15 +218,5 @@ class EnvVarsController extends Controller
         }
 
         return $entries;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function appliedKeys(User $user): array
-    {
-        $keys = $user->getDetails()['env_override_keys'] ?? [];
-
-        return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
     }
 }

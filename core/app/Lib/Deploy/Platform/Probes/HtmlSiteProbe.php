@@ -7,15 +7,8 @@ use App\Lib\Deploy\Platform\PlatformProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * A site made only of documents, whose front page is not called `index`.
- *
- * `static-entry` claims the sites that name themselves. This claims the rest:
- * a tree of HTML and the assets it references, where the entrance has to be
- * worked out rather than read off a filename {@see HtmlSite}.
- *
- * Contributes the document the nginx root is pointed at, which for this
- * platform is the whole recipe -- there is nothing to install and nothing to
- * build, only a question of which file answers `/`.
+ * A site made only of documents whose front page is not called `index`; contributes the document
+ * that answers `/`, worked out by {@see HtmlSite} rather than read off a filename.
  */
 final class HtmlSiteProbe implements PlatformProbe
 {

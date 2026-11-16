@@ -5,10 +5,8 @@ namespace App\Lib\Mail;
 use Closure;
 
 /**
- * Enough of SPF (RFC 7208) to tell whether a domain's record lets a given
- * address send, or reaches a relay's include. Macros, ptr and exists are not
- * evaluated: they never match here, so a record that relies on them can read
- * as not authorising when a receiver would say it does.
+ * Enough of SPF (RFC 7208) to tell whether a domain's record lets an address send, or reaches a relay's
+ * include. Macros, ptr and exists never match here, so a record relying on them can read as not authorising.
  */
 final class SpfCheck
 {
@@ -48,10 +46,7 @@ final class SpfCheck
         return $records;
     }
 
-    /**
-     * check_host() for mail from $domain sent by $ip: pass, fail, softfail,
-     * neutral, none, permerror or temperror.
-     */
+    /** check_host() for mail from $domain sent by $ip: pass, fail, softfail, neutral, none, permerror or temperror. */
     public function resultFor(string $domain, string $ip): string
     {
         $this->lookups = 0;
@@ -65,10 +60,7 @@ final class SpfCheck
         return $this->reason;
     }
 
-    /**
-     * Whether the record at $domain reaches include:$target, directly or
-     * through its own includes and redirects; null when a lookup failed.
-     */
+    /** Whether the record at $domain reaches include:$target, through includes and redirects too; null when a lookup failed. */
     public function includes(string $domain, string $target): ?bool
     {
         $this->lookups = 0;
@@ -110,6 +102,38 @@ final class SpfCheck
     private function checkHost(string $domain, string $ip): string
     {
         $records = $this->records($domain);
+        $unusable = $this->unusableRecords($domain, $records);
+        if ($unusable !== null) {
+            return $unusable;
+        }
+
+        $redirect = null;
+        foreach (self::terms($records[0]) as $term) {
+            if (preg_match('/^redirect=(.+)$/i', $term, $m) === 1) {
+                $redirect = strtolower(rtrim($m[1], '.'));
+
+                continue;
+            }
+            if (preg_match('/^[a-z][a-z0-9_.-]*=/i', $term) === 1) {
+                continue;
+            }
+
+            $result = $this->termResult($term, $domain, $ip);
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        return $this->redirectedOrNeutral($redirect, $domain, $ip);
+    }
+
+    /**
+     * The result when $domain publishes no single SPF record to evaluate, or null when it does.
+     *
+     * @param  list<string>|false  $records
+     */
+    private function unusableRecords(string $domain, array|false $records): ?string
+    {
         if ($records === false) {
             $this->reason = "the SPF lookup for {$domain} failed";
 
@@ -126,43 +150,42 @@ final class SpfCheck
             return 'permerror';
         }
 
-        $redirect = null;
-        foreach (self::terms($records[0]) as $term) {
-            if (preg_match('/^redirect=(.+)$/i', $term, $m) === 1) {
-                $redirect = strtolower(rtrim($m[1], '.'));
+        return null;
+    }
 
-                continue;
-            }
-            if (preg_match('/^[a-z][a-z0-9_.-]*=/i', $term) === 1) {
-                continue;
-            }
+    /** The result one mechanism ends the check with, or null when it does not match. */
+    private function termResult(string $term, string $domain, string $ip): ?string
+    {
+        $qualifier = '+';
+        if (str_contains('+-~?', $term[0])) {
+            $qualifier = $term[0];
+            $term = substr($term, 1);
+        }
+        if (preg_match('#^(all|include|a|mx|ptr|ip4|ip6|exists)(?::([^/]+))?(?:/(\d+))?(?://(\d+))?$#i', $term, $m) !== 1) {
+            $this->reason = "{$domain}'s SPF record has a term it cannot use: {$term}";
 
-            $qualifier = '+';
-            if (str_contains('+-~?', $term[0])) {
-                $qualifier = $term[0];
-                $term = substr($term, 1);
-            }
-            if (preg_match('#^(all|include|a|mx|ptr|ip4|ip6|exists)(?::([^/]+))?(?:/(\d+))?(?://(\d+))?$#i', $term, $m) !== 1) {
-                $this->reason = "{$domain}'s SPF record has a term it cannot use: {$term}";
+            return 'permerror';
+        }
+        $match = $this->matches(strtolower($m[1]), $m[2] ?? '', $m[3] ?? '', $m[4] ?? '', $domain, $ip);
+        if (is_string($match)) {
+            return $match;
+        }
+        if ($match) {
+            $this->reason = "{$domain}'s SPF record matches {$ip} on {$qualifier}{$term}";
 
-                return 'permerror';
-            }
-            $match = $this->matches(strtolower($m[1]), $m[2] ?? '', $m[3] ?? '', $m[4] ?? '', $domain, $ip);
-            if (is_string($match)) {
-                return $match;
-            }
-            if ($match) {
-                $this->reason = "{$domain}'s SPF record matches {$ip} on {$qualifier}{$term}";
-
-                return match ($qualifier) {
-                    '-' => 'fail',
-                    '~' => 'softfail',
-                    '?' => 'neutral',
-                    default => 'pass',
-                };
-            }
+            return match ($qualifier) {
+                '-' => 'fail',
+                '~' => 'softfail',
+                '?' => 'neutral',
+                default => 'pass',
+            };
         }
 
+        return null;
+    }
+
+    private function redirectedOrNeutral(?string $redirect, string $domain, string $ip): string
+    {
         if ($redirect !== null) {
             if (++$this->lookups > self::MAX_LOOKUPS) {
                 return $this->tooManyLookups($domain);
@@ -178,6 +201,8 @@ final class SpfCheck
     }
 
     /**
+     * ptr and exists are counted as lookups, never matched.
+     *
      * @return bool|string whether the mechanism matches, or a result that ends the check
      */
     private function matches(string $name, string $arg, string $cidr4, string $cidr6, string $domain, string $ip): bool|string
@@ -196,45 +221,54 @@ final class SpfCheck
             case 'ip6':
                 return ($name === 'ip6') === $v6 && self::inCidr($ip, $arg, $prefix);
             case 'include':
-                if (++$this->lookups > self::MAX_LOOKUPS) {
-                    return $this->tooManyLookups($domain);
-                }
-                $result = $this->checkHost($target, $ip);
-                if ($result === 'none') {
-                    $this->reason = "{$domain} includes {$target}, which publishes no SPF record";
-
-                    return 'permerror';
-                }
-
-                return in_array($result, ['temperror', 'permerror'], true) ? $result : $result === 'pass';
+                return $this->matchesInclude($target, $domain, $ip);
             case 'a':
             case 'mx':
-                if (++$this->lookups > self::MAX_LOOKUPS) {
-                    return $this->tooManyLookups($domain);
-                }
-                $hosts = [$target];
-                if ($name === 'mx') {
-                    $mx = ($this->resolve)($target, DNS_MX);
-                    $hosts = array_slice(array_map(static fn (array $rr): string => (string) ($rr['target'] ?? ''), $mx ?: []), 0, 10);
-                }
-                foreach ($hosts as $host) {
-                    foreach (($this->resolve)($host, $v6 ? DNS_AAAA : DNS_A) ?: [] as $rr) {
-                        $address = (string) ($rr[$v6 ? 'ipv6' : 'ip'] ?? '');
-                        if ($address !== '' && self::inCidr($ip, $address, $prefix)) {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
+                return $this->matchesAddress($name, $target, $domain, $ip, $v6, $prefix);
             default:
-                // ptr and exists: counted, never matched.
                 if (++$this->lookups > self::MAX_LOOKUPS) {
                     return $this->tooManyLookups($domain);
                 }
 
                 return false;
         }
+    }
+
+    private function matchesInclude(string $target, string $domain, string $ip): bool|string
+    {
+        if (++$this->lookups > self::MAX_LOOKUPS) {
+            return $this->tooManyLookups($domain);
+        }
+        $result = $this->checkHost($target, $ip);
+        if ($result === 'none') {
+            $this->reason = "{$domain} includes {$target}, which publishes no SPF record";
+
+            return 'permerror';
+        }
+
+        return in_array($result, ['temperror', 'permerror'], true) ? $result : $result === 'pass';
+    }
+
+    private function matchesAddress(string $name, string $target, string $domain, string $ip, bool $v6, string $prefix): bool|string
+    {
+        if (++$this->lookups > self::MAX_LOOKUPS) {
+            return $this->tooManyLookups($domain);
+        }
+        $hosts = [$target];
+        if ($name === 'mx') {
+            $mx = ($this->resolve)($target, DNS_MX);
+            $hosts = array_slice(array_map(static fn (array $rr): string => (string) ($rr['target'] ?? ''), $mx ?: []), 0, 10);
+        }
+        foreach ($hosts as $host) {
+            foreach (($this->resolve)($host, $v6 ? DNS_AAAA : DNS_A) ?: [] as $rr) {
+                $address = (string) ($rr[$v6 ? 'ipv6' : 'ip'] ?? '');
+                if ($address !== '' && self::inCidr($ip, $address, $prefix)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function tooManyLookups(string $domain): string

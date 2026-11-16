@@ -2,14 +2,13 @@
 
 namespace App\System\Project\Dind\Services;
 
+use App\System\Privileged;
 use App\System\Project\Dind;
 use InvalidArgumentException;
 
 /**
- * s6, as the account template sets it up: `services/<name>` in the project
- * dir holds each service's `run`, an `env/` dir (one file per variable, read
- * by s6-envdir) and a `down` file when it should not run. The dir is mounted
- * at {@see SOURCE_DIR} and copied to {@see SCAN_DIR} when the account boots.
+ * s6 as the account template sets it up: the project dir's `services/<name>` holds a `run`, an s6-envdir `env/` and a
+ * `down` file when it should not run; mounted at {@see SOURCE_DIR}, copied to {@see SCAN_DIR} when the account boots.
  */
 final class S6ServiceManager implements ServiceManager
 {
@@ -47,15 +46,15 @@ final class S6ServiceManager implements ServiceManager
         foreach ($env as $name => $value) {
             $system->filesystem()->filePutContents($dir.'/env/'.self::name($name), $value."\n", null, '600');
         }
-        $system->exec($enabled ? ['sudo', 'rm', '-f', $dir.'/down'] : ['sudo', 'touch', $dir.'/down']);
+        $system->exec($enabled ? Privileged::files()->removeIfExists($dir.'/down') : Privileged::files()->touch($dir.'/down'));
     }
 
     /** s6-envdir needs the dir even when there are no variables. */
     private function recreateEmptyEnvDir(string $envDir): void
     {
         $system = $this->project->system();
-        $system->exec(['sudo', 'rm', '-rf', $envDir]);
-        $system->exec(['sudo', 'mkdir', '-p', $envDir]);
+        $system->exec(Privileged::files()->removeTree($envDir));
+        $system->exec(Privileged::files()->makeDirectories($envDir));
     }
 
     public function apply(string $service): void

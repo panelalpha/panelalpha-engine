@@ -203,10 +203,12 @@ actually opens the shell.
 
 ## What the shell is
 
-A container of its own, running as your account's own uid, with your home
-directory mounted at `/account` and nothing else. `id` will show your account
-name and uid; `ls ~` will show `project/`, `.panelalpha/` and your domain
-directory, the same files you see over SFTP.
+A container of its own, running as your account's own uid, with your project
+directory mounted as its home at `/account`. `id` will show your account name
+and uid; `ls ~` shows your deployed application, the same files as `~/project`
+over SFTP, and `~/.panelalpha/wetty/`, where this terminal's own settings live.
+The rest of your account (other domains, the rest of `~/.panelalpha`) is not in
+this shell; reach it over SFTP.
 
 It is **not** the container your application runs in, and it has **no network
 access at all** -- no internet, no other containers, not even the rest of your

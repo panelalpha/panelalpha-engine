@@ -7,6 +7,10 @@ namespace App\System\Project\PhpHosting\WordPress;
  */
 final class Plugins
 {
+    use RunsExtensionCommands;
+
+    private const WITHOUT_LOADING = ['--skip-plugins', '--skip-themes'];
+
     public function __construct(
         private WpCli $cli,
     ) {}
@@ -18,16 +22,7 @@ final class Plugins
      */
     public function list(?string $fields = null, ?string $status = null): array
     {
-        $args = ['plugin', 'list', '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        if ($status !== null) {
-            $args[] = '--status='.$status;
-        }
-        $result = $this->cli->runOrFail($args);
-
-        return JsonOutput::decodeList($result['stdout']);
+        return $this->listWith(['plugin', 'list', '--format=json'], $fields, $status);
     }
 
     /**
@@ -39,11 +34,7 @@ final class Plugins
      */
     public function get(string $slug, ?string $fields = null): array
     {
-        $args = ['plugin', 'get', WpCli::positional($slug), '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        $result = $this->cli->run($args);
+        $result = $this->cli->run($this->withFields(['plugin', 'get', WpCli::positional($slug), '--format=json'], $fields));
         if (($result['exit_code'] ?? 1) !== 0) {
             if (! $this->isInstalled($slug)['installed']) {
                 throw new Exception("Plugin '{$slug}' is not installed.", 404);
@@ -56,18 +47,11 @@ final class Plugins
     }
 
     /**
-     * WP-CLI `plugin is-installed`: exit 1 is "not installed"; any other
-     * non-zero exit (a fatal error loading the site) is a failure.
-     *
      * @return array{plugin: string, installed: bool}
      */
     public function isInstalled(string $slug): array
     {
-        $result = $this->cli->run(['plugin', 'is-installed', WpCli::positional($slug)]);
-        $exitCode = $result['exit_code'] ?? 1;
-        if ($exitCode !== 0 && $exitCode !== 1) {
-            throw new Exception($this->cli->failureMessage($result));
-        }
+        $exitCode = $this->installedExitCode(['plugin', 'is-installed', WpCli::positional($slug)]);
 
         return [
             'plugin' => $slug,
@@ -84,9 +68,8 @@ final class Plugins
         if ($force) {
             $args[] = '--force';
         }
-        $result = $this->cli->runOrFail($args);
 
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, $args);
     }
 
     /**
@@ -94,9 +77,7 @@ final class Plugins
      */
     public function activate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'activate', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'activate', WpCli::positional($slug)]);
     }
 
     /**
@@ -104,9 +85,7 @@ final class Plugins
      */
     public function deactivate(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'deactivate', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'deactivate', WpCli::positional($slug)]);
     }
 
     /**
@@ -114,19 +93,48 @@ final class Plugins
      */
     public function update(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'update', WpCli::positional($slug)]);
-
-        return $this->mutationBody($slug, $result['stdout']);
+        return $this->mutation($slug, ['plugin', 'update', WpCli::positional($slug)]);
     }
 
     /**
+     * WordPress's own Delete: the plugin is deactivated and its uninstall runs before its files go, so it leaves no
+     * dropin or constant behind and can drop its settings. A slug that is not installed was already deleted. A plugin
+     * whose uninstall fails, such as one that breaks the site when loaded, has its files deleted without loading any
+     * plugin, and the answer says its uninstall did not run.
+     *
      * @return array{plugin: string, message: string}
      */
     public function delete(string $slug): array
     {
-        $result = $this->cli->runOrFail(['plugin', 'delete', WpCli::positional($slug)]);
+        $uninstall = $this->cli->run(['plugin', 'uninstall', WpCli::positional($slug), '--deactivate']);
+        if ($uninstall['exit_code'] === 0) {
+            return $this->mutationBody($slug, $uninstall['stdout']);
+        }
 
-        return $this->mutationBody($slug, $result['stdout']);
+        if (! $this->isInstalledWithoutLoading($slug)) {
+            return ['plugin' => $slug, 'message' => "Plugin '{$slug}' is not installed, so nothing was deleted."];
+        }
+
+        return $this->deleteWithoutUninstall($slug, $uninstall);
+    }
+
+    private function isInstalledWithoutLoading(string $slug): bool
+    {
+        return $this->installedExitCode(['plugin', 'is-installed', WpCli::positional($slug), ...self::WITHOUT_LOADING]) === 0;
+    }
+
+    /**
+     * @param  array{exit_code: int, stdout: string, stderr: string}  $uninstall
+     * @return array{plugin: string, message: string}
+     */
+    private function deleteWithoutUninstall(string $slug, array $uninstall): array
+    {
+        $this->cli->runOrFail(['plugin', 'delete', WpCli::positional($slug), ...self::WITHOUT_LOADING]);
+
+        return [
+            'plugin' => $slug,
+            'message' => "Plugin '{$slug}' was deleted, but its uninstall did not run: ".$this->cli->failureMessage($uninstall),
+        ];
     }
 
     /**
@@ -138,16 +146,7 @@ final class Plugins
      */
     public function search(string $term, ?string $fields = null, ?int $perPage = null): array
     {
-        $args = ['plugin', 'search', WpCli::positional($term), '--format=json'];
-        if ($fields !== null) {
-            $args[] = '--fields='.$fields;
-        }
-        if ($perPage !== null) {
-            $args[] = '--per-page='.$perPage;
-        }
-        $result = $this->cli->runOrFail($args);
-
-        return JsonOutput::decodeList($result['stdout']);
+        return $this->searchWith(['plugin', 'search', WpCli::positional($term), '--format=json'], $fields, $perPage);
     }
 
     /**

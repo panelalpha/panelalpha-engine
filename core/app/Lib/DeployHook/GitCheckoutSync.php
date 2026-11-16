@@ -12,21 +12,8 @@ use App\System\Project\Git as ProjectGit;
 use App\System\Project\Git\CheckoutRedeploy;
 
 /**
- * What a push does to a checkout, which depends on what the checkout is.
- *
- * A Deploy-managed checkout gets a forced pull, then a Checkout Rebuild -- the
- * two things a manual `git/pull` with `force` does, minus the request around
- * them. Forced because the repository is the source of truth once a hook
- * exists: a fast-forward would refuse the moment anything on the checkout
- * diverged, and a push is not the moment to stop and ask. The engine's own
- * files survive that (`clean -fd` spares what `.git/info/exclude` lists; see
- * docs/internal/adr/0001-checkout-mirrors-the-client-repository.md).
- *
- * A Site Git checkout (`public_html` of a WordPress project) is the opposite:
- * the server owns files the repository knows nothing about -- uploads, caches,
- * a config edited in the admin -- and `clean -fd` would delete them. It is
- * fast-forwarded, which leaves whatever git does not need to overwrite alone
- * and refuses, changing nothing, when it does. There is no build to run.
+ * A Deploy-managed checkout is force-pulled, the repository being the truth, and rebuilt (ADR-0001 keeps our files);
+ * a Site Git checkout is only fast-forwarded, since `clean -fd` would delete the files the server owns there.
  */
 class GitCheckoutSync implements CheckoutSync
 {
@@ -44,6 +31,7 @@ class GitCheckoutSync implements CheckoutSync
         }
 
         $deployLogger = $this->startDeployBeforeThePull($user, $onDeployStarted);
+        $this->startTheAccountBeforeThePull($git, $project, $deployLogger);
 
         $this->redeploy->keepingTheServedTree(
             $git,
@@ -69,9 +57,23 @@ class GitCheckoutSync implements CheckoutSync
     }
 
     /**
-     * Rebuilds from what the checkout holds after the pull rather than what the push named; the two
-     * differ when another push landed in between. A pull that fails never reaches the rebuild, so it
-     * fails the deploy here.
+     * Git runs in the account's container, so a stopped account is started first, and before the served tree is kept
+     * aside, which only a running app has; a failed start has ended the deploy with its own error.
+     */
+    private function startTheAccountBeforeThePull(ProjectGit $git, ProjectAggregate $project, ?DeployLogger $deployLogger): void
+    {
+        try {
+            $this->redeploy->startAccountIfStopped($git, $project, $deployLogger);
+        } catch (\Throwable $e) {
+            $this->finishIfUnfinished($deployLogger, DeployLogger::STATUS_FAILED, 'Could not start the account: '.$e->getMessage());
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Rebuilds from what the checkout holds after the pull, which differs from the pushed commit when another
+     * push landed in between; a pull that fails never reaches the rebuild, so it fails the deploy here.
      */
     private function forcePullAndRebuild(ProjectGit $git, ProjectAggregate $project, ?string $pushedCommit, ?DeployLogger $deployLogger): void
     {
@@ -102,11 +104,8 @@ class GitCheckoutSync implements CheckoutSync
     }
 
     /**
-     * Always a new deploy, never a resumed one. `latest.json` still says
-     * `running` after a deploy was killed before finish(); resuming it would
-     * append this push to the dead deploy's log under the dead deploy's id.
-     * A deploy that is actually alive holds the lock, and start() throws on
-     * that just as resume did.
+     * Always a new deploy: resuming one a kill left `running` in `latest.json` would append this push to the
+     * dead deploy's log. A live deploy holds the lock, and start() throws on that as resume did.
      *
      * @throws DeployAlreadyRunningException
      */
@@ -121,9 +120,8 @@ class GitCheckoutSync implements CheckoutSync
     }
 
     /**
-     * A queue worker outlives its jobs, and these two hold the previous
-     * deploy's `stages` and `recipe` until something resets them. A push does
-     * not carry either, so it must not inherit them from whatever ran last.
+     * A queue worker outlives its jobs, and these two keep the previous deploy's `stages` and `recipe` until
+     * reset; a push carries neither, so it must not inherit them.
      */
     protected function forgetWorkerState(): void
     {

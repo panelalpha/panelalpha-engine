@@ -2,18 +2,11 @@
 
 namespace App\Lib\Deploy\Dind;
 
+use App\System\Privileged;
+
 /**
- * The Docker network host build containers run on.
- *
- * A host build runs the customer's install and build scripts on the *host*
- * daemon. On the default bridge that container could reach the engine API on
- * the bridge gateway and the public address, the host's private network and
- * the cloud metadata address. This network is a plain bridge with a fixed
- * interface name, and
- * scripts/build-network-firewall.sh lets it reach the internet and nothing
- * else. Builds need registries; they do not need the engine.
- *
- * Laravel-free and argv only, like {@see DindHostBuilder}.
+ * The Docker network host build containers run on: a plain bridge with a fixed interface name, which
+ * scripts/build-network-firewall.sh lets reach the internet and nothing else, the engine included.
  */
 final class BuildNetwork
 {
@@ -22,12 +15,9 @@ final class BuildNetwork
     /** Fixed so the firewall matches it by name; `br-` so the DNAT rules skip it like any bridge. */
     public const BRIDGE = 'br-pa-build';
 
-    public const FIREWALL_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh';
-
     /**
-     * The configured name, or null for "no dedicated network" -- an empty
-     * DEPLOY_BUILD_NETWORK, which is the opt-out. A name Docker would refuse
-     * falls back to the default rather than failing every build.
+     * The configured name, or null for an empty DEPLOY_BUILD_NETWORK, the opt-out. A name Docker would
+     * refuse falls back to the default rather than failing every build.
      */
     public static function resolve(?string $configured): ?string
     {
@@ -47,33 +37,28 @@ final class BuildNetwork
     /** @return list<string> */
     public static function inspectArgv(string $name): array
     {
-        return ['sudo', 'docker', 'network', 'inspect', '--format', '{{.Id}}', $name];
-    }
-
-    /** @return list<string> */
-    public static function createArgv(string $name): array
-    {
-        return [
-            'sudo', 'docker', 'network', 'create',
-            '--driver', 'bridge',
-            '--opt', 'com.docker.network.bridge.name='.self::BRIDGE,
-            // Not enable_icc=false: Docker would load br_netfilter for it, and
-            // that sends every bridge on the host -- tenants' inner networks
-            // too -- through iptables. Builds are short-lived and alone.
-            '--label', 'com.panelalpha.role=build',
-            $name,
-        ];
+        return Privileged::docker()->networkId($name);
     }
 
     /**
-     * The firewall lives in the host's netfilter, so it is applied from the
-     * host namespace. Idempotent; run before every build because a reboot
-     * drops it.
+     * Not enable_icc=false: Docker would load br_netfilter for it, sending every bridge on the host
+     * through iptables. Builds are short-lived and alone.
+     *
+     * @return list<string>
+     */
+    public static function createArgv(string $name): array
+    {
+        return Privileged::docker()->createBridgeNetwork($name, self::BRIDGE, 'build');
+    }
+
+    /**
+     * The firewall lives in the host's netfilter, so it is applied from the host namespace; idempotent,
+     * and run before every build because a reboot drops it.
      *
      * @return list<string>
      */
     public static function firewallArgv(string $name): array
     {
-        return ['sudo', 'nsenter', '--target', '1', '--all', 'sh', self::FIREWALL_SCRIPT, $name];
+        return Privileged::host()->applyBuildNetworkFirewall($name);
     }
 }

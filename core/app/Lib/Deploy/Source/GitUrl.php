@@ -5,12 +5,8 @@ namespace App\Lib\Deploy\Source;
 use App\Lib\Deploy\Template\Template;
 
 /**
- * Git remote URL helpers used at clone time.
- *
- * Private HTTPS remotes use a short-lived GIT_ASKPASS script. The repository
- * URL therefore stays clean in process arguments and in .git/config.
- *
- * No Laravel dependencies — unit-testable.
+ * Git remote URL helpers used at clone time. A private HTTPS remote takes its token from a short-lived GIT_ASKPASS script,
+ * so the URL stays clean in process arguments and .git/config. No Laravel dependencies.
  */
 class GitUrl
 {
@@ -50,9 +46,8 @@ class GitUrl
     }
 
     /**
-     * The host a token helper must see to answer; '' answers no prompt.
-     * A host that cannot be quoted into the helper is refused rather than
-     * written into it unescaped.
+     * The host a token helper must see to answer; '' answers no prompt. A host that cannot be quoted into the helper is
+     * refused rather than written into it unescaped.
      */
     private static function restrictedHost(?string $host): string
     {
@@ -183,9 +178,8 @@ class GitUrl
     }
 
     /**
-     * The URL git refused to redirect to, from its error output, or null when
-     * the failure was not a redirect. The `/info/refs` suffix the fetch used is
-     * stripped, so the caller can offer the repository URL itself.
+     * The URL git refused to redirect to, from its error output, or null when the failure was not a redirect; the fetch's
+     * `/info/refs` suffix is stripped, so the caller can offer the repository URL itself.
      */
     public static function redirectedTo(string $output): ?string
     {
@@ -202,7 +196,23 @@ class GitUrl
         return null;
     }
 
-    private static function repositoryFromRedirect(string $url): string
+    /** Git refused a redirect, whether or not its output names where it led: a 3xx it did not follow fails as an HTTP error. */
+    public static function refusedRedirect(string $output): bool
+    {
+        return preg_match('/returned error: 30[1278]\b/', $output) === 1 || self::redirectedTo($output) !== null;
+    }
+
+    /** What to tell a caller whose repository redirects, naming the address when it is known. */
+    public static function redirectRefusal(?string $target): string
+    {
+        return $target === null
+            ? 'The repository redirects to another address. This engine does not follow Git redirects; use the address '
+                .'it redirects to (on GitLab, the one ending in .git).'
+            : "The repository redirects to {$target}. This engine does not follow Git redirects; use {$target} instead.";
+    }
+
+    /** The repository a ref-listing URL belongs to: the `/info/refs` suffix the fetch used is stripped. */
+    public static function repositoryFromRedirect(string $url): string
     {
         return (string) preg_replace('#/info/refs\?.*\z#', '', $url);
     }
@@ -248,13 +258,13 @@ class GitUrl
         return ['env', 'GIT_SSH_COMMAND='.$ssh, ...array_slice($command, 1)];
     }
 
+    /** An SSH remote's user (git@) is the login, not a credential: only a password goes. */
     public static function sanitize(string $repoUrl): string
     {
         $parsed = parse_url($repoUrl);
         if ($parsed === false || empty($parsed['host'])) {
             return $repoUrl;
         }
-        // An SSH remote's user (git@) is the login, not a credential: only a password goes.
         $ssh = in_array(strtolower((string) ($parsed['scheme'] ?? '')), ['ssh', 'git+ssh', 'ssh+git'], true);
         if (empty($parsed['pass']) && ($ssh || empty($parsed['user']))) {
             return $repoUrl;
@@ -271,13 +281,12 @@ class GitUrl
     }
 
     /**
-     * owner/repo of any forge remote: https, ssh:// or scp-style
-     * git@host:owner/repo.git. GitLab subgroups keep the last two segments.
+     * owner/repo of any forge remote: https, ssh:// or scp-style git@host:owner/repo.git, which parse_url() reads as one
+     * opaque path. GitLab subgroups keep the last two segments.
      */
     public static function ownerAndRepo(string $repoUrl): ?string
     {
         $url = trim($repoUrl);
-        // parse_url() reads scp-style remotes as one opaque path.
         $path = ! str_contains($url, '://') && preg_match('#^(?:[^@/]+@)?[^:/]+:(.+)$#', $url, $m) === 1
             ? $m[1]
             : (string) (parse_url($url, PHP_URL_PATH) ?: '');

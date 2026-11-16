@@ -4,6 +4,7 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use Illuminate\Console\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Throwable;
 
 class RebuildEximConfig extends Command
@@ -12,25 +13,28 @@ class RebuildEximConfig extends Command
     protected $aliases = ['system:rebuild-exim-config'];
 
     protected $signature = 'system:exim:rebuild
-        {--networks : Only re-read the addresses Exim listens on and relays for from Docker}';
+        {--networks : Only re-read what the engine decides for Exim: where it listens and relays, the sending domain, and the senders each project may use}
+        {--senders : Only re-read the addresses and domains each project may send mail as}';
 
     protected $description = 'Recreate configuration files for exim4 from database.';
 
     /**
      * Any failure leaves the listen/relay addresses stale, so it exits non-zero
-     * for the caller (bootstrap-from-source.sh) to see.
+     * and says why on stderr for the caller (bootstrap-from-source.sh) to see.
      */
     public function handle(): int
     {
         try {
             $system = app(System::class);
-            if ($this->option('networks')) {
+            if ($this->option('senders')) {
+                $system->exim()->refreshSenderMap();
+            } elseif ($this->option('networks')) {
                 $system->exim()->rebuildNetworks();
             } else {
                 $system->exim()->rebuildEximConfig();
             }
         } catch (Throwable $e) {
-            $this->error($e->getMessage());
+            $this->getOutput()->getErrorStyle()->writeln('<error>'.OutputFormatter::escape($e->getMessage()).'</error>');
 
             return self::FAILURE;
         }

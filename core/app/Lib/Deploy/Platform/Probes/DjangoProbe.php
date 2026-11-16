@@ -7,9 +7,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
 
 /**
- * A Django project with a `manage.py`, wherever in the checkout it lives:
- * `django-admin startproject` inside a subdirectory is a standard layout
- * (NetBox keeps `netbox/manage.py`). Yields the django platform.
+ * A Django project with a `manage.py` wherever in the checkout it lives, since a subdirectory
+ * is a standard layout (NetBox keeps `netbox/manage.py`).
  */
 final class DjangoProbe implements PlatformProbe
 {

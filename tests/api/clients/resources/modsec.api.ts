@@ -6,6 +6,7 @@ import {
   type ModSecurityAuditLogEntry,
   type ModSecurityAuditLogFile,
   type ModSecurityConfig,
+  type ModSecurityCustomRules,
   type ModSecurityRuleset,
 } from '@/types';
 import { describeAttempts, httpReason, recordAttempts } from '@/helpers/attempts';
@@ -116,13 +117,25 @@ export class ModSecurityApi extends WpCliApi {
   }
 
   async tailModSecurityAuditLog(
-    filename: string
+    filename: string,
+    limit?: number
   ): Promise<{ status: number; data: ModSecurityAuditLogEntry[] }> {
-    const response = await this.api.get(`modsec/audit-log/files/${filename}/tail`);
+    const query = limit === undefined ? '' : `?limit=${limit}`;
+    const response = await this.api.get(`modsec/audit-log/files/${filename}/tail${query}`);
     if (response.status() === 200) {
       const body = await response.json();
       return { status: response.status(), data: body.data ?? [] };
     }
     return { status: response.status(), data: [] };
+  }
+
+  async getModSecurityCustomRules(): Promise<ApiResponse<ModSecurityCustomRules>> {
+    const response = await this.api.get('modsec/custom-rules');
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async setModSecurityCustomRulesRaw(rules: string | null): Promise<{ status: number; body: any }> {
+    return this.rawCall(await this.api.put('modsec/custom-rules', { data: { rules } }));
   }
 }

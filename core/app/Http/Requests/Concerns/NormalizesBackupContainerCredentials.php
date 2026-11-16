@@ -3,6 +3,8 @@
 namespace App\Http\Requests\Concerns;
 
 use App\Lib\Vault\RequestVault;
+use App\Models\BackupContainer;
+use App\System\EnginePaths;
 use Illuminate\Validation\ValidationException;
 
 trait NormalizesBackupContainerCredentials
@@ -40,35 +42,12 @@ trait NormalizesBackupContainerCredentials
     ];
 
     /**
-     * Credential keys per remote driver: the ones that must be present, the ones
-     * a `vault:<key>` may stand for, and every one kept.
+     * Where backups survive a recreate and the root broker writes them: below the engine's directory it writes only
+     * the engine's own files, so a store there would fail on its first backup.
      */
-    private const CREDENTIAL_KEYS = [
-        's3' => [
-            'required' => ['access_key_id', 'secret_access_key'],
-            'secrets' => ['secret_access_key'],
-            'kept' => ['access_key_id', 'secret_access_key', 'region', 'endpoint', 'use_path_style_endpoint', 'prefix'],
-        ],
-        'ftp' => [
-            'required' => ['host', 'username'],
-            'secrets' => ['password'],
-            'kept' => ['host', 'username', 'password', 'port'],
-        ],
-        'ftps' => [
-            'required' => ['host', 'username'],
-            'secrets' => ['password'],
-            'kept' => ['host', 'username', 'password', 'port'],
-        ],
-        'sftp' => [
-            'required' => ['host', 'username'],
-            'secrets' => ['password', 'private_key', 'passphrase'],
-            'kept' => ['host', 'username', 'password', 'private_key', 'passphrase', 'port'],
-        ],
-    ];
-
     public function assertLocalLocationIsSafe(string $location): void
     {
-        $normalized = str_replace('\\', '/', trim($location));
+        $normalized = self::normalizedLocation($location);
         if ($normalized === '' || $normalized === '/' || $normalized === '/home') {
             throw ValidationException::withMessages([
                 'location' => 'Local backup location must not be empty, filesystem root, or /home.',
@@ -79,7 +58,19 @@ trait NormalizesBackupContainerCredentials
                 'location' => 'Local backup location must not contain .. segments.',
             ]);
         }
-        if (self::isUnderPersistentRoot(rtrim($normalized, '/'))) {
+        if (self::isAtOrBelow($normalized, EnginePaths::ENGINE_DIR)) {
+            throw ValidationException::withMessages([
+                'location' => 'Local backup location must not be inside the engine\'s directory ('.EnginePaths::ENGINE_DIR
+                    .'): only the engine\'s own files may be written there.',
+            ]);
+        }
+        if (in_array($normalized, self::PERSISTENT_LOCATION_ROOTS, true)) {
+            throw ValidationException::withMessages([
+                'location' => 'Local backup location must be a directory below '.implode(', ', self::PERSISTENT_LOCATION_ROOTS)
+                    .', not one of those paths itself, which the engine depends on.',
+            ]);
+        }
+        if (self::isUnderPersistentRoot($normalized)) {
             return;
         }
 
@@ -90,15 +81,29 @@ trait NormalizesBackupContainerCredentials
         ]);
     }
 
+    /** The directory a location names: backslashes as slashes, without empty or `.` parts, so a respelling is checked too. */
+    private static function normalizedLocation(string $location): string
+    {
+        $path = str_replace('\\', '/', trim($location));
+        $parts = array_filter(explode('/', $path), static fn (string $part): bool => $part !== '' && $part !== '.');
+
+        return (str_starts_with($path, '/') ? '/' : '').implode('/', $parts);
+    }
+
     private static function isUnderPersistentRoot(string $path): bool
     {
         foreach (self::PERSISTENT_LOCATION_ROOTS as $root) {
-            if ($path === $root || str_starts_with($path.'/', $root.'/')) {
+            if (self::isAtOrBelow($path, $root)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static function isAtOrBelow(string $path, string $root): bool
+    {
+        return str_starts_with($path.'/', $root.'/');
     }
 
     /**
@@ -117,7 +122,7 @@ trait NormalizesBackupContainerCredentials
             ]);
         }
 
-        $keys = self::CREDENTIAL_KEYS[$driver] ?? throw ValidationException::withMessages([
+        $keys = BackupContainer::CREDENTIAL_KEYS[$driver] ?? throw ValidationException::withMessages([
             'driver' => 'Unsupported backup storage driver.',
         ]);
 

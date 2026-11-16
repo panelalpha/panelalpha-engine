@@ -26,6 +26,8 @@ class CustomIniSettings
     }
 
     /**
+     * The version is the identity of the set: other installed versions keep theirs.
+     *
      * @param  array<string, string>  $settings
      */
     public function replace(User $user, string $phpVersion, array $settings): void
@@ -34,8 +36,6 @@ class CustomIniSettings
         $this->requireInstalledVersion($phpVersion);
 
         try {
-            // The version is the identity of the set. Other installed
-            // versions keep whatever they already have.
             $user->project($this->system)->php()->updateCustomIniSettings($phpVersion, $settings);
         } catch (\Exception $e) {
             throw ValidationException::withMessages([
@@ -44,10 +44,7 @@ class CustomIniSettings
         }
     }
 
-    /**
-     * The file is mounted into the project's own PHP containers. A dind app
-     * runs PHP from its own image, which never reads it.
-     */
+    /** The file is mounted into the project's own PHP containers; a dind app's image never reads it. */
     private function requirePhpHosting(User $user): void
     {
         if (! $user->project($this->system)->runtime() instanceof PhpHosting) {

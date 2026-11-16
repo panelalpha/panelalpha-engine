@@ -7,9 +7,8 @@ use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Asks an application the checks its runtime brings, and says what the wrong
- * answers mean. The content question a port probe cannot answer: placeholder
- * and homepage are both 200 with a body. Nothing here fails a deploy.
+ * Asks an application the checks its runtime brings, and says what the wrong answers mean:
+ * the content question a port probe cannot answer. Nothing here fails a deploy.
  */
 final class CheckRunner
 {
@@ -19,13 +18,10 @@ final class CheckRunner
     /** Nothing answered, so no check had anything to look at. */
     public const SERVING_UNKNOWN = 'unknown';
 
-    /**
-     * Nothing answered and Docker says why: the container keeps exiting.
-     *
-     * Declared here rather than in a check file because the verdict is not read
-     * from a response. It distinguishes this from `unknown`, which means only
-     * that nobody asked.
-     */
+    /** The engine's own "Project not configured" page answered: no application is running. */
+    public const SERVING_PLACEHOLDER = 'placeholder';
+
+    /** Nothing answered and Docker says why: the container keeps exiting. Not read from a response. */
     public const SERVING_RESTARTING = 'restarting';
 
     /** Nothing answered because the app container is stopped, and not restarting. */
@@ -36,8 +32,7 @@ final class CheckRunner
 
     /**
      * @param  list<HealthCheck>  $checks
-     * @param  list<array{check: string, reason: string, covered_by: ?string}>  $skips
-     *                                                                                  the manifest's `check_skip` entries
+     * @param  list<array{check: string, reason: string, covered_by: ?string}>  $skips  the manifest's `check_skip` entries
      */
     public function __construct(private readonly array $checks, array $skips = [])
     {
@@ -49,8 +44,7 @@ final class CheckRunner
     }
 
     /**
-     * The checks for an application with this runtime, plus whatever its
-     * manifest added.
+     * The checks for an application with this runtime, plus whatever its manifest added.
      *
      * @param  list<string>  $references
      */
@@ -103,14 +97,7 @@ final class CheckRunner
     }
 
     /**
-     * Ask each check about the response for the path it named.
-     *
-     * A check declaring `path: /api/health` must be asked about that path;
-     * asking it about `/` gave every baseline check a pass on a site whose API
-     * reported a dead database.
-     *
-     * A check whose path is absent from the map was not fetched and is failing
-     * rather than skipped: the fetch did not happen or did not survive.
+     * Ask each check about the response for the path it named; a path absent from the map fails the check.
      *
      * @param  array<string, ProbedResponse>  $responses  by path
      * @return array{serving: string, checks: list<array<string, mixed>>}
@@ -141,26 +128,43 @@ final class CheckRunner
     }
 
     /**
+     * Nothing is asked when nothing answered: a silent application is the port probe's finding.
+     *
      * @param  array<string, ProbedResponse>  $responses  by path
      * @return list<CheckResult>
      */
     public function resultsByPath(array $responses, ?string $projectDir): array
     {
-        // A silent application is the port probe's finding, already reported.
-        // Asking content questions of a response nobody received would mark
-        // every check failed and bury the one fact that matters.
-        $anyAnswer = false;
-        foreach ($responses as $response) {
-            if ($response->answered()) {
-                $anyAnswer = true;
-                break;
-            }
-        }
-        if (! $anyAnswer) {
+        if (! self::anyAnswered($responses)) {
             return [];
         }
 
         $context = $projectDir !== null && is_dir($projectDir) ? ProjectContext::at($projectDir) : null;
+        $applies = $this->applicability($context);
+
+        $results = [];
+        foreach ($this->checks as $check) {
+            $results[] = $this->resultFor($check, $applies, $responses, $context);
+        }
+
+        return $results;
+    }
+
+    /** @param  array<string, ProbedResponse>  $responses */
+    private static function anyAnswered(array $responses): bool
+    {
+        foreach ($responses as $response) {
+            if ($response->answered()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return array<string, bool> by reference: whether the check's `when` holds */
+    private function applicability(?ProjectContext $context): array
+    {
         $matcher = new PlatformMatcher(ProbeRegistry::all());
 
         $applies = [];
@@ -169,31 +173,28 @@ final class CheckRunner
                 || ($context !== null && $matcher->matches($check->when, $context));
         }
 
-        $results = [];
-        foreach ($this->checks as $check) {
-            $skip = $this->honouredSkip($check, $applies);
-            if ($skip !== null) {
-                $results[] = CheckResult::notApplicable($check, $skip['reason'], $skip['covered_by']);
-
-                continue;
-            }
-            if (! $applies[$check->reference()]) {
-                $results[] = CheckResult::skipped($check);
-
-                continue;
-            }
-            $results[] = $this->evaluate($check, $responses[$check->path()] ?? null, $context);
-        }
-
-        return $results;
+        return $applies;
     }
 
     /**
-     * The manifest's `check_skip` entry for this check, if it holds.
-     *
-     * An `error` check is only waived while the check covering it is actually
-     * asked. The manifest reader refuses the rest; this is the same rule at the
-     * point where a missing cover would otherwise hide an outage.
+     * @param  array<string, bool>  $applies
+     * @param  array<string, ProbedResponse>  $responses
+     */
+    private function resultFor(HealthCheck $check, array $applies, array $responses, ?ProjectContext $context): CheckResult
+    {
+        $skip = $this->honouredSkip($check, $applies);
+        if ($skip !== null) {
+            return CheckResult::notApplicable($check, $skip['reason'], $skip['covered_by']);
+        }
+        if (! $applies[$check->reference()]) {
+            return CheckResult::skipped($check);
+        }
+
+        return $this->evaluate($check, $responses[$check->path()] ?? null, $context);
+    }
+
+    /**
+     * The manifest's `check_skip` entry for this check, if it holds: an `error` check only while its cover is asked.
      *
      * @param  array<string, bool>  $applies  by reference: asked, not guarded out
      * @return array{check: string, reason: string, covered_by: ?string}|null
@@ -211,11 +212,7 @@ final class CheckRunner
     }
 
     /**
-     * @param  ?ProbedResponse  $response  null when nothing was fetched for this
-     *                                     check's path. Not {@see ProbedResponse::none()}, a fetch that
-     *                                     reached the application and got nothing -- both cannot pass, and
-     *                                     both are reported as a failure with the reason, because the
-     *                                     alternative is a check that silently stops checking.
+     * @param  ?ProbedResponse  $response  null when nothing was fetched for this path, unlike {@see ProbedResponse::none()}; neither passes
      */
     private function evaluate(HealthCheck $check, ?ProbedResponse $response, ?ProjectContext $context): CheckResult
     {
@@ -245,6 +242,8 @@ final class CheckRunner
     }
 
     /**
+     * A diagnosis that throws must not cost the finding it describes.
+     *
      * @return array{0: ?string, 1: ?string}
      */
     private function explain(HealthCheck $check, ProbedResponse $response, ?ProjectContext $context): array
@@ -261,17 +260,15 @@ final class CheckRunner
         try {
             $explained = $explainer->explain($context, $response);
         } catch (\Throwable $e) {
-            // A diagnosis that throws must not cost the finding it describes.
             return [null, null];
         }
 
         return [$explained['detail'] ?? null, $explained['fix'] ?? null];
     }
 
-    /** Does the response satisfy every condition the check declared? */
+    /** Does the response satisfy every condition the check declared? A landing elsewhere passes. */
     private static function holds(HealthCheck $check, ProbedResponse $response): bool
     {
-        // Not where this check looks: nothing to object to.
         if ($check->landing !== [] && ! $response->landedUnder($check->landing)) {
             return true;
         }
@@ -302,14 +299,7 @@ final class CheckRunner
         return true;
     }
 
-    /**
-     * Every member the check named must be present and equal.
-     *
-     * A body that is not JSON at all fails: a check asserting
-     * `{database: connected}` against HTML has found an application whose
-     * contract is broken. The detail line distinguishes "wrong value" from
-     * "not JSON", which need different fixes.
-     */
+    /** Every member the check named must be present and equal; a body that is not JSON fails. */
     private static function holdsJson(HealthCheck $check, ProbedResponse $response): bool
     {
         $wanted = $check->json();
@@ -331,9 +321,8 @@ final class CheckRunner
     }
 
     /**
-     * A scalar compares by value, a list as "any of these". JSON has no
-     * integer-versus-float distinction, so `json: {version: "1.0"}` must not
-     * fail against `1.0`.
+     * A scalar compares by value, a list as "any of these"; numbers compare as floats,
+     * and the string "true" is not the boolean.
      */
     private static function memberMatches(mixed $actual, mixed $expected): bool
     {
@@ -355,19 +344,11 @@ final class CheckRunner
             return is_numeric($actual) && (float) $actual === (float) $expected;
         }
 
-        // `"status": "true"` and `"status": true` are not the same answer.
         return is_string($actual) && $actual === $expected;
     }
 
     /**
-     * One word for what the application is serving.
-     *
-     * Errors first, then warnings: a welcome page left by a project with no
-     * deploy and a not-configured page left by a failed one are both "a
-     * placeholder", and only the severity says which needs action. Within a
-     * severity it is declaration order, which puts the baseline ahead of the
-     * runtime group. Takes whether anything answered rather than the response:
-     * the verdict is about the application that did answer.
+     * One word for what the application is serving: the first failed check by severity, then declaration order.
      *
      * @param  list<CheckResult>  $results
      */

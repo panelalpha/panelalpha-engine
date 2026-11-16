@@ -3,17 +3,14 @@
 namespace App\Lib\Project;
 
 /**
- * One file in a directory the account owns, judged the way the engine has to
- * judge it before reading: root can read straight through a link, so a file is
- * only the account's own log when it is a regular file, owned by the account and
- * reachable by no other name.
+ * One file in a directory the account owns, judged before root reads it: root reads straight through a link,
+ * so it is the account's own only when it is a regular file, owned by the account and reachable by no other name.
  */
 final class AccountFile
 {
     /**
-     * The file's lstat when it is a regular file the account owns alone, null
-     * otherwise. lstat does not follow a link, so a planted symlink is refused,
-     * and nlink 1 refuses a hard link to a file kept elsewhere.
+     * The file's lstat when it is a regular file the account owns alone, null otherwise: lstat refuses
+     * a planted symlink, and nlink 1 a hard link to a file kept elsewhere.
      *
      * @return array<string, int>|null
      */

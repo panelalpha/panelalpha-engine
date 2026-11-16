@@ -1,0 +1,51 @@
+run ["test","-e","/opt/engine/users/alice/ssl-certs/alice.test.pem"]
+put /opt/engine/webserver-config/nginx/vhosts/alice.test.conf -
+server {
+    listen 198.51.100.10:80;
+    listen [2001:db8::7]:80;
+    server_name  alice.test www.alice.test;
+    access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/alice.test/access.log combined;
+    access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/alice.test/bytes.log bytes;
+    error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx/alice.test/error.log error;
+
+    root /home/alice/alice.test/public_html;
+    location ^~ /phpmyadmin {
+        proxy_set_header X-Real-IP $remote_addr;
+        set $pmapass 0;
+        if ($arg_pmassotoken) {
+            set $pmapass 1;
+        }
+        if ($cookie_PMASignonSession) {
+            set $pmapass 1;
+        }
+        if ($pmapass) {
+            rewrite ^([^.]*[^/])$ $1/ permanent;
+            rewrite ^/phpmyadmin(.*) /$1 break; 
+            proxy_pass http://phpmyadmin-users.shared-hosting.palocal;
+        }
+    }
+            location /alice-error-pages/ {
+            alias /opt/panelalpha/shared-hosting/webserver-config/error-pages/;
+            internal;
+        }
+        error_page 403 /alice-error-pages/403.html;
+        error_page 404 /alice-error-pages/404.html;
+        error_page 500 /alice-error-pages/500.html;
+        error_page 502 /alice-error-pages/502.html;
+        error_page 503 /alice-error-pages/503.html;
+        location / {
+            index  index.php index.html index.htm;
+            try_files $uri $uri/ /index.php?$args;
+        }
+        location ~ \.php$ {
+            resolver 127.0.0.54 valid=30s;
+            set $userhost alice;
+            include fastcgi_params;
+            fastcgi_param  SCRIPT_FILENAME /home/alice/alice.test/public_html$fastcgi_script_name;
+            fastcgi_pass $userhost:9082;
+            fastcgi_index index.php;
+        }
+    }
+
+<<< end of /opt/engine/webserver-config/nginx/vhosts/alice.test.conf
+exec ["/usr/local/lib/panelalpha/pa-root","files.makeDirectories","--","/opt/engine/webserver-logs/nginx/alice.test"]

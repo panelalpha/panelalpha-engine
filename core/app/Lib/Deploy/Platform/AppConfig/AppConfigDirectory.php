@@ -5,19 +5,8 @@ namespace App\Lib\Deploy\Platform\AppConfig;
 use App\Lib\Deploy\Platform\ManifestException;
 
 /**
- * A `.panelalpha/` directory — the app config as files rather than as one document:
- *
- *   panelalpha.yaml                         platform, env, commands
- *   hooks/precheck.sh                       before the clone
- *   hooks/prepare.sh                        after the clone, before the build
- *   overrides/entrypoint.sh                 replaces the generated entrypoint
- *   overrides/app.sh                        user management and SSO
- *   overrides/docker-compose.yml            replaces the project's compose
- *   overrides/docker-compose.override.yml   layers over it
- *   files/<path>                            copied into the project at <path>
- *
- * `hooks/` runs between stages; `overrides/` replaces a file the engine or the project
- * would supply. The engine's own `resources/sources/` directories have the same shape.
+ * A `.panelalpha/` directory, the app config as files: `hooks/` run between stages, `overrides/` replace a file the engine or
+ * the project would supply, `files/` are copied in. The engine's own `resources/sources/` directories have the same shape.
  */
 final class AppConfigDirectory
 {
@@ -46,13 +35,16 @@ final class AppConfigDirectory
      * @param  bool  $requireConfig  for the engine's own tree, where a directory without a
      *                               `panelalpha.yaml` is a half-written recipe. A repository's own directory is
      *                               taken as it comes.
+     * @param  ?string  $subject  how errors name the `panelalpha.yaml`; the directory's own
+     *                            path when the caller has no better label
      *
      * @throws ManifestException
      */
     public static function read(
         AppConfigSource $source,
         string $dir,
-        bool $requireConfig = false
+        bool $requireConfig = false,
+        ?string $subject = null
     ): ?AppConfig {
         $dir = rtrim($dir, '/');
         if (! $source->isDirectory($dir)) {
@@ -64,12 +56,7 @@ final class AppConfigDirectory
 
         $replace = self::contents($source, $dir, self::COMPOSE);
         $override = self::contents($source, $dir, self::COMPOSE_OVERRIDE);
-        if ($replace !== null && $override !== null) {
-            throw new ManifestException(
-                "{$dir}: ships both ".self::COMPOSE.' and '.self::COMPOSE_OVERRIDE
-                .' — one replaces the project\'s compose file, the other layers over it'
-            );
-        }
+        self::assertOneComposeFile($dir, $replace, $override);
 
         return AppConfig::fromDirectory([
             'config' => self::contents($source, $dir, self::CONFIG),
@@ -82,7 +69,18 @@ final class AppConfigDirectory
                 ? AppConfig::COMPOSE_REPLACE
                 : AppConfig::COMPOSE_OVERRIDE,
             'files' => self::snippets($source, $dir),
-        ]);
+        ], $subject ?? $dir.'/'.self::CONFIG);
+    }
+
+    /** @throws ManifestException when the directory both replaces the project's compose file and layers over it */
+    private static function assertOneComposeFile(string $dir, ?string $replace, ?string $override): void
+    {
+        if ($replace !== null && $override !== null) {
+            throw new ManifestException(
+                "{$dir}: ships both ".self::COMPOSE.' and '.self::COMPOSE_OVERRIDE
+                .' — one replaces the project\'s compose file, the other layers over it'
+            );
+        }
     }
 
     /** Just the config, for a caller that only wants what the YAML declares. */

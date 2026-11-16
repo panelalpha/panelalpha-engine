@@ -9,8 +9,8 @@
 #   restart  container boot of an already-built app — no build at all
 #
 # It exits non-zero when a fixture fails to deploy or detects as the wrong
-# strategy, or when a warm rebuild reports fewer cached layers than
-# MIN_WARM_RATIO. That last check is the reason this exists: a warm deploy that
+# strategy, or when a warm rebuild's cache hit ratio (cached share of the
+# layers BuildKit can cache) is below MIN_WARM_RATIO. That last check is the reason this exists: a warm deploy that
 # rebuilds every layer is a cache regression, and totals alone hide it behind
 # ordinary variance.
 #
@@ -73,10 +73,8 @@ FIXTURES=(
   # gothinkster/node-express-realworld-example-app: its Dockerfile copies an Nx
   # dist/ the checkout does not have, so the engine declines it, and as the
   # Express app underneath it needs a database. It also needs layers to cache:
-  # the FROM, the export and the context read never count as cached, so
-  # dockersamples/linux_tweet_app's two COPYs make 2/6 with every layer cached.
-  # fly-apps/hello-fly reaches 4/8, exactly MIN_WARM_RATIO, only when every
-  # layer it can cache is cached.
+  # a RUN, COPY or ADD after the FROM. The FROM, the export and the context
+  # read are not counted, so a fully cached rebuild reads 1.0.
   "bdocker1|https://github.com/docker/welcome-to-docker||dockerfile"
   "bdocker2|https://github.com/fly-apps/hello-fly||dockerfile"
   # php — composer.json, no artisan
@@ -149,12 +147,13 @@ for row in "${FIXTURES[@]}"; do
   COLD_TIMINGS=$(core "php /var/www/html/artisan project:deploy:timings $NAME --json" 2>/dev/null)
 
   WARM_START=$(date +%s)
-  core "php /var/www/html/artisan users:rebuild --username=$NAME" >/dev/null 2>&1
+  core "php /var/www/html/artisan users:rebuild --project=$NAME" >/dev/null 2>&1
   WARM=$(( $(date +%s) - WARM_START ))
 
   TIMINGS=$(core "php /var/www/html/artisan project:deploy:timings $NAME --json" 2>/dev/null)
-  LAYERS=$(echo "$TIMINGS" | jq_get '["build"]["step_count"]' || echo 0)
+  LAYERS=$(echo "$TIMINGS" | jq_get '["build"]["cacheable_steps"]' || echo 0)
   CACHED=$(echo "$TIMINGS" | jq_get '["build"]["cached_steps"]' || echo 0)
+  RATIO=$(echo "$TIMINGS" | jq_get '["build"]["cache_hit_ratio"]' || echo 0)
   PHASES=$(printf '%s\n%s\n' "$COLD_TIMINGS" "$TIMINGS" | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip().split("\n{")
@@ -200,7 +199,6 @@ for cmd, secs, cached in sl(warm):
   elif [ -n "$STRATEGY" ] && [ "$STRATEGY" != "$EXPECT" ]; then
     VERDICT="STRATEGY: got '$STRATEGY', want '$EXPECT'"; FAILURES=$((FAILURES+1))
   elif [ "$LAYERS" -gt 0 ]; then
-    RATIO=$(echo "scale=3; $CACHED / $LAYERS" | bc)
     if [ "$(echo "$RATIO < $MIN_WARM_RATIO" | bc)" = "1" ]; then
       VERDICT="CACHE: warm hit ratio $RATIO < $MIN_WARM_RATIO"; FAILURES=$((FAILURES+1))
     else

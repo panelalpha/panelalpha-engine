@@ -2,7 +2,7 @@
 
 Each project can have its own MySQL databases and database logins, on the engine's database server.
 
-Ask your assistant rather than opening a MySQL shell as root. The engine tracks what it created, applies the project's naming rules, and counts it against the project's plan limits - none of which happens if you create things by hand.
+Ask your assistant rather than opening a MySQL shell as root. The engine tracks what it created, applies the project's naming rules and counts it against the project's plan limits. None of that happens if you create things by hand.
 
 ## Creating a database
 
@@ -11,7 +11,7 @@ Create a MySQL database named shop on this project, create a user for it,
 and grant that user access.
 ```
 
-Three things happen: the database is created, a login is created, and that login is given permission to use that database. **All three are needed.** A newly created database user has no access to anything until permissions are granted, which is the usual reason a fresh setup fails to connect.
+Three things happen: the database is created, a login is created and that login is given permission to use that database. **All three are needed.** A newly created database user has no access to anything until permissions are granted, which is the usual reason a fresh setup fails to connect.
 
 ## Two things that catch everyone out
 
@@ -35,7 +35,9 @@ To browse a database in a web interface, ask for a sign-on link. A new install e
 Give me a phpMyAdmin sign-on link for this project.
 ```
 
-You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it - when it stops working, ask for a new one, which takes a second. A suspended project gets no sign-on link.
+You get a URL that logs you straight in. **It expires after five minutes.** Do not bookmark it. When it stops working, ask for a new one, which takes a second. A suspended project gets no sign-on link.
+
+phpMyAdmin opens on the project's main domain. On a free `panelalpha.online` address an **import never gets through**: PanelAlpha Online's proxy, in front of that name, does not pass a `multipart/form-data` body on (the way a browser sends a file), so the POST hangs until the browser gives up and phpMyAdmin ends with "Some error occurred while getting SQL debug info. Error text: error (rejected)". It is not phpMyAdmin's alone: **every upload on such a name fails the same way**: a media file in WordPress, any form that posts a file. Pages, downloads and a form that posts only plain fields work. To upload, use a name that points straight at this server: [Troubleshooting](#troubleshooting).
 
 ## Renaming a database
 
@@ -43,17 +45,25 @@ You get a URL that logs you straight in. **It expires after five minutes.** Do n
 Rename the database shop on this project to store.
 ```
 
-The new name gets the project's prefix, like any new database. The data is moved, every user keeps the access it had, and the old name disappears. If anything fails along the way, the old database is kept as it was. Update your application to the new prefixed name afterwards, and rebuild.
+The new name gets the project's prefix, like any new database. The data is moved, every user keeps the access it had and the old name disappears. If anything fails along the way, the old database is kept as it was. Update your application to the new prefixed name afterwards, and rebuild.
 
-The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused.
+A database that holds only tables is renamed in one quick step. **A database that also holds views, triggers, stored routines or events is copied instead, and for that time its users lose access to the old name and their open connections are closed.** A write from your application during the copy fails with an error, so nothing is lost without a sign. Access is put back if the rename fails. Do it when the site is quiet.
+
+The application database that the engine creates for a container project (its name ends in `app`) cannot be renamed. A name that another database of the project already uses is refused. So is a rename while a push between the project and its staging copy is running, and a push while a rename is running.
 
 ## Copies of a project
 
-On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
+On a traditional PHP project, a staging copy or a clone brings the databases with it, under the new project's prefix, with new users and passwords and the same permissions. A push between the two replaces the databases on the other side, or only the tables you pick, and keeps that side's users and passwords. Tables whose structure differs only in their AUTO_INCREMENT counter count as the same. A push with an empty list of tables is refused: leave the list out to push the whole database. A table push takes up to 500 tables, needs the databases to be part of the push, and is refused on a container project. A container project's databases are not copied. See [Staging](projects.md#staging) and [Cloning](projects.md#cloning).
 
 ## Limits
 
 Passwords must be at least 8 characters. Each project's plan caps how many databases it may have.
+
+The list of a project's databases shows the size of each one.
+
+## Deleting
+
+**Deleting a database removes every table and row in it, and there is no undo.** The project's database users stay but lose access to it. Deleting a database user ends its password at once, so an application that still uses it starts failing; the databases and their data stay. Taking a user's access to a database away has the same effect for that database. The assistant says what will be lost and asks you to confirm before each of these.
 
 ## When your application needs a database at deploy time
 
@@ -76,13 +86,16 @@ The user exists but has no permission on that database, or the password does not
 The database still holds the password it was first created with, while your application now has a different one. Changing the environment variable does not change the password inside the database. See [Reading errors](../02-getting-started/reading-errors.md).
 
 **A rename is refused.**
-The name is already used by another database of the project, is reserved, or is too long once the prefix is added. A container project's own application database (ending in `app`) cannot be renamed.
+The name is already used by another database of the project, is reserved or is too long once the prefix is added. A container project's own application database (ending in `app`) cannot be renamed.
 
 **"Database limit reached".**
 The project has used up its plan's database allowance. Either raise the limit ([Limits](projects.md#limits)) or delete a database it no longer needs.
 
 **phpMyAdmin gives a 404, or loops back to the login page.**
-The sign-on link has expired - they last five minutes. Ask for a fresh one. If a new link does the same, the project's database user is missing; recreate it, then request the link again.
+The sign-on link has expired. They last five minutes. Ask for a fresh one. If a new link does the same, the project's database user is missing; recreate it, then request the link again.
+
+**An upload fails on a `panelalpha.online` address.**
+In phpMyAdmin an import ends with "Some error occurred while getting SQL debug info. Error text: error (rejected)"; a media file in WordPress spins and then fails; the engine's log of that name holds no request that carried the file. PanelAlpha Online's proxy, in front of every `panelalpha.online` name, does not pass a request whose body is `multipart/form-data` on (the way a browser sends a file), so the POST hangs until the browser gives up and the site never sees it. Every upload there fails for that reason, not only phpMyAdmin's: a page, a download and a form that posts plain fields without a file, work. Add a name that points straight at this server (a domain you own, or a `panelalpha.direct` name for it: [Adding your own domain](domains-and-ssl.md#adding-your-own-domain)), make it the project's main domain ([Moving a project to another domain](domains-and-ssl.md#moving-a-project-to-another-domain-or-https-port)), and upload there, where the same file goes through at once.
 
 ## More requests to try
 
@@ -148,6 +161,32 @@ shopuser may do on store.
 ```
 
 Mode: full. Tools: `mysql_database_rename` with `new_dbname`, `task_get`, `mysql_database_list`, `mysql_privileges_get`. Check: the rename runs as a task, the new name has the project's prefix, shopuser keeps its access on the new name, and the old name is gone. On a container project the application's own database (ending in `app`) is refused.
+
+**Rename and push do not overlap**
+
+```text
+Rename the database shop on tphpsite to store while a push to its staging copy
+is running.
+```
+
+Mode: full. Tools: `mysql_database_rename`, `project_push`, `task_get`. Check: while the push runs the rename is refused as busy, and the other way round. Skip when you cannot start both within the push's run time.
+
+**Push selected tables**
+
+```text
+Pick one table of a database on tphpsite and push only that table to
+tphpstage. Then try to push with an empty list of tables.
+```
+
+Mode: modify. Tools: `project_push` with `tables`. Check: only that table is replaced on the other side, and the empty list is refused with nothing replaced.
+
+**Database size**
+
+```text
+How big is each database of tshop?
+```
+
+Mode: read. Tools: `mysql_database_list`. Check: a database that holds data reports a size above 0, not 0.
 
 **Remove**
 

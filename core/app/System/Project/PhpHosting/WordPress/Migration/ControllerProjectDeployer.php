@@ -7,9 +7,8 @@ use App\Lib\Project\ProjectCreator;
 use App\Models\User;
 
 /**
- * Provisions + deploys in-process through ProjectCreator, the same path
- * POST /users and `project:create` take. The queue worker's request and
- * authenticated user are left as they are.
+ * Provisions + deploys in-process through ProjectCreator, the same path POST /users and `project:create` take.
+ * The queue worker's request and authenticated user are left as they are.
  */
 final class ControllerProjectDeployer implements ProjectDeployer
 {

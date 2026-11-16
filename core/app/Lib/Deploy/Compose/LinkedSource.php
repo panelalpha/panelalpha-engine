@@ -3,15 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 /**
- * Where a bind source in the account's home really leads. The account's dockerd
- * follows symlinks in a bind source, and a git checkout keeps them, so a
- * repository committing `data -> /var/run` turns `./data:/sock` into the
- * account's docker socket while the text of the source looks harmless.
- *
- * Core sees the account's home at the same path as the account container does
- * (both bind /home/<user>), so links inside it are read here. A link target
- * outside that home is never followed: core's filesystem there is not the
- * account's, and leaving the home is refused anyway.
+ * Where a bind source in the account's home really leads, since dockerd follows a committed symlink
+ * (`data -> /var/run`). Core sees the home at the account's path; a target outside it is never followed.
  */
 final class LinkedSource
 {
@@ -21,11 +14,8 @@ final class LinkedSource
     private const PANELALPHA_DIR = '.panelalpha';
 
     /**
-     * Whether $source leaves the account's home, goes through a symlink that
-     * ends outside ~/project and ~/.panelalpha, or cannot be inspected.
-     * $source is relative to $projectDir (core's path of ~/project, where the
-     * run file sits), or an absolute path as the account container sees it.
-     * A part that does not exist yet is taken as written: compose creates it.
+     * Whether $source (relative to $projectDir, or absolute as the account sees it) leaves the home, goes
+     * through a link ending outside ~/project and ~/.panelalpha, or cannot be inspected. No link: the text checks own it.
      */
     public static function escapes(string $source, string $projectDir): bool
     {
@@ -34,92 +24,144 @@ final class LinkedSource
         $project = basename($projectDir);
         $accountHome = '/home/'.basename($home);
         if (! is_dir($home)) {
-            // No checkout to look into, so no link to follow.
             return false;
         }
 
-        $source = trim($source);
-        if (str_starts_with($source, '/')) {
-            $pending = self::inHome($source, $accountHome);
-            if ($pending === null) {
-                // Outside the home only its text can be judged, but a `..` in it
-                // may climb back in through a part of the account's own tree.
-                return in_array('..', explode('/', $source), true);
-            }
-            $segments = [];
-        } else {
-            $segments = [$project];
-            $pending = explode('/', $source);
+        $start = self::walkStart(trim($source), $project, $accountHome);
+        if (is_bool($start)) {
+            return $start;
         }
 
         clearstatcache();
-        $followed = 0;
-        // How many trailing parts of $segments do not exist (yet).
-        $missing = 0;
-        while ($pending !== []) {
-            $name = array_shift($pending);
-            if ($name === '' || $name === '.') {
-                continue;
-            }
-            if ($name === '..') {
-                if ($segments === []) {
-                    return true;
-                }
-                array_pop($segments);
-                // Back out of what compose would create, and onto the real tree.
-                $missing = max(0, $missing - 1);
-
-                continue;
-            }
-            $parent = self::join($home, $segments);
-            $segments[] = $name;
-            if ($missing > 0) {
-                $missing++;
-
-                continue;
-            }
-            $path = $parent.'/'.$name;
-            if (! is_link($path)) {
-                if (@lstat($path) === false) {
-                    // Absent is fine; a directory we may not search could hide a link.
-                    if (! is_executable($parent)) {
-                        return true;
-                    }
-                    $missing = 1;
-                }
-
-                continue;
-            }
-
-            array_pop($segments);
-            $target = @readlink($path);
-            if ($target === false || ++$followed > self::MAX_LINKS) {
-                return true;
-            }
-            if (str_starts_with($target, '/')) {
-                $next = self::inHome($target, $accountHome);
-                if ($next === null) {
-                    return true;
-                }
-                $segments = [];
-            } else {
-                $next = explode('/', $target);
-            }
-            $pending = [...$next, ...$pending];
+        $walk = self::walk(['segments' => $start[0], 'pending' => $start[1], 'missing' => 0, 'followed' => 0], $home, $accountHome);
+        if ($walk === null) {
+            return true;
         }
 
-        // No link on the way: the text is the path, and the text checks own it.
-        if ($followed === 0) {
+        if ($walk['followed'] === 0) {
             return false;
         }
 
-        return ! in_array($segments[0] ?? null, [$project, self::PANELALPHA_DIR], true);
+        return ! in_array($walk['segments'][0] ?? null, [$project, self::PANELALPHA_DIR], true);
     }
 
     /**
-     * The parts of absolute $path below $home, `..` kept for the walk, or null
-     * when it does not start there. Not normalised first: `link/..` is the
-     * parent of the link's target, not the directory holding the link.
+     * Outside the home only an absolute source's text can be judged, but a `..` in it may climb back in.
+     *
+     * @return bool|array{0: list<string>, 1: list<string>} the verdict, or the walk's segments and pending parts
+     */
+    private static function walkStart(string $source, string $project, string $accountHome): bool|array
+    {
+        if (str_starts_with($source, '/')) {
+            $pending = self::inHome($source, $accountHome);
+            if ($pending === null) {
+                return in_array('..', explode('/', $source), true);
+            }
+
+            return [[], $pending];
+        }
+
+        return [[$project], explode('/', $source)];
+    }
+
+    /**
+     * `missing` counts the trailing segments that do not exist (yet); null once the walk escapes.
+     *
+     * @param  array{segments: list<string>, pending: list<string>, missing: int, followed: int}  $walk
+     * @return array{segments: list<string>, pending: list<string>, missing: int, followed: int}|null
+     */
+    private static function walk(array $walk, string $home, string $accountHome): ?array
+    {
+        while ($walk['pending'] !== []) {
+            $name = array_shift($walk['pending']);
+            if ($name === '' || $name === '.') {
+                continue;
+            }
+            $walk = $name === '..' ? self::stepBack($walk) : self::stepInto($walk, $name, $home, $accountHome);
+            if ($walk === null) {
+                return null;
+            }
+        }
+
+        return $walk;
+    }
+
+    /**
+     * Back out of what compose would create, and onto the real tree.
+     *
+     * @param  array{segments: list<string>, pending: list<string>, missing: int, followed: int}  $walk
+     * @return array{segments: list<string>, pending: list<string>, missing: int, followed: int}|null
+     */
+    private static function stepBack(array $walk): ?array
+    {
+        if ($walk['segments'] === []) {
+            return null;
+        }
+        array_pop($walk['segments']);
+        $walk['missing'] = max(0, $walk['missing'] - 1);
+
+        return $walk;
+    }
+
+    /**
+     * An absent part is fine, as compose creates it; a directory we may not search could hide a link.
+     *
+     * @param  array{segments: list<string>, pending: list<string>, missing: int, followed: int}  $walk
+     * @return array{segments: list<string>, pending: list<string>, missing: int, followed: int}|null
+     */
+    private static function stepInto(array $walk, string $name, string $home, string $accountHome): ?array
+    {
+        $parent = self::join($home, $walk['segments']);
+        $walk['segments'][] = $name;
+        if ($walk['missing'] > 0) {
+            $walk['missing']++;
+
+            return $walk;
+        }
+        $path = $parent.'/'.$name;
+        if (! is_link($path)) {
+            if (@lstat($path) === false) {
+                if (! is_executable($parent)) {
+                    return null;
+                }
+                $walk['missing'] = 1;
+            }
+
+            return $walk;
+        }
+
+        array_pop($walk['segments']);
+
+        return self::throughLink($walk, $path, $accountHome);
+    }
+
+    /**
+     * @param  array{segments: list<string>, pending: list<string>, missing: int, followed: int}  $walk
+     * @return array{segments: list<string>, pending: list<string>, missing: int, followed: int}|null
+     */
+    private static function throughLink(array $walk, string $path, string $accountHome): ?array
+    {
+        $target = @readlink($path);
+        if ($target === false || ++$walk['followed'] > self::MAX_LINKS) {
+            return null;
+        }
+        if (str_starts_with($target, '/')) {
+            $next = self::inHome($target, $accountHome);
+            if ($next === null) {
+                return null;
+            }
+            $walk['segments'] = [];
+        } else {
+            $next = explode('/', $target);
+        }
+        $walk['pending'] = [...$next, ...$walk['pending']];
+
+        return $walk;
+    }
+
+    /**
+     * The parts of absolute $path below $home, `..` kept for the walk, or null when it does not start there.
+     * Not normalised first: `link/..` is the parent of the link's target.
      *
      * @return list<string>|null
      */

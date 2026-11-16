@@ -23,7 +23,11 @@ function response(status: number, body: unknown = {}): APIResponse {
 /** The engine's own wording (ProjectBusyException). */
 const running = response(409, {
   message:
-    "Project 'pwtest' is busy: deploy task 507 is running. Cancel it (POST /tasks/507/cancel) or wait for it to finish.",
+    "Project 'pwtest' is busy: deploy task 507 is running. Cancel task 507 or wait for it to finish.",
+  code: 'project_busy_task',
+  problems: [
+    { field: 'project', code: 'project_busy_task', message: 'busy', task_id: 507, hints: [] },
+  ],
 });
 const stopping = response(409, {
   message:

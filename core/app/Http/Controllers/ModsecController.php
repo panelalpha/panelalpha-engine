@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ModsecAuditLogTailRequest;
 use App\Http\Resources\ModsecRulesetCollection;
 use App\Lib\Modsec\AuditLogFiles;
 use App\Models\Setting;
@@ -100,18 +101,9 @@ class ModsecController extends Controller
     )]
     public function enableRuleset(string $name): JsonResponse
     {
-        $system = $this->systemWithRuleset($name);
+        $this->systemWithRuleset($name)->modsec()->setRulesetEnabled($name, true);
 
-        $config = Setting::getModsecConfig();
-        if (! in_array($name, $config['enabled_rulesets'])) {
-            $config['enabled_rulesets'][] = $name;
-            Setting::setModsecConfig('enabled_rulesets', $config['enabled_rulesets']);
-            $system->modsec()->rebuildConfig();
-        }
-
-        return new JsonResponse([
-            'data' => null,
-        ]);
+        return new JsonResponse(['success' => true]);
     }
 
     #[OA\Put(
@@ -126,18 +118,9 @@ class ModsecController extends Controller
     )]
     public function disableRuleset(string $name): JsonResponse
     {
-        $system = $this->systemWithRuleset($name);
+        $this->systemWithRuleset($name)->modsec()->setRulesetEnabled($name, false);
 
-        $config = Setting::getModsecConfig();
-        if (in_array($name, $config['enabled_rulesets'])) {
-            $enabled = array_values(array_filter($config['enabled_rulesets'], static fn ($rs): bool => $rs !== $name));
-            Setting::setModsecConfig('enabled_rulesets', $enabled);
-            $system->modsec()->rebuildConfig();
-        }
-
-        return new JsonResponse([
-            'data' => null,
-        ]);
+        return new JsonResponse(['success' => true]);
     }
 
     #[OA\Put(
@@ -156,6 +139,7 @@ class ModsecController extends Controller
             new OA\Response(response: 200, description: 'Updated rulesets', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/ModsecRuleset'))],
             )),
+            new OA\Response(response: 422, description: 'A file name the ruleset does not hold, or files the webserver would not load with the ruleset enabled; nothing is renamed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function toggleConfigFiles(string $name, Request $request): ModsecRulesetCollection
@@ -172,7 +156,11 @@ class ModsecController extends Controller
         $enable = ! empty($params['enable']) ? $params['enable'] : [];
         $disable = ! empty($params['disable']) ? $params['disable'] : [];
 
-        $system->modsec()->toggleConfigFiles($name, $enable, $disable);
+        try {
+            $system->modsec()->toggleConfigFiles($name, $enable, $disable);
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['config_files' => $e->getMessage()]);
+        }
 
         return $this->getRulesets();
     }
@@ -332,16 +320,29 @@ class ModsecController extends Controller
         summary: 'Tail a ModSecurity audit log file',
         security: [['bearerAuth' => []]],
         tags: ['ModSecurity'],
-        parameters: [new OA\Parameter(name: 'filename', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        description: 'The audit log entries in the last 50 KB of the file, newest first.',
+        parameters: [
+            new OA\Parameter(name: 'filename', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(
+                name: 'limit',
+                in: 'query',
+                required: false,
+                description: 'The most entries to return, newest first. Omitted: every entry in the last 50 KB.',
+                schema: new OA\Schema(type: 'integer', minimum: 1, maximum: AuditLogFiles::MAX_TAIL_ENTRIES),
+                x: ['mcp-default' => '10', 'mcp-description' => 'The most entries to return, newest first, up to '.AuditLogFiles::MAX_TAIL_ENTRIES.'.'],
+            ),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Tail of log file', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(type: 'object'))],
             )),
+            new OA\Response(response: 404, description: 'No such file, or core cannot read it'),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function tailAuditLogFile(string $filename): JsonResponse
+    public function tailAuditLogFile(string $filename, ModsecAuditLogTailRequest $request): JsonResponse
     {
-        $logs = (new AuditLogFiles)->tail($filename) ?? abort(new JsonResponse([
+        $logs = (new AuditLogFiles)->tail($filename, $request->limit()) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
 

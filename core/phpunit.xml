@@ -29,5 +29,7 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELEMETRY_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="PA_EXCHANGE_DIR" value="/tmp"/>
+        <env name="PA_PUSH_LOCK" value="/tmp/panelalpha-cache-registry.lock"/>
     </php>
 </phpunit>

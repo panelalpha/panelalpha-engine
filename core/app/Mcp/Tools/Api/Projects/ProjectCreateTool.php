@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a new hosting project (async)
 
-    Creates the account now and deploys it in the background: answers 202 with a task `id`. Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks the best public name it can, a free panelalpha.online one when available, and project_get says which (details.domain). Resource limits are set afterwards with project_update. For a public github.com repository `data.inspection` in the answer is what its file list says before the clone: a `reason` there means it may not deploy, and the project is created anyway.
+    Creates a project and deploys it in the background: answers a task `id`; poll task_get until completed, failed or cancelled. `source` says what to deploy: {"type": "git", "url": "https://github.com/owner/repo", "branch": "main"} (private: "auth": {"type": "token", "token": "vault:<key>"}; SSH remote: "auth": {"type": "deploy_key", "key": "vault:<key>"} from vault_deploy_key_create), {"type": "archive", "url": "https://..."} or {"type": "archive", "upload_id": "..."} from upload_create, {"type": "project", "from": "<name>"} to copy a project, {"type": "wordpress", "title": "...", "admin": {"user", "email", "password"}}, or omit it for an empty container project. Leave `domain` out unless the user has a domain of their own: then {"name": "...", "tunnel": "none"}. For a public github.com repository `data.inspection` says before the clone whether it may deploy. When the user wants one answer with the finished project and can wait, project_create_sync deploys inside the call and returns the project.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectCreateTool extends ApiTool
@@ -37,38 +37,15 @@ class ProjectCreateTool extends ApiTool
     protected function bodyParams(): array
     {
         return [
-            'username',
-            'domain',
+            'name',
+            'runtime',
             'email',
-            'memory_limit',
-            'template',
-            'tunnel',
-            'git_repo',
-            'git_branch',
-            'git_token',
-            'env_vars',
-            'recipe',
-            'stages',
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    protected function argumentNames(): array
-    {
-        return [
-            'name' => 'username',
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    protected function defaults(): array
-    {
-        return [
-            'template' => 'dind',
+            'domain',
+            'limits',
+            'settings',
+            'network',
+            'source',
+            'build',
         ];
     }
 
@@ -78,18 +55,64 @@ class ProjectCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted. Example: johndoe.'),
-            'domain' => $schema->string()->description('Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can. Example: shop-4f2a.panelalpha.online.'),
-            'email' => $schema->string()->description('Example: john@example.com.'),
-            'memory_limit' => $schema->integer()->description('MB, at least 6, or 256 for a container project (template dind or a git_repo). Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
-            'template' => $schema->string()->description('dind runs the app in containers of its own; the other templates are classic shared hosting. This tool sends dind when it is omitted.'),
-            'tunnel' => $schema->string()->description('Omitted, the Engine setting `default_tunnel` decides: none uses `<name>.<cert_domain>` and registers nothing; panelalpha and an unset setting both use the default ladder (a configured base domain first, a free panelalpha.online name otherwise). An explicit value here wins. One of: panelalpha, none.'),
-            'git_repo' => $schema->string()->description('HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect. Example: https://github.com/owner/repo.git.'),
-            'git_branch' => $schema->string(),
-            'git_token' => $schema->string()->description('Token for a private repository. Prefer a `vault:<key>` from vault_secret_create over the token itself.'),
-            'env_vars' => $schema->object()->description('KEY=value applied to the app\'s .env and container on every deploy.'),
-            'recipe' => $schema->string()->description('Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only. Example: php.'),
-            'stages' => $schema->object()->description('Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.'),
+            'name' => $schema->string()->description('The project name: 3-15 lowercase letters and digits, starting with a letter. Generated when omitted, from the repository, the domain or the copied project, with a numeric suffix when taken. Example: shop.'),
+            'runtime' => $schema->string()->description('container: the application runs in containers of its own. php_hosting: classic Apache/PHP-FPM hosting. Omitted: what the source implies, else container. One of: container, php_hosting.'),
+            'email' => $schema->string()->description('Example: owner@example.com.'),
+            'domain' => $schema->object(fn ($schema): array => [
+                'name' => $schema->string()->description('A domain of the caller\'s own (usually with tunnel none), or a label under panelalpha.online. Omitted: <name>.<sites_base_domain>, a free panelalpha.online label, or <name>.<cert_domain>, in that order. Example: shop.example.com.'),
+                'tunnel' => $schema->string()->description('How the domain reaches this host. Omitted, the engine setting default_tunnel decides. panelalpha: a PanelAlpha Online tunnel, so `name`, if given, must be a panelalpha.online label. none: nothing is registered. One of: panelalpha, none.'),
+                'redirect_url' => $schema->string()->description('Redirect the domain here instead of serving the project. Example: https://example.com/.'),
+            ])->description('The project\'s main domain. Omitted entirely, the engine picks the best public name it can.'),
+            'limits' => $schema->object(fn ($schema): array => [
+                'disk' => $schema->integer()->description('MB'),
+                'memory' => $schema->integer()->description('MB, at least 6, or 256 for a container project; at most memory_budget.max_project_mb in GET /metrics/current'),
+                'cpu' => $schema->number()->description('CPU cores, fractions allowed'),
+                'device_read_bps' => $schema->integer()->description('Bytes a second'),
+                'device_write_bps' => $schema->integer()->description('Bytes a second'),
+                'bandwidth' => $schema->integer()->description('MB a month. Reported against the month\'s transfer, never enforced'),
+                'mysql_databases' => $schema->integer(),
+                'ftp_accounts' => $schema->integer(),
+                'sftp_accounts' => $schema->integer(),
+                'addon_domains' => $schema->integer(),
+                'subdomains' => $schema->integer(),
+                'inodes' => $schema->integer(),
+            ])->description('Resource limits; -1 is unlimited. Each is optional: memory defaults to the server\'s project default, disk to unlimited, the rest to none.'),
+            'settings' => $schema->object(fn ($schema): array => [
+                'php_fpm_pool_settings' => $schema->string(),
+                'lsphp_settings' => $schema->string(),
+                'redis_config' => $schema->string(),
+            ])->description('Hosting settings, stored as given.'),
+            'network' => $schema->object(fn ($schema): array => [
+                'dedicated_ipv4' => $schema->boolean(),
+                'dedicated_ipv6' => $schema->boolean(),
+            ])->description('Dedicated addresses; refused when the engine has no free one (`no_free_address`).'),
+            'source' => $schema->object(fn ($schema): array => [
+                'type' => $schema->string()->description('none: empty project. git: clone a repository (container). archive: deploy a .zip/.tar.gz (container). project: copy another project. wordpress: a php_hosting project with a fresh WordPress. One of: none, git, archive, project, wordpress. Example: git.')->required(),
+                'url' => $schema->string()->description('git: the repository. HTTPS (github.com/owner/repo is completed to https://), or an SSH remote (git@host:owner/repo.git, ssh://git@host:port/owner/repo.git), which needs auth type deploy_key. archive: an http(s) URL of a .zip or .tar.gz the deploy downloads (format read from the file itself). Example: https://github.com/acme/shop.'),
+                'branch' => $schema->string()->description('git: branch or tag; omitted, the remote\'s default branch. Checked against the remote before anything is created. Example: main.'),
+                'auth' => $schema->object(fn ($schema): array => [
+                    'type' => $schema->string()->description('One of: none, token, deploy_key. Example: token.'),
+                    'token' => $schema->string()->description('type token: the token, or a vault:<key> of type git_token. Never stored in a task or log. Example: vault:Kq3xT9bLmW2vR8nYp4sZ6cHd.'),
+                    'key' => $schema->string()->description('type deploy_key: the vault:<key> POST /vault/deploy-keys returned. Example: vault:Pd7mW3qZ9xL2vB8nR4tY6cHk.'),
+                ])->description('git: how the clone authenticates; omitted, anonymously. token: an HTTPS token (or a vault:<key> of type git_token). deploy_key: an SSH key from POST /vault/deploy-keys, as vault:<key>; its public half must be on the repository before the create.'),
+                'upload_id' => $schema->string()->description('archive: an id from POST /uploads. The create claims it and moves it into the project. Example: upl_01jaxk3m5v9w2c8e4r7t6y1b0n.'),
+                'path' => $schema->string()->description('archive, PUT /projects/{username}/source only: an archive already in the project home. Example: /project/app.zip.'),
+                'from' => $schema->string()->description('project: the project to copy. The copy takes its limits, settings, template and files; only `name` and `domain.name` may be given. Example: shop.'),
+                'copy_databases' => $schema->boolean()->description('project: copy the application\'s databases too. Default true.'),
+                'title' => $schema->string()->description('wordpress: the site title, at most 255 characters. Example: My shop.'),
+                'admin' => $schema->object(fn ($schema): array => [
+                    'user' => $schema->string()->description('1-60 letters, digits, spaces or _ . @ - Example: admin.'),
+                    'email' => $schema->string()->description('Example: owner@example.com.'),
+                    'password' => $schema->string()->description('At least 8 characters. Never stored by the engine or shown in a task. Example: a long passphrase.'),
+                ])->description('wordpress: the first administrator.'),
+                'locale' => $schema->string()->description('wordpress: core language, e.g. en_US, de_DE; default en_US. Example: en_US.'),
+                'version' => $schema->string()->description('wordpress: latest (default) or a version such as 6.6.2. Example: latest.'),
+            ])->description('Where a project\'s code comes from. `type` decides which other keys apply; a key of another type is refused (`unknown_field`). none: an empty project (a container project waits for files). git: `url`, `branch`, `auth`. archive: exactly one of `upload_id`, `url` (or `path`, on PUT /projects/{username}/source only). project: `from`, `copy_databases`. wordpress: `title`, `admin`, `locale`, `version`.'),
+            'build' => $schema->object(fn ($schema): array => [
+                'env_vars' => $schema->object()->description('KEY=value applied to the app\'s .env and container on every deploy, outranking what the platform generates. A value may be a vault:<key> of type env_vars. At most 200; an empty value is not stored. Example: {"APP_ENV":"production"}.'),
+                'recipe' => $schema->string()->description('Recipe id to deploy with instead of the detected one, from POST /source/inspect application.candidates. This deploy only. Example: php.'),
+                'stages' => $schema->object()->description('Commands this deploy runs, per stage (precheck, prepare, build, install, upgrade, start): {stage: [{id, run, optional, serve, timeout, workdir, role}]}; [] skips a stage. This deploy only.'),
+            ])->description('How a container project builds. Not taken by a php_hosting project or a copy; an empty project takes `env_vars` only.'),
         ];
     }
 }

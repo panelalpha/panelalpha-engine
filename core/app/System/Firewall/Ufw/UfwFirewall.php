@@ -9,56 +9,46 @@ use App\System\Firewall\FirewallClash;
 use App\System\Firewall\FirewallCommandFailed;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
-use App\System\Firewall\FirewallLogEntry;
 use App\System\Firewall\FirewallNotFound;
 use App\System\Firewall\FirewallRule;
 use App\System\Firewall\FirewallStatus;
 use App\System\Firewall\TrustedAddress;
+use App\System\Privileged;
+use App\System\Privileged\RootFirewall;
 use App\System\ProcessRunner;
 use Symfony\Component\Process\Process;
 
 /**
- * ufw on the engine host, set up by scripts/firewall/ufw.sh.
- *
- * ufw reloads only its own chains, so Docker's rules and the engine's tenant
- * and build chains survive every change made here. ufw does not see ports
- * Docker publishes (2011, FTP, SFTP) on its own; the host hook in
- * scripts/firewall/ufw.sh sends them through ufw's route rules from
- * DOCKER-USER, which are the rules here with the scope `published`.
+ * ufw on the engine host, set up by scripts/firewall/ufw.sh; it reloads only its own chains, so Docker's survive.
+ * Ports Docker publishes reach ufw's route rules (scope `published`) through the host hook in DOCKER-USER.
  */
 class UfwFirewall implements ExemptsApiCallers, Firewall
 {
-    private const RULES = '/etc/ufw/user.rules';
-
-    private const RULES6 = '/etc/ufw/user6.rules';
-
-    private const CONF = '/etc/ufw/ufw.conf';
+    private const RULES = RootFirewall::RULES;
 
     /** The rule files as they were before a write, kept there while it holds {@see self::LOCK}. */
-    public const SNAPSHOT = '/opt/panelalpha/shared-hosting/data/ufw-snapshot';
+    public const SNAPSHOT = RootFirewall::SNAPSHOT;
 
     /** How far back the logs are read: lines, per source. */
     private const SCAN = 5000;
 
     /** fail2ban's ignore list, which scripts/firewall/ufw.sh turns into jail config. */
-    private const TRUSTED = '/etc/fail2ban/panelalpha-ignoreip';
-    /** The same, read by the engine-api jail alone: where PanelAlpha Connect calls from. */
-    private const API_TRUSTED = '/etc/fail2ban/panelalpha-api-ignoreip';
+    private const TRUSTED = RootFirewall::TRUSTED_LISTS[0];
 
-    private const SCRIPT = '/opt/panelalpha/shared-hosting/scripts/firewall.sh';
+    /** The same, read by the engine-api jail alone: where PanelAlpha Connect calls from. */
+    private const API_TRUSTED = RootFirewall::TRUSTED_LISTS[1];
 
     /**
-     * ufw rewrites user.rules whole on every call, so two writers at once lose
-     * or resurrect each other's rules. Every ufw write on the host takes this
-     * lock: the engine's, scripts/firewall/ufw.sh's and fail2ban's ban action.
+     * ufw rewrites user.rules whole, so two writers at once lose or resurrect each other's rules.
+     * Every ufw write on the host takes this lock: the engine's, scripts/firewall/ufw.sh's and fail2ban's ban action.
      */
-    public const LOCK = '/opt/panelalpha/shared-hosting/data/ufw.lock';
+    public const LOCK = RootFirewall::LOCKS[0];
 
     /**
      * Serialises read-modify-writes of the trusted list, here and in ufw.sh's CSF import.
      * Not {@see self::LOCK}: saving the list reloads fail2ban, whose ban action waits for that one.
      */
-    public const TRUSTED_LOCK = '/opt/panelalpha/shared-hosting/data/ufw-trusted.lock';
+    public const TRUSTED_LOCK = RootFirewall::LOCKS[1];
 
     private const LOCK_WAIT = 30;
 
@@ -91,11 +81,11 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
 
     public function status(): FirewallStatus
     {
-        $version = $this->system->runProcessOnHost(['ufw', 'version']);
+        $version = $this->system->runProcessOnHost(Privileged::firewall()->version());
         if (! $version->isSuccessful()) {
             return new FirewallStatus($this->name(), null, error: trim($version->getErrorOutput() ?: $version->getOutput()) ?: 'ufw is not installed');
         }
-        $status = $this->system->runProcessOnHost(['ufw', 'status', 'verbose']);
+        $status = $this->system->runProcessOnHost(Privileged::firewall()->status());
         $out = $status->getOutput();
         if (! $status->isSuccessful()) {
             return new FirewallStatus($this->name(), null, error: trim($status->getErrorOutput() ?: $out));
@@ -122,7 +112,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
      */
     private function refusedRules(): array
     {
-        $check = $this->system->runProcessOnHost(['bash', self::SCRIPT, '--refused']);
+        $check = $this->system->runProcessOnHost(Privileged::firewall()->refusedRules());
         $lines = $check->isSuccessful() ? preg_grep('/\t/', preg_split('/\R/', $check->getOutput()) ?: []) : [];
         if ($lines === [] || $lines === false) {
             return [];
@@ -164,11 +154,11 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     /** A missing user6.rules (IPV6=no) is not an error: the IPv4 rules are still read. */
     public function rules(): array
     {
-        $v4 = $this->system->runProcessOnHost(['cat', self::RULES]);
+        $v4 = $this->system->runProcessOnHost(Privileged::firewall()->rules());
         if (! $v4->isSuccessful()) {
             throw new FirewallCommandFailed('Could not read '.self::RULES.': '.trim($v4->getErrorOutput()));
         }
-        $v6 = $this->system->runProcessOnHost(['cat', self::RULES6]);
+        $v6 = $this->system->runProcessOnHost(Privileged::firewall()->rules6());
 
         return UfwRules::parse($v4->getOutput(), $v6->isSuccessful() ? $v6->getOutput() : '');
     }
@@ -195,9 +185,8 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * ufw would write over a rule that differs from this one only in its
-     * action or comment, or skip this one for it: a managed rule would lose
-     * its prefix, a deny would turn into an allow, or half a rule would go in.
+     * ufw would write over a rule differing from this one only in action or comment, or skip this one for it:
+     * a managed rule would lose its prefix, a deny would turn into an allow, or half a rule would go in.
      *
      * @param  list<FirewallRule>  $rules
      */
@@ -279,7 +268,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     private function deleteHalves(array $halves): void
     {
         foreach ($halves as $half) {
-            $this->system->runProcessOnHost(['ufw', ...self::withVerb(['delete'], $half)]);
+            $this->system->runProcessOnHost(Privileged::firewall()->ufw(self::withVerb(['delete'], $half)));
         }
     }
 
@@ -322,11 +311,8 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * ufw cannot hold the new rule beside the old one (a new comment, a shared
-     * ufw rule, or one the two would be listed as), so the old one goes first. A
-     * new comment shares no ufw rule with another, but can pair it with one. A
-     * ban's new rule waits for a lock of its own: fail2ban's unban, run once this
-     * one is released, would take it too.
+     * ufw cannot hold the new rule beside the old one, so the old goes first; one with the old match can only pair.
+     * A ban's new rule waits for a lock of its own: fail2ban's unban, run once this one is released, would take it too.
      *
      * @param  list<FirewallRule>  $others
      * @return array{0: FirewallRule, 1: ?FirewallRule, 2: ?list<FirewallRule>}
@@ -379,12 +365,8 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * fail2ban may have banned the address again between an edit's two locks,
-     * also when the edit keeps what the ban matched. The rules that came in
-     * since are checked against, a ban with the old rule's id included. One
-     * made only of ufw rules $rule has too, action and comment alike, is no
-     * clash: ufw skips those and writes the rest. fail2ban usually bans again
-     * with the comment it banned with before.
+     * Rules that came in between an edit's two locks are checked by toArray(), not id: fail2ban's new ban, usually
+     * with its old comment, can carry the old rule's id. One made only of ufw rules $rule has too is no clash.
      *
      * @param  list<FirewallRule>  $seen
      */
@@ -428,7 +410,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
      */
     private function unbanAfterUnlock(string $source): void
     {
-        $this->afterUnlock[] = fn () => $this->system->runProcessOnHost(['fail2ban-client', 'unban', $source]);
+        $this->afterUnlock[] = fn () => $this->system->runProcessOnHost(Privileged::firewall()->unban($source));
     }
 
     /**
@@ -455,20 +437,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
 
     public function logs(int $limit = 100, ?string $type = null, ?string $address = null): array
     {
-        $entries = [];
-        if ($type === null || $type === FirewallLogEntry::BLOCKED) {
-            $entries = UfwLogs::parseKernel($this->kernelLog());
-        }
-        if ($type !== FirewallLogEntry::BLOCKED) {
-            $entries = [...$entries, ...$this->banLog()];
-        }
-
-        $address = $address === null ? null : FirewallRule::normalizeAddress($address);
-        $entries = array_filter($entries, static fn (FirewallLogEntry $e): bool => ($type === null || $e->type === $type)
-            && ($address === null || $e->address === $address));
-        usort($entries, static fn (FirewallLogEntry $a, FirewallLogEntry $b): int => $b->time <=> $a->time);
-
-        return array_slice($entries, 0, $limit);
+        return (new UfwLogReader($this->system, self::SCAN))->read($limit, $type, $address);
     }
 
     public function trustedAddresses(): array
@@ -489,7 +458,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     /** @return list<TrustedAddress> */
     private function readList(string $path): array
     {
-        $file = $this->system->runProcessOnHost(['cat', $path]);
+        $file = $this->system->runProcessOnHost(Privileged::firewall()->readTrustedList($path));
 
         return TrustedAddress::parseList($file->isSuccessful() ? $file->getOutput() : '');
     }
@@ -507,7 +476,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
             }
             $list[$address->id()] = $address;
             $this->saveTrusted(array_values($list));
-            $this->system->runProcessOnHost(['fail2ban-client', 'unban', $address->address]);
+            $this->system->runProcessOnHost(Privileged::firewall()->unban($address->address));
 
             return $address;
         });
@@ -538,11 +507,11 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
      */
     private function saveTrusted(array $list, string $path = self::TRUSTED): void
     {
-        $write = $this->system->runProcessOnHost(['sh', '-c', 'mkdir -p "$(dirname "$0")" && printf "%s" "$1" > "$0"', $path, TrustedAddress::formatList($list)]);
+        $write = $this->system->runProcessOnHost(Privileged::firewall()->writeTrustedList($path, TrustedAddress::formatList($list)));
         if (! $write->isSuccessful()) {
             throw new FirewallCommandFailed('Could not write '.$path.': '.trim($write->getErrorOutput()));
         }
-        $apply = $this->system->runProcessOnHost(['bash', self::SCRIPT, '--fail2ban']);
+        $apply = $this->system->runProcessOnHost(Privileged::firewall()->applyTrustedLists());
         if (! $apply->isSuccessful()) {
             throw new FirewallCommandFailed(trim($apply->getErrorOutput() ?: $apply->getOutput()) ?: 'fail2ban did not take the new list');
         }
@@ -626,15 +595,6 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
         return $lock;
     }
 
-    /** @return list<FirewallLogEntry> fail2ban's bans and unbans, read in the host's time zone */
-    private function banLog(): array
-    {
-        $offset = trim($this->system->runProcessOnHost(['date', '+%:z'])->getOutput());
-        $bans = $this->system->runProcessOnHost(['tail', '-n', (string) self::SCAN, '/var/log/fail2ban.log']);
-
-        return UfwLogs::parseFail2ban($bans->isSuccessful() ? $bans->getOutput() : '', $offset ?: '+00:00');
-    }
-
     /**
      * scripts/firewall/ufw.sh makes the lock file, but core may get here first
      * or find it unreadable to www-data, so it is created on the host once.
@@ -645,7 +605,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     {
         $lock = @fopen($file, 'r');
         if ($lock === false) {
-            $this->system->runProcessOnHost(['sh', '-c', 'mkdir -p "$(dirname "$0")" && touch "$0" && chmod 0644 "$0"', $file]);
+            $this->system->runProcessOnHost(Privileged::firewall()->ensureLockFile($file));
             $lock = @fopen($file, 'r');
         }
         if ($lock === false) {
@@ -653,18 +613,6 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
         }
 
         return $lock;
-    }
-
-    /** ufw's blocked packets, from the journal, or /var/log/ufw.log where rsyslog keeps it. */
-    private function kernelLog(): string
-    {
-        $journal = $this->system->runProcessOnHost(['journalctl', '-k', '--no-pager', '-o', 'short-iso', '-n', (string) self::SCAN, '-g', 'UFW BLOCK']);
-        if ($journal->isSuccessful() && trim($journal->getOutput()) !== '') {
-            return $journal->getOutput();
-        }
-        $file = $this->system->runProcessOnHost(['tail', '-n', (string) self::SCAN, '/var/log/ufw.log']);
-
-        return $file->isSuccessful() ? $file->getOutput() : '';
     }
 
     /**
@@ -685,7 +633,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
      */
     private function snapshot(): bool
     {
-        $copy = $this->system->runProcessOnHost(['sh', '-c', 'rm -rf "$0" && mkdir -p "$0" && for f; do [ ! -e "$f" ] || cp -p "$f" "$0/" || exit 1; done && sed -n "s/^ENABLED=//p" "$0/ufw.conf"', self::SNAPSHOT, self::RULES, self::RULES6, self::CONF]);
+        $copy = $this->system->runProcessOnHost(Privileged::firewall()->snapshotRules());
         if (! $copy->isSuccessful()) {
             throw new FirewallCommandFailed('Could not copy ufw\'s rules aside before changing them, so nothing was changed: '.trim($copy->getErrorOutput() ?: $copy->getOutput()));
         }
@@ -694,26 +642,24 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * After a failed write: the rule files as they were, loaded again. A failed
-     * load leaves INPUT dropping everything with ufw's user chains empty, which
-     * locks the host out, so if they do not load ufw is turned off instead. A
-     * ufw that was off is stopped again, which clears the chains a failed start left.
+     * After a failed write, the old rule files loaded again, or ufw turned off: empty user chains lock the host out.
+     * A ufw that was off is stopped again, which clears the chains a failed start left.
      *
      * @return string|null what the host was left with, or null when it is as it was
      */
     private function rollBack(): ?string
     {
-        $put = $this->system->runProcessOnHost(['sh', '-c', 'for f; do b="$0/${f##*/}"; [ ! -e "$b" ] || cp -p "$b" "$f" || exit 1; done', self::SNAPSHOT, self::RULES, self::RULES6, self::CONF]);
+        $put = $this->system->runProcessOnHost(Privileged::firewall()->restoreRules());
         if (! $put->isSuccessful()) {
             return $this->turnOffAfterRollBack('could not put the rule files back: '.trim($put->getErrorOutput() ?: $put->getOutput()));
         }
         if (! $this->snapshot) {
-            $this->system->runProcessOnHost(['ufw', 'disable']);
+            $this->system->runProcessOnHost(Privileged::firewall()->ufw(['disable']));
 
             return null;
         }
 
-        $reload = $this->system->runProcessOnHost(['ufw', 'reload']);
+        $reload = $this->system->runProcessOnHost(Privileged::firewall()->ufw(['reload']));
         $why = trim($reload->getOutput()."\n".$reload->getErrorOutput());
         if ($reload->isSuccessful() && preg_match('/^ERROR/mi', $why) !== 1) {
             return null;
@@ -724,16 +670,15 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
 
     private function turnOffAfterRollBack(string $why): string
     {
-        $this->system->runProcessOnHost(['ufw', 'disable']);
+        $this->system->runProcessOnHost(Privileged::firewall()->ufw(['disable']));
 
         return 'ufw could not load its rules again, so it was turned off to keep the host reachable: '.$why
             .'. Fix the rules in '.self::RULES.' and enable the firewall again.';
     }
 
     /**
-     * Run ufw, copying the rule files aside first when guarded. Some refusals
-     * exit 0: iptables refusing a stored rule prints its error, then "Rule
-     * added", and ufw's "Invalid syntax" style refusals do too.
+     * Run ufw, copying the rule files aside first when guarded. Some refusals exit 0: iptables refusing
+     * a stored rule prints its error and then "Rule added", as ufw's "Invalid syntax" style refusals do.
      *
      * @param  list<string>  $args
      */
@@ -742,7 +687,7 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
         if ($guarded) {
             $this->snapshot ??= $this->snapshot();
         }
-        $process = $this->system->runProcessOnHost(['ufw', ...$args]);
+        $process = $this->system->runProcessOnHost(Privileged::firewall()->ufw($args));
         $out = trim($process->getOutput()."\n".$process->getErrorOutput());
         preg_match_all('/^ip6?tables.*$/mi', $out, $refusals);
         if ($process->isSuccessful() && $refusals[0] === [] && preg_match('/^(ERROR|Invalid|Bad)/mi', $out) !== 1) {
@@ -753,10 +698,8 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * ufw refusing the rule itself (a bad port, mixed IP versions) is the
-     * request's fault (422) and wrote nothing. Failing to apply it on the host
-     * (502) first rolls back what ufw may have written, since what is live may
-     * differ from the files, or be nothing.
+     * ufw refusing the rule itself (a bad port, mixed IP versions) is the request's fault (422) and wrote nothing. Failing
+     * on the host (502) first rolls back what ufw may have written: what is live may differ from the files, or be nothing.
      *
      * @param  list<string>  $args
      * @param  list<string>  $refusals  iptables lines in the output
@@ -778,9 +721,8 @@ class UfwFirewall implements ExemptsApiCallers, Firewall
     }
 
     /**
-     * ufw's error, without its "ERROR:" prefixes. A rule it cannot parse also
-     * prints the usage page or a traceback; only what comes before is kept,
-     * which holds the ERROR line and, for ufw-init, the line that says why.
+     * ufw's error, without its "ERROR:" prefixes. Of a usage page or traceback only what comes before is kept:
+     * the ERROR line and, for ufw-init, the line that says why.
      */
     private static function errorText(Process $process): string
     {

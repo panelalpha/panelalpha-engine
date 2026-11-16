@@ -2,11 +2,9 @@
 
 namespace App\Lib\Git;
 
+use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
-use App\Exceptions\ProjectBusyException;
-use App\Jobs\DeployProject;
-use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
@@ -21,15 +19,13 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Git;
 use App\System\Project\Git\CheckoutRedeploy;
+use App\System\Project\Git\CouldNotRun;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The git porcelain on a project's checkout, shared by the /git endpoints and
- * the git:* commands. Each action takes its endpoint's validated input and
- * returns the checkout's data; a git refusal is thrown. The endpoints queue a
- * pull, branch change or revert of a Deploy-managed checkout instead
- * ({@see queueRedeploy()}); the commands run it here.
+ * The git porcelain on a project's checkout for the /git endpoints and the git:* commands; a git refusal is thrown.
+ * The endpoints queue a pull, branch change or revert ({@see queueRedeploy()}); the commands run it ({@see changeHere()}).
  */
 class GitActions
 {
@@ -75,7 +71,7 @@ class GitActions
      */
     public function connectRemote(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
         $this->assertSshRemoteUsable($user, (string) ($params['repo_url'] ?? ''));
         $this->assertRemoteAllowed((string) ($params['repo_url'] ?? ''));
@@ -93,7 +89,7 @@ class GitActions
      */
     public function disconnect(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $this->hooks->disconnectAndForget($user, $git));
     }
@@ -103,9 +99,9 @@ class GitActions
      */
     public function changeBranch(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
-        return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->changeBranch($params['branch']), true);
+        return $this->changeHere($user, ProjectRebuild::CHANGE_BRANCH, $params);
     }
 
     /**
@@ -115,7 +111,7 @@ class GitActions
      */
     public function updateCredentials(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
         $provided = array_key_exists('token', $params);
 
@@ -131,9 +127,9 @@ class GitActions
      */
     public function pull(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
-        return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->pull($params['strategy'] ?? null), true);
+        return $this->changeHere($user, ProjectRebuild::GIT_PULL, $params);
     }
 
     /**
@@ -141,7 +137,7 @@ class GitActions
      */
     public function push(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->push());
     }
@@ -151,9 +147,9 @@ class GitActions
      */
     public function revert(User $user, array $params): array
     {
-        $this->refuseWhileCreating($user);
+        CheckoutChangeGuard::refuseWhileCreating($user);
 
-        return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->revert($params['ref'] ?? null), true);
+        return $this->changeHere($user, ProjectRebuild::REVERT, $params);
     }
 
     /**
@@ -169,10 +165,8 @@ class GitActions
     }
 
     /**
-     * The connect runs `git ls-remote` and `git fetch` on the host, whose
-     * network reaches the metadata service and internal services. A host the
-     * egress guard refuses, or cannot resolve to check, is a 422 before
-     * anything is connected.
+     * The connect runs git on the host, whose network reaches the metadata and internal services: a host the
+     * egress guard refuses, or cannot resolve to check, is a 422 before anything is connected.
      *
      * @throws ProblemException
      */
@@ -220,9 +214,8 @@ class GitActions
         if (DeployKey::stored($user) === null) {
             $https = GitRepoInput::httpsEquivalent($repoUrl);
             throw ProblemException::one('repo_url', 'repo_url_ssh_needs_deploy_key',
-                'This project has no deploy key, so an SSH remote cannot authenticate. Create one with '
-                .'POST /projects/{name}/git/deploy-key, add its public key to the repository as a deploy key, '
-                .'and connect again'.($https !== null ? ", or connect {$https} with a token." : '.'),
+                'This project has no deploy key, so an SSH remote cannot authenticate. Create one, add its public '
+                .'key to the repository as a deploy key, and connect again'.($https !== null ? ", or connect {$https} with a token." : '.'),
                 array_filter(['suggestion' => $https]));
         }
 
@@ -233,9 +226,8 @@ class GitActions
     }
 
     /**
-     * Run `$work` on the checkout `$path` names. A git refusal the layer marks
-     * 422 is a validation error under `git`; any other is rethrown without
-     * credentials in its message, still carrying its status for the endpoints.
+     * Run `$work` on the checkout `$path` names. A git refusal marked 422 is a validation error under `git`;
+     * any other is rethrown without credentials in its message, still carrying its status.
      *
      * @template T
      *
@@ -263,85 +255,8 @@ class GitActions
     }
 
     /**
-     * A change to the checkout while the project's create is still running
-     * would reach an account that may not exist yet (`sudo: unknown user`);
-     * one while a queued rebuild or archive deploy runs would change the files
-     * it is building from.
-     *
-     * @throws GitException
-     */
-    private function refuseWhileCreating(User $user): void
-    {
-        $task = ProjectRebuild::pendingTask($user->username);
-        if ($task === null) {
-            return;
-        }
-
-        throw new GitException(
-            $task->job_type === DeployProject::class
-                ? "Project '{$user->username}' is still being created; try again when its deploy has finished."
-                : "A deploy of project '{$user->username}' is queued or running (task {$task->id}); try again when it has finished.",
-            409,
-            taskId: $task->id,
-        );
-    }
-
-    /**
-     * Refuse a change made in this process while the project lock is held: a
-     * hook delivery is not a queued deploy task, and changing the checkout
-     * under it would settle its tree mid-build. A `$logger` is the queued
-     * path's own deploy, which holds this very lock.
-     *
-     * @throws GitException
-     */
-    private function refuseWhileTheLockIsHeld(ProjectAggregate $project, ?DeployLogger $logger): void
-    {
-        if ($logger !== null || ! DeployLogger::isLockedFor($project->username())) {
-            return;
-        }
-
-        throw self::lockHeldRefusal($project->username());
-    }
-
-    /** What holds the lock, decided as {@see ProjectRebuild::assertIdle()} does: a backup or restore task, else a deploy. */
-    private static function lockHeldRefusal(string $username): GitException
-    {
-        $backup = ProjectRebuild::pendingBackupTask($username);
-        if ($backup !== null) {
-            return new GitException(ProjectBusyException::taskRunning($username, $backup)->plainMessage(), 409, taskId: $backup->id);
-        }
-
-        $holder = DeployLock::heldBy($username);
-        if ($holder === DeployLock::HOLDER_BACKUP || $holder === DeployLock::HOLDER_RESTORE) {
-            return new GitException(
-                "A {$holder} of project '{$username}' is running; try again when it has finished.",
-                409,
-            );
-        }
-        if ($holder === DeployLock::HOLDER_DELETE) {
-            return new GitException(
-                "Project '{$username}' is being deleted; try again when it has finished.",
-                409,
-            );
-        }
-
-        $task = ProjectRebuild::pendingTask($username);
-
-        return new GitException(
-            "A deploy of project '{$username}' is running".($task !== null ? " (task {$task->id})" : '')
-                .'; try again when it has finished.',
-            409,
-            taskId: $task?->id,
-        );
-    }
-
-    /**
-     * On a Deploy-managed DinD checkout, check a pull, branch change or revert
-     * here and queue it with the rebuild after it; the task, or null when the
-     * checkout has nothing to rebuild and the caller runs the action itself.
-     * The checkout is changed by the job, not here: the tree the app was
-     * deployed from is kept aside, and put back after a failed rebuild, only
-     * by the process that changes it.
+     * Check a pull, branch change or revert of a Deploy-managed DinD checkout and queue it with the rebuild; null
+     * when there is nothing to rebuild. The job changes it, as only that process may put the served tree back.
      *
      * @param  array<string, mixed>  $params  the endpoint's validated input
      *
@@ -364,15 +279,29 @@ class GitActions
      */
     private function queueIfRebuildable(User $user, Git $git, ProjectAggregate $project, string $action, array $params): ?Task
     {
-        if (! $git->isDeployManaged() || ! $project->runtime() instanceof Dind) {
+        if (! self::rebuildsInTheAccount($git, $project)) {
             return null;
         }
         $rebuild = app(ProjectRebuild::class);
         $rebuild->assertIdle($user);
-        $this->assertChangeAllowed($git, $action, $params);
+        $this->assertChangeAllowedWhereGitRuns($git, $action, $params);
         $input = $this->queuedInput($git, $action, $params);
 
         return $rebuild->whileIdle($user, fn (): Task => $rebuild->queue($user, $action, null, null, null, $input));
+    }
+
+    /**
+     * A container git could not run in is started, or repaired, before the change, and the change refuses there what
+     * these checks would refuse here.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function assertChangeAllowedWhereGitRuns(Git $git, string $action, array $params): void
+    {
+        try {
+            $this->assertChangeAllowed($git, $action, $params);
+        } catch (CouldNotRun) {
+        }
     }
 
     /**
@@ -402,9 +331,8 @@ class GitActions
     }
 
     /**
-     * What a queued pull, branch change or revert runs: the change, then the
-     * rebuild, under the deploy `$logger` the job opened -- and whose lock it
-     * holds -- before the checkout is touched.
+     * What a queued pull, branch change or revert runs: the change, then the rebuild, under the deploy
+     * `$logger` the job opened, and whose lock it holds, before the checkout is touched.
      *
      * @param  array<string, string>  $input  what queueRedeploy() recorded
      * @return array{commit: ?string, checkout: array<string, mixed>}
@@ -450,34 +378,69 @@ class GitActions
      * @param  callable(Git): array<mixed>  $action
      * @return array<mixed>
      */
-    private function run(User $user, ?string $path, callable $action, bool $redeployIfManaged = false): array
+    private function run(User $user, ?string $path, callable $action): array
     {
-        return $this->onCheckout($user, $path, function (Git $git, ProjectAggregate $project) use ($action, $redeployIfManaged): array {
-            if (! $redeployIfManaged) {
-                return $action($git);
+        return $this->onCheckout($user, $path, fn (Git $git): array => $action($git));
+    }
+
+    /**
+     * A pull, branch change or revert run in this process. A Deploy-managed DinD checkout changes as the queued job
+     * changes it, under a deploy of its own ({@see changeUnderOwnDeploy()}); any other has nothing to rebuild.
+     *
+     * @param  array<string, mixed>  $params  the endpoint's validated input
+     * @return array<mixed> the checkout after the change
+     */
+    private function changeHere(User $user, string $action, array $params): array
+    {
+        return $this->onCheckout($user, $params['path'] ?? null, function (Git $git, ProjectAggregate $project) use ($user, $action, $params): array {
+            if (! self::rebuildsInTheAccount($git, $project)) {
+                return $this->changeAndRebuild($git, $project, $this->checkoutChange($action, $this->queuedInput($git, $action, $params)), null)['checkout'];
             }
 
-            return $this->changeAndRebuild($git, $project, $action, null)['checkout'];
+            return $this->changeUnderOwnDeploy($user, $git, $project, $action, $params)['checkout'];
         });
     }
 
     /**
-     * The change, and the rebuild after it, with the served tree kept aside.
-     * Given a `$logger`, a change git refuses, or one cancelled while git
-     * runs, closes that deploy before the tree is settled; the rebuild
-     * finishes it otherwise. A tree put back brings its branch records back
-     * ({@see CheckoutAside}).
+     * The change and its rebuild as the queued job runs them, under a deploy opened first so its lock holds off pushes and
+     * the history records it. A lock already held, or a change the endpoint would refuse, is refused before that deploy.
+     *
+     * @param  array<string, mixed>  $params  the endpoint's validated input
+     * @return array<string, mixed> the commit deployed and the checkout
+     *
+     * @throws DeployAlreadyRunningException when a deploy took the lock after that refusal
+     */
+    private function changeUnderOwnDeploy(User $user, Git $git, ProjectAggregate $project, string $action, array $params): array
+    {
+        CheckoutChangeGuard::refuseWhileTheLockIsHeld($project, null);
+        $this->assertChangeAllowedWhereGitRuns($git, $action, $params);
+        $rebuild = app(ProjectRebuild::class);
+        $logger = $rebuild->openLogWithoutTask($user, $action);
+
+        return $rebuild->run($user, $action, $logger, null, $this->queuedInput($git, $action, $params));
+    }
+
+    /** A checkout whose change rebuilds the app in the account's container. */
+    private static function rebuildsInTheAccount(Git $git, ProjectAggregate $project): bool
+    {
+        return $git->isDeployManaged() && $project->runtime() instanceof Dind;
+    }
+
+    /**
+     * The change and the rebuild, with the served tree kept aside; a tree put back brings its branch records back
+     * ({@see CheckoutAside}). Given a `$logger`, a refused or cancelled change closes that deploy before the settle.
      *
      * @param  callable(Git): array<mixed>  $action
      * @return array{commit: ?string, checkout: array<mixed>}
      */
     private function changeAndRebuild(Git $git, ProjectAggregate $project, callable $action, ?DeployLogger $logger): array
     {
-        if ($git->isDeployManaged() && $project->runtime() instanceof Dind) {
-            $this->refuseWhileTheLockIsHeld($project, $logger);
+        if (self::rebuildsInTheAccount($git, $project)) {
+            CheckoutChangeGuard::refuseWhileTheLockIsHeld($project, $logger);
         }
 
         $redeploy = app(CheckoutRedeploy::class);
+        $this->startTheAccount($git, $project, $redeploy, $logger);
 
         return $redeploy->keepingTheServedTree(
             $git,
@@ -487,9 +450,22 @@ class GitActions
     }
 
     /**
-     * Unfinished, not only running, is what a refused change closes: a cancel sets `cancelled`
-     * without finishing, and the lock it keeps would stop the served tree coming back. A runtime
-     * with nothing to rebuild returns with the deploy still running, so it is finished here.
+     * Git runs in the account's container, so a stopped account is started first, as a push starts it, and before the
+     * served tree is kept aside, which only a running app has. A start that fails closes the deploy with its own error.
+     */
+    private function startTheAccount(Git $git, ProjectAggregate $project, CheckoutRedeploy $redeploy, ?DeployLogger $logger): void
+    {
+        try {
+            $redeploy->startAccountIfStopped($git, $project, $logger);
+        } catch (\Throwable $e) {
+            self::failUnfinished($logger, 'Could not start the account: '.$e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * A refused change closes an unfinished deploy, not only a running one: a cancelled one keeps its lock, which
+     * would stop the served tree coming back. A deploy left running by a runtime with nothing to rebuild ends here.
      *
      * @param  callable(Git): array<mixed>  $action
      * @return array{commit: ?string, checkout: array<mixed>}
@@ -499,9 +475,7 @@ class GitActions
         try {
             $data = $action($git);
         } catch (\Throwable $e) {
-            if ($logger !== null && ! $logger->isFinished()) {
-                $logger->finish(DeployLogger::STATUS_FAILED, 'Could not change the checkout: '.GitUrl::sanitize($e->getMessage()));
-            }
+            self::failUnfinished($logger, 'Could not change the checkout: '.$e->getMessage());
             throw $e;
         }
         $commit = $git->readHeadCommit();
@@ -511,5 +485,12 @@ class GitActions
         }
 
         return ['commit' => $commit, 'checkout' => $data];
+    }
+
+    private static function failUnfinished(?DeployLogger $logger, string $error): void
+    {
+        if ($logger !== null && ! $logger->isFinished()) {
+            $logger->finish(DeployLogger::STATUS_FAILED, GitUrl::sanitize($error));
+        }
     }
 }

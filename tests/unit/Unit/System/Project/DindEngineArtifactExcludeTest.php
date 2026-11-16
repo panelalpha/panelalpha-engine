@@ -196,6 +196,98 @@ class DindEngineArtifactExcludeTest extends TestCase
         $this->assertSame("*.swp\n", $this->excludeFile('.git/info/exclude'));
     }
 
+    public function test_a_lockfile_the_install_generates_is_not_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('package.json', "{\"name\":\"shop\"}\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('package-lock.json', "{\"lockfileVersion\": 3}\n");
+
+        $this->assertSame('', $this->git('status', '--porcelain'));
+        $this->assertContains('/package-lock.json', explode("\n", $this->excludeFile('.git/info/exclude')));
+    }
+
+    public function test_a_lockfile_the_repository_tracks_stays_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('package.json', "{\"name\":\"shop\"}\n");
+        $this->put('package-lock.json', "{\"lockfileVersion\": 3}\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('package-lock.json', "{\"lockfileVersion\": 2}\n");
+
+        $this->assertNotContains('/package-lock.json', explode("\n", $this->excludeFile('.git/info/exclude')));
+        $this->assertSame(' M package-lock.json', rtrim($this->git('status', '--porcelain')));
+    }
+
+    public function test_a_composer_lockfile_a_lockless_php_build_mirrors_is_not_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('composer.json', "{}\n");
+        $this->put('artisan', "#!/usr/bin/env php\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('composer.lock', "{\"_readme\": []}\n");
+
+        $this->assertSame('', $this->git('status', '--porcelain'));
+    }
+
+    public function test_a_dependency_folder_the_install_writes_is_not_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('package.json', "{\"name\":\"shop\",\"scripts\":{\"start\":\"node app.js\"}}\n");
+        $this->put('yarn.lock', "# yarn lockfile v1\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('node_modules/express/index.js', "module.exports = {};\n");
+        $this->put('vendor/composer/installed.php', "<?php return [];\n");
+
+        $lines = explode("\n", $this->excludeFile('.git/info/exclude'));
+        $this->assertContains('/node_modules', $lines);
+        $this->assertContains('/vendor', $lines);
+        $this->assertSame('', $this->git('status', '--porcelain'));
+    }
+
+    public function test_a_dependency_folder_the_repository_commits_stays_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('vendor/lib.php', "<?php\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('vendor/other.php', "<?php\n");
+
+        $this->assertNotContains('/vendor', explode("\n", $this->excludeFile('.git/info/exclude')));
+        $this->assertSame('?? vendor/other.php', rtrim($this->git('status', '--porcelain')));
+    }
+
+    /** An `app_root` installs beside its own manifest, the depth the lockfiles are looked for at. */
+    public function test_a_dependency_folder_beside_an_app_roots_manifest_is_not_the_clients_change(): void
+    {
+        $this->gitInit();
+        $this->put('README.md', "# shop\n");
+        $this->put('frontend/package.json', "{\"name\":\"shop\"}\n");
+        $this->put('api/composer.json', "{}\n");
+        $this->put('api/vendor/lib.php', "<?php\n");
+        $this->put('docs/index.md', "# docs\n");
+        $this->commitAll();
+
+        $this->exclude()->write();
+        $this->put('frontend/node_modules/express/index.js', "module.exports = {};\n");
+        $this->put('api/vendor/other.php', "<?php\n");
+
+        $lines = explode("\n", $this->excludeFile('.git/info/exclude'));
+        $this->assertContains('/frontend/node_modules', $lines);
+        $this->assertNotContains('/api/vendor', $lines, 'the repository tracks a file in it');
+        $this->assertNotContains('/docs/node_modules', $lines, 'no manifest beside it');
+        $this->assertSame('?? api/vendor/other.php', rtrim($this->git('status', '--porcelain')));
+    }
+
     /**
      * @param array<string, mixed>|null $git the account's git details; git_repo when null
      */

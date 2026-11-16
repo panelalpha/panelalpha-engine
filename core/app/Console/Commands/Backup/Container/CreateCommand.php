@@ -112,7 +112,12 @@ class CreateCommand extends BackupContainerCommand
             'credentials' => $credentials,
         ]);
 
+        $container->claimDefaultWhenNone();
+
         $this->info("Backup container created (ID: {$container->id}).");
+        if ($container->is_default) {
+            $this->line('It is the default backup container.');
+        }
 
         return 0;
     }

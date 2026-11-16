@@ -6,6 +6,7 @@ use App\Lib\Deploy\Platform\Runtime\Php\AccountUserFiles;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * The PHP container runs as the bare account uid, which the base image does
@@ -30,30 +31,29 @@ class AccountUserFilesTest extends TestCase
             return end($argv) === '/etc/passwd' ? self::PASSWD : self::GROUP;
         };
 
-        return new AccountUserFiles($run, $cache ?? new Repository(new ArrayStore()));
+        return new AccountUserFiles($run, $cache ?? new Repository(new ArrayStore));
     }
 
     public function test_the_account_uid_and_gid_are_appended_to_the_images_own_files(): void
     {
         $files = $this->files()->for(self::IMAGE, 1246, 1246);
 
-        $this->assertSame(self::PASSWD . "app:x:1246:1246:app:/app:/usr/sbin/nologin\n", $files['passwd']);
-        $this->assertSame(self::GROUP . "app:x:1246:\n", $files['group']);
+        $this->assertSame(self::PASSWD."app:x:1246:1246:app:/app:/usr/sbin/nologin\n", $files['passwd']);
+        $this->assertSame(self::GROUP."app:x:1246:\n", $files['group']);
     }
 
     public function test_the_files_are_read_from_the_host_image_without_pulling(): void
     {
         $this->files()->for(self::IMAGE, 1246, 1246);
 
-        $this->assertSame(
-            ['sudo', 'docker', 'run', '--rm', '--pull', 'never', '--network', 'none', '--entrypoint', 'cat', self::IMAGE, '/etc/passwd'],
-            $this->calls[0]
-        );
+        $this->assertSame('docker.readFileFromImage', LocalRoot::action($this->calls[0]));
+        $this->assertSame(['0', self::IMAGE, '/etc/passwd'], LocalRoot::values($this->calls[0]));
+        $this->assertSame([], LocalRoot::plain($this->calls[0]));
     }
 
     public function test_an_image_is_read_once_per_tag(): void
     {
-        $cache = new Repository(new ArrayStore());
+        $cache = new Repository(new ArrayStore);
         $this->files(null, $cache)->for(self::IMAGE, 1246, 1246);
         $this->files(null, $cache)->for(self::IMAGE, 1300, 1300);
 
@@ -76,7 +76,7 @@ class AccountUserFilesTest extends TestCase
 
     public function test_a_failed_read_mounts_nothing_and_is_not_cached(): void
     {
-        $cache = new Repository(new ArrayStore());
+        $cache = new Repository(new ArrayStore);
         $failing = function (array $argv): string {
             throw new \RuntimeException('No such image');
         };

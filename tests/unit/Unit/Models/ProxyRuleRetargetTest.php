@@ -195,13 +195,13 @@ class ProxyRuleRetargetTest extends TestCase
         $updateBlock = substr($source, $applyPos, $nextPos - $applyPos);
 
         $retargetPos = strpos($updateBlock, 'ProxyRule::retargetServerName');
-        $createPos = strpos($updateBlock, 'projectDomain()->create()');
+        $createPos = strpos($updateBlock, '->create();');
         $this->assertNotFalse($retargetPos, 'project_update must retarget proxy rules on domain change');
         $this->assertNotFalse($createPos, 'project_update must still create the new domain vhost');
         $this->assertLessThan(
             $createPos,
             $retargetPos,
-            'retargetServerName must run before projectDomain()->create() so the new vhost sees the rules'
+            'retargetServerName must run before the new vhost is created so it sees the rules'
         );
         $this->assertStringNotContainsString(
             'detectAndCreateProxyRules',
@@ -217,7 +217,7 @@ class ProxyRuleRetargetTest extends TestCase
         $https = ProxyRule::forUser('nodedemo')->where('listen_port', 443)->firstOrFail();
         $https->update(['upstream_protocol' => 'https']);
 
-        ProxyRule::syncGeneratedHttpPair('nodedemo', 'app.example.test', 8443);
+        ProxyRule::syncGeneratedHttpPairs('nodedemo', ['app.example.test'], 8443);
 
         $rules = ProxyRule::forUser('nodedemo')->orderBy('listen_port')->get();
         $this->assertCount(2, $rules);
@@ -244,7 +244,7 @@ class ProxyRuleRetargetTest extends TestCase
             'is_generated' => false,
         ]);
 
-        ProxyRule::syncGeneratedHttpPair('shop', 'shop.example.test', 3000);
+        ProxyRule::syncGeneratedHttpPairs('shop', ['shop.example.test'], 3000);
 
         $on443 = ProxyRule::forUser('shop')->where('listen_port', 443)->get();
         $this->assertCount(1, $on443, 'no generated rival next to the hand rule');
@@ -287,7 +287,7 @@ class ProxyRuleRetargetTest extends TestCase
         $this->seedGeneratedPair('nodedemo', 'old.example.test', 3000);
         $this->seedGeneratedPair('other', 'other.example.test', 3000);
 
-        ProxyRule::syncGeneratedHttpPair('nodedemo', 'new.example.test', 3000);
+        ProxyRule::syncGeneratedHttpPairs('nodedemo', ['new.example.test'], 3000);
 
         $this->assertSame(
             ['new.example.test', 'new.example.test'],

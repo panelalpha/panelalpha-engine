@@ -44,13 +44,22 @@ class DeployKeyTest extends DeployHookTestCase
         ];
     }
 
+    public static function setUpBeforeClass(): void
+    {
+        parent::setUpBeforeClass();
+
+        if (trim((string) shell_exec('command -v ssh-keygen')) === '') {
+            self::markTestSkipped('ssh-keygen is not installed here.');
+        }
+        if (posix_getpwuid(posix_geteuid()) === false) {
+            self::markTestSkipped('ssh-keygen needs a passwd entry for uid ' . posix_geteuid() . '.');
+        }
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        if (trim((string) shell_exec('command -v ssh-keygen')) === '') {
-            $this->markTestSkipped('ssh-keygen is not installed here.');
-        }
         $this->withoutMiddleware();
         config(['app.debug' => false]);
         $this->fakeGitHost();
@@ -247,6 +256,40 @@ class DeployKeyTest extends DeployHookTestCase
         $this->deleteJson(self::URL . '/deploy-key')->assertStatus(404);
     }
 
+    /** A client that lost the create's answer reads the key again: same shape, nothing made, nothing scanned. */
+    public function test_the_key_is_read_back_without_making_one(): void
+    {
+        $this->project();
+        $created = $this->postJson(self::URL . '/deploy-key', ['host' => 'git.example.test:2222'])->assertStatus(201);
+        $calls = count($this->calls());
+
+        $read = $this->getJson(self::URL . '/deploy-key')->assertStatus(200);
+
+        $this->assertFalse($read->json('data.created'));
+        $this->assertSame($created->json('data.public_key'), $read->json('data.public_key'));
+        $this->assertSame($created->json('data.fingerprint'), $read->json('data.fingerprint'));
+        $this->assertSame($created->json('data.hosts'), $read->json('data.hosts'));
+        $this->assertStringNotContainsString('PRIVATE KEY', (string) $read->getContent());
+        $this->assertCount($calls, $this->calls(), 'the read ran a host command');
+    }
+
+    public function test_reading_a_project_without_a_key_answers_the_deletes_404_and_makes_nothing(): void
+    {
+        $user = $this->project();
+
+        $this->getJson(self::URL . '/deploy-key')
+            ->assertStatus(404)
+            ->assertExactJson(['message' => "Project 'alice' has no deploy key."]);
+
+        $this->assertNull(DeployKey::stored($user->fresh()));
+        $this->assertSame([], $this->calls());
+    }
+
+    public function test_reading_the_key_of_a_project_that_does_not_exist_is_404(): void
+    {
+        $this->getJson('/api/projects/nosuchproject999/git/deploy-key')->assertStatus(404);
+    }
+
     public function test_an_ssh_remote_without_a_deploy_key_is_refused_with_the_way_to_get_one(): void
     {
         $this->project();
@@ -286,7 +329,7 @@ class DeployKeyTest extends DeployHookTestCase
 
         $message = (string) $response->json('problems.0.message');
         $this->assertStringContainsString('This project has no deploy key', $message);
-        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $message);
+        $this->assertSame(['create_deploy_key', 'connect_repository'], array_values(array_unique(array_column($response->json('problems.0.hints'), 'action'))));
         $this->assertStringNotContainsString('does not match the one pinned', $message);
         $this->assertFalse($this->called('GIT_SSH_COMMAND'));
     }

@@ -40,6 +40,37 @@ test.describe('system info', () => {
     expect([null, 'panelalpha', 'none']).toContain(data.default_tunnel ?? null);
   });
 
+  test('names the domains new projects get, the default first', async ({ api }) => {
+    const {
+      project_domain_bases: bases,
+      sites_base_domain,
+      default_tunnel,
+    } = (await api.getSystemInfo()).data;
+
+    expect(bases?.at(-1)).toMatchObject({
+      base: 'local',
+      source: 'local',
+      publicly_resolvable: false,
+    });
+    if (sites_base_domain) {
+      expect(bases?.[0]).toMatchObject({
+        base: sites_base_domain,
+        source: 'sites_base_domain',
+        suffixed: false,
+      });
+    }
+    const online = bases?.find((base) => base.source === 'panelalpha_online');
+    if (default_tunnel === 'none') {
+      expect(online).toBeUndefined();
+    } else if (online) {
+      expect(online).toMatchObject({
+        base: 'panelalpha.online',
+        suffixed: true,
+        publicly_resolvable: true,
+      });
+    }
+  });
+
   test('SSL certificates are listed per user', async ({ api, setupUser }) => {
     expect(Array.isArray((await api.listSslCertificates(setupUser.username)).data)).toBe(true);
   });

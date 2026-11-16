@@ -3,10 +3,15 @@
 namespace App\Http\Resources;
 
 use App\Lib\Deploy\Credentials\AppCredentials;
+use App\Lib\Findings\Hints\FindingPresenter;
 use App\Lib\Host\ProjectDisk;
 use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\Create\ProjectSourceView;
 use App\Lib\Project\ProjectListFacts;
 use App\Lib\Project\ProjectOverview;
+use App\Lib\Project\PublicRouting\ProjectPublicRouting;
+use App\Lib\Project\PublicRouting\PublicRoutingGrants;
+use App\Lib\Ssl\KeptCertificate;
 use App\Lib\Usage\ProjectBandwidth;
 use App\Models\User;
 use App\System\Project\Dind\AppDatabase;
@@ -43,6 +48,7 @@ class UserResource extends JsonResource
             'email' => $user->email,
             'status' => $user->status,
             'protected' => $user->isProtected(),
+            'public_routing' => ProjectPublicRouting::view($user, app(PublicRoutingGrants::class)),
             'staging_of' => $user->relationLoaded('liveUser')
                 ? ($user->liveUser?->username)
                 : null,
@@ -56,6 +62,7 @@ class UserResource extends JsonResource
             'unreadable_secrets' => $user->unreadableSecrets(),
             'warning' => $user->unreadableSecretsWarning(),
             'app' => ProjectOverview::for($user, $facts),
+            'source' => ProjectSourceView::of($user),
             'usage' => $facts->usageOf($user),
             'config' => $user->getConfig(),
             'email_verified_at' => $user->email_verified_at,
@@ -63,7 +70,7 @@ class UserResource extends JsonResource
             'updated_at' => $user->updated_at,
         ];
 
-        if (! empty($request->get('with_domain_names'))) {
+        if ($request->boolean('with_domain_names')) {
             $resource['domain_names'] = $user->listAllDomainNames();
         }
 
@@ -175,10 +182,12 @@ class UserResource extends JsonResource
             $details['site_password_enabled'],
             $details['site_password_version'],
             $details[User::DETAIL_PROTECTED],
+            $details[ProjectPublicRouting::DETAIL],
+            $details[KeptCertificate::DETAIL],
         );
 
         $details['password_protection'] = $passwordProtected;
 
-        return $details;
+        return FindingPresenter::inDetails($details, (string) $user->username);
     }
 }

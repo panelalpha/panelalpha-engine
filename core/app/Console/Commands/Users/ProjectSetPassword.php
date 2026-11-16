@@ -2,20 +2,16 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\User;
 use App\System\Project\SitePasswordProtection;
 use Illuminate\Console\Command;
 
 class ProjectSetPassword extends Command
 {
-    use ResolvesProject;
-
     protected $aliases = ['projects:set-password'];
 
     protected $signature = 'project:set-password
         {--project= : Project username}
-        {--username= : Deprecated alias for --project}
         {--password= : Site password (prompted if omitted)}
         {--force : Skip confirmation}';
 
@@ -23,9 +19,7 @@ class ProjectSetPassword extends Command
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
-        $username = trim((string) $this->option('username'));
+        $username = trim((string) $this->option('project'));
         if ($username === '') {
             $this->error('--project is required.');
 

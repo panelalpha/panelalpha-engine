@@ -9,12 +9,12 @@ use App\Http\Resources\IpAssignedCollection;
 use App\Http\Resources\IpAssignedResource;
 use App\Http\Resources\IpSubnetCollection;
 use App\Http\Resources\IpSubnetResource;
+use App\Lib\Ip\HostIpCleanup;
 use App\Models\IpAssigned;
 use App\Models\IpSubnet;
 use App\Models\Setting;
 use App\Models\User;
 use App\System;
-use App\System\Network;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -256,25 +256,11 @@ class IpController extends Controller
         }
     }
 
-    /**
-     * Runs a host network command best-effort: a failure is logged and the API change stands.
-     *
-     * @param  callable(Network): string  $command
-     */
-    private function runOnHostOrWarn(System $system, callable $command, string $warning): void
-    {
-        try {
-            $system->runProcessOnHost($command($system->network()));
-        } catch (\Exception $e) {
-            Log::warning($warning, [
-                'exception_message' => $e->getMessage(),
-            ]);
-        }
-    }
-
     #[OA\Delete(
         path: '/ip/subnets/{id}',
         summary: 'Delete an IP subnet',
+        description: 'The subnet goes from the engine\'s address management and is not kept; this cannot be undone. Ask '
+            .'the operator to confirm first.',
         security: [['bearerAuth' => []]],
         tags: ['IP Management'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -293,13 +279,9 @@ class IpController extends Controller
 
         $subnet->delete();
 
-        $this->runOnHostOrWarn(
-            new System,
-            fn (Network $network) => $network->generateIpRouteDelCommand($subnet->ip, $subnet->mask, $subnet->family),
-            "Could not delete IP route for subnet {$subnet->ip}/{$subnet->mask}",
-        );
+        $cleaned = app(HostIpCleanup::class)->removeRoute($subnet);
 
-        return new IpSubnetResource($subnet);
+        return (new IpSubnetResource($subnet))->additional(['host_cleanup_failed' => ! $cleaned]);
     }
 
     #[OA\Get(
@@ -456,7 +438,7 @@ class IpController extends Controller
         } catch (\Exception $e) {
             $this->rollBack($ip, "IP assignment {$address}");
             if ($added) {
-                $this->removeUnusedAddress($system, $ip, $ipSubnet);
+                app(HostIpCleanup::class)->removeUnusedAddress($ip, $ipSubnet);
             }
 
             Log::warning("Could not add IP address {$address} to network interface", [
@@ -470,7 +452,7 @@ class IpController extends Controller
 
         if (! $applied) {
             $this->rollBack($ip, "IP assignment {$address}");
-            $this->removeUnusedAddress($system, $ip, $ipSubnet);
+            app(HostIpCleanup::class)->removeUnusedAddress($ip, $ipSubnet);
 
             throw ValidationException::withMessages([
                 'ip_address' => "The host network interface does not carry {$address}/{$ipSubnet->mask} after adding it, "
@@ -485,19 +467,6 @@ class IpController extends Controller
         $packed = inet_pton($address);
 
         return $packed === false ? $address : (string) inet_ntop($packed);
-    }
-
-    /** Take back an address the failed assignment added, unless another project on a shared subnet holds it. */
-    private function removeUnusedAddress(System $system, IpAssigned $ip, IpSubnet $ipSubnet): void
-    {
-        if ($this->addressStillUsed($ip, $ipSubnet)) {
-            return;
-        }
-        $this->runOnHostOrWarn(
-            $system,
-            fn (Network $network) => $network->generateIpAddressDelCommand($ip->ip_address, $ipSubnet->mask, $ipSubnet->family),
-            "Could not delete IP address {$ip->ip_address} from network interface",
-        );
     }
 
     /** Undo one record whose host step did not take, best-effort. */
@@ -559,26 +528,10 @@ class IpController extends Controller
 
         $ip->delete();
 
-        $system = new System;
-        if (! $this->addressStillUsed($ip, $ipSubnet)) {
-            $this->runOnHostOrWarn(
-                $system,
-                fn (Network $network) => $network->generateIpAddressDelCommand($ip->ip_address, $ipSubnet->mask, $ipSubnet->family),
-                "Could not delete IP address {$ip->ip_address} from network interface",
-            );
-        }
+        $system = app(System::class);
+        $cleaned = app(HostIpCleanup::class)->removeUnusedAddress($ip, $ipSubnet);
         $reloaded = $system->rebuildDomains();
 
-        return (new IpAssignedResource($ip))->additional(['reload_pending' => ! $reloaded]);
-    }
-
-    /** A shared address stays on the interface while another project still holds it. */
-    private function addressStillUsed(IpAssigned $ip, IpSubnet $ipSubnet): bool
-    {
-        return $ipSubnet->is_shared
-            && IpAssigned::query()
-                ->where('ip_subnet_id', $ipSubnet->id)
-                ->where('ip_address', $ip->ip_address)
-                ->exists();
+        return (new IpAssignedResource($ip))->additional(['reload_pending' => ! $reloaded, 'host_cleanup_failed' => ! $cleaned]);
     }
 }

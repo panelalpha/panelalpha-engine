@@ -15,18 +15,20 @@ class ProjectBusyExceptionHintTest extends TestCase
 {
     public function test_a_running_backup_is_waited_for_not_cancelled(): void
     {
-        $message = ProjectBusyException::taskRunning('alice', $this->task(CreateBackup::class, Task::STATUS_RUNNING))->getMessage();
+        $refusal = ProjectBusyException::taskRunning('alice', $this->task(CreateBackup::class, Task::STATUS_RUNNING));
 
-        $this->assertSame("Project 'alice' is busy: backup task 36 is running. Wait for it to finish.", $message);
+        $this->assertSame("Project 'alice' is busy: backup task 36 is running. Wait for it to finish.", $refusal->getMessage());
+        $this->assertSame(['code' => ProjectBusyException::CODE], $refusal->problem());
     }
 
     public function test_a_queued_backup_and_a_running_rebuild_can_still_be_cancelled(): void
     {
-        $queued = ProjectBusyException::taskRunning('alice', $this->task(CreateBackup::class, Task::STATUS_QUEUED))->getMessage();
-        $rebuild = ProjectBusyException::taskRunning('alice', $this->task(RebuildProject::class, Task::STATUS_RUNNING))->getMessage();
+        $queued = ProjectBusyException::taskRunning('alice', $this->task(CreateBackup::class, Task::STATUS_QUEUED));
+        $rebuild = ProjectBusyException::taskRunning('alice', $this->task(RebuildProject::class, Task::STATUS_RUNNING));
 
-        $this->assertStringContainsString('Cancel it (POST /tasks/36/cancel)', $queued);
-        $this->assertStringContainsString('Cancel it (POST /tasks/36/cancel)', $rebuild);
+        $this->assertStringContainsString('Cancel task 36', $queued->getMessage());
+        $this->assertStringContainsString('Cancel task 36', $rebuild->getMessage());
+        $this->assertSame(['code' => ProjectBusyException::TASK, 'task_id' => 36], $queued->problem());
     }
 
     public function test_a_queued_task_is_called_queued_not_running(): void
@@ -34,7 +36,7 @@ class ProjectBusyExceptionHintTest extends TestCase
         $message = ProjectBusyException::taskRunning('alice', $this->task(RebuildProject::class, Task::STATUS_QUEUED))->getMessage();
 
         $this->assertSame(
-            "Project 'alice' is busy: rebuild task 36 is queued. Cancel it (POST /tasks/36/cancel) or wait for it to finish.",
+            "Project 'alice' is busy: rebuild task 36 is queued. Cancel task 36 or wait for it to finish.",
             $message,
         );
     }

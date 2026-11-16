@@ -77,10 +77,11 @@ class HubCallerAddressTest extends HubTestCase
         $connection = $this->connection($token);
 
         foreach ([TestNetwork::public2(20), self::connect(), TestNetwork::public2(20), self::connect(), TestNetwork::public2(20)] as $ip) {
+            $this->travel(1)->seconds();
             $this->callFrom($ip, $token->plainTextToken)->assertOk();
         }
 
-        $this->assertSame([TestNetwork::public2(20), self::connect()], array_keys($connection->fresh()->caller_ips));
+        $this->assertSame([self::connect(), TestNetwork::public2(20)], array_keys($connection->fresh()->caller_ips), 'newest first');
         $this->assertSame(
             self::apiList(TestNetwork::public2(20), self::connect()),
             $this->fail2ban->files[self::API_LIST]

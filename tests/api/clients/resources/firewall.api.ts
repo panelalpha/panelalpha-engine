@@ -1,3 +1,4 @@
+import { Timeouts } from '@/config/timeouts';
 import {
   type ApiResponse,
   type FirewallLogEntry,
@@ -30,6 +31,11 @@ export class FirewallApi extends EngineApiBase {
   async reloadFirewall(): Promise<void> {
     const response = await this.api.put('firewall/reload');
     await this.assertStatus(response, 200);
+  }
+
+  /** The reload without a status assertion, so a held lock can be checked for 409. */
+  async reloadFirewallRaw(): Promise<{ status: number; body: unknown }> {
+    return this.rawCall(await this.api.put('firewall/reload', { timeout: Timeouts.apiCall }));
   }
 
   async listFirewallRules(): Promise<ApiResponse<FirewallRule[]>> {

@@ -5,9 +5,8 @@ namespace App\Lib\Deploy\Platform\Metadata;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Every PackageMetadata reader: a class named `<Something>Metadata` in this directory.
- * A seventh ecosystem is a new file, not an edit to a `match`. Ruby and Gradle are
- * absent — both keep their name in executable code, not a document.
+ * Every PackageMetadata reader: a class named `<Something>Metadata` in this directory. Ruby and Gradle are
+ * absent, as both keep their name in executable code.
  */
 final class MetadataRegistry
 {
@@ -43,10 +42,7 @@ final class MetadataRegistry
     }
 
     /**
-     * Every package file this project holds, one record per ecosystem present.
-     *
-     * A list, because polyglot is the normal case: a Laravel app with a Vite
-     * front end has a composer.json and a package.json, both real.
+     * Every package file this project holds, one record per ecosystem present: polyglot is the normal case.
      *
      * @return list<AppPackage>
      */
@@ -64,11 +60,8 @@ final class MetadataRegistry
     }
 
     /**
-     * The package file that best describes the application as a whole.
-     *
-     * The platform's runtime settles it — a Laravel app is a PHP application
-     * that happens to compile assets. With no runtime, or one no reader covers,
-     * the first record wins, which is stable because the registry is sorted.
+     * The package file that best describes the application: the platform runtime's, else the first one a file
+     * named rather than its directory, else the first record (the registry is sorted).
      *
      * @param  list<AppPackage>  $packages
      */
@@ -86,8 +79,6 @@ final class MetadataRegistry
             }
         }
 
-        // Failing that, prefer one a file actually named over one wearing its
-        // directory's name.
         foreach ($packages as $package) {
             if ($package->isNamed()) {
                 return $package;
@@ -98,7 +89,7 @@ final class MetadataRegistry
     }
 
     /**
-     * The metadata block of an inspection report.
+     * The metadata block of an inspection report, the primary package first so `packages[0]` is the application.
      *
      * @return array<string, mixed>
      */
@@ -107,9 +98,6 @@ final class MetadataRegistry
         $packages = self::read($context);
         $primary = self::primary($packages, $runtime);
 
-        // The primary leads the list, or a caller reading `packages[0]` of a Laravel
-        // application gets its asset pipeline (registry order is alphabetical). The rest
-        // stay in registry order, so the result is stable between runs.
         if ($primary !== null) {
             $packages = array_merge([$primary], array_values(array_filter(
                 $packages,

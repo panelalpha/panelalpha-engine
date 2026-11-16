@@ -3,6 +3,8 @@
 namespace App\System\Project\Git;
 
 use App\Exceptions\DeployCancelledException;
+use App\Exceptions\DockerErrorException;
+use App\Lib\Deploy\Checkout\InstallLockfiles;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitTransport;
@@ -14,16 +16,15 @@ use App\Lib\Http\OutboundUrl;
 use App\Lib\Net\EgressRefusedException;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
+use App\System\Privileged;
+use App\System\Privileged\Exchange;
 use App\System\Project\Git\Exception as GitException;
 use App\System\Project\Git\Ref as GitRef;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Everything a git work tree does, independent of how the command is run.
- *
- * App\System\Project\Git (panel API, host or DinD shell) and
- * App\System\Project\Dind\Source\GitRepository (deploy ingest) share this
- * implementation and differ only in the hooks below.
+ * Everything a git work tree does, however the command is run: App\System\Project\Git (panel API, host or DinD shell)
+ * and App\System\Project\Dind\Source\GitRepository (deploy ingest) share it and differ only in the hooks below.
  */
 abstract class WorkTree
 {
@@ -35,6 +36,7 @@ abstract class WorkTree
 
     public const string STRATEGY_PUSH_FIRST = 'push_first';
 
+    /** HEAD before a pull or push, kept for a person to go back to; the restore uses the commit it read itself. */
     protected const string BACKUP_REF = 'refs/panelalpha/backup';
 
     /** Set in .git/config while connect() fetches, so other calls can say "wait" rather than "not connected". */
@@ -45,6 +47,15 @@ abstract class WorkTree
 
     private const array STRATEGIES = [self::STRATEGY_FF, self::STRATEGY_FORCE, self::STRATEGY_PUSH_FIRST];
 
+    /** Git's words for a remote it could not reach, and for one it reached and would not hand over: a private
+     * repository read without a token answers as one that is not there. */
+    private const string UNREACHABLE_OUTPUT = '/could not resolve host|could not resolve proxy|failed to connect'
+        .'|connection (refused|timed out)|network is unreachable|no route to host|operation timed out/i';
+
+    private const string UNREADABLE_OUTPUT = '/could not read username|could not read password|unable to read askpass'
+        .'|terminal prompts disabled|authentication failed|invalid username or (password|token)|http basic: access denied'
+        .'|repository not found|not found: did you run git update-server-info|does not appear to be a git repository/i';
+
     private const array REMOTE_SUBCOMMANDS = ['clone', 'fetch', 'pull', 'push', 'ls-remote', 'submodule'];
 
     protected string $absolutePath;
@@ -52,6 +63,15 @@ abstract class WorkTree
     protected string $pathKey;
 
     private bool $quiet = false;
+
+    /** HEAD's commit before the pull or push under way; null while HEAD has none. */
+    private ?string $headBackup = null;
+
+    /** HEAD's commit before a merge or a force reset of the step under way rewrote the work tree; null until then. */
+    private ?string $workTreeBackup = null;
+
+    /** The index's tree before the pull or push staged over it, so a refused one puts the staging back; null while HEAD has none. */
+    private ?string $indexBackup = null;
 
     /** The account the work tree belongs to. */
     abstract protected function user(): ModelsUser;
@@ -92,25 +112,27 @@ abstract class WorkTree
     }
 
     /**
-     * Whether this checkout has a remote recorded: the Deploy-managed one, or a
-     * Site Git checkout that `connect` set up. The precondition for anything
-     * that pulls from it.
+     * Whether this checkout has a remote recorded, the Deploy-managed one or a Site Git checkout that `connect` set up:
+     * the precondition for anything that pulls from it.
      */
     public function isConnected(): bool
     {
         return $this->user()->getSiteGit($this->pathKey) !== null;
     }
 
-    /** Whether this path is inside a git work tree at all — no throw either way. */
+    /** Whether this path is inside a git work tree; never throws, a git that could not run reading as no. */
     public function hasRepository(): bool
     {
-        return $this->repositoryExistsLenient();
+        try {
+            return $this->repositoryExistsLenient();
+        } catch (CouldNotRun) {
+            return false;
+        }
     }
 
     /**
-     * The checkout's local exclude file, wherever git keeps it — a gitfile's
-     * git directory included. Null when this path is not the top of a work
-     * tree: no repository, or a directory inside someone else's.
+     * The checkout's local exclude file, wherever git keeps it, a gitfile's git directory included. Null when this path
+     * is not the top of a work tree: no repository, or a directory inside someone else's.
      */
     public function localExcludePath(): ?string
     {
@@ -135,9 +157,8 @@ abstract class WorkTree
     }
 
     /**
-     * Whether $relativePath (checkout-relative) differs from what HEAD has.
-     * Always false for a path the repository does not track — nothing to
-     * compare against, so "no change to revert" is the right reading.
+     * Whether $relativePath (checkout-relative) differs from what HEAD has. Always false for a path the repository does
+     * not track: nothing to compare against, so "no change to revert" is the right reading.
      */
     public function fileDiffersFromHead(string $relativePath): bool
     {
@@ -149,9 +170,8 @@ abstract class WorkTree
     }
 
     /**
-     * Restore $relativePath (checkout-relative) to what HEAD has. Caller's
-     * responsibility to have confirmed it is worth doing first — see
-     * {@see fileDiffersFromHead()}.
+     * Restore $relativePath (checkout-relative) to what HEAD has. The caller confirms first that it is worth doing,
+     * with {@see fileDiffersFromHead()}.
      */
     public function restoreFromHead(string $relativePath): void
     {
@@ -271,15 +291,13 @@ abstract class WorkTree
     {
         $this->requireRepository();
 
-        $shallow = trim($this->git(['rev-parse', '--is-shallow-repository'])) === 'true';
+        $shallow = $this->isShallowRepository();
         $this->gitOverNetwork($shallow ? ['fetch', '--unshallow', '--tags', 'origin'] : ['fetch', '--tags', 'origin'], $token);
     }
 
     /**
-     * Fetch the submodules the checkout declares, at the commits it records, at depth 1
-     * like the clone. Run after the clone and again after every change of the checkout,
-     * so a pull that moves a submodule pointer deploys the new commit. Not optional for a
-     * repository that vendors its dependencies so (nextcloud/server's `3rdparty`).
+     * Fetch the declared submodules at their recorded commits, at depth 1 like the clone, after the clone and every
+     * checkout change, so a moved submodule pointer deploys the new commit; required where dependencies are vendored so.
      *
      * @param  ?list<string>  $paths  only these submodules (and theirs, recursively); null for every one
      * @return bool whether submodules were declared and asked for (not whether they all came down)
@@ -461,11 +479,18 @@ abstract class WorkTree
         ];
     }
 
+    /**
+     * False when git answers that this is no work tree.
+     *
+     * @throws CouldNotRun when git could not run at all, which says nothing about the checkout
+     */
     private function repositoryExistsLenient(): bool
     {
         return $this->quietly(function (): bool {
             try {
                 return trim($this->git(['rev-parse', '--is-inside-work-tree'])) === 'true';
+            } catch (CouldNotRun $e) {
+                throw $e;
             } catch (GitException) {
                 return false;
             }
@@ -557,9 +582,8 @@ abstract class WorkTree
     }
 
     /**
-     * Every branch the connected remote has. Connect and pull fetch one branch
-     * only, so the remote-tracking refs never show the others. Empty when not
-     * connected or the remote cannot be asked; the local refs still answer.
+     * Every branch the connected remote has: connect and pull fetch one branch only, so the remote-tracking refs never
+     * show the others. Empty when not connected or the remote cannot be asked; the local refs still answer.
      *
      * @return list<string>
      */
@@ -615,7 +639,7 @@ abstract class WorkTree
     {
         $this->requireRepository();
 
-        $output = trim($this->git(self::logArgs($limit ?? 50, $branch)));
+        $output = trim($this->git(self::logArgs($limit ?? 50, $this->revisionToLog($branch))));
         if ($output === '') {
             return [];
         }
@@ -628,6 +652,62 @@ abstract class WorkTree
         }
 
         return $commits;
+    }
+
+    /**
+     * The branch as the checkout has it, or as its remote-tracking ref: the branch list reads the
+     * remote, so a branch the checkout never fetched is fetched here, once, to list it.
+     */
+    private function revisionToLog(?string $branch): ?string
+    {
+        if ($branch === null || $branch === '') {
+            return null;
+        }
+
+        GitRef::assertName($branch);
+        foreach ([$branch, 'origin/'.$branch] as $revision) {
+            if ($this->commitIsHere($revision)) {
+                return $revision;
+            }
+        }
+
+        return $this->fetchedBranchRevision($branch);
+    }
+
+    /**
+     * The branch's remote-tracking ref, after fetching it: the remote's own sentence when it has no
+     * such branch, a 422 without git's words when it could not be fetched.
+     */
+    private function fetchedBranchRevision(string $branch): string
+    {
+        $siteGit = $this->user()->getSiteGit($this->pathKey);
+        $token = $siteGit['token'] ?? null;
+
+        try {
+            $this->fetchBranch($branch, $token);
+        } catch (GitException $e) {
+            throw self::remoteLacksBranch($e)
+                ? $this->branchNotFound($branch, $token)
+                : self::branchNotFetched($branch, $e);
+        }
+
+        if ($this->commitIsHere('origin/'.$branch)) {
+            return 'origin/'.$branch;
+        }
+
+        throw $this->branchNotFound($branch, $token);
+    }
+
+    private static function branchNotFetched(string $branch, GitException $e): GitException
+    {
+        Log::warning('git_commits: could not fetch the branch to list it', [
+            'branch' => $branch,
+            'error' => GitUrl::sanitize($e->getMessage()),
+        ]);
+
+        return new GitException("The branch '{$branch}' could not be fetched from the remote, so this project's "
+            .'checkout has no commits of it to list. Check that this server can reach the repository and that the '
+            .'stored token still reads it, then try again.', 422, 'git_branch_not_fetched');
     }
 
     /**
@@ -669,6 +749,7 @@ abstract class WorkTree
 
         if ($ref !== 'HEAD') {
             GitRef::assertName($ref);
+            $this->assertRevertTargetHere($ref);
         } else {
             $this->assertHeadToRevertTo();
         }
@@ -676,6 +757,62 @@ abstract class WorkTree
         $this->resetHardTo($ref);
 
         return $this->status();
+    }
+
+    /**
+     * The checkout is a depth-1 clone, so an earlier commit is fetched before it is refused: going
+     * back to one is what revert is for, and the clone never brought its parent down.
+     */
+    private function assertRevertTargetHere(string $ref): void
+    {
+        if ($this->commitIsHere($ref)) {
+            return;
+        }
+
+        $this->fetchRevertTarget($ref);
+
+        if (! $this->commitIsHere($ref)) {
+            throw new GitException("No commit named '{$ref}' in this checkout.", 422, 'git_ref_not_found');
+        }
+    }
+
+    private function commitIsHere(string $ref): bool
+    {
+        try {
+            $this->git(['rev-parse', '--verify', '--quiet', '--end-of-options', $ref.'^{commit}']);
+
+            return true;
+        } catch (GitException) {
+            return false;
+        }
+    }
+
+    /**
+     * The shallow clone is deepened through the remote: the ref alone first, then the whole branch
+     * history for a host that refuses a fetch by a commit it does not advertise.
+     */
+    private function fetchRevertTarget(string $ref): void
+    {
+        $siteGit = $this->user()->getSiteGit($this->pathKey);
+        if ($siteGit === null || ! $this->isShallowRepository()) {
+            return;
+        }
+        $token = $siteGit['token'] ?? null;
+
+        try {
+            $this->gitOverNetwork(['fetch', '--depth=1', 'origin', $ref], $token);
+            if ($this->commitIsHere($ref)) {
+                return;
+            }
+        } catch (GitException) {
+        }
+
+        $this->fetchFullHistory($token);
+    }
+
+    private function isShallowRepository(): bool
+    {
+        return trim($this->git(['rev-parse', '--is-shallow-repository'])) === 'true';
     }
 
     private function assertHeadToRevertTo(): void
@@ -707,14 +844,12 @@ abstract class WorkTree
             return $this->connectRepair($repoUrl, $branch, $token, $siteGit, $repoExists);
         }
 
-        if ($branch !== '') {
-            GitRef::assertName($branch);
-        }
-        $this->probeRemote($repoUrl, $token);
+        $token = $this->connectToken($repoUrl, $token, $siteGit['token'] ?? null);
+        $this->assertConnectable($repoUrl, $branch, $token);
 
         $syncError = null;
         if ($repoExists) {
-            $this->connectExistingRepository($repoUrl, $branch, $siteGit !== null);
+            $syncError = $this->connectExistingRepository($repoUrl, $branch, $siteGit !== null, $token);
         } else {
             $syncError = $this->connectNewRepository($repoUrl, $branch, $token);
         }
@@ -725,6 +860,27 @@ abstract class WorkTree
         }
 
         return $this->withSyncError($this->status(), $branch, $syncError);
+    }
+
+    private function assertConnectable(string $repoUrl, string $branch, ?string $token): void
+    {
+        if ($branch !== '') {
+            GitRef::assertName($branch);
+        }
+        $this->assertRemoteReadable($repoUrl, $branch, $token);
+    }
+
+    /**
+     * The token a connect reads the remote with, then fetches and stores: the one sent, an empty one clearing it, or
+     * $stored for an HTTPS remote, which no deploy key answers.
+     */
+    private function connectToken(string $repoUrl, ?string $token, ?string $stored): ?string
+    {
+        if ($token !== null || GitRepoInput::isSsh($repoUrl)) {
+            return $token;
+        }
+
+        return $stored;
     }
 
     /**
@@ -748,6 +904,7 @@ abstract class WorkTree
         if ($repoUrl === '' || $branch === '') {
             throw new GitException('Git is managed by deploy.', 422);
         }
+        $this->assertRemoteReadable($repoUrl, $branch, $this->connectToken($repoUrl, $token, $this->user()->getGitToken()));
         $this->ensureOriginMatches($repoUrl);
         $this->persistSiteGit($repoUrl, $branch, $token ?? $this->user()->getGitToken());
         $this->mirrorDeployCredentials($branch, $token ?? $this->user()->getGitToken());
@@ -770,20 +927,81 @@ abstract class WorkTree
     }
 
     /**
-     * Ask a token or SSH remote for its heads before anything is written, so a refused
-     * credential or a changed host key fails here. No -C: the checkout may not exist yet.
+     * Read the remote's heads before anything is written, so a repository the credentials cannot read, a changed
+     * host key and a branch the remote does not have are all refused with nothing connected. No -C: the checkout
+     * may not exist yet.
      */
-    private function probeRemote(string $repoUrl, ?string $token): void
+    private function assertRemoteReadable(string $repoUrl, string $branch, ?string $token): void
     {
-        if ($token !== null && $token !== '') {
-            $this->assertUrlSafeForToken($repoUrl, $token);
-            $this->gitOverNetwork(['ls-remote', '--heads', $repoUrl], $token);
-        } elseif (GitRepoInput::isSsh($repoUrl)) {
-            $this->execute(['git', 'ls-remote', '--heads', $repoUrl]);
+        $this->assertUrlSafeForToken($repoUrl, $token);
+
+        try {
+            $heads = self::headNamesFromLsRemote($this->lsRemoteOutsideCheckout($repoUrl, $token));
+        } catch (GitException $e) {
+            if ($this->hostGitCannotPin($e)) {
+                return;
+            }
+
+            throw $this->unreadableRemote($e, $repoUrl, $token !== null && $token !== '');
         }
+
+        if ($branch === '' || $heads === [] || in_array($branch, $heads, true)) {
+            return;
+        }
+
+        throw self::branchNotFoundAmong($branch, $heads);
     }
 
-    private function connectExistingRepository(string $repoUrl, string $branch, bool $alreadyConnected): void
+    /** `ls-remote` outside the checkout, which a first connect has not made yet; its credentials go in the home. */
+    private function lsRemoteOutsideCheckout(string $repoUrl, ?string $token): string
+    {
+        return $this->executeOverNetwork(['git', 'ls-remote', '--heads', $repoUrl], $token);
+    }
+
+    /**
+     * A host git older than 2.37 cannot pin a name the operator has not allowed, so the remote is left unchecked
+     * here: the connect's own fetch refuses it with that reason, as it always has.
+     */
+    private function hostGitCannotPin(GitException $e): bool
+    {
+        return $e->problemCode === EgressRefusedException::CODE
+            && ! HostGitVersion::of($this->system())->pinsAddresses();
+    }
+
+    /**
+     * The remote did not hand over its heads: a 422 saying what to change, in place of git's own words.
+     */
+    private function unreadableRemote(GitException $e, string $repoUrl, bool $withToken): GitException
+    {
+        if ($e->httpStatus !== 400) {
+            return $e;
+        }
+
+        $host = GitUrl::hostOf($repoUrl) ?? 'the repository host';
+
+        if (preg_match(self::UNREACHABLE_OUTPUT, $e->getMessage()) === 1) {
+            return new GitException("Could not reach {$host}, so the repository cannot be read and nothing was "
+                .'connected. Check the address, and that this server can reach it.', 422, 'git_repository_unreachable');
+        }
+
+        if (preg_match(self::UNREADABLE_OUTPUT, $e->getMessage()) === 0) {
+            return new GitException('The repository could not be read: '.$e->getMessage(), 422, 'git_repository_unreadable');
+        }
+
+        return $withToken
+            ? new GitException("The repository could not be read: {$host} refused the token, or it cannot see "
+                .'this repository. Nothing was connected.', 422, 'git_token_refused')
+            : new GitException("The repository could not be read: {$host} has no repository at this address, or it "
+                .'is private and needs a read token. Nothing was connected.', 422, 'git_repository_not_found');
+    }
+
+    /**
+     * A checkout with no commit is what an interrupted connect leaves behind, and a disconnect keeps it: it is synced
+     * like a fresh one, so a retry brings the branch. A checkout that has commits keeps its files untouched.
+     *
+     * @return ?string why the initial sync failed, null when it did not
+     */
+    private function connectExistingRepository(string $repoUrl, string $branch, bool $alreadyConnected, ?string $token): ?string
     {
         if (! $alreadyConnected) {
             $this->refuseWhileConnecting();
@@ -793,7 +1011,17 @@ abstract class WorkTree
         if ($pointUnbornHead) {
             $this->git(['symbolic-ref', 'HEAD', 'refs/heads/'.$branch]);
         }
-        $this->trackOriginBranch($branch);
+
+        if ($this->headCommitExists()) {
+            $this->trackOriginBranch($branch);
+
+            return null;
+        }
+
+        $syncError = $this->fetchAndSyncFreshInit($branch, $token);
+        $this->clearConnecting();
+
+        return $syncError;
     }
 
     /**
@@ -823,9 +1051,8 @@ abstract class WorkTree
     }
 
     /**
-     * Sync a fresh `git init` with origin's branch so connect() alone is enough; depth 1,
-     * as a full history can outlive the request. reset --hard leaves unrelated untracked
-     * files alone. Best-effort: a failure leaves the repository connected but empty, and says why.
+     * Sync a fresh `git init` with origin's branch so connect() alone is enough; depth 1, as a full history can outlive
+     * the request. reset --hard spares unrelated untracked files. Best-effort: a failure leaves it connected but empty.
      *
      * @return ?string why the sync failed, null when it did not
      */
@@ -849,10 +1076,8 @@ abstract class WorkTree
     }
 
     /**
-     * Connecting an existing repository leaves its work tree alone, so it
-     * stays on the branch it is on. Asked for another one, say so rather than
-     * store a branch the checkout is not on; an unborn HEAD has nothing to
-     * keep, so true: point it at the branch once every other check passed.
+     * Connecting leaves an existing work tree on its branch: asked for another, say so rather than store one it is not
+     * on. An unborn HEAD has nothing to keep, so true: point it at the branch once every other check passed.
      */
     private function keepCurrentBranch(string $branch): bool
     {
@@ -879,18 +1104,33 @@ abstract class WorkTree
     }
 
     /**
-     * The connected branch only: on a shallow checkout a bare `fetch origin` pulls every branch's whole history.
-     * The refspec names origin/<branch> because the deploy's clone is single-branch: without it a
-     * fetch of any other branch only reaches FETCH_HEAD. Submodules are not fetched with it: a
-     * submodule commit that cannot be fetched would fail the change itself, before the deploy
-     * fetches the submodules on its own terms ({@see initSubmodules()}).
+     * The connected branch only, as origin/<branch>, which a single-branch clone would leave in FETCH_HEAD. No
+     * submodules: an unfetchable one fails the change. A ref the remote lacks yet still lets a push create it.
+     *
+     * @see initSubmodules() which fetches the submodules afterwards, on the deploy's own terms
      */
-    private function fetchBranch(string $branch, ?string $token): void
+    private function fetchBranch(string $branch, ?string $token, bool $allowMissing = false): void
     {
         $fetch = ['-c', 'fetch.recurseSubmodules=false', 'fetch', 'origin'];
-        $this->gitOverNetwork($branch === ''
-            ? $fetch
-            : [...$fetch, '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch], $token);
+        if ($branch === '') {
+            $this->gitOverNetwork($fetch, $token);
+
+            return;
+        }
+        try {
+            $this->gitOverNetwork([...$fetch, '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch], $token);
+        } catch (GitException $e) {
+            if (! $allowMissing || ! self::remoteLacksBranch($e)) {
+                throw $e;
+            }
+            $this->gitOverNetwork($fetch, $token);
+        }
+    }
+
+    /** The remote has no such branch yet, which an empty repository answers before anything is fetched. */
+    private static function remoteLacksBranch(GitException $e): bool
+    {
+        return str_contains(strtolower($e->getMessage()), "couldn't find remote ref");
     }
 
     private function refuseWhileConnecting(): void
@@ -968,13 +1208,32 @@ abstract class WorkTree
 
         $this->saveConnection($siteGit['repo_url'], $siteGit['branch'], $this->normalizeToken($token));
 
-        return $this->status();
+        return $this->statusAfterStoringCredentials();
     }
 
     /**
-     * Pull the connected branch with $strategy (ff by default). ff never restores
-     * the backup: a refused fast-forward leaves the tree untouched, and the restore
-     * would wipe the untracked files and local edits git spared (see FastForwardPull).
+     * The credentials are the project's records, stored without git: a container git cannot run in leaves them stored,
+     * and the answer says so in a `warning` in place of the checkout's status, not in a 503 that reads as nothing changed.
+     *
+     * @return array<string, mixed>
+     */
+    private function statusAfterStoringCredentials(): array
+    {
+        try {
+            return $this->status();
+        } catch (CouldNotRun $e) {
+            return $this->statusEnvelope([
+                'connected' => true,
+                'warning' => 'The credentials were stored, but the checkout could not be read: '.GitUrl::sanitize($e->getMessage()),
+            ]);
+        }
+    }
+
+    /**
+     * Pull the connected branch with $strategy (ff by default). ff never restores the backup: a refused fast-forward
+     * leaves the tree untouched.
+     *
+     * @see FastForwardPull
      */
     public function pull(?string $strategy = null): array
     {
@@ -1003,6 +1262,7 @@ abstract class WorkTree
     private function overwriteOrMerge(string $strategy, string $branch, ?string $token): void
     {
         if ($strategy === self::STRATEGY_FORCE) {
+            $this->backUpWorkTree();
             $this->resetHardTo('origin/'.$branch);
         } else {
             $this->pullPushFirst($branch, $token);
@@ -1019,11 +1279,9 @@ abstract class WorkTree
         $branch = self::connectedBranch($siteGit);
         $token = $siteGit['token'] ?? null;
 
-        $this->fetchBranch($branch, $token);
+        $this->fetchBranch($branch, $token, allowMissing: true);
 
-        if ($this->isBehindUpstream()) {
-            throw new GitException('Pull first.', 422);
-        }
+        $this->assertNotBehindUpstream();
 
         $dirty = $this->hasWorkingTreeChanges();
         $ahead = $this->isAheadOfUpstream();
@@ -1033,21 +1291,33 @@ abstract class WorkTree
         }
 
         $this->createBackup();
+        $this->restoringBackupOnFailure(fn () => $this->pushToOrigin($branch, $token, $dirty));
 
-        return $this->restoringBackupOnFailure(function () use ($branch, $token, $dirty): array {
-            $this->pushToOrigin($branch, $token, $dirty);
-
-            return $this->status();
-        });
+        return $this->status();
     }
 
-    /** Commits every change first when $commitFirst, then pushes HEAD to origin's $branch. */
+    private function assertNotBehindUpstream(): void
+    {
+        if ($this->isBehindUpstream()) {
+            throw new GitException('Pull first.', 422);
+        }
+    }
+
+    /**
+     * Commits every change first when $commitFirst, then pushes HEAD to origin's $branch.
+     *
+     * @throws PushRefused when the repository turns the push down
+     */
     private function pushToOrigin(string $branch, ?string $token, bool $commitFirst): void
     {
         if ($commitFirst) {
             $this->commitAll();
         }
-        $this->git(['push', 'origin', 'HEAD:'.$branch], $token);
+        try {
+            $this->git(['push', 'origin', 'HEAD:'.$branch], $token);
+        } catch (GitException $e) {
+            throw PushRefused::of($e);
+        }
     }
 
     /** Runs $step, putting the backup back and rethrowing when git fails. */
@@ -1067,8 +1337,12 @@ abstract class WorkTree
      */
     private function branchNotFound(string $branch, ?string $token): GitException
     {
-        $heads = $this->originHeadsOrNone($token);
+        return self::branchNotFoundAmong($branch, $this->originHeadsOrNone($token));
+    }
 
+    /** @param  list<string>  $heads */
+    private static function branchNotFoundAmong(string $branch, array $heads): GitException
+    {
         $suggestion = GitRemoteProbe::closestRef($branch, $heads, []);
         $message = "The remote has no branch named '{$branch}'.";
         if ($suggestion !== null) {
@@ -1167,21 +1441,22 @@ abstract class WorkTree
         $this->assertRemoteHasBranch($branch, $siteGit['token'] ?? null);
     }
 
-    /** What revert() refuses, and a `$ref` that names no commit here, without touching the checkout. */
+    /** What revert() refuses, and a `$ref` that names no commit here, without resetting the work tree. */
     public function assertRevertable(?string $ref = null): void
     {
         $this->requireRepository();
         $ref = $ref ?? 'HEAD';
         if ($ref !== 'HEAD') {
             GitRef::assertName($ref);
+            $this->assertRevertTargetHere($ref);
+
+            return;
         }
 
         try {
             $this->git(['rev-parse', '--verify', '--quiet', '--end-of-options', $ref.'^{commit}']);
         } catch (GitException) {
-            throw $ref === 'HEAD'
-                ? new GitException('Nothing to revert', 422)
-                : new GitException("No commit named '{$ref}' in this checkout.", 422, 'git_ref_not_found');
+            throw new GitException('Nothing to revert', 422);
         }
     }
 
@@ -1223,10 +1498,8 @@ abstract class WorkTree
     }
 
     /**
-     * A single-branch clone's origin fetches its own branch only, and git will
-     * not set or resolve an upstream outside origin's fetch refspec. Added only
-     * once the branch is known to exist: a refspec naming a missing branch
-     * fails every later fetch.
+     * A single-branch clone's origin fetches its own branch only, and git neither sets nor resolves an upstream outside
+     * that refspec. Added only once the branch is known to exist: a refspec naming a missing one fails every later fetch.
      */
     private function addToOriginFetch(string $branch): void
     {
@@ -1267,26 +1540,42 @@ abstract class WorkTree
 
     private function createBackup(): void
     {
-        if (! $this->headCommitExists()) {
-            return;
-        }
-
-        $this->git(['update-ref', self::BACKUP_REF, 'HEAD']);
-    }
-
-    private function headCommitExists(): bool
-    {
-        try {
-            return trim($this->git(['rev-parse', '--verify', 'HEAD'])) !== '';
-        } catch (GitException) {
-            return false;
+        $this->headBackup = $this->headCommit();
+        $this->workTreeBackup = null;
+        $this->indexBackup = trim($this->git(['write-tree']));
+        if ($this->headBackup !== null) {
+            $this->git(['update-ref', self::BACKUP_REF, $this->headBackup]);
         }
     }
 
     /**
-     * A disconnect removes origin, and with it the branch's upstream; the
-     * checkout reported no tracking, ahead or behind until a branch change.
-     * Set as config, since origin/<branch> exists only after the next fetch.
+     * HEAD's commit just before a merge or a force reset rewrites the work tree, for restoreBackup(). A HEAD that
+     * cannot be read stops the step before the rewrite; one that had no commit leaves nothing to put back.
+     */
+    private function backUpWorkTree(): void
+    {
+        $this->workTreeBackup = $this->headBackup === null ? null : trim($this->git(['rev-parse', '--verify', 'HEAD']));
+    }
+
+    private function headCommitExists(): bool
+    {
+        return $this->headCommit() !== null;
+    }
+
+    private function headCommit(): ?string
+    {
+        try {
+            $commit = trim($this->git(['rev-parse', '--verify', 'HEAD']));
+
+            return $commit !== '' ? $commit : null;
+        } catch (GitException) {
+            return null;
+        }
+    }
+
+    /**
+     * A disconnect removes origin and the branch's upstream with it, so the checkout reported no tracking, ahead or
+     * behind until a branch change. Set as config, since origin/<branch> exists only after the next fetch.
      */
     private function trackOriginBranch(string $branch): void
     {
@@ -1310,11 +1599,24 @@ abstract class WorkTree
         }
     }
 
-    /** Best-effort: back to the backup ref, untracked files removed. */
+    /**
+     * Best-effort. Puts back the work tree (`reset --keep`, so a local change is never overwritten), then HEAD and the
+     * index; a sync commit's changes stay in the files, uncommitted, and a checkout with no commit has none again.
+     */
     private function restoreBackup(): void
     {
         try {
-            $this->resetHardTo(self::BACKUP_REF);
+            if ($this->workTreeBackup !== null) {
+                $this->git(['reset', '--keep', $this->workTreeBackup]);
+            }
+            if ($this->headBackup !== null) {
+                $this->git(['reset', '--quiet', $this->headBackup]);
+            } elseif ($this->headCommitExists()) {
+                $this->git(['update-ref', '-d', 'HEAD']);
+            }
+            if ($this->indexBackup !== null) {
+                $this->git(['read-tree', $this->indexBackup]);
+            }
         } catch (GitException) {
         }
     }
@@ -1353,7 +1655,10 @@ abstract class WorkTree
         }
     }
 
-    /** Commit local changes, merge origin's branch, and push whatever origin lacks. */
+    /**
+     * Commit local changes, merge origin's branch, and push whatever origin lacks. A write that lands after the merge
+     * is left uncommitted, so a refused push that resets to before the merge keeps it rather than reverting a commit.
+     */
     private function pullPushFirst(string $branch, ?string $token): void
     {
         if ($this->hasWorkingTreeChanges()) {
@@ -1361,13 +1666,12 @@ abstract class WorkTree
         }
 
         if ($this->isBehindUpstream()) {
+            $this->backUpWorkTree();
             $this->mergeOrigin($branch);
         }
 
-        $ahead = $this->isAheadOfUpstream();
-        $dirty = $this->hasWorkingTreeChanges();
-        if ($dirty || $ahead) {
-            $this->pushToOrigin($branch, $token, $dirty);
+        if ($this->isAheadOfUpstream()) {
+            $this->pushToOrigin($branch, $token, false);
         }
     }
 
@@ -1416,16 +1720,44 @@ abstract class WorkTree
         }
     }
 
+    /**
+     * Commit local changes, never the lockfile an install generated in a checkout that shipped none: that file is the
+     * engine's own output, and a checkout with nothing else staged is left uncommitted.
+     */
     private function commitAll(): void
     {
-        [$name, $email] = $this->commitIdentity();
+        $untracked = $this->untrackedInstallLockfiles();
 
         $this->git(['add', '-A']);
+        if ($untracked !== []) {
+            $this->git(['--literal-pathspecs', 'reset', '--quiet', '--', ...$untracked]);
+        }
+
+        if (trim($this->git(['-c', 'core.quotepath=off', 'diff', '--cached', '--name-only'])) === '') {
+            return;
+        }
+
+        [$name, $email] = $this->commitIdentity();
+
         $this->git([
             '-c', 'user.name='.$name,
             '-c', 'user.email='.$email,
             'commit', '-m', 'Sync from PanelAlpha',
         ]);
+    }
+
+    /**
+     * What an install wrote into a checkout that shipped no lockfile, read before staging makes it the client's.
+     *
+     * @see InstallLockfiles
+     *
+     * @return list<string> checkout-relative
+     */
+    private function untrackedInstallLockfiles(): array
+    {
+        $candidates = InstallLockfiles::candidates($this->absolutePath);
+
+        return array_values(array_diff($candidates, $this->trackedAmong($candidates)));
     }
 
     /**
@@ -1451,9 +1783,8 @@ abstract class WorkTree
     }
 
     /**
-     * Re-create a missing .git from the stored connection. The remote is probed
-     * before .git is created, so a failed probe cannot leave a half-initialized
-     * repository that blocks the next repair.
+     * Re-create a missing .git from the stored connection. The remote is probed before .git is created, so a failed
+     * probe cannot leave a half-initialized repository that blocks the next repair.
      *
      * @param  array{repo_url: string, branch: string, token: ?string}|null  $siteGit
      */
@@ -1475,9 +1806,8 @@ abstract class WorkTree
             throw new GitException('Git is not connected.', 422);
         }
         GitRef::assertName($branch);
-        $this->assertUrlSafeForToken($repoUrl, $token);
 
-        $this->gitOverNetwork(['ls-remote', '--heads', $repoUrl], $token);
+        $this->assertRemoteReadable($repoUrl, $branch, $token);
         $this->initRepositoryOrRemoveIt($branch, $repoUrl);
 
         $this->persistSiteGit($repoUrl, $branch, $token);
@@ -1514,10 +1844,10 @@ abstract class WorkTree
     protected function ensureWorkTreeDirectory(): void
     {
         $system = $this->system();
-        $system->exec(['sudo', 'mkdir', '-p', $this->absolutePath]);
+        $system->exec(Privileged::files()->makeDirectories($this->absolutePath));
         $chown = $this->user()->getChownString();
         if ($chown) {
-            $system->exec(['sudo', 'chown', $chown, $this->absolutePath]);
+            $system->exec(Privileged::files()->changeOwner($chown, $this->absolutePath));
         }
     }
 
@@ -1536,7 +1866,7 @@ abstract class WorkTree
     {
         $gitDir = rtrim($this->absolutePath, '/').'/.git';
         try {
-            $this->system()->exec(['sudo', 'rm', '-rf', $gitDir]);
+            $this->system()->exec(Privileged::files()->removeTree($gitDir));
         } catch (\Throwable) {
         }
     }
@@ -1652,9 +1982,8 @@ abstract class WorkTree
     }
 
     /**
-     * execute() for a command that talks to the remote. GitHub's edge at times
-     * refuses older git's HTTP/2 fingerprint once the refs are listed; the same
-     * request over HTTP/1.1 is let through, so that one failure is retried so.
+     * execute() for a command that talks to the remote. GitHub's edge at times refuses older git's HTTP/2 fingerprint
+     * once the refs are listed, and lets the same request through over HTTP/1.1, so that one failure is retried so.
      *
      * @param  list<string>  $gitCommand  full argv starting with `git`
      */
@@ -1691,6 +2020,8 @@ abstract class WorkTree
             throw $e;
         } catch (GitException $e) {
             throw $e;
+        } catch (DockerErrorException $e) {
+            throw CouldNotRun::inContainer(GitUrl::sanitize($e->getMessage()), $e->isContainerUnavailable());
         } catch (\InvalidArgumentException $e) {
             throw new GitException($e->getMessage(), 422);
         } catch (\Throwable $e) {
@@ -1745,9 +2076,8 @@ abstract class WorkTree
     }
 
     /**
-     * A remote command with redirects off, or the command unchanged when it
-     * does not talk to a remote. A redirecting remote must be refused rather
-     * than silently lead the connection to another host.
+     * A remote command with redirects off, or the command unchanged when it does not talk to a remote: a redirecting
+     * remote must be refused rather than silently lead the connection to another host.
      *
      * @param  list<string>  $gitCommand
      * @return list<string>
@@ -1894,18 +2224,22 @@ abstract class WorkTree
     }
 
     /**
-     * ssh's own words say what failed, not what to do about it. Without a key nothing
-     * is pinned either, so that case goes first: its host-key failure is not a changed key.
+     * An exec docker refused never ran git. ssh's own words say what failed, not what to do about it. Without a key
+     * nothing is pinned either, so that case goes first: its host-key failure is not a changed key.
      */
     private static function failure(string $message, bool $withKey): GitException
     {
+        $notRun = CouldNotRun::fromOutput($message);
+        if ($notRun !== null) {
+            return $notRun;
+        }
         $hostKey = stripos($message, 'Host key verification failed') !== false;
         $refused = stripos($message, 'Permission denied (publickey') !== false;
 
         if (! $withKey && ($hostKey || $refused)) {
             return new GitException($message.' This project has no deploy key, so the SSH remote cannot '
-                .'authenticate. Create one with POST /projects/{name}/git/deploy-key, add its public key to the '
-                .'repository as a deploy key and try again, or connect the repository\'s HTTPS URL with a token.',
+                .'authenticate. Create one, add its public key to the repository as a deploy key and try again, or '
+                .'connect the repository\'s HTTPS URL with a token.',
                 422, 'git_ssh_needs_deploy_key');
         }
         if ($hostKey) {
@@ -1915,7 +2249,7 @@ abstract class WorkTree
         }
         if ($refused) {
             return new GitException($message.' The repository does not accept this project\'s deploy key: add its '
-                .'public half (POST /projects/{name}/git/deploy-key returns it) to the repository as a deploy key.',
+                .'public half, which creating the key returns, to the repository as a deploy key.',
                 422, 'git_ssh_key_refused');
         }
 
@@ -1940,7 +2274,7 @@ abstract class WorkTree
                 $path = $baseDir.'/'.CredentialFiles::SSH_PREFIX.$kind.'-'.bin2hex(random_bytes(8));
                 $this->installCredentialFile($system, self::credentialTempFile($content, 'pa-git-ssh-'), $path, '0600');
                 $installed[] = $path;
-                $system->exec(['sudo', 'chown', $chown, $path]);
+                $system->exec(Privileged::files()->changeOwner($chown, $path));
             }
         } catch (\Throwable $e) {
             foreach ($installed as $path) {
@@ -1952,13 +2286,10 @@ abstract class WorkTree
         return [$installed[0], $installed[1]];
     }
 
-    /** $content in a 0600 temporary file of the engine's own, removed again when it cannot be written. */
+    /** $content in a 0600 file of the engine's own, removed again when it cannot be written. */
     private static function credentialTempFile(string $content, string $prefix): string
     {
-        $temp = tempnam(sys_get_temp_dir(), $prefix);
-        if ($temp === false) {
-            throw new \RuntimeException('Could not create a temporary Git credential file.');
-        }
+        $temp = Exchange::file($prefix);
         if (file_put_contents($temp, $content, LOCK_EX) === false || ! chmod($temp, 0600)) {
             @unlink($temp);
             throw new \RuntimeException('Could not prepare a temporary Git credential file.');
@@ -1971,7 +2302,7 @@ abstract class WorkTree
     private function installCredentialFile(EngineSystem $system, string $temp, string $path, string $mode): void
     {
         try {
-            $system->exec(['sudo', 'install', '-m', $mode, $temp, $path]);
+            $system->exec(Privileged::files()->install($mode, $temp, $path));
         } finally {
             @unlink($temp);
         }
@@ -1993,7 +2324,7 @@ abstract class WorkTree
             $host = GitUrl::hostOf((string) $this->remoteUrl($gitCommand));
             $temp = self::credentialTempFile(GitUrl::askPassScript($token, $host), 'pa-git-askpass-');
             $this->installCredentialFile($system, $temp, $path, '0700');
-            $system->exec(['sudo', 'chown', $chown, $path]);
+            $system->exec(Privileged::files()->changeOwner($chown, $path));
         } catch (\Throwable $e) {
             CredentialFiles::remove($system, $path);
             throw $e;

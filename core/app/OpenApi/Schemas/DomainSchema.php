@@ -14,6 +14,10 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'php_version', type: 'string', example: '8.2', nullable: true),
         new OA\Property(property: 'redirect_url', type: 'string', nullable: true),
         new OA\Property(property: 'ssl', type: 'boolean', example: true),
+        new OA\Property(property: 'details', type: 'object', properties: [
+            new OA\Property(property: 'https_ports', type: 'array', items: new OA\Items(type: 'integer'), example: [443, 8443], description: 'Ports the domain answers HTTPS on'),
+            new OA\Property(property: 'https_port', type: 'integer', example: 443, description: 'The one the project\'s public URL names when this is its main domain'),
+        ]),
         new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
         new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
     ],

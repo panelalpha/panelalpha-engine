@@ -5,22 +5,8 @@ namespace App\Lib\Deploy\CacheManager;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 
 /**
- * Reading one of our own image tags back.
- *
- *     panelalpha/php:8.3-apache-bookworm-paf53449c0-xf4f426f8
- *     └ repository ┘ └ upstream tag ───┘ └ recipe ┘ └ variant┘
- *
- * Both fingerprints are one-way, which is the fact this class exists to be
- * honest about. Nothing publishes `panelalpha/*`, so a tag the engine fails to
- * recognise as its own goes to the pull path, 404s, and falls through to a
- * pull inside the account's nested NAT — 25 minutes and a dead deploy, per
- * {@see \App\\System\\Project\Dind\Inner\ImageSeeding::ensure()}.
- *
- * Everything here is read from `config/core/images.yaml` and nowhere
- * else. A runtime the catalogue does not describe is a runtime the engine
- * builds no image for, so a tag under its name is not one of ours -- there is
- * no compiled-in list to disagree with the file, and renaming a repository
- * there is the whole of renaming it.
+ * Reads one of our own image tags back, e.g. `panelalpha/php:8.3-apache-bookworm-paf53449c0-xf4f426f8`,
+ * from `config/core/images.yaml` only; both fingerprints in it are one-way.
  */
 final class BuiltImage
 {
@@ -63,14 +49,8 @@ final class BuiltImage
     }
 
     /**
-     * Does this tag promise something baked in on top of the standard recipe?
-     *
-     * The variant suffix hashes an extension set, and a hash does not go
-     * backwards: rebuilt from the tag alone, `-xf4f426f8` yields the plain
-     * base wearing a name that promises imagick — an image that installs
-     * cleanly and 500s on the first request that needs it. Only the caller
-     * that still holds the set rebuilds a variant — see
-     * SharedBaseImages::ensurePhp().
+     * Does this tag promise something baked in on top of the standard recipe? Its hash does not go
+     * backwards, so only a caller still holding the set rebuilds it (SharedBaseImages::ensurePhp()).
      */
     public static function isVariant(string $tag): bool
     {
@@ -86,12 +66,8 @@ final class BuiltImage
     }
 
     /**
-     * The Dockerfile that produces this tag, or null when nothing here can.
-     *
-     * A variant tag hashes an extension set and a hash does not go backwards,
-     * so only a caller that still holds the set can rebuild one; $extensions
-     * is that set. Dispatched on the catalogue's repository table rather than
-     * assumed to be PHP, so what the engine builds is what the config says.
+     * The Dockerfile that produces this tag, or null when nothing here can; a variant needs the
+     * $extensions set its hash came from.
      *
      * @param  list<string>  $extensions
      * @param  list<string>  $packages
@@ -105,11 +81,15 @@ final class BuiltImage
 
         return match (self::runtimeFor($tag)) {
             'php' => PhpBaseImage::dockerfile($source, $extensions, $packages),
+            'python' => $packages === [] ? null : PythonBaseImage::dockerfile($source, $packages),
+            'ruby' => $packages === [] ? null : RubyBaseImage::dockerfile($source, $packages),
             default => null,
         };
     }
 
     /**
+     * Anchored on the last `-pa`: an upstream tag may carry one of its own, as `php:8.3-pale-moon` would.
+     *
      * @return array{runtime: string, repository: string, upstreamTag: string, fingerprint: string, variant: ?string}|null
      */
     public static function parts(string $tag): ?array
@@ -124,14 +104,7 @@ final class BuiltImage
             return null;
         }
 
-        // Anchored on the *last* `-pa`: nothing stops an upstream tag carrying
-        // one of its own, as `php:8.3-pale-moon` would.
-        $variant = null;
-        $body = $rest;
-        if (preg_match('/^(.*)-x([0-9a-f]+)$/i', $body, $m) === 1) {
-            $body = $m[1];
-            $variant = $m[2];
-        }
+        [$body, $variant] = self::withoutVariant($rest);
         $cut = strrpos($body, '-pa');
         if ($cut === false || $cut === 0) {
             return null;
@@ -151,16 +124,28 @@ final class BuiltImage
     }
 
     /**
-     * The recipe fingerprint a fresh build would carry, so a caller can tell a
-     * current image from a superseded one. Null means "cannot judge", not "no
-     * images": a caller deciding what to delete must read it as keep.
+     * @return array{0: string, 1: ?string} the tag without its `-x…` suffix, and the variant hash
+     */
+    private static function withoutVariant(string $rest): array
+    {
+        $variant = null;
+        $body = $rest;
+        if (preg_match('/^(.*)-x([0-9a-f]+)$/i', $body, $m) === 1) {
+            $body = $m[1];
+            $variant = $m[2];
+        }
+
+        return [$body, $variant];
+    }
+
+    /**
+     * The recipe fingerprint a fresh build would carry; null means "cannot judge", read as keep.
+     * Ruby and Python fingerprint a per-image apt package set, so they have no single current value.
      */
     public static function currentFingerprint(string $runtime): ?string
     {
         return match ($runtime) {
             'php' => PhpBaseImage::fingerprint(),
-            // Ruby and Python fingerprint an apt package set, which is
-            // per-image rather than per-recipe: no single current value.
             default => null,
         };
     }

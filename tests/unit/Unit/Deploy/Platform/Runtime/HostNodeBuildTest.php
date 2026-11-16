@@ -213,7 +213,7 @@ class HostNodeBuildTest extends TestCase
             'corepack enable --install-directory /tmp/corepack-bin && corepack prepare pnpm@10 --activate',
             $script
         );
-        $this->assertStringEndsWith('fi && pnpm run build', $script);
+        $this->assertStringEndsWith('fi; } && pnpm run build', $script);
         $this->assertStringNotContainsString('hit"; else corepack', $script);
     }
 

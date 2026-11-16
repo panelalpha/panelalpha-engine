@@ -5,11 +5,8 @@ namespace App\Lib\Deploy\Template;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 
 /**
- * Where the shipped deploy resources live: `core/resources/deploy/`.
- *
- * Resolved relative to this file rather than through `resource_path()`, so
- * the generators stay unit-testable without booting the app — the same
- * bargain {@see PlatformRegistry} makes for manifests.
+ * Where the shipped deploy resources live: `core/resources/deploy/`, resolved relative to this file rather
+ * than through `resource_path()` so generators are testable unbooted, the bargain {@see PlatformRegistry} makes.
  */
 final class ResourceDirectory
 {

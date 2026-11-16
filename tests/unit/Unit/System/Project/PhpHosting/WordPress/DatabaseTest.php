@@ -52,6 +52,8 @@ class DatabaseTest extends TestCase
                 'db',
                 'export',
                 '/home/alice/backup.sql',
+                '--single-transaction',
+                '--skip-add-locks',
                 '--exec='.$this->ownerOnlyCodeOf('/home/alice/backup.sql'),
                 '--path=/home/alice/example.test/public_html',
             ],
@@ -82,6 +84,8 @@ class DatabaseTest extends TestCase
                 'db',
                 'export',
                 '/home/alice/dump.sql',
+                '--single-transaction',
+                '--skip-add-locks',
                 '--exec='.$this->ownerOnlyCodeOf('/home/alice/dump.sql'),
                 '--path=/home/alice/other.test/public_html',
             ],
@@ -185,6 +189,18 @@ class DatabaseTest extends TestCase
         return $process;
     }
 
+    public function test_the_export_takes_no_table_locks(): void
+    {
+        $sequence = [];
+        $this->databaseWithFakeRunner(
+            $sequence,
+            results: [['exit_code' => 0, 'stdout' => '', 'stderr' => '']],
+        )->export('/home/alice/backup.sql');
+
+        $this->assertContains('--single-transaction', $sequence[0]);
+        $this->assertContains('--skip-add-locks', $sequence[0]);
+    }
+
     public function test_export_only_the_given_tables(): void
     {
         $sequence = [];
@@ -193,7 +209,7 @@ class DatabaseTest extends TestCase
         $op->export('/home/alice/views.sql', ['wp_view_a', 'wp_view_b']);
 
         $this->assertSame(
-            ['db', 'export', '/home/alice/views.sql', '--tables=wp_view_a,wp_view_b', '--exec='.$this->ownerOnlyCodeOf('/home/alice/views.sql'), '--path=/home/alice/example.test/public_html'],
+            ['db', 'export', '/home/alice/views.sql', '--single-transaction', '--skip-add-locks', '--tables=wp_view_a,wp_view_b', '--exec='.$this->ownerOnlyCodeOf('/home/alice/views.sql'), '--path=/home/alice/example.test/public_html'],
             $sequence[0]
         );
     }

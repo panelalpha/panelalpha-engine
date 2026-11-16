@@ -12,6 +12,7 @@ import { GitApi } from './resources/git.api';
 import { TunnelsApi } from './resources/tunnels.api';
 import { CdnApi } from './resources/cdn.api';
 import { ProjectSettingsApi } from './resources/project-settings.api';
+import { ProjectSourceApi } from './resources/project-source.api';
 import { EnvVarsApi } from './resources/env-vars.api';
 import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
@@ -26,6 +27,7 @@ import { LighthouseApi } from './resources/lighthouse.api';
 import { McpApi } from './resources/mcp.api';
 import { ModSecurityApi } from './resources/modsec.api';
 import { MySqlApi } from './resources/mysql.api';
+import { OverlayApi } from './resources/overlay.api';
 import { PhpApi } from './resources/php.api';
 import { ProxyRulesApi } from './resources/proxy-rules.api';
 import { SftpApi } from './resources/sftp.api';
@@ -33,6 +35,7 @@ import { SystemApi } from './resources/system.api';
 import { UsersApi } from './resources/users.api';
 import { VaultApi } from './resources/vault.api';
 import { WpCliApi } from './resources/wpcli.api';
+import { WordPressApi } from './resources/wordpress.api';
 
 /** TypeScript surface: all domain methods available on {@link EngineApi}. */
 export interface EngineApi
@@ -64,9 +67,12 @@ export interface EngineApi
     TunnelsApi,
     CdnApi,
     ProjectSettingsApi,
+    ProjectSourceApi,
     EnvVarsApi,
     TasksApi,
     BugReportsApi,
+    OverlayApi,
+    WordPressApi,
     VaultApi {}
 
 /**
@@ -106,9 +112,12 @@ export class EngineApi extends EngineApiBase {
     tunnels: TunnelsApi;
     cdn: CdnApi;
     projectSettings: ProjectSettingsApi;
+    projectSource: ProjectSourceApi;
     envVars: EnvVarsApi;
     tasks: TasksApi;
     bugReports: BugReportsApi;
+    overlay: OverlayApi;
+    wordpress: WordPressApi;
     vault: VaultApi;
   };
 
@@ -143,9 +152,12 @@ export class EngineApi extends EngineApiBase {
       tunnels: new TunnelsApi(transport),
       cdn: new CdnApi(transport),
       projectSettings: new ProjectSettingsApi(transport),
+      projectSource: new ProjectSourceApi(transport),
       envVars: new EnvVarsApi(transport),
       tasks: new TasksApi(transport),
       bugReports: new BugReportsApi(transport),
+      overlay: new OverlayApi(transport),
+      wordpress: new WordPressApi(transport),
       vault: new VaultApi(transport),
     };
 

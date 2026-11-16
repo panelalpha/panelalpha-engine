@@ -12,10 +12,8 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * The DNS switch of an imported site, which is the engine's job: once the
- * kept domain resolves to this engine and answers here, request its
- * certificate and remove the preview tunnel. Until then the domain keeps its
- * self-signed certificate and nothing fails.
+ * The DNS switch of an imported site: once the kept domain resolves to this engine and answers here, request its
+ * certificate and remove the preview tunnel. Until then the domain keeps its self-signed certificate and nothing fails.
  */
 final class ImportedDomainSwitch
 {

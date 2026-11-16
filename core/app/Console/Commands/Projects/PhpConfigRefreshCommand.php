@@ -10,17 +10,16 @@ use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\PhpErrorLogConfig;
 
 /**
- * Accounts created before PHP errors reached a project file keep sending them
- * only to the webserver, and on PHP 8.4 log a JIT warning into it at every
- * start. Safe to run again: a project that already has the directives is left
- * as it is. A running handler keeps the ini it started with, so the new lines
- * are read at that handler's next restart.
+ * Accounts created before PHP errors reached a project file keep sending them only to the webserver, on PHP 8.4 log a
+ * JIT warning into it at every start, and keep a document root's user INI for five minutes. Safe to run again: a
+ * project that already has the directives is left as it is. A running handler keeps the ini it started with, so the
+ * new lines are read at that handler's next restart.
  */
 class PhpConfigRefreshCommand extends ProjectFleetCommand
 {
     protected $signature = 'projects:php-config:refresh'.ProjectOptions::SIGNATURE;
 
-    protected $description = 'Write the PHP error-log directives into existing PHP hosting projects; each takes effect at its handler\'s next restart';
+    protected $description = 'Add the PHP directives existing hosting projects lack; each takes effect at its handler\'s next restart';
 
     private string $outcome = '';
 
@@ -39,7 +38,7 @@ class PhpConfigRefreshCommand extends ProjectFleetCommand
         }
 
         (new PhpErrorLogConfig)->apply($runtime);
-        $this->outcome = '  Error-log directives written.';
+        $this->outcome = '  PHP directives written.';
     }
 
     protected function finished(User $user): string

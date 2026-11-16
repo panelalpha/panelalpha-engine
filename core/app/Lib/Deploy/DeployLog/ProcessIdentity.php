@@ -3,18 +3,15 @@
 namespace App\Lib\Deploy\DeployLog;
 
 /**
- * Telling one process from the next one that reused its pid.
- *
- * A cancel request kills the pid recorded in latest.json, but between that
- * being written and somebody pressing cancel the process may have exited and
- * the number been handed to something else -- so the start time is recorded
- * alongside it and checked before any signal is sent.
+ * Tells one process from the next one that reused its pid: a cancel kills the pid in latest.json, so its
+ * start time is recorded alongside it and checked before any signal is sent.
  */
 final class ProcessIdentity
 {
     /** Field 22 of /proc/pid/stat, counting from the field after the comm. */
     private const START_TIME_FIELD = 19;
 
+    /** Read after the last `)`: the parenthesised comm field may itself contain spaces. */
     public static function startTime(int $pid): ?string
     {
         if ($pid <= 0) {
@@ -24,7 +21,6 @@ final class ProcessIdentity
         if (! is_string($stat)) {
             return null;
         }
-        // The comm field is parenthesised and may itself contain spaces.
         $end = strrpos($stat, ')');
         if ($end === false) {
             return null;

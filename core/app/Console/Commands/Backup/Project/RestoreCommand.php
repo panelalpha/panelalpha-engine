@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Backup\Project;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
+use App\Exceptions\DeployAlreadyRunningException;
 use App\Models\Backup as BackupRecord;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -64,7 +65,7 @@ class RestoreCommand extends Command
 
         try {
             $user->project()->backup($record)->restore($only, $exclude);
-        } catch (\RuntimeException $e) {
+        } catch (DeployAlreadyRunningException|\RuntimeException $e) {
             $this->error($e->getMessage());
 
             return 1;

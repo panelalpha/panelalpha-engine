@@ -7,6 +7,7 @@ use App\Models\ProxyRule;
 use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\Generation\GenerationState;
 use App\System\Project\Dind\Generation\RouteSwitch;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -111,7 +113,8 @@ class ZeroDowntimeFailedSwitchTest extends TestCase
         $this->assertIsArray($result);
         $this->assertTrue($result[ZeroDowntimeRedeploy::COPY_KEPT]);
         $this->assertSame(1, $result['exit_code']);
-        $this->assertNotRan('docker rm -f -v');
+        $this->assertNotRan('account-docker.removeContainers');
+        $this->assertNotRan('files.removeIfExists -- /home/u/.panelalpha-next-generation.yml');
 
         $next = (new GenerationState($this->username))->get(GenerationState::NEXT);
         $this->assertNotNull($next, 'NEXT is kept for the sweep to repair from');
@@ -159,6 +162,8 @@ class ZeroDowntimeFailedSwitchTest extends TestCase
         $project->method('userAppDirPath')->willReturn('/home/u/project');
         $project->method('userAppComposeCommand')->willReturnCallback(fn (array $rest): array => ['docker', 'compose', ...$rest]);
         $project->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($project));
+        $project->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($project));
+        $project->method('userAppComposeProjectName')->willReturn('project');
 
         return $project;
     }
@@ -166,7 +171,7 @@ class ZeroDowntimeFailedSwitchTest extends TestCase
     /** @param list<string> $argv */
     private function account(array $argv): string
     {
-        $line = implode(' ', $argv);
+        $line = LocalRoot::composeLine($argv) ?: implode(' ', $argv);
         $this->ran[] = $line;
         if (preg_match('/for port in (\d+); do/', $line, $m) === 1) {
             $port = (int) $m[1];
@@ -185,14 +190,24 @@ class ZeroDowntimeFailedSwitchTest extends TestCase
         }
 
         return match (true) {
-            str_contains($line, "'ps' '--quiet' '--status' 'running'") => "old1\n",
-            str_contains($line, 'docker rm -f -v') => '',
-            str_contains($line, 'label=com.docker.compose.service=app') => "next1\n",
-            str_contains($line, 'docker port next1 3000/tcp') => TestNetwork::ANY . ':' . self::NEXT_PORT . "\n",
+            preg_match('/account-docker\.listContainers .*label com\.docker\.compose\.project=project(?: |$)/', $line) === 1 => '[{"Id":"old1","Names":["/project-app-1"]}]',
+            str_ends_with($line, 'label com.docker.compose.project=project-next') => '[{"Id":"next1"}]',
+            str_contains($line, 'account-docker.listContainers') && str_contains($line, 'label com.docker.compose.service=app') => '[{"Id":"next1"}]',
+            str_contains($line, 'account-docker.containers') => (string) json_encode([self::running(str_ends_with($line, ' next1'))]),
+            str_contains($line, 'account-docker.logTail') => "booting v2\n",
             str_contains($line, 'docker inspect') => "running 0 0\n",
-            str_contains($line, 'docker logs') => "booting v2\n",
             default => '',
         };
+    }
+
+    /** @return array<string, mixed> a running container's inspect; the copy publishes 3000 on NEXT_PORT */
+    private static function running(bool $copy): array
+    {
+        return [
+            'State' => ['Status' => 'running', 'ExitCode' => 0],
+            'RestartCount' => 0,
+            'NetworkSettings' => ['Ports' => $copy ? ['3000/tcp' => [['HostIp' => TestNetwork::ANY, 'HostPort' => (string) self::NEXT_PORT]]] : []],
+        ];
     }
 
     private function assertRan(string $needle): void

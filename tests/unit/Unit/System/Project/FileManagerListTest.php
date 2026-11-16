@@ -9,6 +9,7 @@ use App\System;
 use App\System\Project;
 use App\System\Project\FileManager;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\TestCase;
 
 class FileManagerListTest extends TestCase
@@ -18,8 +19,11 @@ class FileManagerListTest extends TestCase
     /** @var list<list<string>> */
     private array $commands = [];
 
-    /** @var list<string> paths whose find is answered with a permission error */
+    /** @var list<string> directories whose listing is answered with a permission error */
     private array $denied = [];
+
+    /** @var list<int> bytes each command printed */
+    private array $outputBytes = [];
 
     protected function setUp(): void
     {
@@ -169,6 +173,56 @@ class FileManagerListTest extends TestCase
         $this->assertSame('/', $result['path']);
     }
 
+    public function test_only_the_page_is_read_from_a_large_directory(): void
+    {
+        $prefix = str_repeat('n', 200);
+        for ($i = 0; $i < 300; $i++) {
+            touch(sprintf('%s/%s-%03d', $this->homeDir, $prefix, $i));
+        }
+
+        $result = $this->files()->list('/', true, 2);
+
+        $this->assertSame([$prefix . '-000', $prefix . '-001'], array_column($result['entries'], 'name'));
+        $this->assertSame(300, $result['total']);
+        $this->assertTrue($result['truncated']);
+        $this->assertLessThan(2048, max($this->outputBytes), 'the whole directory was read to return two entries');
+    }
+
+    public function test_the_page_is_cut_after_sorting_names_by_byte_order(): void
+    {
+        foreach (['a.txt', 'a', 'a-b', 'B'] as $name) {
+            file_put_contents($this->homeDir . '/' . $name, 'x');
+        }
+        mkdir($this->homeDir . '/z');
+
+        $result = $this->files()->list('/', true, 3);
+
+        $this->assertSame(['z', 'B', 'a'], array_column($result['entries'], 'name'));
+        $this->assertSame(5, $result['total']);
+    }
+
+    public function test_hidden_entries_are_left_out_of_the_count_too(): void
+    {
+        file_put_contents($this->homeDir . '/.hidden', 'x');
+        mkdir($this->homeDir . '/.config');
+        file_put_contents($this->homeDir . '/visible.txt', 'x');
+
+        $result = $this->files()->list('/', false, 1);
+
+        $this->assertSame(['visible.txt'], array_column($result['entries'], 'name'));
+        $this->assertSame(1, $result['total']);
+        $this->assertFalse($result['truncated']);
+    }
+
+    public function test_an_empty_directory_lists_nothing(): void
+    {
+        $result = $this->files()->list('/');
+
+        $this->assertSame([], $result['entries']);
+        $this->assertSame(0, $result['total']);
+        $this->assertFalse($result['truncated']);
+    }
+
     public function test_has_subdirectories_is_true_only_for_a_directory_that_holds_one(): void
     {
         mkdir($this->homeDir . '/parent/child', 0777, true);
@@ -191,11 +245,8 @@ class FileManagerListTest extends TestCase
 
         $this->assertNotSame([], $this->commands);
         foreach ($this->commands as $argv) {
-            $this->assertSame(
-                ['sudo', 'setpriv', '--reuid', '1001', '--regid', '1001', '--clear-groups'],
-                array_slice($argv, 0, 7),
-                'not run as the account: ' . implode(' ', $argv)
-            );
+            $this->assertStringStartsWith('account.', (string) LocalRoot::action($argv), 'not run as the account: ' . implode(' ', $argv));
+            $this->assertSame(['1001', '1001'], array_slice(LocalRoot::values($argv), 0, 2), 'not run as the account: ' . implode(' ', $argv));
         }
     }
 
@@ -243,14 +294,20 @@ class FileManagerListTest extends TestCase
     {
         $commands = &$this->commands;
         $denied = &$this->denied;
+        $outputBytes = &$this->outputBytes;
 
-        return new class ($this->homeDir, $commands, $denied) extends System {
+        return new class ($this->homeDir, $commands, $denied, $outputBytes) extends System {
             /**
              * @param list<list<string>> $commands
              * @param list<string> $denied
+             * @param list<int> $outputBytes
              */
-            public function __construct(private string $homeRoot, private array &$commands, private array &$denied)
-            {
+            public function __construct(
+                private string $homeRoot,
+                private array &$commands,
+                private array &$denied,
+                private array &$outputBytes,
+            ) {
             }
 
             public function projectHomeDirPath(string $username): string
@@ -266,14 +323,23 @@ class FileManagerListTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->commands[] = (array) $cmd;
-                $argv = array_slice((array) $cmd, 7);
-                if (($argv[0] ?? '') === 'find' && in_array(rtrim((string) ($argv[1] ?? ''), '/'), $this->denied, true)) {
+                $argv = LocalRoot::plain((array) $cmd);
+                if ($this->isDeniedListing($argv)) {
                     $argv = ['sh', '-c', 'exit 1'];
                 }
                 $process = new Process($argv);
                 $process->run();
+                $this->outputBytes[] = strlen($process->getOutput());
 
                 return $process;
+            }
+
+            /** The page listing of a denied directory: `sh -c <script> sh <dir>/ <limit>`. */
+            private function isDeniedListing(array $argv): bool
+            {
+                return ($argv[0] ?? '') === 'sh'
+                    && ctype_digit((string) ($argv[5] ?? ''))
+                    && in_array(rtrim((string) ($argv[4] ?? ''), '/'), $this->denied, true);
             }
         };
     }

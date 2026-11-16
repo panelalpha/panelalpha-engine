@@ -3,7 +3,7 @@ export interface IpSubnet {
   ip: string;
   mask: number;
   family: number;
-  is_shared: boolean | number;
+  is_shared: boolean;
 }
 
 export interface IpSubnetListMeta {

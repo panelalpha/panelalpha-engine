@@ -2,10 +2,11 @@
 
 namespace App\Lib\Deploy\Inspect;
 
+use App\Lib\Findings\Finding;
+
 /**
- * What a project's last deploy decided, next to what its files say now. The engine
- * freezes the strategy, port and commit of every deploy onto the account; without that
- * an inspection reports what the files *would* deploy, and the drift is the finding.
+ * What a project's last deploy froze onto the account, next to what its current files say;
+ * the drift between the two is the finding.
  */
 final class DeploymentSnapshot
 {
@@ -21,6 +22,9 @@ final class DeploymentSnapshot
     ];
 
     /**
+     * `platform` is the recipe, not the strategy it shares (`html` and `static` are both static),
+     * and the value to send back as `recipe`.
+     *
      * @param  array<string, mixed>  $details  the account's details
      * @return array<string, mixed>
      */
@@ -28,14 +32,10 @@ final class DeploymentSnapshot
     {
         return [
             'status' => self::stringOrNull($details['deployment_status'] ?? null) ?? 'unknown',
-            'warnings' => is_array($details['deployment_warnings'] ?? null)
-                ? array_values($details['deployment_warnings'])
-                : [],
+            'warnings' => Finding::storable(Finding::allStored($details['deployment_warnings'] ?? [])),
             'source' => self::stringOrNull($details['deploy_source'] ?? null),
             'strategy' => self::stringOrNull($details['deploy_strategy'] ?? null),
             'label' => self::stringOrNull($details['deploy_label'] ?? null),
-            // The recipe, not the strategy it shares: `html` and `static` are both the
-            // static strategy. It is also the value to send back as `recipe`.
             'platform' => self::stringOrNull($details['deploy_platform'] ?? null),
             'runtime' => self::stringOrNull($details['deploy_runtime'] ?? null),
             'port' => self::intOrNull($details['deploy_port'] ?? null),

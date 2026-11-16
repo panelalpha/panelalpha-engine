@@ -163,6 +163,28 @@ class ResourceLimitTest extends TestCase
         $this->assertNull(ResourceLimit::byKey('bandwidth_limit')->rejectionReason('-1'));
     }
 
+    /** A value below zero is either exactly UNLIMITED or refused; nothing between is stored. */
+    public function test_a_negative_other_than_minus_one_is_refused_on_every_limit(): void
+    {
+        foreach (ResourceLimit::all() as $limit) {
+            if ($limit->key !== 'memory_limit') {
+                $this->assertNull($limit->rejectionReason(ResourceLimit::UNLIMITED), "{$limit->key} refused -1");
+            }
+            foreach (['-2', '-5', '-0.5', '-1.5', -99] as $raw) {
+                $this->assertNotNull($limit->rejectionReason($raw), "{$limit->key} took {$raw}");
+            }
+        }
+
+        $this->assertSame(
+            'The cpu limit must be -1 for unlimited, or 0 or more.',
+            ResourceLimit::byKey('cpu_limit')->rejectionReason('-2')
+        );
+        $this->assertSame(
+            'The mysql databases limit must be -1 for unlimited, or 0 or more.',
+            ResourceLimit::byKey('mysql_databases_limit')->rejectionReason('-2')
+        );
+    }
+
     public function test_normalize_keeps_a_real_value(): void
     {
         $this->assertSame(2048, ResourceLimit::byKey('memory_limit')->normalize('2048'));

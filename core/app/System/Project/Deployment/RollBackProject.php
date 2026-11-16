@@ -31,11 +31,12 @@ final class RollBackProject implements FailureDisposition
         return 'rollback';
     }
 
+    /**
+     * Re-read by id: the pipeline may have saved details since, destroy() works off the row, and a newer
+     * project may have taken the name of one deleted under this deploy.
+     */
     private function destroy(ModelsUser $user): void
     {
-        // Re-read: the pipeline may have saved details since, and destroy()
-        // works off the row rather than the in-memory model. By id: a newer
-        // project may have taken the name of one deleted under this deploy.
         $fresh = $user->getKey() === null ? null : ModelsUser::query()->whereKey($user->getKey())->first();
         $fresh?->project()->destroy();
     }

@@ -7,10 +7,8 @@ use App\Models\TaskLog;
 use Illuminate\Support\Collection;
 
 /**
- * One page of a task's log rows after an id cursor, and where the next starts.
- *
- * The default keeps a page of typical deploy output near 100 KB, well under the
- * 256 KB an MCP tool returns; the maximum is the page the API always gave before.
+ * One page of a task's log rows after an id cursor, and where the next starts. The default keeps a page near
+ * 100 KB, under the 256 KB an MCP tool returns; the maximum is the page the API always gave before.
  */
 final class TaskLogPage
 {

@@ -12,6 +12,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\Paths;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 class PathsTest extends TestCase
 {
@@ -209,6 +210,16 @@ class PathsTest extends TestCase
             $app.'/.env,'.$app.'/'.EngineArtifacts::ENV_OVERRIDES,
             $dind->userAppComposeEnv()['COMPOSE_ENV_FILES']
         );
+    }
+
+    /** A recipe hook that runs a stack of its own with `docker compose --file` keeps the name compose derives for it. */
+    public function test_the_script_env_leaves_the_compose_project_name_to_compose(): void
+    {
+        $dind = $this->dindProject('nora', Strategies::COMPOSE);
+
+        $this->writeRunFile('nora');
+
+        $this->assertArrayNotHasKey('COMPOSE_PROJECT_NAME', $dind->userAppComposeEnv());
     }
 
     /**
@@ -410,9 +421,9 @@ class PathsTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $parts = is_array($cmd) ? $cmd : (preg_split('/\s+/', $cmd) ?: []);
-                $exitCode = (count($parts) >= 4 && $parts[0] === 'sudo' && $parts[1] === 'test' && $parts[2] === '-f')
-                    ? (is_file($parts[3]) ? 0 : 1)
+                $request = is_array($cmd) ? $cmd : [];
+                $exitCode = LocalRoot::action($request) === 'files.isFile'
+                    ? (is_file(LocalRoot::values($request)[0]) ? 0 : 1)
                     : 0;
 
                 // Symfony Process has no public exit-code setter, so this

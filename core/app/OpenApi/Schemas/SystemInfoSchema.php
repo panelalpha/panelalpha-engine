@@ -8,6 +8,16 @@ use OpenApi\Attributes as OA;
     schema: 'SystemInfo',
     properties: [
         new OA\Property(property: 'version', type: 'string', example: '1.5.0', nullable: true),
+        new OA\Property(
+            property: 'features',
+            type: 'array',
+            items: new OA\Items(type: 'string'),
+            example: ['project_source'],
+            description: 'What this engine\'s API offers that an older engine\'s does not; a client talking to engines of '
+                .'several versions checks this rather than the version. `project_source`: POST /projects takes the '
+                .'typed body with `source` (none, git, archive, project, wordpress), PUT /projects/{username}/source, '
+                .'POST /uploads and POST /vault/deploy-keys exist, and GET /projects/{username} returns `source`.',
+        ),
         new OA\Property(property: 'url', type: 'string', example: 'https://203-0-113-7.panelalpha.direct:2011', nullable: true, description: "The engine's base URL (APP_URL), on the name its TLS certificate is issued for"),
         new OA\Property(property: 'api_url', type: 'string', example: 'https://203-0-113-7.panelalpha.direct:2011/api', nullable: true),
         new OA\Property(property: 'mcp_url', type: 'string', example: 'https://203-0-113-7.panelalpha.direct:2011/mcp', nullable: true),
@@ -30,7 +40,34 @@ use OpenApi\Attributes as OA;
             nullable: true,
             description: 'What :2011 is actually presenting, which can differ from cert_domain.',
         ),
-        new OA\Property(property: 'sites_base_domain', type: 'string', example: 'example.com', nullable: true, description: 'Where a project without a domain of its own lands: <name>.<sites_base_domain>.'),
+        new OA\Property(property: 'sites_base_domain', type: 'string', example: 'example.com', nullable: true, description: 'The base domain the operator configured: <name>.<sites_base_domain>. Null while unset; project_domain_bases says where projects land then.'),
+        new OA\Property(
+            property: 'project_domain_bases',
+            description: 'The domains a project created with neither `domain` nor `tunnel` is named under, best '
+                .'first: the first is the default, and each next one is used when the one before cannot be had. '
+                .'A suffixed base names the project `<name>-<4 hex>` instead of `<name>`, and that label is bought '
+                .'from PanelAlpha Online at create time, which can be refused (panelalpha_online.last_error). '
+                .'`local` resolves nowhere.',
+            type: 'array',
+            items: new OA\Items(properties: [
+                new OA\Property(property: 'base', type: 'string', example: 'panelalpha.online'),
+                new OA\Property(
+                    property: 'source',
+                    type: 'string',
+                    enum: ['sites_base_domain', 'panelalpha_online', 'panelalpha_direct', 'local'],
+                    example: 'panelalpha_online',
+                    description: 'The details.domain.source a project named there reports.'
+                ),
+                new OA\Property(property: 'suffixed', type: 'boolean', example: true),
+                new OA\Property(
+                    property: 'publicly_resolvable',
+                    type: 'boolean',
+                    example: true,
+                    nullable: true,
+                    description: "Whether a name there reaches this host from the internet; null where the DNS is not the engine's."
+                ),
+            ], type: 'object'),
+        ),
         new OA\Property(
             property: 'sites_certificates',
             properties: [
@@ -42,6 +79,20 @@ use OpenApi\Attributes as OA;
         ),
         new OA\Property(property: 'default_ipv4', type: 'string', example: '203.0.113.7', nullable: true),
         new OA\Property(property: 'default_ipv6', type: 'string', example: '2001:db8::1', nullable: true),
+        new OA\Property(
+            property: 'default_backup_container',
+            nullable: true,
+            description: 'Where a backup goes when the caller names no store: the store this host set up, or the one an '
+                .'operator made the default. Null when this host has no store. The same store answers `default: true` in '
+                .'GET /backup-containers.',
+            properties: [
+                new OA\Property(property: 'id', type: 'integer', example: 1),
+                new OA\Property(property: 'name', type: 'string', example: 'local'),
+                new OA\Property(property: 'driver', type: 'string', example: 'local'),
+                new OA\Property(property: 'location', type: 'string', example: '/opt/panelalpha/backups/local'),
+            ],
+            type: 'object',
+        ),
         new OA\Property(property: 'ipv4_nat_mode', type: 'boolean', example: false),
         new OA\Property(property: 'ipv4_nat_maps', type: 'array', items: new OA\Items(type: 'object')),
         new OA\Property(property: 'webserver', type: 'object', description: 'The active webserver\'s details, as getDetails() returns them.'),
@@ -100,6 +151,22 @@ use OpenApi\Attributes as OA;
                 ),
             ],
             type: 'object'
+        ),
+        new OA\Property(
+            property: 'tenant_network_firewall',
+            description: 'The tenant network firewall, which the root broker applies whenever Docker starts an account '
+                .'container on its own (docker start, a daemon restart, a reboot); until it does, such a container has no '
+                .'network. Null for a token scoped to projects.',
+            nullable: true,
+            allOf: [new OA\Schema(ref: '#/components/schemas/HostScriptReport')],
+        ),
+        new OA\Property(
+            property: 'host_firewall',
+            description: 'The host firewall\'s Docker hook (scripts/firewall.sh --apply), which the root broker puts back each '
+                .'time it starts; without it the ports Docker publishes may not be filtered as the firewall\'s rules say. '
+                .'Null for a token scoped to projects.',
+            nullable: true,
+            allOf: [new OA\Schema(ref: '#/components/schemas/HostScriptReport')],
         ),
         new OA\Property(
             property: 'host',

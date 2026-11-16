@@ -6,12 +6,8 @@ use Closure;
 use RuntimeException;
 
 /**
- * The connection test behind `POST /wordpress/migrations/test`: the same
- * lookup a migration's first step does, synchronously, with no record and
- * nothing changed on the source (wp_admin logs in, manual_plugin asks the
- * plugin's token check). Every failure becomes an `error_type`. It runs
- * inside the HTTP request, so every source request together gets
- * DEADLINE_SECONDS, not the queue job's budget.
+ * The connection test behind `POST /wordpress/migrations/test`: a migration's first lookup, with no record and nothing
+ * changed on the source. It runs inside the HTTP request, so its source requests share DEADLINE_SECONDS, not a job's budget.
  */
 final class SourceProbe
 {
@@ -58,19 +54,7 @@ final class SourceProbe
         $client = new SourceWordpressClient($http);
 
         try {
-            $site = $this->find($client, $access);
-            $answer = [
-                'ok' => true,
-                'url' => $site->url,
-                'login_url' => $site->loginUrl,
-                'rest_mode' => $site->restMode,
-                'wordpress_version' => $this->wordpressVersion($client, $site),
-            ];
-            foreach ($this->checks as $check) {
-                $answer = array_merge($answer, $check->check($access, $site, $choice));
-            }
-
-            return $answer;
+            return $this->answer($client, $access, $choice);
         } catch (RuntimeException $e) {
             $failure = SourceCheckFailed::from($e);
 
@@ -80,6 +64,26 @@ final class SourceProbe
                 'message' => $this->messageFor($failure),
             ];
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function answer(SourceWordpressClient $client, SourceAccess $access, TargetChoice $choice): array
+    {
+        $site = $this->find($client, $access);
+        $answer = [
+            'ok' => true,
+            'url' => $site->url,
+            'login_url' => $site->loginUrl,
+            'rest_mode' => $site->restMode,
+            'wordpress_version' => $this->wordpressVersion($client, $site),
+        ];
+        foreach ($this->checks as $check) {
+            $answer = array_merge($answer, $check->check($access, $site, $choice));
+        }
+
+        return $answer;
     }
 
     /** @return Closure(): bool */

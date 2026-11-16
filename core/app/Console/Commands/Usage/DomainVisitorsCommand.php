@@ -11,8 +11,8 @@ class DomainVisitorsCommand extends UsageCommand
     protected $signature = 'project:domain:visitors
                             {project : Project username}
                             {domain : Domain hostname}
-                            {--start= : Range start (Y-m-d)}
-                            {--end= : Range end (Y-m-d)}';
+                            {--start= : Range start (Y-m-d, required)}
+                            {--end= : Range end (Y-m-d, required)}';
 
     protected $description = 'Show visitor overview for a domain';
 

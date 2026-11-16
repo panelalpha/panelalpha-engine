@@ -6,12 +6,8 @@ use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
- * One-time SSO URL for a WordPress user, on PHP hosting or in a container.
- *
- * Ensures the engine must-use plugin (same panelalpha_sso token scheme DinD
- * WordPress uses) is on the install, then stores a one-time token and returns
- * `{siteurl}/?panelalpha_sso={token}`. Does not install the panel connector
- * and does not emit controlpanel_sso.
+ * One-time SSO URL `{siteurl}/?panelalpha_sso={token}` for a WordPress user, on PHP hosting or in a container, once the
+ * engine must-use plugin is on the install. Does not install the panel connector and does not emit controlpanel_sso.
  */
 final class Sso
 {

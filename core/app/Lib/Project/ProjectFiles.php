@@ -22,22 +22,20 @@ final class ProjectFiles
     }
 
     /**
-     * A stream path that reads the resolved file $path, or null when there is
-     * no such file.
+     * A stream path that reads the resolved file $path, or null when there is no such file. A path outside the
+     * home is refused: the read follows symlinks, so the helper re-checks the resolved file as the account.
      */
     public static function readablePath(User $user, string $path, ?System $system = null): ?string
     {
         $files = $user->project($system ?? new System)->fileManager();
-        if (! $files->isFile($path)) {
+        if (! $files->isInsideHomeFile($path)) {
             return null;
         }
 
         FileStreamWrapper::register();
-        // The path is confined as a string only; the read follows symlinks, so
-        // the helper re-checks the resolved file, as the account.
-        FileStreamWrapper::confineTo($files->homeDirPath(), $files->asAccount([]));
+        FileStreamWrapper::confineToAccount($files->homeDirPath(), ...$files->accountIds());
 
-        return 'sudophp://'.$path;
+        return 'rootfile://'.$path;
     }
 
     /** Like readablePath(), but $path is as the caller gave it, inside the project. */

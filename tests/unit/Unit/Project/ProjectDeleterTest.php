@@ -5,6 +5,7 @@ namespace Tests\Unit\Project;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProjectBusyException;
+use App\Jobs\CopyProject;
 use App\Jobs\CreateBackup;
 use App\Jobs\CreateStaging;
 use App\Jobs\DeployProject;
@@ -147,7 +148,7 @@ class ProjectDeleterTest extends TestCase
         $this->assertSame(409, $e->getCode());
         $this->assertSame(
             "Project '{$this->name}' is busy: deploy task {$deploy->id} is running. "
-            . "Cancel it (POST /tasks/{$deploy->id}/cancel) or wait for it to finish.",
+            . "Cancel task {$deploy->id} or wait for it to finish.",
             $e->getMessage(),
         );
         $this->assertSame([], $this->destroyed);
@@ -163,7 +164,7 @@ class ProjectDeleterTest extends TestCase
 
         $this->assertSame(
             "Project '{$this->name}' is busy: deploy task {$deploy->id} is running. Cancel task {$deploy->id} or wait for it to finish.",
-            $e->plainMessage(),
+            $e->getMessage(),
         );
     }
 
@@ -176,7 +177,7 @@ class ProjectDeleterTest extends TestCase
 
         $this->assertSame(
             "Project '{$this->name}' is busy: rebuild task {$rebuild->id} is running. "
-            . "Cancel it (POST /tasks/{$rebuild->id}/cancel) or wait for it to finish.",
+            . "Cancel task {$rebuild->id} or wait for it to finish.",
             $e->getMessage(),
         );
 
@@ -293,6 +294,53 @@ class ProjectDeleterTest extends TestCase
 
         $this->assertSame([$this->name], $this->destroyed);
         $this->assertSame(Task::STATUS_CANCELLED, $copy->refresh()->status);
+    }
+
+    public function test_a_running_project_copy_refuses_deleting_its_source(): void
+    {
+        $source = $this->makeUser($this->name);
+        $copy = $this->running($this->task(CopyProject::class, $this->name . 'cp', ['from' => $source->username, 'action' => 'copy']));
+
+        $e = $this->refusal(fn () => $this->deleter()->delete($source));
+
+        $this->assertStringStartsWith(
+            "Project '{$this->name}' is busy: project copy task {$copy->id} is running.",
+            $e->getMessage(),
+        );
+        $this->assertSame([], $this->destroyed);
+    }
+
+    public function test_a_queued_project_copy_is_cancelled_before_its_source_is_torn_down(): void
+    {
+        $source = $this->makeUser($this->name);
+        $copy = $this->task(CopyProject::class, $this->name . 'cp', ['from' => $source->username, 'action' => 'copy']);
+        $status = null;
+
+        $this->deleter(function () use ($copy, &$status): void {
+            $status = $copy->refresh()->status;
+        })->delete($source);
+
+        $this->assertSame([$this->name], $this->destroyed);
+        $this->assertSame(Task::STATUS_CANCELLED, $status);
+    }
+
+    public function test_a_project_copy_taken_between_the_check_and_the_cancel_refuses_deleting_its_source(): void
+    {
+        $source = $this->makeUser($this->name);
+        $copy = $this->task(CopyProject::class, $this->name . 'cp', ['from' => $source->username, 'action' => 'copy']);
+        $canceller = new class (Mockery::mock(ProcessTreeKiller::class)) extends TaskCanceller {
+            public function cancelQueued(Task $task): bool
+            {
+                Task::query()->whereKey($task->id)->first()->markRunning('job-raced');
+
+                return parent::cancelQueued($task);
+            }
+        };
+
+        $e = $this->refusal(fn () => $this->deleter(canceller: $canceller)->delete($source));
+
+        $this->assertStringContainsString("project copy task {$copy->id} is running", $e->getMessage());
+        $this->assertSame([], $this->destroyed);
     }
 
     public function test_a_push_refuses_deleting_either_project_of_the_pair(): void

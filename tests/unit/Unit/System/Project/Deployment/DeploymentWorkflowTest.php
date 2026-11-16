@@ -5,14 +5,19 @@ namespace Tests\Unit\System\Project\Deployment;
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Domains\PublicUrl;
+use App\Lib\Findings\Finding;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System\Project\Deployment\DeployableDindProject;
 use App\System\Project\Deployment\DeployMechanics;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\FailureRetention;
+use App\System\Project\Deployment\RetainProject;
+use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\AppLauncher;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
+use Illuminate\Filesystem\Filesystem;
 use Tests\TestCase;
 
 class DeploymentWorkflowTest extends TestCase
@@ -185,14 +190,14 @@ class DeploymentWorkflowTest extends TestCase
             $domain->domain = 'alice.example.test';
             $mechanics = new RecordingDeployMechanics($model, $domain);
             $mechanics->hasGit = true;
-            $mechanics->publicUrl = ['The application is deployed but not reachable from the internet.'];
+            $mechanics->publicUrl = [new Finding(PublicUrl::UNRESOLVABLE, 'The application is deployed but not reachable from the internet.')];
             $mechanics->envHint = 'Deploy failed with custom environment variables.';
 
             $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
             $path === 'run' ? $workflow->run() : $workflow->rebuildFromCheckout($this->silentDeployLogger());
 
             $this->assertSame('partial', $model->getDetails()['deployment_status'] ?? null, $path);
-            $this->assertSame($mechanics->publicUrl, $model->getDetails()['deployment_warnings'], $path);
+            $this->assertSame(Finding::storable($mechanics->publicUrl), $model->getDetails()['deployment_warnings'], $path);
         }
     }
 
@@ -227,12 +232,15 @@ class DeploymentWorkflowTest extends TestCase
         $domain->domain = 'alice.example.test';
         $mechanics = new RecordingDeployMechanics($model, $domain);
         $mechanics->hasGit = true;
-        $mechanics->serving = ['The application did not answer its health check.'];
+        $mechanics->serving = [new Finding(AppHealth::CODE_NOT_ANSWERING, 'The application did not answer its health check.')];
         $mechanics->envHint = 'Deploy failed with custom environment variables.';
 
         (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->run();
 
-        $this->assertContains($mechanics->envHint, $model->getDetails()['deployment_warnings']);
+        $this->assertContains(
+            ['code' => DeployMechanics::CUSTOM_ENV_SUSPECTED, 'message' => $mechanics->envHint],
+            $model->getDetails()['deployment_warnings'],
+        );
     }
 
     public function test_rebuild_from_source_syncs_ingests_and_starts_without_persisting_status(): void
@@ -281,6 +289,101 @@ class DeploymentWorkflowTest extends TestCase
         );
 
         $this->assertSame("Deploy started (source: git, commit: {$commit}, branch: main)", $started);
+    }
+
+    /**
+     * Git runs in the account's container: a stopped `dind` account is started for a change to its checkout, as the
+     * rebuild starts it, and a running one has its mapping repaired, since one sysbox forgot refuses git's exec.
+     */
+    public function test_starting_the_account_for_a_checkout_starts_a_stopped_dind_account_and_repairs_a_running_one(): void
+    {
+        $cases = [
+            'stopped' => ['dind', false, [false], [DeployLogger::STAGE_PREPARING], 0],
+            'running' => ['dind', true, [], [], 1],
+            'another template' => ['php', false, [], [], 0],
+        ];
+        foreach ($cases as $case => [$template, $running, $syncs, $stages, $repairs]) {
+            $mechanics = new RecordingDeployMechanics($this->dindModel(['template' => $template]), $this->mainDomain());
+            $mechanics->applicationRunning = $running;
+            $logged = [];
+            $logger = $this->silentDeployLogger();
+            $logger->method('stage')->willReturnCallback(function (string $stage) use (&$logged): void {
+                $logged[] = $stage;
+            });
+
+            (new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics))->startAccountForCheckout($logger);
+
+            $this->assertSame($syncs, $mechanics->checkoutSyncs, $case);
+            $this->assertSame($stages, $logged, $case);
+            $this->assertSame($repairs, $mechanics->mappingRepairs, $case);
+        }
+    }
+
+    /** A running account whose recreate did not map it again fails the deploy before git runs in it. */
+    public function test_a_failed_mapping_repair_for_a_checkout_fails_the_deploy_with_its_error(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express']);
+        $mechanics = new RecordingDeployMechanics($model, $this->mainDomain());
+        $mechanics->applicationRunning = true;
+        $mechanics->mappingRepairException = new \RuntimeException(
+            "The account container of 'alice' still has its image unmapped after it was recreated; check that sysbox runs on the host (systemctl status sysbox)."
+        );
+        $finished = [];
+        $logger = $this->silentDeployLogger();
+        $logger->method('finishFailed')->willReturnCallback(function (Finding $failure) use (&$finished): void {
+            $finished[] = $failure->message;
+        });
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->startAccountForCheckout($logger);
+            $this->fail('A failed repair was swallowed.');
+        } catch (ProblemException $e) {
+            $this->assertStringContainsString('still has its image unmapped', $e->getMessage());
+        }
+
+        $this->assertCount(1, $finished);
+        $this->assertStringContainsString('still has its image unmapped', $finished[0]);
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertSame([], $mechanics->checkoutSyncs);
+    }
+
+    /** A rebuild after that start finds the account running and reuses it, so the account is not set up twice. */
+    public function test_a_checkout_rebuild_reuses_an_account_started_for_its_change(): void
+    {
+        $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'express']), $this->mainDomain());
+        $mechanics->hasGit = true;
+        $workflow = new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics);
+
+        $workflow->startAccountForCheckout($this->silentDeployLogger());
+        $mechanics->applicationRunning = true;
+        $workflow->rebuildFromCheckout($this->silentDeployLogger());
+
+        $this->assertSame([false, true], $mechanics->checkoutSyncs);
+    }
+
+    /** A start that fails fails the deploy with its own error, which the explainer reads, and changes nothing after it. */
+    public function test_a_failed_start_for_a_checkout_fails_the_deploy_as_the_explainer_reads_it(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express']);
+        $mechanics = new RecordingDeployMechanics($model, $this->mainDomain());
+        $mechanics->checkoutSyncException = new \RuntimeException('Error response from daemon: mkdir /home/alice/docker/tmp: no space left on device');
+        $finished = [];
+        $logger = $this->silentDeployLogger();
+        $logger->method('finishFailed')->willReturnCallback(function (Finding $failure) use (&$finished): void {
+            $finished[] = $failure->code;
+        });
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->startAccountForCheckout($logger);
+            $this->fail('A failed start was swallowed.');
+        } catch (ProblemException $e) {
+            $this->assertSame('disk-full', $e->problems[0]['code'] ?? null);
+        }
+
+        $this->assertSame(['disk-full'], $finished);
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertFalse($mechanics->startedApplication);
+        $this->assertSame(0, $mechanics->settled, 'nothing was put aside before the start');
     }
 
     /** A failed release started nothing, so a git or push redeploy leaves the running app up. */
@@ -525,6 +628,65 @@ class DeploymentWorkflowTest extends TestCase
         }
 
         $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertFalse($model->hasDeployedBefore());
+    }
+
+    public function test_a_cancelled_rebuild_keeps_the_status_of_the_version_still_serving(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php', 'deployment_status' => 'partial', 'deployment_warnings' => ['slow']]);
+        $mechanics = new RecordingDeployMechanics($model, $this->mainDomain());
+        $mechanics->wipeRebuildException = new DeployCancelledException('Deployment cancelled by user');
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromSource($this->silentDeployLogger(), null);
+            $this->fail('Expected DeployCancelledException');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertSame('partial', $model->getDeploymentStatus());
+        $this->assertSame(['slow'], $model->getDetails()['deployment_warnings'] ?? null);
+        $this->assertArrayNotHasKey('error', $model->getDetails());
+    }
+
+    public function test_a_cancelled_archive_deploy_keeps_the_status_of_the_version_still_serving(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php', 'deployment_status' => 'success']);
+        $mechanics = new RecordingDeployMechanics($model, $this->mainDomain());
+        $mechanics->archiveException = new DeployCancelledException('Deployment cancelled by user');
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->deployFromArchive($this->silentDeployLogger(), '/home/alice/project/app.zip');
+            $this->fail('Expected DeployCancelledException');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertSame('success', $model->getDeploymentStatus());
+    }
+
+    public function test_a_cancelled_redeploy_after_a_failed_one_leaves_that_failure_recorded(): void
+    {
+        $model = $this->dindModel(['deployment_status' => 'failed', 'deployed_before' => true, 'error' => 'build failed']);
+
+        (new RetainProject())->afterCancelled($model, 'Deployment cancelled by user');
+
+        $this->assertSame('build failed', $model->getDetails()['error'] ?? null);
+        $this->assertTrue($model->hasDeployedBefore());
+    }
+
+    public function test_a_cancelled_first_deploy_is_recorded_as_failed(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php']);
+        $mechanics = new RecordingDeployMechanics($model, $this->mainDomain());
+        $mechanics->wipeRebuildException = new DeployCancelledException('Deployment cancelled by user');
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromSource($this->silentDeployLogger(), null);
+            $this->fail('Expected DeployCancelledException');
+        } catch (DeployCancelledException) {
+        }
+
+        $this->assertSame('failed', $model->getDeploymentStatus());
+        $this->assertSame('Deployment cancelled by user', $model->getDetails()['error'] ?? null);
         $this->assertFalse($model->hasDeployedBefore());
     }
 
@@ -796,8 +958,8 @@ class DeploymentWorkflowTest extends TestCase
             $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'build failed'];
             $logger = $this->silentDeployLogger();
             $closed = [];
-            $logger->method('finish')->willReturnCallback(function (string $status, ?string $error = null) use ($mechanics, &$closed): void {
-                $closed[] = [$status, $error, $mechanics->settled];
+            $logger->method('finishFailed')->willReturnCallback(function (Finding $failure) use ($mechanics, &$closed): void {
+                $closed[] = [DeployLogger::STATUS_FAILED, $failure->message, $mechanics->settled];
             });
 
             try {
@@ -808,6 +970,56 @@ class DeploymentWorkflowTest extends TestCase
             $this->assertSame([DeployLogger::STATUS_FAILED, $message, 0], $closed[0] ?? null, $name);
             $this->assertSame([false], $mechanics->settledAsSucceeded, $name);
         }
+    }
+
+    /** A log that cannot be opened is null from its helper, and the rebuild then runs without logging. */
+    public function test_a_source_rebuild_runs_without_a_deploy_log(): void
+    {
+        $this->assertRebuildsWithoutADeployLog(
+            fn (DeploymentWorkflow $w) => $w->rebuildFromSource(null, null),
+            fn (RecordingDeployMechanics $m) => $m->wipeRebuildException = new \RuntimeException('no space left on device'),
+        );
+    }
+
+    public function test_a_checkout_redeploy_runs_without_a_deploy_log(): void
+    {
+        $this->assertRebuildsWithoutADeployLog(
+            fn (DeploymentWorkflow $w) => $w->rebuildFromCheckout(),
+            fn (RecordingDeployMechanics $m) => $m->reprepareException = new \RuntimeException('no space left on device'),
+        );
+    }
+
+    private function assertRebuildsWithoutADeployLog(callable $run, callable $failBeforeStart): void
+    {
+        $this->useStorageWhereNoDeployLogOpens('alice');
+        $this->assertNull(DeployLogger::resumeRunningOrStartSafely('alice'));
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $cases = ['started' => [0, null], 'failed to start' => [1, null], 'failed before the start' => [0, $failBeforeStart]];
+        foreach ($cases as $name => [$exit, $failure]) {
+            $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'express']), $domain);
+            $mechanics->startResult = ['exit_code' => $exit, 'stdout' => '', 'stderr' => $exit === 0 ? '' : 'build failed'];
+            if ($failure !== null) {
+                $failure($mechanics);
+            }
+            $succeeded = $exit === 0 && $failure === null;
+            try {
+                $run(new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics));
+            } catch (\Exception) {
+            }
+
+            $this->assertSame([$succeeded], $mechanics->settledAsSucceeded, $name);
+            $this->assertSame(! $succeeded, ($mechanics->user()->getDetails()['deployment_status'] ?? null) === 'failed', $name);
+        }
+    }
+
+    /** The account's deploy lock path is a directory, so its deploy log cannot be opened. */
+    private function useStorageWhereNoDeployLogOpens(string $username): void
+    {
+        $storage = sys_get_temp_dir() . '/pa-workflow-' . bin2hex(random_bytes(6));
+        mkdir($storage . '/logs/deploy/' . $username . '/.deploy.lock', 0700, true);
+        $this->app->useStoragePath($storage);
+        $this->beforeApplicationDestroyed(static fn () => (new Filesystem())->deleteDirectory($storage));
     }
 
     public function test_workflow_exposes_rebuild_from_source(): void
@@ -878,9 +1090,19 @@ final class RecordingDeployMechanics implements DeployMechanics
     public ?\Throwable $prepareException = null;
     public ?\Throwable $wipeRebuildException = null;
     public ?\Throwable $archiveException = null;
+    public ?\Throwable $reprepareException = null;
+    public ?\Throwable $checkoutSyncException = null;
 
     /** @var array{exit_code: int, stdout: string, stderr: string} */
     public array $startResult = ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+
+    /** @var list<bool> whether each sync for a checkout rebuild reused the running account */
+    public array $checkoutSyncs = [];
+
+    /** How often the account mapping was repaired. */
+    public int $mappingRepairs = 0;
+
+    public ?\Throwable $mappingRepairException = null;
 
     public bool $dindWithoutGit = false;
     public bool $removedAccount = false;
@@ -958,8 +1180,20 @@ final class RecordingDeployMechanics implements DeployMechanics
     {
     }
 
+    public function repairAccountMapping(): void
+    {
+        $this->mappingRepairs++;
+        if ($this->mappingRepairException !== null) {
+            throw $this->mappingRepairException;
+        }
+    }
+
     public function syncHostingForCheckoutRebuild(bool $reuseRunning): void
     {
+        $this->checkoutSyncs[] = $reuseRunning;
+        if ($this->checkoutSyncException !== null) {
+            throw $this->checkoutSyncException;
+        }
     }
 
     public function syncHostingForSourceRebuild(?string $zipPath): void
@@ -988,6 +1222,9 @@ final class RecordingDeployMechanics implements DeployMechanics
     public function reprepareApplicationFromCheckout(): void
     {
         $this->ingestedSource = true;
+        if ($this->reprepareException !== null) {
+            throw $this->reprepareException;
+        }
     }
 
     public function publishDomain(DomainModel $domain): void
@@ -1032,7 +1269,7 @@ final class RecordingDeployMechanics implements DeployMechanics
     public function persistPartialSuccess(array $warnings): void
     {
         $this->userModel->setDetails([
-            'deployment_warnings' => $warnings,
+            'deployment_warnings' => Finding::storable($warnings),
             'deployment_status' => 'partial',
         ]);
     }

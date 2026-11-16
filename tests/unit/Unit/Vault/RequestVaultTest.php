@@ -127,8 +127,8 @@ class RequestVaultTest extends VaultTestCase
         [$unfilled] = $this->projectEntry();
 
         foreach ([
-            'vault:999' => 'vault_secret_create',
-            'vault:abc' => 'vault_secret_create',
+            'vault:999' => 'the vault returned',
+            'vault:abc' => 'the vault returned',
             $unfilled->reference() => 'pasted',
         ] as $value => $says) {
             $this->requestWith(['git_token' => $value]);

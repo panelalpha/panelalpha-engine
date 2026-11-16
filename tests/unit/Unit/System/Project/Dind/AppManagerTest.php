@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
@@ -15,6 +16,7 @@ use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 
 /**
  * App management scripts call a bare `docker compose`. The engine's run file
@@ -44,6 +46,7 @@ class AppManagerTest extends TestCase
         parent::setUp();
         $this->tmpRoot = sys_get_temp_dir().'/pa-appmanager-'.bin2hex(random_bytes(4));
         $this->homeRoot = $this->tmpRoot.'/home';
+        putenv('PA_ROOT_LOCAL_ROOTS='.json_encode(['engine' => $this->tmpRoot]));
 
         $test = $this;
         $container = new Container;
@@ -63,6 +66,7 @@ class AppManagerTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('PA_ROOT_LOCAL_ROOTS');
         Facade::clearResolvedInstances();
         Facade::setFacadeApplication($this->previousApp);
         $this->removeTree($this->tmpRoot);
@@ -140,10 +144,69 @@ class AppManagerTest extends TestCase
 
         $this->assertSame('admin', $users[0]['username']);
         $command = $this->commands[1];
-        $exec = array_search('exec', $command, true);
-        $this->assertSame(['-u', '1000:1000', '-T', 'dind', 'env'], array_slice($command, $exec + 1, 5));
-        $this->assertSame('COMPOSE_FILE='.$dir.'/'.EngineArtifacts::RUN_COMPOSE, $command[$exec + 6]);
-        $this->assertSame(['bash', $dir.'/'.AppConfig::APP_SCRIPT, 'users:list'], array_slice($command, -3));
+        $this->assertSame('1000:1000', LocalRoot::values($command)[1] ?? null);
+        $inAccount = LocalRoot::inAccount($command);
+        $this->assertSame(['env', 'COMPOSE_FILE='.$dir.'/'.EngineArtifacts::RUN_COMPOSE], array_slice($inAccount, 0, 2));
+        $this->assertSame(['bash', $dir.'/'.AppConfig::APP_SCRIPT, 'users:list'], array_slice($inAccount, -3));
+    }
+
+    /** A reassign id reaches the script as a third users:delete argument. */
+    public function test_delete_user_passes_the_reassign_id_to_the_script(): void
+    {
+        $dind = $this->dindProject('reassign', Strategies::COMPOSE);
+        $dir = $this->appDir('reassign');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [0, '["users:list","users:delete"]', ''];
+        $this->replies[] = [0, '[{"id":"7","username":"admin","email":"a@b.c","role":"administrator"}]', ''];
+        $this->replies[] = [0, '{"success":true}', ''];
+
+        $dind->apps()->deleteUser('7', '1');
+
+        $this->assertSame(
+            ['bash', $dir.'/'.AppConfig::APP_SCRIPT, 'users:delete', '7', '1'],
+            array_slice($this->commands[2], -5)
+        );
+    }
+
+    /** With no reassign id the script is left to pick the content's new owner. */
+    public function test_delete_user_without_a_reassign_id_omits_the_argument(): void
+    {
+        $dind = $this->dindProject('noreassign', Strategies::COMPOSE);
+        $dir = $this->appDir('noreassign');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [0, '["users:list","users:delete"]', ''];
+        $this->replies[] = [0, '[{"id":"7","username":"admin","email":"a@b.c","role":"administrator"}]', ''];
+        $this->replies[] = [0, '{"success":true}', ''];
+
+        $dind->apps()->deleteUser('7');
+
+        $this->assertSame(
+            ['bash', $dir.'/'.AppConfig::APP_SCRIPT, 'users:delete', '7'],
+            array_slice($this->commands[2], -4)
+        );
+    }
+
+    /** An app's users:delete answers as if it had removed an unknown id, so the list is what refuses it. */
+    public function test_an_unknown_app_user_is_refused_before_the_delete_runs(): void
+    {
+        $dind = $this->dindProject('unknown', Strategies::COMPOSE);
+        $dir = $this->appDir('unknown');
+        touch($dir.'/'.EngineArtifacts::RUN_COMPOSE);
+        $this->replies[] = [0, '["users:list","users:delete"]', ''];
+        $this->replies[] = [0, '[{"id":"1","username":"admin","email":"a@b.c","role":"administrator"}]', ''];
+
+        try {
+            $dind->apps()->deleteUser('999', '1');
+            $this->fail('Expected NotFoundException');
+        } catch (NotFoundException $e) {
+            $this->assertSame("App user '999' not found.", $e->getMessage());
+        }
+
+        $joined = array_map(static fn (array $cmd): string => implode(' ', $cmd), $this->commands);
+        $this->assertCount(2, $joined, 'info and users:list only');
+        foreach ($joined as $command) {
+            $this->assertStringNotContainsString('users:delete', $command);
+        }
     }
 
     /**
@@ -252,7 +315,23 @@ class AppManagerTest extends TestCase
         $this->assertStringNotContainsString('Sup3rSecret!', $this->logged[0]);
     }
 
-    private function dindProject(string $username, string $strategy): Dind
+    /** A deploy that ran another stack than its app config is written for has no app script that reaches it. */
+    public function test_a_project_deployed_on_another_stack_than_its_app_config_is_refused_before_anything_runs(): void
+    {
+        $dind = $this->dindProject('pinned', Strategies::PHP, [AppManager::DETAIL_APP_CONFIG_FITS => false]);
+        touch($this->appDir('pinned').'/'.AppConfig::APP_SCRIPT);
+
+        try {
+            $dind->apps()->listUsers();
+            $this->fail('Expected app management to be refused');
+        } catch (\Exception $e) {
+            $this->assertSame('App management is not supported for this application', $e->getMessage());
+        }
+        $this->assertSame([], $this->commands);
+    }
+
+    /** @param  array<string, mixed>  $details */
+    private function dindProject(string $username, string $strategy, array $details = []): Dind
     {
         $model = new ModelsUser;
         $model->username = $username;
@@ -261,6 +340,7 @@ class AppManagerTest extends TestCase
             'deploy_strategy' => $strategy,
             'UID' => 1000,
             'GID' => 1000,
+            ...$details,
         ]);
 
         mkdir($this->appDir($username), 0777, true);
@@ -321,18 +401,18 @@ class AppManagerTest extends TestCase
     }
 
     /**
-     * `sudo test -f` answers from the real tree; anything else takes the next
-     * queued reply, recorded.
+     * The broker's `files.isFile` answers from the real tree; anything else
+     * takes the next queued reply, recorded.
      *
      * @param  list<string>  $cmd
      */
     public function reply(array $cmd): Process
     {
-        if (count($cmd) >= 4 && $cmd[0] === 'sudo' && $cmd[1] === 'test' && $cmd[2] === '-f') {
-            return $this->process(is_file($cmd[3]) ? 0 : 1, '', '');
+        if (LocalRoot::action($cmd) === 'files.isFile') {
+            return $this->process(is_file(LocalRoot::values($cmd)[0]) ? 0 : 1, '', '');
         }
 
-        $this->commands[] = $cmd;
+        $this->commands[] = LocalRoot::plain($cmd);
         [$code, $out, $err] = array_shift($this->replies) ?? [0, '', ''];
 
         return $this->process($code, $out, $err);

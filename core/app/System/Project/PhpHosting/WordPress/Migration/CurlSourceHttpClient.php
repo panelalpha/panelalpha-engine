@@ -7,14 +7,8 @@ use Closure;
 use RuntimeException;
 
 /**
- * cURL transport with an in-memory cookie jar (CURLOPT_COOKIEFILE "").
- * Does not persist cookies to the migration row or the job payload.
- * Redirects are followed one hop at a time so each target is checked
- * before a connection, and TLS certificates are verified. Every request is
- * pinned (CURLOPT_RESOLVE) to the address that was checked, or to the
- * caller's `source_ip`, so curl never resolves the host a second time.
- * While a request waits, curl's progress callback asks the caller whether to
- * keep waiting, so a run can keep its claim alive through a long source call.
+ * cURL with in-memory cookies (never on the record or the job), verified TLS and one checked redirect hop at a time.
+ * Each request is pinned (CURLOPT_RESOLVE) to the checked address or `source_ip`, so curl never resolves the host again.
  */
 final class CurlSourceHttpClient implements SourceHttpClient
 {
@@ -134,14 +128,7 @@ final class CurlSourceHttpClient implements SourceHttpClient
             if (! $this->shouldKeepWaiting()) {
                 throw SourceRequestAborted::at($currentUrl);
             }
-            curl_setopt($this->handle, CURLOPT_RESOLVE, $this->resolveEntries($currentUrl));
-            curl_setopt($this->handle, CURLOPT_CUSTOMREQUEST, $currentMethod);
-            curl_setopt($this->handle, CURLOPT_URL, $currentUrl);
-            curl_setopt($this->handle, CURLOPT_REFERER, $currentUrl);
-            curl_setopt($this->handle, CURLOPT_HTTPHEADER, $currentHeaders);
-            curl_setopt($this->handle, CURLOPT_POSTFIELDS, $currentBody);
-
-            $raw = $this->execRaw($currentUrl);
+            $raw = $this->exchange($currentMethod, $currentUrl, $currentBody, $currentHeaders);
             $redirects = $raw['status'] >= 300 && $raw['status'] < 400 && $raw['location'] !== null;
             if (! $redirects) {
                 return new SourceHttpResponse($raw['body'], $raw['status'], $raw['effective']);
@@ -150,15 +137,46 @@ final class CurlSourceHttpClient implements SourceHttpClient
                 throw new RuntimeException('Source WordPress URL redirected too many times');
             }
 
-            $currentUrl = SourceFetchGuard::resolveRedirect($currentUrl, $raw['location']);
-            if (in_array($raw['status'], [301, 302, 303], true)) {
-                $currentMethod = 'GET';
-                $currentBody = null;
-                $currentHeaders = [];
-            }
+            [$currentMethod, $currentUrl, $currentBody, $currentHeaders] = self::nextHop($raw, $currentMethod, $currentUrl, $currentBody, $currentHeaders);
         }
 
         throw new RuntimeException('Source WordPress URL redirected too many times');
+    }
+
+    /**
+     * @param  string|array<string, mixed>|null  $body
+     * @param  list<string>  $headerLines
+     * @return array{body: string, status: int, effective: ?string, location: ?string}
+     */
+    private function exchange(string $method, string $url, string|array|null $body, array $headerLines): array
+    {
+        curl_setopt($this->handle, CURLOPT_RESOLVE, $this->resolveEntries($url));
+        curl_setopt($this->handle, CURLOPT_CUSTOMREQUEST, $method);
+        curl_setopt($this->handle, CURLOPT_URL, $url);
+        curl_setopt($this->handle, CURLOPT_REFERER, $url);
+        curl_setopt($this->handle, CURLOPT_HTTPHEADER, $headerLines);
+        curl_setopt($this->handle, CURLOPT_POSTFIELDS, $body);
+
+        return $this->execRaw($url);
+    }
+
+    /**
+     * @param  array{body: string, status: int, effective: ?string, location: string}  $raw
+     * @param  string|array<string, mixed>|null  $body
+     * @param  list<string>  $headerLines
+     * @return array{0: string, 1: string, 2: string|array<string, mixed>|null, 3: list<string>}
+     */
+    private static function nextHop(array $raw, string $method, string $url, string|array|null $body, array $headerLines): array
+    {
+        $next = SourceFetchGuard::resolveRedirect($url, $raw['location']);
+        SourceFetchGuard::assertRedirectAllowed($raw['status'], $url, $next);
+        if (in_array($raw['status'], SourceFetchGuard::REDIRECTS_AS_GET, true)) {
+            $method = 'GET';
+            $body = null;
+            $headerLines = [];
+        }
+
+        return [$method, $next, $body, $headerLines];
     }
 
     /**

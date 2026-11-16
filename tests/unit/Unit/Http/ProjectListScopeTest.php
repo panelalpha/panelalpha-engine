@@ -48,6 +48,16 @@ class ProjectListScopeTest extends TestCase
         $this->assertSame(['alice'], array_column($data, 'username'));
     }
 
+    /** A query string sends the flag as a word: `with_domain_names=false` leaves the names out. */
+    public function test_with_domain_names_takes_the_words_true_and_false(): void
+    {
+        $off = $this->getJson('/api/projects/all?with_domain_names=false')->assertStatus(200)->json('data.0');
+        $on = $this->getJson('/api/projects/all?with_domain_names=true')->assertStatus(200)->json('data.0');
+
+        $this->assertArrayNotHasKey('domain_names', $off);
+        $this->assertArrayHasKey('domain_names', $on);
+    }
+
     public function test_the_summary_tool_is_filtered_to_the_token_scope(): void
     {
         $this->actingAsScopedToken();

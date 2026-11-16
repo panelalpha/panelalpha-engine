@@ -16,7 +16,7 @@ class DeleteExampleDomain extends Command
 
     protected $signature = 'system:example:delete {--force : Skip confirmation prompts}';
 
-    protected $description = 'Delete example domain and user if they exist.';
+    protected $description = 'Delete the example domain and its project if they exist.';
 
     public function handle(): int
     {
@@ -30,15 +30,15 @@ class DeleteExampleDomain extends Command
         $domain = Domain::findExampleDomain();
         if (! $domain) {
             $this->warn('Could not find example domain to delete.');
-            Setting::set('example-domain-created', '');
+            $this->forgetCreatedDomain();
 
             return 0;
         }
 
         $user = $domain->user;
         if (! $user) {
-            $this->warn('Example domain found but associated user not found.');
-            Setting::set('example-domain-created', '');
+            $this->warn('Example domain found but its project was not found.');
+            $this->forgetCreatedDomain();
 
             return 0;
         }
@@ -47,9 +47,9 @@ class DeleteExampleDomain extends Command
             return 1;
         }
 
-        $this->info("Found example domain: {$domain->domain} (user: {$user->username})");
+        $this->info("Found example domain: {$domain->domain} (project: {$user->username})");
 
-        $shouldDelete = $this->option('force') || $this->confirm("This will completely delete the example user '{$user->username}' and all associated data. Continue?");
+        $shouldDelete = $this->option('force') || $this->confirm("This will completely delete the example project '{$user->username}' and all associated data. Continue?");
 
         if ($shouldDelete) {
             $commandArgs = ['project' => [$user->username]];
@@ -60,12 +60,12 @@ class DeleteExampleDomain extends Command
             $exitCode = $this->call('project:delete', $commandArgs);
 
             if ($exitCode === 0) {
-                Setting::set('example-domain-created', '');
-                $this->info('Example domain and user deleted successfully.');
+                $this->forgetCreatedDomain();
+                $this->info('Example domain and project deleted successfully.');
 
                 return 0;
             } else {
-                $this->error('Failed to delete example user.');
+                $this->error('Failed to delete the example project.');
 
                 return 1;
             }
@@ -73,6 +73,13 @@ class DeleteExampleDomain extends Command
             $this->info('Deletion cancelled.');
 
             return 0;
+        }
+    }
+
+    private function forgetCreatedDomain(): void
+    {
+        foreach (['example-domain-created', 'vhost-default-ip-domain', 'default_wildcard_domain'] as $name) {
+            Setting::set($name, '');
         }
     }
 }

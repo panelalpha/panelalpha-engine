@@ -44,4 +44,7 @@ interface Runtime
     public function rebuildDomain(Domain $domain): void;
 
     public function deleteDomainConfig(string $domainName): void;
+
+    /** Have the project's cron pick up its crontab. */
+    public function reloadCron(): void;
 }

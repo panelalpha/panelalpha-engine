@@ -10,7 +10,9 @@ use League\Flysystem\Ftp\FtpAdapter;
 use League\Flysystem\Ftp\FtpConnectionOptions;
 use League\Flysystem\PhpseclibV3\SftpAdapter;
 use League\Flysystem\PhpseclibV3\SftpConnectionProvider;
+use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\UnableToWriteFile;
@@ -60,9 +62,50 @@ final class Ftp extends AbstractStorage
             return;
         }
 
+        $directories = $this->directoriesAbove($normalized);
         foreach ($this->filesystem->listContents($normalized, true) as $attributes) {
-            if ($attributes->isFile()) {
-                $this->filesystem->delete($attributes->path());
+            if ($attributes->isDir()) {
+                $directories[] = $attributes->path();
+
+                continue;
+            }
+            $this->filesystem->delete($attributes->path());
+        }
+
+        $this->deleteEmptyDirectories($directories);
+    }
+
+    /**
+     * The prefix and the directories above it, deepest first, the storage root excluded.
+     *
+     * @return list<string>
+     */
+    private function directoriesAbove(string $prefix): array
+    {
+        $parts = explode('/', $prefix);
+        $directories = [];
+        for ($depth = count($parts); $depth > 0; $depth--) {
+            $directories[] = implode('/', array_slice($parts, 0, $depth));
+        }
+
+        return $directories;
+    }
+
+    /**
+     * Best effort: the objects are already gone, so a failure only leaves empty directories.
+     *
+     * @param  list<string>  $directories
+     */
+    private function deleteEmptyDirectories(array $directories): void
+    {
+        usort($directories, static fn (string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
+        foreach ($directories as $directory) {
+            try {
+                if ($this->filesystem->listContents($directory, false)->toArray() !== []) {
+                    continue;
+                }
+                $this->filesystem->deleteDirectory($directory);
+            } catch (UnableToDeleteDirectory|UnableToListContents) {
             }
         }
     }
@@ -87,7 +130,7 @@ final class Ftp extends AbstractStorage
             $this->filesystem->write(self::PROBE_FILE, 'ok');
             $this->filesystem->delete(self::PROBE_FILE);
         } catch (UnableToWriteFile|UnableToDeleteFile $exception) {
-            throw new RuntimeException('Backup storage is not writable.', 0, $exception);
+            throw new RuntimeException('Backup storage is not writable: '.$exception->reason(), 0, $exception);
         }
     }
 

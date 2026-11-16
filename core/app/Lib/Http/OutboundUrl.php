@@ -8,19 +8,8 @@ use App\Lib\Net\ResolvedTarget;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
- * A guard for URLs core is about to fetch, so a caller-supplied URL cannot
- * reach what core reaches over HTTP: the metadata service, the cache registry,
- * sites-phpmyadmin, host services.
- *
- * The rule is the tenant network's plus its IPv6 side and the IANA
- * special-purpose ranges that are not globally reachable, minus the private
- * ranges when the operator allows them ({@see config('egress.allow_private')}). An
- * allow-listed name ({@see config('egress.allow_hosts')}) skips only the
- * internal-address check: loopback, link-local, multicast and the reserved
- * ranges stay refused for it. A host is refused
- * when *any* of its A/AAAA records is internal, so a rebind mixing a public and
- * an internal address does not get through. Callers pin the checked address
- * ({@see pin}) and re-check every redirect hop.
+ * A guard so a caller-supplied URL cannot reach what core reaches over HTTP: the metadata service, the cache
+ * registry, sites-phpmyadmin, host services. Callers pin the checked address ({@see pin}) and re-check every redirect.
  */
 final class OutboundUrl
 {
@@ -164,9 +153,8 @@ final class OutboundUrl
     }
 
     /**
-     * A `curl --resolve host:port:address` value pinning the connection to an
-     * address checked here, or null for a literal address. Pinning the checked
-     * answer keeps a rebinding DNS server from answering differently next time.
+     * A `curl --resolve host:port:address` value pinning the connection to an address checked here, so a
+     * rebinding DNS server cannot answer differently next time; null for a literal address.
      *
      * @param  list<string>  $schemes
      *
@@ -342,9 +330,8 @@ final class OutboundUrl
     }
 
     /**
-     * Every address $host resolves to, each checked; empty when it is a literal
-     * address (checked too, nothing to resolve). An allow-listed name is
-     * resolved and checked against the narrower rule.
+     * Every address $host resolves to, each checked; empty for a literal address, checked too.
+     * An allow-listed name is resolved and checked against the narrower rule.
      *
      * @return list<string>
      *
@@ -364,6 +351,8 @@ final class OutboundUrl
     }
 
     /**
+     * Refused when *any* record is internal, so a rebind mixing a public and an internal address does not get through.
+     *
      * @return non-empty-list<string>
      *
      * @throws EgressRefusedException

@@ -15,6 +15,7 @@ export interface DeployTimingsPhase {
 export interface DeployTimingsBuild {
   total_seconds: number;
   step_count: number;
+  cacheable_steps: number;
   cached_steps: number;
   cache_hit_ratio: number | null;
   steps?: unknown[];

@@ -7,12 +7,8 @@ use App\Lib\Deploy\DeployLog\StepWatchdog;
 use Symfony\Component\Process\Process;
 
 /**
- * Running a command, and nothing else: the part of App\System most of its
- * collaborators need.
- *
- * The same five signatures App\System has, and App\System implements it, so a
- * test that subclasses System and overrides one of them still intercepts every
- * command a narrowed consumer runs. {@see HostProcess} for the implementation.
+ * Running a command, and nothing else: App\System's own five signatures, which it implements, so a test that
+ * overrides one in a System subclass still intercepts a narrowed consumer's commands. {@see HostProcess} runs them.
  */
 interface ProcessRunner
 {
@@ -25,11 +21,13 @@ interface ProcessRunner
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string;
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces.
+     *
+     * @param  list<string>  $cmd
      *
      * @throws DockerErrorException
      */
-    public function execOnHost(string|array $cmd, array $env = [], int $timeout = 600): string;
+    public function execOnHost(array $cmd, array $env = [], int $timeout = 600): string;
 
     /**
      * @param  string|list<string>  $cmd
@@ -37,9 +35,11 @@ interface ProcessRunner
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process;
 
     /**
-     * @param  string|list<string>  $cmd
+     * A command the gateway built, in the host's namespaces.
+     *
+     * @param  list<string>  $cmd
      */
-    public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process;
+    public function runProcessOnHost(array $cmd, array $env = [], int $timeout = 600): Process;
 
     /**
      * @param  string|list<string>  $cmd

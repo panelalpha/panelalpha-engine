@@ -8,11 +8,13 @@ use App\Models\Domain;
 use App\Models\Setting;
 use App\System;
 use App\System\ComposeProject;
+use App\System\EnginePaths;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
 
@@ -186,16 +188,10 @@ class LighthouseTargetTest extends TestCase
 
     private function resolverRules(): string
     {
-        $this->assertCount(2, $this->journal->calls, 'lighthouse, then removing the report');
-        $flags = '';
-        foreach ($this->journal->calls[0] as $arg) {
-            if (str_starts_with($arg, '--chrome-flags=')) {
-                $flags = $arg;
-            }
-        }
-        $this->assertSame(1, preg_match('/--host-resolver-rules="([^"]*)"/', $flags, $m), $flags);
+        $this->assertCount(1, $this->journal->calls, 'only lighthouse: the engine removes the report itself');
+        $this->assertSame('compose.lighthouseAudit', LocalRoot::action($this->journal->calls[0]));
 
-        return $m[1];
+        return (string) $this->journal->calls[0][6];
     }
 
     private function fakeSystem(): System
@@ -212,18 +208,19 @@ class LighthouseTargetTest extends TestCase
 
             public function composeFilePath(): string
             {
-                return $this->root . '/docker-compose.yml';
+                return EnginePaths::ENGINE_DIR . '/docker-compose.yml';
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $cmd = (array)$cmd;
-                $this->journal->calls[] = $cmd;
-                // Play the lighthouse container: write the report where the
-                // controller looks for it.
-                $i = array_search('--output-path', $cmd, true);
-                if ($i !== false) {
-                    file_put_contents($this->root . '/data/lighthouse/' . basename($cmd[$i + 1]), json_encode($this->journal->report));
+                $argv = array_values((array) $cmd);
+                $this->journal->calls[] = $argv;
+                if (LocalRoot::action($argv) === 'compose.lighthouseAudit') {
+                    $form = ($argv[5] ?? '') === 'desktop' ? '-desktop' : '-mobile';
+                    file_put_contents(
+                        $this->root . '/data/lighthouse/' . md5((string) $argv[4]) . $form . '.json',
+                        json_encode($this->journal->report)
+                    );
                 }
 
                 return '';

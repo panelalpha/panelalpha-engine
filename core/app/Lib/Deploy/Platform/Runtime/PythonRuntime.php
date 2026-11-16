@@ -7,16 +7,14 @@ use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
- * Python, versioned by `.python-version` when it pins one, else by
- * `requires-python` in pyproject.toml. requirements.txt pins packages, not
- * the interpreter.
+ * Python, versioned by `.python-version` when it pins one, else by `requires-python` in pyproject.toml; requirements.txt pins
+ * packages, not the interpreter.
  */
 final class PythonRuntime implements Runtime
 {
     /**
-     * Bare minors, oldest first — the compiled-in fallback for the catalogue's
-     * `versions`. {@see versions()} answers in the `3.12` form the rest of the
-     * engine speaks, which is why nothing reads this directly.
+     * Bare minors, oldest first, the compiled-in fallback for the catalogue's `versions`; nothing reads this directly, as
+     * {@see versions()} answers in the `3.12` form the rest of the engine speaks.
      *
      * @var list<int>
      */
@@ -25,9 +23,8 @@ final class PythonRuntime implements Runtime
     public const DEFAULT_MINOR = 12;
 
     /**
-     * slim, not alpine: a wheel built for manylinux does not install against
-     * musl, so alpine turns every dependency carrying a C extension into a
-     * source build.
+     * slim, not alpine: a manylinux wheel does not install against musl, so alpine turns every dependency carrying a C extension
+     * into a source build.
      */
     public const IMAGE_VARIANT = 'slim';
 
@@ -78,32 +75,17 @@ final class PythonRuntime implements Runtime
         return 'python';
     }
 
+    /**
+     * An exact `.python-version` pin wins over a `requires-python` range: uv and pyenv run what it names, and a venv built on
+     * another minor is not the one the image runs.
+     */
     public function resolve(ProjectContext $context): ?Requirement
     {
-        $present = false;
-        foreach (self::MANIFESTS as $manifest) {
-            if (! $context->hasFile($manifest)) {
-                continue;
-            }
-            // A pyproject.toml is evidence only when it is a Python project's
-            // manifest. The name is TOML's generic config filename and the
-            // ecosystem borrows it for everything -- ruff, sqlfluff -- so a
-            // file of tool settings does not mean the project is Python.
-            // Dolibarr, a PHP application whose root pyproject.toml runs
-            // codespell, was detected as Python and served the placeholder.
-            // {@see declaresProject()}
-            if ($manifest === 'pyproject.toml' && ! self::declaresProject($context->contents($manifest))) {
-                continue;
-            }
-            $present = true;
-            break;
-        }
+        $present = self::hasPythonManifest($context);
         if (! $present && ! $context->isFile('manage.py')) {
             return null;
         }
 
-        // An exact pin wins over a range: uv and pyenv run what .python-version
-        // names, and a venv built on another minor is not the one the image runs.
         $pinned = self::pinnedMinor($context->contents('.python-version'));
         if ($pinned !== null) {
             return new Requirement('python', '3.'.$pinned, '', '.python-version');
@@ -116,7 +98,35 @@ final class PythonRuntime implements Runtime
             return new Requirement('python', self::defaultVersion(), '', 'engine default');
         }
 
-        $constraint = $matches[1];
+        return self::requiredByPyproject($matches[1]);
+    }
+
+    /**
+     * Whether a Python manifest is present; a pyproject.toml only when it declares a project, as the name is TOML's generic
+     * config file and tools such as ruff or codespell borrow it (Dolibarr, a PHP application, was detected as Python).
+     *
+     * @see declaresProject()
+     */
+    private static function hasPythonManifest(ProjectContext $context): bool
+    {
+        $present = false;
+        foreach (self::MANIFESTS as $manifest) {
+            if (! $context->hasFile($manifest)) {
+                continue;
+            }
+            if ($manifest === 'pyproject.toml' && ! self::declaresProject($context->contents($manifest))) {
+                continue;
+            }
+            $present = true;
+            break;
+        }
+
+        return $present;
+    }
+
+    /** The oldest known version a `requires-python` constraint allows, or its own minor when it is newer than all of them. */
+    private static function requiredByPyproject(string $constraint): Requirement
+    {
         $minor = self::parseMinor($constraint);
         if ($minor === null) {
             return new Requirement('python', self::defaultVersion(), $constraint, 'engine default');
@@ -166,102 +176,77 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Where the project's dependencies live: a virtualenv inside the project,
-     * not the image's global site-packages.
-     *
-     * This is what lets a Python app run from our stock image with nothing
-     * built. Keeping packages installed by `pip install` meant baking them into
-     * a per-project image and exporting it, which for a project of similar size
-     * was 180.7s of a 299.7s build.
-     *
-     * The same trick PHP uses with `vendor/`: the dependencies are part of the
-     * account's files, so the image stays generic and a redeploy replaces files
-     * instead of layers. Host build and runtime container see it at the same
-     * path because both mount the project at /app.
+     * The project's virtualenv, so the app runs from the stock image with nothing baked or exported, as PHP's `vendor/` does: a
+     * redeploy replaces files, not layers, and host build and container both see it at /app.
      */
     public const VENV = '.venv';
 
     /**
+     * Re-running `venv` keeps a rebuild's packages (no --upgrade-deps: it reinstalls pip every deploy), and pip keeps the cache the
+     * host build mounts. Tool config still gets the venv every start runs through; a lockless package needs `pip install .`.
+     *
      * @param  array<string, true>  $files
      */
     public static function installCommand(array $files, ?string $pyproject = null): string
     {
-        // Re-running `venv` over an existing one is a no-op, so a rebuild
-        // keeps the packages it already has and pip only reconciles the diff.
-        // No --upgrade-deps: it reinstalls pip and setuptools every deploy.
         $venv = 'python -m venv '.self::VENV.' && ';
-        // Cached, not --no-cache-dir: the host build mounts a per-project
-        // pip cache, and there is no image layer here for the cache to bloat.
         $pip = self::VENV.'/bin/pip install ';
 
         if (isset($files['requirements.txt'])) {
             return $venv.$pip.'-r requirements.txt';
         }
-        // A committed Pipfile.lock is installed as-is, like `uv sync --frozen`:
-        // `install --deploy` aborts when the lock's hash lags the Pipfile
-        // (JARR), though the project's own image installs it with `pipenv sync`.
         if (isset($files['pipfile'])) {
-            $pipenv = isset($files['pipfile.lock']) ? 'sync' : 'install --deploy';
-
-            return $venv.$pip.'pipenv && '.self::VENV.'/bin/pipenv '.$pipenv;
+            return self::pipenvInstall($files, $venv, $pip);
         }
-        // A Poetry application declaring `package-mode = false` is a
-        // deployable program, not a distributable package: `pip install .`
-        // asks poetry-core to build a wheel of the root and it refuses with
-        // `RuntimeError: Building a package is not possible in non-package
-        // mode.` `poetry install --no-root` installs the dependencies and skips
-        // the project. VIRTUAL_ENV points poetry at the same .venv the other
-        // installs write into; without it poetry makes its own under a cache
-        // directory the runtime never looks at.
         if (self::isNonPackagePoetry($pyproject)) {
-            return $venv.$pip.'poetry'
-                .' && VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
-                .'/bin/poetry install --no-root --no-interaction';
+            return self::poetryInstall($venv, $pip);
         }
 
-        // A uv project states its resolution in `uv.lock`, and
-        // `--no-install-project` is uv's spelling of "dependencies only". pip
-        // has no equivalent — `--no-deps` still builds the root, and a root
-        // holding sibling packages (bitcart's api/conf/daemons) makes
-        // setuptools refuse with `Multiple top-level packages discovered in a
-        // flat-layout`. `--frozen` installs what the project committed, the way
-        // `npm ci` does.
-        //
-        // Not `--no-dev`: a uv project's runtime set is not always in
-        // `dependencies` — bitcart keeps fastapi and uvicorn in a `web` group
-        // reachable only through the `dev` umbrella, so `--no-dev` installs two
-        // packages and the app cannot start.
-        //
-        // A project with a `[build-system]` is a package and is installed too,
-        // as its own `uv sync` would: Codex's `bin/manage.py` imports `codex`,
-        // and Quasarr's `quasarr` script exists only once the project is.
-        //
-        // UV_PYTHON keeps the venv on the image's interpreter. Left to
-        // .python-version, uv downloads its own CPython outside /app and links
-        // .venv to it, which the run container does not have.
         if (isset($files['uv.lock'])) {
-            return $venv.$pip.'uv'
-                .' && UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)"'
-                .' VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
-                .'/bin/uv sync --frozen'.(self::isUvPackage($pyproject) ? '' : ' --no-install-project');
+            return self::uvInstall($pyproject, $venv, $pip);
         }
 
-        // A pyproject declaring neither `[project]` (PEP 621) nor a Poetry
-        // project is configuration for a tool, not a manifest: ruff, codespell,
-        // towncrier, or the `[build-system]` a non-Python application left
-        // behind (Dolibarr). `pip install .` would fail on it anyway, with
-        // `configuration error: 'project' must contain ['version'] properties`.
-        // The venv is still created: every start command runs through it.
         if (self::declaresNothingToInstall($files, $pyproject)) {
             return 'python -m venv '.self::VENV;
         }
 
-        // Everything left states a package and has no lockfile: Poetry in
-        // package mode, PEP 621, a bare setup.py. `pip install .` is the only
-        // way to install their dependencies, and also where a console entry
-        // point and an importable root package come from (mopidy's `mopidy`
-        // script) — so building the project is kept here.
         return $venv.$pip.'.';
+    }
+
+    /**
+     * A committed Pipfile.lock is installed as-is, like `uv sync --frozen`: `install --deploy` aborts when the lock's hash lags
+     * the Pipfile, though the project's own image installs it with `pipenv sync`.
+     *
+     * @param  array<string, true>  $files
+     */
+    private static function pipenvInstall(array $files, string $venv, string $pip): string
+    {
+        $pipenv = isset($files['pipfile.lock']) ? 'sync' : 'install --deploy';
+
+        return $venv.$pip.'pipenv && '.self::VENV.'/bin/pipenv '.$pipenv;
+    }
+
+    /**
+     * `package-mode = false` is a program, whose root `pip install .` cannot build, so `poetry install --no-root` installs only
+     * the dependencies, into the same .venv through VIRTUAL_ENV rather than one under a cache the runtime never reads.
+     */
+    private static function poetryInstall(string $venv, string $pip): string
+    {
+        return $venv.$pip.'poetry'
+            .' && VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
+            .'/bin/poetry install --no-root --no-interaction';
+    }
+
+    /**
+     * `sync --frozen` installs the committed lock with every group (`--no-dev` drops runtime sets kept under `dev`), the project
+     * only with a [build-system] (pip cannot skip the root); UV_PYTHON keeps the venv off a CPython uv would download outside /app.
+     */
+    private static function uvInstall(?string $pyproject, string $venv, string $pip): string
+    {
+        return $venv.$pip.'uv'
+            .' && UV_PYTHON_DOWNLOADS=never UV_PYTHON="$(command -v python)"'
+            .' VIRTUAL_ENV="$PWD/'.self::VENV.'" '.self::VENV
+            .'/bin/uv sync --frozen'.(self::isUvPackage($pyproject) ? '' : ' --no-install-project');
     }
 
     /** uv builds and installs a project only when it names a build backend. */
@@ -292,14 +277,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Whether the project's only manifest is a pyproject that declares
-     * neither a package nor any dependencies.
-     *
-     * `pip install .` on such a file is the wrong manifest, not a missing one:
-     * no distribution to build and no dependency list to install.
-     *
-     * A `setup.py` or `setup.cfg` beside the pyproject is metadata this reader
-     * cannot see, so the project is never judged from the pyproject alone.
+     * Whether the only manifest is a pyproject declaring no project, which {@see declaresProject()} answers: nothing to build or
+     * install. A `setup.py` or `setup.cfg` beside it is metadata this reader cannot see, so it is never judged alone.
      *
      * @param  array<string, true>  $files
      */
@@ -312,25 +291,12 @@ final class PythonRuntime implements Runtime
             return false;
         }
 
-        // The same question {@see declaresProject()} answers: "declares
-        // nothing" is exactly "declares no project".
         return ! self::declaresProject($pyproject);
     }
 
     /**
-     * Whether a pyproject.toml is a Python *project* manifest, or a TOML file
-     * some tool keeps its own settings in.
-     *
-     * The answer is either `[project]` (PEP 621, what modern Poetry,
-     * hatchling, flit, pdm, setuptools and maturin projects have) or
-     * `[tool.poetry]`. A file with neither is configuration for a tool in the
-     * Python ecosystem — codespell, ruff, sqlfluff, pytest — and is not
-     * evidence the application is Python: Dolibarr has six `[tool.*]` tables
-     * and no `[project]`, Composio only `[tool.uv.*]`.
-     *
-     * `[build-system]` is NOT consulted: Dolibarr has one with
-     * `setuptools.build_meta`, so accepting a Python build backend would still
-     * misdetect the repository this exists to fix.
+     * Whether a pyproject.toml is a Python project manifest (`[project]` or `[tool.poetry]`), not a tool's settings. Not
+     * `[build-system]`: Dolibarr, a PHP application, has one with `setuptools.build_meta`.
      */
     public static function declaresProject(?string $pyproject): bool
     {
@@ -339,39 +305,32 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Whether a TOML document has exactly this table, not one whose name
-     * merely starts with it: `[project.scripts]` is not `[project]`.
+     * Whether a TOML document has exactly this table, not one whose name merely starts with it (`[project.scripts]` is not
+     * `[project]`); a comment may follow the header, as in `[project]  # the app`.
      */
     private static function hasTable(string $toml, string $table): bool
     {
-        // TOML allows a comment after a table header, and a project that
-        // writes `[project]  # the app` must not be read as declaring nothing.
-        return preg_match(
-            '/^[ \t]*\['.preg_quote($table, '/').'\][ \t]*(?:#.*)?\r?$/m',
-            $toml
-        ) === 1;
+        return preg_match('/'.self::tableHeader($table).'/m', $toml) === 1;
+    }
+
+    /** The header line of a TOML table, indented or not, a `# comment` allowed after it. */
+    private static function tableHeader(string $table): string
+    {
+        return '^[ \t]*\['.preg_quote($table, '/').'\][ \t]*(?:#[^\n]*)?\r?$';
     }
 
     /**
-     * Whether this pyproject describes a Poetry application, not a distributable
-     * package.
-     *
-     * `package-mode = false` is Poetry's switch for "this is a program": there
-     * is no importable package to build, so pip cannot install the project.
-     * Looked for only under `[tool.poetry]`.
+     * Whether this pyproject is a Poetry application, `package-mode = false` in any of Poetry's boolean spellings, inside
+     * `[tool.poetry]` only: there is no importable package to build, so pip cannot install the project.
      */
     public static function isNonPackagePoetry(?string $pyproject): bool
     {
         if ($pyproject === null) {
             return false;
         }
-        // Poetry's boolean spellings, and only inside [tool.poetry]: the key
-        // must be seen after that table opens and before the next one does.
-        if (preg_match('/^\[tool\.poetry\]\s*$(.*?)(?=^\[|\z)/ms', $pyproject, $section) !== 1) {
-            return false;
-        }
+        $section = self::tableBody($pyproject, 'tool.poetry');
 
-        return preg_match('/^\s*package-mode\s*=\s*false\s*$/mi', $section[1]) === 1;
+        return $section !== null && preg_match('/^\s*package-mode\s*=\s*false\s*(?:#.*)?$/mi', $section) === 1;
     }
 
     /** The venv's interpreter, which is what every Python command must run under. */
@@ -393,8 +352,7 @@ final class PythonRuntime implements Runtime
     private const ENTRYPOINTS = ['app.py', 'main.py', 'wsgi.py', 'asgi.py', 'server.py'];
 
     /**
-     * Modules a declared server imports: the root search takes every
-     * conventional entry point. The nested search is narrower — there, `app.py`
+     * Modules a declared server imports in the nested search; the root search takes every entry point, but below it `app.py`
      * beside a manage.py is a Django application module, not a server target.
      *
      * @var list<string>
@@ -402,10 +360,8 @@ final class PythonRuntime implements Runtime
     private const WSGI_MODULES = ['wsgi.py', 'asgi.py'];
 
     /**
-     * A declared WSGI or ASGI server wins over running the module directly: a
-     * Flask quickstart's `app.py` ends in a bare `app.run()` binding
-     * 127.0.0.1:5000, so the container comes up, stays up, and answers nothing
-     * on the port the recipe published.
+     * A declared WSGI or ASGI server wins over running the module (a Flask `app.run()` binds 127.0.0.1:5000, answering nothing on
+     * the published port); the root, where a project states itself, before a nested Django project, then the project's scripts.
      *
      * @param  list<string>  $manifests  contents of requirements.txt and friends
      */
@@ -414,33 +370,16 @@ final class PythonRuntime implements Runtime
         $projectDir = rtrim($projectDir, '/');
         $server = self::declaredServer($manifests);
 
-        // 1. An application object at the root a declared server can import.
-        //    The root is where a project states itself, so it is consulted
-        //    before anything further down the tree.
         $root = self::applicationModule($projectDir, self::ENTRYPOINTS);
         if ($root !== null && $server !== null) {
             return self::serverCommand($server, $root[0], $root[1], '');
         }
 
-        // 2. A root entry point runnable as a script.
-        foreach (self::ENTRYPOINTS as $file) {
-            if (! is_file($projectDir.'/'.$file)) {
-                continue;
-            }
-            // A file called wsgi.py or asgi.py is a hand-off to a server, not
-            // a program. Running it imports the module and exits, and the
-            // account crash-loops with nothing bound. Only run one when it
-            // says it is also a script.
-            if (self::isServerHandoff($file) && ! self::hasMainGuard($projectDir.'/'.$file)) {
-                continue;
-            }
-
-            return self::python().' '.$file;
+        $script = self::rootScriptCommand($projectDir);
+        if ($script !== null) {
+            return $script;
         }
 
-        // 3. A Django project laid out in a subdirectory -- NetBox --
-        //    and a declared server to run it. Only reached when the
-        //    root offered nothing.
         if ($server !== null) {
             $nested = self::nestedServableModule($projectDir);
             if ($nested !== null) {
@@ -448,26 +387,49 @@ final class PythonRuntime implements Runtime
             }
         }
 
-        // 4. The console script the project declares (Music Assistant's `mass`).
+        return self::declaredScriptCommand($projectDir) ?? self::lastResortServer();
+    }
+
+    /**
+     * A root entry point run as a script. A wsgi.py or asgi.py only with a `__main__` guard: it is a hand-off to a server, and
+     * running it imports the module and exits, so the account crash-loops with nothing bound.
+     */
+    private static function rootScriptCommand(string $projectDir): ?string
+    {
+        foreach (self::ENTRYPOINTS as $file) {
+            if (! is_file($projectDir.'/'.$file)) {
+                continue;
+            }
+            if (self::isServerHandoff($file) && ! self::hasMainGuard($projectDir.'/'.$file)) {
+                continue;
+            }
+
+            return self::python().' '.$file;
+        }
+
+        return null;
+    }
+
+    /** The console script the project declares, else its one root script with a `__main__` guard. */
+    private static function declaredScriptCommand(string $projectDir): ?string
+    {
         $script = self::consoleScript($projectDir);
         if ($script !== null) {
             return self::VENV.'/bin/'.$script;
         }
 
-        // 5. The one root script with a `__main__` guard (SABnzbd.py).
         $main = self::soleMainScript($projectDir);
         if ($main !== null) {
             return self::python().' '
                 .(preg_match('#^[A-Za-z0-9._-]+$#', $main) === 1 ? $main : escapeshellarg($main));
         }
 
-        return self::lastResortServer();
+        return null;
     }
 
     /**
-     * The `[project.scripts]` entry to start, when the install puts it in the
-     * venv: the only one, or the one named after the project. Several with
-     * none of them the project's own is a guess, and null.
+     * The `[project.scripts]` entry to start, when the install puts it in the venv: the only one, or the one named after the
+     * project (PEP 503 normalised); several with none of them the project's own is a guess, and null.
      */
     private static function consoleScript(string $projectDir): ?string
     {
@@ -484,7 +446,6 @@ final class PythonRuntime implements Runtime
             return $scripts[0] ?? null;
         }
 
-        // PEP 503 normalisation: `music_assistant` and `music-assistant` are one name.
         $normalise = static fn (string $name): string => strtolower((string) preg_replace('/[-_.]+/', '-', $name));
         $project = self::tableBody($pyproject, 'project') ?? '';
         if (preg_match('/^[ \t]*name[ \t]*=[ \t]*["\']([^"\']+)["\']/m', $project, $name) !== 1) {
@@ -501,7 +462,7 @@ final class PythonRuntime implements Runtime
     /** The lines of one TOML table, up to the next table header. */
     private static function tableBody(string $toml, string $table): ?string
     {
-        $header = '/^[ \t]*\['.preg_quote($table, '/').'\][ \t]*(?:#.*)?\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
+        $header = '/'.self::tableHeader($table).'(.*?)(?=^[ \t]*\[|\z)/ms';
 
         return preg_match($header, $toml, $matches) === 1 ? $matches[1] : null;
     }
@@ -513,7 +474,7 @@ final class PythonRuntime implements Runtime
     private static function soleMainScript(string $projectDir): ?string
     {
         $found = null;
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($projectDir) as $entry) {
             if (! str_ends_with($entry, '.py') || ! is_file($projectDir.'/'.$entry)
                 || in_array(strtolower($entry), ['setup.py', 'conftest.py', 'manage.py', 'noxfile.py'], true)
                 || preg_match('/^test_|_test\.py$/i', $entry) === 1
@@ -531,11 +492,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * A declared WSGI or ASGI server importing `module:callable`.
-     *
-     * The search-path flag appears only when the module is not importable from
-     * the working directory — a Django project whose package sits below the
-     * root.
+     * A declared server importing `module:callable`, gunicorn on 0.0.0.0, not its 127.0.0.1 default, to be reachable from outside
+     * the container. The search-path flag appears only for a module below the working directory, a nested Django package.
      */
     private static function serverCommand(string $server, string $module, string $callable, string $searchPath): string
     {
@@ -546,8 +504,6 @@ final class PythonRuntime implements Runtime
                 .' --host 0.0.0.0 --port '.self::PORT;
         }
 
-        // --bind, not the default 127.0.0.1:8000: the listener has to be
-        // reachable from outside the container.
         return self::VENV.'/bin/gunicorn --bind 0.0.0.0:'.self::PORT
             .' --timeout 120'.self::searchPathOption('gunicorn', $searchPath)
             .' '.$module.':'.$callable;
@@ -568,23 +524,12 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Nothing in this repository is runnable, and the container still has to
-     * come up -- an account that answers is easier to diagnose than one that
-     * crash-loops with nothing in the log.
-     *
-     * It must not publish the checkout: `python -m http.server` in the project
-     * directory serves every file, with indexes. An InvenTree deploy landed
-     * here and answered 200 on `/.git/config` over a public name.
-     *
-     * So it serves one generated page out of an otherwise empty directory, and
-     * `not-placeholder` recognises the page for what it is instead of the
-     * deploy reporting itself healthy.
+     * Nothing is runnable, yet an account that answers is easier to diagnose than one crash-looping: one generated page from an
+     * empty directory, never the checkout (`/.git/config` once answered 200), titled so `not-placeholder` does not report it healthy.
      */
     private static function lastResortServer(): string
     {
         $dir = self::PLACEHOLDER_DIR;
-        // The title is the detection contract not-placeholder matches on: a
-        // page with a title of its own answered 200 and was reported healthy.
         $page = '<!doctype html><title>'.PlaceholderPage::NOT_CONFIGURED_TITLE.'</title>'
             .'<h1>This application did not start</h1>'
             .'<p>PanelAlpha found no Python entry point in this repository, so nothing is running. '
@@ -597,9 +542,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * gunicorn first: a project listing both is normally serving a WSGI app
-     * through gunicorn with a uvicorn worker class, and gunicorn takes the bind
-     * address.
+     * gunicorn first: a project listing both normally serves a WSGI app through gunicorn with a uvicorn worker class, and gunicorn
+     * takes the bind address.
      *
      * @param  list<string>  $manifests
      */
@@ -616,16 +560,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * A Django project laid out below the project root, as
-     * [module, callable, relative search path], or null when there is none.
-     *
-     * Only reached when nothing at the root is runnable, and only for a project
-     * with a declared server: a WSGI module cannot be run as a script, so
-     * naming one without gunicorn or uvicorn would crash-loop the account.
-     *
-     * `netbox/manage.py` beside `netbox/netbox/wsgi.py` gives module
-     * `netbox.wsgi` with `netbox/` on the import path, exactly what NetBox's
-     * own systemd unit passes (`--pythonpath /opt/netbox/netbox netbox.wsgi`).
+     * A Django project below the root as [module, callable, search path], such as NetBox's `netbox.wsgi` with `netbox/` on the path.
+     * Only with a declared server: a WSGI module run as a script would crash-loop the account.
      *
      * @return array{0: string, 1: string, 2: string}|null
      */
@@ -647,20 +583,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * The WSGI/ASGI modules of every Django project in the checkout, as
-     * [module, search path, file] triples, the outermost project first.
-     *
-     * Both `django-admin startproject` shapes are found because both are
-     * anchored the same way: the package directory holding `wsgi.py` sits
-     * beside the `manage.py` that runs the project. At the root that is
-     * `manage.py` beside `NAME/wsgi.py` (module `NAME.wsgi`); run inside a
-     * subdirectory — NetBox — it is `netbox/manage.py` beside
-     * `netbox/netbox/wsgi.py` (module `netbox.wsgi`, needing `netbox/` on the
-     * import path).
-     *
-     * Anchoring on `manage.py` keeps this from picking up a `wsgi.py`
-     * vendored in some library's tree: Django never writes one without its
-     * manage.py next door.
+     * The WSGI/ASGI modules of every Django project, as [module, search path, file], outermost first: a package holding `wsgi.py`
+     * beside a `manage.py`, which keeps out one vendored in a library, as Django never writes one without its manage.py.
      *
      * @return list<array{0: string, 1: string, 2: string}>
      */
@@ -674,7 +598,6 @@ final class PythonRuntime implements Runtime
                     if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                         continue;
                     }
-                    // `NAME/wsgi.py`, a package beside the manage.py.
                     if (! is_file($projectDirOf.'/'.$entry.'/'.$module)
                         || ! is_file($projectDirOf.'/'.$entry.'/__init__.py')) {
                         continue;
@@ -693,11 +616,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * The directory holding the project's `manage.py`, relative to the project
-     * root — `''` when it is the root itself — or null when there is none.
-     *
-     * Asked by the `django` probe and by the Django recipe's commands, so
-     * detection and the commands cannot disagree about a layout.
+     * The directory holding the project's `manage.py`, relative to the root (`''` for the root), or null. Asked by the `django`
+     * probe and the Django recipe's commands, so they cannot disagree about a layout.
      */
     public static function djangoManageDir(string $projectDir): ?string
     {
@@ -705,34 +625,34 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * A `manage.py` invocation that works wherever the file actually sits.
+     * `manage.py` by its path from the root, not after a `cd`, which would lose the root's venv; Python puts the script's directory
+     * on `sys.path`. Quoted only when needed: a directory name may hold a metacharacter, but `'manage.py'` would fill every log.
      *
-     * Addressed by path from the project root, not with a `cd`: the virtualenv
-     * is at the root and `.venv/bin/python` would not be found from inside
-     * `netbox/`. Python puts the script's own directory on `sys.path[0]`, so
-     * `.venv/bin/python netbox/manage.py` resolves `netbox.settings` as running
-     * it from inside `netbox/` would — the same reasoning as the `--pythonpath`
-     * {@see nestedServableModule()} hands a declared server.
+     * @see nestedServableModule() for the same reasoning behind a declared server's `--pythonpath`
      */
     public static function manageCommand(string $projectDir, string $arguments): string
     {
         $dir = self::djangoManageDir($projectDir);
         $script = $dir === null || $dir === '' ? 'manage.py' : $dir.'/manage.py';
 
-        // Quoted only when needed: the directory name comes off the filesystem
-        // and can hold a space or a metacharacter, but quoting the ordinary
-        // case would put `'manage.py'` in every Django deploy log.
-        return self::python().' '
-            .(preg_match('#^[A-Za-z0-9._/-]+$#', $script) === 1 ? $script : escapeshellarg($script))
-            .' '.$arguments;
+        return self::python().' '.self::shellPath(self::notAnOption($script)).' '.$arguments;
+    }
+
+    /** A path as one shell word: bare when it holds only `[A-Za-z0-9._/-]`, escaped otherwise. */
+    private static function shellPath(string $path): string
+    {
+        return preg_match('#^[A-Za-z0-9._/-]+\z#', $path) === 1 ? $path : escapeshellarg($path);
+    }
+
+    /** A relative path led by `./` when it starts with `-`, so the program it is handed to does not read an option. */
+    private static function notAnOption(string $path): string
+    {
+        return str_starts_with($path, '-') ? './'.$path : $path;
     }
 
     /**
-     * How a Django project is served: a WSGI/ASGI server it declared, run
-     * against the project's own module, and `manage.py runserver` only when it
-     * declared none.
-     *
-     * `runserver` is Django's development server and says so on every boot.
+     * How a Django project is served: a WSGI/ASGI server it declared, against its own module, and `manage.py runserver`, the
+     * development server that says so on every boot, only when it declared none.
      *
      * @param  list<string>  $manifests  contents of requirements.txt and friends
      */
@@ -751,21 +671,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Whether a file called `manage.py` is Django's.
-     *
-     * The name alone is not evidence: bitcart/bitcart ships
-     * `api/views/manage.py`, a FastAPI *router* sharing nothing with Django but
-     * the filename. Detection keyed on the name claimed the repo as Django and
-     * emitted `migrate` and `runserver`; the ASGI app was never started.
-     *
-     * Two signals, either enough: the file carries `DJANGO_SETTINGS_MODULE`,
-     * `execute_from_command_line` or a django import; or a `wsgi.py`/`asgi.py`
-     * sits in the package beside it, the shape `django-admin startproject`
-     * writes.
-     *
-     * The second exists because the first can be missing — a manage.py trimmed
-     * to a shebang is still Django if its project is shaped like one. It is not
-     * a loophole for bitcart, which has neither file anywhere.
+     * Whether a `manage.py` is Django's, as the name alone is not (bitcart's is a FastAPI router): it says so itself, or, trimmed
+     * to a shebang, sits beside a package holding `wsgi.py`/`asgi.py`, the shape `django-admin startproject` writes.
      */
     private static function isDjangoManagePy(string $dir): bool
     {
@@ -798,8 +705,7 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * Directories holding a *Django* `manage.py`, relative to the project
-     * root, the root itself first. Bounded to three levels: a Django project
+     * Directories holding a *Django* `manage.py`, relative to the root, the root first; three levels at most, as a Django project
      * does not keep its manage.py four levels down.
      *
      * @return list<string>
@@ -865,12 +771,8 @@ final class PythonRuntime implements Runtime
     }
 
     /**
-     * The server-specific flag that puts the project's package directory on the
-     * import path, or '' when the module is importable as it is.
-     *
-     * gunicorn spells it `--pythonpath`, uvicorn `--app-dir`. Without it the
-     * nested module cannot be imported and gunicorn exits with
-     * `ModuleNotFoundError`.
+     * The flag putting the package directory on the import path (gunicorn `--pythonpath`, uvicorn `--app-dir`), or '' when the
+     * module imports as it is; without it the nested module cannot be imported and gunicorn exits.
      */
     private static function searchPathOption(string $server, string $searchPath): string
     {
@@ -880,7 +782,7 @@ final class PythonRuntime implements Runtime
 
         $flag = $server === 'uvicorn' ? '--app-dir' : '--pythonpath';
 
-        return " {$flag} '".$searchPath."'";
+        return " {$flag}=".self::shellPath($searchPath);
     }
 
     public function defaultRequirement(): Requirement

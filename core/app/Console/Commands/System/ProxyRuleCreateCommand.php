@@ -4,7 +4,6 @@ namespace App\Console\Commands\System;
 
 use App\Console\Commands\Concerns\AppliesProxyRules;
 use App\Console\Commands\Concerns\ConfirmsChanges;
-use App\Console\Commands\Concerns\ResolvesProject;
 use App\Models\ProxyRule;
 use App\Models\User;
 use App\Rules\ListenIp;
@@ -22,7 +21,6 @@ class ProxyRuleCreateCommand extends Command
 {
     use AppliesProxyRules;
     use ConfirmsChanges;
-    use ResolvesProject;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['proxy-rule:create'];
@@ -36,15 +34,13 @@ class ProxyRuleCreateCommand extends Command
         {--upstream-port= : Upstream port - interactive if not provided}
         {--upstream-protocol=http : Upstream protocol (for HTTP: http, https; for stream: leave empty)}
         {--scope=system : Owner scope (system or user)}
-        {--project= : Username (required for user-owned rules)} {--username= : Deprecated alias for --project}
+        {--project= : Project username (required for user-owned rules)}
         {--force : Skip confirmation}';
 
     protected $description = 'Create a new proxy rule';
 
     public function handle(): int
     {
-        $this->foldProjectOption();
-
         $rule = $this->readRule();
         if ($rule === null) {
             return 1;
@@ -147,9 +143,9 @@ class ProxyRuleCreateCommand extends Command
     /** The owning project from --project, asked for a user rule; null when none was given. */
     private function username(string $scope): ?string
     {
-        $username = $this->option('username');
+        $username = $this->option('project');
         if ($scope === 'user' && ! is_string($username)) {
-            $username = $this->ask('Username (for user-owned rule)');
+            $username = $this->ask('Project username (for user-owned rule)');
         }
 
         return is_string($username) && $username !== '' ? $username : null;

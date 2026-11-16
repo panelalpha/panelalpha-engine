@@ -5,11 +5,13 @@ namespace Tests\Unit\System\Project\Dind;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\System;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AccountDaemon;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\RuntimeSidecars;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Strategy\AccountSecrets;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\LocalRoot;
 
 /**
  * Which password a sidecar nobody configured gets, decided once
@@ -23,24 +25,27 @@ class SidecarPasswordModeTest extends TestCase
     /** @var list<string> */
     private array $commands = [];
 
-    private function dind(array $details, ?string $volumes): Dind
+    /** @param ?list<string> $volumes the volume names the account's daemon lists; null when it cannot be asked */
+    private function dind(array $details, ?array $volumes): Dind
     {
         $commands = &$this->commands;
         $system = new class ($volumes, $commands) extends System {
-            /** @param list<string> $commands */
-            public function __construct(private ?string $volumes, private array &$commands)
+            /**
+             * @param ?list<string> $volumes
+             * @param list<string> $commands
+             */
+            public function __construct(private ?array $volumes, private array &$commands)
             {
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
-                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
-                $this->commands[] = $line;
+                $this->commands[] = (string) LocalRoot::action((array) $cmd);
                 if ($this->volumes === null) {
                     throw new \RuntimeException('Cannot connect to the Docker daemon');
                 }
 
-                return $this->volumes;
+                return (string) json_encode(array_map(static fn (string $name): array => ['Name' => $name], $this->volumes));
             }
         };
 
@@ -49,10 +54,12 @@ class SidecarPasswordModeTest extends TestCase
         $model->details = $details;
 
         $dind = $this->createStub(Dind::class);
+        $dind->method('composeFilePath')->willReturn('/home/u/docker-compose.yml');
         $dind->method('userModel')->willReturn($model);
         $dind->method('username')->willReturn('acme');
         $dind->method('system')->willReturn($system);
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('accountDaemon')->willReturnCallback(fn (): AccountDaemon => new AccountDaemon($dind));
         $dind->method('freezeDeploySnapshot')->willReturnCallback(function (array $snapshot): void {
             $this->frozen[] = $snapshot;
         });
@@ -84,16 +91,16 @@ class SidecarPasswordModeTest extends TestCase
 
     public function test_a_new_account_gets_derived_passwords_and_keeps_them(): void
     {
-        $passwords = (new RuntimeSidecars($this->dind([], '')))->passwords();
+        $passwords = (new RuntimeSidecars($this->dind([], [])))->passwords();
 
         $this->assertFalse($passwords->isLegacy());
         $this->assertSame([[SidecarPasswords::DETAILS_KEY => 'derived']], $this->frozen);
-        $this->assertStringContainsString("'docker' 'volume' 'ls' '-q'", implode("\n", $this->commands));
+        $this->assertSame(['account-docker.listVolumes'], $this->commands);
     }
 
     public function test_an_account_with_data_already_keeps_app(): void
     {
-        $passwords = (new RuntimeSidecars($this->dind([], "project_dbdata\n")))->passwords();
+        $passwords = (new RuntimeSidecars($this->dind([], ['project_dbdata'])))->passwords();
 
         $this->assertTrue($passwords->isLegacy());
         $this->assertSame('app', $passwords->for('MYSQL_PASSWORD'));
@@ -102,7 +109,7 @@ class SidecarPasswordModeTest extends TestCase
 
     public function test_the_stored_mode_is_used_without_asking_docker(): void
     {
-        $passwords = (new RuntimeSidecars($this->dind([SidecarPasswords::DETAILS_KEY => 'derived'], "project_dbdata\n")))
+        $passwords = (new RuntimeSidecars($this->dind([SidecarPasswords::DETAILS_KEY => 'derived'], ['project_dbdata'])))
             ->passwords();
 
         $this->assertFalse($passwords->isLegacy());

@@ -22,11 +22,19 @@ A folder of files with `index.html` (or `index.htm`) at the top is a static site
 
 ### Pages without an index.html
 
-A hand-written site of pages such as `home.html` and `about.html`, with no `index.html`, is still a website. Every file has to be something a browser can open: a page, stylesheet, script, image, font, or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated this way.
+A hand-written site of pages such as `home.html` and `about.html`, with no `index.html`, is still a website. Every file has to be something a browser can open: a page, stylesheet, script, image, font or media file. One `package.json` or `composer.json` anywhere in the repository, and it is no longer treated this way.
 
 ## WordPress and ready-made apps
 
-WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Adminer, and phpMyAdmin are recognised as PHP apps and started for you.
+WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Roundcube, Adminer and phpMyAdmin are recognised as PHP apps and started for you.
+
+Two more apps have their own recipe and deploy from their repository: Roundcube (`https://github.com/roundcube/roundcubemail`, version 1.7 and the development branch) and Postmill (`https://github.com/postmill-ai/postmill-app`).
+
+Roundcube is a mail client only. Set `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST` in the project's environment variables to the mail servers it should log in to and send through. Without them it tries `localhost`, where no mail server runs. The engine creates its database and sets up its configuration on the first deploy.
+
+Postmill starts with a Redis service of its own and applies its database migrations on every deploy.
+
+OpenCart deploys from its `4.1.x.x` branch. The default `master` branch is refused: [OpenCart](#real-applications-to-try).
 
 How to finish the first WordPress setup and look after a site that is already on this engine: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 
@@ -36,17 +44,17 @@ These are projects with a `package.json` at the top of the repository. Commit th
 
 ### Apps that stay running
 
-Next.js, Nuxt, SvelteKit, Remix, Astro (when it runs on the server), NestJS, TanStack Start, Express, Fastify, and a plain Node app. A plain Node app also needs a `start` script in `package.json`, or a file such as `index.js`, `server.js`, or `app.js`.
+Next.js, Nuxt, SvelteKit, Remix, Astro (when it runs on the server), NestJS, TanStack Start, Express, Fastify and a plain Node app. A plain Node app also needs a `start` script in `package.json`, or a file such as `index.js`, `server.js`, or `app.js`.
 
 They start from the `start` script when there is one.
 
 ### Apps that build into files
 
-Vite, Angular, Create React App, Astro when it builds a static site, and Next.js when it exports static files. The engine builds the files, then shows them as a website.
+Vite, Angular, Create React App, Astro when it builds a static site and Next.js when it exports static files. The engine builds the files, then shows them as a website.
 
 ### If package.json is almost empty
 
-No known framework, no `start` script, and no server file: the engine tries a [general build](#if-the-engine-does-not-recognise-it) instead.
+No known framework, no `start` script, and no server file: the engine does not recognise it. A [general build](#if-the-engine-does-not-recognise-it) is there if you ask for one.
 
 ## PHP sites
 
@@ -60,7 +68,7 @@ Ready-made PHP apps are covered under [WordPress and ready-made apps](#wordpress
 
 ### Python
 
-Django needs a `manage.py` file (it may sit in a subfolder). Other Python projects need one of `requirements.txt`, `pyproject.toml`, `Pipfile`, or `setup.py` at the top, and no `manage.py`.
+Django needs a `manage.py` file (it may sit in a subfolder). Other Python projects need one of `requirements.txt`, `pyproject.toml`, `Pipfile` or `setup.py` at the top, and no `manage.py`.
 
 Django starts the way Django usually starts. Other Python projects start from `main.py` or `app.py`, or from a common Python web server if one is already in the project. Failing those, the engine runs the one command the project declares under `[project.scripts]` in `pyproject.toml`, or the one top-level `.py` file that ends in an `if __name__ == "__main__":` block. When there are several of either, name the entry point in a `panelalpha.yaml`.
 
@@ -68,9 +76,9 @@ Django starts the way Django usually starts. Other Python projects start from `m
 
 Rails needs a `Gemfile` and `config/application.rb`. Plain Ruby needs a `Gemfile` plus either a `config.ru` file or a `web:` line in a Procfile.
 
-A `Gemfile` on its own, with none of those, goes to a [general build](#if-the-engine-does-not-recognise-it).
+A `Gemfile` on its own, with none of those, is not recognised. A [general build](#if-the-engine-does-not-recognise-it) is there if you ask for one.
 
-### Go, Rust, Java, and .NET
+### Go, Rust, Java and .NET
 
 - **Go:** a `go.mod` at the top. The engine builds the program and runs it.
 - **Rust:** a `Cargo.toml` at the top, built for production. A library with nothing to run is refused.
@@ -81,13 +89,15 @@ A `Gemfile` on its own, with none of those, goes to a [general build](#if-the-en
 
 **Docker Compose.** A `docker-compose.yml` or `compose.yml` file is checked near the top, so it usually wins. A compose file you only use on your own computer is still picked up. Rename or remove it if you do not want that.
 
-**A Dockerfile.** A `Dockerfile` or `Containerfile`. The image starts the way it was written to start. If both files exist, the `Dockerfile` is used.
+**A Dockerfile.** A `Dockerfile` or `Containerfile`. The image starts the way it was written to start. If both files exist, the `Dockerfile` is used. A Dockerfile in `docker/`, `build/` or `scripts/docker/`, or a variant such as `Dockerfile.prod`, is also found. A single `<name>.dockerfile` at the top is used when nothing else matches. A Dockerfile written for local development (one that maps the host's user id) is not used.
 
 ## If the engine does not recognise it
 
-It still tries a **general build** when the repository has a language file (`package.json`, `composer.json`, `go.mod`, `requirements.txt`, `Gemfile`, and similar) but did not match a named kind above.
+**Unknown** means it did not recognise the project, or the project is not a website. The deploy then shows the "Project not configured" page, with HTTP status 404, so an uptime monitor reports the site as down. Check that before you deploy: [What your repository needs](what-your-repo-needs.md).
 
-**Unknown** means it did not recognise the project, or the project is not a website. Check that before you deploy: [What your repository needs](what-your-repo-needs.md).
+A **general build** (Railpack) runs only when you ask for it, for example `Deploy https://github.com/org/app as railpack`. Inspect offers it among the candidates when the repository has a language file (`package.json`, `composer.json`, `go.mod`, `requirements.txt`, `Gemfile`, and similar), and says "the recipe `railpack` may build it". It is not picked by itself, because most repositories that reach it are libraries or tools with no website to start.
+
+**The choice is for one deploy.** It is not saved. Every later deploy of the project has to ask for it again: a rebuild, a pull, a revert, a branch change, a deployed archive and a push webhook. Without it, that deploy ends on the "Project not configured" page. To stop asking, give the repository a `Dockerfile`, a Compose file or a [panelalpha.yaml](panelalpha-yaml.md).
 
 ## Names you might see in a log
 
@@ -98,7 +108,7 @@ These are the short names the engine uses when you inspect a repository and in d
 | `compose` | Docker Compose |
 | `dockerfile` | A `Dockerfile` or `Containerfile` |
 | `laravel` | Laravel |
-| `php` | PHP, including WordPress, OpenCart, Magento, Matomo, and PHP without Composer |
+| `php` | PHP, including WordPress, OpenCart, Magento, Matomo and PHP without Composer |
 | `rails` | Ruby on Rails |
 | `ruby` | Ruby |
 | `django` | Django |
@@ -121,7 +131,7 @@ These are the short names the engine uses when you inspect a repository and in d
 | `fastify` | Fastify |
 | `node` | A Node app that is not one of the frameworks above |
 | `static` | Files including an `index.html`. Pages with no `index.html` use the same serving and are labelled HTML site |
-| `railpack` | The general build, used when nothing more specific matched |
+| `railpack` | The general build, used only when you ask for it |
 | `fallback` | Unknown, or not a website |
 
 ## Real applications to try
@@ -131,7 +141,8 @@ These deploy real applications from the Supported board, a few from each stack. 
 | Application | Technology | Repository | Board issue |
 |---|---|---|---|
 | PrestaShop | PHP | `https://github.com/PrestaShop/PrestaShop` | #334 |
-| OpenCart | PHP, known app | `https://github.com/opencart/opencart` | #335 |
+| OpenCart | PHP, known app | `https://github.com/opencart/opencart`, branch `4.1.x.x` | #335 |
+| Roundcube | PHP, known app | `https://github.com/roundcube/roundcubemail` | #61 |
 | Firefly III | Laravel | `https://github.com/firefly-iii/firefly-iii` | #8 |
 | MeTube | Python | `https://github.com/alexta69/metube` | #191 |
 | Umami | Node.js | `https://github.com/umami-software/umami` | #26 |
@@ -163,11 +174,23 @@ Check: the shop's installer or front page at the address.
 **PHP known app: OpenCart**
 
 ```text
-Deploy https://github.com/opencart/opencart as project topencart. Tell me if the
-engine recognised it as a known app, and what the first page asks for.
+Deploy https://github.com/opencart/opencart, branch 4.1.x.x, as project
+topencart. Tell me if the engine recognised it as a known app, and what the
+first page asks for.
 ```
 
 Check: the inspection reports a known app, and the first page is served by OpenCart: its storefront, its installer or its login.
+
+OpenCart's default branch, `master`, is an unreleased rewrite whose page loads its scripts from `http://localhost/`. The engine recognises it and refuses the deploy, naming the branch to use instead. The 4.1 release line, branch `4.1.x.x`, is the one supported.
+
+**PHP known app: Roundcube**
+
+```text
+Deploy https://github.com/roundcube/roundcubemail as project troundcube. Tell me
+what mail server settings it needs and what the first page shows.
+```
+
+Check: the inspection reports a known app, the assistant names `ROUNDCUBE_IMAP_HOST` and `ROUNDCUBE_SMTP_HOST`, and the first page is Roundcube's login. Delete the project when done.
 
 **Laravel: Firefly III**
 
@@ -244,7 +267,7 @@ Extra tools: `container_list`. Check: every service it starts is listed, and the
 **Clean up**
 
 ```text
-Delete the projects tprestashop, topencart, tfirefly, tmetube, tumami, tntfy2,
+Delete the projects tprestashop, topencart, troundcube, tfirefly, tmetube, tumami, tntfy2,
 tmemos, tstump, tscoold and tchatwoot.
 ```
 

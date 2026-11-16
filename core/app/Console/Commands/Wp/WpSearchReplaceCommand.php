@@ -9,7 +9,7 @@ class WpSearchReplaceCommand extends WordPressCommand
     protected $signature = 'wordpress:search-replace
                             {search : Search string}
                             {replacement : Replacement string}
-                            {extra?* : Table names and --dry-run, --precise, --all-tables, --all-tables-with-prefix, --regex, --skip-columns=, --regex-delimiter=}';
+                            {extra?* : Table names, and after -- the flags --dry-run, --precise, --all-tables, --all-tables-with-prefix, --regex, --skip-columns=, --regex-delimiter=}';
 
     protected $description = 'Search-replace a string across the WordPress install';
 
