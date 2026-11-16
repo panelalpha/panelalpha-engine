@@ -251,6 +251,8 @@ class EnsureTokenMayUseApiTest extends TestCase
             ['GET', 'api/system/prewarm'], ['GET', 'api/system/sites-db'], ['GET', 'api/system/mcp-scope'],
             ['PUT', 'api/system/prewarm'], ['PUT', 'api/system/mcp-scope'], ['PUT', 'api/system/sites-db'],
             ['PUT', 'api/mcp-tokens/{id}/commands'],
+            ['GET', 'api/api-tokens'], ['POST', 'api/api-tokens'], ['PUT', 'api/api-tokens/{id}/routes'],
+            ['PUT', 'api/api-tokens/{id}/revoke'], ['DELETE', 'api/api-tokens/{id}'],
         ] as $route) {
             $response = $this->dispatched($abilities, route: $route, params: ['id' => '1']);
 

@@ -18,7 +18,7 @@ class McpTokenOperationsOpenApiTest extends TestCase
         $operation = $this->operation('revoke', OA\Put::class);
 
         $this->assertSame('/mcp-tokens/{id}/revoke', $operation->path);
-        $this->assertSame([200, 404], $this->statuses($operation));
+        $this->assertSame([200, 403, 404], $this->statuses($operation));
         $this->assertSame('id', $operation->parameters[0]->name);
         $this->assertSame('path', $operation->parameters[0]->in);
         $this->assertTrue($operation->parameters[0]->required);
@@ -29,7 +29,7 @@ class McpTokenOperationsOpenApiTest extends TestCase
         $operation = $this->operation('destroy', OA\Delete::class);
 
         $this->assertSame('/mcp-tokens/{id}', $operation->path);
-        $this->assertSame([200, 404], $this->statuses($operation));
+        $this->assertSame([200, 403, 404], $this->statuses($operation));
         $this->assertSame('id', $operation->parameters[0]->name);
         $this->assertSame('path', $operation->parameters[0]->in);
         $this->assertTrue($operation->parameters[0]->required);

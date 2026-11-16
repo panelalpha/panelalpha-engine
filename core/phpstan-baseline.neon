@@ -13,12 +13,6 @@ parameters:
 			path: app/Auth/RequestToken.php
 
 		-
-			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: app/Auth/TokenAbilities.php
-
-		-
 			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
 			identifier: arrayValues.list
 			count: 1
@@ -433,18 +427,6 @@ parameters:
 			path: app/Console/Wizard/Sections/McpTokensSection.php
 
 		-
-			message: '#^Method App\\Console\\Wizard\\TokenManager\:\:tokens\(\) should return array\<int, App\\Models\\PersonalAccessToken\> but returns array\<int, Laravel\\Sanctum\\PersonalAccessToken\>\.$#'
-			identifier: return.type
-			count: 1
-			path: app/Console/Wizard/TokenManager.php
-
-		-
-			message: '#^Parameter \#1 \$callback of method Illuminate\\Support\\Collection\<int,Laravel\\Sanctum\\PersonalAccessToken\>\:\:filter\(\) expects \(callable\(Laravel\\Sanctum\\PersonalAccessToken, int\)\: bool\)\|null, Closure\(App\\Models\\PersonalAccessToken\)\: bool given\.$#'
-			identifier: argument.type
-			count: 1
-			path: app/Console/Wizard/TokenManager.php
-
-		-
 			message: '#^Strict comparison using \=\=\= between class\-string\<Illuminate\\Database\\Eloquent\\Model\> and null will always evaluate to false\.$#'
 			identifier: identical.alwaysFalse
 			count: 1
@@ -461,12 +443,6 @@ parameters:
 			identifier: arrayValues.list
 			count: 1
 			path: app/Exceptions/ProblemException.php
-
-		-
-			message: '#^Parameter \#1 \$token of method App\\Http\\Controllers\\McpTokenController\:\:formatToken\(\) expects App\\Models\\PersonalAccessToken, Laravel\\Sanctum\\PersonalAccessToken given\.$#'
-			identifier: argument.type
-			count: 2
-			path: app/Http/Controllers/McpTokenController.php
 
 		-
 			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Support\\Carbon\. Use \-\> instead\.$#'

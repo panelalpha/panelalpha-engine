@@ -100,7 +100,7 @@ class OperatorTokensHttpTest extends TestCase
     public function test_an_unlimited_token_may_limit_one(): void
     {
         $id = $this->postJson('/api/mcp-tokens', ['name' => 'target'])->json('data.id');
-        $this->actingAsToken(TokenAbilities::build(api: true, mcp: false));
+        $this->actingAsToken(TokenAbilities::build(api: true, mcp: true));
 
         $this->putJson("/api/mcp-tokens/{$id}/commands", ['commands' => ['project_get']])->assertOk();
     }

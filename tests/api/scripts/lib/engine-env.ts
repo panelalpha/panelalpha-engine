@@ -83,13 +83,13 @@ export function isLocalEngine(composeFile = ENGINE_COMPOSE_FILE): boolean {
 
 /** Prefer the installed wrapper; fall back to a direct compose exec. */
 export function engineTokenCommand(tokenName = 'api-tests'): string {
-  return `pae-artisan api:token:create ${tokenName} --short`;
+  return `pae-artisan api:token:create ${tokenName} --mcp --short`;
 }
 
 export function engineTokenCommandFallback(tokenName = 'api-tests'): string {
   return (
     `docker compose -f ${ENGINE_COMPOSE_FILE} exec -T core ` +
-    `php artisan api:token:create ${tokenName} --short`
+    `php artisan api:token:create ${tokenName} --mcp --short`
   );
 }
 
@@ -113,7 +113,7 @@ function runAndParseToken(file: string, args: string[]): string | undefined {
  */
 export function mintTokenLocal(tokenName = 'api-tests'): string | undefined {
   return (
-    runAndParseToken('pae-artisan', ['api:token:create', tokenName, '--short']) ??
+    runAndParseToken('pae-artisan', ['api:token:create', tokenName, '--mcp', '--short']) ??
     runAndParseToken('docker', [
       'compose',
       '-f',
@@ -125,6 +125,7 @@ export function mintTokenLocal(tokenName = 'api-tests'): string | undefined {
       'artisan',
       'api:token:create',
       tokenName,
+      '--mcp',
       '--short',
     ])
   );

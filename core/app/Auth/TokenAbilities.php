@@ -121,17 +121,8 @@ class TokenAbilities
         array $existing = [],
         ?array $projects = null
     ): array {
-        $ours = [self::API, self::MCP, self::EVERYTHING, self::PROJECT_SCOPE];
-
         // Anything outside this vocabulary belongs to someone else.
-        $kept = array_values(array_filter(
-            $existing,
-            fn (mixed $a): bool => is_string($a)
-                && ! in_array($a, $ours, true)
-                && ! str_starts_with($a, self::COMMAND_PREFIX)
-                && ! str_starts_with($a, self::ROUTE_PREFIX)
-                && ! str_starts_with($a, self::PROJECT_PREFIX)
-        ));
+        $kept = self::foreign($existing);
 
         $built = [];
 
@@ -162,6 +153,26 @@ class TokenAbilities
     }
 
     /**
+     * The abilities outside this vocabulary.
+     *
+     * @param  array<int, mixed>  $abilities
+     * @return list<string>
+     */
+    private static function foreign(array $abilities): array
+    {
+        $ours = [self::API, self::MCP, self::EVERYTHING, self::PROJECT_SCOPE];
+
+        return array_values(array_filter(
+            $abilities,
+            fn (mixed $a): bool => is_string($a)
+                && ! in_array($a, $ours, true)
+                && ! str_starts_with($a, self::COMMAND_PREFIX)
+                && ! str_starts_with($a, self::ROUTE_PREFIX)
+                && ! str_starts_with($a, self::PROJECT_PREFIX)
+        ));
+    }
+
+    /**
      * @param  array<int, string>  $values
      * @return array<int, string>
      */
@@ -171,6 +182,45 @@ class TokenAbilities
         sort($values);
 
         return array_map(fn (string $v): string => $prefix.$v, $values);
+    }
+
+    /**
+     * Where this token reaches further than $holder does: `everything` for a legacy token under a holder that is not
+     * one, `api` or `mcp` for a surface the holder lacks, `routes`, `commands` or `projects` for a limit the holder
+     * has and this token lacks or exceeds, `other` for an ability outside this vocabulary the holder lacks. Empty when
+     * it stays within $holder.
+     *
+     * @return list<string>
+     */
+    public function widerThan(self $holder): array
+    {
+        if ($holder->isLegacy()) {
+            return [];
+        }
+
+        if ($this->isLegacy()) {
+            return ['everything'];
+        }
+
+        return array_keys(array_filter([
+            self::API => $this->mayUseApi() && ! $holder->mayUseApi(),
+            self::MCP => $this->mayUseMcp() && ! $holder->mayUseMcp(),
+            'routes' => $this->mayUseApi() && self::beyond($this->routes(), $holder->routes()),
+            'commands' => $this->mayUseMcp() && self::beyond($this->commands(), $holder->commands()),
+            'projects' => self::beyond($this->projects(), $holder->projects()),
+            'other' => array_diff(self::foreign($this->abilities), self::foreign($holder->abilities)) !== [],
+        ]));
+    }
+
+    /**
+     * Whether $mine reaches past $limit. Null is no limit.
+     *
+     * @param  array<int, string>|null  $mine
+     * @param  array<int, string>|null  $limit
+     */
+    private static function beyond(?array $mine, ?array $limit): bool
+    {
+        return $limit !== null && ($mine === null || array_diff($mine, $limit) !== []);
     }
 
     /** A token from before any of this: `*`, or nothing at all. */

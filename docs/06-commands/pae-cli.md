@@ -277,7 +277,7 @@ Context: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
 | `pae configure mcp-tokens` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
 | `pae mcp:log:list` | Lists recent assistant requests. `--limit=` sets how many (20 by default). `--token-id=` keeps the requests made with that token, even one deleted since; repeat it for several. `--token-name=` keeps the requests whose token name contains that text, ignoring case. `--project=` keeps the requests that named that project. |
-| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. It is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
+| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. It is refused at the assistant endpoint unless you pass `--mcp`, and without `--mcp` it cannot mint assistant tokens over the API either. `--expires=90d` makes it temporary. |
 | `pae api:token:list` | Lists those software tokens. A project's Engine API token is on it while it works; one that was replaced, denied, or whose project was deleted is removed, so no token that no longer works is left looking live. |
 | `pae api:token:delete {id}` | Removes a software token. |
 

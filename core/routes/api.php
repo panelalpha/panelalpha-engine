@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ApiTokenController;
 use App\Http\Controllers\BackupContainerController;
 use App\Http\Controllers\BugReportController;
 use App\Http\Controllers\DomainController;
@@ -124,6 +125,12 @@ Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
 Route::put('/mcp-tokens/{id}/projects', [McpTokenController::class, 'updateProjects']);
 Route::put('/mcp-tokens/{id}/commands', [McpTokenController::class, 'updateCommands']);
 Route::delete('/mcp-tokens/{id}', [McpTokenController::class, 'destroy']);
+
+Route::get('/api-tokens', [ApiTokenController::class, 'index']);
+Route::post('/api-tokens', [ApiTokenController::class, 'store']);
+Route::put('/api-tokens/{id}/routes', [ApiTokenController::class, 'updateRoutes'])->whereNumber('id');
+Route::put('/api-tokens/{id}/revoke', [ApiTokenController::class, 'revoke'])->whereNumber('id');
+Route::delete('/api-tokens/{id}', [ApiTokenController::class, 'destroy'])->whereNumber('id');
 
 Route::get('/mcp-activity-logs', [McpActivityLogController::class, 'index']);
 Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);

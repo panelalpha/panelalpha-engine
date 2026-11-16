@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\CallerScope;
 use App\Auth\OperatorTokens;
 use App\Auth\TokenAbilities;
 use App\Http\Requests\McpTokenCommandsRequest;
@@ -13,14 +14,18 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
 
+/**
+ * Tokens for AI assistants. Whatever is minted or changed here stays within the caller's own token, and the caller
+ * sees and manages only tokens that do: {@see CallerScope}.
+ */
 class McpTokenController extends Controller
 {
     #[OA\Get(
         path: '/mcp-tokens',
         summary: 'List the root admin MCP tokens and their project scope',
         description: 'Pass `project` to keep only the tokens scoped to that project. A token created without '
-            .'`projects` is unscoped and reaches every project, so it never matches the filter. These tokens are '
-            .'panel-facing and are not exposed as MCP tools.',
+            .'`projects` is unscoped and reaches every project, so it never matches the filter. Only tokens within the '
+            .'caller\'s own are listed. These tokens are panel-facing and are not exposed as MCP tools.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -38,9 +43,9 @@ class McpTokenController extends Controller
     {
         $params = $request->validate(['project' => ['nullable', 'string', 'max:255']]);
 
-        $root = Admin::rootAccount();
+        $scope = OperatorTokens::mcp();
 
-        $tokens = $root->tokens()
+        $tokens = Admin::rootAccount()->tokens()
             ->where(function ($q) use ($params) {
                 $q->whereJsonContains('abilities', TokenAbilities::MCP);
 
@@ -50,7 +55,9 @@ class McpTokenController extends Controller
             })
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn ($t) => $this->formatToken($t));
+            ->filter(fn ($t) => $t instanceof PersonalAccessToken && $scope->covers($t))
+            ->map(fn ($t) => $this->formatToken($t))
+            ->values();
 
         return response()->json(['data' => $tokens]);
     }
@@ -63,7 +70,10 @@ class McpTokenController extends Controller
             .'in a request -- the target of a push, the name a clone or staging copy is created under -- must '
             .'be on the list already: the scope is fixed at mint time, so update it with '
             .'PUT /mcp-tokens/{id}/projects to let the token reach a project added since. `expires_in` is a number '
-            .'and a unit (30m, 12h, 90d, 2w); left out, the token never expires. Panel-facing; not an MCP tool.',
+            .'and a unit (30m, 12h, 90d, 2w); left out, the token never expires. `commands` limits it to those MCP '
+            .'commands. The token stays within the caller\'s own: the caller must hold MCP itself (403 otherwise), a '
+            .'caller limited to some commands must name `commands` among its own, and one that expires must give a '
+            .'lifetime that ends by then (422 on that field). Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -78,21 +88,24 @@ class McpTokenController extends Controller
                     items: new OA\Items(type: 'string'),
                     description: 'Existing project usernames. Omit for an unscoped token. A project created or cloned after this is not added automatically.',
                 ),
+                new OA\Property(property: 'commands', type: 'array', nullable: true, items: new OA\Items(type: 'string'), example: ['project_list', 'project_get'], description: 'The MCP commands it may call; omit or null for every one.'),
             ],
         )),
         responses: [
             new OA\Response(response: 201, description: 'Token created; the plaintext value is returned once', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 403, description: 'The caller\'s token does not hold MCP, or is scoped to some projects', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, or more than the caller\'s own token holds', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function store(McpTokenStoreRequest $request): JsonResponse
     {
         $params = $request->validated();
 
-        $newToken = OperatorTokens::mcp()->mint($params['name'], $params['expires_in'] ?? null, $params['projects'] ?? null);
+        $newToken = OperatorTokens::mcp()->mint($params['name'], $params['expires_in'] ?? null, $params['projects'] ?? null, $request->commands());
         $token = $newToken->accessToken;
+        assert($token instanceof PersonalAccessToken);
 
         return response()->json([
             'data' => array_merge(
@@ -106,7 +119,8 @@ class McpTokenController extends Controller
         path: '/mcp-tokens/{id}/projects',
         summary: 'Replace an MCP token project scope',
         description: 'Sets the exact list of projects the token may reach. An empty list scopes it to no project; '
-            .'the change applies to the next call. Panel-facing; not an MCP tool.',
+            .'the change applies to the next call. A caller scoped to some projects may name only those (422). A token '
+            .'that reaches further than the caller\'s is refused with 403. Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -123,16 +137,14 @@ class McpTokenController extends Controller
             new OA\Response(response: 200, description: 'Updated token', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 403, description: 'That token reaches further than the caller\'s', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function updateProjects(int $id, McpTokenProjectsRequest $request): JsonResponse
     {
-        $token = $this->findMcpToken($id);
-        $token->forceFill([
-            'abilities' => TokenAbilities::of($token)->withProjects($request->validated()['projects']),
-        ])->save();
+        $token = OperatorTokens::mcp()->scope($this->findMcpToken($id), array_values($request->validated()['projects']));
 
         return response()->json(['data' => $this->formatToken($token)]);
     }
@@ -142,8 +154,9 @@ class McpTokenController extends Controller
         summary: 'Limit which MCP commands a token may call',
         description: 'Replaces the token\'s command list: `commands` names every command it may call, null lifts the '
             .'limit so it follows what the engine offers. [] is refused: revoke a token to stop it. The engine\'s global scope '
-            .'(GET /system/mcp-scope) still applies on top. Applies to its next call. Refused with 403 to a caller '
-            .'whose own token is limited to part of the API. Panel-facing; not an MCP tool.',
+            .'(GET /system/mcp-scope) still applies on top. Applies to its next call. The result stays within the '
+            .'caller\'s own token: a caller limited to some commands may name only those, and may not lift the limit '
+            .'(422). A token that reaches further than the caller\'s is refused with 403. Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -158,7 +171,7 @@ class McpTokenController extends Controller
             new OA\Response(response: 200, description: 'Updated token', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
-            new OA\Response(response: 403, description: 'The caller\'s token is limited, or scoped to some projects', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 403, description: 'That token reaches further than the caller\'s, or the caller is scoped to some projects', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
@@ -174,7 +187,8 @@ class McpTokenController extends Controller
         path: '/mcp-tokens/{id}/revoke',
         summary: 'Revoke an MCP token',
         description: 'Marks the token revoked, so it is refused everywhere at once and cannot be un-revoked. It stays '
-            .'on the list with `revoked_at` set. Panel-facing; not an MCP tool.',
+            .'on the list with `revoked_at` set. A token that reaches further than the caller\'s is refused with 403. '
+            .'Panel-facing; not an MCP tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -185,13 +199,13 @@ class McpTokenController extends Controller
             new OA\Response(response: 200, description: 'Revoked token', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 403, description: 'That token reaches further than the caller\'s', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function revoke(int $id): JsonResponse
     {
-        $token = $this->findMcpToken($id);
-        $token->forceFill(['revoked_at' => now()])->save();
+        $token = OperatorTokens::mcp()->revoke($this->findMcpToken($id));
 
         return response()->json(['data' => $this->formatToken($token)]);
     }
@@ -200,7 +214,8 @@ class McpTokenController extends Controller
         path: '/mcp-tokens/{id}',
         summary: 'Delete an MCP token',
         description: 'Removes the token, which refuses it everywhere at once. Activity log rows it wrote keep their '
-            .'token id. Panel-facing; not an MCP tool.',
+            .'token id. A token that reaches further than the caller\'s is refused with 403. Panel-facing; not an MCP '
+            .'tool.',
         x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['MCP'],
@@ -211,13 +226,13 @@ class McpTokenController extends Controller
             new OA\Response(response: 200, description: 'The deleted token\'s id', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 403, description: 'That token reaches further than the caller\'s', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Token not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function destroy(int $id): JsonResponse
     {
-        $token = $this->findMcpToken($id);
-        $token->delete();
+        OperatorTokens::mcp()->delete($this->findMcpToken($id));
 
         return response()->json(['data' => ['id' => $id]]);
     }

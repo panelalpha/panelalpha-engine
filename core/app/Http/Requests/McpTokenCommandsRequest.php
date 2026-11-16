@@ -2,15 +2,12 @@
 
 namespace App\Http\Requests;
 
-use App\Http\Requests\Concerns\RefusesLimitedTokens;
 use App\Mcp\McpScopeSettings;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class McpTokenCommandsRequest extends FormRequest
 {
-    use RefusesLimitedTokens;
-
     public function rules(): array
     {
         return [

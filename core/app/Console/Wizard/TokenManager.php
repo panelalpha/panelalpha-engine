@@ -2,6 +2,7 @@
 
 namespace App\Console\Wizard;
 
+use App\Auth\CallerScope;
 use App\Auth\OperatorTokens;
 use App\Auth\TokenAbilities;
 use App\Console\Prompts\Screen;
@@ -373,6 +374,6 @@ class TokenManager
      */
     private function tokens(): OperatorTokens
     {
-        return new OperatorTokens($this->ability);
+        return new OperatorTokens($this->ability, CallerScope::everything());
     }
 }

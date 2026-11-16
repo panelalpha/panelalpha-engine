@@ -7,7 +7,6 @@ use App\Http\Middleware\Authenticate;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Route;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -178,16 +177,15 @@ class McpTokenScopeHttpTest extends TestCase
         $this->assertSame(['alice'], TokenAbilities::of(PersonalAccessToken::findOrFail($id))->projects());
     }
 
-    public function test_there_is_no_rest_route_that_mints_api_tokens(): void
+    public function test_a_project_scoped_token_cannot_reach_the_api_tokens(): void
     {
-        $uris = array_map(
-            static fn ($route): string => $route->uri(),
-            Route::getRoutes()->getRoutes()
-        );
+        $this->actingAsScopedToken('alice');
 
-        $mints = array_values(array_filter($uris, static fn (string $uri): bool => str_contains($uri, 'api-tokens')));
-
-        $this->assertSame([], $mints);
+        $this->getJson('/api/api-tokens')->assertStatus(403);
+        $this->postJson('/api/api-tokens', ['name' => 'widened'])->assertStatus(403);
+        $this->putJson('/api/api-tokens/1/routes', ['routes' => null])->assertStatus(403);
+        $this->putJson('/api/api-tokens/1/revoke')->assertStatus(403);
+        $this->deleteJson('/api/api-tokens/1')->assertStatus(403);
     }
 
     private function actingAsScopedToken(string $project, int $id = 900501): void

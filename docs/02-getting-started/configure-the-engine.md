@@ -87,11 +87,19 @@ A panel or a script can read every area, and change most of them. A token limite
 |---|---|---|
 | Address and certificate | `GET /system/engine-address` | `PUT /system/engine-address`: `cert_domain`, `cert_email`, `default_tunnel`. Requesting the certificate is `PUT /system/engine-certificate`. The address itself is not a setting: the engine is bound to it, and the API refuses `url`. |
 | Engine API access | `GET /system/api-access` | `PUT`, `POST …/rotate` and `DELETE /system/api-access/{project}` |
-| MCP tokens | `GET /mcp-tokens`, `GET /system/mcp-scope` | `PUT /system/mcp-scope`: `permission_mode`, `commands`. `POST /mcp-tokens` (with `expires_in`), `PUT /mcp-tokens/{id}/commands`, `/projects` and `/revoke`, `DELETE /mcp-tokens/{id}` |
-| API tokens | none | only `pae configure api-tokens` |
+| MCP tokens | `GET /mcp-tokens`, `GET /system/mcp-scope` | `PUT /system/mcp-scope`: `permission_mode`, `commands`. `POST /mcp-tokens` (with `expires_in`, `projects`, `commands`), `PUT /mcp-tokens/{id}/commands`, `/projects` and `/revoke`, `DELETE /mcp-tokens/{id}` |
+| API tokens | `GET /api-tokens` | `POST /api-tokens` (with `expires_in`, `routes`, `projects`), `PUT /api-tokens/{id}/routes` and `/revoke`, `DELETE /api-tokens/{id}`. These are not MCP tools. |
 | Prewarmed images | `GET /system/prewarm` | `PUT /system/prewarm`: `images`, `budget`, `reserve` |
 | Site database | `GET /system/sites-db` | `PUT /system/sites-db`: `innodb_buffer_pool_size`, `key_buffer_size`, `aria_pagecache_buffer_size`. The database restarts, as from the wizard. |
 | Telemetry | `GET /system/telemetry` | `PUT /system/telemetry`: `sending`, `tier`, `source_bundle`, `bug_reports` |
+
+A token you mint or change over the API stays within the token that makes the call, so you can hand out a token with a lower scope than yours and nothing more:
+
+- It gets only what your token has: MCP only if your token has MCP, only the operations, MCP commands and projects your token is limited to, and an expiry no later than your token's. Asking for MCP your token lacks is refused with 403. Asking for more of the rest is refused with 422, naming the field.
+- Your token sees, changes, revokes and deletes only the tokens that stay within it, itself included. Any other token is refused with 403 and left out of the list.
+- Your token can narrow itself but never widen itself.
+- A token scoped to some projects is refused on these routes altogether.
+- Revoking a token does not revoke the tokens it minted; revoke those too.
 
 What the API and the wizard change is kept in the engine database, and it wins over the same key in `.env-core`. Each value in a read says where it came from: `setting` for the database, `env` for `.env-core`, `default` for the engine's own. Sending `null` for a field removes it from the database, so `.env-core` or the default applies again. A change applies on the engine's next request; a deploy already running in the queue keeps what it started with. Secrets are never read back.
 
