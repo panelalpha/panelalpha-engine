@@ -26,7 +26,7 @@ The file is saved into a directory that already exists. Only an `http` or `https
 List what is in /project on this project.
 ```
 
-The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, including one that gets out through a link, or a path that is a file, is refused. A very long folder is cut off after 5000 entries by default, and the answer says so.
+The assistant sees each entry's name, type, size, change time and permissions, folders first. Links are shown as links, with where they point. It reads the folder as the project's own account, so a path that leads out of the account's home, including one that gets out through a link, or a path that is a file, is refused. A path outside the home answers 422 with the code `outside_home`. A very long folder is cut off after 5000 entries by default, and the answer says so.
 
 ```text
 Set the permissions on /project/script.sh to 755.
@@ -56,7 +56,7 @@ with directory /project.
 
 The directory must already exist inside the project's home: `/project` on a repository-deployed project. On traditional PHP hosting each domain has its own folder, `/<domain>/public_html` (`/shop.example.com/public_html` here), which the domain shows as its `document_root`; there is no `/public_html` at the top. Leave the directory out to give the account the whole home. A folder that does not exist is refused.
 
-An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it - plain FTP sends the password unencrypted.
+An FTP account needs a password of at least 8 characters, and the engine does not generate one. Do not type it into the chat: the assistant sends a paste page for it, or makes one up and shows it to you. An SFTP account takes a password the same way, or a public key. You get credentials to hand over. Prefer SFTP where the software at the other end supports it: plain FTP sends the password unencrypted.
 
 An SFTP login is the project's name, an underscore and a suffix (`tshop_sftp1`). You can give the suffix alone, and the engine adds the `tshop_` part. The whole login, with that part, is at most 32 characters. Each login is one account: deleting it removes it completely.
 
@@ -81,10 +81,10 @@ The name must be a plain file name, with no folder part. PHP keeps only the part
 ## Troubleshooting
 
 **"I uploaded my files and the site did not change."**
-Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `<domain>/public_html` on traditional PHP hosting). Or this is a site deployed from an archive or from files and it needs a rebuild - the running application is still the previously built version. On a project connected to git, a rebuild replaces the uploaded files with the repository's, so the change has to go into the repository. Traditional PHP hosting, including WordPress in `<domain>/public_html`, does not need a rebuild after an upload.
+Two possible causes, in order of likelihood. Either the files went to the account's top level rather than into `project/` (or `<domain>/public_html` on traditional PHP hosting). Or this is a site deployed from an archive or from files and it needs a rebuild: the running application is still the previously built version. On a project connected to git, a rebuild replaces the uploaded files with the repository's, so the change has to go into the repository. Traditional PHP hosting, including WordPress in `<domain>/public_html`, does not need a rebuild after an upload.
 
 **"Permission denied" on upload.**
-The path is outside the account's home directory, or the account has hit its disk quota. Ask the assistant to check the project's usage against its limits.
+The account has hit its disk quota. A path outside the account's home directory is a different refusal: a 422 with the code `outside_home`. Ask the assistant to check the project's usage against its limits.
 
 **"The file name ... would be stored as ..." on upload.**
 The name has a folder part, for example `sub\upload.txt`. PHP keeps only the part after the last `/` or `\`, so the engine refuses it with the code `file_name_changed` and writes nothing: the file of the shortened name is left as it was. Upload it under a plain name.
@@ -99,7 +99,7 @@ The engine could not download the address, so nothing was written; the answer is
 The folder already holds a file or folder with the same name as one the archive unpacks to at its top level. Unpacking never replaces or merges, so nothing was extracted; the answer names the entries. Unpack into a new or empty folder, or move the existing entries away first.
 
 **The FTP account connects but shows an empty folder.**
-It is looking at the directory it was configured with. Check that against where the site's files actually are - for repository deploys, `/project`; on traditional PHP hosting, the domain's `/<domain>/public_html`.
+It is looking at the directory it was configured with. Check that against where the site's files actually are: for repository deploys, `/project`; on traditional PHP hosting, the domain's `/<domain>/public_html`.
 
 **I deployed an archive and the site is showing a directory listing.**
 Your archive had a wrapper folder inside it, so the site's files ended up one level too deep. Repackage it with the files at the top level of the zip.

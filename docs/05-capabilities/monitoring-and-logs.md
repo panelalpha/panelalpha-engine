@@ -11,7 +11,7 @@ How much CPU and disk is this host using?
 
 There are five sources behind that answer, and it is worth knowing which one answers which question.
 
-## 1. The deploy log - "why did it fail?"
+## 1. The deploy log: "why did it fail?"
 
 What happened during the last build and start. This is where a failed deploy explains itself, in a plain sentence when the engine recognises the cause.
 
@@ -101,9 +101,9 @@ This site does not open properly. Read the deploy log, check what the site is
 actually serving, and tell me what is wrong.
 ```
 
-## 3. Domain logs - "what are visitors doing?"
+## 3. Domain logs: "what are visitors doing?"
 
-The webserver's access and error logs for a hostname. Not the deploy log - these are the ongoing record of requests hitting the site.
+The webserver's access and error logs for a hostname. Not the deploy log. These are the ongoing record of requests hitting the site.
 
 ```text
 Show me the error log for shop.example.com.
@@ -129,7 +129,7 @@ The assistant can read up to 5000 lines and limit them to a period. The file is 
 
 Use the webserver logs for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
-## 4. Usage - "is it running out of something?"
+## 4. Usage: "is it running out of something?"
 
 Two different questions here.
 
@@ -181,7 +181,7 @@ Linux does not scope these two to a container, so an agent that reads them repor
 
 In an app container, `memory.max` is that service's own limit. The container's memory limit in the project's metrics is the lower of the container's own limit and the project's. A limit above the project's is lowered to fit inside it when the project deploys. A service that sets only a reservation reads `max`, and the project's plan limit still applies to it.
 
-## 5. Lighthouse - "is it fast?"
+## 5. Lighthouse: "is it fast?"
 
 An optional performance and quality report against a site the engine hosts. Only the engine's own domains, their aliases and tunnel hostnames are accepted. Any other address, including an IP address, is refused. If the site redirects somewhere that is not one of those domains, no report comes back.
 
@@ -197,10 +197,10 @@ Entirely separate from deploying. A deploy never waits for one. If the assistant
 The project is probably still being created. Wait a minute. If it stays empty, ask for an older deploy by its ID.
 
 **The health check reports nothing, but I know sites are broken.**
-It only reports applications it could actually reach. Suspended projects and projects it cannot open are skipped rather than reported. Ask about the specific project directly - the answer for that one will say why it was skipped.
+It only reports applications it could actually reach. Suspended projects and projects it cannot open are skipped rather than reported. Ask about the specific project directly. The answer for that one will say why it was skipped.
 
 **A site is fine in my browser but reported as not serving itself.**
-The engine checks from inside the account, so it is seeing something you are not - often a cached page in your browser, or a difference between what the proxy serves and what the application returns. Trust the engine's answer and ask it what specifically failed.
+The engine checks from inside the account, so it is seeing something you are not, often a cached page in your browser, or a difference between what the proxy serves and what the application returns. Trust the engine's answer and ask it what specifically failed.
 
 ## More requests to try
 
@@ -261,7 +261,7 @@ Mode: read. Tools: `container_list`, `container_service_logs` with `since`, `unt
 **Restart pieces**
 
 ```text
-Restart just the app service of tshop. Then stop the whole project and start it
+Restart only the app service of tshop. Then stop the whole project and start it
 again.
 ```
 
@@ -304,4 +304,4 @@ Mode: read. Tools: `task_get` with `after_id`, `task_log_list` with `since`. Che
 
 ## From the server
 
-Deploy logs, health checks and site logs as `pae` commands: [CLI commands](../06-commands/pae-cli.md).
+Deploy logs, health checks and site logs as `pae` commands: [CLI commands](../06-commands/pae-cli.md). The sweep of section 2 runs on demand with `pae project:health:report`.

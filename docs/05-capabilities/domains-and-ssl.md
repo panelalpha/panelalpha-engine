@@ -1,15 +1,15 @@
 # Domains and HTTPS
 
-Every project has at least one hostname - the address visitors type. This page is about making that a name you own, with a working padlock.
+Every project has at least one hostname, the address visitors type. This page is about making that a name you own, with a working padlock.
 
-> **Two different certificates, do not confuse them.** Your *sites* have certificates, and *the engine itself* has one for its API and its connection to your AI assistant. This page is about site certificates. The engine's own is on [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate). A common source of confusion is a site working perfectly in a browser while an assistant still cannot connect, or vice versa - different certificates, different problems.
+> **Two different certificates, do not confuse them.** Your *sites* have certificates, and *the engine itself* has one for its API and its connection to your AI assistant. This page is about site certificates. The engine's own is on [Install](../02-getting-started/install.md#if-connecting-asks-you-to-trust-a-certificate). A common source of confusion is a site working perfectly in a browser while an assistant still cannot connect, or vice versa: different certificates, different problems.
 
 ## Adding your own domain
 
-**Point DNS at your VPS first.** Let's Encrypt issues a certificate by checking that it really reaches your VPS at that name. If the name does not resolve here yet, the request fails - and there is nothing the engine can do about it.
+**Point DNS at your VPS first.** Let's Encrypt issues a certificate by checking that it really reaches your VPS at that name. If the name does not resolve here yet, the request fails, and there is nothing the engine can do about it.
 
 1. At your DNS provider, create an **A record** for the name (for example `shop.example.com`) pointing to your VPS's public IPv4 address.
-2. Wait for it to take effect. Check with `nslookup shop.example.com` - it should return your VPS's address. This can take minutes or, on some providers, hours.
+2. Wait for it to take effect. Check with `nslookup shop.example.com`. It should return your VPS's address. This can take minutes or, on some providers, hours.
 3. Then ask your assistant:
 
 ```text
@@ -23,16 +23,16 @@ Open `https://shop.example.com/` in a browser. You want a padlock with no warnin
 
 If you create a project without naming a domain, the engine picks the best public name it can. It tries, in order:
 
-1. **`<project>.<your base domain>`**, if you have configured a base domain for sites. The best option - you control it.
+1. **`<project>.<your base domain>`**, if you have configured a base domain for sites. The best option: you control it.
 2. **A `panelalpha.online` name**, if your VPS has a public IPv4. Works immediately with no DNS setup from you. Skipped when the engine is set to give new projects its own names instead (below).
 3. **A name derived from the engine's own certificate.**
-4. **`<project>.local`** - which resolves nowhere.
+4. **`<project>.local`**, which resolves nowhere.
 
-**A `.local` name is not a public website.** The application built and started correctly; it simply has no address the world can reach. This is why such deploys are marked `partial`. Attach a domain you control before putting more work into the site.
+**A `.local` name is not a public website.** The application built and started correctly; it has no address the world can reach. This is why such deploys are marked `partial`. Attach a domain you control before putting more work into the site.
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it. The same goes for a staging copy or clone that got a name of its own there, and for a create or copy that fails: the name it was given is released with it.
 
-PanelAlpha Online serves those names through its own proxy, which passes a request on without a `multipart/form-data` body; pages, downloads and a form that posts only plain fields are unaffected, while **every upload sent through such a name fails** - a file in phpMyAdmin, a media file in WordPress ([phpMyAdmin](../05-capabilities/databases.md#troubleshooting)). A name that points straight at the server takes the same upload at once.
+PanelAlpha Online serves those names through its own proxy, which passes a request on without a `multipart/form-data` body; pages, downloads and a form that posts only plain fields are unaffected, while **every upload sent through such a name fails**: a file in phpMyAdmin, a media file in WordPress ([phpMyAdmin](../05-capabilities/databases.md#troubleshooting)). A name that points straight at the server takes the same upload at once.
 
 The server operator can switch the `panelalpha.online` step off for every new project. With the engine setting `default_tunnel` set to `none`, a project created without a name gets step 1 or step 3 above, and nothing is registered at PanelAlpha Online. The value `panelalpha`, or no value, keeps the order above. A request that names `panelalpha` or `none` itself always wins over the setting. Change it with `pae settings:set default_tunnel none`, or with `pae configure address`: [CLI commands](../06-commands/pae-cli.md#configuring-the-engine).
 
@@ -190,7 +190,7 @@ The engine does not sign mail itself. A DKIM signature comes from a relay (SendG
 
 ## Removing an installed certificate
 
-A certificate you install on a domain yourself (`install-ssl-cert`, or the panel's Custom Certificate) replaces the one the engine gave the site, and the engine keeps no copy of what it replaced. The way back is the way forward: `DELETE /projects/{username}/domains/{domain}/installed-ssl-cert` and `pae ssl:project-cert:remove shop.example.com` (or `ssl_cert_remove` for the assistant) drop the installed certificate and give the domain the one it would get if it were added now - the server's own where that covers the name, otherwise the one this engine is set to issue, self-signed on a stock engine. It works for a main domain, an addon domain and a subdomain alike.
+A certificate you install on a domain yourself (`install-ssl-cert`, or the panel's Custom Certificate) replaces the one the engine gave the site, and the engine keeps no copy of what it replaced. The way back is the way forward: `DELETE /projects/{username}/domains/{domain}/installed-ssl-cert` and `pae ssl:project-cert:remove shop.example.com` (or `ssl_cert_remove` for the assistant) drop the installed certificate and give the domain the one it would get if it were added now: the server's own where that covers the name, otherwise the one this engine is set to issue, self-signed on a stock engine. It works for a main domain, an addon domain and a subdomain alike.
 
 The new certificate replaces all four files of the domain's (`crt`, `key`, `ca`, `pem`), so the installed key is gone, and any ACME challenge state of the name is forgotten. The webserver is reloaded and the answer is the certificate the domain carries now, the same shape `installed-ssl-cert` returns. A domain already on a certificate the engine made (one it issued, its self-signed one or the server's own) keeps it: the call answers with it and nothing is issued again, so repeating it spends no Let's Encrypt rate limit. A domain with SSL turned off has no certificate to put back and is refused.
 
@@ -217,7 +217,7 @@ Mode: read. Tools: `ssl_check`. Check: `status` is `trusted`, `dns.points_here` 
 ## Troubleshooting
 
 **The certificate request fails with a DNS error.**
-The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80 - Let's Encrypt uses it to verify ownership, even though your site will run on 443.
+The A record is not pointing here yet. Confirm with `nslookup shop.example.com` from somewhere other than your VPS. Also check nothing is blocking port 80, because Let's Encrypt uses it to verify ownership, even though your site will run on 443.
 
 **The certificate request fails with `Timeout during connect (likely firewall problem)`.**
 DNS is fine, but Let's Encrypt cannot reach port 80 on the VPS. Most often a firewall in your provider's control panel lets only some addresses in, so the site opens for you and not for Let's Encrypt. Port 80 has to be open to everyone, also later for automatic renewals. See [A firewall in front of the VPS](../02-getting-started/install.md#a-firewall-in-front-of-the-vps).
@@ -238,7 +238,7 @@ Visitors to that name already get HTTPS from PanelAlpha Online (see the previous
 Covered on the [Cloudflare](cloudflare.md#troubleshooting) page.
 
 **"Let's Encrypt rate limit."**
-Let's Encrypt caps how many new certificates you can get per week. If you have been retrying a failing request, stop, fix the DNS, and wait - retrying burns the allowance without getting you a certificate.
+Let's Encrypt caps how many new certificates you can get per week. If you have been retrying a failing request, stop, fix the DNS and wait. Retrying burns the allowance without getting you a certificate.
 
 ## More requests to try
 

@@ -6,7 +6,7 @@ Cloudflare lets visitors reach a site through Cloudflare's network instead of po
 
 Use Cloudflare when your domain is already managed at Cloudflare and you would rather not point an A record directly at this VPS, or when you want Cloudflare's HTTPS and protection sitting in front of the site.
 
-If you just want your own domain with a padlock and no Cloudflare in the middle, you do not need any of this. Point an A record at your VPS and use Let's Encrypt: [Domains and HTTPS](domains-and-ssl.md).
+If you want your own domain with a padlock and no Cloudflare in the middle, you do not need any of this. Point an A record at your VPS and use Let's Encrypt: [Domains and HTTPS](domains-and-ssl.md).
 
 ## Before you start
 
@@ -65,7 +65,7 @@ Cloudflare caches your site at its edge. After a content change you can ask it t
 
 - **Purge everything.** Clears the whole cache for the zone the domain is in. The next visitor gets a fresh copy from the engine. Refused while another project on this engine has a name in the same zone (the project's own staging copy does not count): purge single files then.
 - **Purge single files.** Clears up to 30 URLs, for example the stylesheet and the page that changed. Each URL must be on one of the project's own names: its domains, their aliases or its tunnel hostnames.
-- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high`, or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over. The level applies to the whole zone, so it is refused while another project on this engine has a name in the same zone (the project's own staging copy does not count); change it in the Cloudflare dashboard then.
+- **Security level.** One of `off`, `essentially_off`, `low`, `medium`, `high` or `under_attack`. `under_attack` is the "I am under attack" mode: every visitor waits a few seconds before the site answers. Set it back to a normal level when the attack is over. The level applies to the whole zone, so it is refused while another project on this engine has a name in the same zone (the project's own staging copy does not count); change it in the Cloudflare dashboard then.
 
 Each action names one of the project's domains or aliases, and works on the Cloudflare zone that exact name is in: an alias in another zone acts on that zone, not on the main domain's.
 

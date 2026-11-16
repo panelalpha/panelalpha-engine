@@ -290,7 +290,7 @@ Mode: read. Tools: `deploy_log_get` (with `offset` while `more` is true), `task_
 List the deploys tmemos still has a log of. Show me the log of the second newest.
 ```
 
-Mode: read. Tools: `deploy_list`, `deploy_log_read` (with `offset` while `more` is true). Check: each deploy shows its status, branch, commit and what started it, newest first, and the engine keeps the last 10 by default.
+Mode: read. Tools: `deploy_list`, `deploy_log_read` (with `offset` while `more` is true). Check: each deploy shows its status, branch, commit and what started it, newest first, and the engine keeps the last 10 by default. With `page` or `per_page` the answer is one page with `meta` and `links`. A classic hosting project keeps no deploy log and the request is refused with 403.
 
 **Cancel a deploy**
 
@@ -418,7 +418,7 @@ Mode: modify. Tools: `git_commits`, `git_revert` with `ref`, `git_pull`, `task_g
 The git token of tmemos no longer works. Send me the page to replace it.
 ```
 
-Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat and the secret is created with the type `token`. `git_pull` works afterwards.
+Mode: modify. Tools: `vault_secret_create`, `git_update_credentials`. Check: the token is not typed in chat and the secret is created with the type `git_token`. `git_pull` works afterwards.
 
 **Deploy key for an SSH remote**
 
