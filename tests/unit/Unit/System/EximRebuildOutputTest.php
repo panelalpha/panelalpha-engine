@@ -7,6 +7,7 @@ use App\System\Filesystem;
 use App\System\Services\Exim;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
+use Tests\Support\InMemoryDatabase;
 use Tests\Support\LocalRoot;
 use Tests\Support\TestNetwork;
 use Tests\TestCase;
@@ -14,33 +15,50 @@ use Tests\TestCase;
 /** Every file rebuildEximConfig() writes, for each provider, and the order it reads, writes and applies them in. */
 class EximRebuildOutputTest extends TestCase
 {
+    use InMemoryDatabase;
+
     private string $root;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->bootInMemoryDatabase();
         $this->root = sys_get_temp_dir() . '/pa-exim-out-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/config/exim', 0777, true);
-        mkdir($this->root . '/templates/config', 0777, true);
+        mkdir($this->root . '/templates/config/exim', 0777, true);
         putenv('PA_ROOT_LOCAL_ROOTS=' . json_encode(['engine' => $this->root]));
-        foreach (['update-conf', 'passwd', 'rewrite', 'transport'] as $name) {
+        foreach (['update-conf', 'passwd', 'transport'] as $name) {
             copy(
                 dirname(base_path()) . "/templates/config/exim-{$name}.blade.php",
                 $this->root . "/templates/config/exim-{$name}.blade.php"
             );
         }
+        copy(
+            dirname(base_path()) . '/templates/config/exim/rewrite.conf',
+            $this->root . '/templates/config/exim/rewrite.conf'
+        );
     }
 
     protected function tearDown(): void
     {
         putenv('PA_ROOT_LOCAL_ROOTS');
-        foreach (glob($this->root . '/{config/exim,templates/config}/*', GLOB_BRACE) ?: [] as $file) {
-            unlink($file);
-        }
-        foreach (['/config/exim', '/config', '/templates/config', '/templates', ''] as $dir) {
-            rmdir($this->root . $dir);
-        }
+        $this->removeTree($this->root);
         parent::tearDown();
+    }
+
+    private function removeTree(string $path): void
+    {
+        if (! is_dir($path)) {
+            return;
+        }
+        foreach (scandir($path) ?: [] as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $full = $path . '/' . $item;
+            is_dir($full) ? $this->removeTree($full) : unlink($full);
+        }
+        rmdir($path);
     }
 
     /** @return array<string, array{0: array<string, string>, 1: string, 2: string, 3: string, 4: string}> */
@@ -106,10 +124,11 @@ class EximRebuildOutputTest extends TestCase
             "write {$exim}/update-exim4.conf.conf",
             "read {$templates}/exim-passwd.blade.php",
             "write {$exim}/passwd.client",
-            "read {$templates}/exim-rewrite.blade.php",
+            "read {$templates}/exim/rewrite.conf",
             "write {$exim}/rewrite.conf",
             "read {$templates}/exim-transport.blade.php",
             "write {$exim}/transport.conf",
+            "write {$exim}/panelalpha/senders",
             'exec compose.eximUpdateConfig',
             'exec compose.eximRestart',
         ], $system->journal);
@@ -131,10 +150,16 @@ class EximRebuildOutputTest extends TestCase
         );
         $this->assertSame($passwd, file_get_contents("{$exim}/passwd.client"));
         $this->assertSame(
-            $config['sender_domain'] !== ''
-                ? '*  ${local_part}_at_${domain}@' . $config['sender_domain'] . " Ffrs\n"
-                : "* \${address:\$header_from:} F\n",
+            str_replace(
+                Exim::UNNAMED_SENDER,
+                $config['sender_domain'] !== '' ? $config['sender_domain'] : Exim::UNNAMED_SENDER,
+                (string) file_get_contents(dirname(base_path()) . '/templates/config/exim/rewrite.conf')
+            ),
             file_get_contents("{$exim}/rewrite.conf")
+        );
+        $this->assertSame(
+            $config['sender_domain'] !== '' ? "server {$config['sender_domain']}\n" : '',
+            file_get_contents("{$exim}/panelalpha/senders")
         );
         $this->assertSame(
             $implicitTls !== '' ? "REMOTE_SMTP_SMARTHOST_PROTOCOL = smtps\n" : '',
@@ -263,6 +288,13 @@ class EximRebuildOutputTest extends TestCase
                     public function directoryExists(string $path): bool
                     {
                         return is_dir($path);
+                    }
+
+                    public function makeDirWithParents(string $target, ?string $chown = null): void
+                    {
+                        if (! is_dir($target)) {
+                            mkdir($target, 0777, true);
+                        }
                     }
 
                     public function filePutContents(string $path, string $contents, ?string $chown = null, ?string $chmod = null): void

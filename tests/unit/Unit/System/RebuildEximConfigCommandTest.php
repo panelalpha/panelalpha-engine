@@ -38,6 +38,13 @@ class RebuildEximConfigCommandTest extends TestCase
                             throw $this->failure;
                         }
                     }
+
+                    public function refreshSenderMap(): void
+                    {
+                        if ($this->failure !== null) {
+                            throw $this->failure;
+                        }
+                    }
                 };
             }
         });
@@ -81,6 +88,15 @@ class RebuildEximConfigCommandTest extends TestCase
 
         $this->assertSame(1, $exit);
         $this->assertStringContainsString('networks failed', Artisan::output());
+    }
+
+    public function test_the_senders_variant_exits_non_zero_on_failure(): void
+    {
+        $this->stub(new \RuntimeException('senders failed'));
+        $exit = Artisan::call('system:exim:rebuild', ['--senders' => true]);
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('senders failed', Artisan::output());
     }
 
     public function test_an_error_that_is_not_an_exception_still_exits_non_zero(): void

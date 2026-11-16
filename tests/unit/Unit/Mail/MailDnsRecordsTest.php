@@ -74,10 +74,9 @@ class MailDnsRecordsTest extends TestCase
         $this->assertNull($smtp['dkim']['host']);
     }
 
-    public function test_a_sender_domain_moves_the_records_to_it(): void
+    public function test_the_sending_domain_is_the_domain_itself(): void
     {
-        $this->assertSame('mail.host.example', MailDnsRecords::sendingDomain('Shop.Example', ' Mail.Host.Example '));
-        $this->assertSame('shop.example', MailDnsRecords::sendingDomain('Shop.Example', ''));
+        $this->assertSame('shop.example', MailDnsRecords::sendingDomain('Shop.Example'));
     }
 
     public function test_relay_and_host_addresses(): void

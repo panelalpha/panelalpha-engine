@@ -118,7 +118,22 @@ class DeployStrategy
         );
         $decision = ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
 
-        return $this->withDatabaseHostPinned($decision);
+        return $this->withDatabaseHostPinned(ComposeEnvironment::withMailRelay($decision, $this->mailRelay()));
+    }
+
+    /**
+     * The server's mail relay, empty when there is no engine host to ask (a unit test) or no
+     * address it can name.
+     *
+     * @return array<string, string>
+     */
+    protected function mailRelay(): array
+    {
+        try {
+            return $this->dind->system()->exim()->relayEnvironment();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

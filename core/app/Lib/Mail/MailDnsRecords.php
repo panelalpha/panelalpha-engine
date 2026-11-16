@@ -71,12 +71,10 @@ final class MailDnsRecords
         return $ips;
     }
 
-    /** The domain mail from $domain is sent as: a relay sender domain, when set, rewrites every sender to it. */
-    public static function sendingDomain(string $domain, string $senderDomain): string
+    /** The domain mail from $domain is sent as, which is the domain itself: the relay keeps a project's own domain. */
+    public static function sendingDomain(string $domain): string
     {
-        $senderDomain = strtolower(trim($senderDomain));
-
-        return $senderDomain !== '' ? $senderDomain : strtolower($domain);
+        return strtolower(trim($domain));
     }
 
     /**

@@ -20,6 +20,13 @@ final class ComposeEnvironment
     public const INSTANCE_SECRET = 'PA_INSTANCE_SECRET';
 
     /**
+     * The server's mail relay, where a project sends its mail: the address exim listens on for accounts, and its port.
+     */
+    public const SMTP_HOST = 'PA_SMTP_HOST';
+
+    public const SMTP_PORT = 'PA_SMTP_PORT';
+
+    /**
      * Where the application is published and probed: an account that moved these would get a container nothing reaches.
      *
      * @var list<string>
@@ -83,6 +90,28 @@ final class ComposeEnvironment
      * @return array<string, mixed>
      */
     public static function withApiAccess(array $decision, array $values): array
+    {
+        if ($values === []) {
+            return $decision;
+        }
+
+        $decision['env'] = array_merge(
+            ComposeValues::stringMap($decision['env'] ?? null),
+            self::escapedForCompose($values)
+        );
+
+        return $decision;
+    }
+
+    /**
+     * The server's mail relay added to a generated service's `environment:`, reserved: an account's own
+     * value of the same name would send its mail somewhere else, or nowhere.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, string>  $values  `PA_SMTP_HOST`, `PA_SMTP_PORT`
+     * @return array<string, mixed>
+     */
+    public static function withMailRelay(array $decision, array $values): array
     {
         if ($values === []) {
             return $decision;

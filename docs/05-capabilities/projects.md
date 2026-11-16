@@ -42,7 +42,7 @@ To see what you already have:
 List the projects on this engine.
 ```
 
-Projects on traditional PHP hosting are reported as WordPress or as plain PHP. Ask the assistant for the project's app type.
+Projects on traditional PHP hosting are reported as WordPress or as plain PHP. A WordPress the engine installed into a subfolder of the site's folder, such as `<domain>/blog`, is reported as WordPress together with the folder it was installed in, and the WordPress operations use that folder when they are not given one. Ask the assistant for the project's app type.
 
 ## Inspecting one
 
@@ -107,9 +107,9 @@ A project can have **one** staging copy, and a staging copy cannot itself have o
 Make a staging copy of this project without its databases.
 ```
 
-A WordPress site on a traditional PHP project is the exception: its copy is pointed at the databases copied for it, so a staging copy or a clone of it without its databases is refused before anything is copied.
+A WordPress site on a traditional PHP project is the exception: its copy is pointed at the databases copied for it, so a staging copy or a clone of it without its databases is refused before anything is copied. The engine rewrites the `wp-config.php` of the copied WordPress, in its WordPress directory, a subdirectory included, and the addresses the copy answers on; a copy whose `wp-config.php` it cannot find there is refused, so it never keeps writing to the live database. A WordPress the engine did not install itself is looked for up to three folders below the document root and remembered as the project's WordPress directory. A copy is refused before anything is copied when there is more than one WordPress there, or a `wp-config.php` that no WordPress loads.
 
-**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. On a container project the pushed app has to come up: one that keeps restarting, is stopped, or still listens on no port after the time a deploy gives it to start, fails the push, and the other side is put back as it was. Once the other side is running the pushed site, the push is done: a leftover copy the engine then fails to remove is reported as a warning on the push, and nothing is put back. The other project keeps its own database users and passwords, so the site there keeps connecting. A database the other side does not have yet is created there, and its users get the permissions the pushed project's users had on it. If the push fails, that database is dropped again and those permissions are taken back.
+**A push replaces the other side's files and databases.** Both are pushed unless you say otherwise. A domain's own PHP settings (`pae domain:php-directives`) are the project's own and are not among the files a push carries: each side keeps its set, so a push neither clears the other side's nor brings its own there. Before it replaces a database, the engine saves a copy of the one it is about to overwrite, and puts it back if the push fails. On a container project the pushed app has to come up: one that keeps restarting, is stopped, or still listens on no port after the time a deploy gives it to start, fails the push, and the other side is put back as it was. Once the other side is running the pushed site, the push is done: a leftover copy the engine then fails to remove is reported as a warning on the push, and nothing is put back. The other project keeps its own database users and passwords, so the site there keeps connecting. A database the other side does not have yet is created there, and its users get the permissions the pushed project's users had on it. If the push fails, that database is dropped again and those permissions are taken back.
 
 ```text
 Push the staging copy live, files only.
@@ -134,6 +134,8 @@ Only the volumes your compose file names are copied. An anonymous volume, such a
 ## Cloning
 
 A clone is an independent copy, with no ongoing link and no later push.
+
+The clone gets a hostname of its own: `clone.` in front of its source's, or, for a project on a free `panelalpha.online` name, a new name of its own there. It never takes the `staging.` address, so a staging copy of the same project can still be made afterwards. Give the clone an address of your own when you make it, and it uses that.
 
 ```text
 Clone this project.
@@ -194,7 +196,7 @@ The pages change within seconds: the webserver reloads in the background.
 Delete this project.
 ```
 
-**This removes the entire hosting account** - its database records, its configuration, and its home directory with every file in it. There is no undo. Take a backup first if there is any doubt.
+**This removes the entire hosting account** - its database records, the MySQL user its phpMyAdmin sign-in created, its configuration, and its home directory with every file in it. There is no undo. Take a backup first if there is any doubt.
 
 A live project that still has a staging copy is not deleted: delete the staging copy first. A project deleted while a command such as `pae project:rebuild --all` is running is skipped by it, not rebuilt.
 
@@ -209,6 +211,8 @@ Set DATABASE_URL to <value> on this project.
 If the assistant cannot change these, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 The engine stores the value and restarts only the parts of the application that use the changed variable, without a rebuild. Almost every application reads these once at startup, so the restart is what makes the new value take effect. A value the build itself reads still needs a rebuild: ask for one after the change.
+
+A website made only of files (a static site) gets them too: the container serving it loads `.env` from the project folder when it starts, so a rebuild keeps them.
 
 Only the keys you name are changed; the rest are left alone. To see what is set, ask the assistant to list the project's environment variables. Values are hidden in the list.
 
@@ -225,6 +229,25 @@ Every project's application is served from `/app`, the same path on every projec
 So the engine gives every project's application `PA_INSTANCE_SECRET`: 64 hexadecimal characters, different for every project, and the same on every deploy and rebuild of that project. Use it, or a hash of it, where the application would otherwise use its path. In PHP, read it with `getenv('PA_INSTANCE_SECRET')`. Under Apache it is not in `$_SERVER`.
 
 You cannot set it yourself: names starting with `PA_` belong to the engine. Three kinds of project do not receive it: services from your own Docker Compose file, apps from the general build (`railpack` in the log), and websites made only of files. It changes only if the engine's own key changes.
+
+### Sending mail through the server
+
+A container project's application is handed the server's own mail relay, so an application that sends mail does not have to be told an address or reach out to a mail provider. Projects built from a recipe (PHP, Node.js, Python, Ruby and the other detected stacks), from the repository's own `Dockerfile`, and from your own Docker Compose file receive it; apps from the general build (`railpack` in the log) and websites served as plain files (`static` or `fallback` in the log) do not:
+
+- `PA_SMTP_HOST` is the relay's address: the gateway of the network the server's projects run on (`10.200.0.1` with the default tenant network), which the server's mail service listens on beside its loopback and which an application reaches from inside the project. It is not the server's `docker0` address or `host.docker.internal`: each project has its own Docker inside it, whose own bridge usually takes `172.17.0.1`, so on most servers that address leads back into the project itself.
+- `PA_SMTP_PORT` is `25`.
+
+In PHP, read them with `getenv('PA_SMTP_HOST')` and `getenv('PA_SMTP_PORT')`. The connection is plain SMTP: no user name, no password, no TLS. It never leaves the server.
+
+A project deployed from your own Docker Compose file receives both in `.env.panelalpha`, which the engine's app service loads after `.env`, so a value of either name in your own `.env` or in the project's environment variables does not replace it. Names starting with `PA_` belong to the engine here too.
+
+The address is only the relay. Whether the message arrives is decided by the outgoing-mail settings: the smarthost or relay configured for the server, and the sender domain's SPF, DKIM and DMARC records. Mail a domain has no records for is refused, bounced or filed as spam by the receiver.
+
+**The relay decides which sender address leaves.** A message whose sender address is at a domain this project owns, one of its domains or aliases, leaves unchanged: the envelope sender and the `From:`, `Reply-To:` and `Sender:` headers all keep that address, and the display name in front of it. Adding a domain to a project checks only how the name is written, so the relay keeps a domain only when the engine can show it is this server's: it is below the server's sites base domain or its own name (`cert_domain`, else its `.panelalpha.direct` name), a tunnel of the project holds it (the only way a `panelalpha.online` name counts), or its A or AAAA record names one of this server's addresses. The engine checks every minute and asks DNS about a domain at most every 10 minutes, so a domain whose DNS was just pointed here keeps its sender within about 10 minutes, and one pointed away loses it as quickly. Any other sender address is replaced by the same mailbox name at the server's own sending name: the sender domain set in the server's mail settings, else the name the server's own certificate is issued for, else the address-derived `.panelalpha.direct` name of the server; a server with none of the three sends as `panelalpha-sender.invalid`, a reserved name no receiver accepts, and never as the mail service's internal host name. A project cannot send as another project's domain, as a domain nobody here serves, or as someone else's domain it added without pointing it here, so a receiver is never asked to verify a domain that is not this server's.
+
+What the receiver still checks, and the engine does not give it: an SPF record for that sending domain that names this server's address or the relay's, a DKIM signature from this server or its relay, and a reverse DNS name (PTR) on the address the message leaves from. Publish SPF, DKIM and DMARC for every domain a project sends as, as [the mail DNS records](domains-and-ssl.md#mail-from-a-domain) describes, and give the server's own address a PTR that names it; without them the message leaves with a sender that exists and resolves, and a receiver may still refuse it or file it as spam.
+
+A project on traditional PHP hosting receives no environment from the engine, so it cannot read these two: its PHP's own `mail()` (and anything else using `sendmail`) already goes through the same relay from inside the account.
 
 ## Limits
 
@@ -275,9 +298,11 @@ Every five minutes, run php artisan schedule:run in the app service of this proj
 
 The command runs in that service's running container, as that container's own user and in its own working directory, so it sees the application's files and environment. A job never overlaps itself: while a run is still going, the next one is skipped. If the service is not running when a job is due, that run is skipped too. Every run, and every skipped one, is written to `~/.panelalpha/cron/cron.log` in the project's home, together with the command's output. The schedule is in UTC.
 
-A command can be up to 640 bytes. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB.
+On traditional PHP hosting the job runs inside the project's own container, as the project's own user and in its home directory, so it sees the project's files. Its output goes to the same log: every run is appended to `~/.panelalpha/cron/cron.log` in the project's home, with the time it started and the status it exited with. Nothing is mailed there: cron would answer a failing job's output to the bare account name, which the mail server refuses, so the engine turns that mail off and the log is where a job that produced nothing on the site explains itself. Read it in the panel's file manager, in `.panelalpha/cron` in the project's home; it holds both streams of the run. A command never overlaps itself: while a run is still going, the next is skipped and the log says so, and two jobs with the same command count as one here, even on different schedules.
 
-On traditional PHP hosting, write a `%` in a command as it is: the engine escapes it for cron.
+A command can be up to 640 bytes. On traditional PHP hosting, a job written before the engine logged its runs whose command is longer than that keeps running as it did, but its runs are not logged. A container project has no cron jobs until its first deploy has run, and a job asked for before that is refused. The log rolls over at 1 MB.
+
+On traditional PHP hosting, write a `%` in a command as it is: the engine writes it so cron does not read it as a line break.
 
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
@@ -296,6 +321,12 @@ A staging copy or a push is already running on this project. Wait for it to fini
 
 **"A copy of it needs its own databases" (`wordpress_copy_needs_databases`).**
 You asked for a staging copy or a clone of a WordPress site on a traditional PHP project without its databases. Without them the copy would use the live site's database. Ask again with the databases.
+
+**"There is more than one WordPress below ..." or "... is loaded by no WordPress" (`wordpress_install_unclear`).**
+The engine could not tell which WordPress on the traditional PHP project to point at its own database: there are several up to three folders below the document root, or a `wp-config.php` there belongs to none of them. Move each extra WordPress into a project of its own, or remove the `wp-config.php` no site uses, then ask again.
+
+**"The copy of ... holds no wp-config.php of its WordPress".**
+The engine points a WordPress copy at the databases copied for it by rewriting that WordPress's `wp-config.php`, which it finds in the project's WordPress directory, a subdirectory included. It found none in the copy, so the copy was stopped rather than left on the live site's database. Check that the copied project's WordPress directory holds `wp-config.php`, then make the copy again.
 
 **I cloned a project and the site cannot reach its database.**
 A clone of a container project does not copy MySQL databases. Create the database and user on the clone, then update its environment variables to point at the new one: [Databases](databases.md). A traditional PHP project is copied with its databases, unless you asked for them to be left out. The copy has new database names and passwords, so a site that stores the old ones in its own files needs them updated.

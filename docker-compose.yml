@@ -121,6 +121,7 @@ services:
       - ./config/exim/transport.conf:/etc/exim4/conf.d/transport/20_panelalpha_transport
       - ./config/exim/rewrite.conf:/etc/exim4/conf.d/rewrite/90_panelalpha_rewrite
       - ./config/exim/auth.conf:/etc/exim4/conf.d/auth/90_panelalpha_auth
+      - ./config/exim/panelalpha:/etc/exim4/panelalpha:ro
     mem_limit: ${MEM_LIMIT_MAIL:-${MEM_LIMIT_EXIM:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_MAIL:-${MEMSWAP_LIMIT_EXIM:-0}}
   sites-dns:

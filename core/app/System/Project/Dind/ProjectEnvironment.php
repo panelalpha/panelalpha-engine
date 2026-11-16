@@ -99,12 +99,33 @@ class ProjectEnvironment
     {
         $tracked = $overrides !== [] && $this->envIsTracked();
         $services = $this->writeEngineValues(
-            (new ApiAccess($this->dind->system()))->envFor($user) + ($tracked ? $overrides + $generated : $generated),
+            $this->mailRelay()
+                + (new ApiAccess($this->dind->system()))->envFor($user)
+                + ($tracked ? $overrides + $generated : $generated),
             $projectDir,
             $chown
         );
 
         return [$tracked, $services];
+    }
+
+    /**
+     * The server's mail relay for a project whose compose file is its own: the engine sets it in
+     * `.env.panelalpha`, which the generated file of every other project already carries.
+     *
+     * @return array<string, string>
+     */
+    protected function mailRelay(): array
+    {
+        if (! $this->usesComposeStrategy()) {
+            return [];
+        }
+
+        try {
+            return $this->dind->system()->exim()->relayEnvironment();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

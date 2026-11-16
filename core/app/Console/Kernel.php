@@ -7,6 +7,7 @@ use App\Models\AppSsoToken;
 use App\Models\MysqlSsoToken;
 use App\Models\TokenRotation;
 use App\Support\RootConsoleOwnership;
+use App\System\Services\Exim;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\App;
@@ -77,6 +78,7 @@ class Kernel extends ConsoleKernel
     {
         $this->scheduleLogPruning($schedule);
         $this->scheduleInterruptedWorkRecovery($schedule);
+        $this->scheduleMailSenders($schedule);
         $this->scheduleExpiredSecretPurges($schedule);
         $this->scheduleGitCredentialSweep($schedule);
         $this->scheduleTunnelExpiry($schedule);
@@ -126,6 +128,17 @@ class Kernel extends ConsoleKernel
     }
 
     /**
+     * The sender domains each project may use follow its domains, where their DNS points and the address its account
+     * container starts with, and all three change outside any deploy. A minute of staleness costs a project its own
+     * sender domain, never the rewrite itself, and Exim reads the map per message, so nothing is restarted here. Each
+     * domain's DNS answer is reused for {@see Exim::SENDER_DNS_TTL_SECONDS}, so a run asks DNS about few names.
+     */
+    private function scheduleMailSenders(Schedule $schedule): void
+    {
+        $schedule->command('system:exim:rebuild --senders')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
+    }
+
+    /**
      * Hourly removal of ACME challenges, expired vault entries (after a grace
      * hour, so a status check still says `expired`), spent or expired SSO
      * tokens, since an unredeemed app token still holds a live session cookie,
@@ -151,9 +164,9 @@ class Kernel extends ConsoleKernel
     }
 
     /**
-     * A tunnel carries a lifetime; a request never serves one past it, and this
-     * removes its registration and the domain's answer to it. Frequent enough
-     * that a preview's day is honoured to within a few minutes.
+     * A tunnel's own `ExpireTunnel` job removes it at the lifetime it was
+     * given; this sweep is what removes one whose job never ran, so a preview's
+     * day is honoured even then.
      */
     private function scheduleTunnelExpiry(Schedule $schedule): void
     {
@@ -206,14 +219,16 @@ class Kernel extends ConsoleKernel
      * project CPU and memory every minute (minute rows kept two days, hourly
      * averages the month), measure project disk use (`du` walks every file, so
      * a quarter-hour; the API reads the stored figure) and this month's
-     * transfer, record whether each PHP hosting project holds WordPress, sweep
-     * application health, and update the AWStats databases.
+     * transfer, record whether each PHP hosting project holds WordPress, name
+     * the projects and builds the outbound limits stopped, sweep application
+     * health, and update the AWStats databases.
      */
     private function scheduleMonitoring(Schedule $schedule): void
     {
         $schedule->command('telemetry:ship')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('project:mapping:check')->everyFiveMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('metrics:projects:sample')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
+        $schedule->command('system:egress:sync')->everyMinute()->withoutOverlapping(self::MUTEX_MINUTE);
         $schedule->command('metrics:projects:rollup')->hourlyAt(2)->withoutOverlapping(self::MUTEX_HOURLY);
         $schedule->command('metrics:projects:disk')->everyFifteenMinutes()->withoutOverlapping(self::MUTEX_LONG_RUNNING);
         $schedule->command('metrics:projects:bandwidth')->hourly()->withoutOverlapping(self::MUTEX_HOURLY);

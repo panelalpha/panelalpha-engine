@@ -82,6 +82,9 @@
     "panelalpha/php:8.3-test"
 ]
 
+[1 log lines] process /usr/local/lib/panelalpha/pa-root docker.networkSubnetsAndGateways -- bridge
+
+
 [1 log lines] compose {dir} chown=1001:1001
 services:
   app:
