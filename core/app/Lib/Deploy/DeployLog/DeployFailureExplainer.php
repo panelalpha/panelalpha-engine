@@ -34,7 +34,7 @@ class DeployFailureExplainer
     public const ARCHIVE_REFUSED = 'archive_refused';
 
     private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
-        .'|failed to resolve source metadata|failed to do request'
+        .'|failed to resolve source metadata|failed to do request|failed to fetch anonymous token'
         .'|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
 
     private const REGISTRY_REFUSAL = '/unauthorized|authentication required|authorization failed'
@@ -245,7 +245,7 @@ class DeployFailureExplainer
             if (preg_match(self::REGISTRY_ERROR, $line) !== 1) {
                 continue;
             }
-            $ref = self::registryErrorRef($line);
+            $ref = self::registryErrorRef($line) ?: self::tokenScopeImage($line, $output);
             if ($ref !== '' && self::tagBuiltLocally($output, $ref)) {
                 continue;
             }
@@ -287,6 +287,22 @@ class DeployFailureExplainer
         }
 
         return $ref;
+    }
+
+    /**
+     * The image whose registry token BuildKit was fetching, from the token URL's scope, with the tag its
+     * `load metadata for` line names when there is one; '' when the line has no token URL.
+     */
+    private static function tokenScopeImage(string $line, string $output): string
+    {
+        if (preg_match('/token\/?\?scope=repository(?:%3A|:)([^&"\s]+?)(?:%3A|:)pull&service=([^&"\s]+)/i', $line, $m) !== 1) {
+            return '';
+        }
+        $host = strtolower(rawurldecode($m[2]));
+        $image = ($host === 'registry.docker.io' ? 'docker.io' : $host).'/'.rawurldecode($m[1]);
+        $tagged = '/load metadata for ('.preg_quote($image, '/').'[:@][^\s:]+(?::[^\s:]+)?)/';
+
+        return preg_match($tagged, $output, $t) === 1 ? $t[1] : $image;
     }
 
     /** Which kind of failure a registry error line reports, in the daemon's own words. */
@@ -871,6 +887,7 @@ class DeployFailureExplainer
     /**
      * Above base-image-unavailable: compose first pulls a tag it builds locally and prints a benign not-found, so a real failure after
      * it must win. runc's PATH search skips a non-executable file; exit 0 is a finished one-shot and 137 is out-of-memory's.
+     * BuildKit's warning that git is missing from its own PATH says the same words on any build of a context without git.
      *
      * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
      */
@@ -878,8 +895,9 @@ class DeployFailureExplainer
     {
         return [
             'container-entrypoint-missing' => [
-                '/exec:\s*"?([^"\n:]+)"?:\s*executable file not found/i',
-                static fn (array $m): string => "The application's container could not start: its entrypoint ({$m[1]}) was not "
+                '/^(?![^\n]*commit information was not captured)[^\n]*?exec:\s*"?([^"\n:]+)"?:\s*executable file not found/im',
+                static fn (array $m, string $output): ?string => self::imageBuildFailed($output) ? null
+                    : "The application's container could not start: its entrypoint ({$m[1]}) was not "
                         .'found in the image, or is not executable (chmod +x). The full output is in the deploy log.',
             ],
             'container-entrypoint-not-executable' => [
@@ -1276,6 +1294,12 @@ class DeployFailureExplainer
                 static fn (array $m): string => "A build step failed (exit code {$m[1]}). The full output is in the deploy log.",
             ],
         ];
+    }
+
+    /** A failed image build never got as far as starting a container. */
+    private static function imageBuildFailed(string $output): bool
+    {
+        return preg_match('/^failed to solve:|did not complete successfully: exit code/im', $output) === 1;
     }
 
     /**

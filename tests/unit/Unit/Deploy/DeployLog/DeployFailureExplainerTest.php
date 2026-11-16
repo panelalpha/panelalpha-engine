@@ -10,6 +10,9 @@ use Tests\Support\TestNetwork;
 
 class DeployFailureExplainerTest extends TestCase
 {
+    private const BUILDKIT_GIT_WARNING = 'WARNING: current commit information was not captured by the build: '
+        . 'git was not found in the system: exec: "git": executable file not found in $PATH';
+
     /** The failure that made github.com/henrygd/beszel fail. */
     public function test_explains_a_too_old_go_toolchain(): void
     {
@@ -1146,6 +1149,96 @@ OUT;
         $this->assertSame('container-entrypoint-missing', $match['rule'] ?? null);
         $this->assertStringContainsString('docker-entrypoint.sh', $match['message'] ?? '');
         $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /** BuildKit's warning about its own missing git is no container start, so the failed FROM it printed beside is the cause. */
+    public function test_buildkit_git_warning_leaves_a_missing_base_image_to_its_own_rule(): void
+    {
+        $output = self::BUILDKIT_GIT_WARNING . "\n"
+            . 'failed to solve: dockerfile/ubuntu: failed to resolve source metadata for docker.io/dockerfile/ubuntu:latest: '
+            . 'docker.io/dockerfile/ubuntu:latest: not found';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unavailable', $match['rule'] ?? null);
+        $this->assertStringContainsString('The base image dockerfile/ubuntu:latest could not be downloaded', $match['message']);
+        $this->assertStringContainsString('does not exist', $match['message']);
+        $this->assertStringNotContainsString('entrypoint', $match['message']);
+    }
+
+    public function test_buildkit_git_warning_leaves_an_unreachable_registry_to_its_own_rule(): void
+    {
+        $output = self::BUILDKIT_GIT_WARNING . "\n"
+            . 'failed to solve: ghcr.io/arran4/gobookmarks:latest: failed to resolve source metadata for '
+            . 'ghcr.io/arran4/gobookmarks:latest: failed to do request: Head "https://ghcr.io/v2/arran4/gobookmarks/manifests/latest": '
+            . 'dial tcp ' . TestNetwork::public(34) . ':443: i/o timeout';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unavailable', $match['rule'] ?? null);
+        $this->assertStringContainsString('The base image ghcr.io/arran4/gobookmarks:latest could not be downloaded', $match['message']);
+        $this->assertStringContainsString('could not be reached', $match['message']);
+    }
+
+    /** BuildKit fails on the registry token before it resolves anything; the token URL names the image. */
+    public function test_a_registry_token_that_could_not_be_fetched_names_the_image_and_the_unreachable_registry(): void
+    {
+        $ghcr = TestNetwork::public(34);
+        $output = <<<OUT
+#5 ERROR: failed to authorize: failed to fetch anonymous token: Get "https://ghcr.io/token?scope=repository%3Aastral-sh%2Fuv%3Apull&service=ghcr.io": dial tcp {$ghcr}:443: i/o timeout
+------
+ > [internal] load metadata for ghcr.io/astral-sh/uv:0.13.7:
+------
+WARNING: current commit information was not captured by the build: git was not found in the system: exec: "git": executable file not found in \$PATH
+failed to solve: failed to fetch anonymous token: Get "https://ghcr.io/token?scope=repository%3Aastral-sh%2Fuv%3Apull&service=ghcr.io": dial tcp {$ghcr}:443: i/o timeout
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unavailable', $match['rule'] ?? null);
+        $this->assertStringStartsWith('The base image ghcr.io/astral-sh/uv:0.13.7 could not be downloaded: its registry could not be reached', $match['message']);
+    }
+
+    public function test_a_docker_hub_token_scope_names_the_hub_image(): void
+    {
+        $output = 'failed to solve: failed to fetch anonymous token: Get "https://auth.docker.io/token?scope=repository%3Alibrary%2Fnginx%3Apull'
+            . '&service=registry.docker.io": dial tcp: lookup auth.docker.io: i/o timeout';
+
+        $this->assertStringStartsWith(
+            'The base image nginx could not be downloaded: its registry could not be reached',
+            (string) DeployFailureExplainer::explain($output)
+        );
+    }
+
+    public function test_a_real_entrypoint_failure_after_buildkit_git_warning_is_still_named(): void
+    {
+        $output = self::BUILDKIT_GIT_WARNING . "\n"
+            . 'Error response from daemon: failed to create task for container: OCI runtime create failed: runc create failed: '
+            . 'unable to start container process: exec: "/app/server": executable file not found in $PATH: unknown';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('container-entrypoint-missing', $match['rule'] ?? null);
+        $this->assertStringContainsString('its entrypoint (/app/server)', $match['message']);
+    }
+
+    public function test_a_build_step_missing_git_is_a_failed_build_not_an_entrypoint(): void
+    {
+        $output = "#12 7.068 . prepare\$ lefthook install\n"
+            . "#12 7.238 . prepare: │  Error: exec: \"git\": executable file not found in \$PATH\n"
+            . "#12 ERROR: process \"/bin/sh -c pnpm install --frozen-lockfile\" did not complete successfully: exit code: 1\n"
+            . self::BUILDKIT_GIT_WARNING . "\n"
+            . 'failed to solve: process "/bin/sh -c pnpm install --frozen-lockfile" did not complete successfully: exit code: 1';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertNotSame('container-entrypoint-missing', $match['rule'] ?? null);
+        $this->assertStringNotContainsString('entrypoint', $match['message'] ?? '');
+    }
+
+    public function test_buildkit_git_warning_alone_names_no_entrypoint(): void
+    {
+        $this->assertNotSame('container-entrypoint-missing', DeployFailureExplainer::match(self::BUILDKIT_GIT_WARNING)['rule'] ?? null);
     }
 
     /** A bare-name entrypoint that is there but not executable reads the same as a missing one. */
