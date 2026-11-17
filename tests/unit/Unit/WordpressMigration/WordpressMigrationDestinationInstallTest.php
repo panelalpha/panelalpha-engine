@@ -268,7 +268,7 @@ class WordpressMigrationDestinationInstallTest extends WordpressMigrationTestCas
     {
         return (new RoutedSourceHttpClient)
             ->on('GET', self::STATUS_URL, new SourceHttpResponse(
-                json_encode(['success' => true, 'status' => ['status' => 'completed', 'phase' => 'files']], JSON_THROW_ON_ERROR),
+                json_encode(['success' => true, 'status' => ['status' => 'completed', 'phase' => 'completed']], JSON_THROW_ON_ERROR),
                 200,
             ))
             ->on('POST', self::HTACCESS_URL, new SourceHttpResponse('{"success":true,"transferred":true}', 200));

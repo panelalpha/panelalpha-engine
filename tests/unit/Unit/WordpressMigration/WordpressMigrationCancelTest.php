@@ -152,7 +152,7 @@ class WordpressMigrationCancelTest extends ImportTargetTestCase
         $batches = 0;
         $http = (new RoutedSourceHttpClient())
             ->requiringToken(str_repeat('cd', 32))
-            ->on('GET', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/status/mig-db', new SourceHttpResponse('{"success":true,"status":{"status":"running","phase":"database"}}', 200))
+            ->on('GET', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/status/mig-db', new SourceHttpResponse('{"success":true,"status":{"status":"in_progress","phase":"ready","backup_running":false}}', 200))
             ->on('POST', 'https://example.com/wp-json/wp-migrator/v1/remote-sync/process-batch', function () use (&$batches, $migration): SourceHttpResponse {
                 $batches++;
                 $migration->requestCancel();

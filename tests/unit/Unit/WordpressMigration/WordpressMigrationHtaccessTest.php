@@ -25,7 +25,7 @@ class WordpressMigrationHtaccessTest extends WordpressMigrationTestCase
                 'success' => true,
                 'status' => [
                     'status' => 'completed',
-                    'phase' => 'files',
+                    'phase' => 'completed',
                     'migration_id' => 'mig-1',
                 ],
             ], JSON_THROW_ON_ERROR),
@@ -88,7 +88,7 @@ class WordpressMigrationHtaccessTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'completed', 'phase' => 'files'],
+                'status' => ['status' => 'completed', 'phase' => 'completed'],
             ], JSON_THROW_ON_ERROR),
             200,
         ));

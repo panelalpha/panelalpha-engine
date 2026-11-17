@@ -3,12 +3,17 @@
 namespace App\System\Project\PhpHosting\WordPress\Migration;
 
 use App\Models\WordpressMigration;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Sleep;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
 /**
  * Database / files / finalize loops matching the panel's migrateDatabaseUsingPlugin,
  * migrateFilesUsingPlugin, and finalizeMigrationUsingPlugin predicates.
+ *
+ * Finalize decides on the plugin's `status` (the phase is derived from it), not on `phase`.
  */
 final class MigrationTransfer
 {
@@ -36,6 +41,23 @@ final class MigrationTransfer
     private $onProgress;
 
     private const PROGRESS_INTERVAL_SECONDS = 2.0;
+
+    /**
+     * Plugin statuses (v1.1.4) meaning the transfer is not finished and nobody has to be waited for.
+     */
+    private const UNFINISHED_STATUSES = ['pending', 'in_progress', 'interrupted', 'idle'];
+
+    private const WAIT_POLL_SECONDS = 5;
+
+    /**
+     * Engine's own "run is dead" window; a source backup idle longer than this is not waited for.
+     */
+    private const SOURCE_STALE_MINUTES = 15;
+
+    /**
+     * Identical (phase, sent chunks) batches in a row, inside finalize, that count as a stalled source.
+     */
+    private const STALLED_BATCHES = 3;
 
     private float $lastProgressAt = 0.0;
 
@@ -65,13 +87,13 @@ final class MigrationTransfer
     }
 
     /**
-     * Done at once when status === completed or phase === files; batches end on finalized, next_phase === files or a
+     * Done at once when status === completed; batches end on finalized, next_phase === files or a
      * spent budget (false, the next run continues). After a network error, success only if status === completed.
      */
     public function migrateDatabase(string $migrationId, ?BatchBudget $budget = null): bool
     {
         $status = $this->readStatus($migrationId);
-        if (($status['status'] ?? null) === 'completed' || ($status['phase'] ?? null) === 'files') {
+        if (($status['status'] ?? null) === 'completed') {
             return true;
         }
 
@@ -83,7 +105,8 @@ final class MigrationTransfer
     }
 
     /**
-     * Ends when batch has boolean finalized, or when the budget is spent.
+     * Ends when batch has boolean finalized, or when the budget is spent. The plugin picks the part to send
+     * (database or files) itself, so a files step that starts early still finishes.
      * After a network error, success only if status === completed.
      */
     public function migrateFiles(string $migrationId, ?BatchBudget $budget = null): bool
@@ -91,9 +114,6 @@ final class MigrationTransfer
         $status = $this->readStatus($migrationId);
         if (($status['status'] ?? null) === 'completed') {
             return true;
-        }
-        if (($status['phase'] ?? null) === 'database') {
-            return $this->migrateDatabase($migrationId, $budget);
         }
 
         return $this->runBatches(
@@ -105,12 +125,18 @@ final class MigrationTransfer
 
     /**
      * Without a budget a run gets the standard one, never an unbounded loop.
+     * With $guardStall, fails when the source answers STALLED_BATCHES batches in a row with the same
+     * phase and sent chunks (and chunks left to send), instead of spending the whole budget on them.
      *
      * @param  callable(array<string, mixed>): bool  $isCompleted
      */
-    private function runBatches(string $migrationId, ?BatchBudget $budget, callable $isCompleted): bool
+    private function runBatches(string $migrationId, ?BatchBudget $budget, callable $isCompleted, bool $guardStall = false): bool
     {
         $budget ??= new BatchBudget;
+        $lastPhase = null;
+        $lastSent = null;
+        $lastTotal = null;
+        $repeats = 0;
         do {
             $budget->spend();
             try {
@@ -124,6 +150,33 @@ final class MigrationTransfer
             }
             $completed = $isCompleted($result);
             $this->reportProgress($result, $completed);
+
+            if ($guardStall) {
+                if ($completed || $result['total_chunks'] <= 0) {
+                    $repeats = 0;
+                    $lastPhase = null;
+                    $lastSent = null;
+                    $lastTotal = null;
+                } elseif ($result['current_phase'] === $lastPhase
+                    && $result['sent_chunks'] === $lastSent
+                    && $result['total_chunks'] === $lastTotal) {
+                    $repeats++;
+                } else {
+                    $lastPhase = $result['current_phase'];
+                    $lastSent = $result['sent_chunks'];
+                    $lastTotal = $result['total_chunks'];
+                    $repeats = 1;
+                }
+                if ($repeats >= self::STALLED_BATCHES) {
+                    throw new RuntimeException(sprintf(
+                        'Migration was interrupted: the source sent no new chunks in %d batches (phase %s, %d/%d chunks)',
+                        self::STALLED_BATCHES,
+                        self::quoted($result['current_phase']),
+                        $result['sent_chunks'],
+                        $result['total_chunks'],
+                    ));
+                }
+            }
         } while (! $completed && ! $budget->exhausted());
 
         return $completed;
@@ -148,16 +201,99 @@ final class MigrationTransfer
         return true;
     }
 
+    /**
+     * Decides on the plugin's `status`. completed: done. not_found, an unknown or a missing status: fail.
+     * An unfinished status with backup_running not true: continue with batches until finalized, within the
+     * budget. backup_running true (another client sends): wait and re-read, within the budget, unless the
+     * source has been idle for SOURCE_STALE_MINUTES. `phase` is only used in messages.
+     */
     private function transferFinished(string $migrationId, ?BatchBudget $budget): bool
     {
-        $status = $this->client->migrationStatus($migrationId);
+        $budget ??= new BatchBudget;
+        while (true) {
+            $status = $this->readStatus($migrationId);
+            $state = $status['status'] ?? null;
 
-        return match (true) {
-            ($status['status'] ?? null) === 'completed' => true,
-            ($status['phase'] ?? null) === 'database' => $this->migrateDatabase($migrationId, $budget),
-            ($status['phase'] ?? null) === 'files' => $this->migrateFiles($migrationId, $budget),
-            default => throw new RuntimeException('Migration was interrupted'),
-        };
+            if ($state === 'completed') {
+                return true;
+            }
+            if ($state === 'not_found') {
+                throw $this->interrupted($status, 'the source has no record of this migration');
+            }
+            if (! is_string($state) || ! in_array($state, self::UNFINISHED_STATUSES, true)) {
+                throw $this->interrupted($status, 'the source reports a status this engine does not handle');
+            }
+            if (($status['backup_running'] ?? false) !== true) {
+                return $this->runBatches(
+                    $migrationId,
+                    $budget,
+                    static fn (array $result): bool => (bool) ($result['finalized'] ?? false),
+                    guardStall: true,
+                );
+            }
+            if ($this->sourceIdleTooLong($status)) {
+                throw $this->interrupted($status, sprintf(
+                    'the source has made no progress for over %d minutes',
+                    self::SOURCE_STALE_MINUTES,
+                ));
+            }
+            if ($budget->exhausted()) {
+                return false;
+            }
+            $budget->spend();
+            Sleep::sleep(self::WAIT_POLL_SECONDS);
+        }
+    }
+
+    /**
+     * One message for every "interrupted" failure, showing what the source reported.
+     *
+     * @param  array<array-key, mixed>  $status
+     */
+    private function interrupted(array $status, string $reason): RuntimeException
+    {
+        $backupRunning = $status['backup_running'] ?? null;
+        $lastActivity = $status['last_activity'] ?? null;
+
+        return new RuntimeException(sprintf(
+            'Migration was interrupted: %s (status %s, phase %s, backup_running %s, last activity %s)',
+            $reason,
+            self::quoted($status['status'] ?? null),
+            self::quoted($status['phase'] ?? null),
+            is_bool($backupRunning) ? var_export($backupRunning, true) : 'unknown',
+            is_string($lastActivity) && $lastActivity !== '' ? Str::limit($lastActivity, 64) : 'unknown',
+        ));
+    }
+
+    /**
+     * True when last_activity is missing, cannot be read, or is older than SOURCE_STALE_MINUTES.
+     *
+     * @param  array<array-key, mixed>  $status
+     */
+    private function sourceIdleTooLong(array $status): bool
+    {
+        $lastActivity = $status['last_activity'] ?? null;
+        if (! is_string($lastActivity) || $lastActivity === '') {
+            return true;
+        }
+
+        try {
+            $at = Carbon::parse($lastActivity);
+        } catch (Throwable) {
+            return true;
+        }
+
+        return $at->lt(now()->subMinutes(self::SOURCE_STALE_MINUTES));
+    }
+
+    /**
+     * The value in double quotes (cut to 64 characters) when it is a non-empty string, else the bare word missing.
+     */
+    private static function quoted(mixed $value): string
+    {
+        return is_string($value) && $value !== ''
+            ? '"'.Str::limit($value, 64).'"'
+            : 'missing';
     }
 
     /**

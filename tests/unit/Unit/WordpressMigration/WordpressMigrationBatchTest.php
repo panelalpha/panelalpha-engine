@@ -20,11 +20,11 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
     public function test_database_loop_ends_on_next_phase_files(): void
     {
         $http = new FakeSourceHttpClient();
-        // status: still in database
+        // status: transfer not finished
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'database'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -76,7 +76,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'database'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -99,27 +99,6 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $this->assertTrue($http->calledUrlContaining('process-batch'));
     }
 
-    public function test_database_early_exit_when_phase_is_files(): void
-    {
-        $http = new FakeSourceHttpClient();
-        $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
-            json_encode([
-                'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'files'],
-            ], JSON_THROW_ON_ERROR),
-            200,
-        ));
-
-        $client = new SourceWordpressClient($http);
-        $client->setBatchRetrySleepSeconds(0);
-        $client->useSite(new SourceSite('https://example.com'));
-        $client->useSourceToken(self::SOURCE_TOKEN);
-
-        (new MigrationTransfer($client))->migrateDatabase('mig-db-3');
-
-        $this->assertFalse($http->calledUrlContaining('process-batch'));
-    }
-
     public function test_network_error_succeeds_only_when_status_completed(): void
     {
         $http = new FakeSourceHttpClient();
@@ -127,7 +106,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'database'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -141,7 +120,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'completed', 'phase' => 'files'],
+                'status' => ['status' => 'completed', 'phase' => 'completed', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -161,7 +140,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'database'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -173,7 +152,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'database'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -194,7 +173,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
             json_encode([
                 'success' => true,
-                'status' => ['status' => 'running', 'phase' => 'files'],
+                'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false],
             ], JSON_THROW_ON_ERROR),
             200,
         ));
@@ -233,7 +212,7 @@ class WordpressMigrationBatchTest extends WordpressMigrationTestCase
     {
         $http = new FakeSourceHttpClient();
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(
-            json_encode(['success' => true, 'status' => ['status' => 'running', 'phase' => 'files', 'files' => ['total_files' => 12]]], JSON_THROW_ON_ERROR),
+            json_encode(['success' => true, 'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false, 'files' => ['total_files' => 12]]], JSON_THROW_ON_ERROR),
             200,
         ));
         $http->pushHandler(fn (): SourceHttpResponse => new SourceHttpResponse(

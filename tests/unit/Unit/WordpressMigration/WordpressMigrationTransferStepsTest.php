@@ -71,7 +71,7 @@ class WordpressMigrationTransferStepsTest extends WordpressMigrationTestCase
     {
         $migration = $this->transferring();
         $http = (new RoutedSourceHttpClient)->on('GET', self::STATUS_URL, new SourceHttpResponse(
-            json_encode(['success' => true, 'status' => ['status' => 'completed', 'phase' => 'files']], JSON_THROW_ON_ERROR),
+            json_encode(['success' => true, 'status' => ['status' => 'completed', 'phase' => 'completed']], JSON_THROW_ON_ERROR),
             200,
         ));
 
@@ -127,7 +127,7 @@ class WordpressMigrationTransferStepsTest extends WordpressMigrationTestCase
         return (new RoutedSourceHttpClient)
             ->requiringToken(self::SOURCE_TOKEN)
             ->on('GET', self::STATUS_URL, new SourceHttpResponse(
-                json_encode(['success' => true, 'status' => ['status' => 'running', 'phase' => $phase]], JSON_THROW_ON_ERROR),
+                json_encode(['success' => true, 'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false]], JSON_THROW_ON_ERROR),
                 200,
             ))
             ->on('POST', self::BATCH_URL, function () use (&$sent, $total, $phase, $onBatch): SourceHttpResponse {

@@ -117,7 +117,7 @@ class WordpressMigrationFinalizeBudgetTest extends WordpressMigrationTestCase
     {
         return (new RoutedSourceHttpClient)
             ->on('GET', self::STATUS_URL, new SourceHttpResponse(
-                json_encode(['success' => true, 'status' => ['status' => 'running', 'phase' => 'files']], JSON_THROW_ON_ERROR),
+                json_encode(['success' => true, 'status' => ['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false]], JSON_THROW_ON_ERROR),
                 200,
             ))
             ->on('POST', self::BATCH_URL, function () use (&$batches, $finishedAfter, $onBatch): SourceHttpResponse {
@@ -129,7 +129,7 @@ class WordpressMigrationFinalizeBudgetTest extends WordpressMigrationTestCase
                 return new SourceHttpResponse(json_encode([
                     'finalized' => $batches >= $finishedAfter,
                     'phase' => 'files',
-                    'progress' => ['percentage' => 50],
+                    'progress' => ['percentage' => 50, 'sent_chunks' => $batches, 'total_chunks' => 1000],
                 ], JSON_THROW_ON_ERROR), 200);
             })
             ->on('POST', self::HTACCESS_URL, new SourceHttpResponse('{"success":true,"transferred":false}', 200));
