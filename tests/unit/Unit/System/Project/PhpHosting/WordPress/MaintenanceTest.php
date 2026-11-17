@@ -79,6 +79,74 @@ class MaintenanceTest extends TestCase
         $this->assertSame(['enabled' => false], $body);
     }
 
+    public function test_get_ignores_php_deprecations_beside_a_silent_off(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "PHP Deprecated:  Creation of dynamic property Foo::\$bar is deprecated in /home/alice/example.test/public_html/wp-content/plugins/foo/foo.php on line 12\nDeprecated: Return type of Bar::count() should either be compatible with Countable::count(): int in /home/alice/example.test/public_html/wp-content/plugins/foo/bar.php on line 7\nWarning: Undefined array key \"x\" in /home/alice/example.test/public_html/wp-content/themes/t/functions.php on line 3\n"],
+            ],
+        );
+
+        $this->assertSame(['enabled' => false], $maintenance->get());
+    }
+
+    public function test_get_ignores_timestamped_php_deprecations_beside_a_silent_off(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "[17-Nov-2026 10:00:00 UTC] PHP Deprecated:  Foo is deprecated in /a/b.php on line 1\n"],
+            ],
+        );
+
+        $this->assertSame(['enabled' => false], $maintenance->get());
+    }
+
+    public function test_get_still_fails_when_a_real_error_follows_php_deprecations(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "PHP Deprecated:  Foo is deprecated in /a/b.php on line 1\nError: This does not seem to be a WordPress installation.\n"],
+            ],
+        );
+
+        $this->expectException(WordPressException::class);
+        $maintenance->get();
+    }
+
+    public function test_get_still_fails_on_a_php_fatal_error(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "PHP Fatal error:  Uncaught Error: Call to undefined function x() in /a/b.php on line 4\n"],
+            ],
+        );
+
+        $this->expectException(WordPressException::class);
+        $maintenance->get();
+    }
+
+    public function test_set_deactivate_works_when_the_read_back_prints_php_deprecations(): void
+    {
+        $sequence = [];
+        $maintenance = $this->maintenanceWithFakeRunner(
+            $sequence,
+            results: [
+                ['exit_code' => 0, 'stdout' => 'Success: Deactivated Maintenance mode.', 'stderr' => ''],
+                ['exit_code' => 1, 'stdout' => '', 'stderr' => "PHP Deprecated:  Foo is deprecated in /a/b.php on line 1\n"],
+            ],
+        );
+
+        $this->assertSame(['enabled' => false, 'message' => 'Success: Deactivated Maintenance mode.'], $maintenance->set(false));
+    }
+
     public function test_get_with_explicit_path(): void
     {
         $sequence = [];

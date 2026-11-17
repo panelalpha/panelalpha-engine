@@ -42,12 +42,13 @@ final class Maintenance
 
     /**
      * is-active answers "off" with a bare exit 1; an error message beside it means WP-CLI could not tell.
+     * PHP warnings and deprecations from plugins are not error messages.
      *
      * @param  array{exit_code?: int, stdout?: string, stderr?: string}  $result
      */
     private function refuseFailedRun(array $result): void
     {
-        if (($result['exit_code'] ?? 1) !== 0 && trim((string) ($result['stderr'] ?? '')) !== '') {
+        if (($result['exit_code'] ?? 1) !== 0 && trim(JsonOutput::stripNoise((string) ($result['stderr'] ?? ''))) !== '') {
             throw new Exception($this->cli->failureMessage($result));
         }
     }
