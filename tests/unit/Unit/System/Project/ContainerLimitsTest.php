@@ -9,6 +9,7 @@ use App\System\Filesystem;
 use App\System\Project\ContainerLimits;
 use App\System\Project\Dind\AccountRuntime;
 use Illuminate\Support\Facades\Blade;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 
@@ -69,6 +70,66 @@ class ContainerLimitsTest extends TestCase
             $service['blkio_config'],
         );
         $this->assertSame(1, $system->blockDeviceLookups);
+    }
+
+    /**
+     * The PHP hosting compose templates take the same limit vars, so a rebuild that
+     * re-renders them moves the container onto the new limits.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function phpHostingTemplates(): iterable
+    {
+        $dir = __DIR__ . '/../../../../../templates/user/default/project';
+
+        yield 'default' => ["{$dir}/docker-compose.yml.blade.php"];
+        yield 'fpm' => ["{$dir}/docker-compose.yml-fpm.blade.php"];
+        yield 'fpm-apache' => ["{$dir}/docker-compose.yml-fpm-apache.blade.php"];
+        yield 'ls' => ["{$dir}/docker-compose.yml-ls.blade.php"];
+    }
+
+    #[DataProvider('phpHostingTemplates')]
+    public function test_php_hosting_templates_render_the_cpu_and_memory_limits(string $template): void
+    {
+        $system = $this->system();
+
+        $vars = ContainerLimits::templateVars($this->user([
+            'cpu_limit' => 1.5,
+            'memory_limit' => 1024,
+        ]), $system);
+
+        $service = $this->renderedPhp($template, $vars);
+        $this->assertSame(1.5, $service['cpus']);
+        $this->assertSame('1024M', $service['mem_limit']);
+        $this->assertSame('1024M', $service['memswap_limit']);
+    }
+
+    #[DataProvider('phpHostingTemplates')]
+    public function test_php_hosting_templates_leave_out_an_unlimited_cpu(string $template): void
+    {
+        $vars = ContainerLimits::templateVars($this->user([
+            'cpu_limit' => -1,
+            'memory_limit' => 1024,
+        ]), $this->system());
+
+        $service = $this->renderedPhp($template, $vars);
+        $this->assertArrayNotHasKey('cpus', $service);
+        $this->assertSame('1024M', $service['mem_limit']);
+    }
+
+    /**
+     * @param array<string, mixed> $vars
+     * @return array<string, mixed>
+     */
+    private function renderedPhp(string $template, array $vars): array
+    {
+        $yaml = Blade::render((string) file_get_contents($template), [
+            'user' => 'alice',
+            'php_versions' => ['8.3'],
+            ...$vars,
+        ]);
+
+        return Yaml::parse($yaml)['services']['php'] ?? [];
     }
 
     /**
