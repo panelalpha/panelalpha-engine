@@ -149,7 +149,7 @@ These are the values your application reads when it starts. Change one, then reb
 |---|---|
 | `pae project:settings:list --project={project}` | Lists the project's stored settings. |
 | `pae project:settings:get {name} --project={project}` | Prints one setting. |
-| `pae project:settings:set {name} {value} --project={project}` | Sets one setting. |
+| `pae project:settings:set {name} {value} --project={project}` | Sets one setting. For a secret setting (`cloudflare-api-token` or `registry-auth`), the value can be `vault:<key>` from `pae vault:secret:create` instead of the secret itself. Other settings store `vault:...` as plain text. |
 | `pae project:settings:unset {name} --project={project}` | Removes one setting. |
 | `pae project:settings:set system on --project={project}` | Marks the project a system project. No API or assistant token but the project's own then lists it or reaches it, and it is protected. A token cannot turn it off. `pae project:settings:unset system --project={project}` turns it off; protection then stays only if it was set on its own. |
 | `pae project:settings:set protected on --project={project}` | Marks the project protected. While it is on, an assistant or API token can no longer delete, stop or redeploy it, and the answer says the project is protected. Your own `pae` commands are not affected, and a token cannot turn it off. `pae project:settings:unset protected --project={project}` turns it off. |
@@ -316,7 +316,7 @@ A paste link for a Git or Cloudflare token. The value is never printed back.
 
 | Command | What it does |
 |---|---|
-| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<key>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
+| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<key>`). `{type}` is `git_token`, `cloudflare_api_token` or `registry_auth`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
 | `pae vault:secret:list` | Lists entries: reference, type, purpose, scope, the project that owns it, and whether it is filled. Never the secret. `--scope=` or `--type=` narrows the list. |
 | `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is the `vault:<key>` from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
 | `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<key>`. |

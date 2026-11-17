@@ -6,7 +6,6 @@ use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
 use App\Http\Responses\Refusal;
 use App\Lib\Apis\Cloudflare\CloudflareException;
-use App\Lib\Vault\RequestVault;
 use App\System\Project\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -122,7 +121,7 @@ class ProjectSettingController extends Controller
 
         // A secret setting may be given a `vault:<key>` in place of the secret.
         try {
-            $result = $settings->set($key, self::valueFor($username, $key, (string) $validated['value']));
+            $result = $settings->set($key, Settings::resolveValue($username, $key, (string) $validated['value']));
         } catch (\InvalidArgumentException|CloudflareException $e) {
             // An unknown key, or a token Cloudflare itself refused: the
             // caller's input either way.
@@ -130,23 +129,6 @@ class ProjectSettingController extends Controller
         }
 
         return new JsonResponse(['data' => $result]);
-    }
-
-    /**
-     * The value to store: as sent, or the secret a `vault:<key>` stands for.
-     *
-     * Only a *secret* setting may take a reference: a non-secret one can be
-     * read back verbatim, so resolving it from the vault would put a secret
-     * where the transcript can see it. There, `vault:...` is a literal.
-     */
-    private static function valueFor(string $username, string $key, string $value): string
-    {
-        if (! Settings::isSecret($key)) {
-            return $value;
-        }
-
-        // The field is `value`; the vault type is the setting key in snake_case.
-        return (string) RequestVault::get('value', $username, str_replace('-', '_', Settings::normalizeKey($key)));
     }
 
     #[OA\Delete(

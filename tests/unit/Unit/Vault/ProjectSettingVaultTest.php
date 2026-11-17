@@ -2,7 +2,6 @@
 
 namespace Tests\Unit\Vault;
 
-use App\Http\Controllers\User\ProjectSettingController;
 use App\Models\SecretVaultEntry;
 use App\System\Project\Settings;
 use Illuminate\Validation\ValidationException;
@@ -23,13 +22,13 @@ class ProjectSettingVaultTest extends VaultTestCase
     {
         [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN, 'cf-real-token-value');
 
-        $this->assertSame('cf-real-token-value', $this->valueFor('shop', 'cloudflare-api-token', $entry->reference()));
+        $this->assertSame('cf-real-token-value', Settings::resolveValue('shop', 'cloudflare-api-token', $entry->reference()));
         $this->assertSame('shop', $entry->refresh()->project);
     }
 
     public function test_a_literal_passes_through(): void
     {
-        $this->assertSame('a-literal-token', $this->valueFor('shop', 'cloudflare-api-token', 'a-literal-token'));
+        $this->assertSame('a-literal-token', Settings::resolveValue('shop', 'cloudflare-api-token', 'a-literal-token'));
     }
 
     public function test_a_git_token_entry_is_refused_as_a_cloudflare_token(): void
@@ -37,7 +36,7 @@ class ProjectSettingVaultTest extends VaultTestCase
         [$entry] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_not_cloudflare');
 
         $this->expectException(ValidationException::class);
-        $this->valueFor('shop', 'cloudflare-api-token', $entry->reference());
+        Settings::resolveValue('shop', 'cloudflare-api-token', $entry->reference());
     }
 
     public function test_another_projects_entry_is_refused(): void
@@ -45,14 +44,17 @@ class ProjectSettingVaultTest extends VaultTestCase
         [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN, 'cf-theirs', 'blog');
 
         $this->expectException(ValidationException::class);
-        $this->valueFor('shop', 'cloudflare-api-token', $entry->reference());
+        Settings::resolveValue('shop', 'cloudflare-api-token', $entry->reference());
     }
 
-    private function valueFor(string $username, string $key, string $value): string
+    public function test_a_non_secret_key_keeps_a_reference_as_a_literal_and_leaves_the_entry_unclaimed(): void
     {
-        $this->app->instance('request', \Illuminate\Http\Request::create('/', 'PUT', ['value' => $value]));
-        $method = new \ReflectionMethod(ProjectSettingController::class, 'valueFor');
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN, 'cf-not-for-settings');
 
-        return $method->invoke(null, $username, $key, $value);
+        $this->assertSame($entry->reference(), Settings::resolveValue('shop', 'persist-paths', $entry->reference()));
+
+        $entry->refresh();
+        $this->assertNull($entry->project);
+        $this->assertSame(0, (int) $entry->use_count);
     }
 }

@@ -7,6 +7,7 @@ use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\User;
 use App\System\Project\Settings;
 use Illuminate\Console\Command;
+use Illuminate\Validation\ValidationException;
 
 class Set extends Command
 {
@@ -76,6 +77,17 @@ class Set extends Command
             $this->info('Cancelled.');
 
             return 0;
+        }
+
+        // After the prompt: resolving claims the entry and counts a use, which a "no" must not do.
+        try {
+            $value = Settings::resolveValue($user->username, $key, $value);
+        } catch (ValidationException $e) {
+            foreach (collect($e->errors())->flatten() as $message) {
+                $this->error((string) $message);
+            }
+
+            return 1;
         }
 
         try {

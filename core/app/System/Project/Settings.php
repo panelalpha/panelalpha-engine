@@ -5,9 +5,11 @@ namespace App\System\Project;
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\Dind\RegistryAuth;
+use App\Lib\Vault\RequestVault;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System\Project as UserProject;
+use Illuminate\Validation\ValidationException;
 
 class Settings
 {
@@ -74,6 +76,33 @@ class Settings
     public static function isSecret(string $key): bool
     {
         return in_array(self::normalizeKey($key), self::SECRET_KEYS, true);
+    }
+
+    /**
+     * The value to store: as given, or the secret a `vault:<key>` stands for.
+     *
+     * Only a *secret* setting may take a reference: a non-secret one can be
+     * read back verbatim, so resolving it from the vault would put a secret
+     * where the transcript can see it. There, `vault:...` is a literal.
+     *
+     * Resolving claims an unowned entry for `$username` and counts the use,
+     * so call it only when the value is about to be applied.
+     *
+     * @throws ValidationException when the reference cannot be used
+     */
+    public static function resolveValue(string $username, string $key, string $value): string
+    {
+        if (! self::isSecret($key)) {
+            return $value;
+        }
+
+        // The field is `value`; the vault type is the setting key in snake_case.
+        return (string) RequestVault::resolve(
+            'value',
+            $value,
+            $username,
+            str_replace('-', '_', self::normalizeKey($key)),
+        );
     }
 
     public static function redact(string $value): string
