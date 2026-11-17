@@ -13,6 +13,7 @@ use App\System\Project\PhpHosting\WordPress\Migration\SourcePluginTokenCheck;
 use App\System\Project\PhpHosting\WordPress\Migration\SourceSite;
 use App\System\Project\PhpHosting\WordPress\Migration\Steps\InstallSourcePluginStep;
 use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
+use App\System\Project\PhpHosting\WordPress\Migration\WpAdminHtml;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use ZipArchive;
@@ -52,6 +53,19 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
     private bool $openTransferRoutes = false;
 
     private string $releaseVersion = '1.2.0';
+
+    /** The version wp-admin prints for the installed plugin; null means the version the zip carried. */
+    private ?string $shownVersion = null;
+
+    /** The word wp-admin prints before the version; another language changes it. */
+    private string $versionLabel = 'Version';
+
+    private string $newerSlugState = 'none';
+
+    private bool $newerSlugStays = false;
+
+    /** Whether the upload also leaves a panelalpha-migrator copy listed, as a release from 1.2.1 on would. */
+    private bool $uploadAlsoInstallsNewer = false;
 
     /** @var list<string> */
     private array $packagedTokens = [];
@@ -265,6 +279,7 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
 
     public function test_a_plugin_that_refuses_the_imports_token_fails_the_step(): void
     {
+        $this->shownVersion = '';
         $this->pluginState = 'active';
         $this->installedToken = self::RELEASE_TOKEN;
         $this->overwriteHonoured = false;
@@ -275,6 +290,148 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
             $this->fail('Expected the plugin to refuse the token');
         } catch (SourceCheckFailed $e) {
             $this->assertSame(SourceCheckFailed::UNAUTHORIZED, $e->errorType());
+        }
+
+        $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
+    }
+
+    public function test_an_installed_version_other_than_the_pinned_one_stops_the_install(): void
+    {
+        $this->shownVersion = '1.1.4';
+        $migration = $this->migration();
+
+        try {
+            $this->step($this->source())->run($migration);
+            $this->fail('Expected the version mismatch to stop the install');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('An older or different copy of the migrator plugin is on the source site; remove it and try again', $e->getMessage());
+            $this->assertStringContainsString('the source has version 1.1.4, this import installs 1.2.0', $e->getMessage());
+        }
+
+        $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
+    }
+
+    public function test_the_pinned_version_shown_by_wp_admin_passes(): void
+    {
+        $this->shownVersion = '1.2.0';
+
+        $this->step($this->source())->run($this->migration());
+
+        $this->assertTrue(true);
+    }
+
+    public function test_a_version_shown_in_another_language_is_still_compared(): void
+    {
+        $this->versionLabel = 'Wersja';
+        $this->shownVersion = '1.1.4';
+        $migration = $this->migration();
+
+        try {
+            $this->step($this->source())->run($migration);
+            $this->fail('Expected the version mismatch to stop the install');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('the source has version 1.1.4, this import installs 1.2.0', $e->getMessage());
+        }
+
+        $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
+    }
+
+    public function test_the_pinned_version_shown_in_another_language_passes(): void
+    {
+        $this->versionLabel = 'Wersja';
+        $this->shownVersion = '1.2.0';
+        $migration = $this->migration();
+
+        $this->step($this->source())->run($migration);
+
+        $this->assertSame(WordpressMigration::STEP_STATUS_COMPLETED, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
+    }
+
+    public function test_a_version_wp_admin_does_not_show_goes_on_with_a_warning(): void
+    {
+        $this->shownVersion = '';
+        $migration = $this->migration();
+
+        $this->step($this->source())->run($migration);
+
+        $status = $migration->fresh()->toStatusArray();
+        $this->assertSame(WordpressMigration::STEP_STATUS_COMPLETED, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
+        $this->assertSame([InstallSourcePluginStep::VERSION_UNKNOWN_WARNING], array_column($status['warnings'], 'code'));
+        $this->assertStringContainsString('could not check that it is 1.2.0', $status['warnings'][0]['message']);
+    }
+
+    public function test_a_rerun_that_reads_the_version_clears_the_warning(): void
+    {
+        $this->shownVersion = '';
+        $migration = $this->migration();
+        $this->step($this->source())->run($migration);
+        $this->assertSame([InstallSourcePluginStep::VERSION_UNKNOWN_WARNING], array_column($migration->fresh()->toStatusArray()['warnings'], 'code'));
+
+        $this->shownVersion = null;
+        $this->step($this->source())->run($migration->fresh());
+
+        $this->assertSame([], $migration->fresh()->toStatusArray()['warnings']);
+    }
+
+    public function test_the_version_row_is_read_from_real_wordpress_markup(): void
+    {
+        $page = '<html><body><table>'
+            .'<tr class="inactive update" data-slug="wordpress-migrator" data-plugin="wordpress-migrator/wordpress-migrator.php">'
+            .'<td><div class="inactive second plugin-version-author-uri">Version 1.1.4 | By <a href="#">PanelAlpha</a> | <a href="#">View details</a></div></td></tr>'
+            .'<tr class="plugin-update-tr inactive" data-plugin="wordpress-migrator/wordpress-migrator.php">'
+            .'<td colspan="3"><div class="update-message">There is a new version available.</div></td></tr>'
+            .'<tr class="active" data-slug="other-plugin" data-plugin="other-plugin/other-plugin.php">'
+            .'<td><div class="active second plugin-version-author-uri">Versión 1.2.1-beta | Por <a href="#">Someone</a></div></td></tr>'
+            .'<tr class="inactive" data-slug="ten-up" data-plugin="ten-up/ten-up.php">'
+            .'<td><div class="inactive second plugin-version-author-uri">By 10up | View details</div></td></tr>'
+            .'</table></body></html>';
+
+        $this->assertSame(
+            ['wordpress-migrator' => '1.1.4', 'other-plugin' => '1.2.1-beta'],
+            WpAdminHtml::pluginVersions($page),
+        );
+    }
+
+    public function test_a_copy_under_the_newer_slug_is_removed_before_the_upload(): void
+    {
+        $this->newerSlugState = 'active';
+        $http = $this->source();
+
+        $this->step($http)->run($this->migration());
+
+        $this->assertSame('none', $this->newerSlugState);
+        $this->assertSame(1, $http->count('POST', self::UPLOAD));
+    }
+
+    public function test_a_copy_under_the_newer_slug_that_cannot_be_removed_stops_the_install(): void
+    {
+        $this->newerSlugState = 'inactive';
+        $this->newerSlugStays = true;
+        $migration = $this->migration();
+        $http = $this->source();
+
+        try {
+            $this->step($http)->run($migration);
+            $this->fail('Expected the newer copy to stop the install');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('The Engine removes it before the import', $e->getMessage());
+            $this->assertStringContainsString('Remove panelalpha-migrator in wp-admin', $e->getMessage());
+        }
+
+        $this->assertSame(0, $http->count('POST', self::UPLOAD));
+    }
+
+    public function test_a_copy_under_the_newer_slug_listed_after_the_upload_stops_the_install(): void
+    {
+        $this->uploadAlsoInstallsNewer = true;
+        $migration = $this->migration();
+
+        try {
+            $this->step($this->source())->run($migration);
+            $this->fail('Expected the newer copy listed next to the pinned plugin to stop the install');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('next to wordpress-migrator', $e->getMessage());
+            $this->assertStringContainsString('Remove panelalpha-migrator in wp-admin', $e->getMessage());
         }
 
         $this->assertSame(WordpressMigration::STEP_STATUS_PENDING, $migration->fresh()->stepStatus(WordpressMigration::STEP_INSTALL_SOURCE_PLUGIN));
@@ -340,7 +497,7 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
             ->on('POST', self::UPLOAD, fn (): SourceHttpResponse => $this->uploadBroken ? throw new RuntimeException('Connection reset by peer') : $this->upload())
             ->on('POST', self::HOME.'/wp-admin/plugins.php?action=activate&'.$plugin.'&_wpnonce=a1', fn (): SourceHttpResponse => $this->moveTo($this->activationRefused ? $this->pluginState : 'active'))
             ->on('POST', self::HOME.'/wp-admin/plugins.php?action=deactivate&'.$plugin.'&_wpnonce=d1', fn (): SourceHttpResponse => $this->moveTo('inactive'))
-            ->on('POST', self::DELETE, fn (): SourceHttpResponse => $this->moveTo('none'))
+            ->on('POST', self::DELETE, fn (array $headers, ?string $body): SourceHttpResponse => $this->deleteAnswer((string) $body))
             ->on('GET', self::INFO, fn (array $headers): SourceHttpResponse => ($headers['X-Migrator-Token'] ?? null) === $this->installedToken
                 ? RoutedSourceHttpClient::restError(404, 'not_found')
                 : RoutedSourceHttpClient::restError(401, 'rest_forbidden'))
@@ -357,6 +514,19 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
             : RoutedSourceHttpClient::restError(401, 'rest_forbidden');
     }
 
+    private function deleteAnswer(string $body): SourceHttpResponse
+    {
+        if (str_contains($body, 'slug=panelalpha-migrator')) {
+            if (! $this->newerSlugStays) {
+                $this->newerSlugState = 'none';
+            }
+
+            return new SourceHttpResponse('<html></html>', 200);
+        }
+
+        return $this->moveTo('none');
+    }
+
     private function pluginList(): SourceHttpResponse
     {
         $plugin = 'plugin=wordpress-migrator%2Fwordpress-migrator.php';
@@ -366,7 +536,25 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
             default => '',
         };
 
-        return new SourceHttpResponse('<html><script>var s={"_ajax_nonce":"n0nce42"};</script>'.$link.'</html>', 200);
+        $newer = 'plugin=panelalpha-migrator%2Fpanelalpha-migrator.php';
+        $newerLink = match ($this->newerSlugState) {
+            'active' => '<a href="plugins.php?action=deactivate&amp;'.$newer.'&amp;_wpnonce=d2">Deactivate</a>',
+            'inactive' => '<a href="plugins.php?action=activate&amp;'.$newer.'&amp;_wpnonce=a2">Activate</a>',
+            default => '',
+        };
+        $version = $this->shownVersion ?? $this->releaseVersion;
+        $state = $this->pluginState === 'active' ? 'active' : 'inactive';
+        $row = $this->pluginState === 'none' || $version === ''
+            ? ''
+            : '<table>'
+                .'<tr class="'.$state.' update" data-slug="wordpress-migrator" data-plugin="wordpress-migrator/wordpress-migrator.php">'
+                .'<td><div class="'.$state.' second plugin-version-author-uri">'.$this->versionLabel.' '.$version
+                .' | By PanelAlpha | View details</div></td></tr>'
+                .'<tr class="plugin-update-tr '.$state.'" data-plugin="wordpress-migrator/wordpress-migrator.php">'
+                .'<td colspan="3"><div class="update-message">There is a new version available.</div></td></tr>'
+                .'</table>';
+
+        return new SourceHttpResponse('<html><script>var s={"_ajax_nonce":"n0nce42"};</script>'.$link.$newerLink.$row.'</html>', 200);
     }
 
     private function upload(): SourceHttpResponse
@@ -381,6 +569,10 @@ class WordpressMigrationInstallSourcePluginTest extends WordpressMigrationTestCa
         if ($this->pluginState === 'none' || $this->overwriteHonoured) {
             $this->pluginState = $this->pluginState === 'none' ? 'inactive' : $this->pluginState;
             $this->installedToken = end($this->packagedTokens) ?: null;
+        }
+
+        if ($this->uploadAlsoInstallsNewer) {
+            $this->newerSlugState = 'inactive';
         }
 
         return new SourceHttpResponse('<html>Plugin installed successfully.</html>', 200);

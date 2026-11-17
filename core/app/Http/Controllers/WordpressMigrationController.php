@@ -251,7 +251,10 @@ class WordpressMigrationController extends Controller
             .'plugin_unauthenticated means the source plugin is older than 1.2.0 and answers its transfer '
             .'routes without a token, so anyone can copy the site while it is installed; the engine removes it '
             .'(wp_admin), or the user must (manual_plugin, see notices), as soon as the import ends, fails or '
-            .'is cancelled.',
+            .'is cancelled. plugin_version_unknown means wp-admin did not show the installed plugin\'s version, '
+            .'so the engine could not check it is the pinned release; if the import later fails with an undefined '
+            .'method or class, remove every wordpress-migrator and panelalpha-migrator copy from the source and '
+            .'run it again.',
         security: [['bearerAuth' => []]],
         tags: ['WordPress Migrations'],
         parameters: [
@@ -271,7 +274,7 @@ class WordpressMigrationController extends Controller
                     new OA\Property(property: 'source_ip', type: 'string', nullable: true),
                     new OA\Property(property: 'notices', type: 'array', items: new OA\Items(type: 'string'), description: 'What the user still has to do by hand, e.g. remove the plugin from a manual_plugin source.'),
                     new OA\Property(property: 'warnings', type: 'array', description: 'What the import noticed and went on with.', items: new OA\Items(type: 'object', properties: [
-                        new OA\Property(property: 'code', type: 'string', enum: ['plugin_unauthenticated']),
+                        new OA\Property(property: 'code', type: 'string', enum: ['plugin_unauthenticated', 'plugin_version_unknown']),
                         new OA\Property(property: 'message', type: 'string'),
                     ])),
                     new OA\Property(property: 'target_label', type: 'string', nullable: true),

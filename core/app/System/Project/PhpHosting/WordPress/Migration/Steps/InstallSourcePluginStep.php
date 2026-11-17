@@ -13,9 +13,12 @@ use App\System\Project\PhpHosting\WordPress\Migration\WordpressMigratorZip;
 /**
  * wp_admin: upload and activate the migrator zip with this import's own token, then check its routes without it
  * ({@see SourcePluginTokenCheck}). A copy already there is recorded first, so the cleanups leave it alone.
+ * When wp-admin shows no version for the installed plugin, the import goes on with a {@see VERSION_UNKNOWN_WARNING}.
  */
 final class InstallSourcePluginStep implements MigrationStep
 {
+    public const VERSION_UNKNOWN_WARNING = 'plugin_version_unknown';
+
     public function __construct(
         private SourceConnection $source = new SourceConnection,
         private ?WordpressMigratorZip $zip = null,
@@ -58,9 +61,32 @@ final class InstallSourcePluginStep implements MigrationStep
     private function install(WordpressMigration $migration, SourceWordpressClient $client, string $package, string $token): void
     {
         $migration->recordSourcePluginPreinstalled($client->hasPlugin(SourceWordpressClient::PLUGIN_SLUG));
-        $client->installPluginFromZip($package);
+        $shownVersion = $client->installPluginFromZip($package);
+        $this->recordVersionCheck($migration, $shownVersion, $package);
         $client->activatePlugin(SourceWordpressClient::PLUGIN_SLUG);
         $client->assertPluginAcceptsToken($token);
         SourcePluginTokenCheck::run($migration, $client, WordpressMigratorZip::requiresToken($package));
+    }
+
+    /**
+     * A version wp-admin shows is compared by the client already; when it shows none, say so in the status, and
+     * drop an earlier note once a run reads the version.
+     */
+    private function recordVersionCheck(WordpressMigration $migration, ?string $shownVersion, string $package): void
+    {
+        if ($shownVersion !== null) {
+            $migration->removeWarning(self::VERSION_UNKNOWN_WARNING);
+
+            return;
+        }
+
+        $pinned = WordpressMigratorZip::versionOf($package) ?? 'the pinned release';
+        $migration->addWarning(
+            self::VERSION_UNKNOWN_WARNING,
+            'wp-admin on the source site does not show which version of the wordpress-migrator plugin is installed, '
+            .'so the Engine could not check that it is '.$pinned.'. If the import fails with an undefined method or '
+            .'class, remove every wordpress-migrator and panelalpha-migrator copy from the source site and run the '
+            .'import again.',
+        );
     }
 }
