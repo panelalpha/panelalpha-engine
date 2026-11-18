@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use Symfony\Component\Yaml\Tag\TaggedValue;
+
 /**
  * A service's `extends:` merged into it, so {@see ServiceHardener} reads the keys Compose would pull in;
  * `extends.file` is confined to the project root and rebased ({@see NestedCompose}). Own keys win.
@@ -131,6 +133,7 @@ final class ComposeExtends
     /**
      * Compose's `extends` merge: the extending service's keys win; lists are appended (base first),
      * maps merged one level deeper the same way, so every escaping key lands where the hardener sees it.
+     * A `!reset` or `!override` value takes the key's place instead of merging into it.
      *
      * @param  array<string, mixed>  $base
      * @param  array<string, mixed>  $over
@@ -139,6 +142,11 @@ final class ComposeExtends
     private static function merge(array $base, array $over): array
     {
         foreach ($over as $key => $value) {
+            if (self::isMergeTag($value)) {
+                $base = self::replaced($base, $key, $value);
+
+                continue;
+            }
             if (! array_key_exists($key, $base)) {
                 $base[$key] = $value;
 
@@ -153,6 +161,30 @@ final class ComposeExtends
                 $base[$key] = $value;
             }
         }
+
+        return $base;
+    }
+
+    private static function isMergeTag(mixed $value): bool
+    {
+        return $value instanceof TaggedValue
+            && in_array($value->getTag(), [ComposeYaml::RESET_TAG, ComposeYaml::OVERRIDE_TAG], true);
+    }
+
+    /**
+     * A `!reset null` removes the key, as Compose does; any other tagged value is the key's whole value.
+     *
+     * @param  array<string, mixed>  $base
+     * @return array<string, mixed>
+     */
+    private static function replaced(array $base, string|int $key, TaggedValue $value): array
+    {
+        if ($value->getTag() === ComposeYaml::RESET_TAG && $value->getValue() === null) {
+            unset($base[$key]);
+
+            return $base;
+        }
+        $base[$key] = $value->getValue();
 
         return $base;
     }

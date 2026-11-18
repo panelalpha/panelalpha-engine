@@ -6,11 +6,14 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\System;
 use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Reads a compose file the way Docker reads it: an anchor alone on its line, which Symfony rejects, is
- * moved onto its key, and only as a fallback, so a file Symfony already parses is never rewritten.
+ * Reads a compose file the way Docker reads it. What Symfony rejects and Docker accepts is rescued only as a
+ * fallback, so a file Symfony already parses is never rewritten: an anchor alone on its line moves onto its
+ * key, a `---` behind leading comments is dropped, a blank line holding a tab is emptied, and Compose's merge
+ * tags (`!reset`, `!override`) are read.
  */
 final class ComposeYaml
 {
@@ -19,12 +22,32 @@ final class ComposeYaml
     /** An anchor alone on its line, e.g. `&base-lychee-setup`, a trailing comment included. */
     private const STANDALONE_ANCHOR = '/^&[A-Za-z0-9_][A-Za-z0-9_.\-]*(?:[ \t]+#.*)?$/';
 
+    /** Compose's merge tags: `!reset` drops what an extended service set, `!override` replaces it whole. */
+    public const RESET_TAG = 'reset';
+
+    public const OVERRIDE_TAG = 'override';
+
+    /** The document start marker, a trailing comment allowed. */
+    private const DOCUMENT_START = '/^---(?:[ \t]+#.*)?$/';
+
     /**
-     * The parsed document, or null when it cannot be read at all, even with its anchors rescued.
+     * The parsed document, or null when it cannot be read at all, even rescued; merge tags give their values.
      *
      * @return array<mixed>|null
      */
     public static function parse(string $raw): ?array
+    {
+        $parsed = self::parseKeepingMergeTags($raw);
+
+        return $parsed === null ? null : self::withoutMergeTags($parsed);
+    }
+
+    /**
+     * The same, with every tagged value left a {@see TaggedValue}, for {@see ComposeExtends} to merge by.
+     *
+     * @return array<mixed>|null
+     */
+    public static function parseKeepingMergeTags(string $raw): ?array
     {
         try {
             $parsed = Yaml::parse($raw);
@@ -33,18 +56,37 @@ final class ComposeYaml
         } catch (ParseException) {
         }
 
-        $rescued = self::anchorsOntoTheirKeys($raw);
-        if ($rescued === $raw) {
-            return null;
-        }
-
         try {
-            $parsed = Yaml::parse($rescued);
+            $parsed = Yaml::parse(self::rescued($raw), Yaml::PARSE_CUSTOM_TAGS);
 
             return is_array($parsed) ? $parsed : null;
         } catch (ParseException) {
             return null;
         }
+    }
+
+    /**
+     * Every tagged value replaced by the value it tags.
+     *
+     * @param  array<mixed>  $node
+     * @return array<mixed>
+     */
+    public static function withoutMergeTags(array $node): array
+    {
+        foreach ($node as $key => $value) {
+            $node[$key] = self::untagged($value);
+        }
+
+        return $node;
+    }
+
+    private static function untagged(mixed $value): mixed
+    {
+        while ($value instanceof TaggedValue) {
+            $value = $value->getValue();
+        }
+
+        return is_array($value) ? self::withoutMergeTags($value) : $value;
     }
 
     /**
@@ -107,10 +149,10 @@ final class ComposeYaml
      */
     private static function emptySequences(string $raw): array
     {
-        foreach ([$raw, self::anchorsOntoTheirKeys($raw)] as $candidate) {
+        foreach ([$raw, self::rescued($raw)] as $candidate) {
             try {
                 $found = [];
-                self::collectEmptySequences(Yaml::parse($candidate, Yaml::PARSE_OBJECT_FOR_MAP), '', $found);
+                self::collectEmptySequences(Yaml::parse($candidate, Yaml::PARSE_OBJECT_FOR_MAP | Yaml::PARSE_CUSTOM_TAGS), '', $found);
 
                 return $found;
             } catch (ParseException) {
@@ -126,6 +168,9 @@ final class ComposeYaml
      */
     private static function collectEmptySequences(mixed $node, string $path, array &$found): void
     {
+        while ($node instanceof TaggedValue) {
+            $node = $node->getValue();
+        }
         if ($node === []) {
             $found[$path] = true;
 
@@ -158,6 +203,50 @@ final class ComposeYaml
         }
 
         return $node;
+    }
+
+    /** Every text rescue, each a no-op on a file without its construct. */
+    private static function rescued(string $raw): string
+    {
+        return self::blankLinesEmptied(self::leadingDocumentStartDropped(self::anchorsOntoTheirKeys($raw)));
+    }
+
+    /**
+     * A `---` with only comments and blanks above it opens the one document; Symfony counts the comments as a
+     * document of their own. A second `---` is a real second document, and the file is left as written.
+     */
+    private static function leadingDocumentStartDropped(string $raw): string
+    {
+        $lines = preg_split('/\R/', $raw);
+        if ($lines === false) {
+            return $raw;
+        }
+        $starts = array_keys(array_filter($lines, static fn (string $l): bool => preg_match(self::DOCUMENT_START, rtrim($l)) === 1));
+        if (count($starts) !== 1 || ! self::onlyCommentsAbove($lines, $starts[0])) {
+            return $raw;
+        }
+        $lines[$starts[0]] = '';
+
+        return implode("\n", $lines);
+    }
+
+    /** @param list<string> $lines */
+    private static function onlyCommentsAbove(array $lines, int $i): bool
+    {
+        foreach (array_slice($lines, 0, $i) as $above) {
+            $trimmed = trim($above);
+            if ($trimmed !== '' && ! str_starts_with($trimmed, '#')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** A line of only spaces and tabs is blank to Docker; Symfony reads the tab as indentation. */
+    private static function blankLinesEmptied(string $raw): string
+    {
+        return (string) preg_replace('/^[ \t]+$/m', '', $raw);
     }
 
     /**

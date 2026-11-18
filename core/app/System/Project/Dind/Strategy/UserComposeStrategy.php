@@ -158,18 +158,19 @@ class UserComposeStrategy
             ['compose' => $parsed, 'sources' => $included] = $this->flattenIncludes($parsed, $projectDir, $logger);
         }
 
-        return [$this->withExtendsResolved($parsed, $system, $projectDir), $included];
+        return [ComposeYaml::withoutMergeTags($this->withExtendsResolved($parsed, $system, $projectDir)), $included];
     }
 
     /**
      * Through ComposeYaml, not Yaml::parse, so a construct Symfony rejects but Docker accepts is rescued
-     * rather than failing the account; null is a file that is genuinely unreadable.
+     * rather than failing the account; null is a file that is genuinely unreadable. Merge tags stay for
+     * the `extends:` merge.
      *
      * @return array<string, mixed>
      */
     private function parse(string $raw): array
     {
-        $parsed = ComposeYaml::parse($raw);
+        $parsed = ComposeYaml::parseKeepingMergeTags($raw);
         if ($parsed === null) {
             throw new \InvalidArgumentException(
                 'The compose file in this project could not be read as YAML.'
