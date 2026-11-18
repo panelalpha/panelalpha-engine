@@ -37,6 +37,7 @@ use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
+use App\Lib\Deploy\Platform\Runtime\StaleLockfile;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\Platform\Runtime\StaticBuildOutput;
 use App\Lib\Deploy\Platform\Runtime\ViteOwnUrlEnv;
@@ -309,14 +310,44 @@ class HostCompile
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules, $isNode, $appRoot);
         } catch (\Exception $e) {
             $jdkImage = $e instanceof DeployCancelledException ? null : self::newerJdkImage($decision, $e->getMessage());
+            $unfrozen = $isNode ? self::unfrozenInstallAfter($e, $installCmd) : null;
             if ($jdkImage !== null) {
                 $this->compileOnNewerJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
+            } elseif ($unfrozen !== null) {
+                $this->compileWithoutFrozenLockfile($logger, $projectDir, $image, $unfrozen, $buildCmd, $recipeEnv, $isolateNodeModules, $appRoot);
             } elseif (! $mayRetryOnNode) {
                 throw $e;
             } else {
                 $this->retryOnNode($logger, $e, $projectDir, $nodeImage, $install, $build, $recipeEnv, $isolateNodeModules);
             }
         }
+    }
+
+    /** The install without its lockfile freeze when the frozen one refused a lockfile package.json has moved past. */
+    private static function unfrozenInstallAfter(\Exception $failure, string $install): ?string
+    {
+        if ($failure instanceof DeployCancelledException || ! StaleLockfile::refusedBy($failure->getMessage())) {
+            return null;
+        }
+
+        return StaleLockfile::unfrozen($install);
+    }
+
+    /**
+     * @param  array<string, mixed>  $env
+     */
+    private function compileWithoutFrozenLockfile(
+        ?DeployLogger $logger,
+        string $projectDir,
+        string $image,
+        string $install,
+        string $build,
+        array $env,
+        bool $isolateNodeModules,
+        string $appRoot = ''
+    ): void {
+        $logger?->warn('The lockfile does not match package.json, so the frozen install refused it; installing from package.json instead: '.$install);
+        $this->runContainer($projectDir, $image, $install, $build, $env, $isolateNodeModules, true, $appRoot);
     }
 
     /**
@@ -567,10 +598,14 @@ class HostCompile
         try {
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $cached, true, $frontend['root']);
         } catch (\Exception $e) {
-            if ($image !== HostNodeBuild::BUN_IMAGE) {
+            $unfrozen = self::unfrozenInstallAfter($e, $installCmd);
+            if ($unfrozen !== null) {
+                $this->compileWithoutFrozenLockfile($logger, $projectDir, $image, $unfrozen, $buildCmd, $recipeEnv, $cached, $frontend['root']);
+            } elseif ($image !== HostNodeBuild::BUN_IMAGE) {
                 throw $e;
+            } else {
+                $this->retryOnNode($logger, $e, $projectDir, $nodeImage, $install, $build, $recipeEnv, $cached, $frontend['root']);
             }
-            $this->retryOnNode($logger, $e, $projectDir, $nodeImage, $install, $build, $recipeEnv, $cached, $frontend['root']);
         }
     }
 
