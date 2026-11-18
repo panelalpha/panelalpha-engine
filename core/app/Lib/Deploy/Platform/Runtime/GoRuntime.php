@@ -301,18 +301,24 @@ final class GoRuntime implements Runtime
         return $directories;
     }
 
-    /** Non-test .go files outside vendored, hidden and `_` directories; an unreadable directory is skipped. */
+    /**
+     * Non-test .go files outside vendored, hidden and `_` directories and other modules; an unreadable
+     * directory is skipped.
+     */
     private static function goSourceFiles(string $projectDir): \RecursiveIteratorIterator
     {
+        $workspace = is_file($projectDir.'/go.work');
+
         return new \RecursiveIteratorIterator(
             new \RecursiveCallbackFilterIterator(
                 new \RecursiveDirectoryIterator($projectDir, \FilesystemIterator::SKIP_DOTS),
-                static function (\SplFileInfo $file): bool {
+                static function (\SplFileInfo $file) use ($workspace): bool {
                     $name = $file->getFilename();
                     if ($file->isDir()) {
                         return ! in_array($name, ['vendor', 'testdata', 'node_modules'], true)
                             && ! str_starts_with($name, '.')
-                            && ! str_starts_with($name, '_');
+                            && ! str_starts_with($name, '_')
+                            && ($workspace || ! self::isOtherModule($file));
                     }
 
                     return str_ends_with($name, '.go') && ! str_ends_with($name, '_test.go');
@@ -321,6 +327,15 @@ final class GoRuntime implements Runtime
             \RecursiveIteratorIterator::LEAVES_ONLY,
             \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
+    }
+
+    /**
+     * A directory with its own go.mod is a module of its own: `go build` from the root refuses it with "main
+     * module does not contain package", unless a go.work at the root joins them.
+     */
+    private static function isOtherModule(\SplFileInfo $dir): bool
+    {
+        return is_file($dir->getPathname().'/go.mod');
     }
 
     private static function relativeDir(string $projectDir, \SplFileInfo $file): string
