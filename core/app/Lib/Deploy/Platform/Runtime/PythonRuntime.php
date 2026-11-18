@@ -6,6 +6,7 @@ use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\Python\ApplicationObject;
+use App\Lib\Deploy\Platform\Runtime\Python\StreamlitScript;
 
 /**
  * Python, versioned by `.python-version` when it pins one, else by `requires-python` in pyproject.toml; requirements.txt pins
@@ -376,7 +377,7 @@ final class PythonRuntime implements Runtime
             return self::serverCommand($server, $root[0], $root[1], '');
         }
 
-        $script = self::rootScriptCommand($projectDir);
+        $script = self::streamlitCommand($projectDir, $manifests) ?? self::rootScriptCommand($projectDir);
         if ($script !== null) {
             return $script;
         }
@@ -425,6 +426,23 @@ final class PythonRuntime implements Runtime
         }
 
         return self::declares($manifests, $wanted) ? $wanted : null;
+    }
+
+    /**
+     * A declared Streamlit app under its own server, on the published port and address, headless so it does not wait to
+     * open a browser.
+     *
+     * @param  list<string>  $manifests
+     */
+    private static function streamlitCommand(string $projectDir, array $manifests): ?string
+    {
+        if (! self::declares($manifests, 'streamlit')) {
+            return null;
+        }
+        $script = StreamlitScript::find($projectDir);
+
+        return $script === null ? null : self::VENV.'/bin/streamlit run '.self::shellPath(self::notAnOption($script))
+            .' --server.address 0.0.0.0 --server.port '.self::PORT.' --server.headless true';
     }
 
     /**
