@@ -727,6 +727,7 @@ class DetectProjectStrategyTest extends TestCase
             'scripts' => ['build' => 'vite build'],
         ]));
         $this->writeFile('vite.config.ts', 'export default {};');
+        $this->writeFile('index.html', '<!doctype html>');
 
         $result = $this->detect();
 
@@ -780,6 +781,7 @@ class DetectProjectStrategyTest extends TestCase
             'scripts' => ['build' => 'vite build'],
         ]));
         $this->writeFile('vite.config.ts', 'export default {};');
+        $this->writeFile('index.html', '<!doctype html>');
 
         $this->assertSame(Strategies::VITE, $this->detect()['strategy']);
     }

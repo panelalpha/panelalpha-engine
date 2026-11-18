@@ -44,6 +44,7 @@ class DetectionFilesTest extends TestCase
         'static-entry' => [],
         'sveltekit-static-adapter' => ['svelte.config.js'],
         'vite-not-the-build' => ['vite.config.ts', 'package.json'],
+        'vite-without-entry' => ['vite.config.ts', 'package.json'],
     ];
 
     /**

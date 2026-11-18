@@ -250,6 +250,7 @@ class DockerfileBuilderTest extends TestCase
             'scripts' => ['build' => 'vite build'],
         ]));
         $this->write('vite.config.ts', 'export default {};');
+        $this->write('index.html', '<!doctype html>');
 
         $recipe = DetectProjectStrategy::detect($this->tmpDir);
         $docker = DockerfileBuilder::generate($recipe, ProjectContext::listRootFiles($this->tmpDir), $this->tmpDir);

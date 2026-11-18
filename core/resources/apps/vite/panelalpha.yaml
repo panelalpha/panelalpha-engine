@@ -47,6 +47,10 @@ detect:
     # A workspace root whose own build is not Vite (fluxer runs cargo); see
     # ViteNotTheBuildProbe.
     - probe: vite-not-the-build
+    # Vite with nothing at the root to build (haste's app is in ui/, toSub2 is
+    # a Node server with its page in web/): `vite build` can only fail on
+    # `Could not resolve entry module "index.html"`; see ViteWithoutEntryProbe.
+    - probe: vite-without-entry
     # A PHP front controller at the root (Tiki, with no root composer.json):
     # Vite builds its assets, as for Laravel, and is not the application.
     - file: index.php
