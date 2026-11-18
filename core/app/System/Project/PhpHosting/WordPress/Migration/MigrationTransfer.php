@@ -12,8 +12,6 @@ use Throwable;
 /**
  * Database / files / finalize loops matching the panel's migrateDatabaseUsingPlugin,
  * migrateFilesUsingPlugin, and finalizeMigrationUsingPlugin predicates.
- *
- * Finalize decides on the plugin's `status` (the phase is derived from it), not on `phase`.
  */
 final class MigrationTransfer
 {
@@ -53,11 +51,6 @@ final class MigrationTransfer
      * Engine's own "run is dead" window; a source backup idle longer than this is not waited for.
      */
     private const SOURCE_STALE_MINUTES = 15;
-
-    /**
-     * Identical (phase, sent chunks) batches in a row, inside finalize, that count as a stalled source.
-     */
-    private const STALLED_BATCHES = 3;
 
     private float $lastProgressAt = 0.0;
 
@@ -125,18 +118,17 @@ final class MigrationTransfer
 
     /**
      * Without a budget a run gets the standard one, never an unbounded loop.
-     * With $guardStall, fails when the source answers STALLED_BATCHES batches in a row with the same
-     * phase and sent chunks (and chunks left to send), instead of spending the whole budget on them.
+     * With a stall guard, a stalled source fails the run instead of spending the whole budget.
      *
      * @param  callable(array<string, mixed>): bool  $isCompleted
      */
-    private function runBatches(string $migrationId, ?BatchBudget $budget, callable $isCompleted, bool $guardStall = false): bool
-    {
+    private function runBatches(
+        string $migrationId,
+        ?BatchBudget $budget,
+        callable $isCompleted,
+        ?BatchStallGuard $stallGuard = null,
+    ): bool {
         $budget ??= new BatchBudget;
-        $lastPhase = null;
-        $lastSent = null;
-        $lastTotal = null;
-        $repeats = 0;
         do {
             $budget->spend();
             try {
@@ -150,32 +142,8 @@ final class MigrationTransfer
             }
             $completed = $isCompleted($result);
             $this->reportProgress($result, $completed);
-
-            if ($guardStall) {
-                if ($completed || $result['total_chunks'] <= 0) {
-                    $repeats = 0;
-                    $lastPhase = null;
-                    $lastSent = null;
-                    $lastTotal = null;
-                } elseif ($result['current_phase'] === $lastPhase
-                    && $result['sent_chunks'] === $lastSent
-                    && $result['total_chunks'] === $lastTotal) {
-                    $repeats++;
-                } else {
-                    $lastPhase = $result['current_phase'];
-                    $lastSent = $result['sent_chunks'];
-                    $lastTotal = $result['total_chunks'];
-                    $repeats = 1;
-                }
-                if ($repeats >= self::STALLED_BATCHES) {
-                    throw new RuntimeException(sprintf(
-                        'Migration was interrupted: the source sent no new chunks in %d batches (phase %s, %d/%d chunks)',
-                        self::STALLED_BATCHES,
-                        self::quoted($result['current_phase']),
-                        $result['sent_chunks'],
-                        $result['total_chunks'],
-                    ));
-                }
+            if ($stallGuard?->stalled($result, $completed) === true) {
+                throw self::noNewChunks($result);
             }
         } while (! $completed && ! $budget->exhausted());
 
@@ -212,37 +180,77 @@ final class MigrationTransfer
         $budget ??= new BatchBudget;
         while (true) {
             $status = $this->readStatus($migrationId);
-            $state = $status['status'] ?? null;
-
-            if ($state === 'completed') {
+            if (($status['status'] ?? null) === 'completed') {
                 return true;
             }
-            if ($state === 'not_found') {
-                throw $this->interrupted($status, 'the source has no record of this migration');
-            }
-            if (! is_string($state) || ! in_array($state, self::UNFINISHED_STATUSES, true)) {
-                throw $this->interrupted($status, 'the source reports a status this engine does not handle');
-            }
+            self::assertUnfinished($status);
             if (($status['backup_running'] ?? false) !== true) {
-                return $this->runBatches(
-                    $migrationId,
-                    $budget,
-                    static fn (array $result): bool => (bool) ($result['finalized'] ?? false),
-                    guardStall: true,
-                );
+                return $this->sendRemainingBatches($migrationId, $budget);
             }
-            if ($this->sourceIdleTooLong($status)) {
-                throw $this->interrupted($status, sprintf(
-                    'the source has made no progress for over %d minutes',
-                    self::SOURCE_STALE_MINUTES,
-                ));
-            }
-            if ($budget->exhausted()) {
+            if (! $this->waitedForOtherSender($status, $budget)) {
                 return false;
             }
-            $budget->spend();
-            Sleep::sleep(self::WAIT_POLL_SECONDS);
         }
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $status
+     */
+    private static function assertUnfinished(array $status): void
+    {
+        $state = $status['status'] ?? null;
+        if ($state === 'not_found') {
+            throw self::interrupted($status, 'the source has no record of this migration');
+        }
+        if (! is_string($state) || ! in_array($state, self::UNFINISHED_STATUSES, true)) {
+            throw self::interrupted($status, 'the source reports a status this engine does not handle');
+        }
+    }
+
+    private function sendRemainingBatches(string $migrationId, BatchBudget $budget): bool
+    {
+        return $this->runBatches(
+            $migrationId,
+            $budget,
+            static fn (array $result): bool => (bool) ($result['finalized'] ?? false),
+            new BatchStallGuard,
+        );
+    }
+
+    /**
+     * One poll interval spent waiting for the client whose backup is running; false once the budget is spent.
+     *
+     * @param  array<array-key, mixed>  $status
+     */
+    private function waitedForOtherSender(array $status, BatchBudget $budget): bool
+    {
+        if (self::sourceIdleTooLong($status)) {
+            throw self::interrupted($status, sprintf(
+                'the source has made no progress for over %d minutes',
+                self::SOURCE_STALE_MINUTES,
+            ));
+        }
+        if ($budget->exhausted()) {
+            return false;
+        }
+        $budget->spend();
+        Sleep::sleep(self::WAIT_POLL_SECONDS);
+
+        return true;
+    }
+
+    /**
+     * @param  array{current_phase: ?string, sent_chunks: int, total_chunks: int}  $result
+     */
+    private static function noNewChunks(array $result): RuntimeException
+    {
+        return new RuntimeException(sprintf(
+            'Migration was interrupted: the source sent no new chunks in %d batches (phase %s, %d/%d chunks)',
+            BatchStallGuard::BATCHES,
+            self::quoted($result['current_phase']),
+            $result['sent_chunks'],
+            $result['total_chunks'],
+        ));
     }
 
     /**
@@ -250,7 +258,7 @@ final class MigrationTransfer
      *
      * @param  array<array-key, mixed>  $status
      */
-    private function interrupted(array $status, string $reason): RuntimeException
+    private static function interrupted(array $status, string $reason): RuntimeException
     {
         $backupRunning = $status['backup_running'] ?? null;
         $lastActivity = $status['last_activity'] ?? null;
@@ -270,7 +278,7 @@ final class MigrationTransfer
      *
      * @param  array<array-key, mixed>  $status
      */
-    private function sourceIdleTooLong(array $status): bool
+    private static function sourceIdleTooLong(array $status): bool
     {
         $lastActivity = $status['last_activity'] ?? null;
         if (! is_string($lastActivity) || $lastActivity === '') {

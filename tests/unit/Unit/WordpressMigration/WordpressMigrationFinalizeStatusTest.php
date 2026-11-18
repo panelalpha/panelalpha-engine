@@ -42,6 +42,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
             'pending' => ['pending'],
             'in_progress' => ['in_progress'],
             'interrupted' => ['interrupted'],
+            'idle' => ['idle'],
         ];
     }
 
@@ -100,7 +101,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 'backup_running' => false,
                 'last_activity' => now()->toIso8601String(),
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 1, 3),
                 $this->batch(false, 2, 3),
                 $this->batch(true, 3, 3),
@@ -122,7 +123,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 'phase' => 'ready',
                 'backup_running' => false,
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 1, 100),
                 $this->batch(false, 2, 100),
             ]));
@@ -259,7 +260,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 'phase' => 'ready',
                 'backup_running' => false,
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 40, 100),
                 $this->batch(false, 40, 100),
                 $this->batch(false, 41, 100),
@@ -281,7 +282,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 'phase' => 'ready',
                 'backup_running' => false,
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 40, 100),
                 $this->batch(false, 40, 99),
                 $this->batch(false, 40, 98),
@@ -302,7 +303,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 'phase' => 'ready',
                 'backup_running' => false,
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 0, 0),
                 $this->batch(false, 0, 0),
                 $this->batch(false, 0, 0),
@@ -322,7 +323,7 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
                 $this->statusReply(['status' => 'in_progress', 'phase' => 'backup_files', 'backup_running' => true, 'last_activity' => now()->toIso8601String()]),
                 $this->statusReply(['status' => 'in_progress', 'phase' => 'ready', 'backup_running' => false]),
             ]))
-            ->on('POST', self::BATCH_URL, $this->batches([
+            ->on('POST', self::BATCH_URL, $this->inOrder([
                 $this->batch(false, 1, 3),
                 $this->batch(true, 3, 3),
             ]))
@@ -373,15 +374,6 @@ class WordpressMigrationFinalizeStatusTest extends WordpressMigrationTestCase
     /**
      * Answers in order; the last answer repeats once the list is used up.
      *
-     * @param  list<SourceHttpResponse>  $answers
-     * @return Closure(): SourceHttpResponse
-     */
-    private function batches(array $answers): Closure
-    {
-        return $this->inOrder($answers);
-    }
-
-    /**
      * @param  list<SourceHttpResponse>  $answers
      * @return Closure(): SourceHttpResponse
      */
