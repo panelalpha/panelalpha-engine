@@ -42,7 +42,7 @@ class HostCompileNewerJdkTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private static function decision(string $toolchain = '21-maven', string $image = 'maven:3-eclipse-temurin-21'): array
+    private static function decision(string $toolchain = '21-maven', string $image = 'maven:3.9-eclipse-temurin-21'): array
     {
         return [
             'strategy' => 'java',
@@ -53,14 +53,14 @@ class HostCompileNewerJdkTest extends TestCase
 
     public function test_a_refused_release_picks_the_catalogued_jdk(): void
     {
-        $this->assertSame('maven:3-eclipse-temurin-25', HostCompile::newerJdkImage(self::decision(), self::FAILURE));
+        $this->assertSame('maven:3.9-eclipse-temurin-25', HostCompile::newerJdkImage(self::decision(), self::FAILURE));
     }
 
     public function test_nothing_newer_or_nothing_refused_means_no_retry(): void
     {
         // Already on the newest JDK the catalogue has.
         $this->assertNull(HostCompile::newerJdkImage(
-            self::decision('25-maven', 'maven:3-eclipse-temurin-25'),
+            self::decision('25-maven', 'maven:3.9-eclipse-temurin-25'),
             str_replace('25', '26', self::FAILURE)
         ));
         $this->assertNull(HostCompile::newerJdkImage(self::decision(), '[ERROR] COMPILATION ERROR : cannot find symbol'));
@@ -76,7 +76,7 @@ class HostCompileNewerJdkTest extends TestCase
     public function test_the_compile_reruns_on_the_newer_jdk_and_the_app_runs_on_it(): void
     {
         $compose = $this->dir.'/docker-compose.panelalpha.yml';
-        file_put_contents($compose, "services:\n  app:\n    image: 'maven:3-eclipse-temurin-21'\n"
+        file_put_contents($compose, "services:\n  app:\n    image: 'maven:3.9-eclipse-temurin-21'\n"
             ."    working_dir: /app\n  db:\n    image: 'postgres:17'\n");
 
         $system = new class extends System
@@ -123,16 +123,16 @@ class HostCompileNewerJdkTest extends TestCase
             $compile,
             self::decision(),
             '/home/acme/project',
-            'maven:3-eclipse-temurin-25',
+            'maven:3.9-eclipse-temurin-25',
             '',
             'mvn -B -DskipTests package',
             [],
             ''
         );
 
-        $this->assertSame(['maven:3-eclipse-temurin-25'], $system->images);
+        $this->assertSame(['maven:3.9-eclipse-temurin-25'], $system->images);
         $written = (string) file_get_contents($compose);
-        $this->assertStringContainsString("image: 'maven:3-eclipse-temurin-25'", $written);
+        $this->assertStringContainsString("image: 'maven:3.9-eclipse-temurin-25'", $written);
         $this->assertStringContainsString("image: 'postgres:17'", $written);
         $this->assertStringNotContainsString('temurin-21', $written);
     }

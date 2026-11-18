@@ -367,7 +367,7 @@ class RuntimeResolutionTest extends TestCase
         unlink($this->tmpDir . '/build.gradle.kts');
         $this->write('pom.xml', '<project/>');
         $maven = RuntimeRegistry::get('java')->resolve($this->context());
-        $this->assertSame(RuntimeRegistry::get('java')->image($maven), 'maven:3-eclipse-temurin-21');
+        $this->assertSame(RuntimeRegistry::get('java')->image($maven), 'maven:3.9-eclipse-temurin-21');
     }
 
     /**

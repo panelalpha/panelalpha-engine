@@ -11,7 +11,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
  */
 final class JavaRuntime implements Runtime
 {
-    public const MAVEN_IMAGE = 'maven:3-eclipse-temurin-21';
+    public const MAVEN_IMAGE = 'maven:3.9-eclipse-temurin-21';
 
     public const GRADLE_IMAGE = 'gradle:8-jdk21';
 

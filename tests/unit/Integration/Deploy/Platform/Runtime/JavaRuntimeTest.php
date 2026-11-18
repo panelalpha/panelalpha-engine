@@ -341,7 +341,7 @@ class JavaRuntimeTest extends TestCase
         $requirement = $this->resolveIn($dir);
 
         $this->assertSame('25-maven', $requirement->version);
-        $this->assertSame('maven:3-eclipse-temurin-25', $this->runtime->image($requirement));
+        $this->assertSame('maven:3.9-eclipse-temurin-25', $this->runtime->image($requirement));
         $this->assertStringContainsString('release 25', $requirement->explain());
     }
 

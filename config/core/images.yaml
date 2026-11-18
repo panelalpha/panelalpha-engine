@@ -417,11 +417,12 @@ runtimes:
     image:
       # maven and gradle publish under different names, so there is no one
       # template here and each version names its own image. `from` is the
-      # default for anything not overridden.
-      from: "maven:3-eclipse-temurin-21"
+      # default for anything not overridden. Maven stays on 3.9: 3.10 refuses a
+      # pom that declares one dependency twice, which 3.9 only warns about.
+      from: "maven:3.9-eclipse-temurin-21"
       overrides:
         "25-maven":
-          from: "maven:3-eclipse-temurin-25"
+          from: "maven:3.9-eclipse-temurin-25"
         "17-gradle":
           from: "gradle:8-jdk17"
         "21-gradle":
