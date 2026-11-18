@@ -132,7 +132,7 @@ class CreateTest(HostRunsTest):
                 'Memory': 2048 << 20,
                 'MemorySwap': 2048 << 20,
                 'OomScoreAdj': 1000,
-                'PidsLimit': 512,
+                'PidsLimit': 4096,
             },
         })
 
@@ -163,7 +163,7 @@ class CreateTest(HostRunsTest):
             'Memory': 2 << 30,
             'MemorySwap': 2 << 30,
             'OomScoreAdj': 1000,
-            'PidsLimit': 512,
+            'PidsLimit': 4096,
         })
         self.assertNotIn('NetworkMode', body['HostConfig'])
 

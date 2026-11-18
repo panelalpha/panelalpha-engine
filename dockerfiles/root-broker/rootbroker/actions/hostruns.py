@@ -19,7 +19,8 @@ MEMORY_UNITS = {'b': 1, 'k': 1 << 10, 'm': 1 << 20, 'g': 1 << 30}
 SECURITY_OPT = ('no-new-privileges',)
 CAP_DROP = ('ALL',)
 OOM_SCORE_ADJ = 1000
-PIDS_LIMIT = 512
+# Threads count: a Next.js build starts one per CPU in each worker, 260 on 8 CPUs.
+PIDS_LIMIT = 4096
 RUN_SECONDS = relay.SECONDS
 ATTACHED = {'AttachStdin': False, 'AttachStdout': True, 'AttachStderr': True, 'Tty': False, 'OpenStdin': False}
 HOST_OPTIONS = (('network', 'NetworkMode'), ('runtime', 'Runtime'), ('security_opt', 'SecurityOpt'),
