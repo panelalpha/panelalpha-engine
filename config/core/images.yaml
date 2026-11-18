@@ -421,6 +421,15 @@ runtimes:
       # pom that declares one dependency twice, which 3.9 only warns about.
       from: "maven:3.9-eclipse-temurin-21"
       overrides:
+        # Never what a project is detected on: Maven builds an older release on
+        # 21. These are for a build that refuses 21 (an old Lombok, an enforcer
+        # range), which is then compiled and run on the JDK it asked for.
+        "8-maven":
+          from: "maven:3.9-eclipse-temurin-8"
+        "11-maven":
+          from: "maven:3.9-eclipse-temurin-11"
+        "17-maven":
+          from: "maven:3.9-eclipse-temurin-17"
         "25-maven":
           from: "maven:3.9-eclipse-temurin-25"
         "17-gradle":
@@ -432,6 +441,12 @@ runtimes:
           from: "gradle:9-jdk25"
     # Only the 21 pair is the everyday case; the rest are pulled on demand.
     versions:
+      - version: "8-maven"
+        why: "Maven builds that refuse JDK 21 and declare Java 8"
+      - version: "11-maven"
+        why: "Maven builds that refuse JDK 21 and declare Java 11"
+      - version: "17-maven"
+        why: "Maven builds that refuse JDK 21 and declare Java 17"
       - version: "21-maven"
         why: "Java builds under Maven"
       - version: "25-maven"

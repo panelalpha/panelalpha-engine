@@ -124,8 +124,17 @@ final class JavaRuntime implements Runtime
         [$release, $said] = $jdk;
 
         return $said === ''
-            ? new Requirement('java', self::toolchain($tool, $release), '', $file)
-            : new Requirement('java', self::toolchain($tool, $release), (string) $release, $file.' '.$said);
+            ? new Requirement('java', self::detectedToolchain($tool, $release), '', $file)
+            : new Requirement('java', self::detectedToolchain($tool, $release), (string) $release, $file.' '.$said);
+    }
+
+    /**
+     * Maven builds an older release on the default JDK, which javac compiles for; an older JDK is only
+     * taken when a build refuses this one ({@see JdkRefusal}).
+     */
+    private static function detectedToolchain(string $tool, int $release): string
+    {
+        return self::toolchain($tool, $tool === 'maven' ? max($release, self::DEFAULT_JDK) : $release);
     }
 
     /**
@@ -134,12 +143,7 @@ final class JavaRuntime implements Runtime
      */
     public static function toolchain(string $tool, int $jdk): string
     {
-        $candidates = [];
-        foreach (self::toolchains() as $toolchain) {
-            if (preg_match('/^(\d+)-'.preg_quote($tool, '/').'$/', $toolchain, $m) === 1) {
-                $candidates[(int) $m[1]] = $toolchain;
-            }
-        }
+        $candidates = self::releasesOf($tool);
         if ($candidates === []) {
             return $tool === 'gradle' ? self::GRADLE : self::MAVEN;
         }
@@ -151,6 +155,37 @@ final class JavaRuntime implements Runtime
         }
 
         return end($candidates);
+    }
+
+    /**
+     * The catalogued toolchain inside [$min, $max): the lowest, or the highest when $newest; null for none.
+     */
+    public static function toolchainIn(string $tool, int $min, int $max, bool $newest = false): ?string
+    {
+        $inside = array_filter(
+            self::releasesOf($tool),
+            static fn (int $release): bool => $release >= $min && $release < $max,
+            ARRAY_FILTER_USE_KEY
+        );
+        if ($inside === []) {
+            return null;
+        }
+        ksort($inside);
+
+        return $newest ? end($inside) : reset($inside);
+    }
+
+    /** @return array<int, string> JDK release => toolchain */
+    private static function releasesOf(string $tool): array
+    {
+        $releases = [];
+        foreach (self::toolchains() as $toolchain) {
+            if (preg_match('/^(\d+)-'.preg_quote($tool, '/').'$/', $toolchain, $m) === 1) {
+                $releases[(int) $m[1]] = $toolchain;
+            }
+        }
+
+        return $releases;
     }
 
     /**
@@ -430,10 +465,10 @@ final class JavaRuntime implements Runtime
         if ($projectDir !== '' && ! is_file($projectDir.'/pom.xml')
             && (is_file($projectDir.'/build.gradle') || is_file($projectDir.'/build.gradle.kts'))
         ) {
-            return self::toolchain('gradle', self::gradleJdk($projectDir)[0]);
+            return self::detectedToolchain('gradle', self::gradleJdk($projectDir)[0]);
         }
 
-        return self::toolchain('maven', self::mavenJdk($projectDir)[0]);
+        return self::detectedToolchain('maven', self::mavenJdk($projectDir)[0]);
     }
 
     public function defaultRequirement(): Requirement

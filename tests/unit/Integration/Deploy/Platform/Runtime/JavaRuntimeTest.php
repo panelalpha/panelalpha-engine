@@ -369,7 +369,16 @@ class JavaRuntimeTest extends TestCase
     public function test_a_release_past_the_newest_jdk_gets_the_newest(): void
     {
         $this->assertSame('25-maven', JavaRuntime::toolchain('maven', 30));
-        $this->assertSame('21-maven', JavaRuntime::toolchain('maven', 11));
+        $this->assertSame('11-maven', JavaRuntime::toolchain('maven', 11));
+    }
+
+    public function test_a_jdk_is_found_inside_a_range(): void
+    {
+        $this->assertSame('17-maven', JavaRuntime::toolchainIn('maven', 17, 18));
+        $this->assertSame('8-maven', JavaRuntime::toolchainIn('maven', 8, 21));
+        $this->assertSame('17-maven', JavaRuntime::toolchainIn('maven', 0, 21, newest: true));
+        $this->assertSame('17-gradle', JavaRuntime::toolchainIn('gradle', 0, 21));
+        $this->assertNull(JavaRuntime::toolchainIn('maven', 22, 25));
     }
 
     /**

@@ -26,6 +26,7 @@ use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
 use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
+use App\Lib\Deploy\Platform\Runtime\JdkRefusal;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\MissingBuildTool;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
@@ -287,7 +288,7 @@ class HostCompile
     }
 
     /**
-     * Compile, again on a newer JDK when javac refuses the release, and a failed bun compile on Node when
+     * Compile, again on another JDK when the build refuses this one, and a failed bun compile on Node when
      * $mayRetryOnNode, never where node_modules ships: that would leave bun-only packages for Node.
      *
      * @param  array<string, mixed>  $decision
@@ -310,11 +311,11 @@ class HostCompile
         try {
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules, $isNode, $appRoot);
         } catch (\Exception $e) {
-            $jdkImage = $e instanceof DeployCancelledException ? null : self::newerJdkImage($decision, $e->getMessage());
+            $jdkImage = $e instanceof DeployCancelledException ? null : self::retryJdkImage($decision, $e->getMessage());
             $unfrozen = $isNode ? self::unfrozenInstallAfter($e, $installCmd) : null;
             $toolchainImage = $isNode ? self::toolchainImageAfter($e, $image) : null;
             if ($jdkImage !== null) {
-                $this->compileOnNewerJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
+                $this->compileOnOtherJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
             } elseif ($unfrozen !== null) {
                 $this->compileWithoutFrozenLockfile($logger, $projectDir, $image, $unfrozen, $buildCmd, $recipeEnv, $isolateNodeModules, $appRoot);
             } elseif ($toolchainImage !== null) {
@@ -933,32 +934,45 @@ class HostCompile
     }
 
     /**
-     * The engine's JDK image for the release javac refused (a fetched parent pom can set one detection never
-     * saw), or null when it ran on that image or the recipe names its own.
+     * The engine's JDK image for the JDK the build asked for ({@see JdkRefusal}): a release javac refused (a
+     * fetched parent pom can set one detection never saw), an enforcer's range, or the older release the pom
+     * declares when its compiler plugin cannot run on this one. Null when it ran on that image or the recipe
+     * names its own.
      *
      * @param  array<string, mixed>  $decision
      */
-    public static function newerJdkImage(array $decision, string $failure): ?string
+    public static function retryJdkImage(array $decision, string $failure): ?string
     {
-        if (($decision['strategy'] ?? null) !== Strategies::JAVA
-            || preg_match('/error: release version ([0-9]+) not supported/i', $failure, $release) !== 1
-        ) {
+        if (($decision['strategy'] ?? null) !== Strategies::JAVA) {
             return null;
         }
         $declared = trim((string) ($decision['image'] ?? ''));
         foreach (is_array($decision['requirements'] ?? null) ? $decision['requirements'] : [] as $requirement) {
             if (! $requirement instanceof Requirement || $requirement->id !== 'java'
-                || preg_match('/^\d+-(maven|gradle)$/', $requirement->version, $tool) !== 1
+                || preg_match('/^(\d+)-(maven|gradle)$/', $requirement->version, $tool) !== 1
                 || JavaRuntime::imageTag($requirement->version) !== $declared
             ) {
                 continue;
             }
-            $image = JavaRuntime::imageTag(JavaRuntime::toolchain($tool[1], (int) $release[1]));
+            $image = self::wantedJdkImage($failure, $tool[2], (int) $tool[1], $requirement->constraint);
 
             return $image !== $declared ? $image : null;
         }
 
         return null;
+    }
+
+    private static function wantedJdkImage(string $failure, string $tool, int $current, string $constraint): ?string
+    {
+        $wanted = JdkRefusal::wanted($failure, $current, ctype_digit($constraint) ? (int) $constraint : null);
+        if ($wanted === null) {
+            return null;
+        }
+        $toolchain = $wanted['max'] === PHP_INT_MAX && ! $wanted['newest']
+            ? JavaRuntime::toolchain($tool, $wanted['min'])
+            : JavaRuntime::toolchainIn($tool, $wanted['min'], $wanted['max'], $wanted['newest']);
+
+        return $toolchain === null ? null : JavaRuntime::imageTag($toolchain);
     }
 
     /**
@@ -968,7 +982,7 @@ class HostCompile
      * @param  array<string, mixed>  $decision
      * @param  array<string, mixed>  $env
      */
-    private function compileOnNewerJdk(
+    private function compileOnOtherJdk(
         array $decision,
         string $projectDir,
         string $jdkImage,
@@ -979,7 +993,7 @@ class HostCompile
     ): void {
         $declared = trim((string) ($decision['image'] ?? ''));
         $this->project->shell()->logger()?->info(
-            "The JDK in {$declared} cannot compile the Java release this project targets; compiling again with {$jdkImage}"
+            "The build refused the JDK in {$declared}; compiling again with {$jdkImage}, the JDK it asked for"
         );
         $image = $this->commandRuntimeImage(['image' => $jdkImage] + $decision, $projectDir);
         $this->runContainer($projectDir, $image, $install, $build, $env, false, false, $appRoot);

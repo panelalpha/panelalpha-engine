@@ -19,9 +19,12 @@ use Tests\TestCase;
 /**
  * Tigase takes its Java release from a parent pom in its own repository, so
  * detection picked JDK 21 and javac refused `release 25`. The compile
- * runs again on the catalogued JDK and the app is then run on it.
+ * runs again on the catalogued JDK and the app is then run on it. The same
+ * goes for a build that refuses 21 for an older JDK: an enforcer's range
+ * (Ambari's [17,18)) or a Lombok built before 21 (hmdm-server's 1.18.20 on
+ * a pom declaring 1.8).
  */
-class HostCompileNewerJdkTest extends TestCase
+class HostCompileOtherJdkTest extends TestCase
 {
     private const FAILURE = '[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile '
         .'(default-compile) on project tigase-server: Fatal error compiling: error: release version 25 not supported -> [Help 1]';
@@ -42,35 +45,82 @@ class HostCompileNewerJdkTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private static function decision(string $toolchain = '21-maven', string $image = 'maven:3.9-eclipse-temurin-21'): array
+    private static function decision(string $toolchain = '21-maven', string $image = 'maven:3.9-eclipse-temurin-21', string $declared = ''): array
     {
         return [
             'strategy' => 'java',
             'image' => $image,
-            'requirements' => [new Requirement('java', $toolchain, '', 'pom.xml')],
+            'requirements' => [new Requirement('java', $toolchain, $declared, 'pom.xml')],
         ];
     }
 
     public function test_a_refused_release_picks_the_catalogued_jdk(): void
     {
-        $this->assertSame('maven:3.9-eclipse-temurin-25', HostCompile::newerJdkImage(self::decision(), self::FAILURE));
+        $this->assertSame('maven:3.9-eclipse-temurin-25', HostCompile::retryJdkImage(self::decision(), self::FAILURE));
     }
 
     public function test_nothing_newer_or_nothing_refused_means_no_retry(): void
     {
         // Already on the newest JDK the catalogue has.
-        $this->assertNull(HostCompile::newerJdkImage(
+        $this->assertNull(HostCompile::retryJdkImage(
             self::decision('25-maven', 'maven:3.9-eclipse-temurin-25'),
             str_replace('25', '26', self::FAILURE)
         ));
-        $this->assertNull(HostCompile::newerJdkImage(self::decision(), '[ERROR] COMPILATION ERROR : cannot find symbol'));
-        $this->assertNull(HostCompile::newerJdkImage(['strategy' => 'go'] + self::decision(), self::FAILURE));
+        $this->assertNull(HostCompile::retryJdkImage(self::decision(), '[ERROR] COMPILATION ERROR : cannot find symbol'));
+        $this->assertNull(HostCompile::retryJdkImage(['strategy' => 'go'] + self::decision(), self::FAILURE));
+    }
+
+    public function test_javacs_other_wording_of_a_refused_release_picks_it_too(): void
+    {
+        $this->assertSame('maven:3.9-eclipse-temurin-25', HostCompile::retryJdkImage(
+            self::decision(),
+            '[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile on project microcks-model: '
+            .'Fatal error compiling: error: invalid target release: 25 -> [Help 1]'
+        ));
+    }
+
+    public function test_an_enforcer_range_picks_the_jdk_inside_it(): void
+    {
+        $this->assertSame('maven:3.9-eclipse-temurin-17', HostCompile::retryJdkImage(
+            self::decision(),
+            '[ERROR] Rule 1: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message: '
+            .'[ERROR] Detected JDK /opt/java/openjdk is version 21.0.12-1 which is not in the allowed range [17,18).'
+        ));
+        $this->assertSame('maven:3.9-eclipse-temurin-25', HostCompile::retryJdkImage(
+            self::decision(),
+            'Detected JDK /opt/java/openjdk is version 21.0.13 which is not in the allowed range [25,).'
+        ));
+    }
+
+    public function test_an_enforcer_in_the_projects_own_words_falls_back_to_the_declared_release(): void
+    {
+        $this->assertSame('maven:3.9-eclipse-temurin-17', HostCompile::retryJdkImage(
+            self::decision('21-maven', 'maven:3.9-eclipse-temurin-21', '17'),
+            'Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message: DataBuff needs JDK 17'
+        ));
+        $this->assertNull(HostCompile::retryJdkImage(
+            self::decision(),
+            'Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message: JDK version can\'t be empty.'
+        ));
+    }
+
+    public function test_an_old_lombok_on_a_java_8_pom_compiles_on_jdk_8(): void
+    {
+        $lombok = '[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.8.1:compile (default-compile) '
+            .'on project common: Fatal error compiling: java.lang.NoSuchFieldError: Class com.sun.tools.javac.tree.JCTree$JCImport '
+            ."does not have member field 'com.sun.tools.javac.tree.JCTree qualid' -> [Help 1]";
+
+        $this->assertSame('maven:3.9-eclipse-temurin-8', HostCompile::retryJdkImage(
+            self::decision('21-maven', 'maven:3.9-eclipse-temurin-21', '8'),
+            $lombok
+        ));
+        $this->assertSame('maven:3.9-eclipse-temurin-17', HostCompile::retryJdkImage(self::decision(), $lombok), 'no declared release: the newest older JDK');
     }
 
     /** A recipe that named its own image chose it; the engine does not swap it. */
     public function test_a_recipes_own_image_is_kept(): void
     {
-        $this->assertNull(HostCompile::newerJdkImage(self::decision('21-maven', 'ghcr.io/acme/jdk:21'), self::FAILURE));
+        $this->assertNull(HostCompile::retryJdkImage(self::decision('21-maven', 'ghcr.io/acme/jdk:21'), self::FAILURE));
     }
 
     public function test_the_compile_reruns_on_the_newer_jdk_and_the_app_runs_on_it(): void
@@ -119,7 +169,7 @@ class HostCompileNewerJdkTest extends TestCase
         $dind->method('composeWriter')->willReturnCallback(fn (): ComposeWriter => new ComposeWriter($dind));
 
         $compile = new HostCompile($dind);
-        (new \ReflectionMethod($compile, 'compileOnNewerJdk'))->invoke(
+        (new \ReflectionMethod($compile, 'compileOnOtherJdk'))->invoke(
             $compile,
             self::decision(),
             '/home/acme/project',
