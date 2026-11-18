@@ -284,8 +284,9 @@ final class RuntimeSidecars
         $this->dropTestSuite();
         $this->dropAlternativeDatabases();
         $this->clearOfAppService();
+        $gone = $this->dropped + $this->undefinedDependencies();
         foreach ($this->kept as $name => $service) {
-            $this->kept[$name] = ServiceDependencies::withoutDropped($service, $this->dropped);
+            $this->kept[$name] = ServiceDependencies::withoutDropped($service, $gone);
         }
         $this->collectAppAliases();
 
@@ -780,6 +781,28 @@ final class RuntimeSidecars
         }
 
         return $named;
+    }
+
+    /**
+     * Services the kept ones name that the file never defines: a slice such as `docker-compose.monitoring.yml`
+     * depends on the main file's `mariadb`, which Compose refuses as "depends on undefined service".
+     *
+     * @return array<string, true> lowercase names
+     */
+    private function undefinedDependencies(): array
+    {
+        $names = array_map('strval', [...array_keys($this->services), ...array_keys($this->kept)]);
+        $defined = array_change_key_case(array_fill_keys($names, true));
+        $undefined = [];
+        foreach ($this->kept as $service) {
+            foreach (ServiceDependencies::namesIn($service) as $name) {
+                if (! isset($defined[strtolower($name)])) {
+                    $undefined[strtolower($name)] = true;
+                }
+            }
+        }
+
+        return $undefined;
     }
 
     /** A kept sidecar named `app` would clash with the generated app, so it moves to a free name with its references. */
