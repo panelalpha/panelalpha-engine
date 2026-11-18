@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Compose\ComposeFileReferences;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
@@ -397,6 +398,7 @@ class RuntimeSidecars
         if (($sidecars['app_aliases'] ?? []) !== []) {
             $decision['app_aliases'] = $sidecars['app_aliases'];
         }
+        $decision = self::withDeclaredFiles($decision, $sidecars);
         if ($sidecars['services'] === []) {
             if (($sidecars['app_env'] ?? []) !== []) {
                 $decision['env'] = array_merge($sidecars['app_env'], $decision['env'] ?? []);
@@ -408,6 +410,27 @@ class RuntimeSidecars
         $decision['volumes'] = array_merge($sidecars['volumes'], $decision['volumes'] ?? []);
         $decision = self::withSidecarEnv($decision, $sidecars);
         $decision['depends_on'] = array_keys($sidecars['services']);
+
+        return $decision;
+    }
+
+    /**
+     * The `secrets:`/`configs:` the kept services and the app name, and the app's own secrets.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array<string, mixed>  $sidecars
+     * @return array<string, mixed>
+     */
+    private static function withDeclaredFiles(array $decision, array $sidecars): array
+    {
+        foreach (ComposeFileReferences::SECTIONS as $section) {
+            if (is_array($sidecars[$section] ?? null) && $sidecars[$section] !== []) {
+                $decision[$section] = array_merge($sidecars[$section], is_array($decision[$section] ?? null) ? $decision[$section] : []);
+            }
+        }
+        if (($sidecars['app_secrets'] ?? []) !== []) {
+            $decision['app_secrets'] = $sidecars['app_secrets'];
+        }
 
         return $decision;
     }

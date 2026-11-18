@@ -44,7 +44,9 @@ class SidecarCredentials
 
     /**
      * The engine's prefixed and init variables resolved as Compose would,
-     * with a password nobody set taken from the account, not `app`.
+     * with a password nobody set taken from the account, not `app`. One the
+     * service reads from a file (`POSTGRES_PASSWORD_FILE`) is left unset: the
+     * official images refuse a variable set both ways.
      *
      * @param  array<string, string>  $env
      * @return array<string, string>
@@ -58,6 +60,9 @@ class SidecarCredentials
             }
         }
         foreach (SidecarEngine::initVariablesFor($engine) as $variable) {
+            if (self::readFromFile($env, $variable)) {
+                continue;
+            }
             $env[$variable] = self::resolvedComposeValue(
                 (string) ($env[$variable] ?? ''),
                 self::fallbackFor($variable, $passwords)
@@ -65,6 +70,12 @@ class SidecarCredentials
         }
 
         return $env;
+    }
+
+    /** @param  array<string, string>  $env */
+    private static function readFromFile(array $env, string $variable): bool
+    {
+        return trim((string) ($env[$variable.'_FILE'] ?? '')) !== '' && ! array_key_exists($variable, $env);
     }
 
     /**

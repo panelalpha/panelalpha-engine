@@ -16,7 +16,7 @@ use Symfony\Component\Yaml\Yaml;
  * The services a project's own compose file contributes to a deploy (its runtime datastores, and the env
  * pointing the app at them), without workstation services, host ports or networks; hardened and pinned.
  *
- * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>, dropped_mounts?: list<string>, replaced_mounts?: list<string>, published_secrets: array<string, list<string>>, dropped_proxies?: list<string>, dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases: list<string>, services: list<string>}|null, hardening_removed?: list<string>}
+ * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>, dropped_mounts?: list<string>, replaced_mounts?: list<string>, published_secrets: array<string, list<string>>, dropped_proxies?: list<string>, dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases: list<string>, services: list<string>}|null, hardening_removed?: list<string>, secrets?: array<string, mixed>, configs?: array<string, mixed>, app_secrets?: list<mixed>}
  */
 final class RuntimeSidecars
 {
@@ -58,6 +58,9 @@ final class RuntimeSidecars
 
     /** @var array<string, string> env harvested from services that were dropped */
     private array $harvested = [];
+
+    /** @var list<mixed> the `secrets:` of the services the build takes the place of */
+    private array $appSecrets = [];
 
     /** @var list<string> lowercase names the repository's compose files give the app built from its root */
     private array $rootBuildNames = [];
@@ -140,7 +143,8 @@ final class RuntimeSidecars
         private readonly array $env = [],
         private readonly ?string $accountUser = null,
         private readonly ?string $projectDir = null,
-        private readonly ?string $buildImage = null
+        private readonly ?string $buildImage = null,
+        private readonly array $declaredFiles = []
     ) {}
 
     /**
@@ -207,7 +211,8 @@ final class RuntimeSidecars
             $env,
             $accountUser,
             $projectDir,
-            $buildImage
+            $buildImage,
+            ComposeFileReferences::declared($parsed)
         ))->extractedWith($rootBuildNames);
     }
 
@@ -345,6 +350,7 @@ final class RuntimeSidecars
             $this->noteVariantEnv($name, $service);
         }
         if ($this->isReplacedByOurBuild($name, $service)) {
+            $this->appSecrets = ComposeFileReferences::merged($this->appSecrets, ComposeFileReferences::listed($service, 'secrets'));
             $containerName = $service['container_name'] ?? null;
             $this->appServiceNames = ServiceAliases::normalised(array_merge(
                 $this->appServiceNames,
@@ -561,11 +567,35 @@ final class RuntimeSidecars
         if ($this->placeholderSeed !== null && isset($service['environment'])) {
             $service['environment'] = SidecarCredentials::withRequiredSecrets($service['environment'], $this->placeholderSeed);
         }
+        $service = SecretFileEnvironment::inlined(
+            $service,
+            $this->declaredFiles['secrets'] ?? [],
+            $this->readProjectFile(...),
+            fn (string $secret): string => $this->placeholderSeed === null ? '' : SecretSourceFiles::value($secret, $this->placeholderSeed)
+        );
 
         $this->kept[$name] = ServiceDependencies::withoutDropped(
             $service,
             $this->dropped + [self::WORKSTATION_APP => true]
         );
+    }
+
+    /**
+     * A file of the checkout by its path relative to the project: null when it does not exist, '' when it
+     * cannot be read or there is no project to read it in.
+     */
+    private function readProjectFile(string $relative): ?string
+    {
+        if ($this->projectDir === null || $this->projectDir === '') {
+            return '';
+        }
+        $path = rtrim($this->projectDir, '/').'/'.SecretSourceFiles::relative($relative);
+        if (! file_exists($path)) {
+            return null;
+        }
+        $contents = is_file($path) ? AccountHomeRead::contents($path) : null;
+
+        return is_string($contents) ? $contents : '';
     }
 
     /**
@@ -853,8 +883,9 @@ final class RuntimeSidecars
     private function assemble(): array
     {
         $volumes = NamedVolumes::usedBy($this->kept, $this->declaredVolumes);
+        $files = ComposeFileReferences::usedBy($this->kept, $this->appSecrets, $this->declaredFiles);
         ['compose' => $hardened, 'removed' => $removed] = ComposeHarden::applyReporting(
-            ['services' => $this->kept, 'volumes' => $volumes],
+            ['services' => $this->kept, 'volumes' => $volumes] + $files,
             $this->accountMemoryMb,
             $this->services,
             $this->env,
@@ -877,7 +908,30 @@ final class RuntimeSidecars
             'dropped_test_services' => $this->droppedTestServices,
             'dropped_test_matrix' => $this->droppedTestMatrix,
             'hardening_removed' => $removed,
-        ];
+        ] + $this->declaredFilesOf($hardened);
+    }
+
+    /**
+     * The `secrets:` and `configs:` the kept services and the app name, past the hardener, and the app's own
+     * secrets among them: left behind, Compose refused the file with "refers to undefined secret".
+     *
+     * @param  array<string, mixed>  $hardened
+     * @return array{secrets?: array<string, mixed>, configs?: array<string, mixed>, app_secrets?: list<mixed>}
+     */
+    private function declaredFilesOf(array $hardened): array
+    {
+        $out = [];
+        foreach (ComposeFileReferences::SECTIONS as $section) {
+            if (is_array($hardened[$section] ?? null) && $hardened[$section] !== []) {
+                $out[$section] = $hardened[$section];
+            }
+        }
+        $appSecrets = ComposeFileReferences::onlyDeclared($this->appSecrets, $out['secrets'] ?? []);
+        if ($appSecrets !== []) {
+            $out['app_secrets'] = $appSecrets;
+        }
+
+        return $out;
     }
 
     /**

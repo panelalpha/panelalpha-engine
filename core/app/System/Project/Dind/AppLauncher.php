@@ -92,6 +92,7 @@ final class AppLauncher
             (new BindSourceExamples($this->project))->create();
             (new BindSourceOwners($this->project))->apply();
         }
+        (new SecretSourceFileWriter($this->project))->create();
 
         $pulled = $this->pullImages();
         if ($pulled !== null) {

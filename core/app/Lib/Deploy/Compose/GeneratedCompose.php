@@ -72,6 +72,11 @@ final class GeneratedCompose
         if (is_array($volumes) && $volumes !== []) {
             $compose['volumes'] = self::volumeDefinitions($volumes);
         }
+        foreach (ComposeFileReferences::SECTIONS as $section) {
+            if (is_array($decision[$section] ?? null) && $decision[$section] !== []) {
+                $compose[$section] = $decision[$section];
+            }
+        }
 
         return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
     }
@@ -90,8 +95,26 @@ final class GeneratedCompose
         $appService = ServiceHardener::withRestartPolicy($appService);
         $appService = ServiceHardener::withLogRotation($appService);
         $appService = self::withReplacedServiceAliases($appService, $decision);
+        $appService = self::withReplacedServiceSecrets($appService, $decision);
         if (is_array($appService['depends_on'] ?? null) && array_is_list($appService['depends_on'])) {
             $appService['depends_on'] = self::dependsOn($appService['depends_on'], $sidecars);
+        }
+
+        return $appService;
+    }
+
+    /**
+     * The secrets the dropped app service read from `/run/secrets`, which the database beside it shares.
+     *
+     * @param  array<string, mixed>  $appService
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withReplacedServiceSecrets(array $appService, array $decision): array
+    {
+        $secrets = $decision['app_secrets'] ?? null;
+        if (! isset($appService['secrets']) && is_array($secrets) && $secrets !== []) {
+            $appService['secrets'] = array_values($secrets);
         }
 
         return $appService;
