@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Compose;
 
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
@@ -366,5 +367,39 @@ class SelfBuiltImageTagTest extends TestCase
 
         $this->assertSame('app', $this->app($yaml)['image']);
         $this->assertNull(GeneratedCompose::appImage($yaml));
+    }
+
+    /** FarmBot: a Rails recipe builds the app, and its kept `delayed_job` runs the tag the repo's `web` built. */
+    public function test_a_framework_recipe_that_builds_names_its_image_for_the_kept_services(): void
+    {
+        $parsed = Yaml::parse(DeployCompose::framework([
+            'strategy' => 'rails',
+            'build_image' => 'farmbot_web',
+            'sidecars' => ['delayed_job' => ['image' => 'farmbot_web', 'command' => 'bundle exec rake jobs:work']],
+        ], 3000));
+
+        $this->assertSame('farmbot_web', $parsed['services']['app']['image']);
+        $this->assertArrayHasKey('build', $parsed['services']['app']);
+        $this->assertSame('farmbot_web', $parsed['services']['delayed_job']['image']);
+    }
+
+    /** The mounted PHP project builds no image, so nothing would ever provide the tag a kept service runs. */
+    public function test_a_framework_recipe_that_builds_nothing_drops_the_services_on_the_repos_tag(): void
+    {
+        $parsed = Yaml::parse(DeployCompose::framework([
+            'runtime' => PlatformManifest::RUNTIME_PHP,
+            'build_image' => 'app-php',
+            'depends_on' => ['db', 'worker'],
+            'sidecars' => [
+                'db' => ['image' => 'mysql:8.0'],
+                'worker' => ['image' => 'app-php:latest', 'depends_on' => ['db']],
+                'cron' => ['image' => 'alpine:3', 'depends_on' => ['worker', 'db']],
+            ],
+        ], 8000));
+
+        $this->assertArrayNotHasKey('worker', $parsed['services']);
+        $this->assertNotSame('app-php', $parsed['services']['app']['image']);
+        $this->assertSame(['db'], array_keys($parsed['services']['app']['depends_on']));
+        $this->assertSame(['db'], $parsed['services']['cron']['depends_on']);
     }
 }

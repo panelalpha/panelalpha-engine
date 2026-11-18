@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Compose\GeneratedCompose;
@@ -375,6 +376,7 @@ final class AppLauncher
     private static function servicesToBuild(array $compose, string $service): array
     {
         $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+        $builders = self::buildersByImage($services);
         $seen = [];
         $build = [];
         $queue = [$service];
@@ -386,11 +388,39 @@ final class AppLauncher
             $seen[$name] = true;
             if (isset($services[$name]['build'])) {
                 $build[] = $name;
+            } else {
+                $image = ImageTransfer::normalizeImageRef($services[$name]['image'] ?? null);
+                if ($image !== null && isset($builders[strtolower($image)])) {
+                    $queue[] = $builders[strtolower($image)];
+                }
             }
             array_push($queue, ...self::dependencyNames($services[$name]['depends_on'] ?? []));
         }
 
         return $build;
+    }
+
+    /**
+     * The service that builds each image tag, so a dependency running the app's tag (FarmBot's `delayed_job` on
+     * `farmbot_web`) has it built before the release starts it, rather than pulled from Docker Hub.
+     *
+     * @param  array<mixed>  $services
+     * @return array<string, string> lowercase normalised image => service name
+     */
+    private static function buildersByImage(array $services): array
+    {
+        $builders = [];
+        foreach ($services as $name => $definition) {
+            if (! is_array($definition) || ! isset($definition['build'])) {
+                continue;
+            }
+            $image = ImageTransfer::normalizeImageRef($definition['image'] ?? null);
+            if ($image !== null) {
+                $builders[strtolower($image)] ??= (string) $name;
+            }
+        }
+
+        return $builders;
     }
 
     /** @return list<string> the services a `depends_on` names, in its list or map form */

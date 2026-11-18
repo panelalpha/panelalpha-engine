@@ -296,7 +296,52 @@ class DeployCompose
      */
     public static function framework(array $decision, int $port, ?string $publicUrl = null): string
     {
+        $service = FrameworkService::for($decision, $port, $publicUrl);
+        if (isset($service['build'])) {
+            return GeneratedCompose::render(self::withBuiltImageTag($service, $decision), $decision);
+        }
+        $decision = self::withoutSidecarsOnTheBuiltImage($decision);
+
         return GeneratedCompose::render(FrameworkService::for($decision, $port, $publicUrl), $decision);
+    }
+
+    /**
+     * A recipe that builds nothing (the mounted PHP or Node project, nginx) gives the tag the repository's compose built
+     * its app under to no image, so a kept service running it (FarmBot's `delayed_job` on `farmbot_web`) would be pulled
+     * from Docker Hub and fail the deploy.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     */
+    private static function withoutSidecarsOnTheBuiltImage(array $decision): array
+    {
+        $built = ImageTransfer::normalizeImageRef(self::builtImageName($decision['build_image'] ?? null));
+        if ($built === null || ! is_array($decision['sidecars'] ?? null)) {
+            return $decision;
+        }
+
+        $dropped = [];
+        foreach ($decision['sidecars'] as $name => $sidecar) {
+            if (is_array($sidecar) && ! isset($sidecar['build'])
+                && strcasecmp((string) ImageTransfer::normalizeImageRef($sidecar['image'] ?? null), $built) === 0
+            ) {
+                $dropped[strtolower((string) $name)] = true;
+                unset($decision['sidecars'][$name]);
+            }
+        }
+        foreach ($decision['sidecars'] as $name => $sidecar) {
+            if (is_array($sidecar)) {
+                $decision['sidecars'][$name] = ServiceDependencies::withoutDropped($sidecar, $dropped);
+            }
+        }
+        if (is_array($decision['depends_on'] ?? null)) {
+            $decision['depends_on'] = array_values(array_filter(
+                $decision['depends_on'],
+                static fn (mixed $name): bool => ! is_string($name) || ! isset($dropped[strtolower($name)])
+            ));
+        }
+
+        return $decision;
     }
 
     /** The image Railpack built in the account, outside compose: no registry has it to pull. */

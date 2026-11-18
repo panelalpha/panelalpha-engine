@@ -171,6 +171,23 @@ class AppLauncherReleaseTest extends TestCase
         $this->assertSame(['run --rm -T release'], $this->ran);
     }
 
+    public function test_a_dependency_running_the_apps_tag_has_the_app_built_before_the_release(): void
+    {
+        $this->compose = <<<'YAML'
+            services:
+              app:
+                build: { context: . }
+                image: farmbot_web
+                depends_on: [delayed_job]
+              delayed_job:
+                image: farmbot_web
+                command: bundle exec rake jobs:work
+            YAML;
+        $this->launcher('exit 3')->start();
+
+        $this->assertSame(['build release app', 'run --rm -T release'], $this->ran);
+    }
+
     /** The release's build, the build and `up` run inside one guard, applied first and released last. */
     public function test_the_builds_run_inside_one_build_guard(): void
     {
