@@ -30,6 +30,21 @@ OUT;
     }
 
     /** Fictiverse/Redream, a WinForms app, whose build step gives no reason beyond its exit code. */
+    /** Haven-Ombre binds ./config.yaml, which the repository ships only as config.example.yaml. */
+    public function test_names_the_bound_file_the_repository_leaves_out(): void
+    {
+        $output = 'Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create '
+            .'failed: runc create failed: unable to start container process: error during container init: error mounting '
+            .'"/home/pvab12/project/config.yaml" to rootfs at "/app/config.yaml": mount src=/home/pvab12/project/config.yaml, '
+            .'dst=/app/config.yaml, dstFd=/proc/thread-self/fd/15, flags=MS_BIND|MS_REC: not a directory: Are you trying to mount '
+            .'a directory onto a file (or vice-versa)? Check if the specified host path exists and is the expected type';
+
+        $explained = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('binds `config.yaml` onto `/app/config.yaml`', $explained);
+        $this->assertStringContainsString('the repository has no `config.yaml`', $explained);
+    }
+
     public function test_explains_a_windows_only_dotnet_project(): void
     {
         $output = <<<'OUT'

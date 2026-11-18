@@ -894,6 +894,13 @@ class DeployFailureExplainer
     private static function containerStartRules(): array
     {
         return [
+            'bind-file-missing' => [
+                '#mount src=/home/[^/\s]+/project/([^,\s]+), dst=([^,\s]+),[^\n]*?not a directory: Are you trying to mount a directory onto a file#i',
+                static fn (array $m): string => "The compose file binds `{$m[1]}` onto `{$m[2]}`, and the repository has no `{$m[1]}`: "
+                        .'Docker created a directory in its place, which cannot be mounted over a file. The project expects '
+                        ."that file to be created before it starts; add `{$m[1]}` to the project (often by copying an example "
+                        .'the repository ships), then deploy again.',
+            ],
             'container-entrypoint-missing' => [
                 '/^(?![^\n]*commit information was not captured)[^\n]*?exec:\s*"?([^"\n:]+)"?:\s*executable file not found/im',
                 static fn (array $m, string $output): ?string => self::imageBuildFailed($output) ? null

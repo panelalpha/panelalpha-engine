@@ -89,6 +89,7 @@ final class AppLauncher
         $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage());
         if ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
             (new BindSourceDirectories($this->project))->create();
+            (new BindSourceExamples($this->project))->create();
             (new BindSourceOwners($this->project))->apply();
         }
 

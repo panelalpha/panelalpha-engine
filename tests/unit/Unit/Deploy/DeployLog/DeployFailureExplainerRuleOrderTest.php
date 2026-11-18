@@ -50,6 +50,7 @@ class DeployFailureExplainerRuleOrderTest extends TestCase
             'layer-digest-mismatch',
             'image-reference-invalid',
             'build-dns-unavailable',
+            'bind-file-missing',
             'container-entrypoint-missing',
             'container-entrypoint-not-executable',
             'container-start-failed',
