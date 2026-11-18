@@ -354,4 +354,37 @@ class RuntimeSidecarsFromProjectTest extends TestCase
 
         $this->assertSame(['mysql'], array_keys($result['services']));
     }
+
+    /**
+     * Kanboard ships one sample stack per database. SQLite is its default; taking the MySQL sample switched it to
+     * MariaDB, where its own migrations fail on a fresh schema, and every page was the migration error.
+     */
+    public function test_per_database_variants_beside_a_sqlite_one_add_no_database(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.mysql.yml' => self::KANBOARD_APP
+                . "    environment:\n      DATABASE_URL: mysql://kanboard:kanboard-secret@db/kanboard\n"
+                . "  db:\n    image: mariadb:lts\n    environment:\n      MYSQL_DATABASE: kanboard\n",
+            'docker-compose.postgres.yml' => self::KANBOARD_APP
+                . "    environment:\n      DATABASE_URL: postgres://kanboard:kanboard123@db/kanboard\n"
+                . "  db:\n    image: postgres:16\n    environment:\n      POSTGRES_DB: kanboard\n",
+            'docker-compose.sqlite.yml' => self::KANBOARD_APP,
+        ]);
+
+        $this->assertSame([], $result['services']);
+        $this->assertArrayNotHasKey('DATABASE_URL', $result['env']);
+    }
+
+    public function test_a_database_variant_with_no_sqlite_alternative_still_supplies_the_database(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.mysql.yml' => self::KANBOARD_APP
+                . "  db:\n    image: mariadb:lts\n    environment:\n      MYSQL_DATABASE: kanboard\n",
+        ]);
+
+        $this->assertArrayHasKey('db', $result['services']);
+    }
+
+    private const KANBOARD_APP = "services:\n  app:\n    image: kanboard/kanboard:latest\n    volumes:\n      - data:/var/www/app/data\n";
 }
+

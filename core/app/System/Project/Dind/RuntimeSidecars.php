@@ -21,6 +21,12 @@ class RuntimeSidecars
     /** Words a compose filename uses for a stack that is not the deployment. */
     private const NON_PRODUCTION_WORDS = ['dev', 'development', 'local', 'test', 'tests', 'testing', 'ci', 'e2e', 'debug'];
 
+    /** Words a compose filename uses for the database a stack variant runs on. */
+    private const DATABASE_WORDS = ['mysql', 'mariadb', 'postgres', 'postgresql', 'pgsql', 'sqlite', 'sqlite3', 'db'];
+
+    /** The database words of a variant that needs no database service. */
+    private const FILE_DATABASE_WORDS = ['sqlite', 'sqlite3'];
+
     private DindProject $dind;
 
     private ?SidecarPasswords $passwords = null;
@@ -310,9 +316,33 @@ class RuntimeSidecars
                 static fn (string $name): bool => self::suffixWords($name, self::NON_PRODUCTION_WORDS) !== []
             ));
             $names = array_merge($names, array_diff($found, $nonProduction), $nonProduction);
+            if (self::shipsAFileDatabaseVariant($found)) {
+                $names = array_filter(
+                    $names,
+                    static fn (string $name): bool => self::suffixWords($name, self::DATABASE_WORDS) === []
+                );
+            }
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * `docker-compose.sqlite.yml` beside `.mysql` and `.postgres` (Kanboard) makes them alternatives, and the one the
+     * application runs without being told is the file database: adopting the MySQL slice switched Kanboard to MariaDB,
+     * where its own migrations fail on a fresh schema.
+     *
+     * @param  list<string>  $slices
+     */
+    private static function shipsAFileDatabaseVariant(array $slices): bool
+    {
+        foreach ($slices as $slice) {
+            if (self::suffixWords($slice, self::FILE_DATABASE_WORDS) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
