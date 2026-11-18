@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Strategy;
 
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeBuilds;
 use App\Lib\Deploy\Compose\ComposeExtends;
@@ -11,6 +12,8 @@ use App\Lib\Deploy\Compose\ComposeInclude;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Compose\LocalImageBuilds;
+use App\Lib\Deploy\Compose\LocalImageEvidence;
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Compose\PrimaryPortBinding;
@@ -135,6 +138,7 @@ class UserComposeStrategy
         }
 
         $parsed = $this->withFallbackDockerfiles($parsed, $projectDir, $logger);
+        $parsed = $this->withLocalImageBuilds($parsed, $composePath, $projectDir, $env, $logger);
         $parsed = $this->withBuildCaches($parsed, $projectDir);
         $parsed = $this->hostingReady($parsed, $composePath, $projectDir, $chown, $logger, $replaced, $env);
         $parsed = $this->withAppEnvFile($parsed);
@@ -264,6 +268,54 @@ class UserComposeStrategy
         unset($service);
 
         return $parsed;
+    }
+
+    /**
+     * A service running a tag only the repository builds gets that build ({@see LocalImageBuilds}).
+     *
+     * @param  array<string, mixed>  $parsed
+     * @param  array<string, list<?string>>  $env
+     * @return array<string, mixed>
+     */
+    private function withLocalImageBuilds(array $parsed, string $composePath, string $projectDir, array $env, ?DeployLogger $logger): array
+    {
+        $evidence = new LocalImageEvidence(
+            $projectDir,
+            NestedCompose::relativeDir($composePath, $projectDir) ?? '',
+            $this->ownComposeFiles($composePath, $projectDir),
+            $env
+        );
+        $result = LocalImageBuilds::apply($parsed, $evidence, $env, $this->imagePublished(...));
+        foreach ($result['built'] as $built) {
+            $logger?->info(LocalImageBuilds::line($built));
+        }
+
+        return $result['compose'];
+    }
+
+    /**
+     * The file being run and the engine's own compose files, project-relative: none is evidence of another build.
+     *
+     * @return list<string>
+     */
+    private function ownComposeFiles(string $composePath, string $projectDir): array
+    {
+        $root = rtrim($projectDir, '/').'/';
+        $source = str_starts_with($composePath, $root) ? substr($composePath, strlen($root)) : basename($composePath);
+
+        return [
+            $source,
+            EngineArtifacts::RUN_COMPOSE,
+            EngineArtifacts::RUN_COMPOSE_OVERRIDE,
+            EngineArtifacts::RUN_CLIENT_OVERRIDE,
+            EngineArtifacts::APP_CONFIG_COMPOSE,
+        ];
+    }
+
+    /** Whether a registry publishes $image, null when that cannot be told. */
+    protected function imagePublished(string $image): ?bool
+    {
+        return (new RegistryImageConfig)->isPublished($image);
     }
 
     /**

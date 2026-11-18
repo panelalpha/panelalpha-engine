@@ -20,11 +20,15 @@ final class RegistryImageConfig
     /** @var callable(string, string): ?string url and Accept header to body, null on any failure */
     private $get;
 
+    /** @var callable(string, string): ?int url and Accept header to the HEAD status, null when nothing answered */
+    private $head;
+
     private string $architecture;
 
-    public function __construct(?callable $get = null, ?string $architecture = null)
+    public function __construct(?callable $get = null, ?string $architecture = null, ?callable $head = null)
     {
         $this->get = $get ?? self::httpGet(...);
+        $this->head = $head ?? self::httpHead(...);
         $this->architecture = $architecture ?? self::hostArchitecture();
     }
 
@@ -77,6 +81,26 @@ final class RegistryImageConfig
     public function downloadBytes(string $image): ?int
     {
         return $this->layerBytes(self::sources($image));
+    }
+
+    /**
+     * Whether a registry publishes $image: true when the cache registry or Docker Hub has it, false only when
+     * registry-proxy answers that Docker Hub has no such manifest, null when that cannot be told.
+     */
+    public function isPublished(string $image): ?bool
+    {
+        $published = null;
+        foreach (self::sources($image) as [$base, $repository, $reference]) {
+            $status = ($this->head)("{$base}/v2/{$repository}/manifests/{$reference}", self::ACCEPT);
+            if ($status === 200) {
+                return true;
+            }
+            if ($base === 'http://'.DindImageStore::PROXY_REGISTRY) {
+                $published = $status === 404 ? false : null;
+            }
+        }
+
+        return $published;
     }
 
     /** {@see downloadBytes()} as the cache registry alone holds $image. */
@@ -250,6 +274,17 @@ final class RegistryImageConfig
         }
 
         return $response->getStatusCode() === 200 ? (string) $response->getBody() : null;
+    }
+
+    private static function httpHead(string $url, string $accept): ?int
+    {
+        try {
+            return (new Client(['connect_timeout' => 2, 'timeout' => 15, 'http_errors' => false]))
+                ->head($url, ['headers' => ['Accept' => $accept]])
+                ->getStatusCode();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private static function hostArchitecture(): string

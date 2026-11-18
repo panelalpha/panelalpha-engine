@@ -171,4 +171,36 @@ class RegistryImageConfigTest extends TestCase
         $this->assertSame([], $this->config([])->exposedPorts('redis:alpine'));
         $this->assertSame([], $this->config([])->exposedPorts('-rf'));
     }
+    /**
+     * @param  array<string, int>  $statuses  URL to HEAD status; anything else did not answer
+     */
+    private function probe(array $statuses): RegistryImageConfig
+    {
+        return new RegistryImageConfig(
+            static fn (): ?string => null,
+            'amd64',
+            static fn (string $url): ?int => $statuses[$url] ?? null
+        );
+    }
+
+    public function test_a_tag_docker_hub_does_not_have_is_unpublished(): void
+    {
+        $this->assertFalse($this->probe([
+            self::CACHE . '/v2/go-admin/manifests/latest' => 404,
+            self::PROXY . '/v2/library/go-admin/manifests/latest' => 404,
+        ])->isPublished('go-admin:latest'));
+    }
+
+    public function test_a_tag_either_registry_has_is_published(): void
+    {
+        $this->assertTrue($this->probe([self::PROXY . '/v2/library/redis/manifests/7' => 200])->isPublished('redis:7'));
+        $this->assertTrue($this->probe([self::CACHE . '/v2/panelalpha/php/manifests/8.3' => 200])->isPublished('panelalpha/php:8.3'));
+    }
+
+    public function test_an_unanswered_or_other_registry_cannot_be_told(): void
+    {
+        $this->assertNull($this->probe([self::CACHE . '/v2/app/manifests/latest' => 404])->isPublished('app:latest'));
+        $this->assertNull($this->probe([self::PROXY . '/v2/library/app/manifests/latest' => 500])->isPublished('app:latest'));
+        $this->assertNull($this->probe([])->isPublished('quay.io/acme/app:1'));
+    }
 }
