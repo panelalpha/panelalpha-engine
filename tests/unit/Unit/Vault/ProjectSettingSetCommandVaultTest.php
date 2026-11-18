@@ -5,6 +5,7 @@ namespace Tests\Unit\Vault;
 use App\Models\SecretVaultEntry;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Str;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -23,7 +24,7 @@ class ProjectSettingSetCommandVaultTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
+        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
         $this->bootInMemoryDatabase();
         $this->makeUser('shop');
         $this->makeUser('blog');
@@ -58,10 +59,12 @@ class ProjectSettingSetCommandVaultTest extends TestCase
 
     public function test_an_unknown_reference_prints_the_vault_message_and_stores_nothing(): void
     {
-        [$exit, $output] = $this->runSet('registry-auth', 'vault:999999');
+        $reference = 'vault:' . Str::random(24);
+
+        [$exit, $output] = $this->runSet('registry-auth', $reference);
 
         $this->assertSame(1, $exit);
-        $this->assertStringContainsString("No vault entry for 'vault:999999'", $output);
+        $this->assertStringContainsString("No vault entry for '{$reference}'", $output);
         $this->assertNull($this->registryAuthOf('shop'));
     }
 
@@ -148,7 +151,7 @@ class ProjectSettingSetCommandVaultTest extends TestCase
     private function entry(string $type, string $secret, ?string $project = null): SecretVaultEntry
     {
         $entry = SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef('ref'.bin2hex(random_bytes(8))),
+            'ref_hash' => SecretVaultEntry::hashRef('ref' . bin2hex(random_bytes(8))),
             'type' => $type,
             'scope' => SecretVaultEntry::SCOPE_PROJECT,
             'project' => $project,

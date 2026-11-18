@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Http\Controllers\User\ProjectSettingController;
+use App\Lib\Vault\ProjectSettingVaultTypes;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
@@ -65,8 +65,7 @@ class SecretVaultEntry extends Model
      *
      * The setting is `cloudflare-api-token` and the vault type is
      * `cloudflare_api_token`: names are hyphenated in one and snake_case in
-     * the other, and the conversion is the caller's
-     * ({@see ProjectSettingController}).
+     * the other, and {@see ProjectSettingVaultTypes} maps one to the other.
      */
     public const TYPE_CLOUDFLARE_API_TOKEN = 'cloudflare_api_token';
 

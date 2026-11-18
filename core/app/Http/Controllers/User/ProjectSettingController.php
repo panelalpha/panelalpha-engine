@@ -4,6 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Auth\RequestToken;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ProjectSettingUpdateRequest;
 use App\Http\Responses\Refusal;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\System\Project\Settings;
@@ -110,18 +111,14 @@ class ProjectSettingController extends Controller
     /**
      * Set one setting.
      */
-    public function update(string $username, string $key, Request $request): JsonResponse
+    public function update(string $username, string $key, ProjectSettingUpdateRequest $request): JsonResponse
     {
         if ($refusal = $this->readOnlyRefusal($request, $username, $key)) {
             return $refusal;
         }
 
-        $settings = $this->settingsFor($username);
-        $validated = $request->validate(['value' => ['required', 'string']]);
-
-        // A secret setting may be given a `vault:<key>` in place of the secret.
         try {
-            $result = $settings->set($key, Settings::resolveValue($username, $key, (string) $validated['value']));
+            $result = $this->settingsFor($username)->set($key, (string) $request->validated('value'));
         } catch (\InvalidArgumentException|CloudflareException $e) {
             // An unknown key, or a token Cloudflare itself refused: the
             // caller's input either way.

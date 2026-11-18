@@ -4,6 +4,8 @@ namespace App\Console\Commands\Users\ProjectSettings;
 
 use App\Console\Commands\Concerns\ConfirmsChanges;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Vault\ProjectSettingVaultTypes;
+use App\Lib\Vault\RequestVault;
 use App\Models\User;
 use App\System\Project\Settings;
 use Illuminate\Console\Command;
@@ -79,9 +81,8 @@ class Set extends Command
             return 0;
         }
 
-        // After the prompt: resolving claims the entry and counts a use, which a "no" must not do.
         try {
-            $value = Settings::resolveValue($user->username, $key, $value);
+            $value = $this->withVaultSecret($user->username, $key, $value);
         } catch (ValidationException $e) {
             foreach (collect($e->errors())->flatten() as $message) {
                 $this->error((string) $message);
@@ -109,6 +110,19 @@ class Set extends Command
         $this->line('');
 
         return 0;
+    }
+
+    /**
+     * The value with a secret setting's `vault:<key>` read in its place. Reading claims the entry and counts a use,
+     * so it runs only once the change is confirmed.
+     *
+     * @throws ValidationException when the reference cannot be used
+     */
+    private function withVaultSecret(string $project, string $key, string $value): string
+    {
+        $type = ProjectSettingVaultTypes::typeFor($key);
+
+        return $type === null ? $value : (string) RequestVault::resolve('value', $value, $project, $type);
     }
 
     /**
