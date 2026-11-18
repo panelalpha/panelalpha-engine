@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Platform\Runtime;
 use App\Lib\Deploy\AccountHomeRead;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\Python\ApplicationObject;
 
 /**
  * Python, versioned by `.python-version` when it pins one, else by `requires-python` in pyproject.toml; requirements.txt pins
@@ -387,7 +388,43 @@ final class PythonRuntime implements Runtime
             }
         }
 
-        return self::declaredScriptCommand($projectDir) ?? self::lastResortServer();
+        return self::declaredScriptCommand($projectDir)
+            ?? self::applicationObjectCommand($projectDir, $manifests)
+            ?? self::lastResortServer();
+    }
+
+    /**
+     * A declared server pointed at the one application object found below the root, before giving up: an ASGI app
+     * only under uvicorn and a WSGI app only under gunicorn, as the other server cannot serve it.
+     *
+     * @param  list<string>  $manifests
+     */
+    private static function applicationObjectCommand(string $projectDir, array $manifests): ?string
+    {
+        $found = ApplicationObject::find($projectDir);
+        if ($found === null) {
+            return null;
+        }
+        $server = self::serverFor($found->interface, $manifests);
+
+        return $server === null
+            ? null
+            : self::serverCommand($server, $found->module, $found->callable, $found->searchPath);
+    }
+
+    /** @param  list<string>  $manifests */
+    private static function serverFor(?string $interface, array $manifests): ?string
+    {
+        $wanted = match ($interface) {
+            ApplicationObject::ASGI => 'uvicorn',
+            ApplicationObject::WSGI => 'gunicorn',
+            default => null,
+        };
+        if ($wanted === null) {
+            return self::declaredServer($manifests);
+        }
+
+        return self::declares($manifests, $wanted) ? $wanted : null;
     }
 
     /**
@@ -549,14 +586,21 @@ final class PythonRuntime implements Runtime
      */
     private static function declaredServer(array $manifests): ?string
     {
-        $text = strtolower(implode("\n", array_filter($manifests, 'is_string')));
         foreach (['gunicorn', 'uvicorn'] as $server) {
-            if (preg_match('/(?<![a-z0-9_.-])'.$server.'(?![a-z0-9_.-])/', $text) === 1) {
+            if (self::declares($manifests, $server)) {
                 return $server;
             }
         }
 
         return null;
+    }
+
+    /** @param  list<string>  $manifests */
+    private static function declares(array $manifests, string $server): bool
+    {
+        $text = strtolower(implode("\n", array_filter($manifests, 'is_string')));
+
+        return preg_match('/(?<![a-z0-9_.-])'.$server.'(?![a-z0-9_.-])/', $text) === 1;
     }
 
     /**
