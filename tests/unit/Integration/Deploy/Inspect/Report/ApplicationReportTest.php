@@ -6,6 +6,7 @@ use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\Report\ApplicationReport;
 use App\Lib\Deploy\Inspect\Report\DeployVerdict;
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Findings\Finding;
@@ -25,14 +26,14 @@ class ApplicationReportTest extends ReportTestCase
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
      */
-    private function report(array $decision, ?string $issue = null, ?string $appConfigOrigin = null): array
+    private function report(array $decision, ?string $issue = null, ?string $appConfigOrigin = null, ?AppConfig $appConfig = null): array
     {
         return (new ApplicationReport(
             $this->tmpDir,
             $this->context(),
             $decision + ['strategy' => Strategies::FALLBACK, 'label' => 'Unknown'],
             $appConfigOrigin,
-            null,
+            $appConfig,
             $issue === null ? null : new Finding(AppInspector::DETECTION_FAILED, $issue)
         ))->build();
     }
@@ -100,6 +101,34 @@ class ApplicationReportTest extends ReportTestCase
         $this->assertSame(DeployabilityCheck::ROOT_FILE_MISSING, $report['issue']['code']);
         $this->assertSame('composer.json', $report['issue']['file']);
         $this->assertStringContainsString('composer.json', $report['issue']['message']);
+    }
+
+    public function test_a_root_file_the_app_config_prepare_may_write_does_not_make_the_project_undeployable(): void
+    {
+        $this->write('README.md', '# composer.json is written into app/ by the recipe');
+
+        $report = $this->report(
+            ['strategy' => Strategies::PHP, 'app_root' => 'app'],
+            appConfigOrigin: 'engine',
+            appConfig: AppConfig::fromDirectory(['prepare' => "cp composer.json app/composer.json\n"])
+        );
+
+        $this->assertTrue($report['deployable']);
+        $this->assertNull($report['issue']);
+    }
+
+    public function test_an_app_config_without_prepare_still_needs_the_root_file(): void
+    {
+        $this->write('README.md', '# no composer.json here');
+
+        $report = $this->report(
+            ['strategy' => Strategies::PHP, 'app_root' => 'app'],
+            appConfigOrigin: 'engine',
+            appConfig: AppConfig::fromDirectory(['entrypoint' => "#!/bin/sh\nexec apache2-foreground\n"])
+        );
+
+        $this->assertFalse($report['deployable']);
+        $this->assertSame(DeployabilityCheck::ROOT_FILE_MISSING, $report['issue']['code']);
     }
 
     public function test_an_empty_directory_is_reported_as_undeployable(): void

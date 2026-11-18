@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCandidates;
+use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\PythonRuntime;
@@ -152,7 +153,9 @@ final class ApplicationReport
         try {
             DeployabilityCheck::assert($this->decision, $this->projectDir);
         } catch (InvalidArgumentException $e) {
-            return DeployRefusal::findingOf($e, self::DEPLOY_REFUSED);
+            if (! $this->preparedByTheAppConfig($e)) {
+                return DeployRefusal::findingOf($e, self::DEPLOY_REFUSED);
+            }
         }
 
         $start = $this->decision['start_command'] ?? null;
@@ -164,6 +167,18 @@ final class ApplicationReport
         }
 
         return null;
+    }
+
+    /**
+     * The deploy runs the app config's prepare commands before it checks the checkout, and they may write the file the
+     * check asks for (Galette's prepare moves composer.json into its app_root); inspect does not run them.
+     */
+    private function preparedByTheAppConfig(InvalidArgumentException $refusal): bool
+    {
+        return $refusal instanceof DeployRefusal
+            && $refusal->refusal === DeployabilityCheck::ROOT_FILE_MISSING
+            && $this->appConfig !== null
+            && (($this->appConfig->setupCommands() ?? '') !== '' || $this->appConfig->commands(PlatformStage::PREPARE) !== []);
     }
 
     /**
