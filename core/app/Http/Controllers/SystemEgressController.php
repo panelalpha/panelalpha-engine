@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\SystemProjects;
 use App\Http\Requests\SystemEgressDestroyRequest;
 use App\Http\Requests\SystemEgressIndexRequest;
 use App\Lib\Net\Outbound\OutboundStatus;
@@ -57,11 +58,12 @@ class SystemEgressController extends Controller
 
         $days = $request->days();
         $events = $days === null ? $status->active($now) : $status->since($now->copy()->subDays($days));
+        $events = SystemProjects::forRequest()->listable($events, static fn (OutboundEvent $event): string => $event->owner);
 
         return new JsonResponse([
             'active' => $report->active,
             'settings' => (object) $report->settings,
-            'data' => $events->map(static fn (OutboundEvent $event): array => OutboundStatus::describe($event, $now))->values()->all(),
+            'data' => array_map(static fn (OutboundEvent $event): array => OutboundStatus::describe($event, $now), $events),
         ]);
     }
 

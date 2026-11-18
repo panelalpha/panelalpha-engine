@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Auth\SystemProjects;
 use App\Auth\TokenAbilities;
 use App\Mcp\Tools\Concerns\OmitsTitle;
 use App\Models\User;
@@ -29,6 +30,7 @@ class ProjectListSummaryTool extends Tool
         if ($scope !== null) {
             $query->whereIn('username', $scope);
         }
+        SystemProjects::forRequest()->unlist($query);
 
         $projects = $query
             ->get(['id', 'username', 'status', 'created_at'])

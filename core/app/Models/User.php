@@ -124,6 +124,12 @@ class User extends Authenticatable
     /** The only value that key stores; absent means the project is not protected. */
     public const string PROTECTED_ON = 'on';
 
+    /** The `details` key of the `system` project setting. */
+    public const string DETAIL_SYSTEM = 'system';
+
+    /** The only value that key stores; absent means an ordinary project. */
+    public const string SYSTEM_ON = 'on';
+
     /** The `details` key listing the env vars a vault reference set. */
     public const string DETAIL_VAULT_ENV_KEYS = 'env_vault_keys';
 
@@ -1294,12 +1300,33 @@ class User extends Authenticatable
     }
 
     /**
-     * Whether the `protected` setting is on: API and MCP tokens may no longer
-     * delete, stop or redeploy this project.
+     * Whether the `protected` setting, or `system`, is on: API and MCP tokens may
+     * no longer delete, stop or redeploy this project.
      */
     public function isProtected(): bool
     {
-        return ($this->getDetails()[self::DETAIL_PROTECTED] ?? null) === self::PROTECTED_ON;
+        return ($this->getDetails()[self::DETAIL_PROTECTED] ?? null) === self::PROTECTED_ON || $this->isSystem();
+    }
+
+    /** Whether the `system` setting is on: hidden from every token but its own, and protected. */
+    public function isSystem(): bool
+    {
+        return ($this->getDetails()[self::DETAIL_SYSTEM] ?? null) === self::SYSTEM_ON;
+    }
+
+    /**
+     * The usernames of every system project.
+     *
+     * @return list<string>
+     */
+    public static function systemUsernames(): array
+    {
+        return self::query()
+            ->where('details->'.self::DETAIL_SYSTEM, self::SYSTEM_ON)
+            ->pluck('username')
+            ->map(static fn (mixed $name): string => (string) $name)
+            ->values()
+            ->all();
     }
 
     /** A details value that is a non-empty string once trimmed, else null. */

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\SystemProjects;
 use App\Lib\Project\ApiAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,7 +41,9 @@ class SystemApiAccessController extends Controller
     )]
     public function index(): JsonResponse
     {
-        return new JsonResponse(['data' => (new ApiAccess)->all()]);
+        $entries = SystemProjects::forRequest()->listable((new ApiAccess)->all(), static fn (array $entry): ?string => $entry['project'] ?? null);
+
+        return new JsonResponse(['data' => $entries]);
     }
 
     #[OA\Put(

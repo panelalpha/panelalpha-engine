@@ -25,12 +25,25 @@ class Settings
      */
     public const string KEY_PROTECTED = User::DETAIL_PROTECTED;
 
+    /**
+     * The engine's own application: no token but the project's own sees or reaches it, and it is protected.
+     * Read-only over the API, like `protected`.
+     */
+    public const string KEY_SYSTEM = User::DETAIL_SYSTEM;
+
+    /** @var list<string> */
+    public const array OPERATOR_KEYS = [
+        self::KEY_PROTECTED,
+        self::KEY_SYSTEM,
+    ];
+
     /** @var list<string> */
     public const array KEYS = [
         self::KEY_CLOUDFLARE_API_TOKEN,
         self::KEY_REGISTRY_AUTH,
         self::KEY_PERSIST_PATHS,
         self::KEY_PROTECTED,
+        self::KEY_SYSTEM,
     ];
 
     /** @var list<string> */
@@ -120,6 +133,7 @@ class Settings
             self::KEY_REGISTRY_AUTH => $this->setRegistryAuth($projectUser, $value),
             self::KEY_PERSIST_PATHS => $this->setPersistPaths($projectUser, $value),
             self::KEY_PROTECTED => $this->setProtected($projectUser, $value),
+            self::KEY_SYSTEM => $this->setSystem($projectUser, $value),
             default => throw new \InvalidArgumentException("No setter for '{$key}'."),
         };
     }
@@ -147,7 +161,14 @@ class Settings
         }
 
         if ($key === self::KEY_PROTECTED) {
+            self::assertNotSystem($projectUser);
             $this->forgetDetail($projectUser, self::KEY_PROTECTED);
+
+            return;
+        }
+
+        if ($key === self::KEY_SYSTEM) {
+            $this->forgetDetail($projectUser, self::KEY_SYSTEM);
 
             return;
         }
@@ -289,6 +310,30 @@ class Settings
         return $normal;
     }
 
+    /**
+     * @return array{message: string}
+     */
+    private function setSystem(User $projectUser, string $value): array
+    {
+        if (strtolower(trim($value)) !== User::SYSTEM_ON) {
+            throw new \InvalidArgumentException("system takes only 'on'; unset it to make the project an ordinary one again.");
+        }
+
+        $projectUser->setDetails([self::KEY_SYSTEM => User::SYSTEM_ON]);
+        $projectUser->save();
+
+        return ['message' => "Project '{$projectUser->username}' is a system project: no API or MCP token but its own "
+            .'sees or reaches it, and it is protected.'];
+    }
+
+    private static function assertNotSystem(User $projectUser): void
+    {
+        if ($projectUser->isSystem()) {
+            throw new \InvalidArgumentException("'{$projectUser->username}' is a system project, which is always "
+                .'protected; unset system first.');
+        }
+    }
+
     private function storedValue(string $key): ?string
     {
         if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
@@ -305,6 +350,10 @@ class Settings
 
         if ($key === self::KEY_PROTECTED) {
             return $this->project->model()->isProtected() ? User::PROTECTED_ON : null;
+        }
+
+        if ($key === self::KEY_SYSTEM) {
+            return $this->project->model()->isSystem() ? User::SYSTEM_ON : null;
         }
 
         return null;

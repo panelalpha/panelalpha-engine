@@ -48,6 +48,7 @@ class UserResource extends JsonResource
             'email' => $user->email,
             'status' => $user->status,
             'protected' => $user->isProtected(),
+            'system' => $user->isSystem(),
             'public_routing' => ProjectPublicRouting::view($user, app(PublicRoutingGrants::class)),
             'staging_of' => $user->relationLoaded('liveUser')
                 ? ($user->liveUser?->username)
@@ -182,6 +183,7 @@ class UserResource extends JsonResource
             $details['site_password_enabled'],
             $details['site_password_version'],
             $details[User::DETAIL_PROTECTED],
+            $details[User::DETAIL_SYSTEM],
             $details[ProjectPublicRouting::DETAIL],
             $details[KeptCertificate::DETAIL],
         );

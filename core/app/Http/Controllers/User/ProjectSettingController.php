@@ -200,16 +200,17 @@ class ProjectSettingController extends Controller
     }
 
     /**
-     * `protected` is the operator's: a token able to clear it would lift the
-     * refusal it is being held by. The console writes it without a token.
+     * `protected` and `system` are the operator's: a token able to clear one would lift the
+     * refusal it is being held by. The console writes them without a token.
      */
     private function readOnlyRefusal(Request $request, string $username, string $key): ?JsonResponse
     {
-        if (Settings::normalizeKey($key) !== Settings::KEY_PROTECTED || RequestToken::of($request) === null) {
+        $key = Settings::normalizeKey($key);
+        if (! in_array($key, Settings::OPERATOR_KEYS, true) || RequestToken::of($request) === null) {
             return null;
         }
 
-        return Refusal::json(403, 'key', self::READ_ONLY, "The 'protected' setting is read-only over the API; an operator "
+        return Refusal::json(403, 'key', self::READ_ONLY, "The '{$key}' setting is read-only over the API; an operator "
             .'sets or clears it on the host.', $username);
     }
 }

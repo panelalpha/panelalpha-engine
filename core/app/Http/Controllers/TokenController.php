@@ -10,13 +10,44 @@ use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
 
 /**
- * What any token may do to itself: replace itself, or end itself. Neither
+ * What any token may do to itself: say what it is, replace itself, or end itself. No
  * route takes an id, so no token can reach another. Hidden from MCP: a tool
  * call carries the assistant's own token, and rotating or revoking that from
  * inside a conversation only locks the assistant out.
  */
 class TokenController extends Controller
 {
+    #[OA\Get(
+        path: '/tokens/current',
+        summary: 'Describe the calling token',
+        description: '`project` is the project whose API access holds this token, the one an application given API access '
+            .'reads its own name from; null for any other token. `system` is whether that '
+            .'project is a system project, which no other token sees.',
+        security: [['bearerAuth' => []]],
+        tags: ['Tokens'],
+        x: ['mcp-hide' => true],
+        responses: [
+            new OA\Response(response: 200, description: 'The calling token', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'token_id', type: 'integer'),
+                    new OA\Property(property: 'project', type: 'string', nullable: true),
+                    new OA\Property(property: 'system', type: 'boolean'),
+                    new OA\Property(property: 'expires_at', type: 'string', format: 'date-time', nullable: true),
+                ])],
+            )),
+            new OA\Response(response: 400, description: 'The request carries no token'),
+        ],
+    )]
+    public function show(Request $request): JsonResponse
+    {
+        $token = $this->calling($request);
+        if ($token === null) {
+            return new JsonResponse(['message' => 'Only a token can describe itself.'], 400);
+        }
+
+        return new JsonResponse(['data' => CallingToken::describe($token)]);
+    }
+
     #[OA\Post(
         path: '/tokens/current/rotate',
         summary: 'Replace the calling token with a new one of the same name and abilities',

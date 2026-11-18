@@ -44,10 +44,11 @@ class TokenAbilities
     /**
      * Operations a project-scoped token may still reach without naming a
      * project in its path: the project lists (filtered in the controller),
-     * the tasks of its projects, and the two reads that are about the engine,
-     * not about a project.
+     * the tasks of its projects, the reads that are about the engine, not
+     * about a project, and the token's own description.
      */
     private const PROJECT_SCOPE_ROUTES = [
+        'GET /tokens/current',
         'GET /projects',
         'GET /projects/all',
         'GET /tasks',

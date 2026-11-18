@@ -213,8 +213,9 @@ Usage: bash installer.sh [options]
       --no-password        do not set a site password on the --repo project
       --full-privileges    trust the --repo project with this engine: an Engine
                            API token for every project, the server's own name
-                           and public ports, and protection from API tokens once
-                           it is live (for a panel that manages the engine).
+                           and public ports, and once it is live a system
+                           project: hidden from every other API token, and
+                           protected (for a panel that manages the engine).
                            The project is taken to be the PanelAlpha panel:
                            --email becomes its admin, with a generated password
                            printed at the end, --hub-code goes to the panel

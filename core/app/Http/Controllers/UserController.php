@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\SystemProjects;
 use App\Auth\TokenAbilities;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
@@ -42,6 +43,7 @@ use App\OpenApi\ApiDefinitions;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\CpuLimitDeferred;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -91,6 +93,21 @@ class UserController extends Controller
             'per_page' => 'integer',
         ]);
 
+        $query = $this->listedProjects();
+
+        /** @var LengthAwarePaginator */
+        $users = $query->paginate($params['per_page'] ?? 15);
+
+        return new UserCollection($users);
+    }
+
+    /**
+     * The projects the caller's token reaches, without the system ones.
+     *
+     * @return Builder<User>
+     */
+    private function listedProjects(): Builder
+    {
         $query = User::query()->with(['liveUser', 'stagingUser']);
 
         $projects = TokenAbilities::forCurrentRequest()->projects();
@@ -98,10 +115,7 @@ class UserController extends Controller
             $query->whereIn('username', $projects);
         }
 
-        /** @var LengthAwarePaginator */
-        $users = $query->paginate($params['per_page'] ?? 15);
-
-        return new UserCollection($users);
+        return SystemProjects::forRequest()->unlist($query);
     }
 
     #[OA\Get(
@@ -120,12 +134,7 @@ class UserController extends Controller
     )]
     public function listAll(Request $request): UserCollection
     {
-        $query = User::query()->with(['liveUser', 'stagingUser']);
-
-        $projects = TokenAbilities::forCurrentRequest()->projects();
-        if ($projects !== null) {
-            $query->whereIn('username', $projects);
-        }
+        $query = $this->listedProjects();
 
         if ($request->boolean('with_domain_names')) {
             $query->with('domains');

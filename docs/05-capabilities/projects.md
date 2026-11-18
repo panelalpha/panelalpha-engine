@@ -171,6 +171,21 @@ pae project:settings:unset protected --project=<name>
 
 Your own `pae` commands on the server are not affected. Details: [CLI commands](../06-commands/pae-cli.md).
 
+## System projects
+
+A system project is the engine's own application, such as the PanelAlpha panel that `--full-privileges` installs. No token sees it: it is left out of every project list, task list and API access list, and a call that names it, its domains or its tasks is answered exactly as for a project that does not exist. The one exception is the project's own API token, which still reaches it by name, so the application can manage its own domains. Even that token does not find it in a list.
+
+A system project is always protected ([Protecting](#protecting)), and protection cannot be turned off while it is a system project. Only you can turn it on or off, on the server.
+
+```bash
+pae project:settings:set system on --project=<name>
+pae project:settings:unset system --project=<name>
+```
+
+`--full-privileges` makes the panel a system project once it is live. An engine update does the same for a panel installed earlier with that flag: a project with an API token for every project that is protected.
+
+An application reads its own project name from `GET /api/tokens/current`, which answers `project` for the token its API access holds and null for any other token.
+
 ## Overlays
 
 An overlay is a piece of HTML, such as a banner, a notice or a script, that the engine's webserver writes into every page a site serves. The application is not changed. There is one global overlay for every project, and each project can have its own.

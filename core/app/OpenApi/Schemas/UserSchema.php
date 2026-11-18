@@ -21,6 +21,14 @@ use OpenApi\Attributes as OA;
             example: false,
         ),
         new OA\Property(
+            property: 'system',
+            description: 'The engine\'s own application, such as the PanelAlpha panel: no token but the project\'s own '
+                .'API access token lists or reaches it, and it is always protected. Set with '
+                .'`pae project:settings:set system on --project=<username>`; read-only over the API.',
+            type: 'boolean',
+            example: false,
+        ),
+        new OA\Property(
             property: 'public_routing',
             description: 'What the project\'s panelalpha.yaml asks for beyond its domain (`domain: host`, `public_ports:`), what the '
                 .'operator allows it (`pae system:public-routing:allow`), and what its last deploy applied. Null when its last deploy '
