@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Port\EnvVarDefault;
+use App\Lib\Deploy\Sidecar\SidecarCredentials;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
@@ -45,6 +47,11 @@ final class ServiceLimits
     /** What one cargo job may take: a C++ compiler on a large unity file peaks past 1.2 GB. */
     private const CARGO_JOB_MEMORY_MB = 1536;
 
+    /** A heap the service pins with `-Xmx` gets twice its size: Elasticsearch's own rule, the rest is off-heap. */
+    private const PINNED_HEAP_FACTOR = 2;
+
+    private const PINNED_HEAP_PATTERN = '/(?:^|\s)-Xmx(\d+[kmgt]?)(?=\s|$)/i';
+
     private const BYTES_PER_MB = 1048576;
 
     /** @var array<string, float> */
@@ -61,6 +68,14 @@ final class ServiceLimits
      */
     public static function memoryFor(string $name, array $service = [], ?int $accountMemoryMb = null): string
     {
+        return self::withRoomForPinnedHeap(self::catalogueOrRoleMemory($name, $service, $accountMemoryMb), $service);
+    }
+
+    /**
+     * @param  array<string, mixed>  $service
+     */
+    private static function catalogueOrRoleMemory(string $name, array $service, ?int $accountMemoryMb): string
+    {
         $engine = SidecarEngine::resolve($name, $service);
         $catalogued = $engine === null ? null : SidecarEngine::memoryLimitFor($engine);
         if ($catalogued !== null) {
@@ -74,6 +89,44 @@ final class ServiceLimits
         return in_array(strtolower($name), self::CAPPED_APPLICATION_ROLES, true)
             ? self::CAPPED_ROLE_MEMORY
             : self::DEFAULT_MEMORY;
+    }
+
+    /**
+     * $limit, or twice the JVM heap the service's environment pins when that is more: an OpenSearch with
+     * `-Xmx1g` in a 384m container is killed (exit 137) before it answers its health check.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    private static function withRoomForPinnedHeap(string $limit, array $service): string
+    {
+        $heapMb = self::pinnedHeapMb($service);
+        $limitMb = self::toMegabytes($limit);
+        if ($heapMb === null || $limitMb === null || $heapMb * self::PINNED_HEAP_FACTOR <= $limitMb) {
+            return $limit;
+        }
+
+        return ($heapMb * self::PINNED_HEAP_FACTOR).'m';
+    }
+
+    /**
+     * The largest `-Xmx` in the service's environment, as Compose resolves it unset; null when none.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    private static function pinnedHeapMb(array $service): ?int
+    {
+        $largest = null;
+        foreach (SidecarCredentials::environmentMap($service['environment'] ?? null) as $value) {
+            if (preg_match_all(self::PINNED_HEAP_PATTERN, EnvVarDefault::resolve((string) $value), $m) < 1) {
+                continue;
+            }
+            foreach ($m[1] as $size) {
+                $mb = self::toMegabytes($size);
+                $largest = $mb === null ? $largest : max($largest ?? 0, $mb);
+            }
+        }
+
+        return $largest;
     }
 
     /**

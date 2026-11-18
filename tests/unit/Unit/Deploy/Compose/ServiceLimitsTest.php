@@ -26,6 +26,37 @@ class ServiceLimitsTest extends TestCase
         $this->assertSame('512m', ServiceLimits::memoryFor('storage', ['image' => 'mysql:8']));
     }
 
+    public function test_a_datastore_pinning_a_larger_heap_gets_twice_the_heap(): void
+    {
+        $service = ['image' => 'docker.elastic.co/elasticsearch/elasticsearch:9.3.0', 'environment' => ['ES_JAVA_OPTS=-Xms512m -Xmx512m']];
+
+        $this->assertSame('1024m', ServiceLimits::memoryFor('elasticsearch', $service));
+    }
+
+    public function test_the_heap_is_read_from_a_map_and_through_an_unset_default(): void
+    {
+        $opensearch = ['image' => 'opensearchproject/opensearch:2.9.0', 'environment' => ['OPENSEARCH_JAVA_OPTS' => '-Xms1g -Xmx1g']];
+        $defaulted = ['image' => 'elasticsearch:8.17.0', 'environment' => ['ES_JAVA_OPTS' => '${ES_JAVA_OPTS:--Xms512m -Xmx512m}']];
+
+        $this->assertSame('2048m', ServiceLimits::memoryFor('search', $opensearch));
+        $this->assertSame('1024m', ServiceLimits::memoryFor('es', $defaulted));
+    }
+
+    public function test_a_small_pinned_heap_keeps_the_catalogue_limit(): void
+    {
+        $service = ['image' => 'elasticsearch:8.13.0', 'environment' => ['ES_JAVA_OPTS' => '-Xms128m -Xmx128m']];
+
+        $this->assertSame('384m', ServiceLimits::memoryFor('elasticsearch', $service));
+    }
+
+    public function test_an_unpinned_or_unresolvable_heap_changes_nothing(): void
+    {
+        $this->assertSame('384m', ServiceLimits::memoryFor('elasticsearch', ['image' => 'elasticsearch:8.13.0']));
+        $this->assertSame('384m', ServiceLimits::memoryFor('elasticsearch', [
+            'image' => 'opensearchproject/opensearch:3.7.0', 'environment' => ['OPENSEARCH_JAVA_OPTS' => '${OPENSEARCH_JAVA_OPTS}'],
+        ]));
+    }
+
     public function test_an_application_role_is_capped_below_the_default(): void
     {
         // Several of these run per account - web, worker, scheduler - so the
