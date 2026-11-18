@@ -27,6 +27,7 @@ use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
 use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
+use App\Lib\Deploy\Platform\Runtime\MissingBuildTool;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
@@ -311,10 +312,13 @@ class HostCompile
         } catch (\Exception $e) {
             $jdkImage = $e instanceof DeployCancelledException ? null : self::newerJdkImage($decision, $e->getMessage());
             $unfrozen = $isNode ? self::unfrozenInstallAfter($e, $installCmd) : null;
+            $toolchainImage = $isNode ? self::toolchainImageAfter($e, $image) : null;
             if ($jdkImage !== null) {
                 $this->compileOnNewerJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
             } elseif ($unfrozen !== null) {
                 $this->compileWithoutFrozenLockfile($logger, $projectDir, $image, $unfrozen, $buildCmd, $recipeEnv, $isolateNodeModules, $appRoot);
+            } elseif ($toolchainImage !== null) {
+                $this->compileWithToolchain($logger, $e, $projectDir, $toolchainImage, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules, $appRoot);
             } elseif (! $mayRetryOnNode) {
                 throw $e;
             } else {
@@ -347,6 +351,35 @@ class HostCompile
         string $appRoot = ''
     ): void {
         $logger?->warn('The lockfile does not match package.json, so the frozen install refused it; installing from package.json instead: '.$install);
+        $this->runContainer($projectDir, $image, $install, $build, $env, $isolateNodeModules, true, $appRoot);
+    }
+
+    /** The full image of a slim $image whose compile died on a program only the full one carries. */
+    private static function toolchainImageAfter(\Exception $failure, string $image): ?string
+    {
+        $toolchain = NodeRuntime::toolchainImage($image);
+        if ($toolchain === $image || $failure instanceof DeployCancelledException) {
+            return null;
+        }
+
+        return MissingBuildTool::in($failure->getMessage()) === null ? null : $toolchain;
+    }
+
+    /**
+     * @param  array<string, mixed>  $env
+     */
+    private function compileWithToolchain(
+        ?DeployLogger $logger,
+        \Exception $failure,
+        string $projectDir,
+        string $image,
+        string $install,
+        string $build,
+        array $env,
+        bool $isolateNodeModules,
+        string $appRoot = ''
+    ): void {
+        $logger?->info('The build ran '.MissingBuildTool::in($failure->getMessage()).', which the slim image lacks; compiling again in '.$image);
         $this->runContainer($projectDir, $image, $install, $build, $env, $isolateNodeModules, true, $appRoot);
     }
 
@@ -599,8 +632,11 @@ class HostCompile
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $cached, true, $frontend['root']);
         } catch (\Exception $e) {
             $unfrozen = self::unfrozenInstallAfter($e, $installCmd);
+            $toolchainImage = self::toolchainImageAfter($e, $image);
             if ($unfrozen !== null) {
                 $this->compileWithoutFrozenLockfile($logger, $projectDir, $image, $unfrozen, $buildCmd, $recipeEnv, $cached, $frontend['root']);
+            } elseif ($toolchainImage !== null) {
+                $this->compileWithToolchain($logger, $e, $projectDir, $toolchainImage, $installCmd, $buildCmd, $recipeEnv, $cached, $frontend['root']);
             } elseif ($image !== HostNodeBuild::BUN_IMAGE) {
                 throw $e;
             } else {
