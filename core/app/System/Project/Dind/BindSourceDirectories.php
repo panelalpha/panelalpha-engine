@@ -8,7 +8,8 @@ use App\System\Project\Dind as DindProject;
 
 /**
  * Creates, as the account, the checkout directories the compose file binds with `create_host_path: false`
- * ({@see UncreatedBindDirectories}) before `compose up`, which would otherwise refuse the missing source.
+ * ({@see UncreatedBindDirectories}) before `compose up`, which would otherwise refuse the missing source,
+ * and those {@see BindSourceOwners} hands to a non-root service, which Docker would create as root.
  */
 final class BindSourceDirectories
 {
@@ -27,23 +28,34 @@ final class BindSourceDirectories
 
     public function create(): void
     {
-        $paths = $this->declared();
+        $relative = $this->createMissing($this->declared());
+        if ($relative !== []) {
+            $this->project->shell()->logger()?->info('Created '.implode(', ', $relative).', which the compose file binds with create_host_path: false');
+        }
+    }
+
+    /**
+     * Each of $paths that does not exist yet, created as the account when it resolves inside the checkout;
+     * the ones created, relative to it.
+     *
+     * @param  list<string>  $paths
+     * @return list<string>
+     */
+    public function createMissing(array $paths): array
+    {
         if ($paths === []) {
-            return;
+            return [];
         }
         $projectDir = rtrim($this->project->userAppDirPath(), '/');
-        $logger = $this->project->shell()->logger();
         try {
             $created = $this->project->shell()->execAsUserQuiet(['sh', '-c', self::CREATE, 'sh', $projectDir, ...$paths], [], self::TIMEOUT_SECONDS);
         } catch (\Throwable $e) {
-            $logger?->warn('Could not create the bind mount directories the compose file asks Docker not to create: '.trim($e->getMessage()));
+            $this->project->shell()->logger()?->warn('Could not create the bind mount directories the compose file names: '.trim($e->getMessage()));
 
-            return;
+            return [];
         }
-        $relative = self::relativeTo($projectDir, $created);
-        if ($relative !== []) {
-            $logger?->info('Created '.implode(', ', $relative).', which the compose file binds with create_host_path: false');
-        }
+
+        return self::relativeTo($projectDir, $created);
     }
 
     /** @return list<string> */

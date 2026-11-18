@@ -90,9 +90,9 @@ final class AppLauncher
         if ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
             (new BindSourceDirectories($this->project))->create();
             (new BindSourceExamples($this->project))->create();
-            (new BindSourceOwners($this->project))->apply();
         }
         (new SecretSourceFileWriter($this->project))->create();
+        (new BindSourceOwners($this->project))->apply();
 
         $pulled = $this->pullImages();
         if ($pulled !== null) {

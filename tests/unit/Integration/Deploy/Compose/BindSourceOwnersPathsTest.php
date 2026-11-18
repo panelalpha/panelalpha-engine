@@ -84,21 +84,45 @@ class BindSourceOwnersPathsTest extends TestCase
         $this->assertSame([], $this->ran);
     }
 
-    public function test_a_numeric_user_is_handed_its_existing_paths_only(): void
+    public function test_a_numeric_user_is_handed_its_paths_a_missing_one_created_first(): void
     {
         $lines = $this->apply("services:\n  a:\n    image: busybox\n    user: \"1000:1000\"\n    volumes:\n      - ./data:/d\n      - ./missing:/m\n      - ./app.ini:/etc/app.ini\n");
 
         $this->assertSame([
-            'Service a runs as uid 1000 and writes to data, app.ini through a bind mount; handed them to that uid (the account keeps group write)',
+            'Created missing, which service a binds and does not run as root',
+            'Service a runs as uid 1000 and writes to data, missing, app.ini through a bind mount; handed them to that uid (the account keeps group write)',
         ], $lines);
-        $this->assertSame(['sh', $this->project, '1000:' . getmygid(), $this->project . '/data', $this->project . '/app.ini'], array_slice($this->ran[0], 3));
-        $this->assertCount(1, $this->ran);
+        $this->assertDirectoryExists($this->project . '/missing');
+        $this->assertSame(['sh', $this->project, '1000:' . getmygid(), $this->project . '/data', $this->project . '/missing', $this->project . '/app.ini'], array_slice($this->ran[1], 3));
+        $this->assertSame('su', $this->ran[0][0]);
+        $this->assertCount(2, $this->ran);
     }
 
-    public function test_a_service_with_only_missing_paths_is_skipped(): void
+    /** MinIO under `user: ${DOCKER_USER:-1000}` with `./data/media:/data`, which the repository leaves out. */
+    public function test_a_service_with_only_missing_paths_gets_them_created_and_handed_over(): void
     {
-        $this->assertSame([], $this->apply("services:\n  a:\n    image: busybox\n    user: \"1000\"\n    volumes:\n      - ./missing:/m\n"));
-        $this->assertSame([], $this->ran);
+        $lines = $this->apply("services:\n  minio:\n    image: pgsty/silo\n    user: \${DOCKER_USER:-1000}\n    volumes:\n      - ./data/media:/data\n");
+
+        $this->assertSame([
+            'Created data/media, which service minio binds and does not run as root',
+            'Service minio runs as uid 1000 and writes to data/media through a bind mount; handed them to that uid (the account keeps group write)',
+        ], $lines);
+        $this->assertDirectoryExists($this->project . '/data/media');
+    }
+
+    public function test_a_missing_path_is_never_created_through_a_committed_symlink(): void
+    {
+        mkdir($this->root . '/outside', 0755);
+        symlink($this->root . '/outside', $this->project . '/linked');
+
+        $this->assertSame([], $this->apply("services:\n  a:\n    image: busybox\n    user: \"1000\"\n    volumes:\n      - ./linked/new:/m\n"));
+        $this->assertDirectoryDoesNotExist($this->root . '/outside/new');
+    }
+
+    public function test_a_missing_path_of_a_root_service_is_left_to_docker(): void
+    {
+        $this->assertSame([], $this->apply("services:\n  a:\n    image: busybox\n    volumes:\n      - ./missing:/m\n"));
+        $this->assertDirectoryDoesNotExist($this->project . '/missing');
     }
 
     public function test_a_named_user_is_read_from_the_images_passwd(): void
@@ -306,6 +330,12 @@ class BindSourceOwnersPathsTest extends TestCase
     public function answer(array $cmd): string
     {
         $this->ran[] = $cmd;
+        if (($cmd[0] ?? null) === 'su' && str_contains($cmd[5] ?? '', 'root=$(realpath')) {
+            $create = new Process(['bash', '-c', $cmd[5]]);
+            $create->mustRun();
+
+            return $create->getOutput();
+        }
         if (($cmd[0] ?? null) === 'sh' && str_starts_with($cmd[2] ?? '', 'root=$1')) {
             if (isset($this->handOverFails[$cmd[5]])) {
                 throw new \RuntimeException($this->handOverFails[$cmd[5]]);

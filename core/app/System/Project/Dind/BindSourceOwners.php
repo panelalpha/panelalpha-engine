@@ -13,7 +13,8 @@ use App\System\Project\Dind as DindProject;
 
 /**
  * Hands checkout paths a non-root service writes through a bind mount to its uid before `compose up`
- * ({@see WritableProjectBinds}); the group stays the account's with group write, nothing wider.
+ * ({@see WritableProjectBinds}), creating a missing one first; the group stays the account's with group
+ * write, nothing wider. Every strategy: a Dockerfile recipe keeps the repository's MinIO too.
  */
 final class BindSourceOwners
 {
@@ -95,10 +96,6 @@ final class BindSourceOwners
         int $accountGid,
         ?DeployLogger $logger
     ): void {
-        $sources = self::existingSources($bind['sources'], $fs);
-        if ($sources === []) {
-            return;
-        }
         $image = $bind['image'] === null ? null : DeployCompose::resolvedImageRef($bind['image'], $env);
         $build = $this->buildOf($services[$service] ?? null, $image, $services, $env, $builtHere);
         [$user, $passwdImage] = $this->runsAs($bind, $image, $build);
@@ -112,7 +109,26 @@ final class BindSourceOwners
         if ($uid === null || $uid === $accountUid) {
             return;
         }
-        $this->handOverTo($service, $uid, $accountGid, $sources, $logger);
+        $this->createMissingDirectories($service, $bind['sources'], $fs, $logger);
+        $sources = self::existingSources($bind['sources'], $fs);
+        if ($sources !== []) {
+            $this->handOverTo($service, $uid, $accountGid, $sources, $logger);
+        }
+    }
+
+    /**
+     * A source not in the checkout yet is created as the account, as the directory Docker would otherwise
+     * create as root: MinIO's `./data/media:/data` under `user: 1000`.
+     *
+     * @param  list<string>  $sources
+     */
+    private function createMissingDirectories(int|string $service, array $sources, Filesystem $fs, ?DeployLogger $logger): void
+    {
+        $missing = array_values(array_diff($sources, self::existingSources($sources, $fs)));
+        $created = (new BindSourceDirectories($this->project))->createMissing($missing);
+        if ($created !== []) {
+            $logger?->info('Created '.implode(', ', $created).", which service {$service} binds and does not run as root");
+        }
     }
 
     /**
