@@ -14,6 +14,7 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\LocalImageBuilds;
 use App\Lib\Deploy\Compose\LocalImageEvidence;
+use App\Lib\Deploy\Compose\MovedImages;
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Compose\PrimaryPortBinding;
@@ -139,6 +140,7 @@ class UserComposeStrategy
 
         $parsed = $this->withFallbackDockerfiles($parsed, $projectDir, $logger);
         $parsed = $this->withLocalImageBuilds($parsed, $composePath, $projectDir, $env, $logger);
+        $parsed = $this->withMovedImages($parsed, $env, $logger);
         $parsed = $this->withBuildCaches($parsed, $projectDir);
         $parsed = $this->hostingReady($parsed, $composePath, $projectDir, $chown, $logger, $replaced, $env);
         $parsed = $this->withAppEnvFile($parsed);
@@ -291,6 +293,24 @@ class UserComposeStrategy
         }
 
         return $result['compose'];
+    }
+
+    /**
+     * A service on a tag its publisher moved runs it from where it went ({@see MovedImages}).
+     *
+     * @param  array<string, mixed>  $parsed
+     * @param  array<string, list<?string>>  $env
+     * @return array<string, mixed>
+     */
+    private function withMovedImages(array $parsed, array $env, ?DeployLogger $logger): array
+    {
+        $result = MovedImages::apply($parsed['services'], $env, $this->imagePublished(...));
+        foreach ($result['moved'] as $moved) {
+            $logger?->info(MovedImages::line($moved));
+        }
+        $parsed['services'] = $result['services'];
+
+        return $parsed;
     }
 
     /**

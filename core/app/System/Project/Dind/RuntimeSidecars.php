@@ -2,10 +2,12 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeFileReferences;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Deploy\Compose\MovedImages;
 use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
 use App\Lib\Deploy\Compose\ServiceDependencies;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
@@ -389,6 +391,7 @@ class RuntimeSidecars
     public function mergeRuntimeSidecars(array $decision, array $sidecars): array
     {
         $sidecars = $this->withoutAppService($sidecars);
+        $sidecars['services'] = $this->withMovedImages($sidecars['services']);
         if (is_string($sidecars['build_image'] ?? null) && $sidecars['build_image'] !== '') {
             $decision['build_image'] = $sidecars['build_image'];
         }
@@ -511,6 +514,28 @@ class RuntimeSidecars
         }
 
         return $sidecars;
+    }
+
+    /**
+     * A kept service on a tag its publisher moved runs it from where it went ({@see MovedImages}).
+     *
+     * @param  array<string, array<string, mixed>>  $services
+     * @return array<string, array<string, mixed>>
+     */
+    private function withMovedImages(array $services): array
+    {
+        $result = MovedImages::apply($services, [], $this->imagePublished(...));
+        foreach ($result['moved'] as $moved) {
+            $this->dind->shell()->logger()?->info(MovedImages::line($moved));
+        }
+
+        return $result['services'];
+    }
+
+    /** Whether a registry publishes $image, null when that cannot be told. */
+    protected function imagePublished(string $image): ?bool
+    {
+        return (new RegistryImageConfig)->isPublished($image);
     }
 
     /**
