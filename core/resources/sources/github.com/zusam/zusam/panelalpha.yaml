@@ -13,6 +13,21 @@ description: >-
   uploaded files) on the named volume `data`.
 
   First run is upstream's: container/run.sh creates the first user and group
-  from INIT_USER / INIT_GROUP / INIT_PASSWORD, which default to zusam / zusam
-  / zusam. Set them in the project's environment variables before the first
-  deploy to choose your own; they are read only while the database is empty.
+  from INIT_USER / INIT_GROUP / INIT_PASSWORD while the database is empty, and
+  INIT_USER / INIT_PASSWORD default to zusam / zusam, a login nobody deploying
+  it was told and anyone with the address could use. So the engine generates
+  them (`credentials:` below, returned by GET /projects/{name}/app-credentials)
+  and the compose file hands them to the container from
+  ~/.panelalpha/app-credentials.env; the project's own environment variables
+  still win, and the engine then reports those. zusam:init makes a user only
+  when no user has that login yet (in 0.6.1 run.sh runs it on every start, as
+  its database path check reads empty), so a password changed in Zusam is
+  never touched. An
+  installation from before still signing in with zusam / zusam is moved to the
+  engine's login once, through Zusam's own API, by the `ready` service
+  (files/panelalpha-zusam-login.php). INIT_GROUP stays upstream's `zusam`.
+credentials:
+  login_path: /login
+  fields:
+    INIT_USER: {kind: username}
+    INIT_PASSWORD: {kind: password}
