@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Env;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
@@ -314,5 +315,49 @@ class ComposeEnvFilesTest extends TestCase
 
         $this->assertFalse($removed);
         $this->assertSame('.env', $updated['services']['app']['env_file']);
+    }
+
+    public function test_add_to_puts_env_before_a_file_from_outside_the_project(): void
+    {
+        $compose = ['services' => [
+            'app' => ['env_file' => ['./defaults.env', '../.panelalpha/app/app.env', '../.panelalpha/app-credentials.env']],
+            'web' => ['env_file' => './defaults.env'],
+            'bare' => ['image' => 'x'],
+            'db' => ['env_file' => ['../.panelalpha/app/db.env']],
+        ]];
+
+        [$updated, $changed] = ComposeEnvFiles::addTo($compose, ['app', 'web', 'bare'], '.env');
+
+        $this->assertSame(['app', 'web', 'bare'], $changed);
+        $this->assertSame(
+            ['./defaults.env', '.env', '../.panelalpha/app/app.env', '../.panelalpha/app-credentials.env'],
+            $updated['services']['app']['env_file']
+        );
+        $this->assertSame(['./defaults.env', '.env'], $updated['services']['web']['env_file']);
+        $this->assertSame(['.env'], $updated['services']['bare']['env_file']);
+        $this->assertSame(['../.panelalpha/app/db.env'], $updated['services']['db']['env_file']);
+    }
+
+    public function test_add_to_leaves_a_service_that_already_loads_env_in_its_own_order(): void
+    {
+        $compose = ['services' => ['app' => ['env_file' => ['../.panelalpha/app/app.env', './.env']]]];
+
+        [$updated, $changed] = ComposeEnvFiles::addTo($compose, ['app'], '.env');
+
+        $this->assertSame([], $changed);
+        $this->assertSame($compose, $updated);
+    }
+
+    public function test_the_services_loading_a_file_after_env_outrank_it(): void
+    {
+        $compose = ['services' => [
+            'recipe' => ['env_file' => ['.env', '../.panelalpha/app/app.env']],
+            'own' => ['env_file' => ['./.env', ['path' => 'later.env', 'required' => false]]],
+            'overrides' => ['env_file' => ['.env', EngineArtifacts::ENV_OVERRIDES]],
+            'before' => ['env_file' => ['../.panelalpha/app/app.env', '.env', EngineArtifacts::ENV_OVERRIDES]],
+            'none' => ['env_file' => '../.panelalpha/app/db.env'],
+        ]];
+
+        $this->assertSame(['recipe', 'own'], ComposeEnvFiles::outrankingEnv($compose, '.env', EngineArtifacts::ENV_OVERRIDES));
     }
 }

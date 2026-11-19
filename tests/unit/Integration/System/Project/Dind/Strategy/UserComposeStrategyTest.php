@@ -234,6 +234,21 @@ class UserComposeStrategyTest extends TestCase
         $this->assertArrayNotHasKey('env_file', $run['services']['db']);
     }
 
+    /** anchr: `.env` from a template with `ANCHR_DB_PASSWORD=` must not replace the password the recipe stored. */
+    public function test_the_projects_env_file_goes_before_a_recipes_stored_values(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  anchr:\n    image: anchr:3.5.2\n    ports:\n      - \"3000:3000\"\n"
+                . "    env_file:\n      - ../.panelalpha/anchr/app.env\n",
+        ]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['.env', '../.panelalpha/anchr/app.env'], $run['services']['anchr']['env_file']);
+    }
+
     /** A service that already loads `.env` keeps its list, and `.env` is not named twice. */
     public function test_an_app_service_that_already_loads_env_is_left_with_one_entry(): void
     {

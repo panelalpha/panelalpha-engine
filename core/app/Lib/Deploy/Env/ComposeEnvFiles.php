@@ -125,13 +125,15 @@ final class ComposeEnvFiles
     }
 
     /**
-     * Append $envFile to the `env_file:` of $services, after what they already load, so a value there wins.
+     * Add $envFile to the `env_file:` of $services: after the files the project ships, so a value there wins over
+     * them, and before the first file from outside the project, a recipe's stored values, which a template's blank
+     * must not replace.
      *
      * @param  array<string, mixed>  $compose  a decoded compose file
      * @param  list<string>  $services
      * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
      */
-    public static function appendTo(array $compose, array $services, string $envFile): array
+    public static function addTo(array $compose, array $services, string $envFile): array
     {
         $changed = [];
         foreach ($services as $name) {
@@ -141,12 +143,73 @@ final class ComposeEnvFiles
             }
             $declared = $service['env_file'] ?? null;
             $entries = is_array($declared) ? array_values($declared) : ($declared === null ? [] : [$declared]);
-            $entries[] = $envFile;
+            $at = self::firstOutsideProject($entries) ?? count($entries);
+            array_splice($entries, $at, 0, [$envFile]);
             $compose['services'][$name]['env_file'] = $entries;
             $changed[] = $name;
         }
 
         return [$compose, $changed];
+    }
+
+    /**
+     * The services loading $envFile and, after it, some file other than $overridesFile, which wins over `.env`.
+     *
+     * @param  array<string, mixed>  $compose  a decoded compose file
+     * @return list<string>
+     */
+    public static function outrankingEnv(array $compose, string $envFile, string $overridesFile): array
+    {
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+        $outranked = [];
+        foreach ($services as $name => $service) {
+            if (is_array($service) && self::loadsAfter($service, $envFile, $overridesFile)) {
+                $outranked[] = (string) $name;
+            }
+        }
+
+        return $outranked;
+    }
+
+    /**
+     * Whether the service loads $envFile and, after it, a file other than $overridesFile.
+     *
+     * @param  array<string, mixed>  $service
+     */
+    private static function loadsAfter(array $service, string $envFile, string $overridesFile): bool
+    {
+        $seen = false;
+        foreach (self::entriesOf($service['env_file'] ?? null) as $entry) {
+            $relative = self::projectRelative($entry);
+            if ($seen && $relative !== $overridesFile && $relative !== $envFile) {
+                return true;
+            }
+            $seen = $seen || $relative === $envFile;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<mixed>  $entries  `env_file:` entries
+     */
+    private static function firstOutsideProject(array $entries): ?int
+    {
+        foreach ($entries as $i => $entry) {
+            $path = is_array($entry) ? ($entry['path'] ?? null) : $entry;
+            if (is_string($path) && self::leavesProject($path)) {
+                return $i;
+            }
+        }
+
+        return null;
+    }
+
+    private static function leavesProject(string $raw): bool
+    {
+        $path = str_replace('\\', '/', trim($raw));
+
+        return str_starts_with($path, '/') || in_array('..', explode('/', $path), true);
     }
 
     /**

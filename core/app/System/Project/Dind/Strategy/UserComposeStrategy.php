@@ -509,14 +509,15 @@ class UserComposeStrategy
 
     /**
      * The account's environment reaches a compose file the engine did not generate through `.env`, which a
-     * service reads only when its `env_file:` names it: the service that publishes the app's port loads it.
+     * service reads only when its `env_file:` names it: the service that publishes the app's port loads it, before
+     * a recipe's stored values ({@see ComposeEnvFiles::addTo()}).
      *
      * @param  array<string, mixed>  $parsed
      * @return array<string, mixed>
      */
     private function withAppEnvFile(array $parsed): array
     {
-        [$parsed] = ComposeEnvFiles::appendTo($parsed, PrimaryPortBinding::appServices($parsed), '.env');
+        [$parsed] = ComposeEnvFiles::addTo($parsed, PrimaryPortBinding::appServices($parsed), '.env');
 
         return $parsed;
     }

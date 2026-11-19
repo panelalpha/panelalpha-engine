@@ -95,6 +95,8 @@ class ProjectEnvironment
     }
 
     /**
+     * The overrides go to `.env.panelalpha` too when `.env` cannot carry them: tracked, or followed by another file.
+     *
      * @param  array<string, string>  $overrides
      * @param  array<string, string>  $generated
      * @return array{0: bool, 1: list<string>} whether `.env` is tracked, the services that load `.env.panelalpha`
@@ -102,15 +104,40 @@ class ProjectEnvironment
     private function writeEngineEnv(User $user, array $overrides, array $generated, string $projectDir, ?string $chown): array
     {
         $tracked = $overrides !== [] && $this->envIsTracked();
+        $outranking = $overrides === [] || $tracked ? [] : $this->servicesOutrankingEnv();
         $services = $this->writeEngineValues(
             $this->mailRelay()
                 + (new ApiAccess($this->dind->system()))->envFor($user)
-                + ($tracked ? $overrides + $generated : $generated),
+                + ($tracked || $outranking !== [] ? $overrides + $generated : $generated),
             $projectDir,
             $chown
         );
+        self::logOverridesOutrankingEnv($outranking, $this->dind->shell()->logger());
 
         return [$tracked, $services];
+    }
+
+    /**
+     * The run file's services that load an env file after `.env`, which would win over a value merged into it.
+     *
+     * @return list<string>
+     */
+    private function servicesOutrankingEnv(): array
+    {
+        $compose = $this->runFile();
+
+        return $compose === null ? [] : ComposeEnvFiles::outrankingEnv($compose, '.env', EngineArtifacts::ENV_OVERRIDES);
+    }
+
+    /** @param list<string> $services */
+    private static function logOverridesOutrankingEnv(array $services, ?DeployLogger $logger): void
+    {
+        if ($services !== []) {
+            $logger?->info(
+                'Also set the environment variables in '.EngineArtifacts::ENV_OVERRIDES
+                .', loaded after the env files that follow .env in: '.implode(', ', $services)
+            );
+        }
     }
 
     /**
@@ -764,13 +791,8 @@ class ProjectEnvironment
     {
         $fs = $this->dind->system()->filesystem();
         $runPath = $this->dind->userAppComposeFilePath();
-        if (! $fs->fileExists($runPath)) {
-            return [];
-        }
-        $fs->assertNotSymlink($runPath);
-
-        $raw = (string) $fs->fileGetContents($runPath);
-        $compose = ComposeYaml::parse($raw);
+        $raw = $this->runFileContents();
+        $compose = $raw === null ? null : ComposeYaml::parse($raw);
         if ($compose === null) {
             return [];
         }
@@ -787,6 +809,28 @@ class ProjectEnvironment
         }
 
         return $services;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function runFile(): ?array
+    {
+        $raw = $this->runFileContents();
+
+        return $raw === null ? null : ComposeYaml::parse($raw);
+    }
+
+    private function runFileContents(): ?string
+    {
+        $fs = $this->dind->system()->filesystem();
+        $runPath = $this->dind->userAppComposeFilePath();
+        if (! $fs->fileExists($runPath)) {
+            return null;
+        }
+        $fs->assertNotSymlink($runPath);
+
+        return (string) $fs->fileGetContents($runPath);
     }
 
     /**

@@ -453,6 +453,61 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
+     * anchr: the app loads `.env` before the recipe's stored credentials, so a template's blank cannot replace them;
+     * an env var the account set still has to win over both, so it is also loaded last.
+     */
+    public function test_overrides_also_go_after_a_recipe_env_file_that_follows_env(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "ANCHR_DB_PASSWORD=\nANCHR_ALLOW_SIGNUP=true\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          anchr:
+            image: anchr
+            env_file:
+              - .env
+              - ../.panelalpha/anchr/app.env
+          mongo:
+            image: mongo
+            env_file:
+              - ../.panelalpha/anchr/mongo.env
+        YAML);
+
+        $model = $this->dindModel(['env_vars' => ['ANCHR_ALLOW_SIGNUP' => 'false']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $this->assertSame('false', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['ANCHR_ALLOW_SIGNUP']);
+        $overrides = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame('false', $overrides['ANCHR_ALLOW_SIGNUP']);
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(
+            ['.env', '../.panelalpha/anchr/app.env', EngineArtifacts::ENV_OVERRIDES],
+            $compose['services']['anchr']['env_file']
+        );
+        $this->assertSame(['../.panelalpha/anchr/mongo.env'], $compose['services']['mongo']['env_file']);
+        $this->assertSame(['ANCHR_ALLOW_SIGNUP'], Dind\ProjectEnvironment::appliedKeys($model));
+    }
+
+    /** Nothing set by the account: the recipe's file after `.env` stays the last word. */
+    public function test_no_overrides_leave_a_recipe_env_file_last(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "ANCHR_DB_PASSWORD=\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          anchr:
+            image: anchr
+            env_file:
+              - .env
+              - ../.panelalpha/anchr/app.env
+        YAML);
+
+        $this->forcedEnvironment($this->dindModel(), tracked: false)->apply();
+
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(['.env', '../.panelalpha/anchr/app.env'], $compose['services']['anchr']['env_file']);
+    }
+
+    /**
      * Clearing every env_vars field is itself a redeploy: the next apply()
      * has to remove `.env.panelalpha` and detach it from the run file again,
      * not leave a stale override in force.
