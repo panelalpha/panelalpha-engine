@@ -9,8 +9,9 @@ use App\Lib\Deploy\Platform\Runtime\Php\MysqlSidecar;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Backing services implied by a project's .env (DATABASE_URL, REDIS_URL at a local host) when the repo
- * ships no compose, in the shape {@see ComposeHarden::extractRuntimeSidecarsFromYaml()} returns.
+ * Backing services implied by a project's .env (DATABASE_URL, REDIS_URL at a local host, or at a compose
+ * service name such as `postgres`) when the repo ships no compose, in the shape
+ * {@see ComposeHarden::extractRuntimeSidecarsFromYaml()} returns.
  */
 class EnvSidecars
 {
@@ -287,7 +288,16 @@ class EnvSidecars
 
     private static function isLocalHost(string $host): bool
     {
-        return in_array($host, self::LOCAL_HOSTS, true);
+        return in_array($host, self::LOCAL_HOSTS, true) || self::isServiceName($host);
+    }
+
+    /**
+     * A one-label name (`postgres`, `splitpro-db`) is a sibling the repository's compose runs: no managed
+     * database answers to it, and nothing in the account resolves it unless the engine runs one.
+     */
+    private static function isServiceName(string $host): bool
+    {
+        return preg_match('/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/', $host) === 1 && ! ctype_digit($host);
     }
 
     /**
